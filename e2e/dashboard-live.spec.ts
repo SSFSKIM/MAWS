@@ -32,6 +32,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../test/live/support/live';
+import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
@@ -310,6 +311,7 @@ test('the agent creates a dashboard from markdown, binds the CSV it wrote in one
     const errors = maws.consoleErrors();
     note(`the window's console errors: ${JSON.stringify(errors)}`);
     expect.soft(errors).toEqual([]);
+    note(`tool time (P4-A2, X34): ${guardToolTime(journalPath).line}`); // after the last turn; throws over the bound
     note('PASS: the agent wrote a CSV, made the dashboard from markdown and bound the file in one call, the read listing it; a TSV and a JSON array bound, a ragged and an oversize file refused naming why with nothing written; from its stale read its replacement of the dataset B replaced was refused `conflict` and another merged across B’s prose edit');
   } catch (error) {
     failure = error;

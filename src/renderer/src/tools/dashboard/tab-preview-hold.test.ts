@@ -20,7 +20,7 @@ const query = (ref: string, title = 'Live'): DatasetDescriptor => ({ title, sour
 function world() {
   const doc = newDoc();
   setDataset(doc, 'live', query('assets/q1.json'));
-  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const handle = { doc, awareness: null, state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close: () => {} } as unknown as DocumentHandle;
   const holds: { refs: string[]; lose(): void; released: boolean }[] = [];
   const gone = new Set<string>(); // collected snapshots

@@ -1,0 +1,5 @@
+{"state": "six comments (c-s1..c-s6) on the same passage 'Sixline carries' (page 3, caret anchor 3865 in plugin coords), viewport 1920x1080",
+ "after_posting_c-s6": [["c-s1","3303.51px"],["c-s2","3416.51px"],["c-s3","3529.51px"],["c-s4","3642.51px"],["c-s5","3755.51px"],["c-s6","3868.51px"]],
+ "c-s6 clicked (active class on)": "same tops; c-s6 at its anchor +3.5, the others walked up at 113 px pitch",
+ "after a click on an uncommented blank line 5 lines above (caret 3768, no card active, read 05:16Z)": [["c-s1","3303.51px"],["c-s2","3416.51px"],["c-s3","3529.51px"],["c-s4","3642.51px"],["c-s5","3755.51px"],["c-s6","3868.51px"]],
+ "verdict": "the stack stays where the active pin left it; it does not relax to the downward walk"}

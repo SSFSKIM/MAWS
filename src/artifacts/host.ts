@@ -3,6 +3,7 @@
 // P4), and `ArtifactHost`, the one adapter through which an editor under `src/artifacts/` reaches its environment (the
 // renderer's implementation over main's ports now, a web client's in P4). Shapes from the P3-A document's Interfaces.
 import type { Awareness } from '@y/protocols/awareness';
+import type { ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-A2 (X35)
 import type { Actor } from '@shared/artifacts/actor';
 import type {
   ConnectorCallOptions, // E3
@@ -152,6 +153,10 @@ export interface DocumentHandle {
   subscribe(listener: (state: DocumentState) => void): () => void;
   // A restore this replica did not witness landed (Decision Log 16): drop undo history across it, say "Restored from …".
   onRestored(listener: (restored: Restored) => void): () => void;
+  // P4-A2 (X35): the host's provisional frames for this doc, an agent's edit as it streams (`src/shared/artifacts/
+  // provisional.ts`), each delivered after the frames it arrived with are applied; `state().integrated` against a
+  // `committed` frame's `commitSeq` says whether its write is on the page.
+  onProvisional(listener: (frame: ArtifactProvisional) => void): () => void;
   // The composition hold (Decision Log 20, 25k): set at composition start, cleared when composing stops.
   holdRemote(on: boolean): void;
   close(): void;

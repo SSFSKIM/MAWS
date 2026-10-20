@@ -225,6 +225,15 @@ describe('launch contract builds the X6 command line and environment', () => {
     });
     // C12 end
 
+    // P4-A2 (X35): the API streams a tool input's text only under this variable (the execution document's Surprise 10);
+    // Desktop sets it for every session; MAWS sets it under both gateway modes and keeps an explicit value the owner's
+    // environment carries
+    it('sets CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1 under both gateway modes, keeping an explicit value from the capture', () => {
+      expect(buildLaunch(spec(), CAPTURED, OPTS).env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING).toBe('1');
+      expect(buildLaunch(spec({ gateway: 'direct' }), CAPTURED, OPTS).env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING).toBe('1');
+      expect(buildLaunch(spec(), { ...CAPTURED, CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING: '0' }, OPTS).env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING).toBe('0');
+    });
+
     // E1 start (P1 A-17; E0a Q4): the AskUserQuestion preview format is a launch variable only, and the owner's shell may
     // export another value under the CLAUDE_ prefix, so MAWS sets html at every launch over whatever the capture holds
     it('sets CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html under both gateway modes, over an inherited value', () => {

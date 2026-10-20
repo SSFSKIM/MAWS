@@ -22,7 +22,8 @@
 // `default`'s bare `pnpm e2e` collects every live spec and would run them all under those flags, and that no other
 // group's spec reads them is only today's convention, MAWS_LIVE being the name a new live case most likely gates on.
 // It refuses a LIVE_E2E group in a run that is not live too: design-live and dashboard-live set MAWS_LIVE in their own
-// scripts and would spend, the others would build and skip (Decision Log 75).
+// scripts and would spend, the others would build and skip (Decision Log 75). Every live run also takes the
+// LIVE_GUARD_E2E groups (P4-A2, X34: the tool-time guard's heavy-case fixture), whichever live groups it names.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -69,6 +70,9 @@ const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCa
 const asked = dispatched ? env.INPUT_GATES : trailer('Gates');
 const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? ['unit:darwin', ...words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`)] : [])];
 const gates = new Set(words(asked).length > 0 ? words(asked) : defaults);
+// P4-A2 (X34): a live run takes the tool-time guard's heavy-case fixture beside the live groups it names (LIVE_GUARD_E2E,
+// LIVE_E2E groups that spend nothing), so every gate that runs live specs holds the heaviest known cases under the bound.
+if (live) for (const group of words(env.LIVE_GUARD_E2E)) gates.add(`e2e:${group}`);
 
 const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes', 'packaged'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
 if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, unit:darwin, probes, packaged, e2e:default or e2e:<group> with a package.json script)`);

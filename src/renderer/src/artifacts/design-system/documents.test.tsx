@@ -57,7 +57,7 @@ function systemHost(): ArtifactHost {
   const open = async (id: string): Promise<DocumentHandle> => {
     const doc = docs.get(id);
     if (!doc) throw new Error(`no artifact ${id}`);
-    return { doc, awareness: null as never, state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false }), subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close: () => {} };
+    return { doc, awareness: null as never, state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false }), subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote: () => {}, close: () => {} };
   };
   return { open, assetUrl: (id: string, ref: string) => `maws-artifact://${id}/live/${ref}` } as unknown as ArtifactHost;
 }

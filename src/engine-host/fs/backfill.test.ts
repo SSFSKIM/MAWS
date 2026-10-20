@@ -723,5 +723,30 @@ describe('peer messages from disk (E7)', () => {
     expect(events[at + 1]).toMatchObject({ kind: 'peer.message', messageUuid: peer.uuid, seq: null, midTurn: false, fromName: 'repo-33', text: 'E11 S2c: hello from a MAWS session. No reply needed.' });
     expect(only(events, 'turn.started').map((e) => e.origin), 'the READY turn, then the peer turn: no prompt turn opened by the message').toEqual([null, 'peer']);
   });
+
+  // E11 S2(d) (the tracker's E7 row on a terminal team): the lead of a team an interactive terminal formed under the teams
+  // gate (2.1.293) receives its teammate's report as a plain user record, no origin and no isMeta, its text the header and
+  // a <teammate-message teammate_id="scout"> envelope; it is the teammate's message, not the owner's prompt.
+  it("reads a teammate's report in a terminal team's lead as a message from the teammate in a turn of its own, not the owner's prompt", () => {
+    const records = loadTranscript('pass3/e7-team-terminal/b4b10738-4b3f-4539-906b-fcb5da9669a5.jsonl');
+    const report = records[34]!; // line 35
+    expect(report).toMatchObject({ type: 'user', message: { content: expect.stringContaining('<teammate-message teammate_id="scout"') } });
+    expect(report).not.toHaveProperty('origin');
+    expect(report).not.toHaveProperty('isMeta');
+    const events = mapAll(records);
+    const at = events.findIndex((e) => e.kind === 'user.message' && e.messageUuid === report.uuid);
+    expect(events[at - 1]).toMatchObject({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
+    expect(events[at]).toMatchObject({ kind: 'user.message', origin: 'peer', isSynthetic: true });
+    expect(events[at + 1]).toMatchObject({ kind: 'peer.message', messageUuid: report.uuid, from: '', fromName: 'scout', text: 'one.txt contains a single line: "ONE" (followed by a trailing newline).', midTurn: false, replyable: false });
+    expect(only(events, 'user.message').filter((e) => e.origin === null && !e.isSynthetic).map((e) => e.messageUuid), "the owner's prompt only").toEqual([records[4]!.uuid]);
+    expect(only(events, 'turn.started').map((e) => [e.origin, e.userMessageUuid])).toEqual([[null, records[4]!.uuid], ['peer', null]]);
+  });
+
+  it('keeps a plain user record whose text is a cross-session envelope the owner’s: only the teammate form comes without an origin', () => {
+    const content = 'Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/1.sock">\nhi\n</cross-session-message>';
+    const events = mapAll([rec({ type: 'user', uuid: 'u1', timestamp: at(1), message: { role: 'user', content } })]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message']);
+    expect(only(events, 'user.message')[0]).toMatchObject({ origin: null, isSynthetic: false });
+  });
 });
 // E7 end

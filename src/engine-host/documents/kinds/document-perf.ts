@@ -14,9 +14,15 @@
 //
 //   seed     {artifactId, state (base64 V2)}       the document's tabs replaced by the state's, as the human
 //   call     {session, tool, args}                 artifact_read or artifact_edit as `session`; `baseRevision: 'last'`
-//                                                  stands for the revision the session last saw (its read or its batch)
+//                                                  stands for the revision the session last saw (its read or its batch);
+//                                                  `args.toolUseId`, when given, is the call's tool-use id (P4-A2)
+//   stream   {session, toolUseId, name, deltas,    P4-A2 (X35; the child's R12): the pieces of a call's input fed to the
+//             tickMs?}                             session's provisional emitter one per `tickMs` (20), as the engine's
+//                                                  deltas would; answered once the last tick ran, with how many
+//                                                  streaming frames the call sent. A `call` under the same id commits it
+//   drop     {session, toolUseId}                  P4-A2: the call's layer dropped, as an ending without a commit drops it
 //   heap     {}                                    the heap after two collections
-//   release  {session}                             the session's replicas closed (its end)
+//   release  {session}                             the session's replicas closed (its end), its layers dropped first
 //   loop     {reset?}                              the loop's gaps since the last reset (a run-wide measure beside A's)
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
@@ -25,13 +31,16 @@ import { runInNewContext } from 'node:vm';
 import { TABS } from '@artifacts/document/tabs';
 import { applyV2 } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
+import { PROVISIONAL_TICK_MS, type ProvisionalTool } from '@shared/artifacts/provisional';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { artifactEditTool, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
+import { ProvisionalEmitter } from '../../tool-server/provisional';
 import type { McpToolDefinition } from '../../tool-server/server';
 import type { ArtifactStore } from '../store';
 
 const HUMAN: Actor = { kind: 'human' };
 const LOOP_TICK_MS = 1;
+const STREAM_TICK_MS = 20; // P4-A2: `stream`'s default pace, a little over the emitter's tick, so each piece is a frame
 
 /**
  * The host loop's occupancy, sampled by a 1 ms interval timer reading `performance.now()`: each gap between two ticks is
@@ -79,7 +88,9 @@ export type PerfCommand =
   | { cmd: 'call'; session: string; tool: 'artifact_read' | 'artifact_edit'; args: Record<string, unknown> }
   | { cmd: 'heap' }
   | { cmd: 'release'; session: string }
-  | { cmd: 'loop'; reset?: boolean };
+  | { cmd: 'loop'; reset?: boolean }
+  | { cmd: 'stream'; session: string; toolUseId: string; name: ProvisionalTool; deltas: string[]; tickMs?: number } // P4-A2
+  | { cmd: 'drop'; session: string; toolUseId: string }; // P4-A2
 
 export interface LoopStats {
   max: number;
@@ -103,6 +114,7 @@ export type PerfAnswer =
   | CallAnswer
   | { ok: true; heapUsed: number; rss: number; collected: boolean }
   | { ok: true; loop: LoopStats }
+  | { ok: true; frames: number } // P4-A2: `stream`
   | { ok: true };
 
 export const documentPerfSeamRequested = (env: Record<string, string | undefined>): boolean => env.MAWS_E2E === '1' && env.MAWS_DOCUMENT_PERF === '1';
@@ -111,6 +123,8 @@ interface PerfSession {
   tools: Record<'artifact_read' | 'artifact_edit', McpToolDefinition>;
   calls: number;
   lastRevision: number;
+  provisional: ProvisionalEmitter; // P4-A2: the session's layers, which its edits commit or drop
+  streamed: Map<string, number>; // P4-A2: the streaming frames each call sent
 }
 
 const turned = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -123,7 +137,7 @@ export class DocumentPerfSeam {
 
   constructor(
     private readonly store: ArtifactStore,
-    private readonly options: { tools?: (deps: { artifacts: () => ArtifactStore; session: DocumentToolSession }) => PerfSession['tools'] } = {},
+    private readonly options: { tools?: (deps: { artifacts: () => ArtifactStore; session: DocumentToolSession; provisional: ProvisionalEmitter }) => PerfSession['tools'] } = {},
   ) {}
 
   async run(command: PerfCommand): Promise<PerfAnswer> {
@@ -141,8 +155,14 @@ export class DocumentPerfSeam {
           return { ok: true, loop: stats };
         }
         case 'release':
+          this.sessions.get(command.session)?.provisional.processExited(); // P4-A2
           this.store.service.closeSession(command.session as AppSessionId);
           this.sessions.delete(command.session);
+          return { ok: true };
+        case 'stream':
+          return await this.stream(command.session, command.toolUseId as ToolUseId, command.name, command.deltas, command.tickMs ?? STREAM_TICK_MS);
+        case 'drop':
+          this.session(command.session).provisional.dropped(command.toolUseId as ToolUseId);
           return { ok: true };
         default:
           return { ok: false, error: `unknown command ${JSON.stringify((command as { cmd: unknown }).cmd)}` };
@@ -170,20 +190,43 @@ export class DocumentPerfSeam {
   private session(name: string): PerfSession {
     let session = this.sessions.get(name);
     if (!session) {
-      const deps = { artifacts: () => this.store, session: new DocumentToolSession() };
-      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps) }, calls: 0, lastRevision: 0 };
+      const streamed = new Map<string, number>();
+      const provisional = new ProvisionalEmitter({
+        store: () => this.store, appSessionId: name as AppSessionId,
+        onFrame: (frame) => {
+          if (frame.state === 'streaming') streamed.set(frame.toolUseId, (streamed.get(frame.toolUseId) ?? 0) + 1);
+        },
+      });
+      const deps = { artifacts: () => this.store, session: new DocumentToolSession(), provisional };
+      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps) }, calls: 0, lastRevision: 0, provisional, streamed };
       this.sessions.set(name, session);
     }
     return session;
+  }
+
+  // P4-A2 (R12): a call's input fed as the engine's deltas would arrive, one piece per `tickMs`; answered once the
+  // emitter's tick after the last piece ran.
+  private async stream(name: string, toolUseId: ToolUseId, tool: ProvisionalTool, deltas: string[], tickMs: number): Promise<PerfAnswer> {
+    const session = this.session(name);
+    for (const piece of deltas) {
+      session.provisional.delta(toolUseId, tool, piece);
+      await turned(tickMs);
+    }
+    await turned(2 * PROVISIONAL_TICK_MS);
+    return { ok: true, frames: session.streamed.get(toolUseId) ?? 0 };
   }
 
   private async call(name: string, tool: 'artifact_read' | 'artifact_edit', args: Record<string, unknown>): Promise<PerfAnswer> {
     const session = this.session(name);
     const definition = session.tools[tool];
     if (!definition) return { ok: false, error: `no tool ${JSON.stringify(tool)}` };
-    const input = args.baseRevision === 'last' ? { ...args, baseRevision: session.lastRevision } : args;
+    const { toolUseId, ...rest } = args; // P4-A2: the id a `stream` used, so the call commits or drops its layer
+    const input = rest.baseRevision === 'last' ? { ...rest, baseRevision: session.lastRevision } : rest;
     session.calls += 1;
-    const ctx = { appSessionId: name as AppSessionId, cwd: '/', toolUseId: `toolu_perf_${name}_${session.calls}` as ToolUseId, requestId: `perf-${name}-${session.calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false };
+    const ctx = {
+      appSessionId: name as AppSessionId, cwd: '/', toolUseId: (typeof toolUseId === 'string' ? toolUseId : `toolu_perf_${name}_${session.calls}`) as ToolUseId,
+      requestId: `perf-${name}-${session.calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false,
+    };
     // the sampler runs all along, so a call blocking the loop at once is caught by the gap it leaves; the gaps before
     // the call, the command's own parsing among them, are dropped by the reset
     await turned(LOOP_TICK_MS * 3);

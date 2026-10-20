@@ -12,7 +12,7 @@ const sha = '512107c14abcdef0512107c14abcdef0512107c1';
 
 // The summary line for a run's jobs ("conclusion<TAB>name", sorted by name as ci-gate.sh sorts them) and failed log,
 // under ci-gate.sh's flags.
-function refusals(jobs, log, { gates = '', runner = 'macos', class1a = 'pool', live = '', default_beside = '', label = 'f1-landing' } = {}) {
+function refusals(jobs, log, { gates = 'all', runner = 'macos', class1a = 'pool', live = '', default_beside = '', label = 'f1-landing' } = {}) {
   return execFileSync('bash', ['-c', 'set -uo pipefail; source "$0"; refusals "$1" "$2"', join(root, 'scripts/ci-gate-refusals.sh'), jobs.join('\n'), log.join('\n')], {
     encoding: 'utf8',
     env: { ...process.env, sha, gates, runner, class1a, live, default_beside, label },
@@ -72,7 +72,7 @@ test("an own name is carried verbatim, so a prefix doubled by mistake stays an u
 // ci-gate.sh refuses a --default-beside value with a character that is not inert in the printed relaunch command, before
 // it touches git or gh; a valid list gets past that check and fails later on the missing target.
 test('--default-beside with shell metacharacters is refused with exit 2, a valid list is not', () => {
-  const gate = (value) => spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), '/nonexistent', '--default-beside', value], { encoding: 'utf8' });
+  const gate = (value) => spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), '/nonexistent', '--gates', 'all', '--default-beside', value], { encoding: 'utf8' });
   const refused = gate('library;x');
   assert.equal(refused.status, 2);
   assert.match(refused.stderr, /^ci-gate: --default-beside takes group names .*, not library;x\n$/);
@@ -87,13 +87,14 @@ test('a relaunch without default carries no --default-beside', () => {
   assert.doesNotMatch(line, /--default-beside/);
 });
 
-test('a refused plan relaunches the whole run with its own flags; a run nothing was refused in says nothing', () => {
+test('a refused plan relaunches the whole run with its own flags, --gates included; a run nothing was refused in says nothing', () => {
   const planRefused = ['skipped\te2e:${{ matrix.group }}', 'skipped\tpackaged', 'failure\tplan', 'skipped\tprobes', 'skipped\tstatic', 'skipped\tunit', 'skipped\tunit:darwin'];
   assert.equal(
     refusals(planRefused, [refusal('plan')], { gates: 'e2e:default,e2e:side', default_beside: 'library,tools' }),
     `ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: scripts/ci-gate.sh ${sha} --runner macos --class1a pool --gates e2e:default,e2e:side --default-beside library,tools --label f1-landing --evidence\n`,
   );
-  assert.equal(refusals(planRefused, [refusal('plan')], { runner: '', class1a: '' }), `ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: scripts/ci-gate.sh ${sha} --label f1-landing --evidence\n`);
+  // A whole-set run relaunches as one: ci-gate.sh refuses a call that names no gates.
+  assert.equal(refusals(planRefused, [refusal('plan')], { gates: 'all', runner: '', class1a: '' }), `ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: scripts/ci-gate.sh ${sha} --gates all --label f1-landing --evidence\n`);
   assert.equal(refusals(run(), [red('e2e:library')]), '');
 });
 

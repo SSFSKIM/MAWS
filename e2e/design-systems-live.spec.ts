@@ -32,6 +32,7 @@ import { parseLaw } from '../src/artifacts/design-system/law';
 import { validateTokenFile } from '../src/artifacts/design-system/tokens';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../test/live/support/live';
+import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
@@ -303,6 +304,7 @@ test('an agent asked to make a design system from a project creates a Design Sys
     const errors = maws.consoleErrors();
     note(`the window's console errors: ${JSON.stringify(errors)}`);
     expect.soft(errors).toEqual([]);
+    note(`tool time (P4-A2, X34): ${guardToolTime(journalPath).line}`); // after the last turn; throws over the bound
     note('PASS: the agent made a Design System artifact from the project; its token file validates, its law has sections 0 to 8 with no problem, and it opens as the Design System page');
   } catch (error) {
     failure = error;

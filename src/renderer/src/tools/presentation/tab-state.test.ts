@@ -16,7 +16,7 @@ class FakeHandle implements DocumentHandle {
   readonly doc = newDoc();
   readonly awareness = new Awareness(this.doc);
   closed = false;
-  private current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  private current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   private readonly listeners = new Set<(state: DocumentState) => void>();
   private readonly restoredListeners = new Set<(restored: Restored) => void>();
   constructor() {
@@ -32,6 +32,7 @@ class FakeHandle implements DocumentHandle {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
+  onProvisional = () => () => {}; // P4-A2
   onRestored = (listener: (restored: Restored) => void) => {
     this.restoredListeners.add(listener);
     return () => this.restoredListeners.delete(listener);

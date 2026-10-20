@@ -2,17 +2,20 @@
 // fake host and C4's real index. Each row asserts availability before and after (derived from the index's record, the
 // host's status and the memory the service publishes), the outcome, the number of `session.launch` calls and, where a
 // launch happens, that its spec carries the session's cua socket (E13: `runResume` is the only launcher).
+import { spawn } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
+import type { PtyInfo } from '@shared/ipc/schema/pty';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
 import { T0 } from '../../../test/support/builders';
 import { availabilityOf } from './availability';
+import { parseProcesses } from './pane-holder';
 
 vi.mock('electron', () => {
   throw new Error('SessionService must not load Electron');
@@ -267,6 +270,48 @@ describe('session.acquire: the lifecycle table', () => {
   });
 });
 
+// F-AB's take-over half (tracker 2026-10-10): a take-over of a terminal pane's CLI resumes the session itself (W14), and
+// that resume reaching ready is MAWS's last start of the session, so an earlier acquisition's failure no longer
+// describes it once the process exits. The CLI is a real child (the take-over ends it with SIGKILL); the pane and the
+// process table it is found and paused through are the test's.
+describe('session.acquire: a pane take-over’s own resume', () => {
+  it('clears the memory of a failed acquisition: after the resumed process exits the session reads resumable', async () => {
+    const cli = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+    const pid = cli.pid!;
+    let state = 'S+';
+    let foreground = pid;
+    const processes = async () => parseProcesses(`10 1 10 ${foreground} Ss Mon Oct 3 12:00:00 2026\n${pid} 10 ${pid} ${foreground} ${state} Mon Oct 3 12:00:01 2026`);
+    const h = await new SessionHarness({ takeOver: { processes } }).start();
+    try {
+      h.trustDirectory(h.work);
+      const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xaf001), directory: h.work })).record;
+      const availability = () => availabilityOf(h.index.sessions.get(record.appId)!, h.host.table.get(record.appId) ?? null, h.memory.get(record.appId) ?? null);
+      h.host.script = () => ({ exit: { error: 'the model is not available' } });
+      expect(await h.service.acquire(record.appId, 'send')).toMatchObject({ status: 'failed' });
+      expect(availability()).toBe('failed');
+      h.host.script = () => ({});
+      h.host.hold(record.engineSessionId!, { kind: 'terminal', pid }, h.work);
+      cli.on('exit', () => (h.host.disk.registry.length = 0));
+      const pane = { ptyId: 'pane', pid: 10, alive: true, label: 'Terminal' } as PtyInfo;
+      h.host.ptyHost = (name, input) => {
+        if (name === 'pty.list') return { ptys: [pane] };
+        if (name === 'pty.foreground') return { process: 'bash', busy: false };
+        if (name === 'pty.write' && (input as { data: string }).data === '\x1a') [state, foreground] = ['T', 10];
+        return undefined;
+      };
+      expect(await h.service.takeOver(record.appId, { kind: 'terminal', pid }, pane.ptyId)).toEqual({ status: 'resumed', warning: null });
+      expect(availability()).toBe('usable');
+      const live = h.host.table.get(record.appId)!;
+      h.host.table.set(record.appId, { ...live, process: 'exited', exit: { code: null, signal: null, reason: 'stop', at: T0, release: null } });
+      expect(availability()).toBe('resumable');
+      expect(h.memory.get(record.appId)).toMatchObject({ inFlight: false, last: null });
+    } finally {
+      cli.kill('SIGKILL');
+      h.dispose();
+    }
+  });
+});
+
 describe('session.acquire: joins and races', () => {
   let h: SessionHarness;
   let stop: () => Promise<void> = async () => {}; // the take-over's `claude stop`
@@ -335,6 +380,39 @@ describe('session.acquire: joins and races', () => {
     expect(await h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } })).toEqual({ status: 'starting', appSessionId: record.appId });
     await acquiring;
     expect(launchesOf(record.appId)).toHaveLength(1);
+  });
+
+  // W2-A (tracker 2026-10-09, the P2-A whole-branch review's residue): an acquisition that joins a record's start (C11's
+  // route switch, the same options) is answered from that run's end in its reply, so the rest of the run streams tagged as
+  // its own run's would; the phases before the join went out untagged, and a join never follows the run's end
+  it.each([
+    ['fails', { ready: false }, { status: 'failed' }, 'failed'],
+    ['reaches ready', 'gated', { status: 'ready', launched: true, joined: true }, 'ready'],
+  ] as const)('an acquisition joining a record’s start that then %s has the rest of that run stream tagged', async (_, script, answer, end) => {
+    const record = recordAt();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.host.script = () => (script === 'gated' ? { onReady: () => gate } : script);
+    expect(await h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } })).toEqual({ status: 'starting', appSessionId: record.appId });
+    await h.until(() => h.host.table.get(record.appId)?.process === 'initializing');
+    const joined = h.service.acquire(record.appId, 'send', { gateway: 'direct' });
+    if (end === 'failed') h.host.exitNow(record.appId);
+    release();
+    expect(await joined).toMatchObject(answer);
+    expect(launchesOf(record.appId)).toHaveLength(1);
+    expect(h.setupEvents(record.appId).map((e) => [e.phase, e.acquisition])).toEqual([['launching', undefined], [end, true]]);
+  });
+
+  it('a record’s start no acquisition joined streams untagged to its end; an intent’s setup an acquisition joined does too (C10’s card docks from it with the intent’s message)', async () => {
+    const record = recordAt();
+    await h.service.startSession(record.appId, { message: null, options: {} });
+    await h.service.startSession(record.appId, { message: null, options: {} }); // a second record start joins, untagged
+    await h.settled(record.appId);
+    expect(h.setupEvents(record.appId).every((e) => e.acquisition === undefined)).toBe(true);
+    const { appSessionId } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    const [, acquired] = await Promise.all([h.service.startSession(appSessionId, { message: OK_MESSAGE, options: {} }), h.service.acquire(appSessionId, 'read')]);
+    expect(acquired).toMatchObject({ status: 'ready', joined: true });
+    expect(h.setupEvents(appSessionId).every((e) => e.acquisition === undefined)).toBe(true);
   });
 
   it('an intent’s provisional record (a failed or interrupted setup keeps both) is never acquired: refused, nothing launched', async () => {

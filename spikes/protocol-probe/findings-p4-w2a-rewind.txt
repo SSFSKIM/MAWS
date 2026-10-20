@@ -1,0 +1,31 @@
+P4 W2-A, tracker row of 2026-10-07 (the setup-intent row's residue): two no-spend probes behind the start-time
+recovery's fork rewind (src/main/sessions/recovery.ts). Recorded 2026-10-20 on engine 2.1.304 (the newest installed;
+the tested 2.1.296 is no longer on this Mac), each under a scratch CLAUDE_CONFIG_DIR with no credentials and no relay,
+launching `-p --resume X --fork-session --session-id Y` over a copy of the committed real transcript
+fixtures/pass3/e7-team-terminal/b4b10738-4b3f-4539-906b-fcb5da9669a5.jsonl as X. No user message is ever sent, so no
+model request is made.
+
+1. scenarios/p4/fork-transcript-timing.mjs: does the fork write Y's transcript before its first message?
+   No. Y.jsonl is absent after spawn, after `initialize` answered, 3 s later and after the process exited with no
+   message sent (the project directory holds only X.jsonl throughout). So the E11 rule "the pin has no transcript, so
+   the first message never reached C3" holds for a fork as for a new session, and so does C10's rollback reading of
+   a transcript as "the launch wrote a conversation".
+
+   node scenarios/p4/fork-transcript-timing.mjs <engine> fixtures/pass3/e7-team-terminal/<X>.jsonl <X>
+   {"label":"spawned","yExists":false,...}
+   {"label":"initialize answered=true","yExists":false,...}
+   {"label":"3 s after initialize","yExists":false,...}
+   {"label":"after exit (stdin closed, no message ever sent)","yExists":false,...}
+
+2. scenarios/p4/rewind-twice.mjs: what does `rewind_conversation` answer for a target already rewound?
+   The same request twice (target and last seen both the transcript's newest user record, line 35's
+   53abcd76-89d7-4a1b-9f98-38f439be8ba9; interrupt_if_running false):
+   first:  {rewound: true, targetMessageUuid: 53abcd76-…, prefillText: <line 35's text>, precedingAssistantUuid: …}
+   second: {rewound: false, prefillText: null, precedingAssistantUuid: null, error: "target not found",
+            reason: "target_not_found"}
+   Y.jsonl still absent after both and after exit (the rewind alone writes nothing; pass 2 saw its anchor appended
+   with the next write). So a recovery must not re-run a rewind that already ran: the engine refuses it, which would
+   fail the reconciliation and keep the first message from being sent. The recovery reads the host's event log for
+   the rewind's `boundary.rewind` (C3's normaliser derives it from the successful answer) and rewinds only without it.
+   The same refusal is what the 2.1.304 bundle's rewind validation reads (a target no longer in the message list
+   answers `target_not_found`).

@@ -155,7 +155,7 @@ describe('a document tab’s state', () => {
   // (S7b's bound 3: the saved state must not flicker). Only edits left unacknowledged past the delay say saving.
   it('changes nothing the header reads for an edit acknowledged within the delay, and says saving once edits wait past it', async () => {
     const pushed = new Set<(state: DocumentState) => void>();
-    let current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+    let current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
     const push = (patch: Partial<DocumentState>) => {
       current = { ...current, ...patch };
       for (const listener of pushed) listener(current);

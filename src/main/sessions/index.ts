@@ -12,7 +12,7 @@ import type { HostSupervisor } from '../hosts/supervisor';
 import { emit, onEmitted } from '../ipc/events';
 import { CommandFailure, interceptCommand, registerMainHandler } from '../ipc/router';
 import { isSideThreadEvent } from '../side/side-threads'; // E3
-import { SessionReadModel, type SessionSource } from './read-model';
+import { SessionReadModel, type RestoredCostReader, type SessionSource } from './read-model';
 import { launchMode, scenarioClock, scenarioPath } from './select-source';
 import { stubSource } from './stub-source';
 import { FoldFilter, resyncDigests } from './resync'; // E10
@@ -26,6 +26,7 @@ export interface SessionsOptions {
   // E3 (Design §5): app events kept elsewhere than the read model, answered with its own by `session.appEvents` (the
   // side-thread rows, re-synthesised from the index)
   appEventsExtra?: (appSessionId: AppSessionId) => SessionEvent[];
+  restoredCost?: RestoredCostReader; // tracker 2026-09-29: a resumed process's restored cost, from its transcript
 }
 
 export interface Sessions {
@@ -103,9 +104,9 @@ function appEventsOf(model: SessionReadModel, appSessionId: AppSessionId, extra:
   return events.filter((event) => !seen.has(event.id) && (seen.add(event.id), true));
 }
 
-export function startSessions({ env, packaged, appRoot, hosts, indexSource, appEventsExtra }: SessionsOptions): Sessions {
+export function startSessions({ env, packaged, appRoot, hosts, indexSource, appEventsExtra, restoredCost }: SessionsOptions): Sessions {
   const mode = launchMode(env, packaged);
-  const model = new SessionReadModel(mode);
+  const model = new SessionReadModel(mode, restoredCost);
   registerMainHandler('session.digests', () => ({ digests: model.digests() }));
   registerMainHandler('session.launchMode', () => ({ mode }));
   registerMainHandler('session.appEvents', ({ appSessionId }) => ({ events: appEventsOf(model, appSessionId as AppSessionId, appEventsExtra) })); // debt wave 5; E3: the extra

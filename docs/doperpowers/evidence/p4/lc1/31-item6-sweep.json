@@ -1,0 +1,6450 @@
+[
+ {
+  "vw": 1920,
+  "scW": 1904,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   401.5,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1197px",
+   [
+    1197,
+    92,
+    707,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1222,
+     160.9,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1222,
+     273.9,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1222,
+     386.9,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1572.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1238,
+     178.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1238,
+     178.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1547.4,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1551.9,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1589.4,
+     176.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1600,
+  "scW": 1584,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    488,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     342.9,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     455.9,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     568.9,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1252.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     360.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     360.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1446.4,
+     359.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1450.9,
+     364.2,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1488.4,
+     358.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1580,
+  "scW": 1564,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    468,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     417.4,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1232.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1446.4,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1450.9,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1488.4,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1560,
+  "scW": 1544,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    448,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     161,
+     398,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     274,
+     398,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     387,
+     398,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1212.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     179,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     179,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1427,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1431.5,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1469,
+     177,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1540,
+  "scW": 1524,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    428,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     160.9,
+     378,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     273.9,
+     378,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     386.9,
+     378,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1192.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     178.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     178.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1407,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1411.5,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1449,
+     176.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1520,
+  "scW": 1504,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    408,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     160.9,
+     358,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     273.9,
+     358,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     386.9,
+     358,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1172.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     178.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     178.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1387,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1391.5,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1429,
+     176.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1500,
+  "scW": 1484,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    388,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     160.9,
+     338,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     273.9,
+     338,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     386.9,
+     338,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1152.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     178.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     178.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1367,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1371.5,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1409,
+     176.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1480,
+  "scW": 1464,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    368,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     160.9,
+     318,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     273.9,
+     318,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     386.9,
+     318,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1132.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     178.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     178.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1347,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1351.5,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1389,
+     176.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1460,
+  "scW": 1444,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    348,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     160.9,
+     298,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     273.9,
+     298,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     386.9,
+     298,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1112.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     178.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     178.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1327,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1331.5,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1369,
+     176.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1440,
+  "scW": 1424,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    328,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     160.9,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "68.9502px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     273.9,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "181.95px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     386.9,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "294.95px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1092.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     178.9,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     178.9,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     177.3,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     182.3,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     176.9,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1420,
+  "scW": 1404,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    951
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    308,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     296.6,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     409.6,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     522.6,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1072.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     314.6,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     314.6,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     312.9,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     317.9,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     312.6,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1400,
+  "scW": 1384,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    288,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1052.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1380,
+  "scW": 1364,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    268,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "goog-inline-block jfk-button jfk-button-standard docs-appbar",
+    [
+     1032.6,
+     9,
+     42,
+     42
+    ]
+   ],
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1360,
+  "scW": 1344,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    248,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1340,
+  "scW": 1324,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    228,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1320,
+  "scW": 1304,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    208,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1300,
+  "scW": 1284,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    188,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1280,
+  "scW": 1264,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    168,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1260,
+  "scW": 1244,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    148,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1240,
+  "scW": 1224,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    128,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1220,
+  "scW": 1204,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    108,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1200,
+  "scW": 1184,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    88,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1180,
+  "scW": 1164,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    68,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1160,
+  "scW": 1144,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    48,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1140,
+  "scW": 1124,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    28,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1120,
+  "scW": 1104,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    8,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1100,
+  "scW": 1084,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1080,
+  "scW": 1064,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1060,
+  "scW": 1044,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1040,
+  "scW": 1024,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1020,
+  "scW": 1004,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 1000,
+  "scW": 984,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 980,
+  "scW": 964,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 960,
+  "scW": 944,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 940,
+  "scW": 924,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 920,
+  "scW": 904,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 900,
+  "scW": 884,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 880,
+  "scW": 864,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 860,
+  "scW": 844,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 840,
+  "scW": 824,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 820,
+  "scW": 804,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 800,
+  "scW": 784,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 780,
+  "scW": 764,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 760,
+  "scW": 744,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 740,
+  "scW": 724,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 720,
+  "scW": 704,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 700,
+  "scW": 684,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 680,
+  "scW": 664,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 660,
+  "scW": 644,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 640,
+  "scW": 624,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 620,
+  "scW": 604,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ },
+ {
+  "vw": 600,
+  "scW": 584,
+  "side": [
+   "left-sidebar-container docs-ui-unprintable left-si",
+   [
+    16,
+    129,
+    280,
+    935
+   ]
+  ],
+  "page": [
+   301,
+   1226,
+   794,
+   1123
+  ],
+  "plugin": [
+   "1096px",
+   [
+    1096,
+    92,
+    0,
+    0
+   ],
+   "kix-discussion-plugin kix-discussion-plugin-vertical docs-ui-unprintable"
+  ],
+  "cards": {
+   "c-alpha": {
+    "r": [
+     1121,
+     348.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "256.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-bravo": {
+    "r": [
+     1121,
+     461.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "369.16px",
+    "left": "25px",
+    "cls": ""
+   },
+   "c-charlie": {
+    "r": [
+     1121,
+     574.2,
+     282,
+     103
+    ],
+    "disp": "block",
+    "top": "482.16px",
+    "left": "25px",
+    "cls": ""
+   }
+  },
+  "icons": [
+   [
+    "docos-anchoredreplyview-avatar-holder ",
+    [
+     1137,
+     366.2,
+     34,
+     38
+    ]
+   ],
+   [
+    "docos-avatar docos-replyview-avatar docos-anchoredreplyview-",
+    [
+     1137,
+     366.2,
+     32,
+     32
+    ]
+   ],
+   [
+    "goog-inline-block jfk-button jfk-button-flat docs-suggestion",
+    [
+     1311,
+     364.5,
+     34,
+     34
+    ]
+   ],
+   [
+    "docs-icon goog-inline-block docs-material  docos-icon-checkm",
+    [
+     1315.5,
+     369.5,
+     24,
+     24
+    ]
+   ],
+   [
+    "docos-overflowmenu-outer",
+    [
+     1353,
+     364.2,
+     34,
+     34
+    ]
+   ],
+   [
+    "goog-inline-block goog-menu-button docos-docomenu-dropdown g",
+    [
+     1352,
+     364.2,
+     34,
+     34
+    ]
+   ]
+  ],
+  "zoom": "100%"
+ }
+]

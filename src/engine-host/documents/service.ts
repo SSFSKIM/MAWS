@@ -146,11 +146,12 @@ export interface Committed {
 // stands on before it (a copy's entity row, Decision Log 37c: the doc's kind, and so its adapter, is read after it);
 // `afterWrite` writes through the same host replica after the edit and its `afterUpdate` (a restore's `afterRestore`),
 // its thread rows landing in the batch; `inFrame` writes rows that must commit with the write or not at all (a version,
-// an op), given the revision reached.
+// an op), given the revision reached. P4-A2 (X35): and given `edited`, the row the edit's own transaction is (its seq),
+// or null when the edit changed nothing and so appended none; the kind's hooks and `afterWrite` may append rows after it.
 export interface WriteOptions {
   prepare?: () => void;
   afterWrite?: (doc: Doc) => void | { threads?: ThreadChange };
-  inFrame?: (revision: number) => void;
+  inFrame?: (revision: number, write: { edited: number | null }) => void;
 }
 
 export interface ServiceStats {
@@ -203,6 +204,7 @@ export class DocumentService {
   private readonly agentReplicas = new Map<string, AgentReplica>(); // by `${appSessionId}\0${artifactId}`
   private readonly heldPresence = new WeakMap<AgentReplica, { turnEnded: boolean }>(); // P3-F (F19): outlines inside their hold
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private writing: { artifactId: string; mark: number } | null = null; // P4-A2: the write in progress and where its frames start in the outbox
   private flushScheduled = false;
   private nextConnId = 1;
   private closed = false;
@@ -310,21 +312,26 @@ export class DocumentService {
     if (this.closed) return Promise.reject(new Error('the document service is closed'));
     if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
     const hostDoc = this.open(artifactId);
+    const writing = this.writing;
+    this.writing = { artifactId, mark: this.outbox.length }; // P4-A2: `announceWrite` goes in ahead of this write's frames
     const failed = this.inFrame(hostDoc, () => {
       if (options.prepare) {
         options.prepare();
         hostDoc.kind ??= this.kindOf(artifactId); // a doc opened before its entity row was written (a frame that fails evicts it)
       }
       const adapter = this.adapterOf(hostDoc);
+      const before = hostDoc.revision;
       const applied = this.applyOwn(hostDoc, () => this.writeThrough(hostDoc, actor, edit));
+      const edited = hostDoc.revision === before ? null : hostDoc.revision; // P4-A2 (X35): the edit's own row, if it wrote one
       this.afterUpdate(hostDoc, adapter, actor, applied);
       if (options.afterWrite) {
         const after: { outcome?: void | { threads?: ThreadChange } } = {};
         this.writeThrough(hostDoc, actor, (doc) => (after.outcome = options.afterWrite!(doc)));
         if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
       }
-      options.inFrame?.(hostDoc.revision);
+      options.inFrame?.(hostDoc.revision, { edited });
     });
+    this.writing = writing;
     if (failed) return Promise.reject(new Error(`the write to ${artifactId} failed and the document was reset: ${failed}`));
     const revision = hostDoc.revision;
     return new Promise((resolve, reject) => {
@@ -496,6 +503,28 @@ export class DocumentService {
     for (const conn of hostDoc.conns) this.queue(conn, frame);
   }
 
+  // P4-A2 (X35 rule 2; the child's R3): a host-only frame sent to every connection of `artifactId` ahead of the frames
+  // the write in progress has queued, revealed with its commit: the provisional layer's `committed` notice, which names
+  // the write's seq, so a replica reads it before the row and withdraws the layer in the same step as the row's
+  // application. Valid only inside a host-originated write (`writeAs`'s edit, `afterWrite` or `inFrame`); the doc must
+  // be the one being written. Nothing when no connection holds the doc.
+  announceWrite(artifactId: string, frame: Uint8Array): void {
+    if (this.writing === null || this.writing.artifactId !== artifactId) throw new Error(`announceWrite(${artifactId}) outside a write of that doc`);
+    const hostDoc = this.docs.get(artifactId);
+    if (!hostDoc) return;
+    const entries = [...hostDoc.conns].filter((conn) => !conn.closed).map((conn) => ({ conn, frame }));
+    this.outbox.splice(this.writing.mark, 0, ...entries);
+    this.writing.mark += entries.length;
+  }
+
+  // P4-A2 (X35): a host-only frame sent now to every connection of a loaded doc, outside any commit (a `streaming` or
+  // `dropped` provisional frame, which reveals nothing of the store). Nothing when the doc is not loaded.
+  broadcast(artifactId: string, frame: Uint8Array): void {
+    const hostDoc = this.docs.get(artifactId);
+    if (!hostDoc) return;
+    for (const conn of [...hostDoc.conns]) this.send(conn, frame);
+  }
+
   // The agent session's replica of the artifact (Decision Log 9), made on first use, reconnected if the host closed it.
   replica(appSessionId: AppSessionId, artifactId: string): AgentReplica {
     if (this.closed) throw new Error('the document service is closed');
@@ -628,7 +657,7 @@ export class DocumentService {
     try {
       switch (frame.type) {
         case 'step1':
-          this.queue(conn, encodeFrame({ type: 'step2', update: diffV1(hostDoc.doc, frame.sv) }));
+          this.queue(conn, encodeFrame({ type: 'step2', update: diffV1(hostDoc.doc, frame.sv), revision: hostDoc.revision })); // P4-A2: the revision the diff reaches
           // The catch-up for a replica that was away across a restore (Decision Log 16): directly after the step 2, on
           // the same connection, with no frame between them; the provider recognises it by that position.
           if (hostDoc.restored) this.queue(conn, encodeFrame({ type: 'restored', ...hostDoc.restored }));
@@ -646,6 +675,7 @@ export class DocumentService {
           return;
         case 'ack':
         case 'restored':
+        case 'provisional': // P4-A2 (X35)
           return this.reject(conn, `a host-only frame (${frame.type}) from a replica`);
       }
     } catch (error) {
@@ -923,9 +953,11 @@ export class DocumentService {
     if (suggestion) this.inStep(suggestion, update);
   }
 
-  // An integrated update goes to every connection (after the commit) and every host replica but its writer's.
+  // An integrated update goes to every connection (after the commit) and every host replica but its writer's. P4-A2:
+  // with the seq of the row it is (`integrated` set it just before), so a replica knows which rows it has integrated; a
+  // main doc's update flowing into its suggestion doc has no row of that doc and carries none.
   private relay(hostDoc: HostDoc, update: Uint8Array, writer: Writer | null): void {
-    const frame = encodeFrame({ type: 'update', update });
+    const frame = encodeFrame({ type: 'update', update, seq: writer ? hostDoc.revision : 0 });
     for (const conn of hostDoc.conns) if (conn !== writer) this.queue(conn, frame);
     for (const replica of hostDoc.replicas.values()) if (replica !== writer) applyV1(replica.doc, update, MIRROR);
   }

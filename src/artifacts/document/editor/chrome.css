@@ -680,6 +680,43 @@
   pointer-events: none;
 }
 
+/* ── the provisional layer (P4-A2, X35): the agent's batch as it is written, in its colour (--doc-presence) and named,
+   never inside the block the person composes in (provisional.ts). Nothing changes a line box: the quoted passage and
+   the streamed text are only coloured and underlined in the line, and a block's worth of text stands between blocks ── */
+.ds-doc .doc-provisional-old {
+  opacity: 0.55;
+  text-decoration: line-through 2px var(--doc-presence);
+}
+.ds-doc .doc-provisional-text {
+  color: var(--doc-presence);
+  text-decoration: underline 1px color-mix(in oklab, var(--doc-presence) 50%, transparent);
+  text-underline-offset: 3px;
+}
+.ds-doc .doc-provisional-replaced {
+  opacity: 0.55;
+}
+.ds-doc .doc-provisional-block {
+  padding-left: calc(var(--space) * 3);
+  border-left: 2px solid var(--doc-presence);
+  color: color-mix(in oklab, currentColor 78%, transparent);
+  white-space: pre-wrap;
+}
+.ds-doc .doc-provisional-block::before {
+  content: attr(data-provisional-by) " is writing…";
+  display: block;
+  width: fit-content;
+  margin-bottom: var(--space);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--bg-raised);
+  background: var(--doc-presence);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space);
+}
+
 /* ── version history (M5): the preview's change marks, in each author's colour (--doc-author is an author colour) ── */
 .ds-doc y-del {
   text-decoration: line-through;

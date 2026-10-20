@@ -11,7 +11,7 @@ import type { ForeignHolder } from '@shared/graph/session';
 import type { TakeOverOutcome } from '@shared/ipc/schema/session';
 import { hostCall } from './context';
 import { holderAuthority, type HolderDeps } from './holders';
-import { findPane, type PaneProcess } from './pane-holder';
+import { findPane, type PaneProcess, type Processes } from './pane-holder';
 import type { PtyInfo } from '@shared/ipc/schema/pty';
 
 export const TAKE_OVER_WAIT_MS = 10_000; // the registry clears at the holder's exit (its exit handler unlinks the record)
@@ -23,6 +23,7 @@ export interface TakeOverDeps extends HolderDeps {
   resumePane?: (target: { pane: PtyInfo; holder: PaneProcess }) => Promise<TakeOverOutcome>;
   env: NodeJS.ProcessEnv; // the environment the engine receives (its config home)
   signal?: (pid: number) => void;
+  processes?: () => Promise<Processes>; // the OS's process table (`ps`) the pane's holder is found and paused through
   runStop?: (binary: string, jobId: string, env: NodeJS.ProcessEnv) => Promise<void>;
   waitMs?: number;
   pollMs?: number;
@@ -61,7 +62,7 @@ export async function releaseHolder(deps: TakeOverDeps, q: { engineSessionId: Se
     return refused('other_app', `The session is open in another app (${row.entrypoint}, pid ${holder.pid}); close it there, or fork a copy.`);
   }
   if (holder.kind === 'terminal' && deps.resumePane) {
-    const target = await findPane(deps.dispatch, holder.pid);
+    const target = await findPane(deps.dispatch, holder.pid, deps.processes);
     if ((target?.pane.ptyId ?? null) !== (deps.paneId ?? null)) return refused('changed', 'The holder’s terminal pane changed since the confirm; nothing was stopped. Try again.');
     if (target) return deps.resumePane(target);
   }
