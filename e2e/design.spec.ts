@@ -162,7 +162,14 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   const before = (await viewOf(page, id, 'main')).viewport!;
   const from = await worldAt(inMain, before, 200, 4000); // below the phone: no board there
   await drag(page, from, { x: from.x - 80, y: from.y - 60 });
-  await expect.poll(async () => (await viewOf(page, id, 'main')).viewport).toEqual({ zoom: before.zoom, x: before.x - 80, y: before.y - 60 });
+  // P4-B3 Decision Log 35: the main tab adopts the view the panel held (X38's carry), whose arithmetic leaves the pan
+  // about 3 × 10⁻⁵ px off; the offsets are compared within that, the zoom exactly
+  await expect
+    .poll(async () => {
+      const after = (await viewOf(page, id, 'main')).viewport!;
+      return { zoom: after.zoom, dx: Math.abs(after.x - (before.x - 80)), dy: Math.abs(after.y - (before.y - 60)) };
+    })
+    .toEqual({ zoom: before.zoom, dx: expect.closeTo(0, 3), dy: expect.closeTo(0, 3) });
   expect(await canvases.evaluateAll((ns) => ns.map((n) => (n as HTMLElement).dataset.e2eMark))).toEqual(ORDER.map((_, i) => String(i)));
 
   // the wheel pans; a pinch (⌃-wheel) zooms about the pointer
