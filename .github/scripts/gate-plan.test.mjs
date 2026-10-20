@@ -137,13 +137,13 @@ function refusal(scenarioEnv) {
 }
 
 // Decision Log 75: a live run spends on purpose, so it takes the live groups alone.
-const live = { LIVE_E2E: 'library-live send-to-live', CLASS1_E2E: 'default library', GATE_E2E_RUNNER: 'macos' };
+const live = { LIVE_E2E: 'library-live presentations-live', CLASS1_E2E: 'default library', GATE_E2E_RUNNER: 'macos' };
 const livePush = (gates, trailers = '\nLive: yes') => `ci-gate: test\n\nGates: ${gates}${trailers}`;
 
 test('the Live: yes trailer, or the live input on a dispatch, turns live on for a set of live groups', () => {
-  const on = plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live,e2e:send-to-live') });
+  const on = plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live,e2e:presentations-live') });
   assert.equal(on.outputs.live, 'true');
-  assert.deepEqual(JSON.parse(on.outputs.e2e).map((entry) => entry.group), ['library-live', 'send-to-live']);
+  assert.deepEqual(JSON.parse(on.outputs.e2e).map((entry) => entry.group), ['library-live', 'presentations-live']);
   assert.match(on.summary, /Live: yes \(MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1\)\./);
 
   const off = plan({ ...live, HEAD_MESSAGE: livePush('static,e2e:default', '') });
@@ -160,14 +160,14 @@ test('the Live: yes trailer, or the live input on a dispatch, turns live on for 
 test('a live run refuses any gate that is not a live group: e2e:default, a fake group, class 1a, the default set', () => {
   const cases = [
     [livePush('e2e:library-live,e2e:default'), /not e2e:default:/],
-    [livePush('e2e:library,e2e:send-to-live'), /not e2e:library:/],
+    [livePush('e2e:library,e2e:presentations-live'), /not e2e:library:/],
     [livePush('static,unit,probes,e2e:library-live'), /not static, unit, probes:/],
     ['ci-gate: test\n\nLive: yes', /not the default set:/],
   ];
   for (const [message, named] of cases) {
     const { status, stderr } = refusal({ ...live, HEAD_MESSAGE: message });
     assert.equal(status, 1, message);
-    assert.match(stderr, /^gate-plan: a live run takes only the live e2e groups \(e2e:library-live, e2e:send-to-live\), /, message);
+    assert.match(stderr, /^gate-plan: a live run takes only the live e2e groups \(e2e:library-live, e2e:presentations-live\), /, message);
     assert.match(stderr, named, message);
     assert.match(stderr, /ask with Gates: naming those alone \(ci-gate\.sh --live --gates e2e:<group>,…\)/, message);
   }
@@ -179,13 +179,13 @@ test('a live run refuses any gate that is not a live group: e2e:default, a fake 
 // design-live and dashboard-live set MAWS_LIVE=1 in their own scripts, so outside a live run they would spend.
 test('a run that is not live refuses a live group, whether a trailer or a dispatch asks for it', () => {
   for (const scenario of [
-    { HEAD_MESSAGE: livePush('static,e2e:library-live,e2e:send-to-live', '') },
-    { HEAD_MESSAGE: livePush('static,e2e:library-live,e2e:send-to-live', '\nLive: no') },
-    { EVENT: 'workflow_dispatch', INPUT_GATES: 'static,e2e:library-live,e2e:send-to-live', INPUT_RUNNER: 'macos', HEAD_MESSAGE: 'Live: yes' },
+    { HEAD_MESSAGE: livePush('static,e2e:library-live,e2e:presentations-live', '') },
+    { HEAD_MESSAGE: livePush('static,e2e:library-live,e2e:presentations-live', '\nLive: no') },
+    { EVENT: 'workflow_dispatch', INPUT_GATES: 'static,e2e:library-live,e2e:presentations-live', INPUT_RUNNER: 'macos', HEAD_MESSAGE: 'Live: yes' },
   ]) {
     const { status, stderr } = refusal({ ...live, ...scenario });
     assert.equal(status, 1, JSON.stringify(scenario));
-    assert.equal(stderr, 'gate-plan: e2e:library-live, e2e:send-to-live run only in a live run, a paid one: ask with Live: yes (ci-gate.sh --live)\n');
+    assert.equal(stderr, 'gate-plan: e2e:library-live, e2e:presentations-live run only in a live run, a paid one: ask with Live: yes (ci-gate.sh --live)\n');
   }
 });
 
@@ -195,7 +195,7 @@ test('a live run takes the LIVE_GUARD_E2E groups beside the live groups it names
   const guarded = { ...live, LIVE_E2E: `${live.LIVE_E2E} tool-time-heavy-live`, LIVE_GUARD_E2E: 'tool-time-heavy-live' };
   const groups = (outputs) => JSON.parse(outputs.e2e).map((entry) => entry.group);
   assert.deepEqual(groups(plan({ ...guarded, HEAD_MESSAGE: livePush('e2e:library-live') }).outputs), ['library-live', 'tool-time-heavy-live']);
-  assert.deepEqual(groups(plan({ ...guarded, EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:send-to-live', INPUT_LIVE: 'true' }).outputs), ['send-to-live', 'tool-time-heavy-live']);
+  assert.deepEqual(groups(plan({ ...guarded, EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:presentations-live', INPUT_LIVE: 'true' }).outputs), ['presentations-live', 'tool-time-heavy-live']);
   assert.deepEqual(groups(plan({ ...guarded, HEAD_MESSAGE: livePush('e2e:tool-time-heavy-live') }).outputs), ['tool-time-heavy-live']);
   assert.deepEqual(groups(plan({ ...guarded, HEAD_MESSAGE: livePush('e2e:library', '\nRunner: macos') }).outputs), ['library']);
 });
