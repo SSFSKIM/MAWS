@@ -18,6 +18,10 @@
 //
 // Artifacts belong to no session (§4.1), so a pinned tab keeps the artifact it shows when the shown session changes; its
 // list follows the shown session.
+//
+// P4-B3 (its Decision Log 22; X5 as amended; tracker row 290): the artifact a tab shows is its persisted params
+// (`{target}` through the layout store's `setPanelParams`; none while it shows the list or once the instance goes), which
+// the host hands back to the tab restored at the next launch, so the tab shows the same record, pinned or a session's.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
@@ -46,6 +50,13 @@ export interface ArtifactsParams {
   at?: ArtifactOpenAt;
   scope?: ArtifactsScope;
 }
+
+// What the tool persisted for a restored tab, read back: the record's artifact id, else (anything else stored) the list.
+// The version shown and the list's scope are not persisted; a restored record shows the latest.
+const restoredParams = (stored: unknown): ArtifactsParams | undefined => {
+  const target = typeof stored === 'object' && stored !== null && !Array.isArray(stored) ? (stored as { target?: unknown }).target : undefined;
+  return typeof target === 'string' && target !== '' ? { target } : undefined;
+};
 
 // An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock;
 // M6b: a transcript row's Open, `TranscriptActions.openArtifact`), at the version `at` asks for (none: the latest,
@@ -112,8 +123,16 @@ export class ArtifactsHandle {
   snapshot = () => this.state;
 
   private update(patch: Partial<ArtifactsState>): void {
+    const { view } = this.state;
     this.state = { ...this.state, ...patch };
+    if (this.state.view !== view) this.persist();
     this.listeners.forEach((listener) => listener());
+  }
+
+  // The tab's persisted params: the record shown, none for the list.
+  private persist(): void {
+    const { view } = this.state;
+    useLayout.getState().setPanelParams(this.editorScope.tabId, view.kind === 'record' ? { target: view.artifactId } : null);
   }
 
   // The tab stops showing its artifact: the editor's state and its header registration go.
@@ -204,6 +223,7 @@ export class ArtifactsHandle {
     this.disposed = true;
     this.unwatchClose();
     this.leave();
+    useLayout.getState().setPanelParams(this.editorScope.tabId, null);
   };
 }
 
@@ -243,7 +263,7 @@ export const artifactsTool: PanelTool<ArtifactsHandle, ArtifactsParams> = {
   pinnable: true,
   multiInstance: false,
   menu: true,
-  createState: (init) => new ArtifactsHandle({ surface: 'panel', tabId: init.instanceId }, init.appSessionId, init.params),
+  createState: (init) => new ArtifactsHandle({ surface: 'panel', tabId: init.instanceId }, init.appSessionId, init.restored ? restoredParams(init.params) : init.params),
   open: (state, params) => state.open(params),
   beforeClose: () => Promise.resolve(true), // the editor's own closeGuard is asked by the host first (X32), the view frozen meanwhile
   dispose: (state) => state.dispose(),

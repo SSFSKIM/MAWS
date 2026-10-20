@@ -8,16 +8,17 @@ import { useEffect } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectLibrary, resetLibrary, watchLibraryRow } from '../../library/store';
 import { editorHostOf, registerEditorHost, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
-import { panelHost, registerPanelTool } from '../../panel/host';
+import { connectPanelHost, panelHost, registerPanelTool, resetPanelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
-import { useLayout } from '../../stores/layout';
+import { persistLayout, useLayout } from '../../stores/layout';
 import { activeTab, allTabs } from '../../stores/layout-model';
 import { fail, installFakeMain, ok } from '../../test-support/code';
-import { A, B, panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
+import { A, B, heldBridge, hydrateHeld, panelOf, persisted, resetPanelStores, TestHost } from '../../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
 import { ArtifactsSummary } from './Summary';
 import { resetVersionRequests, useVersionRequest } from './viewers/requests';
@@ -565,6 +566,83 @@ describe('the record view', () => {
     await settle();
     expect(listFilters().at(-1)).toEqual({ appSessionId: B, lineage: true });
     expect(listed()).toEqual([OTHER.id]);
+  });
+});
+
+// P4-B3 (M3; its Decision Log 22, tracker row 290): the record a tab shows is its persisted params (`{target}`, none for
+// the list), read back by a restored tab, so the tab shows the same record after a relaunch, pinned or a session's.
+describe('restore', () => {
+  const paramsOf = (tabId: string) => useLayout.getState().panelParams[tabId];
+
+  it('writes the record it shows as its tab’s params, and none at Back, on a re-target to the list and when the instance goes', async () => {
+    testEditor();
+    const { handle } = await mount();
+    expect(paramsOf(TAB)).toBeUndefined();
+    await openRow(1);
+    expect(paramsOf(TAB)).toEqual({ target: NOTES.id });
+    act(() => handle.open({ target: SPEC.id }));
+    await settle();
+    expect(paramsOf(TAB)).toEqual({ target: SPEC.id });
+    fireEvent.click(button('Back')!);
+    await settle();
+    expect(paramsOf(TAB)).toBeUndefined();
+    await openRow(1);
+    act(() => handle.open(undefined));
+    await settle();
+    expect(paramsOf(TAB)).toBeUndefined();
+    await openRow(1);
+    artifactsTool.dispose(handle);
+    expect(paramsOf(TAB)).toBeUndefined();
+  });
+
+  it('a restored tab shows the record its params name; params it cannot read show the list', async () => {
+    testEditor();
+    const restore = (params: unknown) => {
+      const handle = artifactsTool.createState({ appSessionId: A, session: null, instanceId: TAB, params: params as ArtifactsParams, restored: true });
+      handles.push(handle);
+      return handle.snapshot().view;
+    };
+    expect(restore({ target: NOTES.id })).toEqual({ kind: 'record', artifactId: NOTES.id });
+    for (const unreadable of [undefined, null, 'x', 7, [], {}, { target: 7 }, { target: '' }, { target: null }]) expect(restore(unreadable), JSON.stringify(unreadable)).toEqual({ kind: 'list' });
+  });
+
+  // A launch over layout.json as the last one left it: the host forgets its instances (nothing is disposed at a quit),
+  // the layout store reads the keys back, the host passes its barrier and the panel draws.
+  async function launch(layoutJson: Record<string, unknown>) {
+    cleanup();
+    resetPanelHost();
+    useLayout.setState({ hydrated: false, regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, panelParams: {} });
+    const bridge = heldBridge(layoutJson);
+    offs.push(persistLayout(bridge.client), connectPanelHost());
+    registerPanelTool(artifactsTool);
+    await hydrateHeld(bridge);
+    render(<TestHost />);
+    await settle();
+    const quit = () => offs.splice(0).forEach((off) => off()); // persistence flushes what is pending
+    return { left: () => (quit(), { ...layoutJson, ...Object.fromEntries(bridge.sets.map((s) => [s.key, s.value])) }) };
+  }
+  const overview = () => document.querySelector('[role="tabpanel"][aria-label="Session overview"]');
+
+  it.each([
+    ['a pinned tab, with no session in view', null, LAYOUT_DEFAULTS.main],
+    ['a session’s tab', A, persisted({})['main.tabs']],
+  ])('%s shows the same record after a relaunch, never the Session overview or the list; after Back, the list', async (_, appSessionId, shown) => {
+    testEditor();
+    const first = await launch(persisted({ 'main.tabs': shown }));
+    let tabId = '';
+    act(() => void (tabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params: { target: NOTES.id } })));
+    await screen.findByText(`panel editor for ${NOTES.id} in panel:${tabId}`);
+
+    const second = await launch(first.left());
+    expect(overview()).toBeNull();
+    expect(screen.getByText(`panel editor for ${NOTES.id} in panel:${tabId}`)).toBeTruthy();
+    fireEvent.click(button('Back')!);
+    await settle();
+
+    await launch(second.left());
+    expect(overview()).toBeNull();
+    expect(document.querySelector('[data-artifacts-list]')).toBeTruthy();
+    expect(screen.queryByText(/panel editor for/)).toBeNull();
   });
 });
 

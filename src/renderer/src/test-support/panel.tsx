@@ -153,6 +153,7 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
     panelPinned: [],
     panelBySession: new Map(),
     panelActiveNoSession: null,
+    panelParams: {}, // P4-B3
     hydrated: opts.hydrated ?? true,
   });
   useSessions.setState({

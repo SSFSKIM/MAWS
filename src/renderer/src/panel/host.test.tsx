@@ -367,6 +367,28 @@ describe('panel host transitions', () => {
     expect(probe.created).toHaveLength(2); // showing the sessions creates no second instance
   });
 
+  // P4-B3 (its Decision Log 22; X5 as amended): a restored tab's state is created with what its tool persisted for it
+  // (`setPanelParams`), shown or re-targeted first; a tab its tool persisted nothing for gets no params, as before.
+  it('creates a restored tab’s state with the params its tool persisted for it, shown or re-targeted first', () => {
+    const { tool, probe } = probeTool('s', { multiInstance: false });
+    const pinned = probeTool('p');
+    register(tool, pinned.tool);
+    useLayout.setState({
+      panelPinned: [ref('p:pinned01', true)],
+      panelBySession: new Map([
+        [A, { tabs: [ref('s:aaaaaaaa')], activeTabId: 's:aaaaaaaa' }],
+        [B, { tabs: [ref('s:bbbbbbbb')], activeTabId: null }],
+      ]),
+      panelParams: { 's:aaaaaaaa': { target: 'a' }, 's:bbbbbbbb': { target: 'b' } },
+    });
+    render(<TestHost />);
+    expect(pinned.probe.created).toEqual([expect.objectContaining({ instanceId: 'p:pinned01', params: undefined, restored: true })]);
+    expect(probe.created).toEqual([expect.objectContaining({ instanceId: 's:aaaaaaaa', params: { target: 'a' }, restored: true })]);
+    act(() => void panelHost.addTool('s', { appSessionId: B, params: 'p', activate: false }));
+    expect(probe.created.at(-1)).toEqual(expect.objectContaining({ instanceId: 's:bbbbbbbb', params: { target: 'b' }, restored: true }));
+    expect(probe.opens.at(-1)).toEqual({ id: 's:bbbbbbbb', params: 'p' });
+  });
+
   it('activate: false writes a target not shown through updatePanelTabs with the pins passed through, and switches nothing', () => {
     register(probeTool('t').tool);
     useLayout.setState({ panelPinned: [ref('t:pin00000', true)] });

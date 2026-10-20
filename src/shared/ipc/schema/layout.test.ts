@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -62,7 +62,21 @@ describe('layout value shapes', () => {
     for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', 'window.main', 'usage.banners' /* C7 */]) {
       expect(LayoutKeySchema.safeParse(key).success, key).toBe(true);
     }
-    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */, 'panelTools.other' /* P4-B3 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+  });
+
+  // P4-B3 (Decision Log 22, X5 as amended): a panel tool's persisted params per panel tab, and the pin selection while no
+  // session is in view, each a key of its own at version 1, outside the `panel.` namespace hydration reads as sessions'.
+  it('admits the panel tools’ keys: the params per panel tab, opaque to the layout, and the no-session selection', () => {
+    for (const key of ['panelTools.params', 'panelTools.activeNoSession']) expect(LayoutKeySchema.safeParse(key).success, key).toBe(true);
+    const params = { version: 1, params: { 'artifacts:abcdefgh': { target: 'x' }, 'other:12345678': 'anything' } };
+    expect(PanelParamsSchema.parse(params)).toEqual(params);
+    expect(PanelParamsSchema.safeParse({ params: {} }).success).toBe(false);
+    expect(PanelParamsSchema.safeParse({ ...params, version: 2 }).success).toBe(false);
+    expect(PanelParamsSchema.safeParse({ ...params, extra: true }).success).toBe(false);
+    for (const activeTabId of ['artifacts:abcdefgh', null]) expect(PanelActiveNoSessionSchema.parse({ version: 1, activeTabId })).toEqual({ version: 1, activeTabId });
+    expect(PanelActiveNoSessionSchema.safeParse({ version: 1 }).success).toBe(false);
+    expect(PanelActiveNoSessionSchema.safeParse({ version: 1, activeTabId: 3 }).success).toBe(false);
   });
 
   it('derives deterministic tab ids', () => {
