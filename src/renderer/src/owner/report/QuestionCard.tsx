@@ -1,9 +1,10 @@
 // A question the agent left for the person (a `need-input` mark; the P2-C document, Design §6 and §8): its Markdown,
 // its choices as buttons in order (the recommended one marked, never preselected) in a labelled group, Reply, and the
 // state main reports for it: unanswered (with the last refused send's reason, or the words of the trust or relay card
-// holding it, and Retry), queued with Cancel, sent but not confirmed with Answer again, answered with Reply kept for a
-// follow-up, or retired. While the card's own send runs it says Sending… (Starting… when the send starts the session
-// first) and offers nothing, so one click is one answer. A sent answer main never heard of is said with Record again.
+// holding it, and Retry), queued with Cancel, sent but not confirmed with Answer again (saying so when the session's
+// transcript cannot be read), answered with Reply kept for a follow-up, or retired. While the card's own send runs it
+// says Sending… (Starting… when the send starts the session first) and offers nothing, so one click is one answer. A sent
+// answer main never heard of is said with Record again.
 // Reply opens a text field on the card: Enter sends, Shift-Enter breaks the line, Escape or Close closes it and gives
 // the keyboard back to Reply. A session held in a terminal or as a background job answers nowhere here: the card says
 // where it is, with Take over. Every action is the caller's (`answering.ts`): a control without its handler draws
@@ -190,7 +191,7 @@ function StateLine({ state, held, actions, answerAgain }: { state: QuestionState
     case 'unconfirmed':
       return (
         <p className="owner-card-state">
-          {QUESTION.unconfirmed}
+          {state.reason === 'transcript-unreadable' ? QUESTION.unconfirmedUnreadable : QUESTION.unconfirmed}
           <button type="button" className="owner-card-button" disabled={!actions.choose && !actions.reply} onClick={answerAgain}>
             {QUESTION.answerAgain}
           </button>
