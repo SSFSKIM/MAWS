@@ -63,13 +63,16 @@ const SMINOS_REPLY_LINE = /(?:^|\n)\[To reply, run in Bash: \/[^\n"]*\/sminos sa
 // or `@all in <projects>`, `@all on <machines>` or both, then perhaps ` (<states>)`).
 const SMINOS_CHAT_HEAD = /^\[sminos chat .+? \S+:\d+ from /;
 const SMINOS_UNREAD = / \| unread [1-9][0-9]*$/;
-const SMINOS_ORG_TARGET = /@org(?: \([a-z]+(?:,[a-z]+)*\))?$/y;
+// sminos's `STATES`, the words `--state` takes.
+const SMINOS_STATE = '(?:busy|idle|waiting|stopped|gone|vacant|retired)';
+const SMINOS_ORG_TARGET = new RegExp(`@org(?: \\(${SMINOS_STATE}(?:,${SMINOS_STATE})*\\))?$`, 'y');
 const SMINOS_MESSAGE_FRAME = /^\[sminos message from (.+) id=\S+\]$/;
 
 /**
  * Whether a chat frame's target starts at `at` and runs to the end of `rest` (the frame between its sender and its
  * unread count). sminos leaves the names in a scope open (a project's name may hold ` → ` or ` on `), so past `@all in `
- * or `@all on ` a target is any text without a `]`; `@org`'s states are sminos's state words.
+ * or `@all on ` a target is any text without a `]`; `@org`'s states are sminos's state words, so a project named
+ * `ops → @org (later)` opens no second reading.
  */
 function chatTargetAt(rest: string, at: number, lastBracket: number): boolean {
   const length = rest.length - at;

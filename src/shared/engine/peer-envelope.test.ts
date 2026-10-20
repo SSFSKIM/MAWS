@@ -122,6 +122,9 @@ describe('parsePeerMessage', () => {
     expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @all in projB] [example]')).toBeNull();
     expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @org (not a state!)]')).toBeNull();
     expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @all (waiting)]')).toBeNull(); // sminos writes @org (waiting)
+    // `@org`'s states are sminos's own words: a project's name that only looks like an org target opens no second reading.
+    expect(sminosFrameSender('[sminos chat ops alpha/human:4 from human → @all in ops → @org (later)]')).toBe('human');
+    expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @org (waiting,busy)]')).toBe('human');
   });
 
   it('reads a frame line in one pass, so a long line that is no frame is refused at once', () => {
