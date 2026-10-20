@@ -5,12 +5,15 @@
 // stays where it left it, as Google Docs' does (LC-1, docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md item 3). The
 // active card is marked by its form and its elevation, not moved sideways (item 2). Rendered inside the page's scroll
 // box as the page's flex sibling (theme.css's row), so the cards scroll with the text and a scroll runs no layout;
-// re-laid when the passages may have moved (an edit, a frame resize, the provisional layer's growth, X35: the page frame
-// calls `relayoutRef` from its frame callback, P4-B1), and on the thread set, the active thread, the pin, a card's
-// resize, a tab switch and a font load. Positions are written to the entries' elements directly from the layout pass, so
-// a keystroke re-renders nothing in React and the cards move in the frame the text moved in: the pass re-reads the
-// anchors (the display's decorations, P4-B1), runs the layout and sets transforms. Moves caused by an activation, an add
-// or a resolve animate; moves caused by edits never.
+// re-laid when the passages may have moved and on the thread set, the active thread, the pin, a card's resize, a tab
+// switch, a view change and a font load. Positions are written to the entries' elements directly from the layout pass,
+// so a keystroke re-renders nothing in React: the pass re-reads the anchors (the display's decorations, P4-B1), runs the
+// layout and sets transforms. The page frame reports its moves from its frame callback (`relayoutRef`): a frame resize
+// re-lays at once; a change that only edits the document (the owner's typing, an agent's write, the provisional layer's
+// growth, X35) owes a pass that runs once the edits pause, within a ceiling, in an idle moment (margin-settle.ts; P4-B1's
+// follow-up wave), so the frame that paints a keystroke never measures the margin; an edit that draws or removes a
+// passage (a deletion, its undo) re-lays at once. Moves caused by an activation, an add or a resolve animate; moves
+// caused by edits never, also when an animated pass catches up a stale margin (it lands the edits' moves first).
 //
 // Three tiers by the side space beside the page (margin-tiers.ts): cards, the icon rail (Docs' Minimize form: an icon
 // per thread laid by the same stack at the icon gap, none merged, as Docs' three icons on adjacent lines, LC-1 item 7;
@@ -33,6 +36,7 @@ import type { CommentsView } from '../../../comments/view';
 import type { Doc } from '../../../yjs';
 import { nanoid8 } from '../../schema';
 import { getThread, reopen, reply, resolve, type Thread } from '../../threads';
+import { createSettle } from './margin-settle';
 import { activeThread, commentDisplayKey, COMMENTS_ORIGIN, drawnThreads, pinnedThread } from './plugins';
 import type { CommentAuthor } from './surface';
 import { useOpenThreads } from './use-threads';
@@ -47,10 +51,11 @@ export interface MarginThreadsProps {
   /** Expand draws the cards, Minimize the icon rail (Hide is the caller's: the margin is not drawn). */
   view: Exclude<CommentsView, 'hide'>;
   /**
-   * P4-B1: filled with the layout pass for passages that may have moved (an edit, a frame resize, the provisional layer's
-   * growth), which the page frame calls from its frame callback; never on a scroll.
+   * P4-B1: filled with what the margin does when the passages may have moved, which the page frame calls from its frame
+   * callback with what moved them: a frame resize (`resize`, a pass at once) or edits alone (`edit`: the document, an
+   * agent's write, the provisional layer's growth; a pass owed until the edits pause). Never on a scroll.
    */
-  relayoutRef?: { current: () => void };
+  relayoutRef?: { current: (move: PageMove) => void };
   /** The thread the renderer's compose card is on, or null (`CommentOverlayProps.hosting`). */
   hosting: string | null;
   /** Draws the renderer's compose card (the overlay surface, placement `margin`) in the hosting thread's entry. */
@@ -65,6 +70,9 @@ export interface MarginThreadsProps {
   drafts: ReadonlyMap<string, string>;
   onDraftChange(threadId: string, text: string): void;
 }
+
+/** P4-B1: what moved the passages in a page frame's callback: the frame's size, or edits alone. */
+export type PageMove = 'resize' | 'edit';
 
 // P4-B1: what React draws (an entry's id and thread); the pass keeps where each is drawn beside it (`from`, the earliest
 // position of its decorations; null for the compose card's thread drawn nowhere here), so an edit changes nothing React
@@ -185,13 +193,22 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   const located = useRef<Located[]>([]);
   const lastCause = useRef<Cause>('layout');
   const updateAdd = useRef<() => void>(() => {});
+  // P4-B1 (the follow-up wave): the pin the last pass laid the stack from, and the pass the edits owe (margin-settle.ts),
+  // which runs the latest pass through `settleRun`
+  const laidPin = useRef<string | null>(null);
+  const settleRun = useRef<() => void>(() => {});
+  const settle = useMemo(() => createSettle(() => settleRun.current()), []);
+  useEffect(() => () => settle.dispose(), [settle]);
 
   // P4-B1: the layout pass, with its cause: the anchors re-read (the character after each thread's first position, so a
   // passage starting at a soft wrap anchors on the line its first character is drawn on, P6), the stack laid from the
   // pin (the editor's, read here; one drawn nowhere here, an orphan's or another tab's, is no pin), the transforms
   // written. Each entry sits Docs' inset below its line (LC-1 items 1 and 7: a card's top and an icon's alike); the icon
   // tier lays every entry as an icon, ICON_PX tall at the icon gap.
-  const place = useCallback((cause: Cause) => {
+  // P4-B1 (the follow-up wave): `pinAs` lays the stack from that pin rather than the editor's (the catch-up in `pass`).
+  // Every pass settles what the edits owed, the wait written on the column (`data-stale-max`: the longest since the
+  // attribute was last cleared, which the scale gate reads)
+  const place = useCallback((cause: Cause, pinAs?: string | null) => {
     const root = column.current;
     if (!root) return;
     const { tier } = latest.current;
@@ -200,10 +217,13 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     const anchorOf = (entry: Located) => (entry.from === null || editor.isDestroyed ? 0 : Math.round(editor.view.coordsAtPos(entry.from, 1).top - origin));
     const icons = tier.kind === 'icons';
     const items = list.map((entry) => ({ id: entry.id, anchor: anchorOf(entry) + MARGIN_CARD_INSET_PX, height: icons ? ICON_PX : (heights.current.get(entry.id) ?? 0) }));
-    const pin = editor.isDestroyed ? null : pinnedThread(editor.state);
+    const pin = pinAs !== undefined ? pinAs : editor.isDestroyed ? null : pinnedThread(editor.state);
     const pinned = pin !== null && list.some((entry) => entry.id === pin && entry.from !== null) ? pin : null;
     const placed = layoutMargin({ entries: items, pinned, gap: icons ? ICON_GAP_PX : MARGIN_GAP_PX });
     tops.current = placed.tops;
+    laidPin.current = pinned;
+    const waited = settle.settled();
+    if (waited !== null) root.dataset.staleMax = String(Math.max(Number(root.dataset.staleMax ?? 0), Math.round(waited)));
     // P4-B1: an animated cause animates its moves; an unanimated pass that moves nothing (the edit's own frame after an
     // add, which now reaches the margin in the same task) leaves a running transition alone, and one that moves a card
     // ends it there (an edit's moves never animate)
@@ -233,35 +253,49 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     passes.current += 1;
     root.dataset.relayouts = String(passes.current);
     updateAdd.current();
-  }, [editor]);
+  }, [editor, settle]);
 
   // P4-B1: a pass with its cause: the threads located (React told only when the drawn set changed), the mounted cards'
   // heights read when React has just drawn them (`measure`: an activation grows one card and compacts another), then laid.
   // What is drawn is the display's decorations (`drawnThreads`: one walk of about a hundred decorations, no document or
   // DOM scan), in document order, ties to the older thread.
+  const locate = useCallback((): Located[] | null => {
+    const { wantedKey, byId, hosting, tier } = latest.current;
+    if (!column.current || tier.kind === 'off' || editor.isDestroyed) return null;
+    const drawn = drawnThreads(editor.state);
+    const wanted = wantedKey === '' ? [] : wantedKey.split(' ');
+    const list: Located[] = wanted
+      .filter((id) => drawn.has(id))
+      .map((id) => ({ id, from: drawn.get(id)!, thread: byId.get(id) ?? null }))
+      .sort((a, b) => a.from - b.from);
+    // the compose card's thread drawn nowhere here (another tab's) heads the stack at the column's top
+    if (hosting !== null && !drawn.has(hosting)) list.unshift({ id: hosting, from: null, thread: byId.get(hosting) ?? null });
+    return list;
+  }, [editor]);
   const pass = useCallback(
     (cause: Cause, measure: boolean) => {
-      const root = column.current;
-      const { wantedKey, byId, hosting, tier, entries } = latest.current;
-      if (!root || tier.kind === 'off' || editor.isDestroyed) return;
-      const drawn = drawnThreads(editor.state);
-      const wanted = wantedKey === '' ? [] : wantedKey.split(' ');
-      const list: Located[] = wanted
-        .filter((id) => drawn.has(id))
-        .map((id) => ({ id, from: drawn.get(id)!, thread: byId.get(id) ?? null }))
-        .sort((a, b) => a.from - b.from);
-      // the compose card's thread drawn nowhere here (another tab's) heads the stack at the column's top
-      if (hosting !== null && !drawn.has(hosting)) list.unshift({ id: hosting, from: null, thread: byId.get(hosting) ?? null });
+      const list = locate();
+      if (list === null) return;
+      // P4-B1 (the follow-up wave): an animated pass over a margin the edits left stale lands the edits' moves first,
+      // unanimated, from the stack as last laid (its entries at their passages' lines now, its heights, its pin), so an
+      // activation or an add that catches the margin up animates its own moves alone (D4). The second `place` reads the
+      // column's rect first, which applies those moves before the animated ones are written
+      if (ANIMATED.has(cause) && settle.stale) {
+        const at = new Map(list.map((entry) => [entry.id, entry.from]));
+        located.current = located.current.filter((entry) => at.has(entry.id)).map((entry) => ({ ...entry, from: at.get(entry.id)! }));
+        place('layout', laidPin.current);
+      }
       located.current = list;
-      if (!sameEntries(entries, list)) setEntries(list.map(({ id, thread }) => ({ id, thread })));
+      if (!sameEntries(latest.current.entries, list)) setEntries(list.map(({ id, thread }) => ({ id, thread })));
       lastCause.current = cause;
       if (measure) for (const [id, node] of nodes.current) heights.current.set(id, Math.round(node.getBoundingClientRect().height));
       place(cause);
     },
-    [editor, place],
+    [locate, place, settle],
   );
   const passRef = useRef(pass);
   passRef.current = pass;
+  settleRun.current = () => passRef.current('layout', false);
   // P4-B1: after the display's redraw for the threads map, a pass caused by the set's change (an add, a resolve's
   // close-up, a reopen animate, D4 and Z1). The display's observer runs before React re-reads the list, so this pass,
   // not React's later one, is the one that moves the cards
@@ -277,15 +311,22 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     previous.current = { active, pin, set };
     pass(was === null ? 'layout' : was.active !== active || was.pin !== pin ? 'activation' : was.set !== set ? 'set' : 'layout', true);
   }, [wantedKey, byId, hosting, active, pin, tier, pass]);
-  // P4-B1: the passages' moves (an edit, a frame resize, the layer's growth) are the page frame's to report, from its
-  // frame callback: an edit costs this pass and no render
+  // P4-B1: the passages' moves are the page frame's to report, from its frame callback. A frame resize re-lays at once.
+  // Edits alone (the follow-up wave) owe the pass, which runs once they pause (margin-settle.ts), unless they drew or
+  // removed a passage (a deletion, its undo): the drawn set is read from the display's decorations, nothing measured
   useEffect(() => {
     if (!relayoutRef) return;
-    relayoutRef.current = () => pass('layout', false);
+    relayoutRef.current = (move) => {
+      if (move === 'resize') return pass('layout', false);
+      const list = locate();
+      if (list === null) return;
+      if (sameIds(list, located.current)) settle.changed();
+      else pass('layout', false);
+    };
     return () => {
       relayoutRef.current = () => {};
     };
-  }, [relayoutRef, pass]);
+  }, [relayoutRef, pass, locate, settle]);
 
   // a card's resize (its reply field growing, an agent's reply) re-lays the stack, not animated; the elements are
   // observed as they mount
@@ -614,6 +655,11 @@ const IconDot = memo(function IconDot({ label, title, active, onDot }: { label: 
 const Hosted = memo(function Hosted({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
 });
+
+// P4-B1 (the follow-up wave): whether two located lists draw the same threads in the same order
+function sameIds(a: readonly Located[], b: readonly Located[]): boolean {
+  return a.length === b.length && a.every((entry, i) => entry.id === b[i]!.id);
+}
 
 // P4-B1: whether React's entries are the located ones (the same ids, in order, with the same threads)
 function sameEntries(now: readonly Entry[], next: readonly Located[]): boolean {
