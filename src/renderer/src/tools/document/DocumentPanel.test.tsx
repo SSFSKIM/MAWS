@@ -118,6 +118,14 @@ describe('an open at a place', () => {
     await until(() => page.editor?.state.selection.head === 1, 'the caret at the block’s start');
     expect(takeOpenRequest(serial), 'taken by the editor').toBe(false);
   });
+
+  it('opens the history rail previewing a retained version a link names, after the request is taken', async () => {
+    versions = [{ id: 3, seq: 1, at: Date.now(), actor: { kind: 'human' }, kind: 'named', label: 'Draft', assetRefs: [] }];
+    requestArtifactOpen(A, 'latest', 'panel', { version: 3 });
+    mount();
+    await shown();
+    await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null, 'the history rail');
+  });
 });
 
 describe('the document editor in L’s registry', () => {

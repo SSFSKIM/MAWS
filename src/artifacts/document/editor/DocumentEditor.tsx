@@ -225,6 +225,14 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const { reveal, onRevealed } = props;
   const revealed = useRef<number | null>(null);
   const hasTabs = tabs.length > 0;
+  // whether the editor is still mounted when a version's check answers (the reveal itself is gone by then: it was taken)
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     if (!reveal || !hasTabs || revealed.current === reveal.serial) return;
     revealed.current = reveal.serial;
@@ -238,19 +246,16 @@ export function DocumentEditor(props: DocumentEditorProps) {
       if (tabId !== null) history?.close(); // a place in the live document: the live page shows
       return;
     }
-    let live = true;
+    const asked = reveal.serial;
     void history.hasVersion(version).then(
       (retained) => {
-        if (!live || !retained) return;
+        if (!retained || !mounted.current || revealed.current !== asked) return; // gone, or a later reveal took over
         if (!held) setOwnRail('history');
         onRailChange?.('history');
         void history.select(version);
       },
       () => {}, // the list unread: a plain open
     );
-    return () => {
-      live = false;
-    };
   }, [reveal, onRevealed, hasTabs, doc, history, held, onRailChange]);
   // P3-F1: the rail beside the page in a wide body, a drawer over the page's right side in a narrow one (rail-layout.ts)
   const body = useRef<HTMLDivElement>(null);
