@@ -130,6 +130,61 @@ describe('read model snapshot matches events', () => {
 
 // Liveness (Interfaces, digest fold): the parent's phase, activity and turn times move only while the session has a live
 // process — an engine status in starting, initializing or ready, or a C4 replay run the host is playing.
+// Tracker 2026-09-29: a resume the ledger cannot place alone (digest.ts, `restoring`) takes its restored part from the
+// transcript, read as the batch's fold returns and landing as a correction of the session's cost. The figures are pass
+// 3's (digest.test.ts): 0.0031984 at the first process's exit, 0.00593705 for the resume a SIGKILL ended before it
+// recorded its total, so the next resume restores the older figure.
+describe('a resume’s restored part, read from the transcript', () => {
+  const FIRST = 0.0031983999999999997;
+  const SECOND = 0.005937049999999999;
+  const THIRD = FIRST + 0.001; // the next resume's first total: the older figure restored, plus a cheaper turn
+  let src: ReturnType<typeof source>;
+  let model: SessionReadModel;
+  let reads: { appId: AppSessionId; answer(usd: number | null | Error): void }[];
+
+  beforeEach(() => {
+    reads = [];
+    model = new SessionReadModel('index', (r) =>
+      new Promise<number | null>((resolve, reject) => reads.push({ appId: r.appId, answer: (usd) => (usd instanceof Error ? reject(usd) : resolve(usd)) })),
+    );
+    src = source();
+    model.register(src);
+    src.writer.observeRecord(record(A));
+  });
+  const cost = () => model.digests().find((d) => d.appSessionId === A)?.cost?.totalUsd;
+  const killedThenResumed = () => {
+    src.writer.fold(A, [ev('turn.ended', { costUsd: FIRST }), ev('process.exited', {})]);
+    src.writer.fold(A, [ev('turn.ended', { costUsd: SECOND }), ev('process.exited', { signal: 'SIGKILL', code: null, reason: 'crash' })]);
+    src.writer.fold(A, [ev('turn.ended', { costUsd: THIRD })]);
+  };
+
+  it('reads once for the process, then corrects the cost: the older figure it restored is not counted twice', async () => {
+    killedThenResumed();
+    expect(reads.map((read) => read.appId)).toEqual([A]);
+    expect(cost()).toBeCloseTo(SECOND + THIRD, 12); // the ledger's own rule until the transcript answers
+    src.writer.fold(A, [ev('usage.sample', { costUsd: THIRD + 0.002 })]); // the same process: no second read
+    expect(reads).toHaveLength(1);
+    reads[0]!.answer(FIRST);
+    await vi.waitFor(() => expect(cost()).toBeCloseTo(SECOND + 0.001 + 0.002, 12));
+    src.writer.fold(A, [ev('usage.sample', { costUsd: THIRD + 0.003 })]); // later samples keep the corrected part
+    expect(cost()).toBeCloseTo(SECOND + 0.001 + 0.003, 12);
+  });
+
+  it('a read that fails, or lands after the process it was for has exited, changes nothing', async () => {
+    killedThenResumed();
+    reads[0]!.answer(new Error('EACCES'));
+    await Promise.resolve();
+    expect(cost()).toBeCloseTo(SECOND + THIRD, 12);
+    src.writer.fold(A, [ev('process.exited', { signal: 'SIGKILL', code: null, reason: 'crash' }), ev('turn.ended', { costUsd: THIRD })]);
+    const before = cost();
+    expect(reads).toHaveLength(2);
+    src.writer.fold(A, [ev('process.exited', {})]);
+    reads[1]!.answer(FIRST);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(cost()).toBe(before);
+  });
+});
+
 describe('digest liveness', () => {
   let model: SessionReadModel;
   let src: ReturnType<typeof source>;

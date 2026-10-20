@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import { applyStatusToDigest, costLedger, emptyDigest, foldDigest, foldEvents } from './digest';
+import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
 import { framesOf, loadJournal } from '../../../test/support/fixtures';
@@ -133,7 +133,8 @@ describe('digest fold', () => {
       totals.push(digest.cost?.totalUsd ?? 0);
     }
     expect(totals).toEqual([0.3, 0.3, 0.35, 0.37]);
-    expect(ledger).toEqual({ finishedUsd: 0.3, restoredUsd: 0, runningUsd: 0.07, awaitingFirst: false });
+    // a first total below the restored figure: what the process restored is the transcript's to say (restoreCost)
+    expect(ledger).toEqual({ finishedUsd: 0.3, restoredUsd: 0, runningUsd: 0.07, awaitingFirst: false, signalled: false, restoring: { firstUsd: 0.05 } });
   });
 
   // Each journal's result totals as the engine reported them, one process per journal, an exit between processes.
@@ -160,6 +161,54 @@ describe('digest fold', () => {
   it('a resumed process that restored nothing (pass2/resume-live-second, resumed while its holder still ran) counts from zero', () => {
     // the holder ends at 0.061483; the resume's first total, 0.0060484, is its own turn alone (modelUsage 2 input tokens)
     expect(costAfterEach(processes('pass2/resume-live-holder', 'pass2/resume-live-second'))).toEqual([0.061483, 0.061483 + 0.0060484].map((usd) => expect.closeTo(usd, 9)));
+  });
+
+  // Tracker 2026-09-29: a resume the ledger cannot place alone takes its restored part from the transcript's last
+  // `cost-state` (restored-cost.ts). The figures are pass 3's: a session's first process ended at 0.0031984
+  // (p1-side-thread-live-fork) and its resume at 0.00593705 (p1-side-thread-live-resume: 0.0031984 restored plus a turn
+  // of 0.00273865). Here the resume is killed (SIGKILL) before it records its total, so the next resume restores the
+  // older 0.0031984.
+  describe('a resume’s restored part, settled from the transcript', () => {
+    const FIRST = 0.0031983999999999997;
+    const SECOND = 0.005937049999999999;
+    const TURN = SECOND - FIRST;
+    const ledgerAfter = (third: number, exit: Record<string, unknown> = { signal: 'SIGKILL', code: null, reason: 'crash' }) => {
+      const ledger = costLedger(emptyDigest(APP));
+      foldEvents(emptyDigest(APP), new Set(), [
+        ev('turn.ended', { costUsd: FIRST }), ev('process.exited', {}),
+        ev('turn.ended', { costUsd: SECOND }), ev('process.exited', exit),
+        ev('turn.ended', { costUsd: third }),
+      ], ledger);
+      return ledger;
+    };
+
+    it('a first total below the restored figure: the older figure it restored, not zero (the restored part counted twice)', () => {
+      const ledger = ledgerAfter(FIRST + 0.001); // a cheaper turn than the killed process's
+      expect(costOf(ledger)).toBeCloseTo(SECOND + FIRST + 0.001, 12); // the ledger's own rule
+      expect(ledger.restoring).toEqual({ firstUsd: FIRST + 0.001 });
+      expect(costOf(restoreCost(ledger, FIRST))).toBeCloseTo(SECOND + 0.001, 12);
+      expect(restoreCost(ledger, FIRST).restoring).toBeNull();
+    });
+
+    it('a first total at or above it, after a signal ended the process before: the killed process’s spend is kept', () => {
+      const ledger = ledgerAfter(SECOND); // the same turn again: 0.0031984 restored plus 0.00273865
+      expect(costOf(ledger)).toBeCloseTo(SECOND, 12); // the ledger's own rule loses the killed process's turn
+      expect(costOf(restoreCost(ledger, FIRST))).toBeCloseTo(FIRST + 2 * TURN, 12);
+    });
+
+    it('after an exit that recorded its total and a first total above it, nothing is read', () => {
+      expect(ledgerAfter(SECOND + TURN, { signal: null, code: 0, reason: 'quit' }).restoring).toBeNull();
+    });
+
+    it('a figure above the first total was recorded after the process started, and one it cannot read changes nothing', () => {
+      // pass2/resume-live-second: resumed while its holder still ran, which recorded 0.061483 at its exit afterwards
+      const live = costLedger(emptyDigest(APP));
+      foldEvents(emptyDigest(APP), new Set(), processes('pass2/resume-live-holder', 'pass2/resume-live-second').flat().slice(0, -1), live);
+      expect(live.restoring).toEqual({ firstUsd: expect.closeTo(0.0060484, 12) });
+      expect(costOf(restoreCost(live, 0.061483))).toBeCloseTo(0.061483 + 0.0060484, 12);
+      expect(costOf(restoreCost(live, null))).toBeCloseTo(0.061483 + 0.0060484, 12);
+      expect(restoreCost(live, null).restoring).toBeNull();
+    });
   });
 
   it('a synthesised turn end (C4’s backfill, no accounting on disk) leaves the cost alone', () => {
