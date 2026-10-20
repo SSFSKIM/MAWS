@@ -85,7 +85,8 @@ function endOf(editor: Editor, id: string): number {
   return at;
 }
 
-export function DocumentHarness() {
+/** P4-B1: `stacked` puts the replicas one above the other, each the window's width, so a 1600 px window reaches the margin's cards tier. */
+export function DocumentHarness({ stacked = false }: { stacked?: boolean } = {}) {
   const [generation, setGeneration] = useState(1); // a reset opens the next one
   const [world, setWorld] = useState<World | null>(null);
   const [editors, setEditors] = useState<Partial<Record<Replica, Editor | null>>>({});
@@ -216,7 +217,7 @@ export function DocumentHarness() {
 
   if (!world) return <div className="p-4 text-fg-muted">Opening the document…</div>;
   return (
-    <div className="grid h-full grid-cols-2 divide-x divide-border">
+    <div className={stacked ? 'grid h-full grid-rows-2 divide-y divide-border' /* P4-B1 */ : 'grid h-full grid-cols-2 divide-x divide-border'}>
       <section aria-label="Replica A" data-replica="a" className="min-h-0">
         <DocumentEditor artifactId="harness-doc" handle={world.handles.a} host={hosts.a} onEditor={onEditorA} comments={commentsA} history={world.history} />
       </section>

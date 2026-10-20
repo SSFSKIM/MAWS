@@ -33,6 +33,7 @@ const ROUTES: Record<string, () => ReactNode> = {
 // P3-B start: the document editor page (harness/document/), two editors over one in-memory host document
 import { DocumentHarness } from './document/DocumentHarness';
 ROUTES.document = () => <DocumentHarness />;
+ROUTES['document-stack'] = () => <DocumentHarness stacked />; // P4-B1: the replicas stacked, each the window's width (the margin's cards tier)
 // P3-B end
 
 // C9 block begin: the terminal probe page (harness/terminal/), routed as `#probe`; its `#panel` stand-in was folded
