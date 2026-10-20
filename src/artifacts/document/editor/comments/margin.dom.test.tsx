@@ -356,7 +356,7 @@ describe('the tiers (N1 to N6) and the view states', () => {
     comment(m, 't1', 'ships quarterly', 140);
     await settle();
     expect(margin()!.dataset.marginTier).toBe('cards');
-    scene.scrollWidth = 816 + 250; // 250 of side space: a 234 px card
+    scene.scrollWidth = 816 + 250; // 250 of side space: a card 250 less the two gaps wide
     resized();
     expect(reserve()).toBe('250px');
     scene.scrollWidth = 816 + 100; // under the card's minimum: icons

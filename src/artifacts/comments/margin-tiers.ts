@@ -9,9 +9,9 @@ import { RAIL_BESIDE_FROM_PX } from '../document/rail-width';
 import { MARGIN_GAP_PX } from './margin-layout';
 import type { CommentsView } from './view';
 
-/** A card's widest. LC-1 re-bases (item 6). */
-export const CARD_MAX_PX = 300;
-/** A card's narrowest, under which the cards become icons. LC-1 re-bases (item 6). */
+/** A card's widest: Docs' 350 (LC-1 item 6, one width, a 1496 px scroll box beside an A4 page; the sweep pending). */
+export const CARD_MAX_PX = 350;
+/** A card's narrowest, under which the cards become icons. LC-1 re-bases (item 6's sweep, pending). */
 export const CARD_MIN_PX = 200;
 /** An icon's size in the icon rail. LC-1 re-bases (item 7). */
 export const ICON_PX = 24;

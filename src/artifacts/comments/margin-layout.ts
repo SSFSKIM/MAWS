@@ -7,8 +7,8 @@
 // deficit and only then. Deselecting relaxes to the plain walk (Liveblocks; Overleaf's sticky pin is not kept, so the
 // layout has no history). Pure and DOM-free: the margin measures anchors and heights, this places them.
 
-/** The gap between consecutive cards. LC-1 re-bases (item 2). */
-export const MARGIN_GAP_PX = 8;
+/** The gap between consecutive cards: Docs' 10 (LC-1 item 2, measured on the upward walk; the downward walk's gap pending). */
+export const MARGIN_GAP_PX = 10;
 /** How far left the active card stands from the column (`translateX(−S)`, beside the tops this places). LC-1 re-bases (item 2). */
 export const MARGIN_ACTIVE_SHIFT_PX = 12;
 
