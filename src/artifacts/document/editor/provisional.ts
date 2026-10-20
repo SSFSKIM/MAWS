@@ -220,6 +220,8 @@ export const Provisional = Extension.create<ProvisionalOptions>({
           // drawn afresh when the layers or the composition changed, or a remote change arrived (a target block may have
           // come or gone, the history preview may show); the person's own typing only maps it
           apply: (tr, value, _old, state) => {
+            // nothing drawn and nothing to draw: the person's keystrokes and the others' writes cost the plugin nothing
+            if (value.set === DecorationSet.empty && layers.get().size === 0 && !tr.getMeta(provisionalKey)) return value;
             if (tr.getMeta(provisionalKey) || tr.getMeta(ySyncPluginKey) || (tr.docChanged && isBindingTransaction(tr))) {
               const set = draw(state, layers.get(), composing);
               return set === DecorationSet.empty && value.set === DecorationSet.empty ? value : { set, drawn: value.drawn + 1 };

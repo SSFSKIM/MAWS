@@ -28,6 +28,7 @@ export class ProvisionalLayers {
   attach(): () => void {
     const offFrame = this.source.onProvisional((frame) => this.receive(frame));
     const offState = this.source.subscribe((state) => {
+      if (this.layers === NONE) return; // nothing drawn: the person's keystrokes and acks cost the store nothing
       // a lost connection ends every stream on it (the host's frames come only over it; a reconnect's next frame draws
       // the layer again); a committed layer waits on, for the reconnect's step 2 carries its row
       if (state.phase === 'off') this.keep((layer) => layer.state === 'committed');
