@@ -13,6 +13,7 @@ import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/hos
 import { newDoc } from '@artifacts/yjs';
 import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
 import { useNotices } from '../../stores/notices'; // P3-F (F7)
+import { recordCommentDraft } from './comment-drafts'; // P4-B1
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
@@ -282,6 +283,22 @@ describe('a document tab’s state', () => {
     save = new Error('no export 7-pdf.pdf of a; export it again');
     await state.export('pdf', 'letter');
     expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: 'no export 7-pdf.pdf of a; export it again' });
+  });
+
+  // P4-B1 (C8; X36's draft rule): an unsent comment typed in the document's compose card is asked about before the rest
+  it('asks before an unsent comment is lost, and closes as before once it is discarded or when there is none', async () => {
+    const w = world();
+    const state = w.open();
+    await ready(state);
+    recordCommentDraft(A, { hostId: 'document:r1', serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
+    expect(await state.closeGuard()).toBe(false);
+    expect(w.confirm).toHaveBeenCalledWith('Discard your unsent comment?');
+    w.confirm.mockReturnValueOnce(true);
+    expect(await state.closeGuard()).toBe(true); // nothing unsaved besides
+    recordCommentDraft(A, { hostId: 'document:r1', serial: 1, threadId: 'k2m9x0qa', text: '' });
+    w.confirm.mockClear();
+    expect(await state.closeGuard()).toBe(true);
+    expect(w.confirm).not.toHaveBeenCalled();
   });
 
   it('lets the tab close when everything is saved, waits for a save in flight, and asks when it does not land', async () => {

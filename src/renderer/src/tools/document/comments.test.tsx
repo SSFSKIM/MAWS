@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addThread, discardThread, getThread, reply, resolve as resolveThread, threadStatus } from '@artifacts/document/threads';
-import type { CommentOverlayProps } from '@artifacts/document/editor/comments/surface';
+import type { CommentOverlayProps, DocumentComments } from '@artifacts/document/editor/comments/surface'; // P4-B1: DocumentComments
 import { newDoc, type Doc } from '@artifacts/yjs';
 import { AnchorSchema } from '@shared/anchor/anchor';
 import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
@@ -22,6 +22,7 @@ import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
+import { commentDraftOf } from './comment-drafts'; // P4-B1
 import { artifactCommentAnchor, useDocumentComments } from './comments';
 
 // P3-F (L154): the card thread's Reply goes through the human send seam (one spy for every run of the factory, as
@@ -174,6 +175,187 @@ describe('the card on a document', () => {
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
     expect(reach.setActive).toHaveBeenLastCalledWith(null);
     expect(reach.focus).toHaveBeenCalled();
+  });
+});
+
+// P4-B1 (D7, D8 of docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md; the prior art's C3 to C7; X36's draft
+// rule): in the margin the card host is a block in the hosting thread's entry, told which thread that is; the document's
+// card keeps a typed draft on Escape and through a remount, discards an empty one on Escape or a blur, posts on ⌘Enter,
+// and its draft is the artifact's one draft, which the editor's next Comment refocuses.
+describe('the compose card in the margin and the draft rule', () => {
+  // `slot`: where the overlay is drawn; a new slot remounts it under the same surface (the margin moving it, a tab switch)
+  function MarginEditor({ reach, onSurface, slot = 'a' }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string }) {
+    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan' });
+    onSurface(comments);
+    return (
+      <div className="ds-doc">
+        <div key={slot} data-margin-entry={passage.threadId}>
+          {comments.overlay(reach)}
+        </div>
+        <button type="button">Elsewhere</button>
+      </div>
+    );
+  }
+  function mountMargin({ placement = 'margin' }: { placement?: 'margin' | null } = {}) {
+    const doc = newDoc();
+    addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), ...(placement && { placement }) };
+    let surface: DocumentComments | null = null;
+    const view = render(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} />);
+    return {
+      reach,
+      view,
+      surface: () => surface!,
+      comment: () => act(() => surface!.opened(passage)),
+      // the overlay drawn again elsewhere (a tab switch; the margin's cards giving way to the panel): a new host, the same card
+      remount: () => view.rerender(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} slot="b" />),
+    };
+  }
+  const opened = async (m: ReturnType<typeof mountMargin>) => {
+    m.comment();
+    await act(async () => {});
+  };
+
+  it('opens with a margin placement, drawn in flow in the entry, and tells the margin the thread it is on', async () => {
+    const seen = vi.fn(openComment);
+    offComposer();
+    offComposer = registerCommentComposer(seen);
+    const m = mountMargin();
+    await opened(m);
+    expect(seen.mock.calls[0]![1].placement).toEqual({ kind: 'margin', host: 'document', hostId: expect.stringMatching(/^document:/), anchorY: PASSAGE.y });
+    expect(useCommentCard.getState().open).toMatchObject({ host: 'artifact', hostId: (seen.mock.calls[0]![1].placement as { hostId: string }).hostId });
+    const host = document.querySelector<HTMLElement>('[data-card-host]')!;
+    expect(host.hasAttribute('data-card-margin')).toBe(true);
+    expect(card()!.dataset.placement).toBe('margin');
+    expect(card()!.className).toContain('relative');
+    expect(m.reach.hosting).toHaveBeenLastCalledWith(passage.threadId);
+    expect(m.reach.setActive).toHaveBeenLastCalledWith(passage.threadId);
+  });
+
+  it('over the frame (no margin), it opens as a card placement and is drawn anchored', async () => {
+    const seen = vi.fn(openComment);
+    offComposer();
+    offComposer = registerCommentComposer(seen);
+    const m = mountMargin({ placement: null });
+    await opened(m);
+    expect(seen.mock.calls[0]![1].placement).toMatchObject({ kind: 'card', host: 'artifact' });
+    expect(card()!.dataset.placement).toBe('below');
+    expect(m.reach.hosting).toHaveBeenLastCalledWith(passage.threadId);
+  });
+
+  it('reports no thread at once when the overlay goes, and the thread again from its remount, the card kept', async () => {
+    const m = mountMargin();
+    await opened(m);
+    const hosting = vi.mocked(m.reach.hosting!);
+    hosting.mockClear();
+    m.remount();
+    expect(hosting.mock.calls).toEqual([[null], [passage.threadId]]);
+    await act(async () => {});
+    expect(card()).not.toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(hosting).toHaveBeenLastCalledWith(null);
+  });
+
+  it('records the typed draft as the artifact’s, which draft() names; an emptied field or the card closing clears it', async () => {
+    const m = mountMargin();
+    await opened(m);
+    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(m.surface().draft!()).toBeNull();
+    await userEvent.type(field(), 'Monthly?');
+    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(m.surface().draft!()).toBe(passage.threadId);
+    await userEvent.clear(field());
+    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(m.surface().draft!()).toBeNull();
+    await userEvent.type(field(), 'Again');
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(m.surface().draft!()).toBeNull();
+  });
+
+  it('focusDraft() puts the keyboard at the end of the draft’s field', async () => {
+    const m = mountMargin();
+    await opened(m);
+    await userEvent.type(field(), 'Monthly?');
+    screen.getByRole('button', { name: 'Elsewhere' }).focus();
+    act(() => m.surface().focusDraft!());
+    expect(document.activeElement).toBe(field());
+    expect(field().selectionStart).toBe('Monthly?'.length);
+    expect(field().selectionEnd).toBe('Monthly?'.length);
+  });
+
+  it('Escape on a typed draft keeps the card and its draft and gives the text the keyboard; on an empty one it discards (C6)', async () => {
+    const m = mountMargin();
+    await opened(m);
+    await userEvent.type(field(), 'Monthly?');
+    fireEvent.keyDown(field(), { key: 'Escape' });
+    expect(card()).not.toBeNull();
+    expect(field().value).toBe('Monthly?');
+    expect(m.reach.focus).toHaveBeenCalledTimes(1);
+    expect(m.reach.discard).not.toHaveBeenCalled();
+    expect(commentDraftOf(ARTIFACT)?.text).toBe('Monthly?');
+
+    await userEvent.clear(field());
+    fireEvent.keyDown(field(), { key: 'Escape' });
+    expect(card()).toBeNull();
+    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
+    expect(m.reach.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it('a blur to elsewhere with an empty field discards the card; with text, or to nowhere, it stays (C4, C5)', async () => {
+    const m = mountMargin();
+    await opened(m);
+    const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+    await userEvent.type(field(), 'Monthly?');
+    act(() => elsewhere.focus());
+    expect(card()).not.toBeNull();
+    await userEvent.clear(field());
+    act(() => field().blur());
+    expect(card()).not.toBeNull(); // the window losing focus is no choice to leave it
+    act(() => field().focus());
+    act(() => elsewhere.focus());
+    expect(card()).toBeNull();
+    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
+    expect(m.reach.focus).not.toHaveBeenCalled(); // the focus stays where the person put it
+  });
+
+  it('a click on the card’s body puts the caret at the end of its field (C5)', async () => {
+    const m = mountMargin();
+    await opened(m);
+    await userEvent.type(field(), 'Monthly?');
+    fireEvent.keyDown(field(), { key: 'Escape' });
+    await userEvent.click(card()!.querySelector('h3')!);
+    expect(document.activeElement).toBe(field());
+    expect(field().selectionStart).toBe('Monthly?'.length);
+  });
+
+  it('⌘Enter posts beside Enter (C3)', async () => {
+    const m = mountMargin();
+    await opened(m);
+    await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
+    await userEvent.type(field(), 'Should this be monthly?');
+    await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
+    expect(m.reach.record).toHaveBeenCalledWith(passage.threadId, 'Should this be monthly?');
+    expect(card()).toBeNull();
+  });
+
+  it('a remounted card gets its typed draft back (a hidden card keeps its draft)', async () => {
+    const m = mountMargin();
+    await opened(m);
+    await userEvent.type(field(), 'Monthly?');
+    m.remount();
+    await act(async () => {});
+    expect(field().value).toBe('Monthly?');
+    expect(m.surface().draft!()).toBe(passage.threadId);
+  });
+
+  it('the editor going drops its draft', async () => {
+    const m = mountMargin();
+    await opened(m);
+    await userEvent.type(field(), 'Monthly?');
+    m.view.unmount();
+    await act(async () => {});
+    expect(commentDraftOf(ARTIFACT)).toBeNull();
   });
 });
 

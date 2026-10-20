@@ -20,12 +20,17 @@
 // with the view's box: it measures that column, draws the card in flow (`stripCard`), so the strip grows with the card
 // and the view's box shrinks by as much, and draws the pin as a caret on the strip's top edge under the element. The strip
 // never takes more than half the column (`stripMax`), clipping a card whose floor is taller than that.
+//
+// P4-B1 (D7 of docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md): in a document's margin the host is a block
+// in flow in the stack's entry the margin placed (`layout="margin"`), as the docked strip is in its column: the card at
+// the entry's width (`marginCard`), its height capped by the page's scroll box (`.ds-doc`), never pinned, nothing
+// located. The document host also opts into X36's draft rule (`keepDraftOnEscape`, `discardOnBlurEmpty`, `onDraft`).
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { CommentCard } from './CommentCard';
-import { caretOf, pinOf, placeCard, stripCard, stripMax } from './placement';
+import { caretOf, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax } from './placement';
 import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
 
 export interface CardFrame {
@@ -45,13 +50,23 @@ export interface CardFrame {
   // P3-F1 (the P3 interface ledger's X23 row of fix 2): the host has no chat beside it, so the composing card names the
   // session its comment goes to
   namesParent?: true;
+  // P4-B1 start (D8; X36's draft rule, which the document host opts into): the composing field's text as it changes
+  // (`draftOf` gives a remounted card its text back), Escape on a non-empty field returning the keyboard to the host's
+  // control and keeping the card, and focus leaving the card for elsewhere with an empty field discarding it (C4, C6)
+  onDraft?(card: OpenCard, text: string): void;
+  draftOf?(card: OpenCard): string;
+  keepDraftOnEscape?: true;
+  discardOnBlurEmpty?: true;
+  // P4-B1 end
 }
+
+type Layout = 'anchored' | 'docked' | 'margin'; // P4-B1: margin
 
 interface Props {
   hostId: string;
   host: CardHostKind;
   mode: CardHostMode;
-  layout: 'anchored' | 'docked';
+  layout: Layout; // P4-B1
   accepts(card: OpenCard): boolean;
   frame: CardFrame;
   visible: boolean; // the host is on screen (the panel tool's `ctx.visible`, a main tab's active state)
@@ -69,10 +84,13 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     // docked, the strip's own height is the card's: the room it may take is the column's (P2-E2)
     const el = layout === 'docked' ? (ref.current?.parentElement ?? null) : ref.current;
     if (!el) return;
-    const measure = () => setBox((was) => (was.width === el.clientWidth && was.height === el.clientHeight ? was : { width: el.clientWidth, height: el.clientHeight }));
+    // P4-B1: in the margin, the width is the entry's (this block's) and the height the page's scroll box's
+    const tall = layout === 'margin' ? (el.closest<HTMLElement>('.ds-doc') ?? el) : el;
+    const measure = () => setBox((was) => (was.width === el.clientWidth && was.height === tall.clientHeight ? was : { width: el.clientWidth, height: tall.clientHeight }));
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     observer?.observe(el);
+    if (tall !== el) observer?.observe(tall); // P4-B1
     return () => observer?.disconnect();
   }, [layout]);
 
@@ -98,11 +116,20 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   const card = open?.hostId === hostId ? open : null;
   const rect = useLocated(card, frame, box, layout);
   const pin = rect ? pinOf(rect, frame) : null;
-  const style = layout === 'docked' ? stripCard(box) : placeCard(box, pin);
+  const style = layout === 'docked' ? stripCard(box) : layout === 'margin' ? marginCard(box) /* P4-B1 */ : placeCard(box, pin);
   const dismiss = (serial: number) => {
     closeCard(serial);
     restoreFocus?.();
   };
+  // P4-B1: what the card is told beside its dismissal: Escape kept a draft (the keyboard goes back to the host's control)
+  const cardProps = (open: OpenCard) => ({ frame, visible, onDismiss: () => dismiss(open.serial), onDiscard: () => closeCard(open.serial), ...(restoreFocus && { onEscapeKept: restoreFocus }) });
+  if (layout === 'margin') {
+    return (
+      <div ref={ref} data-card-host={host} data-card-margin="" className="relative">
+        {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} {...cardProps(card)} />}
+      </div>
+    );
+  }
   if (layout === 'docked') {
     const caret = card ? caretOf(pin, box) : null;
     return (
@@ -114,14 +141,14 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
         className={`relative shrink-0 bg-bg ${card ? 'overflow-hidden' : ''}`}
       >
         {caret !== null && <Caret x={caret} />}
-        {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
+        {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} {...cardProps(card) /* P4-B1 */} />}
       </div>
     );
   }
   return (
     // P3-G (§D4.1): the anchored card floats over the viewer's body, so a mark-up still of that body is taken without it
     <div ref={ref} data-card-host={host} data-markup-occluder className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-      {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
+      {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} {...cardProps(card) /* P4-B1 */} />}
     </div>
   );
 }
@@ -144,7 +171,7 @@ function Caret({ x }: { x: number }) {
 // claimed), and when the host's box resizes; a null answer keeps what was. `locate` is one function per frame. A card
 // with no rect to stand at (a re-dock nothing has located yet) asks once more after a null (P3-F L198): its first ask
 // can race the page it re-docks into.
-function useLocated(card: OpenCard | null, frame: CardFrame, box: { width: number; height: number }, layout: 'anchored' | 'docked'): CardRect | null {
+function useLocated(card: OpenCard | null, frame: CardFrame, box: { width: number; height: number }, layout: Layout /* P4-B1 */): CardRect | null {
   const [located, setLocated] = useState<{ serial: number; rect: CardRect } | null>(null);
   const serial = card?.serial ?? null;
   const selector = card?.anchor.locator ?? null;
@@ -152,7 +179,7 @@ function useLocated(card: OpenCard | null, frame: CardFrame, box: { width: numbe
   const { width, height } = box;
   const unplaced = useEffectEvent((at: number) => card?.serial === at && card.rect === null && located?.serial !== at);
   useEffect(() => {
-    if (serial === null || selector === null || layout === 'docked' || locate === undefined) return;
+    if (serial === null || selector === null || layout !== 'anchored' /* P4-B1: docked or margin */ || locate === undefined) return;
     let latest = true;
     const ask = (again: boolean) =>
       void locate(selector).then((rect) => {

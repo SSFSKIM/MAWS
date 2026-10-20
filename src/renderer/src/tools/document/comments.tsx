@@ -9,6 +9,13 @@
 // The document tab's wrappers (M8) mount the editor with this, holding the tab's replica open (`holdReplica`) while
 // the overlay is mounted and through its withdrawal of a draft after it went, and through a send in flight, since a
 // send that lands records its message in the document (fix wave 2); the harness page mounts it too.
+//
+// P4-B1 (D7, D8 of docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md): while the editor's margin draws, the
+// overlay is rendered in the margin's stack (`placement: 'margin'`) and the card host is a block in flow there, in the
+// entry of the thread the card is on, which the host reports as it changes (`hosting`); the card opens with a margin
+// placement then. The host opts into X36's draft rule: the composing field's text is the artifact's draft
+// (./comment-drafts.ts), which the editor's next Comment refocuses (`draft`, `focusDraft`), Escape keeps and the tab's
+// close guard asks about; a blur with an empty field discards the card.
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '@artifacts/document/editor/comments/surface';
 import { useThreadStatus } from '@artifacts/document/editor/comments/use-threads';
@@ -19,7 +26,9 @@ import type { ArtifactSessionContext } from '../../artifacts/session-context'; /
 import { QUIET } from '../../sessions/ui';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import { closeCard, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
-import { openCommentComposer } from '../code/anchor/anchor';
+import { focusAtEnd } from '../../side/card/CommentCard'; // P4-B1
+import { openCommentComposer, type CommentPlacement } from '../code/anchor/anchor'; // P4-B1: CommentPlacement
+import { commentDraftEntry, dropCommentDraft, recordCommentDraft } from './comment-drafts'; // P4-B1
 import { cancelPendingComment, PendingCommentNotice, pendingThreadOf, startCommentSession, subscribePending, usePendingComment } from './comment-session'; // P3-F1
 
 const LABEL_MAX = 200; // X10's label cap
@@ -143,10 +152,12 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
   useLayoutEffect(() => {
     titleRef.current = title;
   });
+  // P4-B1: the overlay's latest props, whether the margin hosts it (its placement) and where the passage is
+  const overlaid = useRef<CommentOverlayProps | null>(null);
   const opened = useCallback(
     (passage: CommentedPassage) => {
       const anchor = artifactCommentAnchor({ artifactId, title: titleRef.current, ...passage, ...(artifactKind !== undefined && { artifactKind }) /* P3-C */ });
-      const placement = { kind: 'card', host: 'artifact', hostId } as const;
+      const placement = placementOf(overlaid.current, hostId, passage.threadId); // P4-B1
       // P3-F1 start: the explicit session, else the artifact's own; with neither, a start or the notice (the draft
       // registered after, so the window's card closing for the notice keeps it)
       const session = appSessionId ?? (context?.kind === 'session' ? context.appSessionId : undefined);
@@ -175,8 +186,34 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
   const namesParent = appSessionId === undefined; // P3-F1
   return useMemo(() => {
     const binding: Binding = { artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */ };
-    return { opened, overlay: (props: CommentOverlayProps): ReactNode => <DocumentCardHost {...props} binding={binding} /> };
+    // P4-B1 (C7, X36's one draft per artifact): the thread whose card on this host holds unsent text
+    const draft = (): string | null => {
+      const entry = commentDraftEntry(artifactId);
+      const { open } = useCommentCard.getState();
+      return entry !== null && entry.hostId === hostId && open?.serial === entry.serial && open.hostId === hostId && open.phase.kind === 'composing' ? entry.threadId : null;
+    };
+    const focusDraft = () => {
+      const entry = commentDraftEntry(artifactId);
+      const field = entry?.hostId === hostId ? document.querySelector<HTMLTextAreaElement>(`[data-comment-card][data-card-serial="${entry.serial}"] textarea`) : null;
+      if (field) focusAtEnd(field);
+    };
+    return {
+      opened,
+      overlay: (props: CommentOverlayProps): ReactNode => {
+        overlaid.current = props; // P4-B1
+        return <DocumentCardHost {...props} binding={binding} />;
+      },
+      draft, // P4-B1
+      focusDraft, // P4-B1
+    };
   }, [opened, artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */]);
+}
+
+// P4-B1 (D7): a card the margin will host opens with the margin placement (where its passage is, for the record), any
+// other over the page's frame; both are this host's card.
+function placementOf(overlay: CommentOverlayProps | null, hostId: string, threadId: string): CommentPlacement {
+  if (overlay?.placement !== 'margin') return { kind: 'card', host: 'artifact', hostId };
+  return { kind: 'margin', host: 'document', hostId, anchorY: overlay.locate(threadId)?.y ?? 0 };
 }
 
 // P3-F1: where a document's comments go, by what it is rather than by the object that says it
@@ -192,7 +229,8 @@ const threadOf = (card: OpenCard | null): string | null => (card?.target?.kind =
 function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { binding: Binding }) {
   const { artifactId, hostId, mode, visible, holdReplica, namesParent } = binding; // P3-F1: namesParent
   const pending = usePendingComment(hostId); // P3-F1
-  const { doc, locate, layoutKey, setActive, resolve, reopen, record, discard, focus } = editor;
+  const { doc, locate, layoutKey, setActive, resolve, reopen, record, discard, focus, hosting, placement } = editor; // P4-B1: hosting, placement
+  const inMargin = placement === 'margin'; // P4-B1
 
   // The card on screen draws its thread as active; a draft whose card went with nothing on its way is withdrawn. The
   // overlay going is the card going only when no overlay of this host is back a microtask later (P2's host closes the
@@ -207,9 +245,12 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       const waiting = pendingThreadOf(hostId); // P3-F1: a comment waiting on its session is this host's draft too
       const threadId = threadOf(mine) ?? waiting; // P3-F1: ?? waiting
       draftsOf(hostId).follow(mine?.phase.kind === 'composing' ? threadOf(mine) : waiting, discard); // P3-F1: threadOf(mine), waiting
+      // P4-B1: the typed draft goes with its card (closed, replaced, or turned into its thread)
+      dropCommentDraft(artifactId, hostId, mine?.phase.kind === 'composing' ? { serial: mine.serial } : undefined);
       if (threadId !== shown) {
         shown = threadId;
         setActive(threadId);
+        hosting?.(threadId); // P4-B1: the margin hosts the card in that thread's entry
       }
     };
     follow(useCommentCard.getState().open);
@@ -218,19 +259,21 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
     return () => {
       stop();
       stopPending(); // P3-F1
+      if (shown !== null) hosting?.(null); // P4-B1: at once; a remount (the overlay moving in the margin) reports again
       mountedOverlays.delete(hostId);
       queueMicrotask(() => {
         try {
           if (!mountedOverlays.has(hostId)) {
             cancelPendingComment(hostId); // P3-F1: the editor went, and the comment waiting on its session with it
             draftsOf(hostId).follow(null, discard);
+            dropCommentDraft(artifactId, hostId); // P4-B1
           }
         } finally {
           release?.();
         }
       });
     };
-  }, [hostId, discard, setActive, holdReplica]);
+  }, [hostId, discard, setActive, holdReplica, hosting, artifactId /* P4-B1 */]);
 
   const frame = useMemo<CardFrame>(
     () => ({
@@ -273,8 +316,20 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         };
       },
       ...(namesParent && { namesParent: true as const }), // P3-F1
+      // P4-B1 start (D8; X36's draft rule)
+      onDraft: (card, text) => {
+        const threadId = threadOf(card);
+        if (threadId !== null) recordCommentDraft(artifactId, { hostId, serial: card.serial, threadId, text });
+      },
+      draftOf: (card) => {
+        const entry = commentDraftEntry(artifactId);
+        return entry?.hostId === hostId && entry.serial === card.serial ? entry.text : '';
+      },
+      keepDraftOnEscape: true,
+      discardOnBlurEmpty: true,
+      // P4-B1 end
     }),
-    [layoutKey, hostId, locate, doc, resolve, reopen, record, discard, focus, holdReplica, namesParent /* P3-F1 */],
+    [layoutKey, hostId, locate, doc, resolve, reopen, record, discard, focus, holdReplica, namesParent /* P3-F1 */, artifactId /* P4-B1 */],
   );
 
   return (
@@ -285,6 +340,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
           pending={pending}
           locate={locate}
           layoutKey={layoutKey}
+          inFlow={inMargin} // P4-B1: in the margin's entry, above the card host
           onClose={() => {
             cancelPendingComment(hostId);
             focus();
@@ -295,7 +351,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         hostId={hostId}
         host="artifact"
         mode={mode}
-        layout="anchored"
+        layout={inMargin ? 'margin' : 'anchored'} // P4-B1
         accepts={(card) => card.target?.kind === 'artifact' && card.target.artifactId === artifactId}
         frame={frame}
         visible={visible}
