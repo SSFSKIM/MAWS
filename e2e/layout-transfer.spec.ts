@@ -4,7 +4,7 @@
 // with an edit typed just before the drop, the edit present exactly once after it (in the editor and in what the host
 // exports) and the page's first visible block and the selection carried; a drop onto a surface that already shows the
 // document activates that view and closes the source, its last edit kept; the editor header's Expand floating the
-// session beside it and Restore split docking it; and a relaunch that brings the pinned Artifacts tab back on its record
+// session beside it and folding the right panel, and Restore split docking it with the panel back; and a relaunch that brings the pinned Artifacts tab back on its record
 // without ever drawing "No open tabs". Drags are Playwright's mouse over Chromium's HTML5 drag and drop. What a mouse in
 // Playwright's Electron cannot do mid-drag (Escape, a modifier at the drop: the prior art's live check 5) is covered by
 // the handler tests in src/renderer/src/shell/transfer-drag.test.tsx (C1, C2, Z2) and transfer.test.ts (C4).
@@ -261,7 +261,9 @@ test('a drop onto a panel already showing the document activates it and closes t
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 
-test('the editor header’s Expand floats the session beside it into the main area’s card, and Restore split docks it', async () => {
+const regionWidth = (page: Page, region: 'sidebar' | 'main' | 'panel') => page.evaluate((r) => Math.round(document.querySelector(`[data-region="${r}"]`)?.getBoundingClientRect().width ?? -1), region);
+
+test('the editor header’s Expand floats the session beside it into the main area’s card and folds the right panel, and Restore split docks it with the panel back', async () => {
   test.setTimeout(120_000);
   const page = await start();
   await (await sidebarRow(page, 'Harness A')).click();
@@ -273,9 +275,12 @@ test('the editor header’s Expand floats the session beside it into the main ar
   await left.getByRole('tab', { name: /^Harness A/ }).click(); // the session beside it (the library tab stayed active there)
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const card = mainRegion(page).getByRole('region', { name: 'Session card' });
+  const panelBefore = await regionWidth(page, 'panel');
+  expect(panelBefore, 'the panel open beside the split').toBeGreaterThan(0);
 
   await header.getByRole('button', { name: 'Expand pane' }).click();
   await expect(card).toBeVisible();
+  await expect.poll(() => regionWidth(page, 'panel'), 'Expand folds the right panel (P4 Decision Log 40)').toBeLessThanOrEqual(0);
   await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
   await expect(mainRegion(page).getByRole('separator', { name: 'Resize panes' }), 'no divider while floating').toHaveCount(0);
   await expect(editorIn(inMain(page, id))).toBeVisible();
@@ -285,6 +290,7 @@ test('the editor header’s Expand floats the session beside it into the main ar
 
   await header.getByRole('button', { name: 'Restore split', pressed: true }).click();
   await expect(card).toHaveCount(0);
+  await expect.poll(() => regionWidth(page, 'panel'), 'the panel back as it was').toBe(panelBefore);
   await expect(left.getByRole('tab', { name: /^Harness A/ })).toBeVisible();
   await expect(mainRegion(page).getByRole('separator', { name: 'Resize panes' })).toBeVisible();
   await expect(header.getByRole('button', { name: 'Expand pane', pressed: false })).toBeVisible();
@@ -352,7 +358,9 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 // reads only the side space beside the page; our Expand pane widens the document to the main column. At 1512 × 900 with
 // the default layout (sidebar 300, panel 380) and a document with an open thread: (c) in the panel's record with the
 // panel floated (P3-G's card over it), (a) alone in main with the panel docked, (d) the same with the panel closed, (b)
-// beside a session in main after Expand pane. What the margin draws in each is asserted; the widths go to the report.
+// beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
+// document reaches the cards tier), then after Restore split, the panel back and the tier as it was in the split. What
+// the margin draws in each is asserted; the widths go to the report.
 type MarginReading = { scrollBox: number; page: number; tier: string | null; threads: number };
 const marginOf = (scope: Locator): Promise<MarginReading> =>
   scope.evaluate((root) => {
@@ -385,7 +393,7 @@ async function settled<T>(read: () => Promise<T>, message: string): Promise<T> {
   return value!;
 }
 
-test('the document margin’s tier at 1512 × 900: in the floated panel, alone in main, with the panel closed, and after Expand pane', async () => {
+test('the document margin’s tier at 1512 × 900: in the floated panel, alone in main, with the panel closed, after Expand pane and after Restore split', async () => {
   test.setTimeout(120_000);
   const page = await start(undefined, [1512, 900]);
   await pinArtifactsTool(page);
@@ -404,7 +412,7 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   await record.getByRole('complementary', { name: 'Comments' }).locator('article[data-thread]').getByRole('button', { name: 'Reopen' }).click();
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(record.getByRole('complementary', { name: 'Comments' })).toHaveCount(0);
-  const widths = () => page.evaluate(() => Object.fromEntries(['sidebar', 'main', 'panel'].map((r) => [r, Math.round(document.querySelector(`[data-region="${r}"]`)?.getBoundingClientRect().width ?? -1)])));
+  const widths = async () => ({ sidebar: await regionWidth(page, 'sidebar'), main: await regionWidth(page, 'main'), panel: await regionWidth(page, 'panel') });
   const readings: Record<string, unknown> = {};
 
   // (c) the panel floated (⌥⌘B): the panel spans the area, the session's card over its body at the bottom right
@@ -441,7 +449,8 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   await menu('panel.toggle');
   await expect.poll(async () => (await widths()).panel).toBeGreaterThan(0);
 
-  // (b) beside a session in main, then Expand pane (the session floats into the main area's card)
+  // (b) beside a session in main, then Expand pane (the session floats into the main area's card and the right panel
+  // folds), then Restore split (the session docked beside it, the panel back)
   await menu('pane.split');
   await page.getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click();
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
@@ -449,15 +458,22 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   const split = await settled(() => marginOf(inMain(page, id)), '(b) split settled');
   await header.getByRole('button', { name: 'Expand pane' }).click();
   await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toBeVisible();
-  await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(split.scrollBox);
+  await expect.poll(async () => (await widths()).panel, 'Expand folds the right panel').toBeLessThanOrEqual(0);
+  await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
   const expanded = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) expanded settled');
-  readings.b = { ...expanded, split };
+  await header.getByRole('button', { name: 'Restore split', pressed: true }).click();
+  await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toHaveCount(0);
+  await expect.poll(async () => (await widths()).panel, 'leaving Expand opens the panel again').toBe(alone.panel);
+  await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox, 'the document in its half of the split again').toBe(split.scrollBox);
+  const restored = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) restored settled');
+  readings.b = { ...expanded, split, restored };
   test.info().annotations.push({ type: 'margin readings', description: JSON.stringify(readings) });
 
   // What holds (margin-tiers.ts): off under a 720 px body (rail-width.ts RAIL_BESIDE_FROM_PX); cards while the side
   // space beside the 816 px page is at least 26 + 282 + 25 = 333 px; else icons.
-  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier }).toEqual({ c: 'cards', a: 'icons', d: 'cards', split: 'off', b: 'icons' });
-  expect([floated, alone, closed, expanded].map((r) => r.threads), 'the open thread in every reading').toEqual([1, 1, 1, 1]);
+  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier, restored: restored.tier }).toEqual({ c: 'cards', a: 'icons', d: 'cards', split: 'off', b: 'cards', restored: 'off' });
+  expect(expanded.main, 'the expanded document has the panel-closed main column').toBe(closed.main);
+  expect([floated, alone, closed, expanded, restored].map((r) => r.threads), 'the open thread in every reading').toEqual([1, 1, 1, 1, 1]);
 });
 
 // Loaded in main before its entry (launchMaws's requireFirst): a frame preload registered on the window's session before

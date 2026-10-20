@@ -38,7 +38,8 @@ export const ACTIONS = {
   // page in the browser passes every ⌥⌘ chord to the menu, so it works with a page focused
   'panel.float':          { title: 'Float session over panel',    chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B3 (X32 amendment; its Decision Log 12): the focused pane takes the main area and the session beside it floats in
-  // the split's card, as the editor header's Expand does; on a floating split it restores the split. No default chord
+  // the split's card, as the editor header's Expand does; on a floating split it restores the split. No default chord.
+  // P4-B3x (P4 Decision Log 40): it also folds an open right panel, which restoring the split opens again
   'main.expandArtifactPane': { title: 'Expand pane',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B3 (X38; its Decision Log 21): the focused main artifact tab into the panel ("Show in panel"), and the shown
   // panel's Artifacts record into a main tab ("Move to tab"), as a drag does; refused with the drag's reason. No chords

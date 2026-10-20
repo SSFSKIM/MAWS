@@ -81,8 +81,9 @@ export interface LayoutState {
   splitWithActive(): void;
   focusPane(i: Pane): void;
   setSplitRatio(r: number): void;
-  // P4-B3 (X37): the split's float, `model.floatSplit` / `model.dockSplit` on the current set.
-  floatSplit(sessionTabId: string): void;
+  // P4-B3 (X37): the split's float, `model.floatSplit` / `model.dockSplit` on the current set. P4-B3x: `foldPanel`
+  // (Expand's) also folds an open right panel in the same change, marking the float as its fold (`reconcileFold`).
+  floatSplit(sessionTabId: string, opts?: { foldPanel?: boolean }): void;
   dockSplit(): void;
   dropSession(appSessionId: AppSessionId): void; // session.removed
   // A patch, or an updater for a change that depends on the sidebar it lands on (an early one is replayed over the
@@ -164,6 +165,21 @@ export function panelAfter(panel: PanelRegionState, patch: Partial<PanelRegionSt
   return next;
 }
 
+// P4-B3x (P4 Decision Log 40): the fold rule between `main` and `regions`, applied to every change of either and at
+// hydration. Expand folds an open right panel with its float (`floatSplit`'s `foldPanel`), the fold marked on the float
+// (`floating.foldedPanel`). The mark stands only while the panel stays folded: the panel opening by any path (its
+// toggle, Maximize, Float, a tool revealing it) drops it, so leaving Expand then leaves the panel as the owner set it;
+// the float ending by any path (Restore split, the card's Dock, ⌥⌘B docking the split card, A's last tab closing, S's
+// tab leaving its pane) opens the panel the fold closed, as it was: the same region, its width, tools and tabs kept.
+export function reconcileFold(before: LayoutMain, next: Pick<LayoutState, 'main' | 'regions'>): Pick<LayoutState, 'main' | 'regions'> {
+  if (!next.regions.panel.collapsed) {
+    const main = model.unfold(next.main);
+    return main === next.main ? next : { main, regions: next.regions };
+  }
+  if (!model.foldEnded(before, next.main)) return next;
+  return { main: next.main, regions: { ...next.regions, panel: panelAfter(next.regions.panel, { collapsed: false }) } };
+}
+
 export const FLOATING_CARD_SIZES_MAX = 64;
 // The panel tab key of the resting summary (no tab selected), in `regions.floatingCard`.
 export const SUMMARY_CARD_KEY = 'summary';
@@ -220,17 +236,19 @@ export function createLayoutStore() {
     // Tab changes made before the persisted tabs are read (a row click, a card, a menu action or a new session racing
     // the first `layout.get`) apply at once and are kept, then replayed over the hydrated tabs, so hydration never
     // wipes what the user just opened. After hydration a change simply applies.
+    // P4-B3x: every change of the tabs or the regions lands through `commit`, so the fold rule holds at every state.
+    const commit = (nextMain: LayoutMain, nextRegions: LayoutRegions) => set(reconcileFold(get().main, { main: nextMain, regions: nextRegions }));
     const early: ((m: LayoutMain) => LayoutMain)[] = [];
     const main = (next: (m: LayoutMain) => LayoutMain) => {
       if (!get().hydrated) early.push(next);
-      set({ main: next(get().main) });
+      commit(next(get().main), get().regions);
     };
     // The regions likewise (W5: a project opened in the sidebar, or a region toggled, before the persisted value arrives
     // is kept over it).
     const earlyRegions: ((r: LayoutRegions) => LayoutRegions)[] = [];
     const regions = (next: (r: LayoutRegions) => LayoutRegions) => {
       if (!get().hydrated) earlyRegions.push(next);
-      set({ regions: next(get().regions) });
+      commit(get().main, next(get().regions));
     };
     // Every change of the pins goes through here, so the no-session selection is revalidated against them each time;
     // an unchanged list keeps its identity, so nothing is persisted for a selection change alone.
@@ -298,8 +316,11 @@ export function createLayoutStore() {
         const replayed = early.splice(0);
         // W12: a session whose project changed while the app was closed has its tabs moved to that project's set.
         const stored = persistedMain.version === 1 ? model.fromV1(persistedMain, setOfTab) : persistedMain;
-        const hydratedMain = replayed.reduce((m, change) => change(m), model.refile(model.repairMain(stored, known), setOfTab));
-        const regions = earlyRegions.splice(0).reduce((r, change) => change(r), persistedRegions);
+        const repairedMain = replayed.reduce((m, change) => change(m), model.refile(model.repairMain(stored, known), setOfTab));
+        const replayedRegions = earlyRegions.splice(0).reduce((r, change) => change(r), persistedRegions);
+        // P4-B3x: a fold restored with its float stands; one whose float the reader dropped opens the panel it folded,
+        // and one stored beside an open panel is dropped (both written back below).
+        const { main: hydratedMain, regions } = reconcileFold(stored, { main: repairedMain, regions: replayedRegions });
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
         // no-session selection is read back if it still names a pin.
         const live = livePanelTabIds(panelPinned, panelBySession);
@@ -315,7 +336,7 @@ export function createLayoutStore() {
         // read after a downgrade is gone from layout.json for good.
         const unsaved = new Set(absent);
         const rewritten = readAs.has('main.tabs') && !sameJson(readAs.get('main.tabs'), persistedMain);
-        if (persistedMain.version === 1 || rewritten || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
+        if (persistedMain.version === 1 || rewritten || hydratedMain !== repairedMain || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
         if (regions !== persistedRegions) unsaved.add('regions');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
         for (const key of unsaved) {
@@ -380,7 +401,7 @@ export function createLayoutStore() {
       refileTabs() {
         if (!get().hydrated) return;
         const next = model.refile(get().main, setOfTab);
-        if (next !== get().main) set({ main: next });
+        if (next !== get().main) commit(next, get().regions);
       },
       closeTab(id, opts = {}) {
         const found = model.locateTab(get().main, id);
@@ -407,7 +428,15 @@ export function createLayoutStore() {
       splitWithActive: () => main(model.splitWithActive),
       focusPane: (i) => main((m) => model.focusPane(m, i)),
       setSplitRatio: (r) => main((m) => model.setSplitRatio(m, r)),
-      floatSplit: (sessionTabId) => main((m) => model.floatSplit(m, sessionTabId)),
+      floatSplit(sessionTabId, opts = {}) {
+        // P4-B3x: Expand's fold, over an open panel and a float that happens, lands with the float in one change (the
+        // collapse clears a maximized or floating panel too). Before the layout is read nothing folds: nothing is on
+        // screen to expand.
+        const { main: before, regions: r, hydrated } = get();
+        const folded = model.floatSplit(before, sessionTabId, { foldedPanel: true });
+        if (opts.foldPanel && hydrated && folded !== before && !r.panel.collapsed) commit(folded, { ...r, panel: panelAfter(r.panel, { collapsed: true }) });
+        else main((m) => model.floatSplit(m, sessionTabId));
+      },
       dockSplit: () => main(model.dockSplit),
       dropSession(appSessionId) {
         main((m) => model.dropSession(m, appSessionId));

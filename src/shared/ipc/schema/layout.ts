@@ -142,8 +142,11 @@ const TabSetShape = {
 // P4-B3 (X37; its Decision Log 1): `floating` names the session tab whose pane has yielded into the floating card; absent
 // while docked (never written as null or undefined, so a docked set is the value it was before), and `splitRatio`, which
 // a float never writes, is the ratio Dock returns. Version 2 is kept: an older build reading a set that floats rejects
-// `main.tabs` and falls back to its default tabs.
-export const TabSetSchema = z.strictObject({ ...TabSetShape, floating: z.strictObject({ sessionTabId: z.string() }).optional() });
+// `main.tabs` and falls back to its default tabs. P4-B3x (P4 Decision Log 40): `foldedPanel` marks a float Expand made
+// by also folding the right panel (`regions.panel.collapsed`), present only while that fold stands: the panel comes
+// back when the float ends, unless the owner opened it meanwhile, which drops the mark (the layout store's
+// `reconcileFold`). It persists as the float does, at the same downgrade cost.
+export const TabSetSchema = z.strictObject({ ...TabSetShape, floating: z.strictObject({ sessionTabId: z.string(), foldedPanel: z.literal(true).optional() }).optional() });
 export type TabSet = z.infer<typeof TabSetSchema>;
 const ClosedTabsSchema = z.array(TabRefSchema).max(10);
 export const LayoutMainSchema = z.strictObject({ version: z.literal(2), current: TabSetKeySchema,                // key `main.tabs`

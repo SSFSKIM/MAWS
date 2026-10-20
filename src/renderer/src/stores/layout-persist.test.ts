@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
 import { currentSet } from './layout-model';
@@ -137,6 +137,58 @@ describe('layout persistence', () => {
     store.getState().dockSplit();
     vi.advanceTimersByTime(1000);
     expect(JSON.stringify(sets().at(-1)!.value)).toBe(before);
+  });
+
+  // P4-B3x (P4 Decision Log 40): Expand's fold persists as its float does, so leaving Expand after a relaunch opens the
+  // panel it folded; hydration keeps the rule between the two keys.
+  describe('Expand’s fold of the right panel', () => {
+    const artifactId = '00000000-0000-4000-8000-000000000001';
+    const S = `session:${A}`;
+    const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+    const last = (sets: { key: string; value: unknown }[], key: string) => sets.filter((s) => s.key === key).at(-1)?.value;
+    const expanded = async () => {
+      const { store, hydrate, sets } = setup();
+      await hydrate();
+      store.getState().openTab({ kind: 'artifact', artifactId });
+      store.getState().openSession(A, { split: true });
+      vi.advanceTimersByTime(1000);
+      store.getState().floatSplit(S, { foldPanel: true });
+      vi.advanceTimersByTime(1000);
+      return { main: last(sets(), 'main.tabs') as LayoutMain, regions: last(sets(), 'regions') as LayoutRegions };
+    };
+
+    it('writes the fold on the float and the folded panel, reads both back, and leaving Expand then opens the panel', async () => {
+      const { main, regions } = await expanded();
+      expect(currentSet(main).floating).toEqual({ sessionTabId: S, foldedPanel: true });
+      expect(regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, collapsed: true });
+      const again = setup({ 'main.tabs': clone(main), regions: clone(regions) });
+      await again.hydrate();
+      expect([again.store.getState().main, again.store.getState().regions]).toEqual([main, regions]);
+      expect(again.sets(), 'nothing to write back').toEqual([]);
+      again.store.getState().dockSplit();
+      vi.advanceTimersByTime(1000);
+      expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+      expect(currentSet(last(again.sets(), 'main.tabs') as LayoutMain).floating).toBeUndefined();
+    });
+
+    it('a stored fold whose float the reader drops (its session gone) opens the panel, written back', async () => {
+      const { main, regions } = await expanded();
+      const again = setup({ 'main.tabs': clone(main), regions: clone(regions) });
+      await again.hydrate(() => false);
+      expect(currentSet(again.store.getState().main).floating).toBeUndefined();
+      expect(again.store.getState().regions.panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+      expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+    });
+
+    it('a stored fold beside an open panel is dropped, the float kept, and main.tabs written back', async () => {
+      const { main } = await expanded();
+      const again = setup({ 'main.tabs': clone(main) }); // regions at their default: the panel open
+      await again.hydrate();
+      expect(currentSet(again.store.getState().main).floating).toEqual({ sessionTabId: S });
+      expect(currentSet(last(again.sets(), 'main.tabs') as LayoutMain).floating).toEqual({ sessionTabId: S });
+      again.store.getState().dockSplit();
+      expect(again.store.getState().regions.panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+    });
   });
 
   it('writes nothing for hydration alone when layout.json holds every key', async () => {

@@ -79,7 +79,8 @@ function keptFloat(before: TabSet, after: TabSet): TabSet {
 // with it.
 const asSet = ({ panes, focusedPane, splitRatio, floating }: TabSet): TabSet => {
   const set: TabSet = { panes, focusedPane, splitRatio };
-  return floating && floatingPane({ ...set, floating }) !== null ? { ...set, floating: { sessionTabId: floating.sessionTabId } } : set;
+  if (!floating || floatingPane({ ...set, floating }) === null) return set;
+  return { ...set, floating: floating.foldedPanel ? { sessionTabId: floating.sessionTabId, foldedPanel: true } : { sessionTabId: floating.sessionTabId } };
 };
 
 const onCurrent = (main: LayoutMain, fn: (view: View) => View): LayoutMain => onSet(main, main.current, fn);
@@ -439,13 +440,40 @@ export function setSplitRatio(main: LayoutMain, ratio: number): LayoutMain {
 
 // P4-B3 (X37; its Decision Log 1, 2, 4): the current set's pane showing session tab `sessionTabId` yields into the
 // floating card; `splitRatio` is left as it was, so Dock returns the ratio at pointer-down. Nothing changes unless the
-// set is a split with that session tab active in a pane.
-export function floatSplit(main: LayoutMain, sessionTabId: string): LayoutMain {
+// set is a split with that session tab active in a pane. P4-B3x: `foldedPanel` marks the float as Expand's with the
+// right panel folded by it (the layout store folds the panel in the same change).
+export function floatSplit(main: LayoutMain, sessionTabId: string, opts: { foldedPanel?: boolean } = {}): LayoutMain {
   return onCurrent(main, (v) => {
     if (v.floating?.sessionTabId === sessionTabId) return v;
-    const next: View = { ...v, floating: { sessionTabId } };
+    const next: View = { ...v, floating: opts.foldedPanel ? { sessionTabId, foldedPanel: true } : { sessionTabId } };
     return floatingPane(next) === null ? v : next;
   });
+}
+
+// P4-B3x (P4 Decision Log 40): the float whose Expand folded the right panel, and its set; null when no fold stands.
+// The store keeps at most one: a fold is made only over an open panel and dropped whenever the panel opens.
+export function foldOf(main: LayoutMain): { set: TabSetKey; sessionTabId: string } | null {
+  for (const key of setKeys(main)) {
+    const floating = main.sets[key]?.floating;
+    if (floating?.foldedPanel) return { set: key, sessionTabId: floating.sessionTabId };
+  }
+  return null;
+}
+
+// Whether the fold standing in `before` ended with its float in `after` (a dock, Restore split, or any transition that
+// ended the float), rather than by the mark being dropped while the float stays.
+export function foldEnded(before: LayoutMain, after: LayoutMain): boolean {
+  const fold = foldOf(before);
+  return fold !== null && after.sets[fold.set]?.floating?.sessionTabId !== fold.sessionTabId;
+}
+
+// Every fold mark dropped, the floats kept (the owner opened the panel: leaving Expand then leaves it as they set it);
+// `main` itself when none stands.
+export function unfold(main: LayoutMain): LayoutMain {
+  const fold = foldOf(main);
+  if (fold === null) return main;
+  const set = main.sets[fold.set] as TabSet;
+  return unfold({ ...main, sets: { ...main.sets, [fold.set]: { ...set, floating: { sessionTabId: fold.sessionTabId } } } });
 }
 
 // The floating pane comes back beside the other at the stored ratio; `floating` goes from the value.

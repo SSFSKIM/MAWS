@@ -188,6 +188,29 @@ describe('panel host registry and instances', () => {
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus 3$/);
   });
 
+  // P4-B3x: leaving an Expand that folded the panel opens it again; the dock hands the keyboard to the session's composer,
+  // so no tool is asked for it then. The owner opening the panel while expanded is an opening like any other.
+  it('the panel opening as an Expand that folded it ends asks no tool for the keyboard; the owner opening it does', () => {
+    connect();
+    register(probeTool('t').tool);
+    render(<TestHost />);
+    let id = '';
+    act(() => void (id = panelHost.addTool('t', { appSessionId: A })));
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/visible · focus 1$/);
+    const S = mainShowing(A).sets.none!.panes[0];
+    const split = { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [S, { tabs: [{ id: 'diagnostics', kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }] as [typeof S, typeof S], focusedPane: 0 as const, splitRatio: 0.5 } } };
+    act(() => useLayout.setState({ main: split }));
+    const expand = () => act(() => useLayout.getState().floatSplit(S.activeTabId, { foldPanel: true }));
+    expand();
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    act(() => useLayout.getState().dockSplit());
+    expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/visible · focus 1$/);
+    expand();
+    act(() => useLayout.getState().setPanel({ collapsed: false }));
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/visible · focus 2$/);
+  });
+
   it('passive selection keeps a collapsed panel and keyboard focus; user selection reveals it', () => {
     connect();
     register(probeTool('t').tool);
