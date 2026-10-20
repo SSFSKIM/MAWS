@@ -429,12 +429,13 @@ export function createLayoutStore() {
       focusPane: (i) => main((m) => model.focusPane(m, i)),
       setSplitRatio: (r) => main((m) => model.setSplitRatio(m, r)),
       floatSplit(sessionTabId, opts = {}) {
-        // P4-B3x: Expand's fold, over an open panel and a float that happens, lands with the float in one change (the
-        // collapse clears a maximized or floating panel too). Before the layout is read nothing folds: nothing is on
+        // P4-B3x: Expand's fold, over an open panel and a float that happens (not one the model refuses or docks), lands
+        // with the float in one change (the collapse clears a maximized or floating panel too). An open panel means no
+        // fold stands, so any fold in the result is this one. Before the layout is read nothing folds: nothing is on
         // screen to expand.
         const { main: before, regions: r, hydrated } = get();
         const folded = model.floatSplit(before, sessionTabId, { foldedPanel: true });
-        if (opts.foldPanel && hydrated && folded !== before && !r.panel.collapsed) commit(folded, { ...r, panel: panelAfter(r.panel, { collapsed: true }) });
+        if (opts.foldPanel && hydrated && !r.panel.collapsed && model.foldOf(folded) !== null) commit(folded, { ...r, panel: panelAfter(r.panel, { collapsed: true }) });
         else main((m) => model.floatSplit(m, sessionTabId));
       },
       dockSplit: () => main(model.dockSplit),

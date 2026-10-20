@@ -474,6 +474,14 @@ describe('the split’s card', () => {
       expect(panel()).toEqual(OPEN);
     });
 
+    it('a fold asked with a float the model docks instead (the other pane’s session while one floats) folds nothing', () => {
+      useLayout.setState({ main: splitOf(S, sessionTab(B)) });
+      layout().floatSplit(S.id);
+      layout().floatSplit(sessionTab(B).id, { foldPanel: true }); // its Decision Log 28: a float never changes pane
+      expect(set().floating).toBeUndefined();
+      expect(panel()).toEqual(OPEN);
+    });
+
     it('over a hidden panel Expand folds nothing, and leaving it leaves the panel hidden', () => {
       useLayout.getState().setPanel({ collapsed: true });
       expand();
