@@ -34,6 +34,7 @@ import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/hos
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
+import type { CloseAsk } from '../../panel/editor-host'; // P4-B3
 import { toast } from '../../stores/notices'; // P3-F (F7)
 import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
 import type { DocumentExportFormat, ExportStatus } from './header';
@@ -309,10 +310,11 @@ export class DocumentTabState {
   /**
    * X32's close guard: closing loses nothing once the host has every edit; edits in flight are waited for, then asked about.
    * P4-B1 (C8; X36's draft rule): an unsent comment typed in the document's compose card is asked about first.
-   * P4-B3 (its Decision Log 39): only this tab's card's: a comment on another view's card host is not this close's to lose.
+   * P4-B3 (its Decision Log 39): only this tab's card's: a comment on another view's card host is not this close's to
+   * lose, nor this tab's own when a move closes it (`moving`), since its card goes to the view the move keeps.
    */
-  closeGuard = async (): Promise<boolean> => {
-    const draft = commentDraftEntry(this.artifactId); // P4-B3
+  closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
+    const draft = ask?.moving ? null : commentDraftEntry(this.artifactId); // P4-B3
     if (draft?.hostId === this.commentHostId && draft.text.trim() && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
     if (!handle || handle.state().readOnly || handle.state().unsaved === 0) return true;

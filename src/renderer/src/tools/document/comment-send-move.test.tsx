@@ -22,7 +22,7 @@ import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { adoptStagedArtifactEditorState, artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors, stageArtifactEditorState } from '../../artifacts/registry';
 import { resetMarkupSurfaces } from '../../markup/surface';
-import { askEditorHostClose, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { askEditorHostClose, EditorHostScopeContext, registerEditorHost, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
 import { panelHost, registerPanelTool, resetPanelHost, usePanelHost } from '../../panel/host';
 import { moveArtifactToPanel, moveArtifactToTab } from '../../shell/transfer';
 import { useCommentCard } from '../../side/card/store';
@@ -267,7 +267,7 @@ describe('an unsent comment when its document moves onto a view of it already op
     keptIn(target.view.container, threadId);
   });
 
-  it('a move refused after the hand-over gives the card back to the source, whose close asks about it again', async () => {
+  it('a move refused at the re-check after the source’s guard hands nothing over: the card stays the source’s, whose close asks about it', async () => {
     mainWith([DOC_TAB]);
     const kept = recordInPanel();
     const source = mountIn(main);
@@ -286,6 +286,19 @@ describe('an unsent comment when its document moves onto a view of it already op
     let closes = true;
     await act(async () => void (closes = await askEditorHostClose(main)!));
     expect(closes).toBe(false);
-    expect(asked, 'the source’s own comment again').toEqual(['Discard your unsent comment?']);
+    expect(asked, 'the source’s own comment').toEqual(['Discard your unsent comment?']);
+  });
+
+  it('a move the source’s guard refuses leaves the destination’s own comment on the destination', async () => {
+    mainWith([DOC_TAB]);
+    const source = recordInPanel();
+    const kept = mountIn(main);
+    const threadId = await typedUnsent(); // typed in main's card: main's draft, not the panel's
+    holdArtifactEditorState(source, DOC, 'document', artifactEditorFor('document') as never);
+    act(() => void registerEditorHost(source, { title: 'Launch plan', closeGuard: async () => false })); // the record keeps itself
+    let moved = true;
+    await act(async () => void (moved = await moveArtifactToTab(source.tabId)));
+    expect(moved).toBe(false);
+    keptIn(kept.view.container, threadId);
   });
 });

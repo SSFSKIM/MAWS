@@ -9,8 +9,9 @@
 // target adopts the hold, all in one synchronous run after the last await. Only a guard of something else the move
 // displaces is asked, before that run: the panel's other record (T3, T4), or the source itself when the target already
 // shows the artifact and that view is activated instead (T5, T8; a cancelled dialog is a refusal, C4). That view keeps
-// its own editor, so the source's unsent comment is handed to it before the source is asked (Decision Log 39), and given
-// back when the move does not happen.
+// its own editor, so the source's guard is asked as a move's (`moving`: its unsent comment travels); once the re-checks
+// after it pass, the comment is handed to that view and the source closes in one synchronous run (Decision Log 39), so
+// a refusal at the guard or the re-checks has changed nothing.
 //
 // The drag state (`dragging` in the layout store) is set at `dragstart` and cleared at `drop` and `dragend`, both heard on
 // `window` too, and by a source that unmounts mid-drag (INV-5). Targets decide acceptance from it (a `dragover` cannot
@@ -21,7 +22,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { tabId as mainTabIdOf, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { adoptStagedArtifactEditorState, handArtifactViewOver, heldArtifactEditorState, stageArtifactEditorState } from '../artifacts/registry';
-import { askEditorHostClose, type EditorHostScope } from '../panel/editor-host';
+import { askEditorHostClose, type CloseAsk, type EditorHostScope } from '../panel/editor-host';
 import { instanceOf, panelHost, usePanelHost } from '../panel/host';
 import { useLayout, type LayoutState } from '../stores/layout';
 import { toast } from '../stores/notices';
@@ -123,20 +124,12 @@ export const panelTabMoves = (tab: PanelTabRef): boolean => tab.toolId === ARTIF
 
 // ---- the moves -----------------------------------------------------------------------------------------------------------
 
-// A main tab's own guard (X32's editor closeGuard; an artifact tab has no kind guard): true when it may close.
-async function mainGuardAllows(mainTabId: string): Promise<boolean> {
-  const asked = askEditorHostClose({ surface: 'main', tabId: mainTabId });
+// The guard of a source an activate-existing move closes (T5, T8; X32's editor closeGuard; an artifact tab has no kind
+// guard), asked as a move's: what its editor hands over goes to the view kept. True when it may close.
+const MOVING: CloseAsk = { moving: true };
+async function movingGuardAllows(source: EditorHostScope): Promise<boolean> {
+  const asked = askEditorHostClose(source, MOVING);
   return asked === null || (await asked);
-}
-
-// T5, T8 (Decision Log 39): the source's view hands what the kept view must keep (its unsent comment) over before the
-// source is asked to close; `handBack` gives it back to a source still showing it when the move does not happen.
-function handToKept(source: EditorHostScope, kept: EditorHostScope): () => false {
-  handArtifactViewOver(source, kept);
-  return () => {
-    if (heldArtifactEditorState(source) !== null) handArtifactViewOver(kept, source);
-    return false;
-  };
 }
 
 // Main → panel (T1 to T5, T16 to T20; "Show in panel", `artifact.moveToPanel`, a drop on the panel). True when the
@@ -149,10 +142,12 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   const dest = artifactsTabOf(session);
   if (dest && panelRecordOf(dest.id) === artifactId) {
     // T5: the panel shows it already. That view is activated, unmounted nothing, and the tab closes through its guard,
-    // its unsent comment handed to the panel's view first.
-    const handBack = handToKept({ surface: 'main', tabId: mainTabId }, { surface: 'panel', tabId: dest.id });
-    if (!(await mainGuardAllows(mainTabId))) return handBack();
-    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelRecordOf(dest.id) !== artifactId) return handBack();
+    // its unsent comment handed to the panel's view as it closes.
+    const source: EditorHostScope = { surface: 'main', tabId: mainTabId };
+    const held = heldArtifactEditorState(source);
+    if (!(await movingGuardAllows(source))) return false;
+    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelRecordOf(dest.id) !== artifactId || heldArtifactEditorState(source) !== held) return false;
+    handArtifactViewOver(source, { surface: 'panel', tabId: dest.id }); // synchronous from here to the close
     layout().closeTab(mainTabId, { remember: false }); // a move is not a close (Decision Log 32): no ⌘⇧T entry
     panelHost.selectTab(dest.id);
     return true;
@@ -186,19 +181,18 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
   const mainTabId = mainTabIdOf({ kind: 'artifact', artifactId });
   if (locateTab(layout().main, mainTabId)) {
     // T8: main shows it already. That tab is placed and activated; the record goes Back through its guard, its unsent
-    // comment handed to main's view first.
+    // comment handed to main's view as it goes.
     const source: EditorHostScope = { surface: 'panel', tabId: panelTabId };
-    const handBack = handToKept(source, { surface: 'main', tabId: mainTabId });
-    const asked = askEditorHostClose(source);
-    if (asked !== null && !(await asked)) return handBack();
-    if (transferRefusal(request) !== null || panelRecordOf(panelTabId) !== artifactId) return handBack();
+    const held = heldArtifactEditorState(source);
+    if (!(await movingGuardAllows(source))) return false;
+    if (transferRefusal(request) !== null || panelRecordOf(panelTabId) !== artifactId || heldArtifactEditorState(source) !== held) return false;
     if (locateTab(layout().main, mainTabId)) {
+      handArtifactViewOver(source, { surface: 'main', tabId: mainTabId }); // synchronous from here to the Back
       handle.handOff(); // the guard was asked: the record's state is given back
       placeInMain(artifactId, at);
       return true;
     }
-    // Main lost its tab while the guard asked: the comment comes back, and the record moves after all.
-    handBack();
+    // Main lost its tab while the guard asked: the record moves after all, its comment with its state.
   }
   // The hand-off, synchronous from here to the adoption.
   stageArtifactEditorState({ surface: 'panel', tabId: panelTabId });

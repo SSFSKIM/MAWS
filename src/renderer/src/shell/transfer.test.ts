@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef, type TabSet } from '@shared/ipc/schema/layout';
 import {
-  artifactEditorFor, heldArtifactEditorState, holdArtifactEditorState, registerArtifactEditor, resetArtifactEditors, type ArtifactEditorHold, type ArtifactEditorTarget,
+  artifactEditorFor, heldArtifactEditorState, holdArtifactEditorState, registerArtifactEditor, releaseArtifactEditorState, resetArtifactEditors, type ArtifactEditorHold, type ArtifactEditorTarget,
 } from '../artifacts/registry';
 import { registerEditorHost, type EditorHostScope } from '../panel/editor-host';
 import { instanceIds, instanceOf, panelHost, registerPanelTool, usePanelHost } from '../panel/host';
@@ -171,6 +171,47 @@ describe('main → panel', () => {
     const before = surfaces();
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(false);
     expect(surfaces()).toEqual(before);
+  });
+
+  // Decision Log 39 (the re-review): the source's guard is asked as a move's, and what its editor hands to the view kept
+  // goes only after the re-checks, in the same run as the close, so a refusal has nothing to undo.
+  it('T5 asks the tab’s guard as a move’s, then hands its view over to the panel’s and closes it, in that order', async () => {
+    const order: string[] = [];
+    offs.push(registerArtifactEditor('document', { ...editor, handOver: (from: unknown, to: unknown) => void order.push(`handOver ${JSON.stringify([from, to])}`) }));
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    const dest = addArtifacts(A, DOC);
+    mounted(panelScope(dest));
+    mounted(mainScope());
+    const asked = guard(mainScope(), () => {
+      order.push('guard');
+      return true;
+    });
+    expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
+    expect(asked).toHaveBeenCalledExactlyOnceWith({ moving: true });
+    expect(order).toEqual(['guard', `handOver ${JSON.stringify([{ artifactId: DOC }, { artifactId: DOC }])}`]);
+  });
+
+  it.each([
+    ['refuses', false],
+    ['allows', true],
+  ])('T5 with the panel retargeted while the tab’s guard asks (the guard %s): refused, the tab’s state untouched, nothing handed over', async (_, allowed) => {
+    const handOver = vi.fn();
+    offs.push(registerArtifactEditor('document', { ...editor, handOver }));
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    const dest = addArtifacts(A, DOC);
+    const source = mounted(mainScope());
+    mounted(panelScope(dest));
+    let answer!: (allowed: boolean) => void;
+    guard(mainScope(), () => new Promise<boolean>((resolve) => (answer = resolve)));
+    const moving = moveArtifactToPanel(DOC_TAB.id);
+    act(() => handleOf(dest)!.open({ target: OTHER }));
+    mounted(panelScope(dest), OTHER);
+    answer(allowed);
+    expect(await move(() => moving)).toBe(false);
+    expect(heldArtifactEditorState(mainScope()), 'the tab keeps its own state').toBe(source);
+    expect(editor.dispose.mock.calls.some(([state]) => state === source.state), 'never disposed').toBe(false);
+    expect(handOver).not.toHaveBeenCalled();
+    expect(allTabs(useLayout.getState().main).some((t) => t.id === DOC_TAB.id)).toBe(true);
   });
 
   it('T14: a session tab is never taken by the panel', async () => {
@@ -388,6 +429,27 @@ describe('panel → main', () => {
     expect(await move(() => moveArtifactToTab(src, { pane: 0, index: 0 }))).toBe(false);
     expect(surfaces()).toEqual(before);
     expect(editor.dispose).not.toHaveBeenCalled();
+  });
+
+  // Decision Log 39 (the re-review), the mirror of T5's: the record's guard asked as a move's; a state the record made
+  // anew while it asked is not the one it was asked for, so the move is refused and hands nothing over.
+  it('T8 asks the record’s guard as a move’s, and is refused, handing nothing over, when the record’s state changed meanwhile', async () => {
+    const handOver = vi.fn();
+    offs.push(registerArtifactEditor('document', { ...editor, handOver }));
+    useLayout.setState({ main: panes([DOC_TAB, sessionTab(A)]) });
+    const src = addArtifacts(A, DOC);
+    mounted(panelScope(src));
+    let answer!: (allowed: boolean) => void;
+    const asked = guard(panelScope(src), () => new Promise<boolean>((resolve) => (answer = resolve)));
+    const moving = moveArtifactToTab(src);
+    expect(asked).toHaveBeenCalledExactlyOnceWith({ moving: true });
+    act(() => releaseArtifactEditorState(panelScope(src)));
+    const remade = mounted(panelScope(src));
+    answer(true);
+    expect(await move(() => moving)).toBe(false);
+    expect(handOver).not.toHaveBeenCalled();
+    expect(heldArtifactEditorState(panelScope(src))).toBe(remade);
+    expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC });
   });
 
   it('T8 from a menu activates the open tab where it is', async () => {

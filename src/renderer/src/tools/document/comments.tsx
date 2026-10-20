@@ -170,7 +170,7 @@ export function forgetCardActivation(hostId: string): void {
 /**
  * P4-B3 (its Decision Log 39): a move that activates another view of the document (T5, T8) closes this host's view
  * rather than carrying it, so the card this host draws, the comment typed in it and the drafts it holds go to the kept
- * view's host first, keeping that view's editor: the card is drawn there with its text, its thread stays, and the
+ * view's host as this view closes, keeping that view's editor: the card is drawn there with its text, its thread stays, and the
  * closing view has nothing of it to lose. A comment still waiting on its session to start (nothing typed yet) stays
  * with this host and goes with it.
  */

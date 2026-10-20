@@ -313,6 +313,24 @@ describe('a document tab’s state', () => {
     recordCommentDraft(A, { hostId: 'document:another-view', serial: 1, threadId: 'k2m9x0qa', text: '' });
   });
 
+  // P4-B3 (its Decision Log 39): asked as a move's (the move hands this tab's card to the view it keeps), the guard
+  // leaves out its own comment, and still asks about edits the host has not acknowledged.
+  it('asked as a move’s, leaves out its own comment and still asks about unacknowledged edits', async () => {
+    const w = world();
+    const state = w.open();
+    await ready(state);
+    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
+    expect(await state.closeGuard({ moving: true })).toBe(true);
+    expect(w.confirm).not.toHaveBeenCalled();
+    w.memory.dropConnections();
+    await until(() => w.handles[0]!.state().phase === 'off', 'the port to go');
+    w.handles[0]!.doc.get('scratch').setAttr('x', 2);
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 50 });
+    expect(await state.closeGuard({ moving: true })).toBe(false);
+    expect(w.confirm).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Launch plan'));
+    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: '' });
+  });
+
   it('lets the tab close when everything is saved, waits for a save in flight, and asks when it does not land', async () => {
     const w = world();
     const state = w.open();

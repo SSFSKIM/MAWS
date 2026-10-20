@@ -51,7 +51,7 @@ export interface ArtifactEditor<S = unknown> {
   moved?(state: S, target: ArtifactEditorTarget): void;
   // P4-B3 (its Decision Log 39): a move onto a surface already showing the artifact activates that view and closes the
   // source (`handArtifactViewOver`); what the source's view holds beyond the artifact itself (the document's unsent
-  // comment) goes to the view kept first.
+  // comment) goes to the view kept as the source closes.
   handOver?(from: S, to: S): void;
 }
 
@@ -212,12 +212,15 @@ export function adoptStagedArtifactEditorState(artifactId: string, scope: Editor
 
 // P4-B3 (its Decision Log 39): a move onto a surface that already shows the artifact (T5, T8) activates that view and
 // closes the source rather than handing the source's hold over, so what the source's view holds beyond the artifact's
-// own state (the document's unsent comment) goes to the destination's state first, and the source's close has nothing
-// of it to lose. The destination's state is the one its scope holds, made now when its body has not mounted yet. False
-// when the source holds nothing or its editor hands nothing over.
+// own state (the document's unsent comment) goes to the destination's state, in the same synchronous run as the
+// source's close (after its guard was asked as a move's, `moving`), and the source's close has nothing of it to lose.
+// The destination's state is the one its scope holds, made now when its body has not mounted yet. False, changing
+// nothing, when the source holds nothing, its editor hands nothing over, or the destination holds another showing.
 export function handArtifactViewOver(from: EditorHostScope, to: EditorHostScope): boolean {
   const source = holds.get(keyOf(from));
   if (!source?.editor.handOver) return false;
+  const there = holds.get(keyOf(to));
+  if (there && (there.artifactId !== source.artifactId || there.kind !== source.kind || there.editor !== source.editor)) return false;
   const target = holdArtifactEditorState(to, source.artifactId, source.kind, source.editor);
   try {
     source.editor.handOver(source.state, target.state);
