@@ -16,7 +16,7 @@
 // (`onDiscard`: the focus is where the person put it). A click on the composing card's body, off its controls, puts the
 // caret at the end of the field. The field's text is told to the frame as it changes (`onDraft`), and a remounted card
 // starts from the frame's (`draftOf`).
-import { useEffect, useRef, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { GlyphMark } from '../../attention/GlyphMark';
 import { glyphFor } from '../../attention/glyph';
@@ -96,12 +96,17 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss, on
     if (frame.keepDraftOnEscape && thread === null && !composingEmpty()) onEscapeKept?.();
     else onDismiss();
   };
-  // P4-B1 (C4): the focus leaving the card for somewhere else (not nowhere: a window losing focus keeps it) with
-  // nothing typed discards it
+  // P4-B1 (C4): the focus leaving the card for somewhere else with nothing typed discards it. Focus going nowhere is a
+  // click on something unfocusable (the margin, the page's ground) or the window losing focus: told apart on the next
+  // task, when a window blur has left the document without focus; a card gone meanwhile (a remount) is not asked
   const onBlur = (event: FocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget;
-    if (!frame.discardOnBlurEmpty || next === null || event.currentTarget.contains(next) || !composingEmpty()) return;
-    onDiscard();
+    if (!frame.discardOnBlurEmpty || event.currentTarget.contains(next) || !composingEmpty()) return;
+    if (next !== null) return onDiscard();
+    setTimeout(() => {
+      const root = ref.current;
+      if (root && document.hasFocus() && !root.contains(document.activeElement) && composingEmpty()) onDiscard();
+    }, 0);
   };
   // P4-B1 (C5): a click on the composing card's body, off its controls, puts the caret at the end of the field
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -184,6 +189,18 @@ function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; fram
   const { onSending, onDraft } = frame; // P3-B; P4-B1: onDraft
   const initial = card.phase.kind === 'composing' ? card.phase.destination : undefined; // P3-F1
   const text = frame.draftOf?.(card) ?? ''; // P4-B1: a remounted card's kept draft
+  // P4-B1 (C6): the field takes the keyboard when the card first shows, and on a remount (its host moved) only if the
+  // keyboard was in the card when the previous mount went, so a kept draft drawn again elsewhere does not pull it back.
+  // Asked in the mount's layout effect, which runs after the previous mount's cleanup in the same commit (a render runs
+  // before it).
+  const field = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const element = field.current;
+    if (lastUnmount?.serial !== serial || lastUnmount.focused) element?.focus();
+    return () => {
+      lastUnmount = { serial, focused: element?.closest('[data-comment-card]')?.contains(document.activeElement) ?? false };
+    };
+  }, [serial]);
   const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }), ...(initial && { destination: initial }) /* P3-F1 */, text /* P4-B1 */ });
   // P4-B1: the field's text, told to the card and the frame as the person changes it
   const setText = (value: string) => {
@@ -204,7 +221,7 @@ function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; fram
         <textarea
           aria-label={FORM.field}
           placeholder={FORM.placeholder}
-          autoFocus
+          ref={field} // P4-B1: focused on mount by the layout effect above (C6), in place of autoFocus
           rows={1}
           value={form.text}
           disabled={form.sending}
@@ -225,6 +242,10 @@ function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; fram
     </>
   );
 }
+
+// P4-B1 (C6): the last composer to unmount, by its card, and whether the keyboard was in its card then (one card per
+// window, so one record).
+let lastUnmount: { serial: number; focused: boolean } | null = null;
 
 // P4-B1 (C5): the field takes the keyboard with the caret after its text.
 export function focusAtEnd(field: HTMLTextAreaElement): void {

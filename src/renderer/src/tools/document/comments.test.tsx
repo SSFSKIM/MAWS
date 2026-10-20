@@ -184,8 +184,9 @@ describe('the card on a document', () => {
 // and its draft is the artifact's one draft, which the editor's next Comment refocuses.
 describe('the compose card in the margin and the draft rule', () => {
   // `slot`: where the overlay is drawn; a new slot remounts it under the same surface (the margin moving it, a tab switch)
-  function MarginEditor({ reach, onSurface, slot = 'a' }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string }) {
-    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan' });
+  // `draftRule`: the document's opt-in (DocumentPanel); a deck or a design leaves it out
+  function MarginEditor({ reach, onSurface, slot = 'a', draftRule = true }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string; draftRule?: boolean }) {
+    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', ...(draftRule && { draftRule }) });
     onSurface(comments);
     return (
       <div className="ds-doc">
@@ -196,19 +197,19 @@ describe('the compose card in the margin and the draft rule', () => {
       </div>
     );
   }
-  function mountMargin({ placement = 'margin' }: { placement?: 'margin' | null } = {}) {
+  function mountMargin({ placement = 'margin', draftRule = true }: { placement?: 'margin' | null; draftRule?: boolean } = {}) {
     const doc = newDoc();
     addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), ...(placement && { placement }) };
     let surface: DocumentComments | null = null;
-    const view = render(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} />);
+    const view = render(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} draftRule={draftRule} />);
     return {
       reach,
       view,
       surface: () => surface!,
       comment: () => act(() => surface!.opened(passage)),
       // the overlay drawn again elsewhere (a tab switch; the margin's cards giving way to the panel): a new host, the same card
-      remount: () => view.rerender(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} slot="b" />),
+      remount: (slot = 'b') => view.rerender(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} slot={slot} draftRule={draftRule} />),
     };
   }
   const opened = async (m: ReturnType<typeof mountMargin>) => {
@@ -302,7 +303,7 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(m.reach.focus).toHaveBeenCalledTimes(2);
   });
 
-  it('a blur to elsewhere with an empty field discards the card; with text, or to nowhere, it stays (C4, C5)', async () => {
+  it('a blur to elsewhere with an empty field discards the card; with text it stays (C4, C5)', async () => {
     const m = mountMargin();
     await opened(m);
     const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
@@ -310,13 +311,34 @@ describe('the compose card in the margin and the draft rule', () => {
     act(() => elsewhere.focus());
     expect(card()).not.toBeNull();
     await userEvent.clear(field());
-    act(() => field().blur());
-    expect(card()).not.toBeNull(); // the window losing focus is no choice to leave it
     act(() => field().focus());
     act(() => elsewhere.focus());
     expect(card()).toBeNull();
     expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
     expect(m.reach.focus).not.toHaveBeenCalled(); // the focus stays where the person put it
+  });
+
+  // Review finding 2: in Chromium a click on something unfocusable (the margin, the page's ground) blurs to null, as the
+  // window losing focus does; the document still having focus on the next task tells them apart
+  it('a blur to nowhere with an empty field: a click on the background discards; the window losing focus keeps it (C4)', async () => {
+    const m = mountMargin();
+    await opened(m);
+    const hasFocus = vi.spyOn(document, 'hasFocus');
+    hasFocus.mockReturnValue(false);
+    act(() => field().blur());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(card()).not.toBeNull(); // the window went: no choice to leave the card
+    hasFocus.mockReturnValue(true);
+    await userEvent.type(field(), 'Monthly?');
+    act(() => field().blur());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(card()).not.toBeNull(); // a typed draft stays
+    await userEvent.clear(field());
+    act(() => field().blur());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(card()).toBeNull(); // a click on the background, the field empty
+    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
+    hasFocus.mockRestore();
   });
 
   it('a click on the card’s body puts the caret at the end of its field (C5)', async () => {
@@ -347,6 +369,43 @@ describe('the compose card in the margin and the draft rule', () => {
     await act(async () => {});
     expect(field().value).toBe('Monthly?');
     expect(m.surface().draft!()).toBe(passage.threadId);
+  });
+
+  // Review finding 3: the field takes the keyboard on the card's first showing and on a remount that had it, never on
+  // one whose owner had left it (C6: Escape gave the text the keyboard)
+  it('a kept draft drawn again does not take the keyboard; a card that had it keeps it; focusDraft() still takes it', async () => {
+    const m = mountMargin();
+    await opened(m);
+    expect(document.activeElement).toBe(field());
+    m.remount(); // the overlay moving into the thread's entry right after the card opened
+    await act(async () => {});
+    expect(document.activeElement).toBe(field());
+    await userEvent.type(field(), 'Monthly?');
+    const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+    act(() => elsewhere.focus()); // the owner left the draft (Escape gives the text the keyboard)
+    m.remount('c'); // the panel opening, a tab switch, a tier swap
+    await act(async () => {});
+    expect(field().value).toBe('Monthly?');
+    expect(document.activeElement).toBe(elsewhere);
+    act(() => m.surface().focusDraft!());
+    expect(document.activeElement).toBe(field());
+  });
+
+  // Review finding 1: the draft rule is the document's opt-in; a deck's or a design's card (no draft() asked, no close
+  // guard reading it) keeps today's Escape and blur, and records nothing
+  it('without the opt-in (a deck, a design): Escape discards a typed comment, a blur keeps an empty one, nothing is recorded', async () => {
+    const m = mountMargin({ draftRule: false });
+    expect(m.surface().draft).toBeUndefined();
+    expect(m.surface().focusDraft).toBeUndefined();
+    await opened(m);
+    act(() => screen.getByRole('button', { name: 'Elsewhere' }).focus());
+    expect(card()).not.toBeNull(); // no blur rule
+    act(() => field().focus());
+    await userEvent.type(field(), 'Monthly?');
+    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    fireEvent.keyDown(field(), { key: 'Escape' });
+    expect(card()).toBeNull();
+    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
   });
 
   it('the editor going drops its draft', async () => {
