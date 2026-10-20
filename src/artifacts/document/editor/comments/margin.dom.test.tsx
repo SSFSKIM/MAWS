@@ -330,6 +330,22 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     act(() => void m.editor().commands.setActiveThread(null));
     expect(m.rails[m.rails.length - 1]).toBeNull();
   });
+
+  // P4-B1 (X36's draft rule: a hidden card keeps its draft, one draft per thread): the reply drafts are the editor's,
+  // so the margin and the panel draw the same draft and neither unmounting loses it
+  it('keeps a reply typed in a margin card across the panel’s round trip, the panel showing the same draft (Z5, X36)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    await settle();
+    const field = () => within(entry('t1')!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
+    act(() => fireEvent.change(field(), { target: { value: 'Half a reply' } }));
+    m.rerender({ rail: 'comments' });
+    await settle();
+    const panel = screen.getByRole('complementary', { name: 'Comments' });
+    expect((within(panel.querySelector<HTMLElement>('[data-thread="t1"]')!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement).value).toBe('Half a reply');
+    m.rerender({ rail: null });
+    expect(field().value).toBe('Half a reply');
+  });
 });
 
 describe('the activation table and the keys', () => {

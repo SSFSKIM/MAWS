@@ -6,10 +6,10 @@
 // message and the reply field. The reply field's text is the host's (`draft`, `onDraftChange`), so a card that goes
 // away keeps its draft. A click on the card outside its controls activates it, and the reply field takes the keyboard
 // only when that click activated it: a thread the host activates otherwise (the caret, a click on the passage) leaves
-// the keyboard where it was. On the focused card, outside a text field: R to the reply field, E resolves or reopens,
-// J and K the next and previous thread, U and Escape back to the text (the prior art's K3); Escape in the reply field
-// exits too and keeps a written draft (X36's draft rule). Each key acts only when the host gave its handler. App chrome:
-// comments.css, app tokens only.
+// the keyboard where it was. On the focused card, outside a text field: R to the reply field (on a compacted card, R
+// activates it as a click does first), E resolves or reopens, J and K the next and previous thread, U and Escape back
+// to the text (the prior art's K3); Escape in the reply field exits too and keeps a written draft (X36's draft rule).
+// Each key acts only when the host gave its handler. App chrome: comments.css, app tokens only.
 import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type Ref } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import type { ThreadState } from '../document/threads';
@@ -102,7 +102,10 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
     const action = (() => {
       switch (key) {
         case 'r':
-          return replyField.current && (() => replyField.current?.focus());
+          // a compacted card has no field yet: R activates it as a click does, and the field takes the keyboard once
+          // the activation lands (an open, writable thread only)
+          if (replyField.current) return () => replyField.current?.focus();
+          return open && !readOnly ? activateByClick : null;
         case 'e':
           return readOnly ? null : open ? onResolve : onReopen;
         case 'j':
