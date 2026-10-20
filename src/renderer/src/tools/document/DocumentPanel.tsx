@@ -20,6 +20,9 @@ import { useDocumentComments } from './comments';
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
+import { setCommentsView } from './comments-view'; // P4-B1
+import { useSettings } from '../../stores/settings'; // P4-B1
+import type { CommentsView } from '@artifacts/comments/view'; // P4-B1
 import type { DocumentTabState } from './tab-state';
 import { captureDocumentView, keepUndoManager, liveBody, restoreDocumentViewWhenDrawn, type DocumentView } from './view-carry'; // P4-B3 M5
 
@@ -69,7 +72,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   // the artifact's own context (its session, a session its directory starts on Comment, or a card saying why not);
   // not offered only while that is unread.
   const target = useArtifactCommentTarget(artifactId);
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */ });
+  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */, draftRule: true /* P4-B1: X36's draft rule, the document's (its Comment asks draft(), its tab's close guard reads it) */ });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);
@@ -123,6 +126,10 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     return restoreDocumentViewWhenDrawn(editor, () => page.current, view, () => (carried.current = null));
   }, [editor]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
+  // P4-B1 (the P4 spec §4.3; settings version 15): View › Comments, per user, read from the settings and written through
+  // them (the editor is portable and takes the value and the setter)
+  const commentsView = useSettings((s) => s.state?.settings.artifacts.commentsView ?? 'expand');
+  const onCommentsViewChange = useCallback((view: CommentsView) => void setCommentsView(view), []);
   const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
@@ -139,6 +146,8 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         suggestions={state.host}
         rail={snapshot.rail}
         onRailChange={onRailChange}
+        commentsView={commentsView} /* P4-B1 */
+        onCommentsViewChange={onCommentsViewChange} /* P4-B1 */
         saveVersionRequest={snapshot.saveVersionRequest}
         pageScope={SystemPage}
         onPage={onPage}

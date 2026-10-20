@@ -116,6 +116,17 @@
 .doc-tab[aria-selected="true"] .doc-tab-close {
   visibility: visible;
 }
+/* P4-B1 (the prior art's Z6): a tab with open comment threads, in the passages' highlight colour */
+.doc-tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  margin-left: var(--space);
+  border-radius: 50%;
+  background: var(--warning);
+  vertical-align: middle;
+}
 .doc-tab-close:hover {
   color: var(--fg);
   background: var(--bg-active);
@@ -470,12 +481,15 @@
 }
 
 /* ── comments (M4): the open threads' passages, the active one, and the threads rail ── */
+/* P4-B1: a pale tint for every open passage and a strong one for the active thread's, as Docs draws them (LC-1 item 2,
+   docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): with the active card no longer shifted, the passage carries
+   more of which thread is active */
 .ds-doc .comment {
-  background: color-mix(in oklab, var(--warning) 18%, transparent);
-  border-bottom: 2px solid color-mix(in oklab, var(--warning) 60%, transparent);
+  background: color-mix(in oklab, var(--warning) 14%, transparent);
+  border-bottom: 2px solid color-mix(in oklab, var(--warning) 50%, transparent);
 }
 .ds-doc .comment.comment-active {
-  background: color-mix(in oklab, var(--warning) 36%, transparent);
+  background: color-mix(in oklab, var(--warning) 45%, transparent);
   border-bottom-color: var(--warning);
 }
 /* P3-E (E2 M4): a block commented whole (a dashboard's view) is outlined rather than tinted, its content kept legible */
@@ -489,6 +503,14 @@
 .ds-doc .doc-atom.comment.comment-active {
   background: none;
   outline-color: var(--warning);
+}
+/* P4-B1: View › Comments › Hide draws the passages plain, as Docs' Hide does (LC-1 item 7); Minimize keeps them. The
+   view is the tab editor's (`data-comments-view`, DocumentEditor.tsx); only colours change, so no line moves */
+[data-comments-view='hide'] .ds-doc .comment,
+[data-comments-view='hide'] .ds-doc .comment.comment-active {
+  background: none;
+  border-bottom-color: transparent;
+  outline-color: transparent;
 }
 .doc-rail {
   display: flex;
@@ -558,91 +580,47 @@
   border: 0;
   padding: var(--space) 0;
 }
-.doc-thread {
+/* P4-B1: a thread in the panel is X36's card, styled by src/artifacts/comments/comments.css; the panel's filters: */
+.doc-rail-filters {
   display: flex;
-  flex-direction: column;
-  gap: var(--space);
-  padding: calc(var(--space) * 2);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space) calc(var(--space) * 2);
+  padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+}
+.doc-rail-segments {
+  display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-}
-.doc-thread[data-status='resolved'] {
-  background: var(--bg);
-  color: var(--fg-muted);
-}
-/* the editor's active thread (its card's, a shown or clicked passage's), in the passage's highlight colour */
-.doc-thread[aria-current='true'] {
-  border-color: var(--warning);
-  box-shadow: 0 0 0 1px var(--warning);
-}
-.doc-thread-quote {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font: inherit;
-  text-align: left;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  border-left: 3px solid var(--warning);
-  padding: 0 0 0 calc(var(--space) * 2);
-  cursor: pointer;
-}
-.doc-thread-quote-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
-.doc-thread-tab {
+.doc-rail-segment {
+  position: relative;
+  padding: 2px calc(var(--space) * 2);
   font-size: var(--text-ui-sm);
   color: var(--fg-muted);
+  cursor: default;
 }
-.doc-thread-note {
-  margin: 0;
-  font-size: var(--text-ui-sm);
-  color: var(--fg-muted);
+.doc-rail-segment + .doc-rail-segment {
+  border-left: 1px solid var(--border);
 }
-.doc-thread-messages {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.doc-rail-segment:has(input:checked) {
+  color: var(--fg);
+  background: var(--bg-active);
 }
-.doc-thread-message {
-  display: flex;
-  flex-direction: column;
+.doc-rail-segment:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
-.doc-thread-author {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space);
-  font-size: var(--text-ui-sm);
-  font-weight: 600;
+.doc-rail-segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
-.doc-thread-chip {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-sm);
-}
-.doc-thread-body {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.doc-thread-reply {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space);
-}
-.doc-thread-reply-field {
-  flex: 1;
+.doc-rail-search {
+  flex: 1 0 100%;
   min-width: 0;
-  max-height: calc(var(--space) * 30);
-  field-sizing: content;
-  resize: none;
   font: inherit;
   font-size: var(--text-ui-sm);
   color: var(--fg);
@@ -650,10 +628,6 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: var(--space) calc(var(--space) * 2);
-}
-.doc-thread-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 /* ── awareness (M5): the blocks an agent is editing, outlined in its colour and named ── */
@@ -1047,4 +1021,148 @@
 }
 .doc-mention-empty {
   padding: var(--space) calc(var(--space) * 2);
+}
+
+/* ── the margin (P4-B1, the P4 spec §4.3; MarginThreads.tsx): the shown tab's open threads as cards beside the page,
+   inside the page's scroll box as the page's flex sibling (theme.css's row), so they scroll with the text and never
+   re-lay on a scroll. The geometry is Google Docs' as LC-1 measured it (docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md,
+   items 2, 6 and 7). The column reserves the unit centred with the page (`--doc-margin-reserve`: the page gutter and the
+   least card) only while a thread or a compose card is open on the tab, else 0 and the page is centred alone; each entry
+   sits a page gutter (26 px) from the page at the drawn card's width (`--doc-margin-card`), which may run past the
+   reserve into the free space on its right, so the column never clips. Entries are absolutely positioned at the top the
+   pure layout gave them (margin-layout.ts), moved by `transform`; a move caused by an activation, an add or a resolve
+   animates (`data-animate`, Docs' 350 ms `ease`), one caused by an edit never (Docs animates those too; kept still for
+   R4), and none under reduced motion. The active card does not move sideways: it is raised (below). App chrome inside
+   the page's scope, so it names the app's own type and colour tokens again (the page's `--ds-*` would reach it
+   otherwise). ── */
+.doc-margin {
+  position: relative;
+  flex: 0 0 var(--doc-margin-reserve, 0px);
+  width: var(--doc-margin-reserve, 0px);
+  min-height: var(--doc-margin-height, 0px);
+  overflow: visible;
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--fg);
+  /* the icon tier hangs over the page's right padding when the side space is short (`--doc-margin-overlap`): moved by
+     `left`, so its flex footprint stays the reserve (a negative margin would shrink the centred row and shift the page) */
+  left: calc(-1 * var(--doc-margin-overlap, 0px));
+}
+.doc-margin-entry {
+  position: absolute;
+  top: 0;
+  left: var(--doc-margin-page-gutter, 26px);
+  width: var(--doc-margin-card, 282px);
+  will-change: transform;
+}
+.doc-margin[data-animate] .doc-margin-entry {
+  transition: transform 350ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .doc-margin[data-animate] .doc-margin-entry {
+    transition: none;
+  }
+}
+.doc-margin-entry[data-active] {
+  z-index: 2;
+}
+/* a card's state by elevation, as Docs marks it (LC-1 item 2): an inactive card flat, a grey tint of the ground; the
+   active one the floating surface with its shadow (its passage's highlight the darker one: the comments block above) */
+.doc-margin .thread-card {
+  border-color: transparent;
+  background: color-mix(in oklab, var(--bg) 96%, var(--fg));
+}
+.doc-margin .thread-card[aria-current='true'] {
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-float);
+}
+/* the icon tier: a round icon per thread at the page gutter, laid by the same stack (LC-1 item 7: Docs merges none),
+   over the page's right padding when the column overlaps it; the active thread's card opens over its icon, reaching
+   left over the page (`.doc-margin-overlay`, right-aligned to the icon), and that overlay floats the card itself */
+.doc-margin-entry[data-icon-entry] {
+  width: var(--doc-margin-icon, 32px);
+}
+.doc-margin-icon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--doc-margin-icon, 32px);
+  height: var(--doc-margin-icon, 32px);
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+  color: var(--fg);
+  background: color-mix(in oklab, var(--warning) 36%, var(--bg-raised));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--warning) 60%, transparent);
+  cursor: pointer;
+  will-change: transform;
+}
+.doc-margin-icon[data-active] {
+  background: var(--warning);
+  z-index: 2;
+}
+.doc-margin-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(var(--doc-margin-card, 282px), 80cqi);
+  z-index: 7;
+  box-shadow: var(--shadow-float);
+  border-radius: var(--radius);
+  will-change: transform;
+}
+.doc-margin-overlay .thread-card[aria-current='true'] {
+  box-shadow: none;
+}
+/* the Add comment button beside a non-empty selection (C1), at the selection head's line (LC-1 item 8 re-bases), at
+   the page gutter */
+.doc-margin-add {
+  position: absolute;
+  top: 0;
+  left: var(--doc-margin-page-gutter, 26px);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  padding: 0;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-float);
+  cursor: pointer;
+  z-index: 3;
+  will-change: transform;
+}
+.doc-margin-add:hover {
+  background: var(--bg-hover);
+}
+/* P4-B1: in the icon tier the button lines up with the icons where the column has room for it and is pulled back
+   inside the column where it has not: over the page's right padding when the column reserves nothing (a selection on a
+   tab with no open thread), so it never leaves a narrow scroll box (nor makes it scroll sideways), and the page does
+   not move as a selection shows it */
+.doc-margin[data-margin-tier='icons'] .doc-margin-add {
+  left: min(var(--doc-margin-page-gutter, 26px), calc(var(--doc-margin-reserve, 0px) - var(--doc-margin-gap, 10px) - 28px));
+}
+/* the compose card's entry hosts P2's card in flow (CommentCardHost's margin layout); in the icon tier the entry is
+   marked too, but its icon and overlay keep their own placing */
+.doc-margin-entry[data-compose]:not([data-icon-entry]) > * {
+  position: relative;
+}
+/* the live region (K4): announced, never seen */
+.doc-margin-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* the toolbar's view menu (View › Comments: Expand, Minimize, Hide) */
+.doc-menu [role='menuitemradio'][aria-checked='true']::before {
+  content: '✓ ';
 }

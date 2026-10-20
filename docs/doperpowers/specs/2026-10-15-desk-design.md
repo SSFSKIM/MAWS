@@ -348,6 +348,13 @@ February 2026 terms. The bridge keeps every session an ordinary Claude Code
 session and reaches nearly the same control (§5), with more streaming than
 the SDK wire gives.
 
+*Revised 2026-10-19 (owner; Decision Log):* the terms leg no longer holds.
+The owner confirmed that an SDK product on subscription credentials is fine
+under the terms as of October. The terminal-holdable leg stands, and it is
+why the bridge stays: it is how the web reaches sessions that the engine or
+a terminal holds (lane A). Under #52 the web also serves MAWS's SDK-host
+sessions (lane B), controlled by the MAWS daemon.
+
 **Web client.** React, its skeleton copied from MAWS's renderer (React 19,
 Zustand stores, TanStack Query; the transcript and its presentation model,
 the request card, the composer, the attention model, the subagents panel,
@@ -6195,6 +6202,31 @@ a hub that connects into machines (§2).
   Rejected then: Remote Control's feature range as the yardstick. RC is the narrowest of Desktop's session kinds,
   because the client is a guest on a CLI it does not own, and the desk is meant to reach past it.
   Date/Author: 2026-10-19, the owner (through the RC research session); folded by the design session.
+- Decision: the web serves both lanes of sessions, which settles the first of the three decisions the entry above left
+  open. The design is in the research note `~/claude-code-bundle/2.1.300/notes/web-maws-remote-research.ko.md` §3.7
+  (the research session's machine; its gist goes on #52 with the bridge benchmark).
+  - **Lane A:** engine-supervised `--bg` sessions and terminal sessions, controlled through the bridge mod (this
+    spec's §2 and §5).
+  - **Lane B:** MAWS's SDK-host sessions (stdio stream-json), controlled by the MAWS daemon.
+  - **One plane for both:** one cursor, one trust channel and one X1 vocabulary, plus a per-session capability list
+    that says what the web can do with each session.
+    - A session moves between lanes by a resume handoff.
+    - In a session MAWS spawns, the bridge only observes.
+    - §5's control table gains a row for the SDK host owning the process.
+
+  §2's "bridge, not an SDK host" binding loses its terms leg. The owner confirmed that an SDK product on subscription
+  credentials is fine under the terms as of October. The terminal-holdable leg stays, as the reason lane A exists.
+  The owner's remaining worry is whether lane A's connection is fast enough. The research session is benchmarking the
+  bridge hop and will post the numbers with this decision on #52.
+
+  The first live sample, a desk Resume at 2026-10-20 05:07Z on the MacBook (#52 comment 6283891796), came from the
+  plane's per-open log line added by doperpowers #283. The bridged open reached its snapshot after 5.40 s, and the
+  bridge's own snapshot was ready at 1.43 s. So the engine-to-bridge leg is not where most of the time goes.
+
+  Rejected: lane A only, the research's first recommendation (§3.6 of the note). The owner chose both, so that web
+  MAWS can host sessions as the desktop app does.
+  Date/Author: 2026-10-19, the owner (relayed by the RC research session, `2-1-300-19`); folded by the design session
+  2026-10-20.
 
 ## Outcomes & Retrospective
 

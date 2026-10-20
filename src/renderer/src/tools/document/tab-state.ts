@@ -37,6 +37,7 @@ import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import { toast } from '../../stores/notices'; // P3-F (F7)
 import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
 import type { DocumentExportFormat, ExportStatus } from './header';
+import { commentDraftOf } from './comment-drafts'; // P4-B1
 import { createHistoryApi } from './history-api';
 import { documentMentions } from './mentions';
 
@@ -302,8 +303,12 @@ export class DocumentTabState {
     if (this.current.exporting?.phase !== 'running') this.set({ exporting: null });
   }
 
-  /** X32's close guard: closing loses nothing once the host has every edit; edits in flight are waited for, then asked about. */
+  /**
+   * X32's close guard: closing loses nothing once the host has every edit; edits in flight are waited for, then asked about.
+   * P4-B1 (C8; X36's draft rule): an unsent comment typed in the document's compose card is asked about first.
+   */
   closeGuard = async (): Promise<boolean> => {
+    if (commentDraftOf(this.artifactId)?.text.trim() && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
     if (!handle || handle.state().readOnly || handle.state().unsaved === 0) return true;
     const saved = await new Promise<boolean>((resolve) => {

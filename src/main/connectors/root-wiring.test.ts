@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { SessionServiceDeps } from '../sessions/context';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V15 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 import type { ConnectorsDeps } from '.';
 
@@ -71,7 +71,7 @@ describe('the application root’s connector composition', () => {
     vi.resetModules();
     state.handlers.clear();
     state.connectorDeps = null;
-    state.settings = SETTINGS_DEFAULTS_V14;
+    state.settings = SETTINGS_DEFAULTS_V15;
     state.root = mkdtempSync(join(tmpdir(), 'maws-root-wiring-'));
     state.shellConfig = join(state.root, 'shell-config');
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));

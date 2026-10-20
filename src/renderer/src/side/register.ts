@@ -21,9 +21,10 @@ export function registerSidePane(): void {
 }
 
 // The seam's one opener (P2-E1, D2): a card placement opens the comment card in the producer's host, anything else the
-// sheet.
+// sheet. P4-B1 (M4): a document's margin placement is its card host's card too, drawn in the margin's stack; a pin
+// placement (P4-B2's popover) is B2's to route.
 export function openComment(anchor: Anchor, context: CommentContext): void {
-  if (context.placement?.kind === 'card') openCard(anchor, context);
+  if (context.placement?.kind === 'card' || context.placement?.kind === 'margin' /* P4-B1 */) openCard(anchor, context);
   else openComposer(anchor, context);
 }
 

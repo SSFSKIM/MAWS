@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V15 } from '@shared/settings/defaults';
 import { resetLibrary } from '../library/store';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
@@ -30,7 +30,7 @@ const space = (id: string, name: string): LibrarySpace => ({ id, name, createdAt
 let b: SettingsBridge;
 
 async function renderSection(artifacts: Settings['artifacts'], spaces: LibrarySpace[] = []) {
-  b = settingsBridge({ ...SETTINGS_DEFAULTS_V14, artifacts });
+  b = settingsBridge({ ...SETTINGS_DEFAULTS_V15, artifacts });
   b.answers['library.list'] = () => ({ rows: [system(MAWS, 'MAWS'), system(CLASSROOM, 'Classroom')], counts });
   b.answers['library.spaces'] = () => ({ spaces });
   window.maws = b.bridge;
@@ -51,7 +51,7 @@ afterEach(() => {
 
 describe('Settings › Artifacts', () => {
   it('lists the house system and the library’s systems, and writes the owner’s default alone', async () => {
-    await renderSection({ defaultDesignSystem: null, spaceDesignSystems: {} });
+    await renderSection({ defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ });
     const select = screen.getByRole('combobox', { name: 'Default design system' }) as HTMLSelectElement;
     expect([...select.options].map((o) => o.text)).toEqual(['House system', 'Classroom', 'MAWS']);
     expect(select.value).toBe('');
@@ -59,21 +59,21 @@ describe('Settings › Artifacts', () => {
     fireEvent.change(select, { target: { value: CLASSROOM } });
     await act(async () => {});
     expect(b.sets).toEqual([{ artifacts: { defaultDesignSystem: CLASSROOM } }]);
-    expect(settings()).toEqual({ defaultDesignSystem: CLASSROOM, spaceDesignSystems: {} });
+    expect(settings()).toEqual({ defaultDesignSystem: CLASSROOM, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ });
     fireEvent.change(select, { target: { value: '' } });
     await act(async () => {});
     expect(b.sets.at(-1)).toEqual({ artifacts: { defaultDesignSystem: null } });
   });
 
   it('keeps showing a saved system the library no longer has, marked', async () => {
-    await renderSection({ defaultDesignSystem: GONE, spaceDesignSystems: {} });
+    await renderSection({ defaultDesignSystem: GONE, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ });
     const select = screen.getByRole('combobox', { name: 'Default design system' }) as HTMLSelectElement;
     expect(select.value).toBe(GONE);
     expect(select.selectedOptions[0]!.text).toBe('A deleted system · the house system applies');
   });
 
   it('marks a Space’s deleted default with the next link of the chain, not the house, while the owner’s default is live', async () => {
-    await renderSection({ defaultDesignSystem: CLASSROOM, spaceDesignSystems: { [TEACHING]: GONE } }, [space(TEACHING, 'Teaching')]);
+    await renderSection({ defaultDesignSystem: CLASSROOM, spaceDesignSystems: { [TEACHING]: GONE }, commentsView: 'expand' /* P4-B1 */ }, [space(TEACHING, 'Teaching')]);
     const teaching = screen.getByRole('combobox', { name: 'Design system for Teaching' }) as HTMLSelectElement;
     expect(teaching.value).toBe(GONE);
     expect(teaching.selectedOptions[0]!.text).toBe('A deleted system · the next default applies');
@@ -81,7 +81,7 @@ describe('Settings › Artifacts', () => {
   });
 
   it('sets and clears a Space’s default, writing the Spaces’ record whole', async () => {
-    await renderSection({ defaultDesignSystem: null, spaceDesignSystems: { [TEACHING]: CLASSROOM } }, [space(TEACHING, 'Teaching'), space(RESEARCH, 'Research')]);
+    await renderSection({ defaultDesignSystem: null, spaceDesignSystems: { [TEACHING]: CLASSROOM }, commentsView: 'expand' /* P4-B1 */ }, [space(TEACHING, 'Teaching'), space(RESEARCH, 'Research')]);
     const row = screen.getByRole('group', { name: 'By Space' });
     expect(within(row).getAllByRole('combobox').map((s) => s.getAttribute('aria-label'))).toEqual(['Design system for Research', 'Design system for Teaching']);
     const research = within(row).getByRole('combobox', { name: 'Design system for Research' }) as HTMLSelectElement;
@@ -95,7 +95,7 @@ describe('Settings › Artifacts', () => {
   });
 
   it('says a Space can have its own default when there is none', async () => {
-    await renderSection({ defaultDesignSystem: null, spaceDesignSystems: {} });
+    await renderSection({ defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ });
     expect(screen.getByRole('group', { name: 'By Space' }).textContent).toContain('No Spaces yet. A Space can have its own default design system.');
   });
 });

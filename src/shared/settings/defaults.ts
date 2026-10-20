@@ -1,13 +1,13 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14), the one migration from every earlier version, and the one patch merge
+// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15), the one migration from every earlier version, and the one patch merge
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { BrowserSettingsSchema, ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V14: Settings = {
-  version: 14, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14
+export const SETTINGS_DEFAULTS_V15: Settings = {
+  version: 15, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
@@ -20,7 +20,7 @@ export const SETTINGS_DEFAULTS_V14: Settings = {
   supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: ruled by A-29 (residue 10 and 11)
   browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a: the default partition; Google (Decision Log 10); new-window links in the app (Decision Log 11); cua #90: the bookmarks bar shown
   mods: { toHuman: { enabled: true } }, // P2-C: the to-human lane on (the P2-C document, §9)
-  artifacts: { defaultDesignSystem: null, spaceDesignSystems: {} }, // P3-D: the house system, no Space defaults (D9)
+  artifacts: { defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1: Docs' default, the cards in the margin */ }, // P3-D: the house system, no Space defaults (D9)
 };
 
 // The earlier files, as their versions wrote them: C1's and C5's.
@@ -32,8 +32,12 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
+// P4-B1 start (2026-10-20): P3-D's version 14, as it wrote it: version 15's sections less the comments view
+const SettingsV14Schema = SettingsSchema.extend({ version: z.literal(14), artifacts: SettingsSchema.shape.artifacts.omit({ commentsView: true }) });
+type SettingsV14 = z.infer<typeof SettingsV14Schema>;
+// P4-B1 end
 // P3-D start (2026-10-13): P2-C's version 13, as it wrote it: version 14's sections less the design-system defaults
-const SettingsV13Schema = SettingsSchema.omit({ artifacts: true }).extend({ version: z.literal(13) });
+const SettingsV13Schema = SettingsV14Schema.omit({ artifacts: true }).extend({ version: z.literal(13) });
 type SettingsV13 = z.infer<typeof SettingsV13Schema>;
 // P3-D end
 
@@ -96,10 +100,16 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V14);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V15);
 
-// P3-D: v13 → v14, the design-system defaults empty: the house system, no Space defaults
-const fromV13 = (v13: SettingsV13): Settings => ({ ...v13, version: 14, artifacts: defaults().artifacts });
+// P4-B1: v14 → v15, the comments view at its default (the cards in the margin)
+const fromV14 = (v14: SettingsV14): Settings => ({ ...v14, version: 15, artifacts: { ...v14.artifacts, commentsView: defaults().artifacts.commentsView } });
+// P3-D: v13 → v14, the design-system defaults empty: the house system, no Space defaults; P4-B1: then v14 → v15
+const fromV13 = (v13: SettingsV13): Settings => {
+  const { commentsView: _view, ...artifacts } = defaults().artifacts;
+  void _view;
+  return fromV14({ ...v13, version: 14, artifacts });
+};
 // P2-C: v12 → v13, the mods section with the to-human lane on, and the owner channel's two notification groups on;
 // P3-D: then v13 → v14
 const fromV12 = (v12: SettingsV12): Settings => {
@@ -178,6 +188,8 @@ export function migrateSettings(input: unknown): Settings {
       return fromV12(SettingsV12Schema.parse(raw)); // P2-C
     case 13:
       return fromV13(SettingsV13Schema.parse(raw)); // P3-D
+    case 14:
+      return fromV14(SettingsV14Schema.parse(raw)); // P4-B1
     default:
       return SettingsSchema.parse(raw);
   }
