@@ -1,6 +1,6 @@
 // A delivery's frame line (the composite's §9.1; the DC9 plan's M4 and M6). sminos pushes a send to a session as its
-// frame: the first line names the event — `[sminos chat <project> <writer_short>:<seq> from <from> → <@you | @all>[ |
-// unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event with a `msg_id` (doperpowers'
+// frame: the first line names the event — `[sminos chat <project> <writer_short>:<seq> from <from> → <@you | @all |
+// a broadcast's scope>[ | unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event with a `msg_id` (doperpowers'
 // `sminos.py`: `compose_chat_frame`, `compose_frame`) — and the text follows it. A row is a delivery only when it marks a
 // delivery's provenance:
 // - idle, the bridge submits it as the user (`$.prompt.submit({asUser: true})` writes a user row whose `origin` is
