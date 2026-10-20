@@ -222,8 +222,8 @@ describe('re-layout (R1 to R6)', () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
     await settle();
-    act(() => addTab(m.handle.doc, 'Second', 'tab2'));
-    addThread(m.handle.doc, { threadId: 'tx', tabId: 'tab2', blockId: null, quote: 'elsewhere', anchor: null, by: ownerActor, at: now(), body: 'On the other tab' });
+    act(() => void addTab(m.handle.doc, { title: 'Second', id: 'tab2' }));
+    addThread(m.handle.doc, { threadId: 'tx', tabId: 'tab2', blockId: 'tab2-block', quote: 'elsewhere', anchor: { kind: 'block' }, by: ownerActor, at: now(), body: 'On the other tab' });
     await settle();
     expect(entry('t1')).not.toBeNull();
     expect(entry('tx')).toBeNull();
