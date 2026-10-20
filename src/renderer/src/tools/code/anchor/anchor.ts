@@ -21,7 +21,15 @@ export interface CardRect {
   width: number;
   height: number;
 }
-export type CommentPlacement = { kind: 'card'; host: 'browser' | 'artifact-page' /* P3-L (M5b; M6b: E2's 'deliverable' gone) */ | 'artifact' /* P3-B */; hostId?: string; rect?: CardRect } | { kind: 'sheet' };
+export type CommentPlacement =
+  | { kind: 'card'; host: 'browser' | 'artifact-page' /* P3-L (M5b; M6b: E2's 'deliverable' gone) */ | 'artifact' /* P3-B */; hostId?: string; rect?: CardRect }
+  | { kind: 'sheet' }
+  // P4-B1 (X21) start: a document's card in its margin's stack (`anchorY` the passage's first line in the page frame,
+  // `stackIndex` its place in the stack's document order), and a deck's or a design's card in the pin popover (`pinRect`
+  // the pin's box). The card store reads only `card` placements today; the margin's host takes these (P4-B1 M4, B2).
+  | { kind: 'margin'; host: 'document'; anchorY: number; stackIndex: number }
+  | { kind: 'pin'; host: 'slide' | 'design'; pinRect: CardRect };
+// P4-B1 (X21) end
 export interface CommentContext {
   appSessionId: AppSessionId;
   placement?: CommentPlacement;
