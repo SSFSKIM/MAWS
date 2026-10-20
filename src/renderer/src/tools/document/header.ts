@@ -13,7 +13,7 @@
 import type { DocumentState } from '@artifacts/host';
 import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { PageSize } from '@artifacts/document/export/design-system';
-import type { EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
+import type { CloseAsk, EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
 import { CommentsIcon, HistoryIcon, SaveVersionIcon, SuggestIcon } from './icons';
 
 export type DocumentExportFormat = 'md' | 'html' | 'docx' | 'pdf';
@@ -39,7 +39,7 @@ export interface DocumentHeaderCommands {
   setSuggestions(on: boolean): void;
   export(format: DocumentExportFormat, pageSize: PageSize): void;
   dismissExport(): void;
-  closeGuard(): Promise<boolean>;
+  closeGuard(ask?: CloseAsk): Promise<boolean>; // P4-B3: ask
 }
 
 export const FORMAT_NAMES: Record<DocumentExportFormat, string> = { md: 'Markdown', html: 'Web page', docx: 'Word', pdf: 'PDF' };

@@ -4,7 +4,7 @@
 // pins it, moves it to the other pane (an artifact's also into the panel, P3-F wave S) and closes it or the others. (The
 // Overview is no tab since W5: it floats over the main area.)
 import { ContextMenu } from 'radix-ui';
-import type { KeyboardEvent, MouseEvent } from 'react';
+import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { UNPINNABLE_KINDS, type TabRef } from '@shared/ipc/schema/layout';
 import { PinIcon, useChordHint } from '../app/IconButton';
@@ -13,7 +13,7 @@ import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab, allTabs, closeTab, currentSet, sessionOfTab } from '../stores/layout-model';
+import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { displayTitle } from '../sessions/title';
 // E5 start
@@ -26,17 +26,15 @@ import { useViewer } from '../tools/code/viewer/viewer-store';
 import { LIBRARY_COPY } from '../library/copy';
 import { useArtifactTitle } from '../library/store';
 // P3-L end
-// P3-F wave S (F16) start
-import { usePanelHost } from '../panel/host';
-import { openArtifactTab } from '../library/actions';
-import { ARTIFACTS_TOOL_ID, canShowArtifactInPanel, freePanelFor, openArtifactInPanel } from '../tools/artifacts/ArtifactsTool';
-// P3-F wave S (F16) end
+// P3-F wave S (F16); P4-B3 (X38): the move to the panel, its drag and its one refusal
+import { beginDrag, endDragFrom, moveArtifactToPanel, TAB_DRAG_TYPE, useTransferRefusal } from '../shell/transfer';
+import { TRANSFER_COPY } from '../tools/artifacts/copy';
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
 import { useBrowserTitle } from '../tools/browser/store';
 // E4a end
 
-export const TAB_DRAG_TYPE = 'application/x-maws-tab';
+export { TAB_DRAG_TYPE };
 
 export interface TabLabel {
   title: string;
@@ -120,6 +118,8 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
   const onAuxClick = (event: MouseEvent) => {
     if (event.button === 1) void requestCloseTab(tab.id);
   };
+  // P4-B3 (INV-5): a tab unmounting mid-drag (moved, closed) ends the drag it started, whose dragend reaches no one.
+  useEffect(() => () => endDragFrom('main', tab.id), [tab.id]);
 
   const element = (
     <div
@@ -131,12 +131,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       data-tab-id={tab.id}
       data-dirty={dirty ? 'true' : undefined} // E5
       draggable
-      onDragStart={(event) => {
-        event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
-        event.dataTransfer.effectAllowed = 'move';
-        useLayout.getState().setDragging({ tabId: tab.id, fromPane: pane });
-      }}
-      onDragEnd={() => useLayout.getState().setDragging(null)}
+      onDragStart={(event) => beginDrag(event, { source: 'main', tabId: tab.id, fromPane: pane })}
       onClick={() => useLayout.getState().activateTab(tab.id)}
       onMouseDown={(event) => event.button === 1 && event.preventDefault()} // no autoscroll on a middle press
       onAuxClick={onAuxClick}
@@ -206,34 +201,18 @@ function TabMenuItem({ children, onSelect, disabled = false, reason }: { childre
   );
 }
 
-// P3-F wave S (F16, the owner's obs 7): an artifact tab moves into the panel, the mirror of the panel record's Open in
-// tab. The panel it lands in is the one shown once the tab is gone: the session the focused pane shows next (the close's
-// own rule, `closeTab`), else the pinned Artifacts tab the no-session panel lists. Each side's guard is asked once, and
-// the artifact is never shown nowhere: the Artifacts tab there lets go of another artifact it shows first (its guard
-// keeping it refuses the move), then the tab closes through its own guard, and the panel opens only once it has (opened
-// first, the tool would switch main to its session while the tab is still in front). A panel that changed while the
-// tab's guard answered is checked again, and if it can no longer take the artifact, the artifact goes back to a main tab.
-export const SHOW_IN_PANEL_COPY = { label: 'Show in panel', noPanel: 'No session’s panel to show it in' };
+// P3-F wave S (F16, the owner's obs 7): an artifact tab moves into the panel, the mirror of the panel record's Move to
+// tab. P4-B3 (X38; its Decision Log 20, 21): through the transfer's one move, which a drag onto the panel takes too, and
+// disabled with the reason that drag is refused for (the panel shown once the tab is gone has none, M5).
+export const SHOW_IN_PANEL_COPY = { label: 'Show in panel', noPanel: TRANSFER_COPY.noPanel };
 
 function ShowInPanelItem({ tab }: { tab: Extract<TabRef, { kind: 'artifact' }> }) {
-  const session = useLayout((s) => sessionOfTab(activeTab(closeTab(s.main, tab.id))));
-  const pinned = useLayout((s) => s.panelPinned);
-  const registered = usePanelHost((s) => s.tools.has(ARTIFACTS_TOOL_ID));
-  const can = canShowArtifactInPanel(session, pinned, registered);
+  const refusal = useTransferRefusal({ to: 'panel', mainTabId: tab.id });
   return (
-    <TabMenuItem disabled={!can} reason={SHOW_IN_PANEL_COPY.noPanel} onSelect={() => void showInPanel(tab.id, tab.artifactId, session)}>
+    <TabMenuItem disabled={refusal !== null} reason={refusal ?? undefined} onSelect={() => void moveArtifactToPanel(tab.id)}>
       {SHOW_IN_PANEL_COPY.label}
     </TabMenuItem>
   );
-}
-
-async function showInPanel(id: string, artifactId: string, session: AppSessionId | null) {
-  if (!(await freePanelFor(session, artifactId))) return; // the panel's own record kept its place
-  await requestCloseTab(id);
-  if (allTabs(useLayout.getState().main).some((t) => t.id === id)) return; // its close guard kept it
-  const still = sessionOfTab(activeTab(useLayout.getState().main)) === session && canShowArtifactInPanel(session) && (await freePanelFor(session, artifactId));
-  if (still) openArtifactInPanel(session, artifactId);
-  else openArtifactTab(artifactId);
 }
 
 function moveToOtherPane(id: string, pane: 0 | 1) {

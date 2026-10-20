@@ -31,6 +31,13 @@ export function cancelVersionRequest(serial: number): void {
   if (store.getState().request?.serial === serial) store.setState({ request: null });
 }
 
+// P4-B3: an open that carries its viewer's state (a move between surfaces) asks for no version, and an ask still left for
+// that artifact on that surface goes, so the moved viewer keeps the version it shows.
+export function withdrawVersionRequest(artifactId: string, surface: EditorHostScope['surface']): void {
+  const request = store.getState().request;
+  if (request?.artifactId === artifactId && request.surface === surface) store.setState({ request: null });
+}
+
 // The request a viewer of `artifactId` on `surface` should take, or null.
 export function useVersionRequest(artifactId: string, surface: EditorHostScope['surface']): VersionRequest | null {
   return useStore(store, (s) => (s.request?.artifactId === artifactId && s.request.surface === surface ? s.request : null));

@@ -90,6 +90,36 @@ describe('the frame a delivery names its send by', () => {
     for (const line of ['[sminos message from human id=5e551e17', '[sminos message from human id=5e551e17] extra', '[sminos message from human id=5e551e1]', '[sminos message from other id=5e551e17]', '[sminos message id=5e551e17]'])
       expect(message.test(line), line).toBe(false);
   });
+
+  // sminos 1.2.0's scoped broadcast names its scope where a bare broadcast says @all (`frame_of`'s `target_label`), each
+  // project by the delivering machine's own name for it.
+  it("names a scoped broadcast by its scope's label, the projects' names open", () => {
+    const P = '7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22';
+    const scoped = (scope: Record<string, unknown>) => framePattern({ writer: 'alpha/human', seq: 4, from: 'human', wake: true, scope });
+    expect(scoped({ machines: ['beta'] }).test('[sminos chat projB alpha/human:4 from human → @all on beta]')).toBe(true);
+    expect(scoped({}).test('[sminos chat projB alpha/human:4 from human → @org | unread 3]')).toBe(true);
+    expect(scoped({ states: ['waiting'] }).test('[sminos chat projB alpha/human:4 from human → @org (waiting)]')).toBe(true);
+    const named = scoped({ projects: [P, P], machines: ['beta'], here: 'alpha', states: ['busy', 'idle'] });
+    expect(named.test('[sminos chat projB alpha/human:4 from human → @all in projB,beta on beta,alpha (busy,idle)]')).toBe(true);
+    expect(named.test(`[sminos chat projB alpha/human:4 from human → @all in ${P},my project on beta,alpha (busy,idle)]`)).toBe(true);
+    for (const line of [
+      '[sminos chat projB alpha/human:4 from human → @all]', // a bare broadcast: not this one's scope
+      '[sminos chat projB alpha/human:4 from human → @all on mini]', // another machine
+      '[sminos chat projB alpha/human:4 from human → @all on beta (waiting)]', // a state it did not name
+      '[sminos chat projB alpha/human:4 from human → @you]', // not a broadcast
+    ])
+      expect(scoped({ machines: ['beta'] }).test(line), line).toBe(false);
+    // The names are one open run: a broad scope's frame is matched at once, where an open run per name backtracked for
+    // seconds over 35 of them.
+    const many = Array.from({ length: 35 }, (_, i) => `${P.slice(0, -2)}${String(i).padStart(2, '0')}`);
+    const broad = scoped({ projects: many, machines: ['beta'] });
+    expect(broad.test(`[sminos chat projB alpha/human:4 from human → @all in ${many.map((_, i) => `p${i}`).join(',')} on beta]`)).toBe(true);
+    expect(broad.test(`[sminos chat projB alpha/human:4 from human → @all in ${many.map((_, i) => `p${i}`).join(',')} on mini]`)).toBe(false);
+    // The line up to the names is taken at its first place: a line repeating it is refused at once too.
+    const started = performance.now();
+    expect(broad.test(`[sminos chat ${'x alpha/human:4 from human → @all in '.repeat(2000)}zzz on mini]`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
 });
 
 describe("a send at the session view's tail", () => {
@@ -181,6 +211,10 @@ describe("a send at the session view's tail", () => {
     ];
     for (const row of delivered(framed(1, 'x'))) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
     for (const row of delivered('[sminos message from human id=5e551e17]\nr')) expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
+    // An operator's scoped broadcast (sminos 1.2.0, `say --machine mini --state idle`): its frame names the scope.
+    const scoped = { offset: ++offset, event: { ts: '2026-10-15T09:00:00.000Z', writer: 'alpha/human', seq: 2, kind: 'human', from: 'human', to: [{ session: S, alias: 'maws-45' }], text: 'r', wake: true, scope: { machines: ['mini'], states: ['idle'] }, mac: { nonce: 'h6', value: 'v' } } as LogEvent };
+    for (const row of delivered('[sminos chat MAWS alpha/human:2 from human → @all on mini (idle)]\nr')) expect(tailSends(base({ entries: [scoped], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
+    expect(tailSends(base({ entries: [scoped], transcript: { rows: [assistantRow('x'), userRow('[sminos chat MAWS alpha/human:2 from human → @all]\nr')], complete: false } }))).toHaveLength(1);
   });
 
   it("takes a frame from the bridge's row appended into a running turn (doperpowers #233), in either form", () => {

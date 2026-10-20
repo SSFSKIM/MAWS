@@ -87,7 +87,7 @@ export const shownSession = (main: LayoutMain = layout().main): AppSessionId | n
 const selectionOf = (appSessionId: AppSessionId | null): string | null =>
   appSessionId === null ? layout().panelActiveNoSession : (layout().panelBySession.get(appSessionId)?.activeTabId ?? null);
 
-// P3-G (§D4.4): the panel tab the region shows over its body: the shown session's selection, else the transient pin
+// P3-G (§D4.4): the panel tab the region shows over its body: the shown session's selection, else the no-session pin
 // selection (PanelRegion's own rule), for a caller outside React (Mark-up's start and its tab-switch ending).
 export const selectedPanelTabId = (state: LayoutState = layout()): string | null => {
   const shown = shownSession(state.main);
@@ -112,20 +112,25 @@ function createInstance(ref: PanelTabRef, tool: AnyTool, init: PanelToolInit<unk
   return instance;
 }
 
-// A tab the strip shows for the first time: its state is created with the shown session and no params, marked restored
-// (a restored tab, or a pinned one re-adopting at launch). Called by the host component; idempotent.
+// P4-B3 (its Decision Log 22; X5 as amended): a restored tab's params are what its tool persisted for it through
+// `setPanelParams`, undefined when it persisted none.
+const restoredParams = (tabId: string): unknown => layout().panelParams[tabId];
+
+// A tab the strip shows for the first time: its state is created with the shown session and the params its tool
+// persisted for it, marked restored (a restored tab, or a pinned one re-adopting at launch). Called by the host
+// component; idempotent.
 export function ensureShownInstances(tabs: PanelTabRef[], appSessionId: AppSessionId | null): void {
   const { tools } = usePanelHost.getState();
   for (const ref of tabs) {
     const tool = tools.get(ref.toolId);
     if (!tool || instances.has(ref.id)) continue;
-    createInstance(ref, tool, { appSessionId, session: sessionRecord(appSessionId), instanceId: ref.id, params: undefined, restored: true });
+    createInstance(ref, tool, { appSessionId, session: sessionRecord(appSessionId), instanceId: ref.id, params: restoredParams(ref.id), restored: true });
   }
 }
 
 // Ensure-instance for a re-target: a restored ref whose list was never shown has none yet.
 function ensureInstance(ref: PanelTabRef, tool: AnyTool, target: AppSessionId | null): Instance {
-  return instances.get(ref.id) ?? createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: ref.id, params: undefined, restored: true });
+  return instances.get(ref.id) ?? createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: ref.id, params: restoredParams(ref.id), restored: true });
 }
 
 const sessionRecord = (appSessionId: AppSessionId | null) => (appSessionId === null ? null : (useSessions.getState().records.get(appSessionId) ?? null));

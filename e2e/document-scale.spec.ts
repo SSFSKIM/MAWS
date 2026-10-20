@@ -16,7 +16,10 @@
 // beside them: `1 p95` ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16), `7 enter` ≤ 1,200 ms per preview (mini 890.8 to
 // 1,126.8; MacBook target 1,000), `8 renderer collected` ≤ 600 MB (mini 480.5 and 519.7, about 8% run variance; MacBook 412
 // to 469, target 500). The MacBook targets in B's section and S7b's table are unchanged; a rise over these bounds is the
-// regression signal.
+// regression signal. P4 Decision Log 33 rescales rows 1 and 2 by the mini's own drift: from 10-20 the same tree reads
+// slower there (de71da97a 17.0 on 10-19, 22.4 after a reboot on 10-20; the cause survived restarts, Chrome, System
+// Settings and Docker quit, and renderer accessibility is off), so `1 p95` ≤ 28 ms (clean runs on 10-20 read 20.3 to
+// 26.6) and `2 p95` ≤ 58 ms (Event Timing's 8 ms grain puts it at 48 or 56).
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -510,9 +513,9 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const counted = everyKeystroke(report, await remoteSeen(pageB), drained.end);
     const painted = counted.inB;
     const note = `${keys.keystrokes} keystrokes (${keys.noTransaction} without a transaction); agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}`;
-    rows.add('1 p95', 'keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16)', note);
+    rows.add('1 p95', 'keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)', keys.frame.p95, 'ms', 28, 'p95 ≤ 28 ms (mini 20.3 to 26.6, P4 Decision Log 33; MacBook target 16)', note);
     rows.add('1 max', 'keystroke → frame in A, max', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
-    rows.add('2 p95', 'keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)', keys.presented.p95, 'ms', 50, 'p95 ≤ 50 ms', `${keys.presentedReported} keydowns reported at ≥ 16 ms; max ${keys.presented.max}`);
+    rows.add('2 p95', 'keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)', keys.presented.p95, 'ms', 58, 'p95 ≤ 58 ms (mini 56 and 56, P4 Decision Log 33)', `${keys.presentedReported} keydowns reported at ≥ 16 ms; max ${keys.presented.max}`);
     rows.add('3 p95', 'keystroke → durable ack, p95 (every keystroke counted)', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked${missed(counted.acked, counted.keystrokes, 'unacknowledged')}; drained ${drained.waitedMs} ms; p50 ${counted.ack.p50}, max ${counted.ack.max}`);
     rows.add('4 p95', 'keystroke painted in window B, p95 (every keystroke counted)', painted.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.painted} of ${counted.keystrokes} painted${missed(counted.painted, counted.keystrokes, 'not painted in B')}; p50 ${painted.p50}, max ${painted.max}`);
     rows.add('5 p99', 'host event-loop delay over the run (A’s testLoopDelay: the whole gaps of its own 10 ms timer), p99, documents live with the writer’s batches', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');

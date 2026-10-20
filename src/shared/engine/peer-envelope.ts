@@ -57,14 +57,55 @@ const UNKNOWN_SENDER = 'unknown';
 // it, so the body drawn ends before it. Matched whole, as the body's last line only.
 const SMINOS_REPLY_LINE = /(?:^|\n)\[To reply, run in Bash: \/[^\n"]*\/sminos say "@[^\s"/]+\/[^\s"/]+ <your reply>"\]$/;
 // sminos's frame line, the first line of every event it pushes, followed by the event's text (doperpowers `sminos.py`:
-// `compose_chat_frame`, `compose_frame`): `[sminos chat <project> <writer_short>:<seq> from <from> → <@you | @all>[ |
-// unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event that carries a `msg_id`.
-const SMINOS_CHAT_FRAME = /^\[sminos chat .+? \S+:\d+ from (.+) → @(?:you|all)(?: \| unread [1-9][0-9]*)?\]$/;
+// `compose_chat_frame`, `compose_frame`): `[sminos chat <project> <writer_short>:<seq> from <from> → <target>[ |
+// unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event that carries a `msg_id`. The target is
+// `@you`, or a broadcast's: `@all`, or from sminos 1.2.0 its scope's label (`scope_label`: `@org`, `@org (<states>)`,
+// or `@all in <projects>`, `@all on <machines>` or both, then perhaps ` (<states>)`).
+const SMINOS_CHAT_HEAD = /^\[sminos chat .+? \S+:\d+ from /;
+const SMINOS_UNREAD = / \| unread [1-9][0-9]*$/;
+// sminos's `STATES`, the words `--state` takes.
+const SMINOS_STATE = '(?:busy|idle|waiting|stopped|gone|vacant|retired)';
+const SMINOS_ORG_TARGET = new RegExp(`@org(?: \\(${SMINOS_STATE}(?:,${SMINOS_STATE})*\\))?$`, 'y');
 const SMINOS_MESSAGE_FRAME = /^\[sminos message from (.+) id=\S+\]$/;
+
+/**
+ * Whether a chat frame's target starts at `at` and runs to the end of `rest` (the frame between its sender and its
+ * unread count). sminos leaves the names in a scope open (a project's name may hold ` → ` or ` on `), so past `@all in `
+ * or `@all on ` a target is any text without a `]`; `@org`'s states are sminos's state words, so a project named
+ * `ops → @org (later)` opens no second reading.
+ */
+function chatTargetAt(rest: string, at: number, lastBracket: number): boolean {
+  const length = rest.length - at;
+  if (length === 4 && (rest.startsWith('@you', at) || rest.startsWith('@all', at))) return true;
+  if (rest.startsWith('@all in ', at) || rest.startsWith('@all on ', at)) return length > 8 && lastBracket < at;
+  if (!rest.startsWith('@org', at)) return false;
+  SMINOS_ORG_TARGET.lastIndex = at;
+  return SMINOS_ORG_TARGET.test(rest);
+}
+
+/**
+ * Who a chat frame line names as its sender, read in one pass. The header is taken at its first place, as a pattern
+ * would; the sender then runs to a ` → ` that opens a whole target. A sender's alias and a scope's project names are
+ * both open, so a line may split there more than one way (an alias `a → @all in b` saying `→ @you`, a project named
+ * `ops → @all`): such a line names no one sender, and is read as no frame rather than credited to a guess.
+ */
+function chatFrameSender(line: string): string | null {
+  const head = SMINOS_CHAT_HEAD.exec(line);
+  if (head === null || !line.endsWith(']') || line.includes('\n')) return null;
+  const rest = line.slice(head[0].length, -1).replace(SMINOS_UNREAD, '');
+  const lastBracket = rest.lastIndexOf(']');
+  let sender: string | null = null;
+  for (let at = rest.indexOf(' → ', 1); at >= 0; at = rest.indexOf(' → ', at + 1)) {
+    if (!chatTargetAt(rest, at + 3, lastBracket)) continue;
+    if (sender !== null) return null;
+    sender = rest.slice(0, at);
+  }
+  return sender;
+}
 
 /** Who a sminos frame line says sent the event, or null when the line is not a whole frame. */
 export function sminosFrameSender(line: string): string | null {
-  return (SMINOS_CHAT_FRAME.exec(line) ?? SMINOS_MESSAGE_FRAME.exec(line))?.[1] ?? null;
+  return chatFrameSender(line) ?? SMINOS_MESSAGE_FRAME.exec(line)?.[1] ?? null;
 }
 
 /** A sminos message's text as drawn: its frame line (whole, the first, with the text after it) and its reply line cut. */

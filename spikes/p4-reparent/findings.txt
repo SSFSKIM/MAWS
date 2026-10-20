@@ -1,0 +1,217 @@
+R-1 (P4): can a live editor be reparented between the right panel and a main pane without a remount?
+2026-10-19. Bounded spike for the design of moving an artifact's editor between the panel and a main tab.
+
+Short answer
+  Partly. The DOM and React halves work: Chromium 152 has moveBefore, and a React reverse portal moves a live body
+  with no remount. That carries the iframe, focus, transitions, React state and the editor instance with its undo
+  history. Two things still need code after every move: the selection and, when the focus is inside, the scroll
+  offset. The reverse portal also changes which React ancestors and contexts the body sees, and MAWS's pane focus
+  relies on those. On the remount path, the undo history (row 147) carries over through an UndoManager made outside
+  the editor. @y/prosemirror 2 supports that directly, and this spike measured it working.
+
+Versions and setup
+  Electron 44.4.5, Chromium 152.0.7977.130, V8 15.2.124.28-electron.0, Node 24.21.0 (main and renderer
+  process.versions), darwin arm64. React 19.3.0 (development build). @tiptap/core and @tiptap/pm 3.31.3,
+  @y/prosemirror 2.0.0-15, @y/y 14.0.0-rc.28.
+  The page ran in one hidden BrowserWindow (show: false, backgroundThrottling: false). document.hasFocus() was true,
+  visibilityState was 'visible', and the run had 138 animation frames with 0 missed.
+  The editor is MAWS's own document binding, imported from src/: the schema's extensions plus `collaboration` from
+  src/artifacts/document/collab.ts, bound to a replica of the in-memory host over MessageChannel ports, as in the
+  editor suites. Typing is trusted (webContents.insertText). ⌘Z is a trusted keyDown (webContents.sendInputEvent)
+  with no app menu.
+  Two full runs gave identical results apart from timings.
+
+Run
+  From the repo root, after `pnpm install --frozen-lockfile --prefer-offline`:  spikes/p4-reparent/run.sh
+  run.sh bundles page/run.tsx with esbuild into out/ (ignored) and runs node_modules/.bin/electron main.mjs through
+  /tmp/maws-review/with-slot.sh. It writes results/run.json (every value below) and results/console.txt.
+  Files: main.mjs (window, trusted input, report), preload.cjs, build.mjs, page/dom.ts (suite 1), page/react.tsx
+  (suite 2), page/editor.ts (suite 3), page/util.ts.
+  Harness note: in 2 of 5 runs Electron's shutdown hung after the report (main thread parked in mach_msg, no CPU),
+  under both app.quit() and app.exit(0). main.mjs therefore SIGKILLs itself once the files are written, and run.sh
+  treats a fresh run.json as success.
+
+1. DOM level
+   Element.prototype.moveBefore is available.
+   The moved subtree held: a focused contenteditable selecting "quick brown"; an overflow container at
+   scrollTop 300 (a sibling of the focused element); a srcdoc iframe with counter 42 set in its window; a 2D canvas
+   and a WebGL canvas (preserveDrawingBuffer); and a div 325 ms into a 2 s transform transition.
+   It moved between two connected 600 px parents, once with moveBefore and once with insertBefore on a fresh copy.
+
+   Result                    moveBefore                                   insertBefore
+   ------------------------  -------------------------------------------  -------------------------------------------
+   Focus                     kept; no blur, focusout, focus or focusin    lost to body; blur and focusout fired
+                                                                          synchronously (1 each)
+   Selection                 lost                                         lost
+   Scroll (focus outside)    300 -> 300                                   300 -> 0
+   Iframe                    same window; counter 42; 1 load event        new window; counter reset to 0; 2 loads
+   Canvas                    both pixels kept; no WebGL context loss      both pixels kept; no WebGL context loss
+   Transition                keeps running, no transitioncancel           cancelled (transitioncancel 1); jumps to
+                             (325 ms at 65 px -> 767 ms at 153 px)        its end state (400 px)
+   MutationObserver          two childList records: one removal from the old parent (+0 -1) and one addition to
+                             the new one (+1 -0); identical for both methods
+   ResizeObserver            no entries for either (same-size parents, no frame in between)
+
+   - Selection in detail: both methods collapse the Selection and a live Range synchronously to the old parent at
+     offset 0, as a removal does. After moveBefore, one selectionchange follows and the caret lands at offset 0 of the
+     still-focused contenteditable.
+   - Scroll with the focus inside the scroll container: moveBefore keeps the offset but scrolls the focused element
+     into view, as focusing it would. Measured cases:
+       - focused input below the fold: 300 -> 2603 (bottom-aligned; the input is at 2702 in a 120 px container)
+       - focused input already in view: 310 -> 310
+       - focused contenteditable taller than the container (an editor's view.dom): 300 -> 0, aligned to its top
+       - focus inside with no selection: same as with a selection
+     With no focus inside, the offset is kept, including with a non-focused selection inside: 300 -> 300.
+   - Parking (moveBefore into a connected holder, frames in between, then on to the destination):
+       - display:none holder: the iframe is kept (window, counter, 1 load), but focus is lost (blur and focusout),
+         scroll drops to 0, the transition is cancelled, and ResizeObserver reports 0x0 and then the sizes again.
+       - offscreen holder (position:fixed; left:-100000px): focus, scroll 300, iframe and transition are all kept;
+         no ResizeObserver entries.
+   - Preconditions: moveBefore throws HierarchyRequestError ("State-preserving atomic move cannot be performed on
+     nodes participating in an invalid hierarchy") in both of these cases:
+       - a detached node moved into a connected parent
+       - a connected node moved into a detached parent
+     A keeper's host must therefore enter the document once with appendChild, or be created inside the parking
+     holder.
+
+2. React level (reverse portal)
+   The arrangement: a keeper renders the child through createPortal into a host element it owns, inside its own
+   React subtree. Each pane mounts a keyed placeholder only while the body is its active tab. The placeholder's
+   layout effect moves the host in with moveBefore, and its cleanup parks the host in an offscreen holder. The test
+   moved the body A -> B -> none (parked) -> A.
+
+   - Mounts: the child's useLayoutEffect and useEffect each ran once and cleaned up once, at root.unmount(). Six DOM
+     moves caused 0 remounts.
+   - Continuity across all moves, including while parked:
+       - useState kept (clicks 0 -> 1 -> 2)
+       - the same button node
+       - the uncontrolled input's value kept
+       - focus stayed on the input
+       - the iframe kept its window and counter 7, with onLoad firing once
+   - Events after a move: synthetic events still fire, and a setState from the moved child renders into the moved
+     DOM.
+   - Event order for a click inside the child at pane B:
+       pane-B native capture, keeper-zone React capture, child React capture, child React bubble,
+       keeper-zone React bubble, pane-B native bubble.
+     React handlers follow the React tree, not the DOM. The destination pane's React onPointerDownCapture and onClick
+     never fire; the keeper's ancestors' handlers do. Native addEventListener on the destination pane sees both
+     phases.
+   - Context: the child reads the keeper's provider ("keeper") at every destination, never "pane-A" or "pane-B".
+   - A `surface` prop changed with the move (panel -> main): the child re-rendered, and effects keyed on it
+     re-registered (register panel / unregister panel / register main ...) without a remount.
+   - Ordering: a placeholder's layout-effect cleanup runs before React removes its DOM, so parking in the cleanup
+     works. Recorded moves: into A by append, then park, into B, park, into A, park, all by moveBefore.
+   - Without the parking step, the host leaves the document with the old placeholder:
+       - the iframe reloads (onLoad 2, then 3 at the next move; counter reset)
+       - focus is lost, and React's onBlur never fires
+       - every later insertion must be appendChild, because moveBefore throws on a detached node
+
+3. Editor level (MAWS's document editor binding)
+   (i) Reparent with moveBefore. The editor body is a host div containing a scroll container containing the editor.
+       Starting state: the editor focused, "Paragraph" selected (152-161), scrollTop 400, undo depth 2.
+       Kept:
+       - the same EditorView instance, not destroyed
+       - focus (view.hasFocus() true, ProseMirror's focused flag true)
+       - undo depth 2/0
+       Lost:
+       - Selection. The DOM selection collapses synchronously while ProseMirror's state still reads 152-161. At the
+         next selectionchange, ProseMirror (being focused) reads the collapsed DOM selection, and its selection
+         becomes 1-1, the start of the document. Typing would land there.
+       - Scroll: 400 -> 0 synchronously. This is section 1's reveal of the focused element; view.dom is taller than
+         the container.
+       Fix-up, measured: call editor.view.focus() synchronously right after the move, which writes ProseMirror's
+       selection back to the DOM, and set the saved scrollTop back synchronously. Then:
+       - the selection stays 152-161 and scrollTop stays 400 after 3 frames
+       - trusted typing "!!" replaced "Paragraph" in p3 (undo depth 3)
+       - trusted ⌘Z removed "!!"
+       - a second ⌘Z removed " beta", an edit made before the move (depth 1/2)
+       Contrast, the same move with insertBefore: the same view, but focus lost (hasFocus false, focused flag
+       false), scrollTop 0 and an empty DOM selection. Trusted typing went nowhere until refocused.
+   (ii) Remount: destroy the editor and create a new one over the same replica.
+       Control, as MAWS does it today (row 147):
+       - collab.ts makes its UndoManager in the attachUndo plugin view and destroys it in that view's destroy and in
+         onDestroy. After the destroy, the manager no longer listens to the doc.
+       - The new editor makes a fresh manager: undo depth 2 -> 0. ⌘Z did nothing (trusted, then synthetic), and
+         " one two" stays.
+       Handed-in manager:
+       - Created outside the editor: new UndoManager(ytype, { trackedOrigins: new Set() }).
+       - Swapped in with view.dispatch(tr.setMeta(yUndoPluginKey, { undoManager })) after the binding's own swap.
+         This is the swap that @y/prosemirror 2's undo plugin documents and supports. It rebinds the stack handlers
+         and adds the sync plugin to trackedOrigins (measured true).
+       - On destroy, the undo plugin's view only unbinds. It removes its stack listeners and drops its sync plugin
+         from trackedOrigins, leaving only the manager itself. It never destroys the manager. Measured after
+         destroy: depth 2, still listening to the doc.
+       - In the new editor (the other pane), swapped in again: hasUndoOps true, depth 2.
+       - Trusted ⌘Z undid " two", then " one", both made before the remount. After the undo, the caret returned to
+         the end of the edited block (359), restored from the stack item's relative bookmark that the old view
+         stored.
+       - An edit made after the remount (" three") was tracked and undone.
+       Explicit transfer of view state (measured):
+       - Captured at unmount: scrollTop 500, and the selection 445-455 as Y relative positions
+         (resolvedPositionsToRelativePositions, exported through src/artifacts/yjs/prosemirror.ts).
+       - Restored after the new binding's first render (relativePositionsToResolvedPositions, then setSelection):
+         exactly 500 and 445-455, with focus.
+       TipTap's own Collaboration, for reference (not used by MAWS and not installed; read from the published
+       @tiptap/extension-collaboration 3.31.3 and @tiptap/y-tiptap 3.0.10):
+       - It takes a manager through yUndoOptions.undoManager.
+       - y-tiptap's undo-plugin view destroy calls undoManager.destroy() even on a handed-in manager. TipTap patches
+         the plugin view to stash a restore() that re-attaches the doc listener and observers on the next view
+         ("quick fix", y-prosemirror #102/#114).
+       - MAWS's @y/prosemirror 2 needs no such patch, because its destroy only detaches.
+
+Recommendation for MAWS
+  Use an explicit transfer on remount. Lift the UndoManager out of the editor into the per-scope state object. Do
+  not build the keeper now.
+
+  What "free" (a keeper with moveBefore) would cost to build in MAWS:
+  - A keeper layer at the app shell, above the right panel and the main area. It renders each live body through
+    createPortal into a host it owns. Each host is created inside a connected offscreen parking holder, not a
+    display:none one (display:none loses focus, scroll and transitions, measured). The panel and the main pane's
+    active-tab slot each get a placeholder: moveBefore in a layout effect, park in its cleanup.
+  - A post-move fix-up for every kind with a focus or selection model. ProseMirror needs view.focus() plus a scroll
+    restore (measured above). CodeMirror and any other contenteditable need their own equivalent (not measured
+    here). The scroll restore could be generic: save scrollTop for the scrollable ancestors of activeElement inside
+    the host, and restore them after the move.
+  - A change of React semantics for every kept body, against MAWS's (b) and (c):
+      - Pane focus hangs off onPointerDownCapture on the pane, and that handler never sees a kept body's events
+        (measured). It, and any other pane-level React capture or bubble behaviour, would move to native listeners
+        or to a re-dispatch from the keeper. That needs an audit of every handler between the pane and the body.
+      - The body reads the keeper's contexts, not the pane's (measured). Surface and tabId must reach it as keeper
+        props.
+      - The per-scope state object keyed {surface, tabId} must be re-keyed on each move anyway, or turned into a
+        per-artifact one. Header registration re-runs on the prop change; that part is cheap.
+  - A conflict with (a): a main pane mounts only its active tab's body, keyed by tab id.
+      - If the keeper holds a body only while the panel or the main pane shows it, a tab switch still unmounts it.
+        Row 147's own repro (the panel's content unmounts while the main area is on another tab) would still lose
+        undo, so the external UndoManager is needed either way.
+      - If it holds hidden bodies alive, that is a keep-alive policy for every open tab. It needs eviction and
+        accepts the memory of live editors and iframes. That is a product decision, not a refactor.
+  - What it buys beyond the transfer: iframe-backed kinds keep their documents (HtmlFrame, PdfFrame, slides elements,
+    the design-system canon); transitions continue; and the editor never re-binds or redraws (row 131).
+
+  What the explicit per-kind transfer costs:
+  - collab.ts takes an `undoManager` option. When one is given, it skips attachUndo's create and destroy and hands
+    the manager to yUndoPlugin.
+  - The scope state object owns the manager:
+      - created over the live tab body
+      - destroyed with the entry
+      - cleared on a restore this replica did not make, which onRestored does today for the binding's own manager
+    About 30 lines plus tests.
+  - On a panel <-> main move, the registry re-keys the entry from {panel, tabId} to {main, tabId}, carrying the
+    replica handle, the manager and a view memento. For the document kind, the memento is scrollTop, the selection
+    as Y relative positions, and whether it had focus. It is captured in the unmount cleanup and consumed after the
+    new binding's first render; the helpers are already exported. About 50 generic lines plus about 10 per kind.
+  - The same manager-outlives-view change fixes row 147 for tab switches too, independent of moves.
+  - What it loses:
+      - Iframe-backed kinds reload, unless a kind captures its own memento (for example a PDF page via postMessage).
+      - Row 131's redraw stays.
+      - An IME composition in progress is cut by the unmount (not measured).
+
+  When the keeper becomes the better pick: if a kind's live state sits in an iframe or webview and is too costly to
+  serialize, and its reload is visible to the person. Even then, scope it to that kind, with pane focus on native
+  listeners.
+
+  To verify when building the transfer (not measured here):
+  - one manager bound by two editors at once (StrictMode's double construction, or the panel and the main tab
+    showing the same artifact at the same time). Keep one manager per scope, not per artifact.
+  - the restore-clear path with a handed-in manager.
