@@ -76,6 +76,12 @@ export function selectionOf(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kin
   return selectionAt(ordered, placeOfNumber(ordered, at.version));
 }
 
+// P4-B4: a retained version named by its id (a link's `#v<id>`, `show_pane`'s `at.version`) as a selection: that version by
+// its revision, kept there even when it is the latest now; an id the artifact does not retain, the latest.
+export function selectionOfVersionId(ordered: readonly Pick<ArtifactVersion, 'id' | 'seq'>[], versionId: number): VersionSelection {
+  const version = ordered.find((candidate) => candidate.id === versionId);
+  return version ? { revision: version.seq } : 'latest';
+}
 
 // An absolute path with no `.` or `..` segment, no empty segment and no trailing separator: what the files service
 // accepts, and what the host records (it resolves every path it is given).

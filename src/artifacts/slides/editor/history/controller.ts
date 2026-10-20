@@ -178,6 +178,12 @@ export class DeckHistoryController {
     return this.open({ kind: 'version', versionId });
   }
 
+  /** P4-B4: whether the artifact retains the version with `versionId` (a link's `#v`): the list read, else read now. */
+  async hasVersion(versionId: number): Promise<boolean> {
+    const versions = this.snapshot.versions ?? (await this.api.versions());
+    return versions.some((version) => version.id === versionId);
+  }
+
   /** The pill: the live deck against the version at the last view. */
   openNewChanges(): Promise<void> {
     const since = this.snapshot.pill?.since ?? null;

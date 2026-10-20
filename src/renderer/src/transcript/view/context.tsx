@@ -4,6 +4,7 @@
 // scrolling out of the virtualised list and back.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import type { AskRowData, Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
 import { WorkMotion } from './motion';
@@ -30,12 +31,13 @@ export interface TranscriptActions {
   // E7 end
   // E2 start: the artifact row's Open and a delivered file's name (tools/maws/actions.ts, registered from App.tsx's E2 block).
   // P3-L M6b: the panel's Artifacts tool on the artifact (a delivery's id is the artifact's), at the version `at` asks for
-  openArtifact(appSessionId: AppSessionId, artifactId: string, at?: ArtifactOpenAt): void; // P3-L M6b fix wave 2: none, the latest
+  // P4-B4: at the place `location` names (an artifact link's fragment), its version, when it names one, the version shown
+  openArtifact(appSessionId: AppSessionId, artifactId: string, at?: ArtifactOpenAt, location?: ArtifactLocation): void; // P3-L M6b fix wave 2: none, the latest
   // E2 end
   // P3-F wave S (F14): an artifact link's ⌘-click, the artifact in a main tab of its own (library/actions.ts's
   // openArtifactTab, registered from App.tsx's E2 block and installed in its host actions); when omitted, as in the
   // desk, an artifact link is its text
-  openArtifactTab?(artifactId: string): void;
+  openArtifactTab?(artifactId: string, location?: ArtifactLocation): void; // P4-B4: location, as openArtifact's
   // E4d start: a page element comment's chip (tools/browser/comment/actions.ts, registered from App.tsx's E4d block)
   openBrowserUrl(appSessionId: AppSessionId, url: string): void; // the in-app browser on the page: the session's, a side thread's parent's
   // E4d end

@@ -7,6 +7,7 @@
 // it asks to be interactive; `engine` draws MAWS's own drawing of the site (`engine`, given by the site). A Client
 // element requires client JavaScript, deferred in R3: it draws MAWS native instead.
 import { createContext, useContext, useId, useState, type MouseEvent, type ReactNode } from 'react';
+import { parseArtifactLink } from '@shared/artifacts/link'; // P4-B4
 import { SURFACE_VALUE_MAX } from '@shared/engine/surface';
 import { Markdown, registeredActions } from '../transcript';
 import { input as sendInput, press as sendPress, select as sendSelect, type Site } from './actions';
@@ -291,14 +292,19 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
   // links: the plugin's own when it answers them (a press carrying the href), else the app's link handling; the
   // transcript's link component is not mounted under a transcript here, so the click is taken before it. P3-F wave S
   // (F14): an artifact chip is MAWS's own, opened for this surface's session as the transcript opens it (the panel; a
-  // ⌘-click, its main tab)
+  // ⌘-click, its main tab); P4-B4: at the place its fragment names, which the chip carries (`parseArtifactLink`)
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
-    const artifactId = (event.target as HTMLElement).closest<HTMLElement>('[data-chip="artifact"]')?.dataset.artifactId;
-    if (artifactId) {
+    const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-chip="artifact"]');
+    const link = chip ? parseArtifactLink(`maws-artifact:${chip.dataset.artifactId ?? ''}${chip.dataset.artifactAt ?? ''}`) : null;
+    if (link) {
       event.preventDefault();
       event.stopPropagation();
+      const { artifactId, at } = link;
       const actions = registeredActions();
-      if (event.metaKey && actions.openArtifactTab) actions.openArtifactTab(artifactId);
+      if (event.metaKey && actions.openArtifactTab) {
+        if (at) actions.openArtifactTab(artifactId, at);
+        else actions.openArtifactTab(artifactId);
+      } else if (at) actions.openArtifact(site.appSessionId, artifactId, undefined, at);
       else actions.openArtifact(site.appSessionId, artifactId);
       return;
     }

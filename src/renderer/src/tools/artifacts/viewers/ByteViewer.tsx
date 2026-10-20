@@ -71,9 +71,9 @@ import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
 import { CommentIcon, ConnectorsIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
-import { bodyOf, placeOfOpenAt, selectionAt, selectionOf, shownVersion, underSession, versionLabel, versionsInOrder, type BodyKind, type VersionSelection } from './model';
+import { bodyOf, placeOfOpenAt, selectionAt, selectionOf, selectionOfVersionId, shownVersion, underSession, versionLabel, versionsInOrder, type BodyKind, type VersionSelection } from './model';
 import { pageElementAnchor, type PickMessage } from './pick';
-import { takeVersionRequest, useVersionRequest } from './requests';
+import { takeOpenRequest, useOpenRequest } from './requests';
 
 type ByteKind = 'html' | 'file';
 const COMMENT_ACTION = 'comment'; // the header action a dismissed card gives focus back to
@@ -174,11 +174,14 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const choose = (n: number) => ordered !== null && state.view.setState({ selected: selectionAt(ordered, n) });
   const chooseAt = (at: ArtifactOpenAt) => ordered !== null && state.view.setState({ selected: selectionOf(ordered, at) });
   // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
-  const request = useVersionRequest(artifactId, scope.surface);
+  const request = useOpenRequest(artifactId, scope.surface);
   useEffect(() => {
     if (ordered === null) return;
     noteArtifactVersions(artifactId, ordered);
-    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ selected: selectionOf(ordered, request.at) });
+    // P4-B4: a place's version (a retained version's id) names the version shown; a place without one, the version asked
+    if (request === null || !takeOpenRequest(request.serial)) return;
+    const version = request.location?.version;
+    state.view.setState({ selected: version !== undefined ? selectionOfVersionId(ordered, version) : selectionOf(ordered, request.at) });
   }, [artifactId, ordered, request, state.view]);
 
   // the frame picking is asked of, by what keys it: another version or a Reload is another frame

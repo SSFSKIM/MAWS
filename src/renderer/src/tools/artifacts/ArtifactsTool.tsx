@@ -19,6 +19,7 @@
 // Artifacts belong to no session (§4.1), so a pinned tab keeps the artifact it shows when the shown session changes; its
 // list follows the shown session.
 import { useEffect, useSyncExternalStore } from 'react';
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
@@ -33,28 +34,31 @@ import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
 import { ArtifactRecordView } from './RecordView';
 import { ArtifactsSummary } from './Summary';
-import { cancelVersionRequest, requestArtifactVersion } from './viewers/requests';
+import { cancelOpenRequest, requestArtifactOpen } from './viewers/requests';
 
 // The panel tool's id (shared with `show_pane`'s `artifact` pane); E2's Deliverables tool's (`deliverables`) gave way
 // to it at the cutover (Decision Log 10).
 export { ARTIFACTS_TOOL_ID };
 
 // X5 params: an artifact to show (`target`; none shows the list), the version of it to show (`at`, M6b fix wave 2;
-// none: the latest), and the list's scope.
+// none: the latest), the place in it (`location`, P4-B4: a link's fragment, `show_pane`'s `at`; its version, a retained
+// version's id, names the version shown), and the list's scope.
 export interface ArtifactsParams {
   target?: string;
   at?: ArtifactOpenAt;
+  location?: ArtifactLocation;
   scope?: ArtifactsScope;
 }
 
 // An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock;
 // M6b: a transcript row's Open, `TranscriptActions.openArtifact`), at the version `at` asks for (none: the latest,
-// followed as new ones land). Until a build registers the tool, nothing. P3-F wave S (F16): no session (null) is the
-// panel with no session in view, which shows only the pins: the artifact opens in a pinned Artifacts tab when there is
-// one, and nothing pins one for it.
-export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactId: string, at?: ArtifactOpenAt): void {
+// followed as new ones land), at the place `location` names (P4-B4: an artifact link's fragment). Until a build
+// registers the tool, nothing. P3-F wave S (F16): no session (null) is the panel with no session in view, which shows
+// only the pins: the artifact opens in a pinned Artifacts tab when there is one, and nothing pins one for it.
+export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactId: string, at?: ArtifactOpenAt, location?: ArtifactLocation): void {
   if (!canShowArtifactInPanel(appSessionId)) return;
-  panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params: { target: artifactId, ...(at !== undefined && { at }) }, activate: true });
+  const params: ArtifactsParams = { target: artifactId, ...(at !== undefined && { at }), ...(location !== undefined && { location }) };
+  panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params, activate: true });
 }
 
 // Whether `openArtifactInPanel` has a panel to show the artifact in, for a caller that offers it.
@@ -161,16 +165,16 @@ export class ArtifactsHandle {
   }
 
   // X5's `open`: a target shows that artifact (the one already shown keeps its state, and a move waiting on its guard is
-  // withdrawn) at the version `at` asks for (fix wave 2: every open asks, the latest when it names none, superseding any
-  // earlier ask; a move the guard refused cancels its own); no target shows the list.
+  // withdrawn) at the version `at` asks for and the place `location` names (fix wave 2: every open asks, the latest when
+  // it names none, superseding any earlier ask; a move the guard refused cancels its own); no target shows the list.
   open = (params: ArtifactsParams | undefined) => {
     if (params?.scope !== undefined && params.scope !== this.state.scope) this.update({ scope: params.scope, scrollTop: 0 });
     const target = params?.target;
     if (target === undefined) return this.back();
-    const serial = requestArtifactVersion(target, params?.at ?? 'latest', this.editorScope.surface);
+    const serial = requestArtifactOpen(target, params?.at ?? 'latest', this.editorScope.surface, params?.location);
     const { view } = this.state;
     if (view.kind === 'record' && view.artifactId === target) return this.withdraw();
-    this.leaveThen({ kind: 'record', artifactId: target }, () => cancelVersionRequest(serial));
+    this.leaveThen({ kind: 'record', artifactId: target }, () => cancelOpenRequest(serial));
   };
 
   back = () => {

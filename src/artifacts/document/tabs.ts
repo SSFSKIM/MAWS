@@ -39,6 +39,20 @@ export const tabBody = (doc: Doc, tabId: string): Node | undefined => {
   return body instanceof YNode ? body : undefined;
 };
 
+/**
+ * P4-B4 (the link grammar's `#block=`): the tab holding the block with `blockId` at any depth (block ids are unique in a
+ * document), in display order; null when none does. A walk of the bodies, for a one-off reveal rather than every edit.
+ */
+export function tabOfBlock(doc: Doc, blockId: string): string | null {
+  const holds = (node: Node): boolean =>
+    node.toArray().some((child) => child instanceof YNode && (child.getAttr('id') === blockId || holds(child)));
+  for (const { id } of listTabs(doc)) {
+    const body = tabBody(doc, id);
+    if (body && holds(body)) return id;
+  }
+  return null;
+}
+
 interface NewTab {
   title: string;
   /** The tab's content as a ProseMirror doc of the schema; one empty paragraph when absent (a body is `block+`). */
