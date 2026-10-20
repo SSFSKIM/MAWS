@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseQuery } from '@shared/artifacts/search-query';
+import type { Section } from '@artifacts/library/sections';
 import { HUMAN, openWorld, type World } from '../tool-server/artifact-world.fixture';
 import { STORE_MIGRATIONS, openStore } from './migrations';
 import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, searchQuery, snippetAndRead, startArtifactSearch, type SearchRequest, type SearchTimers } from './search';
@@ -368,7 +369,11 @@ describe('the snippet and read', () => {
     expect(snippetAndRead(titled, terms('roadmap review')).read).toEqual({ tab: 't', from: 'b2' }); // no block holds both: the longest outside titles
     expect(snippetAndRead(titled, terms('review opening')).read).toEqual({ tab: 't', from: 'b1' }); // the longer, "opening", outside titles
     const onlyTitle = blocks('Roadmap review', 'Nothing here.');
-    expect(snippetAndRead(onlyTitle, terms('roadmap'))).toEqual({ snippet: 'Roadmap review', read: { tab: 't' } });
+    // the document's first tab title is its own title again: matched there alone, the hit is title-only (the lead, no read)
+    expect(snippetAndRead(onlyTitle, terms('roadmap'))).toEqual({ snippet: 'Nothing here.' });
+    // a later tab's title is the anchor when nothing else holds the term, and opens that tab
+    const second = { body: 'Plan\nNothing here.\nRoadmap tab\nOther text.', sections: [[0, { tab: 't' }], [5, { tab: 't', from: 'b1' }], [19, { tab: 't2' }], [31, { tab: 't2', from: 'c1' }]] as Section[] };
+    expect(snippetAndRead(second, terms('roadmap'))).toEqual({ snippet: 'Roadmap tab', read: { tab: 't2' } });
   });
 
   it('keeps the snippet inside the anchor’s section: a short block alone, with no ellipsis', () => {

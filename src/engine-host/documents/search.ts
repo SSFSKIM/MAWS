@@ -428,7 +428,8 @@ const isTabTitle = ([, place]: Section): boolean => place !== null && 'tab' in p
 // The anchor (Decision Logs 17 and 22): the longest term's first occurrence, Unicode case-insensitively, inside the first
 // section that holds every term, so a hit opens where the query's words are together; else the first occurrence of the
 // longest term the body holds. A document's tab titles are passed over in both, since they repeat its title (which bm25
-// already ranked): a tab title is the anchor only when no other section holds any term.
+// already ranked): a later tab's title is the anchor only when no other section holds any term, and the first tab's
+// title never is (matched there alone, the hit is title-only).
 export function anchorOf(text: SectionedText, terms: readonly QueryTerm[]): { index: number; end: number } | null {
   const longestFirst = [...terms].sort((a, b) => codePoints(b.text) - codePoints(a.text)).map((term) => new RegExp(escaped(term.text), 'giu'));
   const at = (pattern: RegExp, from: number): { index: number; end: number } | null => {
@@ -470,8 +471,11 @@ export function anchorOf(text: SectionedText, terms: readonly QueryTerm[]): { in
     const found = outsideTitles(pattern);
     if (found) return found;
   }
+  // the last resort, a later tab's title; never the document's first tab title, the copy of its own title, which leaves
+  // the hit title-only (the lead, no `read`)
+  const pastFirstTitle = sections.length > 1 && isTabTitle(sections[0]!) ? sections[1]![0] : sections.length === 1 && isTabTitle(sections[0]!) ? text.body.length : 0;
   for (const pattern of longestFirst) {
-    const found = at(pattern, 0);
+    const found = at(pattern, pastFirstTitle);
     if (found) return found;
   }
   return null;

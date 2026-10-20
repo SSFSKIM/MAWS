@@ -98,3 +98,4 @@ case 2: links in the answer [{"text":"Q3 launch checklist","href":"maws-artifact
 case 2: verdict: no maws call true; no ToolSearch true; the link form true
 A-15 after the run: 174 keys
 vitest: case 1 failed (the answer links the note at the answer's block), case 2 passed. run 2 spend: 0.0024 + 0.0010 = 0.0034 USD
+source (appended by hand at the final fix wave): run in the worktree at bdff704f1 (ce734021b's parent), with M2's then uncommitted edits to src/engine-host/documents/search.ts and search.test.ts and an earlier, uncommitted version of test/live/artifact-search.live.test.ts (this record has no "case 1's prompt" line); the exact content of those edits was not recorded.

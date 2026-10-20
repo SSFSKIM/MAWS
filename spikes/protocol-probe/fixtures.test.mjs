@@ -410,6 +410,13 @@ test('p4 the maws server lists artifact_search exactly as MAWS describes it, rea
  const loaded=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools.find(t=>t.name==='mcp__maws__artifact_search');
  assert.equal(loaded.defer_loading,null);assert.equal(loaded.description,expected.description);assert.deepEqual(loaded.input_schema.properties,expected.inputSchema.properties);
 });
+test('p4 the model is given the other two wire changes as listed: show_pane\'s `at` and artifact_list\'s pointer to artifact_search',()=>{
+ const tools=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools;
+ const pane=tools.find(t=>t.name==='mcp__maws__show_pane');const servedPane=served4.tools.find(t=>t.name==='show_pane');
+ assert.ok(pane.input_schema.properties.at);assert.deepEqual(pane.input_schema.properties.at,servedPane.inputSchema.properties.at);
+ const list=tools.find(t=>t.name==='mcp__maws__artifact_list');const servedList=served4.tools.find(t=>t.name==='artifact_list');
+ assert.equal(list.description,servedList.description);assert.ok(list.description.includes('To find artifacts by what they contain, use artifact_search.'));
+});
 test('p4 R-2: the server\'s instructions reach the model under ## maws in the engine\'s context message, the owner\'s style case and tool search off included',()=>{
  for(const name of ['p4-b4-instructions','p4-b4-owner-style','p4-b4-no-tool-search','p4-b4-append']){
   const q=mainRequests4(load4(name))[0];const context=contextText4(q);

@@ -98,3 +98,4 @@ A-15 after the run: 174 keys
 case 1: verdict (added by hand from the run's log; the file's verdict lines were added after this run): searched true; linked at the answer's block false (linked block Rk3vQ8aT, the first block, the read.from of its first search "하반기 로드맵"; its second search "검색 출시" answered read.from Zp9dH4sE, the answer's block); the date true; the owner true. vitest: case 1 failed (the answer links the note at the answer's block), case 2 passed.
 case 2: verdict (by hand): no maws call true; no ToolSearch true; the link form true.
 run 1 spend: 0.0037 + 0.0011 = 0.0048 USD
+source (appended by hand at the final fix wave): run in the worktree at bdff704f1 (ce734021b's parent), with M2's then uncommitted edits to src/engine-host/documents/search.ts and search.test.ts and an earlier, uncommitted version of test/live/artifact-search.live.test.ts (this record has no "case 1's prompt" line); the exact content of those edits was not recorded.

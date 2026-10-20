@@ -25,6 +25,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import { parseArtifactLink } from '@shared/artifacts/link';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ArtifactSearchResultSchema } from '@shared/maws/search-tools';
 import type { JournalRow } from '@shared/wire/journal';
 import { openDocuments, type Documents } from '../../src/engine-host/documents';
 import { registerDocumentKind } from '../../src/engine-host/documents/kinds/document';
@@ -151,7 +152,7 @@ async function oneSession(g: LiveGate, documents: Documents, scenario: string, p
     const tool = guardToolTime(rows); // after the last turn; throws over the bound
     note(`${scenario}: tool time (X34): ${tool.line}`);
     note(`${scenario}: answer ${JSON.stringify(ended.resultText)}`);
-    return { id, rows, toolUses, answer: ended.resultText ?? '' };
+    return { id, rows, toolUses, initTools: init.tools, answer: ended.resultText ?? '' };
   } finally {
     stopAnswering();
     const closed = await closeSession(host, g, { appSessionId: id, journalPath, scenario, provenance: PROVENANCE, transcript: { name: `${scenario}-transcript`, engineSessionId: spec.sessionId! } }, note);
@@ -178,6 +179,18 @@ describe('artifact_search and the link paragraph, live (P4-B4 M5)', () => {
       note(`case 1: target links after ${JSON.stringify(documents.store.links(target))}`);
       expect(searches.length, 'the journal shows the agent’s artifact_search call').toBeGreaterThan(0);
       expect(run.toolUses.filter((u) => u.name === 'mcp__maws__artifact_search' && u.parent === null).length, 'called by the session itself, not a subagent').toBeGreaterThan(0);
+      // found by the search itself, not by artifact_list's walk: some artifact_search answer holds the note among its hits
+      const foundBySearch = searches.some((s) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(s.answer ?? 'null');
+        } catch {
+          return false; // a refusal's text
+        }
+        const answer = ArtifactSearchResultSchema.safeParse(parsed);
+        return answer.success && answer.data.hits.some((hit) => hit.id === target);
+      });
+      expect(foundBySearch, 'an artifact_search answer holds the note among its hits').toBe(true);
       const links = artifactLinks(run.answer);
       note(`case 1: links in the answer ${JSON.stringify(links)}`);
       const atBlock = links.filter((link) => link.artifactId === target && link.at?.block === ANSWER_BLOCK);
@@ -201,6 +214,8 @@ describe('artifact_search and the link paragraph, live (P4-B4 M5)', () => {
       const run = await oneSession(g, documents, 'p4-b4-link-form', linkPrompt(artifact, title), LINK_MAX_USD);
       const loaded = run.toolUses.filter((u) => u.name === 'ToolSearch');
       note(`case 2: ToolSearch calls ${loaded.length} (none: no deferred maws tool was loaded); maws calls ${mawsCalls(run.rows).length}`);
+      // "no artifact tool loaded" rests on the maws tools being deferred behind ToolSearch (Surprise 3)
+      expect(run.initTools, 'ToolSearch among the session’s tools: the maws tools are deferred').toContain('ToolSearch');
       expect(mawsCalls(run.rows), 'no maws tool called').toEqual([]);
       expect(loaded, 'no ToolSearch call, so no artifact tool loaded').toEqual([]);
       const links = artifactLinks(run.answer);
