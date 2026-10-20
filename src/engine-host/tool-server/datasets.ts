@@ -28,6 +28,7 @@ import { sameQueryIdentity } from '../dashboards/refresh'; // E3
 import { parseToolArguments, TOOL_ERRORS } from '@shared/maws/tools';
 import { dashboardAdapterOf } from '../dashboards';
 import { actorOf, answering, lineageOf, opIdOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
+import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
 const TOOL = 'artifact_dataset';
@@ -139,9 +140,12 @@ const keyedSnapshot = (prior: DatasetDescriptor | null, input: { source: { serve
   input.rowKey !== undefined && keptBy(prior, input.source) && prior.rowKey !== input.rowKey ? (snapshotOf(prior)?.ref ?? null) : null;
 // E3 end
 
-export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<DatasetRefreshRequests, 'ask'> /* E3 */ }): McpToolDefinition {
+// P4-A2 (X35; the dashboard view's layer is G2's): the session's provisional layer of the call is committed from the
+// write's frame and dropped on any other ending (`withProvisional`). A refresh writes nothing here (main's sink publishes
+// it), so its layer is dropped once the call answers, published or not.
+export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<DatasetRefreshRequests, 'ask'> /* E3 */; provisional?: ProvisionalEmitter }): McpToolDefinition {
   return defineMawsTool(TOOL, (args, ctx) =>
-    deps.session.joined(opIdOf(ctx), () =>
+    withProvisional(deps.provisional, ctx.toolUseId, () => deps.session.joined(opIdOf(ctx), () =>
       answering(TOOL, async () => {
         const parsed = parseToolArguments(TOOL, args);
         if (!parsed.ok) return toolError(parsed.error);
@@ -326,6 +330,7 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
                         ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
                         : { status: 'dataset', artifactId, id: input.id, revision };
                       op.record(recorded);
+                      if (ctx.toolUseId !== null) deps.provisional?.committed(ctx.toolUseId, artifactId, revision); // P4-A2 (X35 rule 2)
                     },
                   },
                 );
@@ -339,6 +344,6 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
           (held as { release(): void } | null)?.release(); // E3
         }
       }),
-    ),
+    )),
   );
 }

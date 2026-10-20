@@ -38,14 +38,19 @@ import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboar
 import type { ArtifactStore } from '../documents/store';
 import { actorOf, answering, filesOf, lineageOf, loaderFields, opIdOf, pathsOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
+import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
 
 const TOOL = 'artifact_publish';
 const PAGE = 'index.html';
 
-export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
+// P4-A2 (X35; G2 draws it): the session's provisional layer of a Y kind's publish, committed from the write's frame and
+// dropped on any other ending of the call (`withProvisional`); an html page has none.
+type PublishDeps = ArtifactToolDeps & { provisional?: ProvisionalEmitter };
+
+export function artifactPublishTool(deps: PublishDeps): McpToolDefinition {
   return defineMawsTool(TOOL, (args, ctx) =>
-    deps.session.joined(opIdOf(ctx), () => answering(TOOL, async () => {
+    withProvisional(deps.provisional, ctx.toolUseId, () => deps.session.joined(opIdOf(ctx), () => answering(TOOL, async () => {
       const parsed = parseToolArguments(TOOL, args);
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
@@ -74,7 +79,7 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       await store.ensureMigrated(artifact.id, actorOf(ctx));
       const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
       return toolText(result);
-    })),
+    }))),
   );
 }
 
@@ -184,7 +189,7 @@ async function placed(store: ArtifactStore, recorded: ArtifactPublishResult, inp
   return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version: place, externalReferences: externalReferenceCount(text), ...(owner !== null && owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
-async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
+async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
   const replica = store.service.replica(ctx.appSessionId, artifact.id);
   let suggest = false;
@@ -241,6 +246,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
               outcome.result = { ...outcome.result, revision, changed: changedLive, kept, removed, ...(warnings.length > 0 && { warnings }) };
               op.record(outcome.result);
               store.linkInWrite(artifact.id, ctx.appSessionId, 'edited'); // P3-F: only with files taken, never on a refusal
+              if (ctx.toolUseId !== null) deps.provisional?.committed(ctx.toolUseId, target, written); // P4-A2 (X35 rule 2)
             },
           },
         );
