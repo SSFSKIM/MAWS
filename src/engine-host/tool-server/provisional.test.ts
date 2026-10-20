@@ -141,7 +141,7 @@ describe('the streamed layer', () => {
     expect(presence(doc)).toMatchObject({ editing: { blocks: ['tb1', 'p3', 'c1'] } }); // an insert's anchor is not edited
   });
 
-  it('reads a publish’s files and a dataset’s id (host-side, for G2’s layers), and nothing of a call to a kind its tool does not write', async () => {
+  it('shows a publish’s presence from the frame that names its deck and reads nothing more of its files until G2 draws them, and nothing of a call to a kind its tool does not write', async () => {
     const deck = (await world.store.create({ kind: 'presentation', title: 'Deck' }, HUMAN)).id;
     const end = world.connect(deck, HUMAN);
     const publish = id('toolu_publish');
@@ -149,17 +149,17 @@ describe('the streamed layer', () => {
       emitter.delta(publish, 'artifact_publish', piece);
       await tick();
     }
-    expect(layer(end).map((frame) => frame.ops)).toEqual([
-      [{ op: 'file', path: 'slides/01.html', text: '<section>One' }],
-      [{ op: 'file', path: 'slides/01.html', text: '<section>One</section>' }, { op: 'file', path: 'slides/03.html', text: '<sec' }],
-    ]);
-    expect(layer(end)[0]).toMatchObject({ kind: 'presentation', artifactId: deck });
+    expect(presence(deck)).toMatchObject({ name: 'Claude', editing: { blocks: [] } }); // on the deck from the first tick
+    expect(layer(end)).toEqual([]); // no frame: nothing draws a deck's files before G2
+    emitter.dropped(publish);
+    expect(layer(end)).toEqual([]); // and so nothing to withdraw
+    expect(presence(deck)?.editing).toBeUndefined();
     const page = (await world.store.create({ kind: 'html', title: 'Page', content: { bytes: Buffer.from('<p>Hi</p>'), name: 'index.html' } }, HUMAN)).id;
     emitter.delta(id('toolu_page'), 'artifact_publish', `{"artifact":"${page}","baseRevision":1,"files":{"index.html":"<p>Bye`);
     emitter.delta(id('toolu_edit_deck'), 'artifact_edit', `{"artifact":"${deck}","baseRevision":1,"ops":[{"op":"delete","id":"p4"}]}`);
     await tick();
     expect(world.service.loaded(page)).toBeNull(); // no replica, no presence, no frame
-    expect(layer(end)).toHaveLength(2);
+    expect(layer(end)).toEqual([]);
   });
 
   it('never writes: the document, its revision and its versions are as they were', async () => {
@@ -240,7 +240,7 @@ describe('the layer’s endings', () => {
     expect(layer(end)).toMatchObject([{ toolUseId: call, state: 'dropped', ops: [] }]);
   });
 
-  it('withdraws at once the layer of a publish that changes no file, releasing its outline', async () => {
+  it('releases a publish’s outline when it changes no file, sending no frame (its ops are not drawn until G2)', async () => {
     const artifactDeps = { artifacts: () => world.store, session: new ArtifactSession(), provisional: emitter };
     const created = json<{ artifactId: string }>(await artifactCreateTool(artifactDeps).call({ kind: 'design_system', title: 'Site', files: { 'a.html': 'A' } }, ctx()));
     const site = created.artifactId;
@@ -251,12 +251,12 @@ describe('the layer’s endings', () => {
       emitter.delta(call, 'artifact_publish', piece);
       await tick();
     }
-    expect(layer(end).map((frame) => frame.state)).toEqual(['streaming', 'streaming']);
+    expect(layer(end)).toEqual([]);
     expect(presence(site)).toMatchObject({ editing: { blocks: [] } });
     end.received.length = 0;
     expect(json(await artifactPublishTool(artifactDeps).call({ artifact: site, baseRevision: revision, files: { 'a.html': 'A' } }, ctx({ toolUseId: call })))).toMatchObject({ changed: [], revision });
     expect(end.received.filter((frame) => frame.type === 'update')).toEqual([]);
-    expect(layer(end)).toMatchObject([{ toolUseId: call, state: 'dropped', ops: [] }]);
+    expect(layer(end)).toEqual([]);
     expect(presence(site)?.editing).toBeUndefined();
   });
 

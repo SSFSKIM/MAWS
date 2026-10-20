@@ -68,6 +68,11 @@ describe('readPartialJson', () => {
     expect(readPartialJson('{"new": "han \\ud55c')).toEqual({ new: 'han 한' });
     expect(readPartialJson('{"new": "han \\ud5')).toEqual({ new: 'han ' });
     expect(readPartialJson('{"new": "han \\u')).toEqual({ new: 'han ' });
+    // an escaped backslash at the cut is whole, and a literal `u12` after one is text, not a cut escape
+    expect(readPartialJson('{"new": "abc\\\\')).toEqual({ new: 'abc\\' });
+    expect(readPartialJson('{"new": "a\\\\u12')).toEqual({ new: 'a\\u12' });
+    expect(readPartialJson('{"new": "a\\\\\\u12')).toEqual({ new: 'a\\' });
+    expect(readPartialJson('{"new": "C:\\\\Users\\\\')).toEqual({ new: 'C:\\Users\\' });
   });
 
   it('answers undefined for nothing and for a broken input', () => {

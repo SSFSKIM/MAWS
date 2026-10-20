@@ -99,11 +99,15 @@ describe('the provisional layers', () => {
     handle.send(frame('b', 'streaming', [op('The')]));
     handle.send(frame('b', 'committed', [op('The new')]));
     expect(texts()).toEqual([]);
+    // a call this replica never drew (it attached after the last tick): nothing drawn for the one task before its row
+    handle.send(frame('c', 'committed', [op('The whole batch')], 9));
+    expect(texts()).toEqual([]);
   });
 
   it('end the streams of a lost connection and keep the committed layers for the reconnect’s step 2', () => {
     const { handle, texts } = attached();
     handle.send(frame('a', 'streaming', [op('Streaming')]));
+    handle.send(frame('b', 'streaming', [op('Writ')]));
     handle.send(frame('b', 'committed', [op('Written')], 9));
     handle.change({ phase: 'off' });
     expect(texts()).toEqual(['b:Written']);

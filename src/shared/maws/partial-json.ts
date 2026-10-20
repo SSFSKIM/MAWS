@@ -16,7 +16,17 @@ interface Container {
 
 const NUMBER = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
 const LITERAL = /^(true|false|null)$/;
-const CUT_ESCAPE = /\\u[0-9a-fA-F]{0,3}$|\\$/;
+
+// A string cut inside an escape: a dangling backslash (an odd run of them: `\\\\` is an escaped backslash, whole) or a
+// `\\u` with fewer than four digits whose backslash is itself unescaped; the cut escape is dropped, the rest kept.
+function withoutCutEscape(text: string): string {
+  const trailing = /\\+$/.exec(text)?.[0].length ?? 0;
+  if (trailing % 2 === 1) return text.slice(0, -1);
+  const unicode = /\\u[0-9a-fA-F]{0,3}$/.exec(text);
+  if (!unicode) return text;
+  const run = /\\+$/.exec(text.slice(0, unicode.index + 1))?.[0].length ?? 0; // the backslashes ending with the escape's own
+  return run % 2 === 1 ? text.slice(0, unicode.index) : text;
+}
 
 export function readPartialJson(text: string): unknown {
   const trimmed = text.trimEnd();
@@ -99,7 +109,7 @@ export function readPartialJson(text: string): unknown {
     const container = top();
     if (container?.expect === 'key') cut = container.memberStart;
     else {
-      out = out.replace(CUT_ESCAPE, '') + '"';
+      out = withoutCutEscape(out) + '"';
       valueDone();
     }
   } else if (literalStart >= 0) {

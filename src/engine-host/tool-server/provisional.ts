@@ -43,6 +43,14 @@ const MAX_INPUT = 2 * 1024 * 1024;
 const INPUT_PER_MS = 8_000;
 const MAWS_PREFIX = `mcp__${MAWS_SERVER_NAME}__`; // the engine's name for a `maws` tool, as its tool_use block carries it
 
+// Whose ops stream to the renderers: the document batch's, which the document editor draws (M5). A publish's files and
+// a dataset's id are not drawn until G2 (the slide, design and dashboard layers), so until then their input is read
+// only until its target resolves (presence from the first delta, which needs the `artifact` key alone) and no further:
+// re-reading a whole-deck publish at every tick and decoding its frame on every connection of the doc, the host's own
+// agent replicas included, would cost the host loop and the open editor for nothing visible (the hand-back review).
+// G2 flips the flag per kind it draws; `opsOf` already reads the files and the id.
+const STREAMS_OPS: Record<ProvisionalTool, boolean> = { artifact_edit: true, artifact_publish: false, artifact_dataset: false };
+
 // The kinds each call writes; another kind's call is refused by its tool, so it shows nothing.
 const WRITES: Record<ProvisionalTool, (kind: ArtifactKind) => boolean> = {
   artifact_edit: (kind) => kind === 'document' || kind === 'dashboard',
@@ -66,7 +74,7 @@ interface Call {
   buffer: string;
   timer: ReturnType<typeof setTimeout> | null;
   started: boolean; // its `tools/call` arrived: the input is whole, nothing more is read
-  inert: boolean; // past MAX_INPUT, or a kind its tool does not write
+  inert: boolean; // past MAX_INPUT, a kind its tool does not write, or a tool whose ops are not drawn yet (presence stands)
   target: { id: string; kind: ArtifactKind; asSuggestions: boolean } | null;
   key: string | null; // the doc the layer is on: the artifact's, or its suggestion doc's
   sent: string | null; // the ops of the last streaming frame on `key` (JSON), null before one
@@ -259,6 +267,13 @@ export class ProvisionalEmitter {
     }
     const suggest = call.tool !== 'artifact_dataset' && (call.target.asSuggestions || input.mode === 'suggest');
     const key = suggest ? store.service.suggestionDoc(call.target.id) : call.target.id;
+    if (!STREAMS_OPS[call.tool]) {
+      // presence on the doc the owner's setting names, then nothing more of the input (the call's end releases it)
+      call.key = key;
+      this.present(store, call, key, []);
+      call.inert = true;
+      return;
+    }
     if (call.key !== null && call.key !== key) {
       // R7: the layer moves to the suggestion doc, withdrawn where it was drawn
       this.withdraw(store, call);
@@ -268,18 +283,23 @@ export class ProvisionalEmitter {
     }
     call.key = key;
     const { ops, blocks } = this.opsOf(store, call, input, whole);
-    const outline = JSON.stringify(blocks);
-    if (call.presence?.blocks !== outline) {
-      const agent = store.service.replica(this.deps.appSessionId, key);
-      agent.setPresence({ ...this.display, editing: { blocks } });
-      store.service.holdPresence(agent); // a turn end meanwhile leaves the outline to the call's ending
-      call.presence = { key, agent, blocks: outline };
-    }
+    this.present(store, call, key, blocks);
     const json = JSON.stringify(ops);
     if (json === (call.sent ?? '[]')) return;
     call.ops = ops;
     call.sent = json;
     store.service.broadcast(key, this.frame(call, 'streaming', ops));
+  }
+
+  // R6: the agent's presence on `key`, the blocks named so far outlined, held as a batch's outline is (a turn end
+  // meanwhile leaves it to the call's ending); republished only when the blocks change.
+  private present(store: ArtifactStore, call: Call, key: string, blocks: string[]): void {
+    const outline = JSON.stringify(blocks);
+    if (call.presence?.blocks === outline) return;
+    const agent = store.service.replica(this.deps.appSessionId, key);
+    agent.setPresence({ ...this.display, editing: { blocks } });
+    store.service.holdPresence(agent);
+    call.presence = { key, agent, blocks: outline };
   }
 
   // R1: the batch's ops as far as they parse, in op order, and the blocks they name so far (an insert's anchor is not

@@ -59,7 +59,10 @@ export class ProvisionalLayers {
         if (this.layers.get(id)?.state !== 'committed') this.set(id, frame);
         return;
       case 'committed':
-        // kept until its row is integrated; a frame without its seq names no row to wait for, so it goes at once
+        // kept until its row is integrated; a frame without its seq names no row to wait for, so it goes at once. A
+        // replica that never drew the call (attached after its last tick, or reconnected since) draws nothing now
+        // either: the real text is the next frame, and a layer for one paint before it would be a flash.
+        if (!this.layers.has(id)) return;
         this.set(id, (frame.commitSeq ?? 0) > this.source.state().integrated ? frame : null);
         return;
       case 'dropped':
