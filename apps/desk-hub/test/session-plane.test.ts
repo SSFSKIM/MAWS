@@ -294,7 +294,7 @@ describe('RPCs', () => {
     const m = await machine(project);
     await m.connect();
     await m.sync(project);
-    const current = m.name + '#' + m.generation;
+    const current = m.name + '#' + m.generation + '#replies';
     expect(await hub.projectQueues(project)).toContain(current);
     await hub.projectSend(project, m.name, m.generation - 1, { t: 'refused', project, refusal: { reason: 'not-open', message: 'late' } });
     expect(await hub.projectQueues(project)).toContain(current);
