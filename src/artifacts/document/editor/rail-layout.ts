@@ -6,9 +6,9 @@
 // watched as well, and every render of the editor measures again (a tab switch or a suggestion review mounts another).
 // A body not laid out (0 px wide) keeps the rail beside the page.
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { RAIL_BESIDE_FROM_PX } from '../rail-width'; // P4-B1: the margin's tiers read it too
 
-/** The body width from which the rail sits beside the page (the P3-E inspector's threshold, the architect's ruling). */
-export const RAIL_BESIDE_FROM_PX = 720;
+export { RAIL_BESIDE_FROM_PX }; // P4-B1
 
 export interface RailLayout {
   mode: 'beside' | 'drawer';
