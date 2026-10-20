@@ -166,8 +166,16 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
   });
 
   await test.step('the agent replies in the first thread while the owner types above: the card grows, the second is pushed, the active thread stays', async () => {
+    // the paragraph holding the caret, by index in the live editor (−1: the selection is not in it)
+    const caretParagraph = () =>
+      text.evaluate((el) => {
+        const node = window.getSelection()?.anchorNode;
+        const paragraph = (node instanceof Element ? node : node?.parentElement)?.closest('p') ?? null;
+        return paragraph ? Array.from(el.querySelectorAll('p')).indexOf(paragraph) : -1;
+      });
     await text.locator(`.comment-${t1}`).click();
     await expect(entry(t1)).toHaveAttribute('data-active', '');
+    expect(await caretParagraph(), 'the caret in the first passage after the click').toBe(1);
     const t2Before = await entryTop(t2);
     const h1Before = (await entry(t1).boundingBox())!.height;
     // the owner types at the end of the first paragraph (above both passages) while the reply lands. P4-B1: the caret
@@ -176,6 +184,7 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('End');
     await expect(entry(t1), 'the caret leaving by the keyboard keeps the thread').toHaveAttribute('data-active', '');
+    expect(await caretParagraph(), 'the caret at the first paragraph after ArrowUp and End').toBe(0);
     await text.evaluate((el) => {
       (el as HTMLElement).dataset.marker = 'before-reply'; // survives only if the editor is not remounted by the reply
     });
@@ -203,7 +212,7 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
       return { active: el ? `${el.tagName}.${el.className}` : null, editorKept: document.querySelector('.ProseMirror[data-marker="before-reply"]') !== null };
     });
     const paragraphs = await text.locator('p').allTextContents();
-    expect(paragraphs[0], `the owner's words appended to the first paragraph (${JSON.stringify({ ...where, paragraphs })})`).toContain('agenda is set. More words typed here.');
+    expect(paragraphs[0], `the owner's words appended to the first paragraph (${JSON.stringify({ ...where, caretParagraph: await caretParagraph(), paragraphs })})`).toContain('agenda is set. More words typed here.');
     await page.screenshot({ path: 'test-results/document-margin-grown.png' });
   });
 
