@@ -11,7 +11,7 @@ import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { importMarkdown } from '../import/markdown';
 import { schemaFor } from '../schema';
 import { addTab, createDocument, listTabs, tabBody } from '../tabs';
-import { DocumentEditor } from './DocumentEditor';
+import { DocumentEditor, type DocumentReveal } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import type { MentionSource, MentionTarget } from './MentionPicker';
@@ -1070,5 +1070,75 @@ describe('a control drawn before the store turned read-only', () => {
       kept.discard(threadId);
     });
     expect(getThread(handle.doc, threadId)).toMatchObject({ status: 'open', messages: [] });
+  });
+});
+
+// P4-B4 (the link grammar; "Opening at a place"): a reveal asked from outside the editor (a link's fragment, show_pane's
+// at) selects the block's tab, puts the caret at the block's start and scrolls it into view once that tab's editor has
+// bound; a tab alone is selected; a version opens the history rail previewing it; a place the document does not have
+// opens it as a plain open does. Each reveal is taken once (`onRevealed`).
+describe('a reveal asked from outside', () => {
+  async function mountRevealing(first: DocumentReveal | null) {
+    world = new World(doc(para('a1', 'First tab text')));
+    world.host.write((d) => addTab(d, { title: 'Appendix', id: 't2', body: schemaFor().nodeFromJSON(doc(para('b1', 'Appendix opening'), para('b2', 'The answer is here'))) }));
+    history = new MemoryHistory(world.host);
+    history.version('named', { kind: 'human' }, { label: 'Before' });
+    const handle = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(handle);
+    await whenSynced(handle);
+    let current: Editor | null = null;
+    const revealed = vi.fn();
+    const scrolled: number[] = []; // the selection's head at each transaction that scrolled it into view
+    const onEditor = (editor: Editor | null) => {
+      current = editor;
+      editor?.on('transaction', ({ transaction }) => {
+        if (transaction.scrolledIntoView) scrolled.push(transaction.selection.head);
+      });
+    };
+    const view = (reveal: DocumentReveal | null) => <DocumentEditor artifactId="doc1" handle={handle} host={owner} history={history!} reveal={reveal} onRevealed={revealed} onEditor={onEditor} />;
+    const rendered = render(view(first));
+    return { editor: () => current, revealed, scrolled, rerender: (reveal: DocumentReveal | null) => rendered.rerender(view(reveal)) };
+  }
+  const selectedTab = () => screen.getByRole('tab', { selected: true }).textContent;
+  const startOf = (editor: Editor, id: string) => {
+    let at = -1;
+    editor.state.doc.forEach((node, offset) => {
+      if (node.attrs.id === id) at = offset + 1; // inside the paragraph, before its first character
+    });
+    return at;
+  };
+
+  it('selects a block’s tab from the block alone, the caret at its start, scrolled into view', async () => {
+    const { editor, revealed, scrolled } = await mountRevealing({ serial: 1, location: { block: 'b2' } });
+    await until(() => editor()?.getText().includes('The answer is here') === true && editor()!.state.selection.head === startOf(editor()!, 'b2'), 'the block revealed');
+    expect(selectedTab()).toContain('Appendix');
+    expect(scrolled).toContain(startOf(editor()!, 'b2'));
+    expect(revealed).toHaveBeenCalledWith(1);
+  });
+
+  it('reveals in an editor already showing the document, and a tab alone selects that tab', async () => {
+    const { editor, revealed, rerender } = await mountRevealing(null);
+    await until(() => editor()?.getText() === 'First tab text', 'the first tab');
+    rerender({ serial: 2, location: { tab: 't2' } });
+    await until(() => editor()?.getText().startsWith('Appendix opening') === true, 'the second tab');
+    expect(selectedTab()).toContain('Appendix');
+    rerender({ serial: 3, location: { tab: 't2', block: 'a1' } }); // the block names its own tab
+    await until(() => editor()?.getText() === 'First tab text' && editor()!.state.selection.head === startOf(editor()!, 'a1'), 'the first tab’s block');
+    expect(revealed.mock.calls).toEqual([[2], [3]]);
+  });
+
+  it('opens the history rail previewing a version named by its id', async () => {
+    await mountRevealing({ serial: 4, location: { version: 1 } });
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null, 'the version previewed');
+    expect(screen.getByRole('complementary', { name: 'Version history' })).toBeTruthy();
+  });
+
+  it('opens a place the document does not have as a plain open: the first tab, no rail', async () => {
+    const { editor, revealed } = await mountRevealing({ serial: 5, location: { block: 'gone', tab: 'nope', version: 9 } });
+    await until(() => editor()?.getText() === 'First tab text', 'the first tab');
+    await ticks(20);
+    expect(selectedTab()).toContain('Main');
+    expect(screen.queryByRole('complementary', { name: 'Version history' })).toBeNull();
+    expect(revealed).toHaveBeenCalledWith(5);
   });
 });

@@ -8,7 +8,8 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { setDsOverrides } from '@artifacts/document/meta';
-import { createDocument } from '@artifacts/document/tabs';
+import { addTab, createDocument } from '@artifacts/document/tabs';
+import { schemaFor } from '@artifacts/document/schema';
 import type { ArtifactHost } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
@@ -18,6 +19,7 @@ import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
 import { useLayout } from '../../stores/layout';
 import { resetShellStores } from '../../test-support/shell-stores';
+import { requestArtifactOpen, resetOpenRequests, takeOpenRequest } from '../artifacts/viewers/requests';
 import { PageSystemProvider, provideDocumentDesignSystem, SystemPage, type DesignSystemScopeProps } from './design-system';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
@@ -99,6 +101,24 @@ function mount({ visible = true, onShown = vi.fn<() => void>() }: { visible?: bo
   return { state: hold.state as DocumentTabState, onShown, view, setVisible: (now: boolean) => view.rerender(tree(now)), remount: (now: boolean) => (view.unmount(), render(tree(now))) };
 }
 const shown = () => until(() => document.querySelector('.ds-doc .ProseMirror') !== null, 'the page');
+
+// P4-B4: an open's place (a link's fragment, show_pane's at) is the open request for this artifact on this surface; the
+// body hands it to the editor, which reveals it and takes it once, so a later remount shows the document as it was left
+describe('an open at a place', () => {
+  afterEach(() => resetOpenRequests());
+
+  it('reveals the block a link names in its tab and takes the request', async () => {
+    const body = schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b9' }, content: [{ type: 'text', text: 'The answer' }] }] });
+    memory.write((doc) => addTab(doc, { title: 'Findings', id: 't2', body }));
+    const serial = requestArtifactOpen(A, 'latest', 'panel', { block: 'b9' });
+    mount();
+    await shown();
+    await until(() => screen.queryByRole('tab', { selected: true })?.textContent?.includes('Findings') === true, 'the block’s tab');
+    const page = document.querySelector('.ds-doc .ProseMirror') as unknown as { editor?: { state: { selection: { head: number } } } };
+    await until(() => page.editor?.state.selection.head === 1, 'the caret at the block’s start');
+    expect(takeOpenRequest(serial), 'taken by the editor').toBe(false);
+  });
+});
 
 describe('the document editor in L’s registry', () => {
   it('registers Panel and Main with the tab’s state, and opens the document there', async () => {

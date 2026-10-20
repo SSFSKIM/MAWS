@@ -6,7 +6,7 @@ import { applyV1, applyV2, diffV1, newDoc, stateV2, stateVector } from '../yjs';
 import { ynodeToPmnode } from '../yjs/prosemirror';
 import { dsOverrides, setDsOverrides } from './meta';
 import { schemaFor } from './schema';
-import { addTab, createDocument, deleteTab, keyBetween, listTabs, moveTab, renameTab, tabBody } from './tabs';
+import { addTab, createDocument, deleteTab, keyBetween, listTabs, moveTab, renameTab, tabBody, tabOfBlock } from './tabs';
 
 const schema = schemaFor();
 let n = 0;
@@ -140,5 +140,21 @@ describe('the document’s own settings (the root meta node)', () => {
     expect(dsOverrides(reloaded)).toEqual({ '--ds-color-accent': '#0a84ff' });
     setDsOverrides(reloaded, null);
     expect(dsOverrides(reloaded)).toEqual({});
+  });
+});
+
+// P4-B4 (the link grammar): a link's `#block=` names a block alone, its tab found from it (block ids are unique in a
+// document), at any depth
+describe('tabOfBlock', () => {
+  it('names the tab holding a block, a nested one too, and null for an id no tab holds', () => {
+    const doc = newDoc();
+    const body = (...blocks: object[]) => schema.nodeFromJSON({ type: 'doc', content: blocks });
+    const para = (id: string, text: string) => ({ type: 'paragraph', attrs: { id }, content: [{ type: 'text', text }] });
+    const first = createDocument(doc, { title: 'Main', id: 'tA', body: body(para('a1', 'one'), para('a2', 'two')) });
+    const second = addTab(doc, { title: 'Appendix', id: 'tB', body: body(para('b1', 'three'), { type: 'blockquote', attrs: { id: 'b2' }, content: [para('b3', 'quoted')] }) });
+    expect(tabOfBlock(doc, 'a2')).toBe(first);
+    expect(tabOfBlock(doc, 'b1')).toBe(second);
+    expect(tabOfBlock(doc, 'b3'), 'nested inside a top-level block').toBe(second);
+    expect(tabOfBlock(doc, 'nope')).toBeNull();
   });
 });
