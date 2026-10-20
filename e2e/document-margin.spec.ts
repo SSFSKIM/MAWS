@@ -173,34 +173,14 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
         const paragraph = (node instanceof Element ? node : node?.parentElement)?.closest('p') ?? null;
         return paragraph ? Array.from(el.querySelectorAll('p')).indexOf(paragraph) : -1;
       });
-    // the DOM selection as the page has it (anchor and focus by paragraph index, the focused element, each mark's
-    // paragraph), read twice around the click into the assertion's message
-    const selectionState = () =>
-      text.evaluate((el) => {
-        const paragraphs = Array.from(el.querySelectorAll('p'));
-        const indexOf = (node: Node | null | undefined) => {
-          const paragraph = (node instanceof Element ? node : node?.parentElement)?.closest('p') ?? null;
-          return paragraph ? paragraphs.indexOf(paragraph) : -1;
-        };
-        const selection = window.getSelection();
-        const focused = document.activeElement;
-        return {
-          anchor: indexOf(selection?.anchorNode),
-          anchorOffset: selection?.anchorOffset,
-          focus: indexOf(selection?.focusNode),
-          focusOffset: selection?.focusOffset,
-          collapsed: selection?.isCollapsed,
-          activeElement: focused ? `${focused.tagName}.${focused.className}` : null,
-          marks: Array.from(el.querySelectorAll<HTMLElement>('[data-thread]')).map((mark) => `${mark.dataset.thread}@${indexOf(mark)}`),
-        };
-      });
-    const beforeClick = await selectionState();
+    // the owner's keyboard is on the toolbar after the panel's round trip and the editor's own selection is still the
+    // second passage: a click in the first paragraph (plain text: nothing to clear) brings the keyboard back to the page
+    // first. A click on a passage of an unfocused page can leave the caret where it was: ProseMirror re-syncs its
+    // selection to the DOM 20 ms after a focus, and the activation's render on the mini ran past that
+    await text.locator('p').first().click();
     await text.locator(`.comment-${t1}`).click();
-    const afterClick = await selectionState();
     await expect(entry(t1)).toHaveAttribute('data-active', '');
-    await page.waitForTimeout(300);
-    const settledClick = await selectionState();
-    expect(await caretParagraph(), `the caret in the first passage after the click (${JSON.stringify({ t1, t2, beforeClick, afterClick, settledClick })})`).toBe(1);
+    expect(await caretParagraph(), 'the caret in the first passage after the click').toBe(1);
     const t2Before = await entryTop(t2);
     const h1Before = (await entry(t1).boundingBox())!.height;
     // the owner types at the end of the first paragraph (above both passages) while the reply lands. P4-B1: the caret
