@@ -26,6 +26,8 @@ DESKTOP_T = os.path.join(HERE, 'fixtures', 'desktop-B1.jsonl')
 DECK = os.path.join(HERE, 'seed', 'maws-deck')
 B5 = "In the slide deck \"Autumn Workshops 2026\", on slide 2, change the session lead's date to 21 October. Change nothing else."
 URL = 'https://claude.ai/artifact/5d1c9a7e'
+OTHER = 'https://claude.ai/artifact/9e0b4f21'  # another Artifact, as a same-titled deck would be
+SLIDES = 'https://claude.ai/artifact-type/slides'
 
 
 def read(path):
@@ -134,14 +136,17 @@ class CoworkDeck(Prep):
     TIMED_MNT = '/sessions/timed/mnt/MAWS parity bench'
 
     def seed(self):
-        """A seed session: the deck's files written into the folder and published, one call per data file."""
+        """A seed session: the deck's files written into the folder, then created and published in one call (`root` the
+        deck's folder, `file_path` relative to the working directory, `files` sources relative to `root`); the deck's url
+        is only in the call's result, never in the records' inputs."""
         r = Recorder(self.SEED_MNT)
         r.human('Publish the deck in deck/ as a Slides artifact titled "Autumn Workshops 2026".')
         files = sorted(os.path.relpath(os.path.join(root, n), DECK) for root, _, names in os.walk(DECK) for n in names)
         for rel in files:
             with open(os.path.join(DECK, rel), encoding='utf-8') as f:
                 r.call('Write', {'file_path': '%s/deck/%s' % (self.SEED_MNT, rel), 'content': f.read()})
-        r.call('Artifact', {'file_path': 'deck/project/deck.json', 'files': {rel: 'deck/' + rel for rel in files if rel != 'project/deck.json'}})
+        r.call('Artifact', {'type_url': SLIDES, 'title': 'Autumn Workshops 2026', 'root': 'deck', 'file_path': 'deck/project/deck.json',
+                            'files': {rel: rel for rel in files if rel != 'project/deck.json'}})
         return records(os.path.join(self.dir, 'seed.jsonl'), r.recs)
 
     def test_after_rebuilds_before_and_after_from_the_records(self):
@@ -149,9 +154,10 @@ class CoworkDeck(Prep):
         self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork')
         r = Recorder(self.TIMED_MNT, start=600)
         r.human(B5)
-        r.call('Artifact', {'action': 'read', 'url': 'https://claude.ai/x'})
-        r.call('Artifact', {'file_path': 'deck/project/slides/sessions.html', 'edits': [{'old_str': '14 October', 'new_str': '21 October'}]}, ok=False)
-        r.call('Artifact', {'file_path': 'deck/project/slides/sessions.html', 'edits': [{'old_str': 'Grace Okafor, 14 October', 'new_str': 'Grace Okafor, 21 October'}]})
+        r.call('Artifact', {'action': 'read', 'url': 'https://claude.ai/artifact/0ther'})  # a read names no deck
+        edit = {'url': URL, 'root': 'deck', 'file_path': 'deck/project/slides/sessions.html'}
+        r.call('Artifact', dict(edit, edits=[{'old_str': '14 October', 'new_str': '21 October'}]), ok=False)
+        r.call('Artifact', dict(edit, edits=[{'old_str': 'Grace Okafor, 14 October', 'new_str': 'Grace Okafor, 21 October'}]))
         self.cowork_session(r)
         out = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--seed-transcript', seed)
         self.assertEqual(out['seedCheck']['pass'], True, out['seedCheck'])
@@ -160,6 +166,9 @@ class CoworkDeck(Prep):
         with open(out['manifest'], encoding='utf-8') as f:
             m = json.load(f)
         self.assertEqual((m['landing'], m['landingFiles'], m['landingActions']), (['Artifact', 'mcp__cowork__update_artifact'], None, {'Artifact': ['publish', None]}))
+        # the seed's records name no url, so the timed turn's is the deck's, and the manifest says so
+        self.assertEqual(m['deckUrl'], URL)
+        self.assertIn("the seed's records name none", m['deckUrlFrom'])
 
     # The Slides flow as 2.1.302 prescribes it: a quickstart, a `type_url` publish that creates the deck, its files written
     # under one folder (the index first, then the cover) and published to the url with `root` (`file_path` one file's
@@ -172,7 +181,7 @@ class CoworkDeck(Prep):
         r = Recorder(self.SEED_MNT)
         r.human('Make a slide deck titled "Autumn Workshops 2026" from the files in deck/.')
         r.call('Artifact', {'action': 'quickstart', 'intent': 'slides'})
-        r.call('Artifact', {'type_url': 'https://claude.ai/artifact-type/slides', 'title': 'Autumn Workshops 2026', 'auto_open': 'after_first_write'})
+        r.call('Artifact', {'type_url': SLIDES, 'title': 'Autumn Workshops 2026', 'auto_open': 'after_first_write'})
         put = lambda rel: r.call('Write', {'file_path': '%s/%s' % (self.SCRATCH, rel), 'content': read(os.path.join(DECK, rel))})
         slides = ['project/slides/%s.html' % sid for sid in json.loads(read(os.path.join(DECK, 'project', 'deck.json')))['order']]
         put('project/deck.json')
@@ -188,16 +197,27 @@ class CoworkDeck(Prep):
         r.call('Artifact', {'action': 'verify', 'url': URL})
         return records(os.path.join(self.dir, 'seed.jsonl'), r.recs)
 
-    def timed_b5(self):
-        """A fresh session's B5 edit: the deck read, slide 2's file saved by read_file, edited there and published."""
+    def timed_b5(self, read_url=URL, **publish):
+        """A fresh session's B5 edit: the deck read, slide 2's file saved by read_file, edited there and published
+        (`publish` overrides the publish's input; None drops a key)."""
         r = Recorder(self.TIMED_MNT, start=600)
         r.human(B5)
         r.call('Artifact', {'action': 'list'})
         r.call('Artifact', {'action': 'read', 'url': URL})
-        r.call('Artifact', {'action': 'read_file', 'url': URL, 'path': 'project/slides/sessions.html'})
+        r.call('Artifact', {'action': 'read_file', 'url': read_url, 'path': 'project/slides/sessions.html'})
         r.call('Edit', {'file_path': self.SAVED + '/project/slides/sessions.html', 'old_string': 'Grace Okafor, 14 October', 'new_string': 'Grace Okafor, 21 October'})
-        r.call('Artifact', {'url': URL, 'root': self.SAVED, 'file_path': self.SAVED + '/project/slides/sessions.html'})
+        inp = dict({'url': URL, 'root': self.SAVED, 'file_path': self.SAVED + '/project/slides/sessions.html'}, **publish)
+        r.call('Artifact', {k: v for k, v in inp.items() if v is not None})
         return r
+
+    def stopped(self, rep, timed, seed):
+        """`after` on a timed turn the rebuild must refuse: it stops with its reason and writes no manifest."""
+        self.main('before', 'B5', str(rep), '--out', self.run_dir, '--surface', 'cowork')
+        self.cowork_session(timed)
+        with self.assertRaises(SystemExit) as stopped:
+            prep.main(['after', 'B5', str(rep), '--out', self.run_dir, '--permissions-answered', '0', '--seed-transcript', seed])
+        self.assertFalse(os.path.exists(os.path.join(self.run_dir, 'desktop-B5-r%d' % rep, 'manifest.json')))
+        return str(stopped.exception)
 
     def test_the_slides_flow_of_2_1_302(self):
         seed = self.seed_slides()
@@ -207,14 +227,57 @@ class CoworkDeck(Prep):
         self.assertTrue(out['seedCheck']['pass'], out['seedCheck'])
         self.assertTrue(out['check']['pass'], out['check'])
         self.assertEqual((out['afterSource'], out['valid'], out['permissionMode']), ("rebuilt from the records' calls", 'yes', 'auto'))
-        # the hold's first read of the same seed: the rebuilt deck is the bench's, and the seed turn's mode is printed
+        self.assertEqual((out['deckUrl'], out['deckUrlFrom']), (URL, "the seed's records"))
+        # the hold's first read of the same seed: the rebuilt deck is the bench's, its url and the seed turn's mode printed
         first = self.main('deck', seed, os.path.join(self.dir, 'cowork-seed'))
         self.assertTrue(first['same']['pass'], first['same'])
-        self.assertEqual(first['permissionModes'], ['auto'])
+        self.assertEqual((first['url'], first['permissionModes']), (URL, ['auto']))
+
+    def test_a_publish_off_the_decks_paths_fails_loudly(self):
+        """The engine serves a data file_path at its path relative to `root`: `root` at the slide's own folder serves a
+        stray top-level sessions.html, `root` a level too high serves it under the saved folder's name. Neither edits
+        slide 2, so neither may pass B5."""
+        seed = self.seed_slides()
+        for rep, root in ((1, self.SAVED + '/project/slides'), (2, os.path.dirname(self.SAVED))):
+            with self.subTest(root=root):
+                why = self.stopped(rep, self.timed_b5(root=root), seed)
+                self.assertIn("published files outside the deck's project/ layout", why)
+
+    def test_the_timed_turn_edits_the_seeds_deck_only(self):
+        """A create in the timed turn, a publish or read_file to another Artifact's url, and a publish naming no url of a
+        file never published in the session (the engine would make it a new Artifact) each fail loudly."""
+        seed = self.seed_slides()
+        cases = [
+            (dict(type_url=SLIDES, title='Autumn Workshops 2026', url=None), 'type_url in the timed turn'),
+            (dict(url=OTHER), 'another Artifact than the deck'),
+            (dict(read_url=OTHER), 'another Artifact than the deck'),
+            (dict(url=None), 'naming no url'),
+        ]
+        for rep, (change, why) in enumerate(cases, 1):
+            with self.subTest(change=change):
+                self.assertIn(why, self.stopped(rep, self.timed_b5(**change), seed))
+
+    def test_the_deck_is_one_artifact_through_the_seed(self):
+        call = lambda inp, cwd='/w': dict(name='Artifact', input=inp, cwd=cwd, ok=True, id='t')
+        r = prep.Replay()
+        r.apply(dict(call({}), name='Write', input={'file_path': '/w/d/project/deck.json', 'content': '{}'}))
+        r.apply(call({'type_url': SLIDES, 'root': 'd', 'file_path': 'd/project/deck.json'}))
+        r.apply(call({'root': 'd', 'file_path': 'd/project/deck.json'}))  # no url: where this file went, the new deck
+        self.assertEqual((r.published, r.url), ({'project/deck.json': '{}'}, None))
+        r.apply(call({'url': URL + '/', 'root': 'd', 'file_path': 'd/project/deck.json'}))  # its url, learned from the seed
+        self.assertEqual((r.url, r.url_from), (URL + '/', 'seed'))
+        r.apply(call({'action': 'read_file', 'url': URL + '?v=2', 'path': 'project/deck.json'}))  # another spelling of it
+        r.apply(call({'type_url': SLIDES, 'root': 'd', 'file_path': 'd/project/deck.json'}))  # the seed made another deck
+        with self.assertRaisesRegex(prep.RebuildError, 'replaced'):
+            r.apply(call({'url': URL, 'root': 'd', 'file_path': 'd/project/deck.json'}))
+        r.timed(same_session=False)  # another session remembers none of the seed's files' urls
+        with self.assertRaisesRegex(prep.RebuildError, 'naming no url'):
+            r.apply(call({'root': 'd', 'file_path': 'd/project/deck.json'}))
 
     def test_read_file_carries_the_published_text_to_the_edit(self):
         """With no seed records (the deck before is the bench's), only read_file can give the edited copy its text."""
         r = prep.Replay(prep.seed_files())
+        r.timed(same_session=False)
         for c in self.timed_b5().recs:
             for b in (c.get('message') or {}).get('content') or []:
                 if isinstance(b, dict) and b.get('type') == 'tool_use':
@@ -271,15 +334,22 @@ class CoworkDeck(Prep):
         r.apply(call('Artifact', {'action': 'run_script', 'url': 'u', 'mode': 'query'}))
         r.apply(call('Write', {'file_path': '/w/p.html', 'content': '<section><h2>A</h2></section>'}))
         with self.assertRaisesRegex(prep.RebuildError, 'unknown shape'):
-            r.apply(call('Artifact', {'file_path': '/w/p.html', 'edits': [{'find': 'A', 'replace': 'B'}]}))
+            r.apply(call('Artifact', {'url': 'u', 'file_path': '/w/p.html', 'edits': [{'find': 'A', 'replace': 'B'}]}))
         # files of shapes the schema does not have or the records cannot follow, each the rebuild's own error (the
-        # engine's list form, objects, was a TypeError before; seed_slides publishes it)
-        for files in (['p.html'], [{'path': 'p.html', 'live': True}], {'q.html': {'artifact': 'v', 'path': 'q.html'}}, {'q.html': 3}, 'p.html'):
+        # engine's list form, objects, was a TypeError before; seed_slides publishes it), and published paths the
+        # engine refuses (absolute, "..", empty segments)
+        for files in (['p.html'], [{'path': 'p.html', 'live': True}], {'q.html': {'artifact': 'v', 'path': 'q.html'}}, {'q.html': 3}, 'p.html',
+                      [{'path': '/w/p.html'}], {'../p.html': 'p.html'}, {'a//p.html': 'p.html'}):
             with self.assertRaises(prep.RebuildError):
-                r.apply(call('Artifact', {'url': 'u', 'files': files}))
+                r.apply(call('Artifact', {'url': 'u', 'file_path': '/w/p.html', 'files': files}))
+        with self.assertRaisesRegex(prep.RebuildError, 'no file_path'):
+            r.apply(call('Artifact', {'url': 'u', 'files': {'q.html': 'p.html'}}))
+        # a data file outside `root` (or the working directory) is refused by the engine, never served under it
+        with self.assertRaisesRegex(prep.RebuildError, 'not inside /w/b'):
+            r.apply(call('Artifact', {'url': 'u', 'root': 'b', 'file_path': '/w/p.html'}))
         with self.assertRaisesRegex(prep.RebuildError, 'occurs 0 times'):
-            r.apply(call('Artifact', {'file_path': '/w/p.html', 'edits': [{'old_str': 'Z', 'new_str': 'B'}]}))
-        r.apply(call('Artifact', {'file_path': '/w/p.html', 'edits': [{'old_str': '>A<', 'new_str': '>B<'}]}))
+            r.apply(call('Artifact', {'url': 'u', 'file_path': '/w/p.html', 'edits': [{'old_str': 'Z', 'new_str': 'B'}]}))
+        r.apply(call('Artifact', {'url': 'u', 'file_path': '/w/p.html', 'edits': [{'old_str': '>A<', 'new_str': '>B<'}]}))
         self.assertEqual(r.published, {'p.html': '<section><h2>B</h2></section>'})
 
 

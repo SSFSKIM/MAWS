@@ -214,31 +214,41 @@ attempt is valid, so the hold knows at once which cell needs another repetition.
 (no session found, or a deck it can neither rebuild nor take from bench-after/) it exits and leaves the attempt open, so
 `after` can run again once the cause is fixed (a wrong --seed-transcript, bench-after/ still to be written); the reason
 is kept in the attempt's pending.json, and an attempt redone instead is closed as aborted with that reason. `deck`
-rebuilds a Cowork deck from a session's records for the hold's first read and prints, beside `same`, the permission mode
-each of the session's human turns was recorded in; `kinds` is the first read of §3 and prints the recorded permission
-mode too (a Cowork audit's system/init, a transcript's human records).
+rebuilds a Cowork deck from a session's records for the hold's first read and prints, beside `same`, the deck's url
+and the permission mode each of the session's human turns was recorded in; `kinds` is the first read of §3 and prints
+the recorded permission mode too (a Cowork audit's system/init, a transcript's human records).
 
-A Cowork deck is rebuilt from the records. The engine's `Artifact` tool publishes local files (2.1.302's schema:
-`file_path` the page or a data file; `edits`, old_str/new_str pairs applied to that file on disk and then published;
-`files` the other files, either a map {published path: source path | {from, contentType} | null} or a list
-[{path, contentType}] publishing each file at its own spelling from that path; `root` the folder relative sources resolve
-against), so the deck's text lives in the transcript's own `Write`, `Edit` and `MultiEdit` calls, the publish's `edits`,
+A Cowork deck is rebuilt from the records. The engine's `Artifact` tool publishes local files (2.1.302's schema and
+cli.pretty.js `bg()`: `file_path` the page or, on an Artifact made from a type such as the Slides deck, a data file
+served at its path relative to `root`, else to the working directory, and refused when it lies outside; `edits`,
+old_str/new_str pairs applied to that file on disk and then published; `files` the other files, either a map
+{published path: source path | {from, contentType} | null} or a list [{path, contentType}] publishing each file at its
+own spelling from that path; `root` the folder relative sources resolve against, which never changes a published
+path), so the deck's text lives in the transcript's own `Write`, `Edit` and `MultiEdit` calls, the publish's `edits`,
 and the published files `read_file` saves locally. 2.1.302's Slides flow is a quickstart, a `type_url` publish that
 creates the deck, the index and slides written under one folder and published to the deck's url with `root`,
 `file_path` and `files`; a later edit reads the deck, saves the slide's file with `read_file`, edits it there and
-publishes it. The rebuild replays the successful calls in order: a publish (a `type_url` one starts a new deck from its
-own files, else from none), a `read_file` (the published text then found under the published path wherever it was saved);
-every other action of the engine's list (cli.pretty.js `Qe()`, and its consolidated spellings) leaves the files as they
-were, save those that change the artifact in ways the records do not carry (sync, write_db, upload_asset, delete_asset,
-copy_from, delete, call_endpoint, a mutating run_script). The seed's calls (`after --seed-transcript T`, T possibly the
-timed transcript itself; its calls up to the timed turn's send) give the deck before, checked `same` against
-seed/maws-deck and recorded as seedCheck; the timed turn's calls carry it on to the deck after. A file named under
-another session's mount of the folder is matched by its trailing path. Anything the rebuild cannot follow (an edit of a
-file whose text is not in the records, one of those actions or one not in the list, an edit or a files entry of an
-unknown shape, published files outside the deck's layout, any unexpected error on the way) fails loudly; for the deck
-after, the files the driver's untimed follow-up has the model write to bench-after/ are then the last resort, and the
-manifest says so (`afterSource`, with `rebuildError`). The rebuild is tested on synthesized records only (prep_test.py,
-the 2.1.302 Slides flow among them); the hold's first step tries it on real ones.
+publishes it. The rebuild replays the successful calls in order and computes each published path the engine's way, so
+a publish whose `root` serves the slide anywhere but its project/ path adds a stray file rather than editing the slide,
+and fails. It follows one deck: a `type_url` publish (a create) starts it from its own files and is allowed only in the
+seed's calls; the first publish or read_file naming a url after the seed's last create names the deck's url, and every
+later one must name the same Artifact; a publish naming no url goes where its `file_path` was last published in the
+session, and is followed only when that was the deck in the same session (otherwise the engine sends it somewhere the
+records do not show, or makes a new Artifact). When the seed's records name no url (a create whose url is only in its
+result, or no seed records), the timed turn's first url is taken as the deck's and the manifest says so (`deckUrl`,
+`deckUrlFrom`). A `read_file` puts the published text under the published path wherever it was saved; every other
+action of the engine's list (cli.pretty.js `Qe()`, and its consolidated spellings) leaves the files as they were, save
+those that change the artifact in ways the records do not carry (sync, write_db, upload_asset, delete_asset, copy_from,
+delete, call_endpoint, a mutating run_script). The seed's calls (`after --seed-transcript T`, T possibly the timed
+transcript itself; its calls up to the timed turn's send) give the deck before, checked `same` against seed/maws-deck
+and recorded as seedCheck; the timed turn's calls carry it on to the deck after. A file named under another session's
+mount of the folder is matched by its trailing path. Anything the rebuild cannot follow (an edit of a file whose text is
+not in the records, one of those actions or one not in the list, an edit or a files entry of an unknown shape, a data
+file outside its `root`, published files outside the deck's layout, a create in the timed turn, a publish or read_file
+to another url or to an unknown one, any unexpected error on the way) fails loudly; for the deck after, the files the
+driver's untimed follow-up has the model write to bench-after/ are then the last resort, and the manifest says so
+(`afterSource`, with `rebuildError`). The rebuild is tested on synthesized records only (prep_test.py, the 2.1.302
+Slides flow among them, and the publishes it must refuse); the hold's first step tries it on real ones.
 
 Dry-run end to end against a fake Desktop store (the Desktop fixture as the session's transcript) through `report`.
 desktop-driver.js is the GUI half for `cua_repl`: written, not run (no GUI automation in this phase). Its labels are
