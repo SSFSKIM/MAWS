@@ -290,15 +290,27 @@ describe('a document tab’s state', () => {
     const w = world();
     const state = w.open();
     await ready(state);
-    recordCommentDraft(A, { hostId: 'document:r1', serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
+    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
     expect(await state.closeGuard()).toBe(false);
     expect(w.confirm).toHaveBeenCalledWith('Discard your unsent comment?');
     w.confirm.mockReturnValueOnce(true);
     expect(await state.closeGuard()).toBe(true); // nothing unsaved besides
-    recordCommentDraft(A, { hostId: 'document:r1', serial: 1, threadId: 'k2m9x0qa', text: '' });
+    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: '' });
     w.confirm.mockClear();
     expect(await state.closeGuard()).toBe(true);
     expect(w.confirm).not.toHaveBeenCalled();
+  });
+
+  // P4-B3 (its Decision Log 39): the document open in another view too, the comment on that view's card goes nowhere
+  // when this tab closes, so this tab's guard does not ask about it.
+  it('does not ask about an unsent comment on another view’s card', async () => {
+    const w = world();
+    const state = w.open();
+    await ready(state);
+    recordCommentDraft(A, { hostId: 'document:another-view', serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
+    expect(await state.closeGuard()).toBe(true);
+    expect(w.confirm).not.toHaveBeenCalled();
+    recordCommentDraft(A, { hostId: 'document:another-view', serial: 1, threadId: 'k2m9x0qa', text: '' });
   });
 
   it('lets the tab close when everything is saved, waits for a save in flight, and asks when it does not land', async () => {

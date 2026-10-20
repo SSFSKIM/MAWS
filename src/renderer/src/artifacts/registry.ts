@@ -49,6 +49,10 @@ export interface ArtifactEditor<S = unknown> {
   // P4-B3 (its Decision Log 19): the state was handed to a tab on another surface by a move (`adoptStagedArtifactEditorState`);
   // a state that keeps the surface it was made for follows it here.
   moved?(state: S, target: ArtifactEditorTarget): void;
+  // P4-B3 (its Decision Log 39): a move onto a surface already showing the artifact activates that view and closes the
+  // source (`handArtifactViewOver`); what the source's view holds beyond the artifact itself (the document's unsent
+  // comment) goes to the view kept first.
+  handOver?(from: S, to: S): void;
 }
 
 // What `artifactEditorFor` answers: the registration with `Main` filled in.
@@ -204,6 +208,24 @@ export function adoptStagedArtifactEditorState(artifactId: string, scope: Editor
     console.error(`[artifacts] moving the ${hold.kind} editor's state to ${key} failed`, error);
   }
   return true;
+}
+
+// P4-B3 (its Decision Log 39): a move onto a surface that already shows the artifact (T5, T8) activates that view and
+// closes the source rather than handing the source's hold over, so what the source's view holds beyond the artifact's
+// own state (the document's unsent comment) goes to the destination's state first, and the source's close has nothing
+// of it to lose. The destination's state is the one its scope holds, made now when its body has not mounted yet. False
+// when the source holds nothing or its editor hands nothing over.
+export function handArtifactViewOver(from: EditorHostScope, to: EditorHostScope): boolean {
+  const source = holds.get(keyOf(from));
+  if (!source?.editor.handOver) return false;
+  const target = holdArtifactEditorState(to, source.artifactId, source.kind, source.editor);
+  try {
+    source.editor.handOver(source.state, target.state);
+    return true;
+  } catch (error) {
+    console.error(`[artifacts] handing the ${source.kind} editor's view from ${keyOf(from)} to ${keyOf(to)} over failed`, error);
+    return false;
+  }
 }
 
 // P4-B3 M5 (its Decision Log 25): the view carry. A hold carries the editor's state, not what its mounted body shows

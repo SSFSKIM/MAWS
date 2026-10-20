@@ -8,23 +8,27 @@
 // the source lets go without its close guard (nothing can be lost: the replica with every typed edit moves), and the
 // target adopts the hold, all in one synchronous run after the last await. Only a guard of something else the move
 // displaces is asked, before that run: the panel's other record (T3, T4), or the source itself when the target already
-// shows the artifact and that view is activated instead (T5, T8; a cancelled dialog is a refusal, C4).
+// shows the artifact and that view is activated instead (T5, T8; a cancelled dialog is a refusal, C4). That view keeps
+// its own editor, so the source's unsent comment is handed to it before the source is asked (Decision Log 39), and given
+// back when the move does not happen.
 //
 // The drag state (`dragging` in the layout store) is set at `dragstart` and cleared at `drop` and `dragend`, both heard on
 // `window` too, and by a source that unmounts mid-drag (INV-5). Targets decide acceptance from it (a `dragover` cannot
-// read the payload) and act on the payload at `drop`.
+// read the payload) and act on the payload at `drop`. While it is set, the browser cover is held (Decision Log 39), so
+// no page's native view covers a target.
 import { useSyncExternalStore, type DragEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId as mainTabIdOf, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
-import { adoptStagedArtifactEditorState, stageArtifactEditorState } from '../artifacts/registry';
-import { askEditorHostClose } from '../panel/editor-host';
+import { adoptStagedArtifactEditorState, handArtifactViewOver, heldArtifactEditorState, stageArtifactEditorState } from '../artifacts/registry';
+import { askEditorHostClose, type EditorHostScope } from '../panel/editor-host';
 import { instanceOf, panelHost, usePanelHost } from '../panel/host';
 import { useLayout, type LayoutState } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { activeTab, allTabs, closeTab, currentSet, locateTab, sessionOfTab } from '../stores/layout-model';
 import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
+import { holdCover } from '../tools/browser/covering'; // Decision Log 39
 import { markTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5 (S6)
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab'; // a main tab's id
@@ -125,6 +129,16 @@ async function mainGuardAllows(mainTabId: string): Promise<boolean> {
   return asked === null || (await asked);
 }
 
+// T5, T8 (Decision Log 39): the source's view hands what the kept view must keep (its unsent comment) over before the
+// source is asked to close; `handBack` gives it back to a source still showing it when the move does not happen.
+function handToKept(source: EditorHostScope, kept: EditorHostScope): () => false {
+  handArtifactViewOver(source, kept);
+  return () => {
+    if (heldArtifactEditorState(source) !== null) handArtifactViewOver(kept, source);
+    return false;
+  };
+}
+
 // Main → panel (T1 to T5, T16 to T20; "Show in panel", `artifact.moveToPanel`, a drop on the panel). True when the
 // artifact moved or the panel's view of it was activated; false when refused or cancelled, everything as it was.
 export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
@@ -134,9 +148,11 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   const session = panelSessionWithout(mainTabId);
   const dest = artifactsTabOf(session);
   if (dest && panelRecordOf(dest.id) === artifactId) {
-    // T5: the panel shows it already. That view is activated, unmounted nothing, and the tab closes through its guard.
-    if (!(await mainGuardAllows(mainTabId))) return false;
-    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelRecordOf(dest.id) !== artifactId) return false;
+    // T5: the panel shows it already. That view is activated, unmounted nothing, and the tab closes through its guard,
+    // its unsent comment handed to the panel's view first.
+    const handBack = handToKept({ surface: 'main', tabId: mainTabId }, { surface: 'panel', tabId: dest.id });
+    if (!(await mainGuardAllows(mainTabId))) return handBack();
+    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelRecordOf(dest.id) !== artifactId) return handBack();
     layout().closeTab(mainTabId, { remember: false }); // a move is not a close (Decision Log 32): no ⌘⇧T entry
     panelHost.selectTab(dest.id);
     return true;
@@ -169,16 +185,20 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
   const artifactId = panelRecordOf(panelTabId)!;
   const mainTabId = mainTabIdOf({ kind: 'artifact', artifactId });
   if (locateTab(layout().main, mainTabId)) {
-    // T8: main shows it already. That tab is placed and activated; the record goes Back through its guard.
-    const asked = askEditorHostClose({ surface: 'panel', tabId: panelTabId });
-    if (asked !== null && !(await asked)) return false;
-    if (transferRefusal(request) !== null || panelRecordOf(panelTabId) !== artifactId) return false;
+    // T8: main shows it already. That tab is placed and activated; the record goes Back through its guard, its unsent
+    // comment handed to main's view first.
+    const source: EditorHostScope = { surface: 'panel', tabId: panelTabId };
+    const handBack = handToKept(source, { surface: 'main', tabId: mainTabId });
+    const asked = askEditorHostClose(source);
+    if (asked !== null && !(await asked)) return handBack();
+    if (transferRefusal(request) !== null || panelRecordOf(panelTabId) !== artifactId) return handBack();
     if (locateTab(layout().main, mainTabId)) {
       handle.handOff(); // the guard was asked: the record's state is given back
       placeInMain(artifactId, at);
       return true;
     }
-    // Main lost its tab while the guard asked: the record moves after all.
+    // Main lost its tab while the guard asked: the comment comes back, and the record moves after all.
+    handBack();
   }
   // The hand-off, synchronous from here to the adoption.
   stageArtifactEditorState({ surface: 'panel', tabId: panelTabId });
@@ -250,6 +270,21 @@ export function moveShownRecordToTab(): void {
 const refused = (text: string) => void toast({ id: 'transfer-refused', level: 'info', text, actions: [], dismissible: true });
 
 // ---- the drag ------------------------------------------------------------------------------------------------------------
+
+// Decision Log 39 (3): a Browser page is a native view drawn above the whole renderer, so a drop target over a pane or
+// the panel showing one (a body, the right edge) would lie under it, out of the pointer's reach. While a drag is on, the
+// window's browser cover is held (the pages show their pictures, as under the Overview); it is released as the drag
+// state clears, by whichever path the drag ends (a drop, `dragend`, Escape, the source unmounting).
+let releaseCover: (() => void) | null = null;
+useLayout.subscribe(({ dragging }) => {
+  if ((dragging !== null) === (releaseCover !== null)) return;
+  if (dragging !== null) releaseCover = holdCover();
+  else {
+    const release = releaseCover;
+    releaseCover = null;
+    release?.();
+  }
+});
 
 const clearOnWindow = () => endDrag();
 

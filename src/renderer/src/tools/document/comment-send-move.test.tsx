@@ -1,8 +1,11 @@
 // P4-B3 M6's review (its Decision Log 37): a document's comment sent and, before the answer, the document moved: to the
 // other main pane (the body remounts over the same tab state, as `moveTab`, ⌘\ and Open in split do) or between the
 // panel and a main tab (the hold handed over). The card stays (its host id is the tab state's), so its composer is drawn
-// again by a new form: it starts sending, a second Enter opens no second thread, and the answer reaches it. The real
-// document editor over the memory host, with the real card host; happy-dom lays nothing out, so the page has a box.
+// again by a new form: it starts sending, a second Enter opens no second thread, and the answer reaches it.
+// P4-B3's whole-branch review (its Decision Log 39): a comment typed and not sent when its document moves onto a surface
+// already showing it (T5, T8), which keeps its own view and closes the source: the card goes to the kept view with its
+// text and its thread, and the source closes asking nothing. The real document editor over the memory host, with the
+// real card host and the real transfer; happy-dom lays nothing out, so the page has a box.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Editor } from '@tiptap/core';
@@ -10,22 +13,28 @@ import { TextSelection } from '@tiptap/pm/state';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { createDocument } from '@artifacts/document/tabs';
+import { listThreads } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
-import type { LayoutMain } from '@shared/ipc/schema/layout';
+import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { adoptStagedArtifactEditorState, artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors, stageArtifactEditorState } from '../../artifacts/registry';
 import { resetMarkupSurfaces } from '../../markup/surface';
-import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { askEditorHostClose, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { panelHost, registerPanelTool, resetPanelHost, usePanelHost } from '../../panel/host';
+import { moveArtifactToPanel, moveArtifactToTab } from '../../shell/transfer';
 import { useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { useLayout } from '../../stores/layout';
+import { allTabs } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { A, sessionTab } from '../../test-support/panel';
 import { resetShellStores } from '../../test-support/shell-stores';
+import { ARTIFACTS_TOOL_ID, artifactsTool } from '../artifacts/ArtifactsTool';
 import { registerCommentComposer } from '../code/anchor/anchor';
+import { commentDraftOf } from './comment-drafts';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 
@@ -37,6 +46,7 @@ const HOST_BOX = { width: 900, height: 900 };
 let memory: MemoryDocumentHost;
 let fake: FakeClient;
 let offs: Array<() => void> = [];
+let asked: string[] = []; // what a close guard asked the owner
 
 const clientSize = { width: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')!, height: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')! };
 beforeAll(() => {
@@ -53,6 +63,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
+  asked = [];
   fake = fakeClient({ 'session.intent.get': null });
   window.maws = fake.client;
   memory = new MemoryDocumentHost();
@@ -87,7 +98,11 @@ function deps(): DocumentTabDeps {
       return handle;
     },
   } as unknown as ArtifactHost;
-  return { host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [] };
+  return { host, ipc, log: () => {}, confirm: (message) => {
+      asked.push(message);
+      return false;
+    },
+    sessionTitle: () => undefined, sessions: () => [] };
 }
 
 // A body of the kind's surface in `scope` over the state that scope holds; `slot` keys its element, so a new slot is
@@ -174,5 +189,103 @@ describe('a comment being sent when its document moves', () => {
     fireEvent.keyDown(field(), { key: 'Enter' });
     await act(async () => {});
     expect(fake.invoked('side.thread.open'), 'no third thread').toHaveLength(2);
+  });
+});
+
+describe('an unsent comment when its document moves onto a view of it already open (T5, T8)', () => {
+  const DOC_TAB: TabRef = { id: main.tabId, kind: 'artifact', artifactId: DOC, pinned: false };
+  const TEXT = 'Keep this unsent comment';
+
+  beforeEach(() => {
+    resetPanelHost();
+    offs.push(registerPanelTool(artifactsTool));
+  });
+
+  // The main area: `left` beside session A's tab (focused), so the panel shown is A's once the document's tab is gone.
+  function mainWith(left: TabRef[]): void {
+    const set = { ...EMPTY_TAB_SET, focusedPane: 1, panes: [{ tabs: left, activeTabId: left.at(-1)!.id }, { tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }] };
+    useLayout.setState({ hydrated: true, main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: set } } as LayoutMain });
+  }
+  // A's Artifacts tab showing the document as a record.
+  const recordInPanel = (): EditorHostScope => ({ surface: 'panel', tabId: panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: DOC }, activate: false }) });
+  const mainTabOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === main.tabId);
+
+  // A comment started on the first words and typed, not sent: its thread made, its text the artifact's draft.
+  async function typedUnsent(): Promise<string> {
+    const editor = await ready();
+    act(() => {
+      editor.commands.insertContent('Quarterly plans ship on time.');
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1, 10)));
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await waitFor(() => expect(field()).toBeTruthy());
+    await userEvent.type(field(), TEXT);
+    expect(commentDraftOf(DOC)?.text).toBe(TEXT);
+    return commentDraftOf(DOC)!.threadId;
+  }
+
+  // The card drawn in `container` with the text typed, the draft and its thread kept, nothing asked.
+  function keptIn(container: HTMLElement, threadId: string): void {
+    expect(container.contains(field()), 'the card is drawn by that view').toBe(true);
+    expect(field().value).toBe(TEXT);
+    expect(commentDraftOf(DOC)).toEqual({ threadId, text: TEXT });
+    expect(listThreads(memory.doc).map((t) => t.id), 'the thread is not withdrawn').toContain(threadId);
+    expect(asked, 'no guard asked about the comment').toEqual([]);
+  }
+
+  it('main → panel (T5): the panel’s view takes the card and its text; the tab closes without asking', async () => {
+    mainWith([DOC_TAB]);
+    const kept = recordInPanel();
+    const source = mountIn(main);
+    const threadId = await typedUnsent();
+    const target = mountIn(kept);
+    let moved = false;
+    await act(async () => void (moved = await moveArtifactToPanel(main.tabId)));
+    expect(moved).toBe(true);
+    expect(mainTabOpen()).toBe(false);
+    source.view.unmount(); // the closed tab's body goes
+    await act(async () => {});
+    keptIn(target.view.container, threadId);
+  });
+
+  it('panel → main (T8): main’s tab, its body never mounted, takes the card and its text as it shows; the record goes Back without asking', async () => {
+    mainWith([DOC_TAB]); // the document's tab, its body not mounted (no hold yet)
+    const source = recordInPanel();
+    const record = mountIn(source);
+    const threadId = await typedUnsent();
+    let moved = false;
+    await act(async () => void (moved = await moveArtifactToTab(source.tabId)));
+    expect(moved).toBe(true);
+    record.view.unmount(); // the record went Back to the list
+    await act(async () => {});
+    expect(commentDraftOf(DOC)?.text, 'kept while no body draws it').toBe(TEXT);
+    // Comments go to the session in front; the library is not connected here, so with the document in front its own
+    // context stays unread and its comments wait. A's pane in front again gives the card its session.
+    act(() => useLayout.getState().focusPane(1));
+    const target = mountIn(main); // the tab main activated
+    await waitFor(() => expect(field()).toBeTruthy());
+    keptIn(target.view.container, threadId);
+  });
+
+  it('a move refused after the hand-over gives the card back to the source, whose close asks about it again', async () => {
+    mainWith([DOC_TAB]);
+    const kept = recordInPanel();
+    const source = mountIn(main);
+    const threadId = await typedUnsent();
+    mountIn(kept);
+    let moved = true;
+    await act(async () => {
+      const move = moveArtifactToPanel(main.tabId);
+      usePanelHost.setState({ closing: new Set([kept.tabId]) }); // the panel's tab starts closing while the guard is asked
+      moved = await move;
+    });
+    expect(moved).toBe(false);
+    expect(mainTabOpen()).toBe(true);
+    await waitFor(() => expect(source.view.container.contains(field())).toBe(true));
+    keptIn(source.view.container, threadId);
+    let closes = true;
+    await act(async () => void (closes = await askEditorHostClose(main)!));
+    expect(closes).toBe(false);
+    expect(asked, 'the source’s own comment again').toEqual(['Discard your unsent comment?']);
   });
 });

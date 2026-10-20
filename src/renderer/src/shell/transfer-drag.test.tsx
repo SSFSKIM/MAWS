@@ -3,7 +3,8 @@
 // Electron drag cannot press Escape mid-drag (the prior art's live check 5). Each target accepts exactly the drags the
 // shared refusal allows (an accepting `dragover` is prevented with `dropEffect = 'move'`; a refusing target never
 // prevents it, so the cursor says no-drop), highlights the place the artifact will take with the outcome's label, and
-// moves the artifact on drop; Escape, a release elsewhere or a source unmounting clears every drag state.
+// moves the artifact on drop; Escape, a release elsewhere or a source unmounting clears every drag state. Every drag
+// holds the browser cover while it is on (P4-B3 Decision Log 39), so no page's native view lies over a target.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +28,7 @@ import { fail, installFakeMain, ok } from '../test-support/code';
 import { A, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
+import { coverPane, resetCovering } from '../tools/browser/covering';
 import { PANEL_TAB_DRAG_TYPE, TAB_DRAG_TYPE } from './transfer';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
@@ -74,19 +76,21 @@ function drag(kind: 'dragStart' | 'dragEnter' | 'dragOver' | 'dragLeave' | 'drop
 
 const offs: (() => void)[] = [];
 let rows: LibraryRow[];
+let fakeMain: ReturnType<typeof installFakeMain>;
 
 beforeEach(() => {
   resetPanelStores();
   resetArtifactEditors();
   resetLibrary();
+  resetCovering();
   useNotices.setState({ notices: [] });
   rows = [row(DOC, 'Launch notes'), row(NOTES, 'Notes')];
-  installFakeMain((name, input) => {
+  fakeMain = installFakeMain((name, input) => {
     if (name === 'library.list') return ok({ rows, counts: {} });
     if (name === 'library.get') return ok({ row: rows.find((r) => r.id === input.artifactId) ?? null });
     if (name === 'artifacts.get') return ok({ artifact: null });
     if (name === 'layout.get') return ok({ value: null });
-    if (name === 'layout.set' || name === 'artifacts.markViewed') return ok();
+    if (name === 'layout.set' || name === 'artifacts.markViewed' || name === 'browser.view.cover') return ok();
     return fail(`not answered here: ${name}`);
   });
   offs.push(connectLibrary());
@@ -101,6 +105,7 @@ afterEach(() => {
   cleanup();
   resetSlots();
   offs.splice(0).forEach((off) => off());
+  resetCovering();
 });
 
 function renderBoth() {
@@ -260,6 +265,49 @@ describe('a main tab dragged onto the panel', () => {
     drag('dragStart', mainTab(DOC_TAB.id), transfer());
     act(() => useLayout.getState().closeTab(DOC_TAB.id));
     expect(useLayout.getState().dragging).toBeNull();
+  });
+});
+
+// P4-B3 Decision Log 39: a Browser page is a native view above the renderer, so a target over a pane or the panel
+// showing one would be out of reach under it. A placed page stands in for the Browser pane here (`coverPane`); the
+// window's cover is asked as a drag starts and lifted however it ends.
+describe('the browser cover while a drag is on', () => {
+  const covers = () => fakeMain.callsOf('browser.view.cover').map((input) => input.covered);
+  const PAGE = { x: 0, y: 0, width: 400, height: 300 };
+
+  it('asked at a main tab’s dragstart, lifted by its drop on a target (the move made)', async () => {
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    const page = coverPane(() => PAGE);
+    renderBoth();
+    expect(covers()).toEqual([]);
+    const dt = transfer();
+    drag('dragStart', mainTab(DOC_TAB.id), dt);
+    expect(covers(), 'the pages show their pictures for the drag').toEqual([true]);
+    drag('dragOver', panelTarget()!, dt);
+    drag('drop', panelTarget()!, dt);
+    await settle();
+    expect(recordOf(artifactsTabOfA()!)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(covers()).toEqual([true, false]);
+    page.release();
+  });
+
+  it('lifted by Escape (the drag ends with no drop), a release elsewhere and the source unmounting, for either surface’s drag', async () => {
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB, NOTES_TAB]) });
+    const page = coverPane(() => PAGE);
+    const id = addArtifacts(DOC);
+    renderBoth();
+    await settle();
+    drag('dragStart', mainTab(NOTES_TAB.id), transfer());
+    drag('dragEnd', mainTab(NOTES_TAB.id));
+    expect(covers(), 'Escape').toEqual([true, false]);
+    drag('dragStart', panelTab(id), transfer());
+    drag('drop', document.body); // not a target: heard on the window
+    expect(covers(), 'a release elsewhere').toEqual([true, false, true, false]);
+    drag('dragStart', mainTab(NOTES_TAB.id), transfer());
+    act(() => useLayout.getState().closeTab(NOTES_TAB.id));
+    expect(covers(), 'the source unmounting').toEqual([true, false, true, false, true, false]);
+    expect(useLayout.getState().dragging).toBeNull();
+    page.release();
   });
 });
 
