@@ -66,6 +66,12 @@ interface Options {
   holdReplica?: () => () => void;
   /** P3-C (M7 fix wave 1; Decision Log 33, 35): the commented artifact's kind when it is not a document (the lead's wording). */
   artifactKind?: ArtifactKind;
+  /**
+   * P4-B1 (D8; X36's draft rule): the surface keeps a typed comment as the artifact's one draft (Escape keeps it, an empty
+   * card is discarded on a blur, `draft()` and the tab's close guard read it). Only a surface whose editor asks `draft()`
+   * and whose tab guards its close opts in (the document's); without it Escape discards as before.
+   */
+  draftRule?: true;
 }
 
 interface Binding {
@@ -75,6 +81,7 @@ interface Binding {
   visible: boolean;
   holdReplica: (() => () => void) | undefined;
   namesParent: boolean; // P3-F1: no chat beside it, so the card names its session
+  draftRule: boolean; // P4-B1
 }
 
 // A card host's drafts: the new threads it opened that nothing was said in yet, each with the sends in it still on their
@@ -146,7 +153,7 @@ function draftsOf(hostId: string): Drafts {
 }
 
 /** The surface DocumentEditor takes (`comments`), stable while the artifact and the session stay. */
-export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind }: Options): DocumentComments { // P3-F1: context
+export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind, draftRule /* P4-B1 */ }: Options): DocumentComments { // P3-F1: context
   const hostId = `document:${useId()}`;
   const titleRef = useRef(title);
   useLayoutEffect(() => {
@@ -185,7 +192,7 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
   // P3-F1 end
   const namesParent = appSessionId === undefined; // P3-F1
   return useMemo(() => {
-    const binding: Binding = { artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */ };
+    const binding: Binding = { artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */, draftRule: draftRule === true /* P4-B1 */ };
     // P4-B1 (C7, X36's one draft per artifact): the thread whose card on this host holds unsent text
     const draft = (): string | null => {
       const entry = commentDraftEntry(artifactId);
@@ -203,10 +210,9 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
         overlaid.current = props; // P4-B1
         return <DocumentCardHost {...props} binding={binding} />;
       },
-      draft, // P4-B1
-      focusDraft, // P4-B1
+      ...(draftRule && { draft, focusDraft }), // P4-B1
     };
-  }, [opened, artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */]);
+  }, [opened, artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */, draftRule /* P4-B1 */]);
 }
 
 // P4-B1 (D7): a card the margin will host opens with the margin placement (where its passage is, for the record), any
@@ -227,7 +233,7 @@ function targetKeyOf(appSessionId: AppSessionId | undefined, context: ArtifactSe
 const threadOf = (card: OpenCard | null): string | null => (card?.target?.kind === 'artifact' ? card.target.threadId : null);
 
 function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { binding: Binding }) {
-  const { artifactId, hostId, mode, visible, holdReplica, namesParent } = binding; // P3-F1: namesParent
+  const { artifactId, hostId, mode, visible, holdReplica, namesParent, draftRule } = binding; // P3-F1: namesParent; P4-B1: draftRule
   const pending = usePendingComment(hostId); // P3-F1
   const { doc, locate, layoutKey, setActive, resolve, reopen, record, discard, focus, hosting, placement } = editor; // P4-B1: hosting, placement
   const inMargin = placement === 'margin'; // P4-B1
@@ -316,20 +322,22 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         };
       },
       ...(namesParent && { namesParent: true as const }), // P3-F1
-      // P4-B1 start (D8; X36's draft rule)
-      onDraft: (card, text) => {
-        const threadId = threadOf(card);
-        if (threadId !== null) recordCommentDraft(artifactId, { hostId, serial: card.serial, threadId, text });
-      },
-      draftOf: (card) => {
-        const entry = commentDraftEntry(artifactId);
-        return entry?.hostId === hostId && entry.serial === card.serial ? entry.text : '';
-      },
-      keepDraftOnEscape: true,
-      discardOnBlurEmpty: true,
+      // P4-B1 start (D8; X36's draft rule, for the surface that opts in)
+      ...(draftRule && {
+        onDraft: (card: OpenCard, text: string) => {
+          const threadId = threadOf(card);
+          if (threadId !== null) recordCommentDraft(artifactId, { hostId, serial: card.serial, threadId, text });
+        },
+        draftOf: (card: OpenCard) => {
+          const entry = commentDraftEntry(artifactId);
+          return entry?.hostId === hostId && entry.serial === card.serial ? entry.text : '';
+        },
+        keepDraftOnEscape: true as const,
+        discardOnBlurEmpty: true as const,
+      }),
       // P4-B1 end
     }),
-    [layoutKey, hostId, locate, doc, resolve, reopen, record, discard, focus, holdReplica, namesParent /* P3-F1 */, artifactId /* P4-B1 */],
+    [layoutKey, hostId, locate, doc, resolve, reopen, record, discard, focus, holdReplica, namesParent /* P3-F1 */, artifactId, draftRule /* P4-B1 */],
   );
 
   return (
