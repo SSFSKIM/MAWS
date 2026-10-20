@@ -115,25 +115,28 @@ const IN_ALPHABET = /[\uE000-\uE00F]/;
 const toLiteral = (text: string): string => (IN_ALPHABET.test(text) ? text.replace(ALPHABET, (char) => `${LITERAL}${String.fromCharCode(97 + char.charCodeAt(0) - 0xe000)}`) : text);
 const fromLiteral = (text: string): string => (text.includes(LITERAL) ? text.replace(LITERAL_PAIR, (_, letter: string) => String.fromCharCode(0xe000 + letter.charCodeAt(0) - 97)) : text);
 /**
- * Every string a node's JSON holds (its texts, attribute values, and property names inside an opaque value), mapped.
- * P4-R5: what the map leaves as it was comes back as it was, not copied (every serialization maps every string, and few
- * change), so a block's JSON keeps ProseMirror's own attribute objects: nothing that reads it writes to it.
+ * Every string a node's JSON holds (its texts, attribute values, and property names inside an opaque value), mapped, in
+ * a copy whose every object and array is a new one, changed or not: what reads a block's JSON compares attribute values
+ * by identity (Tiptap's `attrsEqual`, where the Markdown serializer opens and closes marks), and ProseMirror hands every
+ * run of one mark the same attrs object, so a shared array value such as `userIds` would compare equal where a copy does
+ * not, and the Markdown would change.
+ * P4-R5: one traversal, each object built by a key loop rather than from an entries array; an own `__proto__` is defined,
+ * as Object.fromEntries defines it, where assigning it would set the prototype (the one inherited setter a fresh object
+ * has); two keys the map sends to one keep the first's place and the last's value, as there.
  */
 export const mapStrings = <T>(value: T, map: (text: string) => string): T => {
   if (typeof value === 'string') return map(value) as T;
+  if (Array.isArray(value)) return value.map((item) => mapStrings(item, map)) as T; // a hole stays a hole
   if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) {
-    let out: unknown[] | null = null;
-    for (let k = 0; k < value.length; k++) {
-      const item = mapStrings(value[k] as unknown, map);
-      if (item !== value[k]) (out ??= value.slice())[k] = item;
-    }
-    return (out ?? value) as T;
-  }
   const record = value as Record<string, unknown>;
-  const keys = Object.keys(record);
-  if (keys.every((key) => map(key) === key && mapStrings(record[key], map) === record[key])) return value;
-  return Object.fromEntries(keys.map((key) => [map(key), mapStrings(record[key], map)])) as T;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(record)) {
+    const name = map(key);
+    const item = mapStrings(record[key], map);
+    if (name === '__proto__') Object.defineProperty(out, name, { value: item, writable: true, enumerable: true, configurable: true });
+    else out[name] = item;
+  }
+  return out as T;
 };
 
 const ID = '[0-9a-z]{2,32}';
