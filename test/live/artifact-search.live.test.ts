@@ -95,8 +95,10 @@ function mawsCalls(rows: JournalRow[]): { name: string; args: unknown; answer: s
 
 const blocksOf = (blocks: readonly (readonly [string, string])[]) =>
   schemaFor().nodeFromJSON({ type: 'doc', content: blocks.map(([id, text]) => ({ type: 'paragraph', attrs: { id }, content: [{ type: 'text', text }] })) });
+// the first tab titled with the document's title, as a real create titles it (the document adapter's `initial`,
+// artifact_create's document path), so a query naming the title meets the tab title in the mirror as it would
 const seedDocument = async (documents: Documents, title: string, blocks: readonly (readonly [string, string])[], actor: Actor) =>
-  (await documents.store.create({ kind: 'document', title, initial: (doc) => void createDocument(doc, { title: '', body: blocksOf(blocks) }) }, actor)).id;
+  (await documents.store.create({ kind: 'document', title, initial: (doc) => void createDocument(doc, { title, body: blocksOf(blocks) }) }, actor)).id;
 
 let gate: GateResult;
 const record: string[] = [];
