@@ -7,9 +7,12 @@
 //   streaming  per batch tick (PROVISIONAL_TICK_MS, longer for a long input: INPUT_PER_MS), only when the ops changed;
 //              sent now (`DocumentService.broadcast`), since it reveals nothing of the store
 //   committed  from the write's own frame (`committed`, called by the tool), queued ahead of the write's update frames
-//              (`DocumentService.announceWrite`), naming the write's revision, which the update carries as its seq
+//              (`DocumentService.announceWrite`), naming the row the edit's own transaction is, which its update
+//              carries as its seq (rows the kind's hooks append after it reveal nothing the layer stands for)
 //   dropped    on every other ending (R8): the tool's refusal or failure (`withProvisional`), a `tool.result` no commit
-//              preceded (the engine denied the call, or the model abandoned it), the turn's end, the process's exit
+//              preceded (the engine denied the call, or the model abandoned it), the turn's end, the process's exit;
+//              and from the write's frame when the write changed nothing (`uncommitted`): no row will carry a seq to
+//              wait for, so the layer goes at once
 //
 // From the tick in which `artifact` resolves, the session's replica of the doc shows the agent editing the blocks the
 // ops name so far (R6), held as a batch's outline is (`holdPresence`); an `artifact_edit` commit takes it over (the
@@ -19,6 +22,8 @@
 // there, dropped on the main doc (R7). Nothing here writes a doc, a row or a version (rule 1), and nothing here throws
 // into a tool: a failure is logged and the layer is left to the call's ending.
 import { DocIndex } from '@artifacts/document/block-index';
+import { needleOf } from '@artifacts/document/edit-plan';
+import { stripMilestones } from '@artifacts/document/markdown';
 import { encodeFrame } from '@artifacts/provider/frames';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import { isDocKind, type ArtifactKind } from '@shared/artifacts/entity';
@@ -123,8 +128,9 @@ export class ProvisionalEmitter {
   }
 
   // From the write's own frame (rule 2): the committed notice, queued ahead of the write's update frames on `docKey`,
-  // names `commitSeq`, the doc's revision the write reached (the seq its last update carries), and carries the last
-  // ops. A layer on another doc (the owner's setting changed under the call) is dropped there instead.
+  // names `commitSeq`, the row the edit's own transaction is (`WriteOptions.inFrame`'s `edited`: the seq its update
+  // carries, so a replica withdraws the layer in the task that applies it, not at a later row of the kind's hooks), and
+  // carries the last ops. A layer on another doc (the owner's setting changed under the call) is dropped there instead.
   committed(toolUseId: ToolUseId, docKey: string, commitSeq: number): void {
     const call = this.calls.get(toolUseId);
     if (!call) return;
@@ -134,8 +140,20 @@ export class ProvisionalEmitter {
         if (call.key === docKey) store.service.announceWrite(docKey, this.frame(call, 'committed', call.ops, commitSeq));
         else store.service.broadcast(call.key, this.frame(call, 'dropped', []));
       }
-      // an edit's own commit publishes its cursor and blocks and holds them (D11); any other write's outline ends here
-      if (call.presence && !(call.tool === 'artifact_edit' && call.presence.key === docKey)) store.service.releasePresence(call.presence.agent, this.display);
+      this.handOver(store, call, docKey);
+    });
+  }
+
+  // P4-A2 (X35): from the frame of a write whose edit changed nothing (`edited` null): no row of it will reach a replica
+  // (and the doc's last row may be the owner's own, which is never relayed back to them), so the layer is withdrawn at
+  // once, as a drop; the outline is handed over as a commit hands it, the tool having published its own.
+  uncommitted(toolUseId: ToolUseId, docKey: string): void {
+    const call = this.calls.get(toolUseId);
+    if (!call) return;
+    this.cancel(call);
+    this.end(call, (store) => {
+      if (call.key !== null && call.sent !== null) store.service.broadcast(call.key, this.frame(call, 'dropped', []));
+      this.handOver(store, call, docKey);
     });
   }
 
@@ -196,6 +214,12 @@ export class ProvisionalEmitter {
     } catch (error) {
       this.log(call, `could not end its layer: ${messageOf(error)}`);
     }
+  }
+
+  // The outline at a write's frame: an edit's own write publishes its cursor and blocks and holds them (D11); any other
+  // write's outline ends here.
+  private handOver(store: ArtifactStore, call: Call, docKey: string): void {
+    if (call.presence && !(call.tool === 'artifact_edit' && call.presence.key === docKey)) store.service.releasePresence(call.presence.agent, this.display);
   }
 
   // The layer's `dropped` on the doc it was drawn on, and the outline back to the idle name.
@@ -325,16 +349,25 @@ export class ProvisionalEmitter {
     return { ops, blocks };
   }
 
-  // R5: the first top-level block in document order whose text holds the quote, on the session's host replica of the
-  // layer's doc (the one its batch is planned on, whose index its read warmed); none, null.
-  private quoteBlock(store: ArtifactStore, call: Call, i: number, quote: string): string | null {
+  // R5: the first top-level block in document order whose markdown holds the quote, as the tool matches it (edit-plan.ts:
+  // milestones stripped, the block's agent markdown searched, the quote's plain-text needle a filter over its raw text
+  // only, every block read when the filter leaves none), on the session's host replica of the layer's doc (the one its
+  // batch is planned on, whose index its read warmed); none, null.
+  private quoteBlock(store: ArtifactStore, call: Call, i: number, old: string): string | null {
     const known = call.quotes.get(i);
     if (known !== undefined) return known;
-    const found = store.service.readAs(call.key!, this.actor, (doc) => {
-      const index = DocIndex.of(doc);
-      for (const tabId of index.tabIds()) for (const top of index.tops(tabId)) if (top.id !== null && index.text(top).includes(quote)) return top.id;
-      return null;
-    });
+    const quote = stripMilestones(old);
+    const needle = quote ? needleOf(quote) : null;
+    const found = !quote
+      ? null
+      : store.service.readAs(call.key!, this.actor, (doc) => {
+          const index = DocIndex.of(doc);
+          const first = (filter: boolean) => {
+            for (const tabId of index.tabIds()) for (const top of index.tops(tabId)) if (top.id !== null && (!filter || index.rawText(top).includes(needle!)) && index.md(top).includes(quote)) return top.id;
+            return null;
+          };
+          return (needle !== null ? first(true) : null) ?? first(false);
+        });
     call.quotes.set(i, found);
     return found;
   }

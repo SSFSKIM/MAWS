@@ -238,6 +238,22 @@ describe('DocumentService: untrusted frames', () => {
     expect(rowCount()).toBe(0);
   });
 
+  // P4-A2 (X35): a provisional frame is the host's alone (frames.ts's `isHostOnly`), as `ack` and `restored` are
+  it('closes a connection that sends a provisional frame, and keeps the doc and its other connections', () => {
+    make();
+    const a = raw('a1', human);
+    a.edit((doc) => doc.get('t').insert(0, 'abc'));
+    tick();
+    const b = raw('a1', agent);
+    tick();
+    b.send({ type: 'provisional', json: JSON.stringify({ state: 'committed', commitSeq: 99 }) });
+    expect(b.closed).toBe(true);
+    expect(service.stats.rejected.at(-1)?.reason).toBe('a host-only frame (provisional) from a replica');
+    expect(a.closed).toBe(false);
+    tick();
+    expect(service.loaded('a1')?.get('t').toString()).toBe('abc');
+  });
+
   it('refuses a new struct under a clientID bound to another actor (a forged authorship), and accepts a restatement of it', () => {
     make();
     const a = raw('a1', human);
@@ -1481,6 +1497,36 @@ describe('DocumentService: the provisional layer’s frames (P4-A2)', () => {
     expect(b.take()).toEqual([{ type: 'provisional', json: '{"state":"streaming"}' }]);
     service.broadcast('never-loaded', notice('{}')); // nothing, no throw
     expect(service.stats.commits).toBe(0);
+  });
+
+  it('tells inFrame the edit’s own row (the revision its transaction reached, before the kind’s hooks and afterWrite wrote), and null when the edit wrote none', async () => {
+    const adapter: KindAdapter = {
+      kind: 'document',
+      afterUpdate(doc) {
+        doc.get('meta').setAttr('repaired', (Number(doc.get('meta').getAttr('repaired') ?? 0) + 1));
+      },
+    };
+    make({ adapters: [adapter], kindOf: () => 'document' });
+    const a = raw('a1', human);
+    tick();
+    a.take();
+    const seen: { revision: number; edited: number | null }[] = [];
+    const afterWrite = (doc: Doc) => void doc.get('meta').setAttr('after', seen.length);
+    const written = service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'agent'), { afterWrite, inFrame: (revision, { edited }) => void seen.push({ revision, edited }) });
+    tick();
+    const revision = await written;
+    const seqs = a.take().flatMap((frame) => (frame.type === 'update' ? [frame.seq] : []));
+    expect(seqs).toHaveLength(3); // the edit, the hook's repair, afterWrite's row
+    expect(seen).toEqual([{ revision, edited: seqs[0] }]);
+    expect(seqs[0]).toBeLessThan(revision);
+
+    // an edit that changes nothing appends no row: null, though afterWrite's row moves the revision
+    const unchanged = service.writeAs('a1', agent, () => undefined, { afterWrite, inFrame: (at, { edited }) => void seen.push({ revision: at, edited }) });
+    tick();
+    const after = await unchanged;
+    expect(after).toBeGreaterThan(revision);
+    expect(seen.at(-1)).toEqual({ revision: after, edited: null });
+    expect(a.take().filter((frame) => frame.type === 'update')).toHaveLength(1); // afterWrite's alone; no hook ran
   });
 
   it('refuses an announce from a write naming another doc', async () => {

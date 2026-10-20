@@ -2,10 +2,11 @@
 // emitter over A's real store with the document kind registered. A raw replica end on the document reads what the
 // layer's frames say and in which order they arrive beside the write's own frames; the agent's presence is read on the
 // session's replica. Proves: presence from the tick in which `artifact` resolves; the streamed ops cumulative, by name
-// and by quote; the committed notice of a real `artifact_edit` ahead of its update, naming the update's seq; the layer
-// dropped on a refusal, a `tool.result`, the turn's end and the process's exit; suggest mode moving the layer; nothing
-// for another tool or an unjoined delta; nothing written by a tick. Then the same path on a session: the engine's
-// deltas and `tools/call` over a scripted transport.
+// and by quote (matched on the blocks' markdown, as the tool matches it); the committed notice of a real `artifact_edit`
+// ahead of its update, naming the edit's own row (not a later row of the kind's hooks); the layer dropped on a refusal,
+// a `tool.result`, the turn's end and the process's exit, and at once from the frame of a write that changed nothing
+// (an edit or a publish); suggest mode moving the layer; nothing for another tool or an unjoined delta; nothing written
+// by a tick. Then the same path on a session: the engine's deltas and `tools/call` over a scripted transport.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Frame } from '@artifacts/provider/frames';
 import { stateVector } from '@artifacts/yjs';
@@ -14,6 +15,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { scriptedSession } from '../conformance/session-harness';
 import { HUMAN, openDocumentWorld, sessionActor, type DocumentWorld, type RawEnd } from '../documents/kinds/document-world.fixture';
+import { ArtifactSession } from './artifact-context';
+import { artifactPublishTool } from './artifact-publish';
+import { artifactCreateTool, artifactReadTool } from './artifact-tools';
 import { artifactEditTool, documentReadTool, DocumentToolSession, type DocumentToolDeps } from './documents';
 import { openPath, ProvisionalEmitter } from './provisional';
 import type { McpToolContext, McpToolResult } from './server';
@@ -112,6 +116,18 @@ describe('the streamed layer', () => {
     ]);
   });
 
+  it('places an unscoped quote by the blocks’ markdown, as the tool matches it: formatting, links and comment milestones', async () => {
+    const doc = await world.seeded();
+    const end = world.connect(doc, HUMAN);
+    const quotes = ['over the **lazy**', '[dog](https://example.com)', 'item with **bold**', '<c:t3>scheduled for Friday</c:t3>', 'the lazy dog'];
+    const ops = quotes.map((old) => ({ op: 'replace_text', old, new: 'x' }));
+    await feed(id('toolu_markdown'), JSON.stringify({ artifact: doc, baseRevision: 3, ops }));
+    // p1's bold and its link, the list holding the bold item, p2's commented passage; the plain words of a formatted
+    // passage are not its markdown, so the tool finds them nowhere
+    expect(layer(end).at(-1)!.ops).toMatchObject([{ block: 'p1' }, { block: 'p1' }, { block: 'l1' }, { block: 'p2' }, { block: null }]);
+    expect(presence(doc)).toMatchObject({ editing: { blocks: ['p1', 'l1', 'p2'] } });
+  });
+
   it('draws inserts, cells, replaced blocks and moves as their fields parse', async () => {
     const doc = await world.seeded();
     const end = world.connect(doc, HUMAN);
@@ -181,7 +197,7 @@ describe('the layer’s endings', () => {
     return { doc, end, args };
   }
 
-  it('announces a real artifact_edit’s commit ahead of its update, naming the update’s seq and the answered revision', async () => {
+  it('announces a real artifact_edit’s commit ahead of its updates, naming the edit’s own row; the answer names the write’s revision', async () => {
     const call = id('toolu_commit');
     const { doc, end, args } = await streamed(call);
     end.received.length = 0;
@@ -193,11 +209,55 @@ describe('the layer’s endings', () => {
     expect(committedAt).toBeLessThan(updates[0].at);
     const [committed, ...after] = layer(end);
     expect(after).toEqual([]); // no streaming or dropped frame after the commit
-    expect(committed).toMatchObject({ state: 'committed', commitSeq: answer.revision, artifactId: doc, ops: [{ op: 'replace_text', block: 'p2', old: 'Friday', text: 'Monday' }] });
-    expect(committed.commitSeq).toBe(Math.max(...updates.map((update) => update.seq ?? 0)));
+    expect(committed).toMatchObject({ state: 'committed', commitSeq: updates[0].seq, artifactId: doc, ops: [{ op: 'replace_text', block: 'p2', old: 'Friday', text: 'Monday' }] });
+    expect(answer.revision).toBe(Math.max(...updates.map((update) => update.seq ?? 0)));
     // the tool's own commit took the outline over (its cursor, the blocks it touched), held its 4 s
     expect(presence(doc)).toMatchObject({ editing: { blocks: ['p2'] } });
     expect(emitter.presenting(doc)).toBe(false);
+  });
+
+  it('names the edit’s own row when the kind’s hooks write after it (a commented passage replaced whole), not the write’s last', async () => {
+    const call = id('toolu_anchor');
+    const { end, args } = await streamed(call, '[{"op":"replace_text","block":"p2","old":"scheduled for Friday","new":"moved"}]');
+    end.received.length = 0;
+    json(await artifactEditTool(deps()).call(args, ctx({ toolUseId: call })));
+    const seqs = end.received.flatMap((frame) => (frame.type === 'update' ? [frame.seq ?? 0] : []));
+    expect(seqs.length).toBeGreaterThan(1); // the edit's row, then the thread's (its passage gone)
+    expect(layer(end)).toMatchObject([{ state: 'committed', commitSeq: seqs[0] }]);
+    expect(seqs[0]).toBeLessThan(Math.max(...seqs));
+  });
+
+  it('withdraws at once the layer of a batch that writes no row, leaving the tool its outline', async () => {
+    const call = id('toolu_unchanged');
+    const { doc, end, args } = await streamed(call, '[{"op":"replace_text","block":"p2","old":"Friday","new":"Friday"}]');
+    const revision = world.store.revision(doc);
+    end.received.length = 0;
+    json(await artifactEditTool(deps()).call(args, ctx({ toolUseId: call })));
+    expect(presence(doc)).toMatchObject({ editing: { blocks: ['p2'] } }); // the tool's own, held its 4 s
+    expect(emitter.presenting(doc)).toBe(false);
+    expect(world.store.revision(doc)).toBe(revision); // no row: none the owner's replica could wait for
+    expect(end.received.filter((frame) => frame.type === 'update')).toEqual([]);
+    expect(layer(end)).toMatchObject([{ toolUseId: call, state: 'dropped', ops: [] }]);
+  });
+
+  it('withdraws at once the layer of a publish that changes no file, releasing its outline', async () => {
+    const artifactDeps = { artifacts: () => world.store, session: new ArtifactSession(), provisional: emitter };
+    const created = json<{ artifactId: string }>(await artifactCreateTool(artifactDeps).call({ kind: 'design_system', title: 'Site', files: { 'a.html': 'A' } }, ctx()));
+    const site = created.artifactId;
+    const { revision } = json<{ revision: number }>(await artifactReadTool(artifactDeps).call({ artifact: site }, ctx()));
+    const end = world.connect(site, HUMAN);
+    const call = id('toolu_same_files');
+    for (const piece of [`{"artifact":"${site}","baseRevision":${revision},"files":{"a.html":"`, 'A"}}']) {
+      emitter.delta(call, 'artifact_publish', piece);
+      await tick();
+    }
+    expect(layer(end).map((frame) => frame.state)).toEqual(['streaming', 'streaming']);
+    expect(presence(site)).toMatchObject({ editing: { blocks: [] } });
+    end.received.length = 0;
+    expect(json(await artifactPublishTool(artifactDeps).call({ artifact: site, baseRevision: revision, files: { 'a.html': 'A' } }, ctx({ toolUseId: call })))).toMatchObject({ changed: [], revision });
+    expect(end.received.filter((frame) => frame.type === 'update')).toEqual([]);
+    expect(layer(end)).toMatchObject([{ toolUseId: call, state: 'dropped', ops: [] }]);
+    expect(presence(site)?.editing).toBeUndefined();
   });
 
   it('drops the layer of a refused call and releases the outline to the idle name', async () => {
@@ -315,9 +375,12 @@ describe('on an engine session', () => {
     const answer = await callTool('artifact_edit', JSON.parse(args), 'toolu_live');
     const frames = layer(end);
     expect(frames.map((frame) => frame.state)).toEqual(['streaming', 'streaming', 'committed']);
-    expect(frames.at(-1)).toMatchObject({ toolUseId: 'toolu_live', appSessionId: 'app-s', commitSeq: answer.revision, ops: [{ op: 'replace_text', block: 'p2', old: 'Friday', text: 'Monday' }] });
     const committedAt = end.received.findIndex((frame) => frame.type === 'provisional' && JSON.parse(frame.json).state === 'committed');
-    expect(end.received.findIndex((frame) => frame.type === 'update')).toBeGreaterThan(committedAt);
+    const firstUpdate = end.received.findIndex((frame) => frame.type === 'update');
+    expect(firstUpdate).toBeGreaterThan(committedAt);
+    const editRow = (end.received[firstUpdate] as { seq?: number }).seq;
+    expect(frames.at(-1)).toMatchObject({ toolUseId: 'toolu_live', appSessionId: 'app-s', commitSeq: editRow, ops: [{ op: 'replace_text', block: 'p2', old: 'Friday', text: 'Monday' }] });
+    expect(editRow).toBeLessThanOrEqual(answer.revision);
 
     // a call the engine denied: its tool_use streamed, no `tools/call`, its result an error
     stream({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_denied', name: 'mcp__maws__artifact_edit', input: {} } }, 4);

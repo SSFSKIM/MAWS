@@ -345,7 +345,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                 }
               },
               {
-                inFrame: (at) => {
+                inFrame: (at, { edited }) => {
                   if (!outcome.result || !outcome.doc) return;
                   outcome.result.revision = suggesting ? store.service.revision(id) : at;
                   deps.session.views.record(outcome.doc, outcome.result.revision); // the session's own write is a revision it knows
@@ -357,8 +357,12 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                   clearTimeout(deps.session.presence.get(writeId));
                   agent.setPresence({ ...presence, ...(cursor && { cursor }), editing: { blocks } });
                   store.service.holdPresence(agent); // P3-F (F19): a turn end leaves it to the hold
-                  // P4-A2 (X35 rule 2): the layer's committed notice, ahead of this write's frames, names its revision
-                  if (ctx.toolUseId !== null) deps.provisional?.committed(ctx.toolUseId, writeId, at);
+                  // P4-A2 (X35 rule 2): the layer's committed notice, ahead of this write's frames, names the batch's own
+                  // row; a batch that changed nothing has none to wait for, and its layer goes now
+                  if (ctx.toolUseId !== null) {
+                    if (edited !== null) deps.provisional?.committed(ctx.toolUseId, writeId, edited);
+                    else deps.provisional?.uncommitted(ctx.toolUseId, writeId);
+                  }
                   shown.agent = agent;
                   shown.id = writeId;
                 },

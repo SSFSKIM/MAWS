@@ -233,7 +233,7 @@ async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Art
             }
           },
           {
-            inFrame: (written) => {
+            inFrame: (written, { edited }) => {
               if (!outcome.result) return;
               const revision = suggest ? store.service.revision(artifact.id) : written;
               const doc = store.service.live(target);
@@ -246,7 +246,11 @@ async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Art
               outcome.result = { ...outcome.result, revision, changed: changedLive, kept, removed, ...(warnings.length > 0 && { warnings }) };
               op.record(outcome.result);
               store.linkInWrite(artifact.id, ctx.appSessionId, 'edited'); // P3-F: only with files taken, never on a refusal
-              if (ctx.toolUseId !== null) deps.provisional?.committed(ctx.toolUseId, target, written); // P4-A2 (X35 rule 2)
+              if (ctx.toolUseId !== null) {
+                // P4-A2 (X35 rule 2): the publish's own row; files as they were wrote none, and the layer goes now
+                if (edited !== null) deps.provisional?.committed(ctx.toolUseId, target, edited);
+                else deps.provisional?.uncommitted(ctx.toolUseId, target);
+              }
             },
           },
         );

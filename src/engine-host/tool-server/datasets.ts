@@ -323,14 +323,18 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
                   },
                   {
                     prepare,
-                    inFrame: (revision) => {
+                    inFrame: (revision, { edited }) => {
                       recorded = configured
                         ? { status: 'dataset', artifactId, id: input.id, revision, columns: configured.columns, rows: configured.rows, ...(snapshotOf(configured) === null && { notFetched: true as const }) } // E3
                         : table
                         ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
                         : { status: 'dataset', artifactId, id: input.id, revision };
                       op.record(recorded);
-                      if (ctx.toolUseId !== null) deps.provisional?.committed(ctx.toolUseId, artifactId, revision); // P4-A2 (X35 rule 2)
+                      if (ctx.toolUseId !== null) {
+                        // P4-A2 (X35 rule 2): the dataset's own row; a descriptor as it was wrote none, and the layer goes now
+                        if (edited !== null) deps.provisional?.committed(ctx.toolUseId, artifactId, edited);
+                        else deps.provisional?.uncommitted(ctx.toolUseId, artifactId);
+                      }
                     },
                   },
                 );

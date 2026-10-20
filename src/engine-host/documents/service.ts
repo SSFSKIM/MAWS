@@ -146,11 +146,12 @@ export interface Committed {
 // stands on before it (a copy's entity row, Decision Log 37c: the doc's kind, and so its adapter, is read after it);
 // `afterWrite` writes through the same host replica after the edit and its `afterUpdate` (a restore's `afterRestore`),
 // its thread rows landing in the batch; `inFrame` writes rows that must commit with the write or not at all (a version,
-// an op), given the revision reached.
+// an op), given the revision reached. P4-A2 (X35): and given `edited`, the row the edit's own transaction is (its seq),
+// or null when the edit changed nothing and so appended none; the kind's hooks and `afterWrite` may append rows after it.
 export interface WriteOptions {
   prepare?: () => void;
   afterWrite?: (doc: Doc) => void | { threads?: ThreadChange };
-  inFrame?: (revision: number) => void;
+  inFrame?: (revision: number, write: { edited: number | null }) => void;
 }
 
 export interface ServiceStats {
@@ -319,14 +320,16 @@ export class DocumentService {
         hostDoc.kind ??= this.kindOf(artifactId); // a doc opened before its entity row was written (a frame that fails evicts it)
       }
       const adapter = this.adapterOf(hostDoc);
+      const before = hostDoc.revision;
       const applied = this.applyOwn(hostDoc, () => this.writeThrough(hostDoc, actor, edit));
+      const edited = hostDoc.revision === before ? null : hostDoc.revision; // P4-A2 (X35): the edit's own row, if it wrote one
       this.afterUpdate(hostDoc, adapter, actor, applied);
       if (options.afterWrite) {
         const after: { outcome?: void | { threads?: ThreadChange } } = {};
         this.writeThrough(hostDoc, actor, (doc) => (after.outcome = options.afterWrite!(doc)));
         if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
       }
-      options.inFrame?.(hostDoc.revision);
+      options.inFrame?.(hostDoc.revision, { edited });
     });
     this.writing = writing;
     if (failed) return Promise.reject(new Error(`the write to ${artifactId} failed and the document was reset: ${failed}`));
@@ -672,6 +675,7 @@ export class DocumentService {
           return;
         case 'ack':
         case 'restored':
+        case 'provisional': // P4-A2 (X35)
           return this.reject(conn, `a host-only frame (${frame.type}) from a replica`);
       }
     } catch (error) {
