@@ -304,13 +304,13 @@ describe('the provisional layer', () => {
     expect(margin.dataset.marginTier, 'the margin drawn').not.toBe('off');
     await ticks(30);
     const passes = () => Number(margin.dataset.relayouts ?? 0);
-    const settled = { passes: passes(), keys: new Set(keys).size };
+    const settled = { passes: passes(), calls: keys.length };
     for (const text of ['A', 'A longer', 'A longer text']) world!.host.announce(frame('tu1', 'streaming', [{ op: 'insert', after: 'p3', text }]));
     await until(() => drawn(container)[0]?.textContent === 'A longer text', 'the last frame');
     await until(() => passes() > settled.passes, 'a margin layout pass');
     await ticks(30);
     expect(passes() - settled.passes, 'coalesced to the animation frame').toBeLessThanOrEqual(2);
-    expect(new Set(keys).size, 'the hosted overlay’s key unmoved').toBe(settled.keys);
+    expect(keys.length, 'the hosted overlay not drawn again').toBe(settled.calls); // its key is the margin's constant one: the calls, not the distinct keys, say whether it was drawn
   });
 });
 
