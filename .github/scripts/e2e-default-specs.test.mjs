@@ -104,7 +104,6 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
     'e2e/presentations-live.spec.ts',
     'e2e/presentations-scale.spec.ts',
     'e2e/resume-picker.spec.ts',
-    'e2e/send-to-live.spec.ts',
     'e2e/sessions-available-live.spec.ts',
     'e2e/sessions.spec.ts',
     'e2e/shell.spec.ts',

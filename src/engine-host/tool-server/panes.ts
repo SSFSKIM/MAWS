@@ -4,6 +4,7 @@
 // timeout error after PANE_ANSWER_MS. A request the engine withdrew, or one pending when the process ended, settles at
 // once with an error nobody reads (the server answers an aborted call with nothing). E2: a thin instance of the host
 // bridge (`./bridge.ts`), which `artifact_screenshot`'s capture shares.
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { RequestId } from '@shared/graph/ids';
 import type { MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { PANE_ANSWER_MS, type Pane } from '@shared/maws/panes';
@@ -15,6 +16,7 @@ export interface PaneShowRequest {
   pane: Pane;
   target: string | null;
   line: number | null;
+  at?: ArtifactLocation; // P4-B4: the place an `artifact` pane opens its artifact at; absent when none
 }
 
 export type PaneBridgeAnswer = ShowPaneResult | { error: string };

@@ -16,6 +16,9 @@ import { KIND_LABELS, ROW_COPY } from './copy';
 import { KindIcon } from './icons';
 import { RowContextMenu, RowMenu } from './RowMenu';
 import { showSpace } from './view';
+import { SEND_TO_COPY } from '../delivery/copy'; // P4-B5
+import { latestReceipt, useDelivery } from '../delivery/store'; // P4-B5
+import { ipc } from '../ipc/client'; // P4-B5
 
 const SHOWN_SESSIONS = 3;
 const CHIP = 'inline-flex h-5 max-w-40 min-w-0 shrink-0 items-center rounded-sm border border-border px-1.5 text-ui-sm text-fg-muted';
@@ -71,6 +74,28 @@ const Dot = () => (
     ·
   </span>
 );
+
+// P4-B5: the row's receipt of the latest Send to (main's, this main's life): "Sent to Notion · 2 minutes ago", opening
+// the delivery where the service named one.
+function Receipt({ artifactId, now, tabIndex }: { artifactId: string; now: number; tabIndex: number }) {
+  const receipt = useDelivery((s) => latestReceipt(s, artifactId));
+  if (!receipt) return null;
+  const words = `${SEND_TO_COPY.actionSent(receipt.target)} · ${formatAgo(Math.max(0, now - receipt.at))}`;
+  return (
+    <>
+      <Dot />
+      {receipt.url ? (
+        <button type="button" data-part="receipt" tabIndex={tabIndex} title={receipt.name} onClick={() => void ipc.invoke('layout.openExternal', { url: receipt.url! })} className="shrink-0 truncate text-ui-sm text-fg-muted underline-offset-2 outline-accent hover:text-fg hover:underline focus-visible:outline-2">
+          {words}
+        </button>
+      ) : (
+        <span data-part="receipt" title={receipt.name} className="shrink-0 truncate">
+          {words}
+        </span>
+      )}
+    </>
+  );
+}
 
 export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, onKeyDown }: RowProps) {
   const now = useNow();
@@ -133,6 +158,7 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, o
           )}
           <Dot />
           <span className="truncate">{ROW_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by)}</span>
+          <Receipt artifactId={row.id} now={now} tabIndex={tabIndex} />
         </span>
         {row.snippet && (
           <span data-part="snippet" className="col-start-2 row-start-3 truncate text-ui-sm text-fg-faint">

@@ -1,12 +1,14 @@
 // The library's actions (the P3-L execution document, M3): each a write through A's `artifacts.*` and `spaces.*`, whose
 // answer carries the store's refusal read by `artifactRefusalOf`; the library changes only when main's index does (no
 // optimistic edit); opening an artifact reveals the main area and opens, or activates, its one tab.
+import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
 import { fail, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
+import { resetOpenRequests, takeOpenRequest, useOpenRequest } from '../tools/artifacts/viewers/requests';
 import {
   createArtifact, createSpace, deleteArtifact, deleteSpace, duplicateArtifact, linkSpaceDirectory, markArtifactViewed, moveArtifactToSpace, openArtifactTab,
   renameArtifact, renameSpace, setArtifactPinned,
@@ -70,5 +72,18 @@ describe('opening an artifact', () => {
     openArtifactTab(A);
     expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${A}`);
     expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toHaveLength(1);
+  });
+
+  // P4-B4: a place (a link's fragment) is asked of the main tab's editor, the latest version shown unless it names one; a
+  // plain open asks nothing of it (the tab keeps the version it shows)
+  it('asks the main tab’s editor for the place it names, at the latest; a plain open asks nothing', () => {
+    resetOpenRequests();
+    const asked = renderHook(() => useOpenRequest(A, 'main'));
+    act(() => openArtifactTab(A));
+    expect(asked.result.current).toBeNull();
+    act(() => openArtifactTab(A, { block: 'b7' }));
+    expect(asked.result.current).toMatchObject({ artifactId: A, at: 'latest', location: { block: 'b7' }, surface: 'main' });
+    expect(takeOpenRequest(asked.result.current!.serial)).toBe(true);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${A}`);
   });
 });

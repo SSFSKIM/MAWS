@@ -30,7 +30,7 @@ const FORK_FORK = `${FIXTURES}/pass3/fork-pinned-id-fork.jsonl`;
 const READ_ONLY = `${FIXTURES}/pass3/read-only-permission.jsonl`;
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
-  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<CommandResult<N>>;
+  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
 }
 
 function value<N extends CommandName>(result: CommandResult<N>) {

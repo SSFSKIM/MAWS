@@ -99,7 +99,7 @@ test('a refused plan relaunches the whole run with its own flags, --gates includ
 });
 
 test('a live run relaunches live, its refused groups and a refused plan alike', () => {
-  const liveRun = ['failure\te2e:library-live', 'success\te2e:send-to-live', 'success\tplan'];
+  const liveRun = ['failure\te2e:library-live', 'success\te2e:presentations-live', 'success\tplan'];
   assert.match(refusals(liveRun, [refusal('e2e:library-live')], { live: 'yes', class1a: '' }), / scripts\/ci-gate\.sh \w+ --runner macos --live --gates e2e:library-live --label /);
   const planRefused = ['failure\tplan', 'skipped\te2e:library-live'];
   assert.match(refusals(planRefused, [refusal('plan')], { live: 'yes', gates: 'e2e:library-live' }), / --class1a pool --live --gates e2e:library-live --label /);

@@ -44,6 +44,7 @@ import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
 import { artifactHost } from '../../../artifacts';
 import { connectorsOwner } from '../../../artifacts/connector-owner'; // P3-HD M3c2
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { ArtifactEditor, ArtifactEditorProps, ArtifactEditorTarget } from '../../../artifacts/registry';
 import { startArtifactSession } from '../../../artifacts/session-context';
@@ -53,6 +54,7 @@ import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../lib
 import { useLibraryRow } from '../../../library/store';
 import { useRegionMarkupSurface } from '../../../markup/surface';
 import { focusEditorHostAction, useEditorHost, type EditorHostAction, type EditorHostExport } from '../../../panel/editor-host';
+import { sendToSubject, useSendToAction } from '../../../delivery/header'; // P4-B5
 import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
 import type { OpenCard } from '../../../side/card/store';
 import { useSessions } from '../../../stores/sessions';
@@ -71,9 +73,9 @@ import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
 import { CommentIcon, ConnectorsIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
-import { bodyOf, placeOfOpenAt, selectionAt, selectionOf, shownVersion, underSession, versionLabel, versionsInOrder, type BodyKind, type VersionSelection } from './model';
+import { bodyOf, placeOfOpenAt, selectionAt, selectionOfOpen, shownVersion, underSession, versionLabel, versionsInOrder, type BodyKind, type VersionSelection } from './model';
 import { pageElementAnchor, type PickMessage } from './pick';
-import { takeVersionRequest, useVersionRequest } from './requests';
+import { takeOpenRequest, useOpenRequest } from './requests';
 
 type ByteKind = 'html' | 'file';
 const COMMENT_ACTION = 'comment'; // the header action a dismissed card gives focus back to
@@ -172,13 +174,14 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   // the picker's place, or a version asked for from outside (a card thread's artifact row: by its revision, else by its
   // number, X12's on an imported page, else the latest), kept as the identity it names (M6b fix waves 1 to 3)
   const choose = (n: number) => ordered !== null && state.view.setState({ selected: selectionAt(ordered, n) });
-  const chooseAt = (at: ArtifactOpenAt) => ordered !== null && state.view.setState({ selected: selectionOf(ordered, at) });
+  // P4-B4: a place's version (a retained version's id, a link's `#v<id>`) names the version shown; a place without one, `at`
+  const chooseAt = (at: ArtifactOpenAt, location?: ArtifactLocation) => ordered !== null && state.view.setState({ selected: selectionOfOpen(ordered, at, location) });
   // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
-  const request = useVersionRequest(artifactId, scope.surface);
+  const request = useOpenRequest(artifactId, scope.surface);
   useEffect(() => {
     if (ordered === null) return;
     noteArtifactVersions(artifactId, ordered);
-    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ selected: selectionOf(ordered, request.at) });
+    if (request !== null && takeOpenRequest(request.serial)) state.view.setState({ selected: selectionOfOpen(ordered, request.at, request.location) });
   }, [artifactId, ordered, request, state.view]);
 
   // the frame picking is asked of, by what keys it: another version or a Reload is another frame
@@ -451,6 +454,9 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
       },
     });
   }
+  // P4-B5: Send to, the revision the viewer shows (a version's when it is not the latest followed)
+  const sendTo = useSendToAction(selection === null ? null : sendToSubject(artifactId, kind, title, selection.versionId === undefined ? null : { versionId: selection.versionId }));
+  if (sendTo && formats.length > 0) actions.push(sendTo);
   useEditorHost(scope, { title, saved: 'readonly', actions, exports });
 }
 

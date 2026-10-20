@@ -50,8 +50,9 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   const listed = comments ? actions.filter((a) => a !== comments) : actions;
   const exports = registration?.exports ?? [];
   const breadcrumb = registration?.breadcrumb ?? [];
-  const shown = narrow ? [] : listed.slice(0, SHOWN_ACTIONS);
-  const overflow = narrow ? listed : listed.slice(SHOWN_ACTIONS);
+  const counted = listed.filter((a) => !a.pinned); // P4-B5: a pinned action is drawn beside the three, never folded but narrow
+  const shown = narrow ? [] : [...counted.slice(0, SHOWN_ACTIONS), ...listed.filter((a) => a.pinned)];
+  const overflow = narrow ? listed : counted.slice(SHOWN_ACTIONS);
   const folded = narrow ? exports : [];
   const plain = suffix ? `${title} · ${suffix}` : title;
   const hasEditorControls = listed.length > 0 || exports.length > 0 || Boolean(markup);

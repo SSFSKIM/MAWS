@@ -64,9 +64,10 @@ import * as library from './schema/library'; // P3-L M1
 import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
 import * as presentations from './schema/presentations'; // P3-C M6
 import * as connectors from './schema/connectors'; // P3-H H3b
+import * as delivery from './schema/delivery'; // P4-B5
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -602,7 +603,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -929,6 +930,9 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('maws.ask.answer', { outcome: 'write_failed' }).ok).toBe(true);
       expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'file', target: '/r/a.ts', line: 3 }).ok).toBe(true);
       expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'nope', target: null, line: null }).ok).toBe(false);
+      // P4-B4: an artifact pane's place, absent when none; a place outside the link grammar is refused
+      expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'artifact', target: 'x', line: null, at: { tab: 't1', block: 'b2', version: 3 } }).ok).toBe(true);
+      expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'artifact', target: 'x', line: null, at: { block: 'not an id' } }).ok).toBe(false);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'show_pane: the artifact pane is not available in this build of MAWS' } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false } }).ok).toBe(false);

@@ -228,6 +228,32 @@ describe('the panel header', () => {
     expect(calls).toEqual(['a4']);
   });
 
+  // P4-B5 (X32 additive): a pinned action (the header's Send to) is drawn beside the first three, never folded into "More
+  // actions" but under the narrow header, where every action is
+  it('draws a pinned action beside the first three, wherever the editor listed it, and folds it only under the narrow header', async () => {
+    const user = userEvent.setup();
+    const { resize } = installResizeObserver();
+    let width = 0;
+    const spy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-editor-header') ? width : 0;
+    });
+    offs.push(() => spy.mockRestore());
+    const action = (n: number, extra: Partial<EditorHostAction> = {}): EditorHostAction => ({ id: `a${n}`, label: `Action ${n}`, onSelect: () => {}, ...extra });
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1), action(2), action(3), action(4), action(5, { pinned: true, label: 'Send to…' })] }));
+    const controls = ['Float session over panel', 'Maximize right panel', 'Hide right panel'];
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Send to…', 'More actions', ...controls]);
+    await user.click(within(header()).getByRole('button', { name: 'More actions' }));
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Action 4']);
+    await user.keyboard('{Escape}');
+
+    width = 280;
+    resize(header(), { width: 264, height: 40 });
+    expect(buttons()).toEqual(['More actions', ...controls]);
+  });
+
   // P3-L (M6b fix wave 1, X32 additive): an editor gives focus back to an action's control in the header over its scope
   // (a dismissed comment card to Comment); an action folded into "More actions" gives it to that menu's button.
   it('focuses an action’s control in the header over the scope, "More actions" for a folded one, and answers false otherwise', () => {

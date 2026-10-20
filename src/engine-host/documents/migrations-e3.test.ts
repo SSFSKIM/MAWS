@@ -1,7 +1,8 @@
 // E3 M1 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1; E's Decision Log 48 (1)): schema 3 of the host's
 // artifact store, the query-snapshot retention. `artifact_assets` gains `querySnapshot` (0 or 1, 0 for every existing
 // row) and `retiredAt` (null: active); `artifact_query_snapshots` is the bounded per-query membership, its rows tied to
-// their asset by a composite foreign key that cascades. H's schema-2 cases stay in migrations.test.ts (bound to V2).
+// their asset by a composite foreign key that cascades. H's schema-2 cases stay in migrations.test.ts (bound to V2);
+// these run the schema-3 list they were written for (P4-B4's schema 4 is migrations-search.test.ts's).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, STORE_MIGRATIONS } from './migrations';
 
 const V2 = STORE_MIGRATIONS.slice(0, 2);
+const V3 = STORE_MIGRATIONS.slice(0, 3);
 let dir: string;
 const fresh = () => (dir = mkdtempSync(join(tmpdir(), 'maws-store-e3-')));
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -20,8 +22,8 @@ const columns = (db: DatabaseSync, table: string) => db.prepare(`SELECT name, ty
 
 describe('openStore: schema 3 (E3, query snapshot retention)', () => {
   it('creates a fresh store at schema version 3 with the two asset columns and the membership table', () => {
-    expect(STORE_MIGRATIONS.map((migration) => migration.version)).toEqual([1, 2, 3]);
-    const { db, applied } = openStore(join(fresh(), 'store.sqlite'), STORE_MIGRATIONS, quiet);
+    expect(V3.map((migration) => migration.version)).toEqual([1, 2, 3]);
+    const { db, applied } = openStore(join(fresh(), 'store.sqlite'), V3, quiet);
     expect(applied).toEqual([1, 2, 3]);
     expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
     expect(columns(db, 'artifact_assets').slice(-2)).toEqual([
@@ -58,21 +60,21 @@ describe('openStore: schema 3 (E3, query snapshot retention)', () => {
     first.db.prepare("INSERT INTO artifact_connector_grants (artifactId, server, tool, fingerprint, mode, grantedAt) VALUES ('a1', 'fixture', 'rows', 'f1', 'read', 2)").run();
     first.db.close();
 
-    const upgraded = openStore(path, STORE_MIGRATIONS, quiet);
+    const upgraded = openStore(path, V3, quiet);
     expect(upgraded.applied).toEqual([3]);
     expect(upgraded.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
     expect(upgraded.db.prepare('SELECT assetId, querySnapshot, retiredAt FROM artifact_assets').all()).toEqual([{ assetId: 'old', querySnapshot: 0, retiredAt: null }]);
     expect(upgraded.db.prepare('SELECT COUNT(*) AS n FROM artifact_query_snapshots').get()).toEqual({ n: 0 });
     expect(upgraded.db.prepare('SELECT server, tool FROM artifact_connector_grants').all()).toEqual([{ server: 'fixture', tool: 'rows' }]);
     upgraded.db.close();
-    const again = openStore(path, STORE_MIGRATIONS, quiet);
+    const again = openStore(path, V3, quiet);
     expect(again.applied).toEqual([]);
     again.db.close();
   });
 
   it('opens a schema-3 store read-only under the schema-2 list, leaving it at 3', () => {
     const path = join(fresh(), 'store.sqlite');
-    openStore(path, STORE_MIGRATIONS, quiet).db.close();
+    openStore(path, V3, quiet).db.close();
     const older = openStore(path, V2, quiet);
     expect(older.status).toBe('readOnly');
     older.db.close();

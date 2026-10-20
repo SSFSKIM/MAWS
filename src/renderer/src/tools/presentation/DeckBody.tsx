@@ -11,6 +11,8 @@
 // P3-F (L233): the header's Export exports what the editor shows (the session's `shown`), read when an entry is chosen.
 // P3-F: Present is offered while the deck has a slide to show (the show's own reading), following the deck live; a deck
 // with no slide is shown once its stage shows the empty deck (no slide is drawn to report it).
+// P4-B4: an open's place (a link's fragment, `show_pane`'s `at`) reaches the editor as its `reveal`, the open request for
+// this artifact on this surface, taken once the editor has it.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost } from '@artifacts/host';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
@@ -21,7 +23,9 @@ import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
+import { sendToSubject, useSendToAction } from '../../delivery/header'; // P4-B5
 import { useEditorHost } from '../../panel/editor-host';
+import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F1
 import { useDocumentComments } from '../document/comments'; // M7: B's surface
 import { chooseDeckSystem, presentDeck } from './commands';
@@ -79,7 +83,9 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
     () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
     [opened, artifactId],
   );
-  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, unresolved: snapshot.unresolved, history: state.history !== null }, commands));
+  const header = deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, unresolved: snapshot.unresolved, history: state.history !== null }, commands);
+  const sendTo = useSendToAction(sendToSubject(artifactId, 'presentation', row?.title, shown)); // P4-B5
+  useEditorHost(scope, sendTo ? { ...header, actions: [...(header.actions ?? []), sendTo] } : header);
 
   // M7: comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown,
   // to the deck's own context; not offered only while that is unread
@@ -129,6 +135,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   const history = useMemo(() => (state.history && handle ? { api: state.history, handle } : undefined), [state.history, handle]);
   const onPreviewDrawn = useCallback((ms: number) => session && recordPreview(session, ms), [session]);
   const onThumbnailsDrawn = useCallback((thumbnails: number) => session?.markDrawn(thumbnails), [session]);
+  const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4: an open's place (a link's slide or version)
 
   if (snapshot.failed !== null) return <Notice>{`This presentation could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.handle || !session) return <Notice>Opening the presentation…</Notice>;
@@ -152,6 +159,8 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
         onPreviewDrawn={onPreviewDrawn}
+        reveal={reveal} /* P4-B4 */
+        onRevealed={takeOpenRequest}
       />
     </div>
   );

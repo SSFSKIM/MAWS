@@ -105,6 +105,21 @@ CREATE TABLE artifact_query_snapshots (
 `,
   },
   // E3 end
+  // P4-B4 start (docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md, "The mirror"; the P4 ledger's X15 slot "the
+  // host store's next schema version" and its X23 row): `artifact_search`'s full-text mirror, main's `library_text`
+  // shape. `artifact_text` holds each live artifact's title and sectioned body (trigram FTS5, so a term of three
+  // characters or more matches inside a longer word); `artifact_text_rows` the revision and title each row was written
+  // at, by which a row is told stale, and the body's sections (`[offset, place][]` JSON, `@artifacts/library/sections`).
+  // Left empty here: the search's catch-up and the host's sweep fill it (search.ts).
+  {
+    version: 4,
+    sql: `
+CREATE VIRTUAL TABLE artifact_text USING fts5(artifact_id UNINDEXED, title, body, tokenize = 'trigram');
+CREATE TABLE artifact_text_rows (artifactId TEXT PRIMARY KEY, textRowid INTEGER NOT NULL UNIQUE, revision INTEGER NOT NULL,
+  title TEXT NOT NULL, sections TEXT NOT NULL);
+`,
+  },
+  // P4-B4 end
 ];
 
 // `ok`; `readOnly`: a newer app's file, every write refused with `storeTooNew`; `recovered`: the file at the path was

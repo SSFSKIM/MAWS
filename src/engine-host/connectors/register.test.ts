@@ -104,7 +104,8 @@ describe('the engine host’s connectors surface (P3-H H3b)', () => {
     const owned = Object.entries(commands).filter(([name, spec]) => name.startsWith('connectors.') && spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(CONNECTORS_DEADLINE_SHAPES).sort()).toEqual(owned.sort());
     expect([...handlers.keys()].sort()).toEqual(owned.sort());
-    expect(Object.entries(CONNECTORS_DEADLINE_SHAPES).filter(([, shape]) => shape !== 'immediate')).toEqual([['connectors.resolve', 'bounded']]);
+    // P4-B5: route E's observation alone is a status read, bounded as `resolve` is
+    expect(Object.entries(CONNECTORS_DEADLINE_SHAPES).filter(([, shape]) => shape !== 'immediate')).toEqual([['connectors.resolve', 'bounded'], ['connectors.observe', 'bounded']]);
   });
 
   it('grants, lists, checks and revokes through the store, announcing each committed change by tool alone', async () => {

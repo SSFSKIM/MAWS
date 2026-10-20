@@ -125,6 +125,21 @@ describe('SurfaceTree (R2)', () => {
     expect(fake.invoked('session.ui.press')).toEqual([]); // MAWS's own chip: nothing is pressed in the plugin
   });
 
+  // P4-B4: the link's fragment opens it at its place there too
+  it('a Markdown artifact link with a fragment opens the artifact at its place', () => {
+    const openArtifact = vi.fn();
+    const openArtifactTab = vi.fn();
+    offs.push(registerTranscriptActions({ openArtifact, openArtifactTab }));
+    setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab });
+    offs.push(() => setHostActions(DEFAULT_ACTIONS));
+    setup({ type: 'Markdown', props: { text: `[the block](maws-artifact:${ARTIFACT}#tab=t2&block=b7)`, key: 'md' } });
+    const chip = screen.getByRole('button', { name: 'the block' });
+    fireEvent.click(chip);
+    expect(openArtifact).toHaveBeenCalledWith(ID, ARTIFACT, undefined, { tab: 't2', block: 'b7' });
+    fireEvent.click(chip, { metaKey: true });
+    expect(openArtifactTab).toHaveBeenCalledWith(ARTIFACT, { tab: 't2', block: 'b7' });
+  });
+
   it('an Svg is a data: image, or a frame with an empty sandbox when interactive', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6"/></svg>';
     setup({ type: 'Box', children: [{ type: 'Svg', props: { source: svg, alt: 'Probe dot', width: 16, height: 16 } }, { type: 'Svg', props: { source: svg, alt: 'Live dot', isInteractive: true } }] });

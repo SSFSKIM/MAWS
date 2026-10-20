@@ -12,6 +12,7 @@ import type { DesignSystemExport } from '@artifacts/document/export/design-syste
 import { exportDocx } from '@artifacts/document/export/docx';
 import { exportHtml } from '@artifacts/document/export/html';
 import { exportMarkdown } from '@artifacts/document/export/markdown';
+import { exportNotionMarkdown } from '@artifacts/document/export/notion'; // P4-B5
 import { exportSource, type ImageLoader, type ViewRenderer } from '@artifacts/document/export/source';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { Exporter, ExportContext, ExportRequest } from './export';
@@ -61,7 +62,8 @@ const html = async (request: DocumentExportRequest, context: DocumentExportConte
   exportHtml(await sourceOf(context), { system: context.system, pageSize: request.pageSize, images: 'inline', loadImage: imagesOf(context), renderView: context.renderView, viewCss: context.viewCss /* P3-E */ });
 
 const RUN: Record<DocumentExportFormat, (request: DocumentExportRequest, context: DocumentExportContext) => Promise<void>> = {
-  md: async (request, context) => context.writeFile(request.path, exportMarkdown(await sourceOf(context), { renderView: context.renderView /* P3-E */ })),
+  // P4-B5: the delivery's Notion dialect (Notion's enhanced Markdown, a page's content) beside the GFM file
+  md: async (request, context) => context.writeFile(request.path, (request.dialect === 'notion' ? exportNotionMarkdown : exportMarkdown)(await sourceOf(context), { renderView: context.renderView /* P3-E */ })),
   html: async (request, context) => context.writeFile(request.path, await html(request, context)),
   docx: async (request, context) =>
     context.writeFile(request.path, await exportDocx(await sourceOf(context), { system: context.system, pageSize: request.pageSize, loadImage: imagesOf(context), authorName: context.authorName, renderView: context.renderView /* P3-E */ })),
