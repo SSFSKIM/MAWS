@@ -274,7 +274,7 @@ test.describe('the document editor', () => {
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
     await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
-    await expect(card.getByRole('heading')).toHaveText('Field notes, Notes');
+    await expect(card.getByRole('heading')).toHaveText('Field notes'); // P4-B1 (tracker L275): a one-tab document names no tab
     // the host's doc has the thread once replica A's update arrived over its port (as the next case reads it)
     const hostThreads = () => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
     await expect.poll(async () => (await hostThreads()).length, { message: 'the new thread at the host' }).toBe(1);

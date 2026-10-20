@@ -393,11 +393,11 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         {comments.view && (
           /* P4-B1: View › Comments beside the toolbar's Comments: Expand (cards in the margin), Minimize (icons), Hide */
           <span ref={viewAnchor} className="doc-menu-anchor">
-            <Tool ref={viewButton} label="Comments view" expanded={menu === 'comments-view'} onClick={() => setMenu(menu === 'comments-view' ? null : 'comments-view')}>
+            <Tool ref={viewButton} label="Comment view" expanded={menu === 'comments-view'} onClick={() => setMenu(menu === 'comments-view' ? null : 'comments-view')}>
               ▾
             </Tool>
             {menu === 'comments-view' && (
-              <div role="menu" className="doc-menu" aria-label="Comments view">
+              <div role="menu" className="doc-menu" aria-label="Comment view">
                 {VIEWS.map(([value, label]) => (
                   <button
                     key={value}

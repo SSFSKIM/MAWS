@@ -1,8 +1,9 @@
 // The margin in the product (P4-B1; the P4 spec §2 item 1 and §5 B1's "a margin case added to e2e:document-app: an agent
 // reply growing a card while the owner types"; docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md M5). `pnpm
-// e2e:document-app`, the product build, MAWS_HARNESS=0, the window at 1600 × 900 so an `artifact` main tab reaches the
-// margin's cards tier, and the host seam (`documents/kinds/document-perf.ts`, MAWS_DOCUMENT_PERF=1) running the real
-// `artifact_reply` as an agent session. The owner's two threads are cards beside their passages; the agent's reply grows
+// e2e:document-app`, the product build, MAWS_HARNESS=0, the window at 1600 × 900 and the document in the panel's
+// pinned Artifacts tool, maximized, so its body reaches the margin's cards tier while the main area shows the session
+// its comments go to (an `artifact` main tab alone has no session to comment to without an engine), and the host seam
+// (`documents/kinds/document-perf.ts`, MAWS_DOCUMENT_PERF=1) running the real `artifact_reply` as an agent session. The owner's two threads are cards beside their passages; the agent's reply grows
 // the first card while the owner types in the paragraph above, the second card is pushed down, the active thread
 // stays the owner's, and the typed text lands whole; the view states and the panel's round trip are read on the same
 // document. No engine runs; the profile is the case's own directory under /tmp.
@@ -11,6 +12,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PerfSeam } from './support/document-scale';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -47,14 +49,28 @@ async function start(): Promise<{ page: Page; seam: PerfSeam }> {
   return { page, seam };
 }
 
-// The owner's document, opened from the library in an `artifact` main tab.
-async function openInMain(page: Page, title: string): Promise<{ id: string; main: Locator }> {
+// The panel's Artifacts tool, added in session A's panel and pinned; the main area shows Harness A, so a comment has a
+// session to go to.
+async function pinArtifactsTool(page: Page): Promise<void> {
+  const panel = page.locator('[data-region="panel"]');
+  await (await sidebarRow(page, 'Harness A')).click();
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
+  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
+}
+
+// The owner's document in the pinned Artifacts tool's record view, the panel maximized (the margin's cards tier).
+async function openInPanel(page: Page, title: string): Promise<{ id: string; main: Locator }> {
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title });
-  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
-  await page.locator('[data-library]').getByRole('article', { name: title, exact: true }).click({ timeout: 15_000 });
-  const main = page.locator(`[data-artifact-tab="${artifact.id}"]`);
-  await expect(main.locator('.ds-doc .ProseMirror[data-editor="live"]')).toBeVisible({ timeout: 15_000 });
-  return { id: artifact.id, main };
+  const panel = page.locator('[data-region="panel"]');
+  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
+  const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
+  await expect(record.locator('.ds-doc .ProseMirror[data-editor="live"]')).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+  await expect.poll(async () => (await record.locator('.doc-editor-body').boundingBox())!.width, { message: 'the panel maximized' }).toBeGreaterThan(1200);
+  return { id: artifact.id, main: record };
 }
 
 async function selectIn(text: Locator, index: number, quote: string): Promise<void> {
@@ -104,7 +120,8 @@ async function keep(page: Page, main: Locator, text: Locator, index: number, quo
 test('an agent reply grows a card while the owner types; the stack re-lays, the active thread stays; the view states and the panel round trip', async () => {
   test.setTimeout(120_000);
   const { page, seam } = await start();
-  const { id, main } = await openInMain(page, 'Margin review');
+  await pinArtifactsTool(page);
+  const { id, main } = await openInPanel(page, 'Margin review');
   const text = main.locator('.ds-doc .ProseMirror[data-editor="live"]');
   const toolbar = main.getByRole('toolbar', { name: 'Formatting' });
   const margin = main.getByRole('region', { name: 'Comments' });
@@ -170,7 +187,7 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
   });
 
   await test.step('the view states: Minimize gives the icon rail, Hide no margin, Expand the cards; the panel takes the cards out and gives them back', async () => {
-    const view = toolbar.getByRole('button', { name: 'Comments view' });
+    const view = toolbar.getByRole('button', { name: 'Comment view' });
     await view.click();
     await toolbar.getByRole('menuitemradio', { name: 'Minimize' }).click();
     await expect(margin).toHaveAttribute('data-margin-tier', 'icons');
