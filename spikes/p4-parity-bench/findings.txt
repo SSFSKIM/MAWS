@@ -120,7 +120,9 @@ What this means for the cells:
       measurement-only (§2). Its scope differs from MAWS's (a per-session config dir, Cowork's own system prompt);
   (b) the owner removes `enableArtifact: false` for the hold, so a Code session on the owner's scope gets the Slides
       artifact. This is the closest comparison, but it changes the owner's settings and may add the `Artifact` tool to
-      MAWS's own sessions too (whether the engine offers it outside entrypoint `claude-desktop` is not verified);
+      MAWS's own sessions too (whether the engine offers it outside entrypoint `claude-desktop` is not verified). It is
+      not built: desktop-prep would need a surface of its own for it (the Cowork deck's rebuild and landing applied to
+      a Code session's transcript), since a presentation on `--surface code` is the plain-file deck.html of (c);
   (c) a Code session on the plain file deck.html. Same scope and engine, but a plain file is not a deck kind and its
       edit is a string patch, so it measures the engine's file editing rather than a deck protocol.
   The executor recommends (a), reporting (c) beside it only if the hold has time; the result names the kind used.
@@ -208,28 +210,44 @@ prompt. `after --permissions-answered N` finds Desktop's own records for the ses
 <account>/<org>/local_<id>.json's `cliSessionId`, then ~/.claude/projects/<slug>/<id>.jsonl; Cowork:
 local-agent-mode-sessions/…/audit.jsonl and its private transcript), copies or rebuilds the edited artifact, runs the
 checker, writes the manifest (N above 0 is a human stop) and prints the turn's recorded permission mode and whether the
-attempt is valid, so the hold knows at once which cell needs another repetition. `deck` rebuilds a Cowork deck from a
-session's records for the hold's first read; `kinds` is the first read of §3.
+attempt is valid, so the hold knows at once which cell needs another repetition. When `after` cannot close the attempt
+(no session found, or a deck it can neither rebuild nor take from bench-after/) it exits and leaves the attempt open, so
+`after` can run again once the cause is fixed (a wrong --seed-transcript, bench-after/ still to be written); the reason
+is kept in the attempt's pending.json, and an attempt redone instead is closed as aborted with that reason. `deck`
+rebuilds a Cowork deck from a session's records for the hold's first read and prints, beside `same`, the permission mode
+each of the session's human turns was recorded in; `kinds` is the first read of §3 and prints the recorded permission
+mode too (a Cowork audit's system/init, a transcript's human records).
 
 A Cowork deck is rebuilt from the records. The engine's `Artifact` tool publishes local files (2.1.302's schema:
 `file_path` the page or a data file; `edits`, old_str/new_str pairs applied to that file on disk and then published;
-`files`, published paths mapped to source paths, not to texts), so the deck's text lives in the transcript's own `Write`,
-`Edit` and `MultiEdit` calls and the publish's `edits`. The rebuild replays the successful calls in order: the seed's
-(`after --seed-transcript T`, T possibly the timed transcript itself; its calls up to the timed turn's send) give the deck
-before, checked `same` against seed/maws-deck and recorded as seedCheck; the timed turn's calls carry it on to the deck
-after. A file named under another session's mount of the folder is matched by its trailing path. Anything the rebuild
-cannot follow (an edit of a file whose text is not in the records, an `Artifact` action other than a publish or a read,
-an edit of an unknown shape, published files outside the deck's layout) fails loudly; for the deck after, the files the
-driver's untimed follow-up has the model write to bench-after/ are then the last resort, and the manifest says so
-(`afterSource`). The rebuild is tested on synthesized records only (prep_test.py); the hold's first step tries it on real
-ones.
+`files` the other files, either a map {published path: source path | {from, contentType} | null} or a list
+[{path, contentType}] publishing each file at its own spelling from that path; `root` the folder relative sources resolve
+against), so the deck's text lives in the transcript's own `Write`, `Edit` and `MultiEdit` calls, the publish's `edits`,
+and the published files `read_file` saves locally. 2.1.302's Slides flow is a quickstart, a `type_url` publish that
+creates the deck, the index and slides written under one folder and published to the deck's url with `root`,
+`file_path` and `files`; a later edit reads the deck, saves the slide's file with `read_file`, edits it there and
+publishes it. The rebuild replays the successful calls in order: a publish (a `type_url` one starts a new deck from its
+own files, else from none), a `read_file` (the published text then found under the published path wherever it was saved);
+every other action of the engine's list (cli.pretty.js `Qe()`, and its consolidated spellings) leaves the files as they
+were, save those that change the artifact in ways the records do not carry (sync, write_db, upload_asset, delete_asset,
+copy_from, delete, call_endpoint, a mutating run_script). The seed's calls (`after --seed-transcript T`, T possibly the
+timed transcript itself; its calls up to the timed turn's send) give the deck before, checked `same` against
+seed/maws-deck and recorded as seedCheck; the timed turn's calls carry it on to the deck after. A file named under
+another session's mount of the folder is matched by its trailing path. Anything the rebuild cannot follow (an edit of a
+file whose text is not in the records, one of those actions or one not in the list, an edit or a files entry of an
+unknown shape, published files outside the deck's layout, any unexpected error on the way) fails loudly; for the deck
+after, the files the driver's untimed follow-up has the model write to bench-after/ are then the last resort, and the
+manifest says so (`afterSource`, with `rebuildError`). The rebuild is tested on synthesized records only (prep_test.py,
+the 2.1.302 Slides flow among them); the hold's first step tries it on real ones.
 
 Dry-run end to end against a fake Desktop store (the Desktop fixture as the session's transcript) through `report`.
 desktop-driver.js is the GUI half for `cua_repl`: written, not run (no GUI automation in this phase). Its labels are
 Desktop 2.42304's in English and Korean (the owner's Desktop runs ko-KR), each Korean label its own pattern (JavaScript's
 `\b` is ASCII-only, so it never sits beside Hangul), checked with node on sample lines; `bench.probe()` checks each
-against the live accessibility tree as the hold's first step. After choosing Auto it checks that the permission-mode
-control shows Auto; a permission card it has to answer is counted in `bench.rep()`'s result, which step 3 passes on.
+against the live accessibility tree as the hold's first step. The folder panel's Open button, which exists only while
+the panel is up, is matched by its whole name, since Desktop's own Choose folder (폴더 선택) contains Choose (선택).
+After choosing Auto it checks that the permission-mode control shows Auto; a permission card it has to answer is
+counted in `bench.rep()`'s result, which step 3 passes on.
 
 
 ## 7. The record run
@@ -244,25 +262,29 @@ per repetition and both arms share it through the interleaving.
 Preconditions, each confirmed at the hold's start:
 1. The owner's go for cua on the MacBook (the architect obtains it).
 2. Claude Desktop signed in to the owner's account (confirm in its GUI); Code sessions set to Opus 5.5, effort Extra
-   high (매우 높음), permission mode Auto (자동) on every session (the saved landing default is Accept edits).
+   high (매우 높음), permission mode Auto (자동) on every session (the saved landing default is Accept edits). Cowork
+   sessions, if the decks run there, also in Auto: all 55 Cowork sessions with records on this Mac (engines 2.1.87 to
+   2.1.197) record `default`, in their audit's system/init and their transcripts, and a turn not recorded in auto is
+   invalid (§1). If Cowork cannot run in Auto for the account, the decks move to (c) and the result says why.
 3. "MAWS parity bench", X39's one project for the bench in the owner's Anthropic account: for the Code sessions the
    folder /tmp/maws-parity-bench/MAWS parity bench (Desktop groups Code sessions by folder; each session is also
    bridged to claude.ai by Remote Control); for Cowork, if the decks run there, a Cowork Space or claude.ai project of
    that name. Deleted after the run: the Code sessions, the Cowork tasks and the Space or project, every Slides artifact
    the bench made. No sharing, no invites.
-4. The owner's two calls: the deck surface (§3: (a) Cowork, (b) `enableArtifact` removed for the hold, or (c) plain
-   deck.html; if decks run on more than one, which one is judged, passed to `report --judge`), and the MAWS arm on the
-   owner's real ~/.claude (MAWS_BENCH_SCOPE=owner: the engine writes the bench sessions' transcripts under
-   ~/.claude/projects and the bench folder's entry in ~/.claude.json, as any MAWS session would; the harness writes
-   nothing there).
+4. The owner's two calls: the deck surface (§3: (a) Cowork, or (c) plain deck.html; (b), `enableArtifact` removed for
+   the hold, needs its own surface in desktop-prep first; if decks run on more than one, which one is judged, passed to
+   `report --judge`), and the MAWS arm on the owner's real ~/.claude (MAWS_BENCH_SCOPE=owner: the engine writes the
+   bench sessions' transcripts under ~/.claude/projects and the bench folder's entry in ~/.claude.json, as any MAWS
+   session would; the harness writes nothing there).
 5. The relay (ClaudeUsage) answering /api/hello; this branch built (`scripts/e2e-build.sh plain`); MAWS_E2E_QUIET=1
    and lockf /tmp/macbook-e2e.lock for every MAWS repetition; no other MAWS e2e or heavy run on the host.
 
 The hold's first step (untimed): `bench.probe()`; the probe sessions and `desktop-prep.py kinds` (§3); the MAWS seeds
 (one MAWS invocation that seeds the bench profile, MAWS_BENCH_PROFILE kept for the whole run); for Cowork decks, the
 Slides seed made from seed/maws-deck by an untimed Cowork turn, titled as tasks.json's deck title, then `desktop-prep.py
-deck <that session's transcript> <run>/cowork-seed`, which prints `check.py same seed/maws-deck` on the rebuilt deck:
-it must pass before any timed Cowork repetition, else the decks run on (b) or (c). The parser counts `Artifact`'s
+deck <that session's transcript> <run>/cowork-seed`, which prints `check.py same seed/maws-deck` on the rebuilt deck
+and the permission mode the seed turn was recorded in (`kinds` prints the probe's): the check must pass and the mode be
+`auto` before any timed Cowork repetition, else the decks run on (c). The parser counts `Artifact`'s
 publish (an omitted action included) as the landing; if the seed's record shows another publishing operation,
 `after --landing-actions Artifact=<op>` names it.
 

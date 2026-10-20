@@ -50,8 +50,9 @@ const LABELS = {
   stop: [/\bbutton\b.*\bStop\b/, /\bbutton\b.*(?<!\p{L})중지(?!\p{L})/u],
   // a permission card that still appears in auto mode
   alwaysAllow: [/Always allow/, /항상 허용/],
-  // the folder panel (NSOpenPanel)
-  open: [/\bbutton\b.*\b(Open|Choose)\b/, /\bbutton\b.*(?<!\p{L})(열기|선택)(?!\p{L})/u],
+  // the folder panel's (NSOpenPanel's) default button, its whole name only: Desktop's own "Choose folder" (폴더 선택)
+  // contains Choose (선택), and matching it would make the panel's checks pass before the panel is there
+  open: [/^\s*\d+\s+button\s+"?(Open|Choose)"?\s*$/, /^\s*\d+\s+button\s+"?(열기|선택)"?\s*$/u],
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

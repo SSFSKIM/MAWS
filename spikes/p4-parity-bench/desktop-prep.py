@@ -7,8 +7,10 @@ Desktop's records are only read.
 
   python3 -I desktop-prep.py before <task> <rep> --out RUN [--surface code|cowork]
   python3 -I desktop-prep.py after  <task> <rep> --out RUN --permissions-answered N [--seed-transcript T] ...
-  python3 -I desktop-prep.py deck   <transcript> <out dir>     a Cowork deck rebuilt from a session's records
-  python3 -I desktop-prep.py kinds  <transcript.jsonl | audit.jsonl> ...   the artifact kinds a session was offered
+  python3 -I desktop-prep.py deck   <transcript> <out dir>     a Cowork deck rebuilt from a session's records, `same`
+                                                               against the bench's, and the turns' permission modes
+  python3 -I desktop-prep.py kinds  <transcript.jsonl | audit.jsonl> ...   the artifact kinds a session was offered and
+                                                               the permission mode its records carry
 
 Attempts: a repetition's records live in RUN/desktop-<task>-r<rep>, a later attempt at the same repetition in
 …-a2, …-a3: nothing is overwritten. `before` opens the first attempt without a manifest; an attempt it finds laid but
@@ -26,6 +28,7 @@ The surfaces:
           driver's untimed follow-up has the model write, is the last resort and the manifest says when it was used.
 """
 import argparse
+import contextlib
 import glob
 import importlib.util
 import json
@@ -116,9 +119,12 @@ def open_attempt(out, task, rep):
             continue
         if os.path.isfile(os.path.join(d, 'pending.json')):  # laid, never closed: recorded as aborted, never reused
             p = json.loads(read(os.path.join(d, 'pending.json')))
+            why = 'aborted: laid by before and never closed by after (the attempt was redone)'
+            if p.get('afterStopped'):
+                why += '; after had stopped on: %s' % p['afterStopped']
             aborted = dict(arm='desktop', task=p['task'], rep=p['rep'], attempt=n, kind=p['kind'], surface=p['surface'], host=p['host'], startedAt=p['startedAt'],
                            prompt=p['prompt'], promptMatch=p['promptMatch'], transcript=None, humanStop=None, pin=None, measurementOnly=False,
-                           check={'pass': False, 'detail': 'aborted: laid by before and never closed by after (the attempt was redone)'})
+                           check={'pass': False, 'detail': why})
             write(os.path.join(d, 'manifest.json'), json.dumps(aborted, indent=2) + '\n')
             continue
         shutil.rmtree(d, ignore_errors=True)
@@ -197,9 +203,11 @@ def cowork_session(started):
     d = best[1]
     transcripts = sorted(glob.glob(os.path.join(d, '.claude', 'projects', '*', '*.jsonl')), key=os.path.getmtime)
     meta = {}
-    if os.path.isfile(d + '.json'):
+    try:
         m = json.loads(read(d + '.json'))
         meta = {k: m.get(k) for k in ('model', 'effort', 'effortOverride', 'permissionMode', 'createdAt', 'title') if k in m}
+    except (OSError, ValueError, AttributeError):  # Desktop's own file, absent or mid-write: the records still carry the turn
+        pass
     return dict(transcript=transcripts[-1] if transcripts else None, audit=os.path.join(d, 'audit.jsonl'), local=d, meta=meta, cliVersion=None)
 
 
@@ -211,15 +219,58 @@ def relay_logs(since):
 #
 # The engine's `Artifact` tool publishes local files (2.1.302's schema): `file_path` the page or, on an Artifact made
 # from a type, one of its data files; `edits` old_str/new_str pairs applied to `file_path` on disk, then published;
-# `files` {published path: source path | {from} | null} beside it. The content therefore lives in the transcript's own
-# writes (`Write`, `Edit`, `MultiEdit`) and the publish's `edits`; the rebuild replays them in order, successful calls
-# only, and fails loudly on anything it cannot follow.
+# `files` beside it, a map {published path: source path | {from, contentType} | null} or a list [{path, contentType}]
+# (each file published at its own spelling, read from it); `root` the folder relative sources resolve against. A
+# `type_url` publish creates a new Artifact from a type (the Slides flow: quickstart, the create, then the deck's files
+# written and published to its url). The content therefore lives in the transcript's own writes (`Write`, `Edit`,
+# `MultiEdit`), the publish's `edits` and the published files `read_file` saves locally; the rebuild replays them in
+# order, successful calls only, and fails loudly on anything it cannot follow.
 
 class RebuildError(Exception):
     pass
 
 
-ARTIFACT_READS = ('list', 'read', 'read_page_data', 'open', 'pin', 'unpin', 'get_endpoints')
+@contextlib.contextmanager
+def rebuilding():
+    """Any error while rebuilding is the rebuild's own, so `after`'s fallback and exits apply to it."""
+    try:
+        yield
+    except RebuildError:
+        raise
+    except Exception as e:
+        raise RebuildError('an unexpected %s in the rebuild: %s' % (type(e).__name__, e)) from e
+
+
+# The engine's Artifact actions (2.1.302: every action its schema can offer, cli.pretty.js `Qe()`), by what each does to
+# the artifact. A publish is replayed and a read_file followed (it saves a published file locally, where an edit then
+# finds it); these leave the artifact's files as they were; the unfollowed change the artifact in ways its records do
+# not carry (its sync, store, assets, existence or endpoints) and fail loudly, as does any action outside the list.
+ARTIFACT_KEEPS = frozenset((
+    'list', 'read', 'list_types', 'describe_type', 'quickstart', 'comments', 'reply', 'resolve', 'watch', 'unwatch', 'status',
+    'resume_replies', 'read_page_data', 'verify', 'read_db', 'room_send', 'list_assets', 'read_asset', 'list_files', 'preview',
+    'open', 'get_endpoints', 'pin', 'unpin', 'share'))
+ARTIFACT_UNFOLLOWED = frozenset(('sync', 'write_db', 'upload_asset', 'delete_asset', 'copy_from', 'delete', 'call_endpoint', 'run_script'))
+# The split tools some sessions get instead of those actions (2.1.302's ArtifactComments, ArtifactCheck, ArtifactData):
+# only ArtifactData writes, with these operations.
+ARTIFACT_DATA_WRITES = frozenset(('set', 'update', 'str_replace', 'delete', 'batch'))
+
+
+def artifact_action(inp):
+    """The call's action by its canonical name: the engine's consolidated spellings (publish with `asset: true`, read with
+    a file `path` or `paths`, delete with an asset id as `path`; 2.1.302's `NRe`) mapped back."""
+    action = inp.get('action') or 'publish'
+    path = inp.get('path')
+    if action == 'publish' and inp.get('asset') is True:
+        return 'copy_from' if isinstance(inp.get('from_url'), str) or isinstance(inp.get('asset_ids'), list) else 'upload_asset'
+    if action == 'read' and (isinstance(path, str) or isinstance(inp.get('paths'), list)):
+        return 'read_asset' if isinstance(path, str) and re.fullmatch(r'[0-9a-f]{32}', path) else 'read_file'
+    if action == 'delete' and isinstance(path, str):
+        return 'delete_asset'
+    return action
+
+
+def shape(x):
+    return sorted(x) if isinstance(x, dict) else type(x).__name__
 
 
 def calls(transcript, since=None, until=None):
@@ -249,16 +300,23 @@ class Replay:
     def __init__(self, published=None):
         self.disk = {}
         self.published = dict(published or {})
+        self.fetched = {}  # published path -> its text when a read_file saved it locally
 
     def path(self, call, p, root=None):
         if not isinstance(p, str) or not p:
             raise RebuildError('%s: a path that is not a string: %r' % (call['name'], p))
+        if root is not None and not isinstance(root, str):
+            raise RebuildError('%s: a root that is not a string: %r' % (call['name'], root))
         base = os.path.join(call['cwd'], root) if root else call['cwd']
         return os.path.normpath(os.path.join(base, p))
 
     def text(self, call, p):
         if p in self.disk:
             return self.disk[p]
+        # A published file a read_file saved: it lands under its published path (in the scratchpad, or out_dir).
+        hits = [k for k in self.fetched if p.endswith('/' + k)]
+        if hits:
+            return self.fetched[max(hits, key=len)]
         # The same file under another session's mount of the folder: the longest unique match of trailing components.
         parts = p.split('/')
         for n in range(len(parts) - 1, 1, -1):
@@ -306,42 +364,75 @@ class Replay:
                 self.replace(call, p, e.get('old_string'), e.get('new_string'), bool(e.get('replace_all')))
         elif name == 'Artifact':
             self.artifact(call)
+        elif name == 'ArtifactData' and inp.get('action') in ARTIFACT_DATA_WRITES:
+            raise RebuildError('ArtifactData %s: it writes the artifact\'s store, which the records do not carry' % inp.get('action'))
 
     def artifact(self, call):
         inp = call['input']
-        action = inp.get('action') or 'publish'
-        if action in ARTIFACT_READS:
+        action = artifact_action(inp)
+        if action in ARTIFACT_KEEPS or (action == 'run_script' and inp.get('mode') == 'query'):  # a query runs read verbs only
             return
-        if action != 'publish' or inp.get('asset') or inp.get('type_url') or inp.get('from_url'):
-            raise RebuildError('Artifact %s with %s: not a publish this rebuild can follow' % (action, sorted(k for k in inp if k != 'description')))
+        if action == 'read_file':
+            paths = [inp.get('path')] + (inp.get('paths') if isinstance(inp.get('paths'), list) else [])
+            for k in (self.key(p) for p in paths if isinstance(p, str) and p):
+                if k in self.published:
+                    self.fetched[k] = self.published[k]
+            return
+        if action in ARTIFACT_UNFOLLOWED:
+            raise RebuildError('Artifact %s: it changes the artifact in a way the records do not carry' % action)
+        if action != 'publish':
+            raise RebuildError('Artifact %r: not an action of the engine\'s Artifact tool (2.1.302)' % action)
+        if inp.get('from_url'):
+            raise RebuildError('Artifact publish with from_url: not a publish this rebuild can follow')
+        created = isinstance(inp.get('type_url'), str)
+        if created:  # a new Artifact from a type: none of the files published before are its own
+            self.published = {}
         root = inp.get('root')
         root_abs = self.path(call, root) if root else None
         fp = self.path(call, inp['file_path']) if inp.get('file_path') else None
         for e in inp.get('edits') or []:
             if not isinstance(e, dict) or set(e) - {'old_str', 'new_str', 'path', 'file_path', 'replace_all'}:
-                raise RebuildError('Artifact publish: an edit of an unknown shape %r' % (sorted(e) if isinstance(e, dict) else type(e).__name__))
+                raise RebuildError('Artifact publish: an edit of an unknown shape %r' % shape(e))
             target = self.path(call, e.get('path') or e.get('file_path')) if (e.get('path') or e.get('file_path')) else fp
             if target is None:
                 raise RebuildError('Artifact publish: edits with no file_path')
             self.replace(call, target, e.get('old_str'), e.get('new_str'), bool(e.get('replace_all')))
         if fp:
             self.published[self.key(fp, root_abs)] = self.text(call, fp)
-        files = inp.get('files')
-        if isinstance(files, list):
-            files = {f: f for f in files}
-        if files is not None and not isinstance(files, dict):
-            raise RebuildError('Artifact publish: files of type %s' % type(files).__name__)
-        for pub, src in (files or {}).items():
+        files = self.files(inp.get('files'))
+        for pub, src in files:
             if src is None:
                 self.published.pop(self.key(pub), None)
-            elif isinstance(src, str):
-                self.published[self.key(pub)] = self.text(call, self.path(call, src, root))
-            elif isinstance(src, dict) and isinstance(src.get('from'), str):
-                self.published[self.key(pub)] = self.text(call, self.path(call, src['from'], root))
             else:
-                raise RebuildError('Artifact publish: a files entry of an unknown shape for %s' % pub)
-        if not fp and not files:
+                self.published[self.key(pub)] = self.text(call, self.path(call, src, root))
+        if not fp and not files and not created:
             raise RebuildError('Artifact publish with neither file_path nor files')
+
+    @staticmethod
+    def files(files):
+        """A publish's `files` as (published path, source path or None) pairs. The map form {published path: source path |
+        {from, contentType} | null}; the list form [{path, contentType}], each file published at its own spelling and read
+        from it. Anything else (a copy from another artifact's files, a live file) is not in the records."""
+        if files is None:
+            return []
+        if isinstance(files, list):
+            out = []
+            for e in files:
+                if not (isinstance(e, dict) and isinstance(e.get('path'), str) and e['path'] and set(e) <= {'path', 'contentType'}):
+                    raise RebuildError('Artifact publish: a files list entry of an unknown shape %r' % shape(e))
+                out.append((e['path'], e['path']))
+            return out
+        if isinstance(files, dict):
+            out = []
+            for pub, src in files.items():
+                if src is None or isinstance(src, str):
+                    out.append((pub, src))
+                elif isinstance(src, dict) and isinstance(src.get('from'), str) and set(src) <= {'from', 'contentType'}:
+                    out.append((pub, src['from']))
+                else:
+                    raise RebuildError('Artifact publish: the files entry for %s is of an unknown shape %r' % (pub, shape(src)))
+            return out
+        raise RebuildError('Artifact publish: files of type %s' % type(files).__name__)
 
 
 def seed_files():
@@ -382,7 +473,10 @@ def turn_window(transcript, match):
 
 def check(*args):
     res = subprocess.run(['/usr/bin/python3', '-I', os.path.join(HERE, 'check.py'), *args], capture_output=True, text=True)
-    return json.loads(res.stdout) if res.stdout.strip() else {'pass': False, 'detail': res.stderr.strip()[-300:]}
+    try:
+        return json.loads(res.stdout)
+    except ValueError:
+        return {'pass': False, 'detail': 'check.py gave no verdict: %s' % (res.stderr.strip() or res.stdout.strip())[-300:]}
 
 
 # ---- after ----------------------------------------------------------------------------------------------------------
@@ -400,6 +494,14 @@ def landing_actions(args, default):
     return out
 
 
+def stop(d, p, why):
+    """`after` cannot close the attempt: it stays open for `after` again (a wrong --seed-transcript, bench-after/ still to
+    be written), and the reason is kept in its pending.json, so that an attempt redone instead is closed saying why."""
+    p['afterStopped'] = why
+    write(os.path.join(d, 'pending.json'), json.dumps(p, indent=2) + '\n')
+    sys.exit(why)
+
+
 def after(args):
     found = pending_attempt(args.out, args.task, args.rep)
     if found is None:
@@ -410,7 +512,7 @@ def after(args):
     load_after = load()
     s = code_session(started) if p['surface'] == 'code' else cowork_session(started)
     if s is None:
-        sys.exit('no Desktop %s session found since %s in %s' % (p['surface'], p['startedAt'], ARM_DIR))
+        stop(d, p, 'no Desktop %s session found since %s in %s' % (p['surface'], p['startedAt'], ARM_DIR))
     name = FILES[p['kind']]
     deck = p['kind'] == 'presentation' and p['surface'] == 'cowork'
     if args.seed_transcript and not deck:
@@ -418,31 +520,37 @@ def after(args):
     seed_check, after_source, rebuild_error = None, None, None
     if not deck:  # a plain file in the folder, both surfaces
         before_path, after_path = os.path.join(d, 'before-' + name), os.path.join(d, 'after-' + name)
-        shutil.copyfile(os.path.join(ARM_DIR, name), after_path)
-        after_source = 'the file in the folder'
+        try:
+            shutil.copyfile(os.path.join(ARM_DIR, name), after_path)
+            after_source = 'the file in the folder'
+        except OSError as e:  # the turn removed it: the checker fails on the missing file
+            after_source = 'no file in the folder: %s' % e
     else:
         if not s['transcript']:
-            sys.exit('no transcript for the Cowork session %s' % s['local'])
+            stop(d, p, 'no transcript for the Cowork session %s' % s['local'])
         # Before: the seed's calls up to the timed turn's send (the seed transcript may be the timed one), else the
-        # bench's seed deck. After: the same replay carried on through the timed turn's calls.
+        # bench's seed deck. After: the same replay carried on through the timed turn's calls. Any error on the way is
+        # the rebuild's (`rebuilding`): the deck after falls back to bench-after/, else the attempt stays open.
         try:
-            send, until = turn_window(s['transcript'], p['promptMatch'])
-            r = Replay(None if args.seed_transcript else seed_files())
-            for c in calls(args.seed_transcript, until=send) if args.seed_transcript else []:
-                r.apply(c)
-            before_path = write_deck(r.published, os.path.join(d, 'before-deck')) if args.seed_transcript else SEED_DECK
+            with rebuilding():
+                send, until = turn_window(s['transcript'], p['promptMatch'])
+                r = Replay(None if args.seed_transcript else seed_files())
+                for c in calls(args.seed_transcript, until=send) if args.seed_transcript else []:
+                    r.apply(c)
+                before_path = write_deck(r.published, os.path.join(d, 'before-deck')) if args.seed_transcript else SEED_DECK
         except RebuildError as e:
-            sys.exit('the deck before the turn could not be rebuilt from the records: %s' % e)
+            stop(d, p, 'the deck before the turn could not be rebuilt from the records: %s' % e)
         try:
-            for c in calls(s['transcript'], since=send, until=until):
-                r.apply(c)
-            after_path = write_deck(r.published, os.path.join(d, 'after-deck'))
+            with rebuilding():
+                for c in calls(s['transcript'], since=send, until=until):
+                    r.apply(c)
+                after_path = write_deck(r.published, os.path.join(d, 'after-deck'))
             after_source = "rebuilt from the records' calls"
         except RebuildError as e:
             rebuild_error = str(e)
             folder = os.path.join(ARM_DIR, 'bench-after')
             if not os.path.isfile(os.path.join(folder, 'project', 'deck.json')):
-                sys.exit('the deck after the turn could not be rebuilt from the records (%s), and there is no %s' % (e, folder))
+                stop(d, p, 'the deck after the turn could not be rebuilt from the records (%s), and there is no %s' % (e, folder))
             after_path = os.path.join(d, 'after-deck')
             shutil.rmtree(after_path, ignore_errors=True)
             shutil.copytree(folder, after_path)
@@ -471,12 +579,19 @@ def after(args):
 
 def deck(args):
     """The hold's first read of a Cowork seed: the deck a session's records leave, written to OUT, and `same` against the
-    bench's seed deck."""
-    r = Replay()
-    for c in calls(args.transcript):
-        r.apply(c)
-    out = write_deck(r.published, os.path.abspath(args.out))
-    print(json.dumps({'deck': out, 'same': check('same', SEED_DECK, out)}, indent=2))
+    bench's seed deck; beside it the permission mode each human turn was recorded in (a timed turn not in auto is
+    invalid, so a seed recorded in another mode says Cowork's timed turns will be too)."""
+    modes = [t['permissionMode'] for t in bench_parse().parse_transcript(args.transcript)[2]]
+    try:
+        with rebuilding():
+            r = Replay()
+            for c in calls(args.transcript):
+                r.apply(c)
+            out = write_deck(r.published, os.path.abspath(args.out))
+    except RebuildError as e:
+        print(json.dumps({'deck': None, 'rebuildError': str(e), 'permissionModes': modes}, indent=2))
+        sys.exit(1)
+    print(json.dumps({'deck': out, 'same': check('same', SEED_DECK, out), 'permissionModes': modes}, indent=2))
 
 
 KIND_TOOLS = {
@@ -492,10 +607,14 @@ def kinds(args):
     """The record run's first read (R-6): which kinds a session was offered, from the names its records carry: a Cowork
     audit's system/init tools; a Code transcript's deferred-tool lists, its tool calls, and the tool names a probe turn
     was asked to list (its assistant text)."""
+    is_human = bench_parse().is_human
     for path in args.paths:
         names = set()
         listed = ''
+        modes = []  # the permission modes the records carry: a Cowork audit's system/init, a transcript's human records
         for r in jsonl(path):
+            if 'permissionMode' in r and ((r.get('type') == 'system' and r.get('subtype') == 'init') or is_human(r)):
+                modes.append(r['permissionMode'])
             if r.get('type') == 'system' and r.get('subtype') == 'init':
                 names.update(r.get('tools') or [])
             a = r.get('attachment') or {}
@@ -508,7 +627,8 @@ def kinds(args):
                     if b.get('type') == 'text':
                         listed += '\n' + b.get('text', '')
         names.update(w.strip(' -*`') for w in listed.split() if w.strip(' -*`'))
-        print(json.dumps({'records': path, 'tools': len(names), 'kinds': {k: sorted(n for n in names if f(n)) for k, f in KIND_TOOLS.items()}}, indent=2))
+        print(json.dumps({'records': path, 'tools': len(names), 'kinds': {k: sorted(n for n in names if f(n)) for k, f in KIND_TOOLS.items()},
+                          'permissionModes': modes}, indent=2))
 
 
 def main(argv):
