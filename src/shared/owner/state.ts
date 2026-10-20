@@ -30,7 +30,9 @@ export const QuestionStateSchema = z.discriminatedUnion('state', [
   // main's in-memory note of the last send that did not go out, never persisted: `failed` (refused, in its words) or
   // `held` (a trust or relay card holds it until its continuation: the seam's reason, 'trust' | 'relay')
   z.strictObject({ state: z.literal('unanswered'), failed: z.strictObject({ reason: z.string() }).optional(), held: z.strictObject({ reason: z.string() }).optional() }),
-  z.strictObject({ state: z.enum(['queued', 'unconfirmed']), text: z.string(), origin: AnswerOriginSchema, members: z.array(AnswerMemberSchema) }),
+  // `reason`, on an answer shown unconfirmed only, in memory only: why it is (main's transcript reads for its confirmation
+  // keep failing); absent, the transcript was read and did not show it taken, or nothing identifies the answer to look for
+  z.strictObject({ state: z.enum(['queued', 'unconfirmed']), text: z.string(), origin: AnswerOriginSchema, members: z.array(AnswerMemberSchema), reason: z.enum(['transcript-unreadable']).optional() }),
   z.strictObject({ state: z.literal('delivered'), answer: z.strictObject({ text: z.string(), origin: z.enum(['answer', 'reply', 'legacy']), at: z.string() }) }),
   z.strictObject({ state: z.literal('retired') }),
 ]);

@@ -71,6 +71,7 @@ export class FakeEngineHost {
   declaresSystemPromptSnapshot = true; // P2-C: whether the binary declares --system-prompt-snapshot
   unavailable = false; // E10: every command answers host_unavailable (a supervisor main cannot reach)
   onCall: ((name: string) => void) | null = null; // E10: runs as each command arrives, before it is answered
+  ptyHost: ((name: string, input: unknown) => unknown) | null = null; // P4 W2-A: answers the pty host's commands (a pane take-over's)
   private readonly readyListeners = new Set<() => void>(); // E10: the session service's, told at becomeReady()
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
   private hostState: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
@@ -118,6 +119,12 @@ export class FakeEngineHost {
     return s;
   }
 
+  // A launch left initializing (`ready: false`) reports ready (W2-A: a row the recovery waits for).
+  readyNow(appSessionId: string): void {
+    const s = this.table.get(appSessionId);
+    if (s) this.setStatus({ ...s, process: 'ready', engineState: 'idle' });
+  }
+
   // The lingering process of a stop answered `{ exited: false }` finally exits.
   exitNow(appSessionId: string): void {
     const s = this.table.get(appSessionId);
@@ -127,6 +134,7 @@ export class FakeEngineHost {
   }
 
   readonly dispatch: HostDispatch = async (owner, name, input) => {
+    if (owner === 'pty-host' && this.ptyHost !== null) return { ok: true, value: (await this.ptyHost(name, input)) as never };
     if (owner !== 'engine-host') throw new Error(`unexpected owner ${owner}`);
     this.calls.push({ name, input });
     this.onCall?.(name);
@@ -249,6 +257,8 @@ export class FakeEngineHost {
         return undefined;
       }
       case 'session.rewind':
+        // C3's normaliser derives `boundary.rewind` from a successful answer, as the host's event log then holds it
+        if (this.rewound) this.batch(id, [{ kind: 'boundary.rewind', targetMessageUuid: input.targetMessageUuid, precedingAssistantUuid: null, prefillText: null }]);
         return { rewound: this.rewound, reason: this.rewound ? null : 'not found', error: null, prefillText: null, precedingAssistantUuid: null, files: null };
       case 'session.renameSession':
         if (this.renameError !== null) throw new Error(this.renameError);

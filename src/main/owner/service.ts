@@ -775,8 +775,10 @@ function ownerMarkOf(mark: OwnerMarkRow, unsent: Unsent | undefined, unreadable:
     case 'queued':
     case 'unconfirmed': {
       const shown = mark.answerAttempts.at(-1); // the newest answer, on its way (never a legacy one: it is born taken)
-      // a queued answer whose confirmation waits on a transcript that keeps failing to be read shows unconfirmed (L158)
+      // a queued answer whose confirmation waits on a transcript that keeps failing to be read shows unconfirmed (L158),
+      // and says why; a read that succeeds resets the count, and with it the reason
       question = { state: mark.state === 'queued' && unreadable ? 'unconfirmed' : mark.state, text: shown?.text ?? '', origin: shown?.origin === 'reply' ? 'reply' : 'answer', members: shown?.members ?? [] };
+      if (unreadable && question.state === 'unconfirmed') question.reason = 'transcript-unreadable';
       break;
     }
     case 'delivered':

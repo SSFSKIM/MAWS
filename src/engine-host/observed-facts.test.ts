@@ -102,6 +102,7 @@ describe('recovery from the exported fixtures yields the fields the journal hold
     expect(facts.plugins).toEqual({ value: { plugins: BUILTINS.map((name) => ({ name, path: 'builtin', source: `${name}@builtin`, version: null })), errors: [], warnings: [] }, at: '2026-10-09T07:02:37.012Z', launchId: 'LU1' });
     // the answer's 19,058 corrected as the normaliser corrects its sample (debt wave 4's contextTotal): one mapping
     expect(facts.contextUsage).toEqual({ value: { percent: 2, totalTokens: 18_194, maxTokens: 1_000_000, autoCompactThreshold: 967_000 }, at: '2026-10-09T07:02:37.048Z', launchId: 'LU1' });
+    expect(facts.launches).toEqual(['LU1']); // a reload with no older launch to inherit from is folded once all the same
   });
 
   it('p1-side-thread-live-resume: the resumed launch’s init', async () => {
@@ -402,6 +403,26 @@ describe('recovery across budgets, forget, unreadable journals, inherited errors
     let last = (await host.read(ID))!;
     while (!last.complete) last = (await host.read(ID))!;
     expect(last.plugins).toMatchObject({ launchId: 'L2', value: { plugins: [{ name: 'p2' }], errors: [{ plugin: 'bad' }] } });
+    expect(last.launches.sort()).toEqual(['L1', 'L2']);
+    expect(opened.filter((f) => f.endsWith('L2.jsonl'))).toHaveLength(1); // held unlisted but not re-read, which would spend each budget before L1
+  });
+
+  it('the same across a host restart between the cut passes: the reload launch stays unlisted until it inherits, so the restarted host folds it again', async () => {
+    const warnings = [{ plugin: 'p1', type: 'shadowed', message: 'shadowed by user' }];
+    await journalRows('L1', [spawn(0), init(1, { plugin_warnings: warnings }), status(2, 'plan')]);
+    await journalRows('L2', [spawn(10), request(11, 'r1', 'reload_plugins'), answer(12, 'r1', { commands: [], agents: [], plugins: [{ name: 'p2', path: '/p2' }], error_count: 1 })]);
+    let ticks = 0;
+    const cut = (await service({ budgetMs: 3, clock: () => ticks++ }).read(ID))!; // L2 folded, L1 not yet
+    expect(cut).toMatchObject({ complete: false, plugins: { launchId: 'L2', value: { errors: [] } } });
+    const listedAtCut = store.files.get(ID)?.launches;
+    const restarted = (await service().read(ID))!; // a new host over the same store and journal: no waiting list in memory
+    expect(restarted.complete).toBe(true);
+    expect(restarted.plugins).toEqual({
+      value: { plugins: [{ name: 'p2', path: '/p2', source: null, version: null }], errors: [{ plugin: 'bad', type: 'load', message: 'no manifest', path: null }], warnings },
+      at: at(12), launchId: 'L2',
+    });
+    expect(restarted.launches.sort()).toEqual(['L1', 'L2']);
+    expect(listedAtCut).toEqual([]); // the cut pass wrote L2's list but did not list L2
   });
 
   it('prunes launches the journal no longer holds on an ordinary read, with no recovery to run', async () => {

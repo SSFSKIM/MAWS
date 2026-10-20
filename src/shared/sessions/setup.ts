@@ -56,7 +56,8 @@ export const SetupEventSchema = z.strictObject({
     .nullable(),
   // P2-A (2026-10-09): present on the phases of an acquisition's own run, whose end reaches every caller in its
   // `session.acquire` reply (delivered on another transport, in no fixed order with these events): nothing docks a card
-  // or tells a failure from a tagged event; phase readers read it as any other
+  // or tells a failure from a tagged event; phase readers read it as any other. P4 W2-A: and on a record start's phases
+  // from the moment an acquisition joined it, whose reply tells that run's end
   acquisition: z.literal(true).optional(),
 });
 export type SetupEvent = z.infer<typeof SetupEventSchema>;

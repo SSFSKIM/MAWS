@@ -54,7 +54,7 @@ export interface SessionServiceDeps {
   // P2-C (2026-10-09): the owner channel's launch decision (src/main/owner/launch.ts), consulted before every launch but
   // the trust bootstrap's; absent, launches carry no contract, flag or advertisement
   ownerChannel?: OwnerChannelLaunches;
-  takeOver?: Pick<TakeOverDeps, 'signal' | 'runStop' | 'waitMs' | 'pollMs'>; // W7: the tests' seams
+  takeOver?: Pick<TakeOverDeps, 'signal' | 'runStop' | 'waitMs' | 'pollMs' | 'processes'>; // W7: the tests' seams (P4 W2-A: `processes`)
   // P2-A (X16): where the service publishes each session's acquisition memory (main's read model, so the digest's
   // availability follows it); absent, nothing is published
   acquisitions?: { observeAcquisition(appSessionId: AppSessionId, memory: AcquisitionMemory): void };

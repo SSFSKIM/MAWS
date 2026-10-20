@@ -67,6 +67,7 @@ import { startOwnerChannel } from './owner/register'; // P2-C (2026-10-09)
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 import { transcriptPathOf } from './sessions/context'; // P2-D
 import { readRecentTurns } from './sessions/recent-turns'; // P2-D
+import { readRestoredCost } from './sessions/restored-cost'; // tracker 2026-09-29
 // C10 end
 // C11 start
 // (electron's `shell` comes with C8c's imports above, `onEmitted` with C7's)
@@ -266,10 +267,20 @@ void startWithProfileLock(app, () => {
   // ---- C5: layout store and the read side (launch mode, read model, stub source in scenario mode) ----
   const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
   registerOpenExternal();
+  // The engine's environment (its config directory, where it writes a session's transcript): C7's services below read it too.
+  const home = app.getPath('home');
+  const engineEnv = captureShellEnvironment();
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({
     env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource,
+    // tracker 2026-09-29: what a resumed process restored, by its transcript's last `cost-state` (the cost ledger), from
+    // the transcript the index knows for the session, else where the engine writes a launched session's
+    restoredCost: async ({ appId, directory, engineSessionId }) => {
+      if (engineSessionId === null) return null;
+      const known = index.unavailable === null ? index.sessions.summaryOf(appId)?.transcriptPath : null;
+      return readRestoredCost(known || (await transcriptPathOf(await engineEnv, directory, engineSessionId)), engineSessionId);
+    },
     // E3: a parent's side-thread rows, re-synthesised from the index (none while the index is unavailable)
     appEventsExtra: (appSessionId) => {
       if (index.unavailable !== null) return [];
@@ -303,8 +314,6 @@ void startWithProfileLock(app, () => {
 
   // C7 start: the composer's main services (C7 execution document, M1): ClaudeUsage's files for the status line (read
   // only), the prompt history (MAWS's own file; the terminal's read only), the `@` menu's file listing and the picker.
-  const home = app.getPath('home');
-  const engineEnv = captureShellEnvironment();
   const engineConfigDir = engineEnv.then((env) => claudeConfigDir(env, env.HOME || home));
   const userDefaults = async () => readUserEngineDefaults(await engineConfigDir);
   // P2-D (2026-10-09): the resume chooser's preview read, from the transcript path the index keeps, else where the

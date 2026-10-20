@@ -8,7 +8,7 @@
 // reconciliation; `session.launch` answering `launching` is the linearisation point after which the process is C3's to
 // report; rollback is per resource, never forced, and never a transcript.
 import { randomUUID } from 'node:crypto';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupEvent, SetupPhase, SetupResources } from '@shared/sessions/setup';
@@ -251,11 +251,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     const bound = run.intent;
     const engineSessionId = end.status.engineSessionId ?? bound.progress.engineSessionId!;
     const rewindTo = bound.kind === 'fork' ? (bound.source?.rewindTo ?? null) : null;
-    if (rewindTo !== null) {
-      const lastSeen = (await newestUserUuid(s, appSessionId)) ?? rewindTo;
-      const rewound = await hostCall(s.dispatch, 'session.rewind', { appSessionId, targetMessageUuid: rewindTo, lastSeenMessageUuid: lastSeen, files: false });
-      if (!rewound.rewound) throw new SetupFailure('launching', `the fork could not rewind to ${rewindTo}: ${rewound.reason ?? rewound.error ?? 'refused'}`);
-    }
+    if (rewindTo !== null) await rewindFork(s, appSessionId, rewindTo);
     let firstTurn: 'sent' | 'queued' | 'none' = 'none';
     if (bound.message !== null) {
       const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: bound.message.content });
@@ -269,6 +265,14 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
   } finally {
     watch?.dispose();
   }
+}
+
+// A fork's rewind to the point it was asked from, before its first message (the setup's binding, and the start-time
+// recovery's for a quit before the send, recovery.ts); a refusal fails the step.
+export async function rewindFork(s: Setup, appSessionId: AppSessionId, rewindTo: MessageUuid): Promise<void> {
+  const lastSeen = (await newestUserUuid(s, appSessionId)) ?? rewindTo;
+  const rewound = await hostCall(s.dispatch, 'session.rewind', { appSessionId, targetMessageUuid: rewindTo, lastSeenMessageUuid: lastSeen, files: false });
+  if (!rewound.rewound) throw new SetupFailure('launching', `the fork could not rewind to ${rewindTo}: ${rewound.reason ?? rewound.error ?? 'refused'}`);
 }
 
 // After the handoff nothing is rolled back: a fork titled by the human gets its `(fork)` name through the engine, the

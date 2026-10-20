@@ -15,6 +15,7 @@ describe('the owner channel’s state (Interfaces X18)', () => {
         question({ state: 'unanswered', failed: { reason: 'The session has exited.' } }),
         question({ state: 'queued', text: 'Answering "Which backend?": Postgres', origin: 'answer', members: [{ kind: 'entry', id: 'q-1', life: 'alive' }] }),
         question({ state: 'unconfirmed', text: 'Answering "Which backend?": x', origin: 'reply', members: [{ kind: 'uuid', id: 'u-9', life: 'unknown' }] }),
+        question({ state: 'unconfirmed', text: 'Answering "Which backend?": y', origin: 'answer', members: [], reason: 'transcript-unreadable' }),
         question({ state: 'delivered', answer: { text: 'Answering "Which backend?": Postgres', origin: 'legacy', at: '2026-10-09T10:01:00.000Z' } }),
         question({ state: 'retired' }),
         { id: 'app-1:u-1:0:e0', kind: 'essential', anchor: { messageUuid: 'u-1', blockIndex: 0, span: 0 }, head: 'Read this.', at: '2026-10-09T10:00:00.000Z', item: false, essential: { state: 'read', readAt: '2026-10-09T10:02:00.000Z' } },

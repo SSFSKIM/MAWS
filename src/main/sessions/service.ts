@@ -25,7 +25,7 @@ import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDir
 import { readSettings, seedPermissionMode } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
 import type { BootstrapNote } from './intents';
-import { liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
+import { awaitsReady, liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
 import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, sideThreadRefusal, type GuardContext, type Guarded } from './start-guards';
 // E3 start
@@ -248,11 +248,41 @@ export class SessionService {
     for (const id of new Set<string>([...owed, ...this.reconcileFailures.keys()]) as Set<AppSessionId>) {
       const intent = this.deps.intents.get(id);
       if (intent === null) this.unreconciled.delete(id);
+      else if (idle(id) && awaitsReady(intent, live)) this.reconcileWhenReady(id); // W2-A: beside the recovery
       else if (idle(id)) await this.reconcileOne(intent, live);
     }
     this.unrecovered = null;
     this.startedSince.clear();
     if (this.unreconciled.size > 0) void this.settleUnreconciled().catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
+  }
+
+  // P4 W2-A: a reconciliation that waits for its live row's ready (the first message not yet C3's) runs beside the
+  // recovery, since every command waits for the recovery. As the setup it resumes, it holds the id's `starting` mark,
+  // its lock and an in-flight entry from this tick, so a start or an intent operation is refused `starting` and an
+  // acquisition joins it, answered once the reconciliation ended.
+  private reconcileWhenReady(appSessionId: AppSessionId): void {
+    this.starting.add(appSessionId);
+    const registration = this.inflight.open(appSessionId, 'setup');
+    void this.serial(appSessionId, async () => {
+      const intent = this.deps.intents.get(appSessionId);
+      return intent === null ? null : this.reconcileOne(intent, null);
+    })
+      .then(
+        async (failure) => ({ outcome: await this.reconciledOutcome(appSessionId, failure) }),
+        (error: unknown) => ({ error }),
+      )
+      .then((result) => {
+        this.starting.delete(appSessionId);
+        registration.end(result);
+      });
+  }
+
+  // What a joiner of that reconciliation is answered: ready when the row is, else why it is not.
+  private async reconciledOutcome(appSessionId: AppSessionId, failure: string | null): Promise<AcquireOutcome> {
+    const live = await reservationOf(this.s.dispatch, appSessionId).catch(() => null);
+    if (failure === null && live?.process === 'ready') return { status: 'ready', appSessionId, launched: true, joined: false };
+    const last = this.deps.intents.get(appSessionId)?.progress.lastFailure ?? null;
+    return { status: 'failed', appSessionId, message: failure ?? last?.message ?? 'The session did not start.', resources: last?.resources ?? UNTOUCHED };
   }
 
   // The reconciliations a re-run passed over (their id locked or starting), each under its id's lock once the command
@@ -554,7 +584,7 @@ export class SessionService {
         const deps: TakeOverDeps = {
           dispatch: this.s.dispatch, sessions: this.s.sessions, env: this.s.env, ...this.deps.takeOver, paneId,
           resumePane: async (target) => pauseTakeOver({
-            processes: readProcesses,
+            processes: this.deps.takeOver?.processes ?? readProcesses,
             write: (data) => paneCall(this.s.dispatch, 'pty.write', { ptyId: target.pane.ptyId, data }),
             foreground: () => paneCall(this.s.dispatch, 'pty.foreground', { ptyId: target.pane.ptyId }),
             signal: (pid, signal) => process.kill(pid, signal),
@@ -634,7 +664,7 @@ export class SessionService {
     this.starting.add(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
     const registration = early ?? this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options); // P2-A
-    const captured = capturingSetup(this.s, appSessionId);
+    const captured = capturingSetup(this.s, appSessionId, registration.tagged); // W2-A: tagged once an acquisition joins a record's start
     const claim = this.claimWorktreeName(this.deps.intents.get(appSessionId));
     let release: (() => void) | null = null;
     let handedOff = false;
@@ -754,7 +784,10 @@ export class SessionService {
     const entry = this.inflight.get(appSessionId);
     if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options) : this.refuseUnknown(appSessionId);
     const own = canonicalOptions(options);
-    if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
+    if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) {
+      entry.joinedByAcquisition(); // W2-A: the rest of a record start's phases stream tagged; this reply tells its end
+      return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
+    }
     const settled = () => this.acquireOrJoin(appSessionId, options);
     return entry.done.then(settled, settled);
   }
@@ -830,7 +863,7 @@ export class SessionService {
     try {
       const record = this.deps.index.sessions.get(appSessionId);
       if (record === null || this.deps.intents.get(appSessionId) !== null) return this.refusal(appSessionId);
-      const captured = capturingSetup(this.s, appSessionId, true); // its phases stream tagged: the reply tells its end
+      const captured = capturingSetup(this.s, appSessionId, registration.tagged); // its phases stream tagged: the reply tells its end
       const [guard, run] = await guardResumeStart(captured.setup, record, { message: null, options }, this.resumeMessages);
       registration.guard(guard);
       if (run === null) return acquireOutcomeOfGuard(guard);
