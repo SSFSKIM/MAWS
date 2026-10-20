@@ -33,4 +33,5 @@ export const TRANSFER_COPY = {
   noPanel: 'No session’s panel to show it in',
   noRecord: 'The panel shows no artifact',
   closing: 'The panel tab is closing',
+  sending: 'A comment is being sent', // P4-B3 Decision Log 37: a move waits for the send's answer
 } as const;

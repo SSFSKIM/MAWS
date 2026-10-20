@@ -20,7 +20,8 @@ import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { requestArtifactVersion, resetVersionRequests, useVersionRequest } from '../tools/artifacts/viewers/requests';
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5
-import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal } from './transfer';
+import { beginCommentSend } from '../tools/document/comment-drafts'; // P4-B3 Decision Log 37
+import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal, useTransferRefusal } from './transfer';
 
 const DOC = 'doc-1';
 const OTHER = 'doc-2';
@@ -459,6 +460,30 @@ describe('panel → main', () => {
     expect(transferRefusal({ to: 'tab', panelTabId: src })).toBe(TRANSFER_COPY.closing);
     expect(await move(() => moveArtifactToTab(src))).toBe(false);
     expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC });
+  });
+
+  // Decision Log 37 (M6's review): the moved card's composer would come back enabled before the send answered
+  it('a comment on the artifact being sent refuses either move, changing nothing, until the send answers', async () => {
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    const src = addArtifacts(A);
+    const answered = beginCommentSend(DOC);
+    expect(transferRefusal({ to: 'panel', mainTabId: DOC_TAB.id })).toBe(TRANSFER_COPY.sending);
+    const before = surfaces();
+    expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(false);
+    expect(surfaces()).toEqual(before);
+    const refusal = renderHook(() => useTransferRefusal({ to: 'panel', mainTabId: DOC_TAB.id }));
+    expect(refusal.result.current).toBe(TRANSFER_COPY.sending);
+    act(() => answered());
+    expect(refusal.result.current, 'the menus hear the answer').toBeNull();
+    expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
+
+    expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC });
+    const again = beginCommentSend(DOC);
+    expect(transferRefusal({ to: 'tab', panelTabId: src })).toBe(TRANSFER_COPY.sending);
+    expect(await move(() => moveArtifactToTab(src))).toBe(false);
+    expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC });
+    again();
+    expect(await move(() => moveArtifactToTab(src))).toBe(true);
   });
 });
 

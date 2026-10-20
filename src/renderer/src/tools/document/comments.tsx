@@ -28,7 +28,7 @@ import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import { closeCard, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
 import { focusAtEnd } from '../../side/card/CommentCard'; // P4-B1
 import { openCommentComposer, type CommentPlacement } from '../code/anchor/anchor'; // P4-B1: CommentPlacement
-import { commentDraftEntry, dropCommentDraft, recordCommentDraft } from './comment-drafts'; // P4-B1
+import { beginCommentSend, commentDraftEntry, dropCommentDraft, recordCommentDraft } from './comment-drafts'; // P4-B1; P4-B3: beginCommentSend
 import { cancelPendingComment, PendingCommentNotice, pendingThreadOf, startCommentSession, subscribePending, usePendingComment } from './comment-session'; // P3-F1
 
 const LABEL_MAX = 200; // X10's label cap
@@ -155,6 +155,15 @@ const mountedOverlays = new Set<string>();
 // P4-B1: per host, the card whose thread the host last drew active; a remount drawing the same card (the margin moving
 // it, the panel's round trip) leaves the active thread as the human last set it (only the human activates)
 const activatedCard = new Map<string, number>();
+/**
+ * P4-B3 (its Decision Log 37): a move hands the card host to a new editor (the host id the tab state keeps), whose
+ * active thread starts at none, so the card it draws must activate its thread again there; an overlay-only remount
+ * keeps the mark and does not.
+ */
+export function forgetCardActivation(hostId: string): void {
+  activatedCard.delete(hostId);
+}
+
 function draftsOf(hostId: string): Drafts {
   let drafts = draftsByHost.get(hostId);
   if (!drafts) draftsByHost.set(hostId, (drafts = new Drafts(hostId)));
@@ -325,11 +334,13 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         const threadId = threadOf(card);
         if (threadId === null) return () => {};
         const release = holdReplica?.();
+        const answered = beginCommentSend(artifactId); // P4-B3 (Decision Log 37): a move waits for the answer
         const settle = draftsOf(hostId).sending(threadId, text, { record, withdraw: discard });
         return (went) => {
           try {
             settle(went);
           } finally {
+            answered();
             release?.();
           }
         };

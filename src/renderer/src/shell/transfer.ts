@@ -25,6 +25,7 @@ import { toast } from '../stores/notices';
 import { activeTab, allTabs, closeTab, currentSet, locateTab, sessionOfTab } from '../stores/layout-model';
 import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
+import { commentSending, subscribeCommentSends } from '../tools/document/comment-drafts'; // P4-B3 Decision Log 37
 import { markTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5 (S6)
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab'; // a main tab's id
@@ -91,12 +92,15 @@ export function transferRefusal(request: TransferRequest): string | null {
   if (request.to === 'panel') {
     const tab = allTabs(layout().main).find((t) => t.id === request.mainTabId);
     if (tab?.kind !== 'artifact') return TRANSFER_COPY.notArtifact;
+    if (commentSending(tab.artifactId)) return TRANSFER_COPY.sending; // Decision Log 37
     const session = panelSessionWithout(request.mainTabId);
     if (!canShowArtifactInPanel(session)) return TRANSFER_COPY.noPanel;
     const dest = artifactsTabOf(session);
     return dest && closing.has(dest.id) ? TRANSFER_COPY.closing : null;
   }
-  if (panelRecordOf(request.panelTabId) === null) return TRANSFER_COPY.noRecord;
+  const record = panelRecordOf(request.panelTabId);
+  if (record === null) return TRANSFER_COPY.noRecord;
+  if (commentSending(record)) return TRANSFER_COPY.sending; // Decision Log 37
   return closing.has(request.panelTabId) ? TRANSFER_COPY.closing : null;
 }
 
@@ -105,9 +109,11 @@ export function transferRefusal(request: TransferRequest): string | null {
 const subscribeTransfer = (listener: () => void) => {
   const offLayout = useLayout.subscribe(listener);
   const offHost = usePanelHost.subscribe(listener);
+  const offSends = subscribeCommentSends(listener); // Decision Log 37
   return () => {
     offLayout();
     offHost();
+    offSends();
   };
 };
 export const useTransferRefusal = (request: TransferRequest | null): string | null =>
