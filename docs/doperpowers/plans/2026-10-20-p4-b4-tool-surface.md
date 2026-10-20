@@ -16,7 +16,7 @@ What it is for: the owner says "the roadmap we discussed last week" in a fresh s
 - [x] 2026-10-20 05:35Z M1 — the shared contract (457dd1ee3; reviewer-medium on opus: correct, one P3 finding taken into M4)
 - [ ] M2 — the host mirror and the tool (b183b9e7c; a fix wave for Decision Logs 16 to 18, then review)
 - [ ] M3 — the instruction on the wire and the final fixtures (executed by the controller; in review)
-- [ ] M4 — fragments in the renderer and on `show_pane`
+- [ ] M4 — fragments in the renderer and on `show_pane` (p4-b4-m4 e44dad54c, merged 2b6c7d557; in review)
 - [ ] M5 — the live run and R-3
 - [ ] M6 — gates, the whole-branch review, the hand-back
 
@@ -139,6 +139,7 @@ The evidence an embeddings row would need is the misses of lexical search on the
 16. 2026-10-20 (M2, revising the Design's cap). **The mirror's body is capped at 2 MiB of UTF-8 (`MIRROR_TEXT_MAX_BYTES`), not text.ts's 256 KiB**, which left all but the first third of a 200-page document unsearchable (M2's bench: the body stopped at block `s56p4` of 160). The tool exists for the owner's long documents; main's library index keeps its cap.
 17. 2026-10-20 (M2, revising the anchor). **The anchor is the longest term's first occurrence inside the first section that holds every term**, else its first occurrence in the body: so `read` opens the block a multi-word query describes ("second paragraph" lands on the second paragraph, not the first block naming either word).
 18. 2026-10-20 (M2, revising the refresher). **The refresher and the sweep leave an artifact alone while the document service holds it loaded** (an editor or an agent replica on it) and refresh it once it unloads (`service.onUnload`); the search-time catch-up brings a loaded one up to date when a search needs it. So no extraction ever runs on the host's loop beside the owner's typing (M2 measured 40 to 55 ms for a 200-page document at the old cap, 2 s after a pause), and the cost lands only in a search, under X34's bound.
+19. 2026-10-20 (M4). The executor's decisions, kept: one open request per artifact and surface carries both the version and the place (the version request renamed `requestArtifactOpen`, `useOpenRequest`, `takeOpenRequest`); the renderer's actions take the place positionally as `location` (`openArtifactInPanel(appSessionId, artifactId, at?, location?)`, `openArtifactTab(artifactId, location?)`), since the existing `at` (`ArtifactOpenAt`) already means a version place there, while the wire (`show_pane`'s `at`, the bridge request, `maws.pane.show`) keeps `at` (the ledger's `{at?}` for the two actions to be recorded as built); `#v<n>` names a retained version's id for every kind (a byte viewer pins it by that version's revision; an id not retained opens the latest); `at` is optional, not nullable, on the bridge request and `maws.pane.show`, so existing payloads stand; `show_pane` with `at` and no target opens the list; the chip carries the fragment in `data-artifact-at`, never the href; the document's reveal finds the block by its own walk, places the caret without taking focus, leaves a version preview when the place is in the live document and waits for the document's tabs; both history controllers gained `hasVersion`; a design shows a board through its show-a-thread path; a design system opens plainly.
 
 ## Outcomes & Retrospective
 
