@@ -16,7 +16,7 @@ import { takeCarriedView, useArtifactViewCapture, type ArtifactEditorProps } fro
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
 import { useArtifactCommentTarget } from './comment-session'; // P3-F1
-import { useDocumentComments } from './comments';
+import { forgetCardActivation, useDocumentComments } from './comments'; // P4-B3: forgetCardActivation
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
@@ -115,7 +115,11 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     const manager = body && state.undoManagerFor(body);
     return editor && manager ? keepUndoManager(editor, manager) : undefined;
   }, [editor, state]);
-  useArtifactViewCapture(scope, () => (editor ? (captureDocumentView(editor, page.current) ?? undefined) : undefined));
+  useArtifactViewCapture(scope, () => {
+    if (!editor) return undefined;
+    forgetCardActivation(state.commentHostId); // Decision Log 37: the card activates its thread in the editor it moves to
+    return captureDocumentView(editor, page.current) ?? undefined;
+  });
   const carried = useRef<DocumentView | null | undefined>(undefined); // undefined: not taken yet
   useEffect(() => {
     if (carried.current === undefined) carried.current = (takeCarriedView(scope) as DocumentView | undefined) ?? null;

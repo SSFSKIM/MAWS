@@ -326,17 +326,22 @@ test('a comment draft moves with its document, panel → main and back, kept onc
   const panel = panelRegion(page);
   const DRAFT = 'draft-note kept across the move';
   await startComment(page, inPanel(page, id), 5, DRAFT);
+  // the draft's thread drawn active (Decision Log 37: it stays so in the editor a move makes)
+  const activePassage = (scope: Locator) => editorIn(scope).locator('.comment-active');
+  await expect(activePassage(inPanel(page, id)).first()).toBeVisible();
 
   // panel → main by the right edge, so the session stays beside it
   await drag(page, inPanel(page, id).getByTitle('Drag to move to a tab'), mainRegion(page).getByTestId('drop-edge'), mainRegion(page).getByTestId('drop-edge-highlight'));
   await expect(inMain(page, id)).toBeVisible();
   await expect(inMain(page, id).locator('[data-comment-card] textarea'), 'the draft in main’s card').toHaveValue(DRAFT);
   expect(await draftFields(page, DRAFT), 'one draft').toBe(1);
+  await expect(activePassage(inMain(page, id)).first(), 'the thread still active in main').toBeVisible();
 
   await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
   await expect(inPanel(page, id)).toBeVisible();
   await expect(inPanel(page, id).locator('[data-comment-card] textarea'), 'the draft back in the panel’s card').toHaveValue(DRAFT);
   expect(await draftFields(page, DRAFT), 'one draft').toBe(1);
+  await expect(activePassage(inPanel(page, id)).first(), 'the thread still active in the panel').toBeVisible();
   // the card closed (its draft with it), so the quit has no unsent comment to ask about
   await inPanel(page, id).locator('[data-comment-card]').getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.locator('[data-comment-card]')).toHaveCount(0);

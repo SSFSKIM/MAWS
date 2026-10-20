@@ -23,7 +23,7 @@ import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
 import { commentDraftOf } from './comment-drafts'; // P4-B1
-import { artifactCommentAnchor, useDocumentComments } from './comments';
+import { artifactCommentAnchor, forgetCardActivation, useDocumentComments } from './comments';
 
 // P3-F (L154): the card thread's Reply goes through the human send seam (one spy for every run of the factory, as
 // CardThread.test.tsx explains)
@@ -297,8 +297,11 @@ describe('the compose card in the margin and the draft rule', () => {
     act(() => surface!.opened(passage));
     await act(async () => {});
     await userEvent.type(field(), 'Monthly?');
+    vi.mocked(reach.setActive).mockClear();
+    forgetCardActivation('document:tab-state-1'); // the move's capture (Decision Log 37): a new editor, active at none
     view.rerender(<Body key="main" hostId="document:tab-state-1" onSurface={onSurface} />); // the move: another body, one commit
     await act(async () => {});
+    expect(reach.setActive, 'the card activates its thread in the editor it moved to').toHaveBeenLastCalledWith(passage.threadId);
     expect(field().value).toBe('Monthly?');
     expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
     expect(reach.discard).not.toHaveBeenCalled();

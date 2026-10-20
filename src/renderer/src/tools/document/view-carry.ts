@@ -18,6 +18,7 @@ import type { Editor } from '@tiptap/core';
 import { NodeSelection, TextSelection, type Selection } from '@tiptap/pm/state';
 import type { Node as YType } from '@artifacts/yjs';
 import type { UndoManager } from '@artifacts/yjs/document';
+import { activeThread, pinnedThread } from '@artifacts/document/editor/comments/plugins'; // P4-B3 Decision Log 37
 import { relativePositionsToResolvedPositions, resolvedPositionsToRelativePositions, ySyncPluginKey, yUndoPluginKey } from '@artifacts/yjs/prosemirror';
 
 type RelativePosition = NonNullable<ReturnType<typeof resolvedPositionsToRelativePositions>[number]>;
@@ -29,6 +30,8 @@ export interface DocumentView {
   /** 'top': scrolled to its top; null: no laid-out page to read (hidden behind a version, say), so nothing restored. */
   scroll: { block: RelativePosition; fraction: number } | 'top' | null;
   focused: boolean;
+  /** Decision Log 37: the comment thread drawn active and the one the human pinned (the margin's stack walks from it). */
+  threads?: { active: string | null; pinned: string | null };
 }
 
 /** The tab body the live editor binds (its collaboration extension's), or null. */
@@ -71,6 +74,7 @@ export function captureDocumentView(editor: Editor, page: HTMLElement | null): D
     selection: anchor && head ? { node: selection instanceof NodeSelection, anchor, head } : null,
     scroll: page ? scrollPlace(editor, page) : null,
     focused: view.hasFocus(),
+    threads: { active: activeThread(state), pinned: pinnedThread(state) },
   };
 }
 
@@ -167,7 +171,17 @@ export function restoreDocumentView(editor: Editor, page: HTMLElement | null, vi
   }
   const restored = view.selection && selectionAt(editor, view.selection);
   if (restored) pm.dispatch(editor.state.tr.setSelection(restored).setMeta('addToHistory', false));
+  restoreThreads(editor, view.threads);
   return release;
+}
+
+// Decision Log 37: the active and the pinned thread, through the comments extension's own command (every thread it
+// activates is pinned too; activating none keeps the pin), so a pin with nothing active is the pin, then none.
+function restoreThreads(editor: Editor, threads: DocumentView['threads']): void {
+  if (!threads || typeof editor.commands.setActiveThread !== 'function') return;
+  const { active, pinned } = threads;
+  if (pinned !== null && pinned !== active) editor.commands.setActiveThread(pinned);
+  if (active !== null || pinned !== null) editor.commands.setActiveThread(active);
 }
 
 // `aim` again whenever the page or its content changes size, until the owner's first input in the page or the settling

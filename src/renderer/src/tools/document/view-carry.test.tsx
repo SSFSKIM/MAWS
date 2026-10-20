@@ -10,6 +10,7 @@ import { TextSelection } from '@tiptap/pm/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { createDocument } from '@artifacts/document/tabs';
+import { addThread } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
 import { yUndoPluginKey } from '@artifacts/yjs/prosemirror';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
@@ -21,6 +22,7 @@ import { resetShellStores } from '../../test-support/shell-stores';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 import { liveBody, SCROLL_SETTLE_MS } from './view-carry';
+import { activeThread, pinnedThread } from '@artifacts/document/editor/comments/plugins';
 import { installResizeObserver } from '../../test-support/resize';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
@@ -299,6 +301,31 @@ describe('a document moved between the panel and a main tab comes back where the
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  // Decision Log 37 (M6's review): the editor a move makes starts with no active and no pinned thread
+  it('the active and the pinned comment thread come across, panel → main and main → panel', async () => {
+    memory.write((doc) => {
+      for (const threadId of ['t-active', 't-pinned']) addThread(doc, { threadId, tabId: 't1', blockId: 'p1', quote: 'Paragraph', anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    });
+    const source = mountIn(panel);
+    const editor = await ready();
+    act(() => void editor.commands.setActiveThread('t-active'));
+    expect([activeThread(editor.state), pinnedThread(editor.state)]).toEqual(['t-active', 't-active']);
+    const target = move(panel, main, source);
+    const moved = await ready();
+    await settle();
+    expect([activeThread(moved.state), pinnedThread(moved.state)], 'panel → main').toEqual(['t-active', 't-active']);
+
+    act(() => {
+      moved.commands.setActiveThread('t-pinned');
+      moved.commands.setActiveThread(null); // the pin kept, nothing active (Escape)
+    });
+    expect([activeThread(moved.state), pinnedThread(moved.state)]).toEqual([null, 't-pinned']);
+    move(main, panel, target);
+    const back = await ready();
+    await settle();
+    expect([activeThread(back.state), pinnedThread(back.state)], 'main → panel').toEqual([null, 't-pinned']);
   });
 
   it('only the first mount restores: a later remount of the target opens as an ordinary remount does', async () => {
