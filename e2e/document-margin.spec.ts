@@ -133,13 +133,19 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await page.keyboard.press('Enter');
     await page.keyboard.type('The budget review is on Friday with the whole team.');
     await page.keyboard.press('Enter');
+    // four lines between the two passages: the first card, compact, fits above the second without pushing it, and the
+    // agent's long reply then grows it into the second's room
+    for (const line of ['Agenda item one.', 'Agenda item two.', 'Agenda item three.', 'Agenda item four.']) {
+      await page.keyboard.type(line);
+      await page.keyboard.press('Enter');
+    }
     await page.keyboard.type('Risks are listed below, each with an owner.');
     await page.keyboard.press('Enter');
     await page.keyboard.type('Closing notes follow the risks.');
   });
   const centredLeft = (await pageBox()).x;
   const t1 = await keep(page, main, text, 1, 'budget review');
-  const t2 = await keep(page, main, text, 2, 'listed below');
+  const t2 = await keep(page, main, text, 6, 'listed below');
   const entry = (threadId: string) => margin.locator(`[data-margin-entry="${threadId}"]`);
   const lineTop = (threadId: string) => text.locator(`[data-thread="${threadId}"]`).first().evaluate((el) => el.getClientRects()[0]!.top);
   const entryTop = async (threadId: string) => (await entry(threadId).boundingBox())!.y;

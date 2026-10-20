@@ -282,17 +282,20 @@ test.describe('the document editor', () => {
     expect(threads).toEqual([{ id: expect.any(String), status: 'open', quote: QUOTE, messages: [] }]);
     const threadId = threads[0]!.id;
 
-    // anchored: the card's top-left corner sits under the passage's first line, 4 px below it
+    // P4-B1: the card is hosted in the margin's stack at the passage's first line (the two replicas side by side leave
+    // no side space, so the margin is the icon rail and the compose card sits in its overlay beside the dot); before
+    // P4-B1 it was anchored 4 px under the passage over the frame
     const mark = content(page, 'a').locator(`[data-thread="${threadId}"]`).first();
     await expect(mark).toHaveText(QUOTE);
     await expect(content(page, 'a').locator(`.comment-active.comment-${threadId}`)).toHaveText(QUOTE); // the display's decoration
+    const margin = replica(page, 'a').getByRole('region', { name: 'Comments' });
+    await expect(margin.locator('[data-margin-entry][data-compose] [data-comment-card]')).toBeVisible();
     const line = await mark.evaluate((el) => {
       const r = el.getClientRects()[0]!;
-      return { left: r.left, bottom: r.bottom };
+      return { left: r.left, top: r.top };
     });
     const box = (await card.boundingBox())!;
-    expect(Math.abs(box.y - (line.bottom + 4))).toBeLessThanOrEqual(2);
-    expect(Math.abs(box.x - line.left)).toBeLessThanOrEqual(2);
+    expect(Math.abs(box.y - line.top), 'the compose card at the passage’s first line').toBeLessThanOrEqual(2);
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
 
     await card.getByRole('button', { name: 'Resolve' }).click();
