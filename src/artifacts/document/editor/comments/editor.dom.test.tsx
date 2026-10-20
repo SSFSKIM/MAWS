@@ -73,7 +73,7 @@ describe('commenting a selection', () => {
 
     expect(opened).toHaveLength(1);
     const [{ threadId, tabId, tabTitle, quote }] = opened as [CommentedPassage];
-    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: 'Main', quote: 'ships quarterly' });
+    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: '', quote: 'ships quarterly' }); // P4-B1 (tracker L275): one tab, no tab title
     expect(getThread(handle.doc, threadId)).toMatchObject({ tabId: TAB, blockId: 'p1', quote: 'ships quarterly', status: 'open', createdBy: { kind: 'human' }, messages: [] });
     expect(covered(editor())).toEqual({ [threadId]: 'ships quarterly' });
     await ticks(3);
@@ -410,5 +410,22 @@ describe('the tab strip’s comment dot', () => {
     act(() => void resolve(handle.doc, 'zz000001', { kind: 'human' }, Date.now() + 2));
     await until(() => dot('Appendix') === null, 'the resolved tab’s dot to go');
     expect(dot('Main')).not.toBeNull();
+  });
+});
+
+// P4-B1 (tracker L275): a document of one tab names no tab in the passage it hands the surface, so a tab title that
+// differs from the document's does not label the comment card and the side thread "title, tab title"; with several
+// tabs the shown tab is named.
+describe('the commented passage’s tab title', () => {
+  it('is empty in a one-tab document and the shown tab’s title once there are more', async () => {
+    const { editor, opened } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    expect(opened[0]!.tabTitle).toBe('');
+    world!.host.write((d) => addTab(d, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON(doc(para('a1', 'Appendix text.'))) }));
+    await until(() => screen.queryByRole('tab', { name: 'Appendix' }) !== null, 'the second tab');
+    act(() => void select(editor(), 'Owners'));
+    act(() => fireEvent.click(commentButton()));
+    expect(opened[1]!.tabTitle).toBe('Main');
   });
 });

@@ -246,7 +246,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               {...props}
               key={active.id}
               tabId={active.id}
-              tabTitle={active.title}
+              tabTitle={tabs.length === 1 ? '' : active.title} // P4-B1 (tracker L275): one tab names no tab in a comment's label
               author={author}
               rail={rail}
               openRail={openRail}

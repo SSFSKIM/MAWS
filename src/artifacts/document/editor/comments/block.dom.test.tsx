@@ -77,7 +77,7 @@ describe('commenting a block (P3-E)', () => {
 
     expect(opened).toHaveLength(1);
     const [{ threadId, tabId, tabTitle, quote }] = opened as [CommentedPassage];
-    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: 'Main', quote: 'chart: Sales by region' });
+    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: '', quote: 'chart: Sales by region' }); // P4-B1 (tracker L275): one tab, no tab title
     expect(getThread(handle.doc, threadId)).toMatchObject({ tabId: TAB, blockId: 'c1', quote: 'chart: Sales by region', anchor: { kind: 'block' }, status: 'open', messages: [] });
     expect(JSON.stringify(editor().getJSON())).not.toContain('"comment"'); // no mark anywhere
     await ticks(3);
