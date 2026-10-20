@@ -10,11 +10,11 @@ import { MARGIN_ACTIVE_SHIFT_PX, MARGIN_GAP_PX } from '../../../comments/margin-
 import { CARD_MAX_PX } from '../../../comments/margin-tiers';
 import type { CommentsView } from '../../../comments/view';
 import { addTab } from '../../tabs';
-import { addThread, getThread, reply, resolve } from '../../threads';
+import { addThread, getThread, reopen, reply, resolve } from '../../threads';
 import { DocumentEditor, type DocumentRail } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
-import { TAB, World, doc, para, ticks, until } from '../test-world';
+import { TAB, World, doc, para, until } from '../test-world';
 import { resetScene, resized, scene, shiftOf, stubGeometry, topOf } from './margin-test-support';
 import { activeThread, commentSelection } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
@@ -265,10 +265,7 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(m.editor().view.dom.querySelector('[data-thread="t1"]')).not.toBeNull();
     expect(reserve()).toBe('0px');
     expect(screen.getByRole('status').textContent).toContain('Comment resolved'); // K4
-    act(() => {
-      const { reopen } = require('../../threads') as typeof import('../../threads');
-      reopen(m.handle.doc, 't1', ownerActor, now(), 'test');
-    });
+    act(() => reopen(m.handle.doc, 't1', ownerActor, now(), 'test'));
     await settle();
     expect(entry('t1')).not.toBeNull();
   });

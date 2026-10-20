@@ -201,8 +201,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   useEffect(() => {
     if (activeThreadId !== null && rail === null && marginHosts) openRail('margin');
     else if (activeThreadId === null && rail === 'margin') openRail(null);
-    // openRail is a plain closure over the props
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // openRail is a plain closure over the props, read at the effect's run
   }, [activeThreadId, rail, marginHosts]);
   useEffect(() => {
     if (rail !== 'history') {
