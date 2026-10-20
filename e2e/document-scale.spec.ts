@@ -239,7 +239,7 @@ const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} $
 // the margin's re-layout on the layer's growth is in the measurement (`streamWhile`: started with the typing, stopped
 // when it ends, its answer recorded in the row's note). Without `stream` (A2 not on this tree) the row is recorded
 // without the layer and says so; the acceptance's tree carries A2 (the child's Decision Log 6). Rows:
-// `1m p95` ≤ the control's `1h p95` in the same job + 3 ms (P4-B1's follow-up, below; it was ≤ 20 ms, the mini's
+// `1m p95` ≤ the control's `1h p95` in the same job + 6 ms (P4-B1's follow-up, below; it was ≤ 20 ms, the mini's
 // calibration of row 1 before the margin existed), `1m max` ≤ 50 ms, `1m relayouts` (the margin's layout passes per frame
 // callback the page ran, `data-relayouts` over the page's `data-frames`: the agents' edits and the layer's growth run
 // frames of their own, so a ratio per keystroke would count them against the owner; the scripted scroll afterwards adds
@@ -264,10 +264,12 @@ const STALE_LIMIT_MS = 1_200;
 const RELAYOUTS_PER_FRAME = 0.1;
 // P4-B1's follow-up (P4 Decision Logs 36 and 38: `1m p95`'s bound is the follow-up wave's): the margin open may cost at
 // most this much p95 over the control (the same workload, the margin hidden) run just before it in the same job, in
-// place of the absolute 20 ms calibrated before the margin existed. Three milliseconds is the mini's spread between
-// identical back-to-back runs of this workload (25.5 and 27.8, run 39398316541) and the A/B's "within about 3 ms"; the
-// diagnostic read the margin at +0.6 and +2.9 over its one control
-const MARGIN_OVER_CONTROL_MS = 3;
+// place of the absolute 20 ms calibrated before the margin existed. The over-control readings so far are +0.6 and +2.9
+// (run 39398316541) and identical back-to-back runs of this workload spread 2.3 ms (25.5 and 27.8), so the margin is
+// 6 ms: the higher reading clears it by 3.1, more than that spread, and a margin as it stands (about +1.75 on average)
+// goes red by chance about one job in thirty. It still catches the margin's own cost rising by about 4 ms at p95 (one
+// job in two) and by about 6.5 ms (five jobs in six); a smaller regression is for an A/B to read, B minus A
+const MARGIN_OVER_CONTROL_MS = 6;
 const STREAM_SECTION = TYPING_SECTION + 2; // kept clear of the agents, two sections under the caret: on screen with it
 const STREAM_TICK_MS = 120; // P4-B1: the layer's pace, a piece every 120 ms and the seam's round trip (the typing is about 36 s)
 const STREAM_ID = 'toolu_perf_stream_margin';
