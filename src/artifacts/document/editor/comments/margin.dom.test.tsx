@@ -15,14 +15,13 @@ import { DocumentEditor, type DocumentRail } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
-import { resetScene, resized, scene, shiftOf, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
-import { MARGIN_LIST_QUIET_MS } from './MarginThreads';
+import { resetScene, resized, scene, shiftOf, stubCoords, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
 import { activeThread, commentSelection } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { agentActor, findPos, now, owner as ownerActor, select } from './test-support';
 
-// P4-B1: the shared card counted as it renders (passed through), so a case can show a list re-read leaves an unchanged
-// card alone
+// P4-B1: the shared card counted as it renders (passed through), so a case can show a thread's change leaves another
+// thread's card alone
 const cardRenders = vi.hoisted(() => new Map<string, number>());
 vi.mock('../../../comments/ThreadCard', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../comments/ThreadCard')>();
@@ -94,7 +93,10 @@ async function mount(content: JSONContent, initial: { rail?: DocumentRail; comme
       artifactId="doc1"
       handle={handle}
       host={owner}
-      onEditor={(e) => (current = e)}
+      onEditor={(e) => {
+        current = e;
+        if (e) stubCoords(e); // P4-B1: the margin anchors through coordsAtPos
+      }}
       {...(initial.surface !== false && { comments })}
       rail={props.rail}
       onRailChange={(rail) => {
@@ -134,7 +136,9 @@ function comment(m: Mounted, id: string, needle: string, top: number, body = `Ab
     m.editor().commands.setActiveThread(id); // as the editor's Comment command draws the new thread
   });
 }
-const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, MARGIN_LIST_QUIET_MS + 50))); // P4-B1: the margin's list quiet moment
+const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80))); // use-threads' quiet moment (the panel's)
+const frame = () => act(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+const type = (m: Mounted, text: string, at: string) => act(() => m.editor().view.dispatch(m.editor().state.tr.insertText(text, findPos(m.editor(), at))));
 const margin = () => screen.queryByRole('region', { name: 'Comments' });
 const entry = (id: string) => document.querySelector<HTMLElement>(`[data-margin-entry="${id}"]`);
 const relayouts = () => Number(margin()?.getAttribute('data-relayouts') ?? 0);
@@ -185,16 +189,15 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     expect(topOf(entry('t2'))).toBe(scene.entryHeight + MARGIN_GAP_PX);
   });
 
-  it('skips a zero-width first rect at a soft wrap (P6) and anchors a block thread at its block', async () => {
+  // P4-B1: the anchor is the character after the passage's first position (`coordsAtPos(from, 1)`), so a passage that
+  // starts at a soft wrap anchors on the line its first character is drawn on, not at the end of the line above
+  it('anchors a passage starting at a soft wrap on its first character’s line (P6)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'keeps going', 400);
     await settle();
-    // the span's first client rect is empty: the next one is the line
-    const span = m.editor().view.dom.querySelector('[data-thread="t1"]')!;
-    // P4-B1: Chromium's empty fragment at a soft wrap has no width but the full line's height
-    vi.spyOn(span, 'getClientRects').mockImplementation(() => [new DOMRect(320, 400, 0, 20), new DOMRect(120, 420, 200, 20)] as unknown as DOMRectList);
-    act(() => m.editor().view.dispatch(m.editor().state.tr.insertText(' ', findPos(m.editor(), 'Owners'))));
-    await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    scene.lines.set('t1', { top: 420, beforeTop: 400, height: 20 }); // before the position: the line above's end
+    type(m, ' ', 'Owners');
+    await frame();
     expect(topOf(entry('t1'))).toBe(420 - scene.columnTop);
   });
 });
@@ -256,27 +259,52 @@ describe('re-layout (R1 to R6)', () => {
     await act(() => Promise.resolve()); // the follow-up passes' microtask
     expect(margin()!.hasAttribute('data-animate')).toBe(true);
     expect(topOf(entry('t2'))).toBe(140 - scene.columnTop + 120 + MARGIN_GAP_PX); // laid with the grown height
-    act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'Third'))));
-    await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    // P4-B1: an edit's pass that moves nothing leaves the attribute (a running transition goes on); one that moves a card
+    // is not animated
+    type(m, 'X', 'Third');
+    await frame();
+    expect(margin()!.hasAttribute('data-animate')).toBe(true);
+    scene.lines.set('t1', { top: 160, height: 20 }); // a line typed above t1's passage
+    type(m, 'X', 'Third');
+    await frame();
+    expect(topOf(entry('t1'))).toBe(160 - scene.columnTop);
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
   });
 
-  // P4-B1 (Z3): an orphan is not wanted, so a pass does not search the page for it every frame
-  it('does not search the page for an orphaned thread on every edit (Z3)', async () => {
+  // P4-B1 (Z3): what is drawn is the display's decorations, which an undo brings back with the mark in one transaction,
+  // so a passage deleted and restored at once has its card back at the next frame, and no pass searches the page
+  it('a passage deleted and restored by undo within 100 ms has its card back, and no pass queries the page (Z3)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
     comment(m, 't2', 'track the budget', 300);
     await settle();
+    const queries = vi.spyOn(m.editor().view.dom, 'querySelectorAll');
     const from = findPos(m.editor(), 'ships quarterly');
     act(() => m.editor().view.dispatch(m.editor().state.tr.delete(from, from + 'ships quarterly'.length)));
-    await settle();
-    const queries = vi.spyOn(m.editor().view.dom, 'querySelectorAll');
-    for (const at of ['Owners', 'Third']) {
-      act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), at))));
-      await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
-    }
-    expect(queries.mock.calls.filter(([selector]) => selector === '[data-thread]')).toHaveLength(0);
+    await frame();
+    expect(entry('t1')).toBeNull(); // the orphan leaves at the edit's frame
+    await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
+    act(() => void m.editor().commands.undo());
+    await frame();
+    expect(entry('t1')).not.toBeNull();
+    expect(topOf(entry('t1'))).toBe(140 - scene.columnTop);
     expect(entry('t2')).not.toBeNull();
+    expect(queries.mock.calls.filter(([selector]) => selector === '[data-thread]')).toHaveLength(0);
+  });
+
+  // P4-B1 (R2): the margin reads the threads map at once, so an agent's reply shows in its card while the owner types,
+  // with no pause in the typing
+  it('shows an agent’s reply in its card while the owner keeps typing (R2)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'track the budget', 300);
+    await settle();
+    type(m, 'X', 'Third');
+    act(() => reply(m.agent.doc, 't1', { id: 't1:m2', by: agentActor, at: now(), body: 'Answered mid-typing.' }, 'agent'));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    type(m, 'Y', 'Third');
+    await frame();
+    expect(within(entry('t1')!).getByText('Answered mid-typing.')).toBeDefined();
   });
 
   it('an agent’s reply grows a card and re-lays the cards below it; the active thread stays (R2, R3)', async () => {
@@ -295,8 +323,8 @@ describe('re-layout (R1 to R6)', () => {
     expect(topOf(entry('t1'))).toBe(130 - MARGIN_GAP_PX - 120); // t1 pushed up to make room
   });
 
-  // P4-B1: the list is re-read after a quiet moment; an unchanged thread keeps its object and its card is not drawn again
-  it('a list re-read (an agent’s reply in another thread) re-renders only the changed thread’s card', async () => {
+  // P4-B1: the list follows the threads map; an unchanged thread keeps its object and its card is not drawn again
+  it('an agent’s reply re-renders only that thread’s card', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
     comment(m, 't2', 'track the budget', 300);

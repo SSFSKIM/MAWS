@@ -3,8 +3,10 @@
 // sits at a top; every mark span (`[data-thread]`) has the first line box the scene names for its thread (viewport
 // coordinates); every margin entry (`[data-margin-entry]`) has the height the scene names (a default otherwise). A
 // `ResizeObserver` that records its targets lets a test fire a resize as the browser would. Test support only.
+import type { Editor } from '@tiptap/core';
 import { act } from '@testing-library/react';
 import { vi } from 'vitest';
+import { drawnThreads } from './plugins';
 
 export interface Scene {
   /** The editor body's width (the 720 px rule reads it). */
@@ -14,8 +16,12 @@ export interface Scene {
   pageWidth: number;
   /** The column's top in the viewport (anchors are measured against it). */
   columnTop: number;
-  /** threadId → the first line box of its passage: top and height in viewport coordinates. */
-  lines: Map<string, { top: number; height: number; left?: number; width?: number }>;
+  /**
+   * threadId → the first line box of its passage: top and height in viewport coordinates. P4-B1: `beforeTop` is the top
+   * `coordsAtPos` answers for the side before the passage's first position (the line above, at a soft wrap); `top` the
+   * side after it.
+   */
+  lines: Map<string, { top: number; height: number; left?: number; width?: number; beforeTop?: number }>;
   /** threadId → its entry's height; `entryHeight` for the rest. */
   heights: Map<string, number>;
   entryHeight: number;
@@ -137,4 +143,21 @@ export function shiftOf(element: Element | null): number {
   const transform = (element as HTMLElement | null)?.style.transform ?? '';
   const match = /translate\((-?[\d.]+)px, /.exec(transform);
   return match ? Number(match[1]) : 0;
+}
+
+/**
+ * P4-B1: the editor's `coordsAtPos` answered from the scene: a thread's first drawn position (the display's decorations,
+ * as the margin reads them) is at its line's top (`beforeTop` for the side before it); any other position at 0.
+ */
+export function stubCoords(editor: Editor): void {
+  vi.spyOn(editor.view, 'coordsAtPos').mockImplementation((pos: number, side = 1) => {
+    for (const [id, from] of drawnThreads(editor.state)) {
+      if (from !== pos) continue;
+      const line = scene.lines.get(id);
+      if (!line) break;
+      const top = side < 0 ? (line.beforeTop ?? line.top) : line.top;
+      return { top, bottom: top + line.height, left: line.left ?? 120, right: (line.left ?? 120) + 1 };
+    }
+    return { top: 0, bottom: 0, left: 0, right: 0 };
+  });
 }
