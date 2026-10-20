@@ -57,9 +57,11 @@ const UNKNOWN_SENDER = 'unknown';
 // it, so the body drawn ends before it. Matched whole, as the body's last line only.
 const SMINOS_REPLY_LINE = /(?:^|\n)\[To reply, run in Bash: \/[^\n"]*\/sminos say "@[^\s"/]+\/[^\s"/]+ <your reply>"\]$/;
 // sminos's frame line, the first line of every event it pushes, followed by the event's text (doperpowers `sminos.py`:
-// `compose_chat_frame`, `compose_frame`): `[sminos chat <project> <writer_short>:<seq> from <from> → <@you | @all>[ |
-// unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event that carries a `msg_id`.
-const SMINOS_CHAT_FRAME = /^\[sminos chat .+? \S+:\d+ from (.+) → @(?:you|all)(?: \| unread [1-9][0-9]*)?\]$/;
+// `compose_chat_frame`, `compose_frame`): `[sminos chat <project> <writer_short>:<seq> from <from> → <target>[ |
+// unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event that carries a `msg_id`. The target is
+// `@you`, or a broadcast's: `@all`, or from sminos 1.2.0 its scope's label (`scope_label`: `@org`, or `@all in
+// <projects>`, `@all on <machines>` or both, either followed by ` (<states>)`).
+const SMINOS_CHAT_FRAME = /^\[sminos chat .+? \S+:\d+ from (.+) → (?:@you|@org(?: \(.+\))?|@all(?: in .+)?(?: on .+)?(?: \(.+\))?)(?: \| unread [1-9][0-9]*)?\]$/;
 const SMINOS_MESSAGE_FRAME = /^\[sminos message from (.+) id=\S+\]$/;
 
 /** Who a sminos frame line says sent the event, or null when the line is not a whole frame. */

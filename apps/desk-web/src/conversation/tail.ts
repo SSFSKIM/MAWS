@@ -6,7 +6,7 @@
 //
 // Matching is by identity alone, one to one. sminos pushes a send as its delivery frame, and the prompt's whole first
 // line must be the frame sminos writes for that event: `[sminos chat <project> <writer_short>:<seq> from <from> →
-// <@you | @all>[ | unread N]]` (`frame_of`, `compose_chat_frame`, `event_ref`, `writer_short` in doperpowers'
+// <@you | @all | a broadcast's scope>[ | unread N]]` (`frame_of`, `compose_chat_frame`, `event_ref`, `writer_short` in doperpowers'
 // `sminos.py`; a web send's writer, `hub/<member>`, has no session part and stands whole), or `[sminos message from
 // <via or from> id=<msg_id>]` for an event that carries a `msg_id` (`compose_frame`). The row must mark a delivery's
 // provenance (`delivery-frame.ts`): the bridge's plugin prompt as the user (an idle session), the bridge's row appended
@@ -25,6 +25,7 @@
 // a read-only machine, failed) stays at the tail whatever history is held.
 import type { Delivery, JsonObject, LogEvent, Recipient } from 'desk-hub/protocol';
 import { deliveredLines } from './delivery-frame';
+import { broadcastLabel } from './stream';
 import { failureOf, resultOf } from './outcome';
 import { failureText } from './words';
 import { deliveryKey, type OutboxItem, type RpcEntry } from '../project/conversation';
@@ -71,17 +72,22 @@ export function sendRef(event: { writer: string; seq: number; msg_id?: unknown }
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** A stand-in for each project name in a scope's label: escaped as itself, then opened. */
+const OPEN = '\u0000';
+
 /**
  * The first line sminos writes when it pushes this event, as a pattern over a whole line: `compose_frame`'s
  * `[sminos message from <via or from> id=<msg_id>]` for an event with a `msg_id`, else `compose_chat_frame`'s
- * `[sminos chat <project> <writer_short>:<seq> from <from> → <@all | @you>[ | unread N]]`. Only the project's name (the
- * machine's own for it) and the unread count are open.
+ * `[sminos chat <project> <writer_short>:<seq> from <from> → <target>[ | unread N]]`, the target `@you`, or for a
+ * broadcast (`wake`) its scope's label (`scopeLabel`), `@all` for a bare one. Only the project's name and the scope's
+ * project names (each the machine's own for it) and the unread count are open.
  */
-export function framePattern(event: { writer: string; seq: number; from?: unknown; via?: unknown; msg_id?: unknown; wake?: unknown }): RegExp {
+export function framePattern(event: { writer: string; seq: number; from?: unknown; via?: unknown; msg_id?: unknown; wake?: unknown; scope?: unknown }): RegExp {
   const str = (value: unknown) => (typeof value === 'string' ? value : '');
   if (str(event.msg_id) !== '') return new RegExp(`^${escape(`[sminos message from ${str(event.via) || str(event.from)} id=${str(event.msg_id)}]`)}$`);
-  const tail = ` ${writerShort(event.writer)}:${event.seq} from ${str(event.from)} → ${event.wake === true ? '@all' : '@you'}`;
-  return new RegExp(`^\\[sminos chat .+${escape(tail)}(?: \\| unread [1-9][0-9]*)?\\]$`);
+  const target = event.wake === true ? escape(broadcastLabel(event.scope, () => OPEN)).split(OPEN).join('.+') : '@you';
+  const tail = `${escape(` ${writerShort(event.writer)}:${event.seq} from ${str(event.from)} → `)}${target}`;
+  return new RegExp(`^\\[sminos chat .+${tail}(?: \\| unread [1-9][0-9]*)?\\]$`);
 }
 
 /** What the held rows say of the sends: the first lines that may be deliveries, the uuids, the oldest row's time. */
