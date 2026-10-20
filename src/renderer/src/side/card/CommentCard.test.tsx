@@ -304,6 +304,59 @@ describe('dismissal', () => {
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The comment was not sent: The session is gone']);
   });
 
+  // P4-B3 (M6's review; its Decision Log 37): a card host remounted with its card while a send is on its way (a document
+  // moved to another pane or between the panel and a tab keeps its card) draws a new form; the send is the card's, so the
+  // new form starts sending, sends nothing more, and takes the answer
+  describe('a remount while a send is on its way', () => {
+    const hostAs = (slot: string) => (
+      <div key={slot} className="relative">
+        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible restoreFocus={restoreFocus} />
+      </div>
+    );
+    async function sentThenRemounted() {
+      fake = fakeClient();
+      window.maws = fake.client;
+      const view = render(hostAs('a'));
+      pick();
+      await userEvent.type(field(), 'Why?{Enter}');
+      expect(fake.invoked('side.thread.open')).toHaveLength(1);
+      const before = field();
+      view.rerender(hostAs('b')); // the body moved: another host element, the same card
+      await act(async () => {});
+      expect(field(), 'a new form').not.toBe(before);
+      return view;
+    }
+
+    it('starts disabled, a second Enter opens nothing, and a refusal reaches it, enabled again', async () => {
+      await sentThenRemounted();
+      expect(field().disabled).toBe(true);
+      fireEvent.keyDown(field(), { key: 'Enter' });
+      await act(async () => {});
+      expect(fake.invoked('side.thread.open')).toHaveLength(1);
+      await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: 'b2222222-2222-4222-8222-222222222222', reason: 'no_engine_session', message: 'This session has not started yet' }));
+      expect(screen.getByRole('alert').textContent).toContain('This session has not started yet');
+      expect(field().disabled).toBe(false);
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    });
+
+    it('a send that went reaches the new form: Send to main closes the card, nothing sent twice', async () => {
+      fake = fakeClient();
+      window.maws = fake.client;
+      const view = render(hostAs('a'));
+      pick();
+      await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
+      await userEvent.type(field(), 'Look here{Enter}');
+      expect(fake.invoked('side.sendToMain')).toHaveLength(1);
+      view.rerender(hostAs('b'));
+      await act(async () => {});
+      expect(field().disabled).toBe(true);
+      fireEvent.keyDown(field(), { key: 'Enter' });
+      await act(() => fake.reply('side.sendToMain', { messageUuid: null, disposition: 'sent' }));
+      expect(fake.invoked('side.sendToMain')).toHaveLength(1);
+      expect(useCommentCard.getState().open).toBeNull();
+    });
+  });
+
   it('its host unmounting closes it, though StrictMode’s effect replay does not', async () => {
     pick(); // open before the host mounts, so the replay's cleanup meets it
     const { unmount } = render(

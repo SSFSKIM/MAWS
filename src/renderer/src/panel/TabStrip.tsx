@@ -1,15 +1,19 @@
 // The panel's strip (C8a execution document, M1): the home glyph, the tabs in `PanelHostProps.tabs` order (pins first),
 // and "+". One row that scrolls and never wraps; each tab is `icon · title · suffix`, truncated at a 72 px minimum,
 // with its pin and close glyphs revealed on hover, focus and selection (Codex §3). The shown session's own
-// interactions write through `onChange`; closing goes through the host so `beforeClose` runs.
-import { DropdownMenu } from 'radix-ui';
-import type { KeyboardEvent, ReactNode } from 'react';
+// interactions write through `onChange`; closing goes through the host so `beforeClose` runs. P4-B3 (X38; its Decision
+// Log 17, 21): a tab whose tool moves to main (the Artifacts tool) drags while it shows a record, and its context menu
+// offers "Move to main area", disabled with the reason a drag of it would be refused.
+import { ContextMenu, DropdownMenu } from 'radix-ui';
+import { useEffect, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
+import { beginDrag, endDragFrom, moveArtifactToTab, panelTabMoves, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
+import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
 import { panelHost, requestFocus, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 import type { PanelHostProps } from './host-slot';
 
@@ -57,9 +61,16 @@ function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; se
   const pinnable = tool ? tool.pinnable : true;
   const ToolIcon = tool?.icon;
   const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width
+  const record = usePanelRecord(tab.id); // P4-B3: the artifact it shows, which a drag moves to main
+  useEffect(() => () => endDragFrom('panel', tab.id), [tab.id]); // INV-5: a tab unmounting mid-drag ends its drag
 
-  return (
-    <div data-tab-id={tab.id} className={`group flex h-7 max-w-48 min-w-18 shrink-0 items-center rounded-sm ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}>
+  const element = (
+    <div
+      data-tab-id={tab.id}
+      draggable={record !== null || undefined}
+      onDragStart={record === null ? undefined : (event) => beginDrag(event, { source: 'panel', tabId: tab.id, toolId: tab.toolId, artifactId: record })}
+      className={`group flex h-7 max-w-48 min-w-18 shrink-0 items-center rounded-sm ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}
+    >
       <button
         type="button"
         role="tab"
@@ -90,6 +101,32 @@ function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; se
         <CloseIcon />
       </GlyphButton>
     </div>
+  );
+  if (!panelTabMoves(tab)) return element;
+  return (
+    <ContextMenu.Root modal={false}>
+      <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+          <MoveToMainItem tabId={tab.id} />
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  );
+}
+
+// P4-B3 (M3 of the prior art): the record into a main tab, appended to the focused pane, as the record bar's Move to tab.
+function MoveToMainItem({ tabId }: { tabId: string }) {
+  const refusal = useTransferRefusal({ to: 'tab', panelTabId: tabId });
+  return (
+    <ContextMenu.Item
+      disabled={refusal !== null}
+      title={refusal ?? undefined}
+      onSelect={() => void moveArtifactToTab(tabId)}
+      className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover"
+    >
+      {TRANSFER_COPY.moveToMain}
+    </ContextMenu.Item>
   );
 }
 

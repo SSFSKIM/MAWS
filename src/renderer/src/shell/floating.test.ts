@@ -11,7 +11,12 @@ import { persistLayout, useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices'; // P3-F wave S (F6)
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
-import { cardSession, cardSizeKey, closeCard, dockPanel, FLOAT_COPY, floatPanel, openCard, placeCard, useFloatingCard } from './floating';
+import { cardHost, cardSession, cardSizeKey, closeCard, dockPanel, dockSplit, EXPAND_COPY, FLOAT_COPY, floatPanel, floatSplit, openCard, placeCard, useFloatingCard } from './floating';
+import type { ProjectId } from '@shared/graph/ids'; // P4-B3 M2
+import { item as attention, T0 } from '../../../../test/support/builders'; // P4-B3 M2
+import { useAttention } from '../stores/attention'; // P4-B3 M2
+import { activeTab } from '../stores/layout-model'; // P4-B3 M2
+import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M2
 
 const A = 'app-a' as AppSessionId;
 type Panel = LayoutRegions['panel'];
@@ -261,5 +266,212 @@ describe('the card’s size key', () => {
     expect(cardSizeKey(useLayout.getState())).toBe('browser-1');
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: 'browser-1', toolId: 'browser', pinned: false }], activeTabId: null }]]) });
     expect(cardSizeKey(useLayout.getState())).toBe('summary');
+  });
+});
+
+// P4-B3 M2 (X37; its Decision Log 7, 8, 12, 13, 14): the split's card. S (session A) on the left beside Diagnostics on
+// the right, at the ratio 0.4, the right pane focused.
+describe('the split’s card', () => {
+  const B = 'app-b' as AppSessionId;
+  const sessionTab = (id: AppSessionId): TabRef => ({ id: tabId({ kind: 'session', appSessionId: id }), kind: 'session', appSessionId: id, pinned: false });
+  const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
+  const SETTINGS: TabRef = { id: 'settings', kind: 'settings', section: null, pinned: false };
+  const S = sessionTab(A);
+  const splitOf = (left: TabRef = S, right: TabRef = DIAGNOSTICS): LayoutMain => ({
+    ...LAYOUT_DEFAULTS.main,
+    sets: { [NO_PROJECT]: { panes: [{ tabs: [left], activeTabId: left.id }, { tabs: [right], activeTabId: right.id }], focusedPane: 1, splitRatio: 0.4 } },
+  });
+  const set = () => useLayout.getState().main.sets[NO_PROJECT]!;
+  const layout = () => useLayout.getState();
+  const closed = () => useFloatingCard.getState().closed;
+  const marked = () => [...useComposerStore.getState().focusOnMount];
+  const unmark = () => useComposerStore.setState({ focusOnMount: new Set() });
+  const notices = () => useNotices.getState().notices.map((n) => n.text);
+  const pending = (...items: ReturnType<typeof attention>[]) => useAttention.setState({ bySession: new Map([[items[0].appSessionId, items]]) });
+  beforeEach(() => {
+    useLayout.setState({ main: splitOf() });
+    useNotices.setState({ notices: [] });
+    useAttention.setState({ bySession: new Map() });
+  });
+
+  it('cardSession and cardHost: the floating pane’s session in the split, the panel’s shown session when the panel floats, none otherwise', () => {
+    expect([cardHost(layout()), cardSession(layout())]).toEqual([null, null]);
+    useLayout.getState().floatSplit(S.id);
+    expect([cardHost(layout()), cardSession(layout())], 'Diagnostics is focused: no matter').toEqual(['split', A]);
+    useLayout.getState().setPanel({ maximized: true });
+    expect([cardHost(layout()), cardSession(layout())], 'the main area is at 0 px under a maximized panel').toEqual([null, null]);
+    useLayout.getState().setPanel({ maximized: false });
+    useLayout.getState().setCurrentProject('elsewhere' as ProjectId);
+    expect([cardHost(layout()), cardSession(layout())], 'another tab set: the float stays with its own').toEqual([null, null]);
+  });
+
+  it('a float (the divider’s release, Expand) floats S with the ratio untouched, focuses S’s pane and marks its composer', () => {
+    expect(floatSplit(S.id)).toBe(true);
+    expect(set()).toMatchObject({ floating: { sessionTabId: S.id }, splitRatio: 0.4, focusedPane: 0 });
+    expect(marked()).toEqual([A]);
+    expect(activeTab(layout().main), 'the card stands for S: the panel shows it, ⌘W closes it').toEqual(S);
+  });
+
+  it('a float asked of a tab that is no pane’s active session is refused, and marks nothing', () => {
+    expect(floatSplit(DIAGNOSTICS.id)).toBe(false);
+    expect(set().floating).toBeUndefined();
+    expect(marked()).toEqual([]);
+  });
+
+  it('a float asked while the panel stands in main docks the panel first', () => {
+    useLayout.getState().setPanel({ maximized: true });
+    floatSplit(S.id);
+    expect(layout().regions.panel).toMatchObject({ maximized: false, floating: false });
+    expect(cardHost(layout())).toBe('split');
+  });
+
+  it('Dock returns the split at its ratio with S focused and its composer marked', () => {
+    floatSplit(S.id);
+    useLayout.getState().focusPane(1);
+    unmark();
+    dockSplit();
+    expect(set().floating).toBeUndefined();
+    expect(set()).toMatchObject({ splitRatio: 0.4, focusedPane: 0 });
+    expect(marked()).toEqual([A]);
+  });
+
+  it('one card at a time: ⌥⌘B with the split card up docks it and nothing else; a second press floats the panel', () => {
+    floatSplit(S.id);
+    runAction('panel.float');
+    expect(set().floating).toBeUndefined();
+    expect(layout().regions.panel.floating).toBe(false);
+    runAction('panel.float');
+    expect(layout().regions.panel.floating).toBe(true);
+    expect([cardHost(layout()), cardSession(layout())]).toEqual(['panel', A]);
+  });
+
+  it('one card at a time: the panel’s float (its divider past the maximum) docks a floating split first', () => {
+    floatSplit(S.id);
+    floatPanel({ width: 444 });
+    expect(set().floating).toBeUndefined();
+    expect(layout().regions.panel).toMatchObject({ floating: true, width: 444 });
+    expect([cardHost(layout()), cardSession(layout())]).toEqual(['panel', A]);
+  });
+
+  it('Close leaves the pill and puts the focused pane on A; the pill brings the card back with S focused and its composer marked', () => {
+    floatSplit(S.id);
+    closeCard();
+    expect(closed()).toBe(true);
+    expect(set().focusedPane).toBe(1);
+    unmark();
+    openCard();
+    expect(closed()).toBe(false);
+    expect(set().focusedPane).toBe(0);
+    expect(marked()).toEqual([A]);
+  });
+
+  it('the focused pane moving to S while the card is a pill (a sidebar click, ⌘⇧\\) opens the card and marks its composer', () => {
+    floatSplit(S.id);
+    closeCard();
+    unmark();
+    useLayout.getState().openSession(A); // the sidebar's row: S's tab is open, so its pane is focused
+    expect(closed()).toBe(false);
+    expect(marked()).toEqual([A]);
+    closeCard();
+    runAction('pane.focusOther');
+    expect(closed()).toBe(false);
+    expect(set().focusedPane).toBe(0);
+  });
+
+  it('the pill state resets whenever the split floats or docks, and on a tab set’s return', () => {
+    floatSplit(S.id);
+    closeCard();
+    dockSplit();
+    expect(closed()).toBe(false);
+    floatSplit(S.id);
+    closeCard();
+    useLayout.getState().setCurrentProject('elsewhere' as ProjectId);
+    useLayout.getState().setCurrentProject(null);
+    expect(closed()).toBe(false);
+    expect(cardHost(layout())).toBe('split');
+  });
+
+  // Decision Log 13 (LC-3: Codex keys its exception by the pending input's id)
+  it('a new permission request or question raises the pill without the keyboard; one closed while pending stays closed until the next', () => {
+    floatSplit(S.id);
+    closeCard();
+    unmark();
+    const permission = attention(A, 'permission', T0);
+    pending(attention(A, 'error', T0));
+    expect(closed(), 'an error is no request').toBe(true);
+    pending(permission);
+    expect(closed()).toBe(false);
+    expect(marked(), 'the raise never takes the keyboard').toEqual([]);
+    closeCard();
+    pending({ ...permission, state: 'delivered' });
+    expect(closed(), 'the same request, still pending').toBe(true);
+    pending(permission, attention(A, 'question', '2026-09-28T10:01:00.000Z'));
+    expect(closed()).toBe(false);
+  });
+
+  it('the panel’s card is raised the same way; a request of another session raises nothing', () => {
+    useLayout.setState({ main: mainShowing(A) });
+    floatPanel();
+    closeCard();
+    pending(attention(B, 'permission', T0));
+    expect(closed()).toBe(true);
+    pending(attention(A, 'plan', T0));
+    expect(closed()).toBe(false);
+  });
+
+  it('Expand on the pane beside a session floats it; on a floating split it docks; otherwise it says why', () => {
+    runAction('main.expandArtifactPane'); // Diagnostics is focused, the session beside it
+    expect(set()).toMatchObject({ floating: { sessionTabId: S.id }, splitRatio: 0.4, focusedPane: 0 });
+    useLayout.getState().focusPane(1);
+    runAction('main.expandArtifactPane'); // Restore split
+    expect(set().floating).toBeUndefined();
+    expect(set().focusedPane).toBe(0);
+    expect(notices()).toEqual([]);
+    useLayout.setState({ main: splitOf(DIAGNOSTICS, SETTINGS) });
+    runAction('main.expandArtifactPane');
+    expect(set().floating).toBeUndefined();
+    expect(notices()).toEqual([EXPAND_COPY.noSession]);
+    useNotices.setState({ notices: [] });
+    useLayout.setState({ main: mainShowing(A) });
+    runAction('main.expandArtifactPane');
+    expect(notices()).toEqual([EXPAND_COPY.noSession]);
+  });
+
+  it('the split card’s size key is the tab of the pane it sits over', () => {
+    floatSplit(S.id);
+    expect(cardSizeKey(layout())).toBe(`main:${DIAGNOSTICS.id}`);
+  });
+
+  // Decision Log 14: the card transitions (either card) mark the session's next transcript mount to carry its scroll
+  it('floating and docking mark the session’s transcript to carry its scroll; an ordinary tab switch does not', () => {
+    const scroll = { following: false, offset: 900, signature: '3:r3', anchor: 'r2' };
+    takeTranscriptCarry(A); // a mark an earlier test's transition left (no transcript mounts here to take it)
+    recordTranscriptScroll(A, scroll);
+    useLayout.getState().activateTab(DIAGNOSTICS.id);
+    expect(takeTranscriptCarry(A)).toBeNull();
+    floatSplit(S.id);
+    expect(takeTranscriptCarry(A)).toEqual(scroll);
+    expect(takeTranscriptCarry(A), 'one-shot').toBeNull();
+    dockSplit();
+    expect(takeTranscriptCarry(A)).toEqual(scroll);
+    useLayout.setState({ main: mainShowing(A) });
+    floatPanel();
+    expect(takeTranscriptCarry(A)).toEqual(scroll);
+    dockPanel();
+    expect(takeTranscriptCarry(A)).toEqual(scroll);
+  });
+
+  // M2 review (P3): a file tab of the session has no transcript of it mounted, so neither the panel's float nor its dock
+  // over that tab marks a carry (the mark would wait for whatever mount of the session came next)
+  it('the panel’s float and dock over a file tab of the session mark no carry', () => {
+    const file: TabRef = { id: 'file:/x', kind: 'file', path: '/x', line: null, appSessionId: A, pinned: false };
+    takeTranscriptCarry(A);
+    recordTranscriptScroll(A, { following: false, offset: 900, signature: '3:r3', anchor: 'r2' });
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [file], activeTabId: file.id }], focusedPane: 0, splitRatio: 0.5 } } } });
+    floatPanel();
+    expect(layout().regions.panel.floating).toBe(true);
+    expect(takeTranscriptCarry(A)).toBeNull();
+    dockPanel();
+    expect(takeTranscriptCarry(A)).toBeNull();
   });
 });

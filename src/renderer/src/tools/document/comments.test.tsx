@@ -23,7 +23,7 @@ import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
 import { commentDraftOf } from './comment-drafts'; // P4-B1
-import { artifactCommentAnchor, useDocumentComments } from './comments';
+import { artifactCommentAnchor, forgetCardActivation, useDocumentComments } from './comments';
 
 // P3-F (L154): the card thread's Reply goes through the human send seam (one spy for every run of the factory, as
 // CardThread.test.tsx explains)
@@ -273,6 +273,39 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(m.reach.hosting).toHaveBeenLastCalledWith(passage.threadId); // the margin still told the thread it is on
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(setActive).toHaveBeenLastCalledWith(null); // the card closing still clears what it drew
+  });
+
+  // P4-B3 M6 (the transfer e2e): a document moved between the panel and a main tab is a new body over the tab state that
+  // travels; with a host id of its own each body was a new host, so the old one going withdrew the draft's thread and
+  // dropped its text. The tab state's host id makes the new body the same host, as a remount is.
+  it('a host id the caller keeps (the tab state’s) carries the composing card and its draft to another body', async () => {
+    const doc = newDoc();
+    addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), placement: 'margin' };
+    let surface: DocumentComments | null = null;
+    function Body({ hostId, onSurface }: { hostId?: string; onSurface(surface: DocumentComments): void }) {
+      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', draftRule: true, ...(hostId !== undefined && { hostId }) });
+      onSurface(comments);
+      return (
+        <div className="ds-doc">
+          <div data-margin-entry={passage.threadId}>{comments.overlay(reach)}</div>
+        </div>
+      );
+    }
+    const onSurface = (next: DocumentComments) => (surface = next);
+    const view = render(<Body key="panel" hostId="document:tab-state-1" onSurface={onSurface} />);
+    act(() => surface!.opened(passage));
+    await act(async () => {});
+    await userEvent.type(field(), 'Monthly?');
+    vi.mocked(reach.setActive).mockClear();
+    forgetCardActivation('document:tab-state-1'); // the move's capture (Decision Log 37): a new editor, active at none
+    view.rerender(<Body key="main" hostId="document:tab-state-1" onSurface={onSurface} />); // the move: another body, one commit
+    await act(async () => {});
+    expect(reach.setActive, 'the card activates its thread in the editor it moved to').toHaveBeenLastCalledWith(passage.threadId);
+    expect(field().value).toBe('Monthly?');
+    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(reach.discard).not.toHaveBeenCalled();
+    expect(surface!.draft!()).toBe(passage.threadId);
   });
 
   it('records the typed draft as the artifact’s, which draft() names; an emptied field or the card closing clears it', async () => {

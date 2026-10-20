@@ -103,6 +103,13 @@ export function claimCard(serial: number, hostId: string): boolean {
   return true;
 }
 
+// P4-B3 (its Decision Log 39): the card drawn by another host of the same record from now on (a move that activates
+// another view of a document hands its card there before its own view closes).
+export function handCardTo(serial: number, hostId: string): void {
+  const { open } = useCommentCard.getState();
+  if (open?.serial === serial && open.hostId !== hostId) useCommentCard.setState({ open: { ...open, hostId } });
+}
+
 // The open card, or only that card when a serial is given.
 export function closeCard(serial?: number): void {
   const { open } = useCommentCard.getState();

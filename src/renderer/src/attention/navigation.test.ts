@@ -14,6 +14,7 @@ import { hideSideChild, showSideChild } from '../side/store';
 import { hideCardThread, showCardThread } from '../side/card/store'; // P2-E1
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
+import { closeCard, floatSplit, useFloatingCard } from '../shell/floating'; // P4-B3
 import { connectAttention } from './navigation';
 
 const nine = scenarioFile('nine-sessions');
@@ -32,6 +33,7 @@ beforeEach(() => {
 afterEach(() => {
   disconnect();
   resetAskSheets();
+  useFloatingCard.setState({ closed: false }); // P4-B3
 });
 
 // A blocking `maws` ask's originating event (what the Question sheet's store follows and `attention.request` answers).
@@ -121,6 +123,21 @@ describe('the fallback toast', () => {
     useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId }); // the docked card is not in a file tab
     fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
     expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`, `attention:${fix.id}`]);
+  });
+
+  // P4-B3 (its Decision Log 11): a pane that yielded into the split's card keeps its tab active, but the request shows
+  // only in the card: on screen while the card is open, not behind its pill
+  it('counts the split’s card: its session’s request is on screen while the card is open, not behind the pill', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const notify = () => fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    useLayout.getState().openSession(fix.appSessionId);
+    useLayout.getState().openTab({ kind: 'diagnostics' }, { pane: 1 });
+    floatSplit(`session:${fix.appSessionId}`);
+    notify();
+    expect(useNotices.getState().notices).toEqual([]);
+    closeCard();
+    notify();
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${fix.id}`]);
   });
 
   // W-C review m1: a maximized panel covers the main region, so a session tab in front there shows nothing; an ask's

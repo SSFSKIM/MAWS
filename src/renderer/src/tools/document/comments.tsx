@@ -25,7 +25,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactSessionContext } from '../../artifacts/session-context'; // P3-F1
 import { QUIET } from '../../sessions/ui';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
-import { closeCard, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
+import { closeCard, handCardTo /* P4-B3 */, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
 import { focusAtEnd } from '../../side/card/CommentCard'; // P4-B1
 import { openCommentComposer, type CommentPlacement } from '../code/anchor/anchor'; // P4-B1: CommentPlacement
 import { commentDraftEntry, dropCommentDraft, recordCommentDraft } from './comment-drafts'; // P4-B1
@@ -72,6 +72,12 @@ interface Options {
    * and whose tab guards its close opts in (the document's); without it Escape discards as before.
    */
   draftRule?: true;
+  /**
+   * P4-B3 M6: the card host's id, when the caller keeps one across bodies (the document tab state's, which a move
+   * between the panel and a main tab carries), so a body that replaces another over the same state is the same host,
+   * as a remount is: its composing card and draft stay. Else the hook's own.
+   */
+  hostId?: string;
 }
 
 interface Binding {
@@ -88,76 +94,99 @@ interface Binding {
 // way. A draft is withdrawn (the thread and its mark) once its card no longer composes and no send in it is on its way;
 // a send that went is recorded as the thread's message and the thread is no draft any more, whatever became of the card
 // or the editor meanwhile (P2 completes a send after its card was closed or replaced, by design); a refused one leaves
-// the draft as it was. Kept outside React, by host id: the opener, the card's sends and the host's effect all change it,
-// and a send outlives the host. An entry with no drafts is dropped; it holds nothing else worth keeping.
-class Drafts {
-  private readonly sends = new Map<string, number>(); // draft thread id → its sends on their way
-  private composing: string | null = null; // the thread whose card this host shows composing
+// the draft as it was. Kept outside React, by thread, each naming its host: the opener, the card's sends and the host's
+// effect all change it, a send outlives the host, and (P4-B3) a move that activates another view of the document hands
+// the host's drafts to that view's host, sends on their way included.
+interface DraftThread {
+  hostId: string;
+  sends: number; // on their way
+}
+const draftThreads = new Map<string, DraftThread>(); // draft thread id → its host and sends
+const composingIn = new Map<string, string>(); // host id → the thread its card composes in
 
-  constructor(private readonly hostId: string) {}
-
-  opened(threadId: string): void {
-    this.sends.set(threadId, 0);
-  }
+const drafts = {
+  opened(hostId: string, threadId: string): void {
+    draftThreads.set(threadId, { hostId, sends: 0 });
+  },
 
   /** Kept on purpose (resolved from its card): never withdrawn. */
   keep(threadId: string): void {
-    this.sends.delete(threadId);
-    this.prune();
-  }
+    draftThreads.delete(threadId);
+  },
 
-  /** The host's card composes in `threadId` now (null: none, or the host went): every other idle draft is withdrawn. */
-  follow(threadId: string | null, withdraw: (threadId: string) => void): void {
-    this.composing = threadId;
-    for (const [id, sending] of [...this.sends]) {
-      if (id === threadId || sending > 0) continue;
-      this.sends.delete(id);
+  /** The host's card composes in `threadId` now (null: none, or the host went): every other idle draft of it is withdrawn. */
+  follow(hostId: string, threadId: string | null, withdraw: (threadId: string) => void): void {
+    if (threadId === null) composingIn.delete(hostId);
+    else composingIn.set(hostId, threadId);
+    for (const [id, draft] of [...draftThreads]) {
+      if (draft.hostId !== hostId || id === threadId || draft.sends > 0) continue;
+      draftThreads.delete(id);
       withdraw(id);
     }
-    this.prune();
-  }
+  },
 
   /** A send in `threadId` set out; the call returned settles it. */
   sending(threadId: string, text: string, { record, withdraw }: { record(threadId: string, body: string): void; withdraw(threadId: string): void }): (went: boolean) => void {
-    const draft = this.sends.has(threadId);
-    if (draft) this.sends.set(threadId, this.sends.get(threadId)! + 1);
+    const draft = draftThreads.get(threadId);
+    if (draft) draft.sends += 1;
     return (went) => {
       if (went) {
-        this.sends.delete(threadId);
+        draftThreads.delete(threadId);
         record(threadId, text);
-      } else if (draft && this.sends.has(threadId)) {
-        const left = this.sends.get(threadId)! - 1;
-        this.sends.set(threadId, left);
-        if (left === 0 && threadId !== this.composing) {
-          this.sends.delete(threadId);
+      } else if (draft && draftThreads.get(threadId) === draft) {
+        draft.sends -= 1;
+        if (draft.sends === 0 && composingIn.get(draft.hostId) !== threadId) {
+          draftThreads.delete(threadId);
           withdraw(threadId);
         }
       }
-      this.prune();
     };
-  }
+  },
 
-  private prune(): void {
-    if (this.sends.size === 0 && draftsByHost.get(this.hostId) === this) draftsByHost.delete(this.hostId);
-  }
-}
+  /** P4-B3 (its Decision Log 39): the host's drafts, and the thread its card composes in, are `to`'s from now on. */
+  handTo(from: string, to: string): void {
+    for (const draft of draftThreads.values()) if (draft.hostId === from) draft.hostId = to;
+    const composing = composingIn.get(from);
+    composingIn.delete(from);
+    if (composing !== undefined) composingIn.set(to, composing);
+  },
+};
 
-const draftsByHost = new Map<string, Drafts>();
 // The card hosts whose overlay is mounted. DocumentEditor remounts the overlay with the page on every tab switch while the
 // host id stays the document's, and P2's card host keeps its card through a remount within a microtask; so does this.
 const mountedOverlays = new Set<string>();
 // P4-B1: per host, the card whose thread the host last drew active; a remount drawing the same card (the margin moving
 // it, the panel's round trip) leaves the active thread as the human last set it (only the human activates)
 const activatedCard = new Map<string, number>();
-function draftsOf(hostId: string): Drafts {
-  let drafts = draftsByHost.get(hostId);
-  if (!drafts) draftsByHost.set(hostId, (drafts = new Drafts(hostId)));
-  return drafts;
+/**
+ * P4-B3 (its Decision Log 37): a move hands the card host to a new editor (the host id the tab state keeps), whose
+ * active thread starts at none, so the card it draws must activate its thread again there; an overlay-only remount
+ * keeps the mark and does not.
+ */
+export function forgetCardActivation(hostId: string): void {
+  activatedCard.delete(hostId);
+}
+
+/**
+ * P4-B3 (its Decision Log 39): a move that activates another view of the document (T5, T8) closes this host's view
+ * rather than carrying it, so the card this host draws, the comment typed in it and the drafts it holds go to the kept
+ * view's host as this view closes, keeping that view's editor: the card is drawn there with its text, its thread stays, and the
+ * closing view has nothing of it to lose. A comment still waiting on its session to start (nothing typed yet) stays
+ * with this host and goes with it.
+ */
+export function handCommentCardOver(artifactId: string, from: string, to: string): void {
+  if (from === to) return;
+  drafts.handTo(from, to); // first: this host following the card away withdraws only what is still its own
+  const entry = commentDraftEntry(artifactId);
+  if (entry?.hostId === from) recordCommentDraft(artifactId, { ...entry, hostId: to });
+  const { open } = useCommentCard.getState();
+  if (open?.hostId === from) handCardTo(open.serial, to);
 }
 
 /** The surface DocumentEditor takes (`comments`), stable while the artifact and the session stay. */
-export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind, draftRule /* P4-B1 */ }: Options): DocumentComments { // P3-F1: context
-  const hostId = `document:${useId()}`;
+export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind, draftRule /* P4-B1 */, hostId: kept /* P4-B3 */ }: Options): DocumentComments { // P3-F1: context
+  const own = `document:${useId()}`;
+  const hostId = kept ?? own;
   const titleRef = useRef(title);
   useLayoutEffect(() => {
     titleRef.current = title;
@@ -173,11 +202,11 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
       const session = appSessionId ?? (context?.kind === 'session' ? context.appSessionId : undefined);
       if (session === undefined) {
         startCommentSession({ hostId, artifactId, threadId: passage.threadId, label: anchor.label, context: context?.kind === 'directory' ? context : { kind: 'none' }, open: (started) => openCommentComposer(anchor, { appSessionId: started, placement, destination: 'main' }) });
-        draftsOf(hostId).opened(passage.threadId);
+        drafts.opened(hostId, passage.threadId);
         return;
       }
       // P3-F1 end
-      draftsOf(hostId).opened(passage.threadId);
+      drafts.opened(hostId, passage.threadId);
       openCommentComposer(anchor, { appSessionId: session /* P3-F1 */, placement });
     },
     [artifactId, appSessionId, context /* P3-F1 */, hostId, artifactKind],
@@ -253,7 +282,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       const mine = open?.hostId === hostId ? open : null;
       const waiting = pendingThreadOf(hostId); // P3-F1: a comment waiting on its session is this host's draft too
       const threadId = threadOf(mine) ?? waiting; // P3-F1: ?? waiting
-      draftsOf(hostId).follow(mine?.phase.kind === 'composing' ? threadOf(mine) : waiting, discard); // P3-F1: threadOf(mine), waiting
+      drafts.follow(hostId, mine?.phase.kind === 'composing' ? threadOf(mine) : waiting, discard); // P3-F1: threadOf(mine), waiting
       // P4-B1: the typed draft goes with its card (closed, replaced, or turned into its thread)
       dropCommentDraft(artifactId, hostId, mine?.phase.kind === 'composing' ? { serial: mine.serial } : undefined);
       if (threadId !== shown) {
@@ -276,7 +305,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         try {
           if (!mountedOverlays.has(hostId)) {
             cancelPendingComment(hostId); // P3-F1: the editor went, and the comment waiting on its session with it
-            draftsOf(hostId).follow(null, discard);
+            drafts.follow(hostId, null, discard);
             dropCommentDraft(artifactId, hostId); // P4-B1
             activatedCard.delete(hostId); // P4-B1
           }
@@ -305,7 +334,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
             doc={doc}
             threadId={threadId}
             onResolve={() => {
-              draftsOf(hostId).keep(threadId); // resolved on purpose: it stays, listed under Resolved
+              drafts.keep(threadId); // resolved on purpose: it stays, listed under Resolved
               resolve(threadId);
               closeCard(card.serial);
               focus();
@@ -318,7 +347,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         const threadId = threadOf(card);
         if (threadId === null) return () => {};
         const release = holdReplica?.();
-        const settle = draftsOf(hostId).sending(threadId, text, { record, withdraw: discard });
+        const settle = drafts.sending(threadId, text, { record, withdraw: discard });
         return (went) => {
           try {
             settle(went);

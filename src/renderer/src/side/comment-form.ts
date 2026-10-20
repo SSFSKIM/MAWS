@@ -4,7 +4,7 @@
 // (P4-B1: ⌘Enter too), Shift+Enter breaks a line, an input method's composition keeps its Enter. While a side thread starts the form is
 // disabled; a refusal stays in the form with Retry and, while Send to main is offered, Send to main instead; a refusal arriving
 // after the presentation went (closed or replaced: `gone`) is a toast, so the comment is never lost unseen.
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { STARTS } from '../composer/submit/submit-state'; // P2-A
@@ -35,14 +35,63 @@ export interface CommentFormInput {
   onSending?: (sending: { text: string; destination: CommentDestination }) => (went: boolean) => void;
   destination?: CommentDestination; // P3-F1: the one the form starts on (CommentContext's), Side thread when absent
   text?: string; // P4-B1: the text the form starts with (a remounted card's kept draft), empty when absent
+  /**
+   * P4-B3 (its Decision Log 37): what the form's send belongs to beyond this mount (a card's serial). A presentation can
+   * remount while its send is on its way (a document moved to another pane or surface keeps its card); the send is then
+   * kept here, so a form mounting under the same key starts sending (disabled: no second send), and the answer reaches
+   * the form mounted when it arrives. Without one, the send is the mount's own, as before.
+   */
+  sendKey?: string;
 }
 
-export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending, destination: initial, text: initialText }: CommentFormInput) { // P3-F1: initial; P4-B1: initialText
+// P4-B3: the sends on their way by `sendKey`, and their answers until a mounted form takes them.
+type Answer = { ok: true; sent: { child?: AppSessionId; text: string } } | { ok: false; destination: CommentDestination; error: string };
+interface Flight {
+  destination: CommentDestination;
+  answer: Answer | null;
+}
+const flights = new Map<string, Flight>();
+const flightListeners = new Set<() => void>();
+const changed = () => {
+  for (const listener of flightListeners) listener();
+};
+const subscribeFlights = (listener: () => void) => {
+  flightListeners.add(listener);
+  return () => void flightListeners.delete(listener);
+};
+/** Whether a send under `key` is on its way (no answer yet). */
+export const sendingUnder = (key: string): boolean => flights.get(key)?.answer === null;
+
+export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending, destination: initial, text: initialText, sendKey /* P4-B3 */ }: CommentFormInput) { // P3-F1: initial; P4-B1: initialText
   const status = useSessions((s) => s.engine.get(parent) ?? null);
   const [text, setText] = useState(initialText ?? ''); // P4-B1: initialText
   const [destination, setDestination] = useState<CommentDestination>(initial ?? 'thread'); // P3-F1: initial
   const [screenshot, setScreenshot] = useState<AnchorScreenshot | null>(anchor.screenshot ?? null);
-  const [phase, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
+  const [local, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
+  // P4-B3: a send kept by key outlives this mount: while it is on its way the form is sending, and its answer is taken
+  // by whichever form is mounted under the key when it arrives
+  const flight = useSyncExternalStore(subscribeFlights, () => (sendKey === undefined ? undefined : flights.get(sendKey)));
+  const phase: CommentFormPhase = flight && flight.answer === null ? { kind: 'sending', destination: flight.destination } : local;
+  const sentRef = useRef(onSent);
+  useLayoutEffect(() => {
+    sentRef.current = onSent;
+  });
+  useEffect(() => {
+    if (sendKey === undefined) return;
+    // the answer, once, by the form mounted when it is there (one that came while none was mounted, at the next mount)
+    const take = () => {
+      const kept = flights.get(sendKey);
+      if (!kept?.answer) return;
+      flights.delete(sendKey);
+      changed();
+      const { answer } = kept;
+      if (answer.ok) sentRef.current(answer.sent);
+      else setPhase({ kind: 'refused', destination: answer.destination, error: answer.error });
+    };
+    const off = subscribeFlights(take);
+    queueMicrotask(take);
+    return off;
+  }, [sendKey]);
   const ready = status?.process === 'ready';
   // P2-A start (2026-10-09; the execution document §5.6): Send to main is offered for every parent it can start (a
   // record with no ready process starts on the Send); a terminal or job holding it, or an archive, says why
@@ -60,6 +109,25 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
     setPhase({ kind: 'sending', destination: to });
     const sent = text.trim();
     const settled = onSending?.({ text: sent, destination: to }); // P3-B
+    // P4-B3: kept by key, the answer goes to the form mounted when it comes (never to this mount's state once it went)
+    const kept = sendKey === undefined ? null : { destination: to, answer: null as Answer | null };
+    if (kept && sendKey !== undefined) {
+      flights.set(sendKey, kept);
+      changed();
+    }
+    const answer = (value: Answer) => {
+      if (!kept || sendKey === undefined || flights.get(sendKey) !== kept) return false;
+      kept.answer = value;
+      flights.set(sendKey, { ...kept }); // a new object: the forms' snapshots see the change
+      changed();
+      return true;
+    };
+    const dropKept = () => {
+      if (kept && sendKey !== undefined && flights.get(sendKey) === kept) {
+        flights.delete(sendKey);
+        changed();
+      }
+    };
     // Send to main's acquisition of a parent that is not ready (P2-A, A's §5.6) runs here, before sendComment's
     // `side.sendToMain`, so the sheet and the card inherit it alike.
     // P2-A start (2026-10-09; the execution document §5.6): Send to main on a parent with no ready process starts it
@@ -75,8 +143,10 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
       }
       if (refusal !== null) {
         settled?.(false); // P3-B
-        if (gone()) toast({ level: 'warning', text: COPY.refusedAfterClose(refusal), actions: [], dismissible: true });
-        else setPhase({ kind: 'refused', destination: to, error: refusal });
+        if (gone()) {
+          dropKept(); // P4-B3
+          toast({ level: 'warning', text: COPY.refusedAfterClose(refusal), actions: [], dismissible: true });
+        } else if (!answer({ ok: false, destination: to, error: refusal })) setPhase({ kind: 'refused', destination: to, error: refusal });
         return;
       }
     }
@@ -84,10 +154,13 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
     const result = await sendComment(to, { parent, anchor, text: sent, screenshot }, reveal ? { reveal } : {});
     settled?.(result.ok); // P3-B
     if (gone()) {
+      dropKept(); // P4-B3
       if (!result.ok) toast({ level: 'warning', text: COPY.refusedAfterClose(result.error), actions: [], dismissible: true });
       return;
     }
-    if (result.ok) onSent({ ...(result.child && { child: result.child }), text: sent });
+    const sentAs = { ...(result.ok && result.child && { child: result.child }), text: sent };
+    if (answer(result.ok ? { ok: true, sent: sentAs } : { ok: false, destination: to, error: result.error })) return; // P4-B3
+    if (result.ok) onSent(sentAs);
     else setPhase({ kind: 'refused', destination: to, error: result.error });
   };
 

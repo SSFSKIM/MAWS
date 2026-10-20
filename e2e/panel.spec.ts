@@ -14,6 +14,9 @@ import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_DRAG } from './support/panel-support';
+import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
+import { closeScene, launchScene, scratchProject, show, type Scene } from './support/maws-tools'; // P4-B3: the split's float
+import { seedTranscript, transcript } from './support/side-replay'; // P4-B3
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const SCENARIO = 'stub:test/fixtures/panel/harness-sessions.json';
@@ -1116,26 +1119,27 @@ test.describe('the floating session card (P3-G)', () => {
         await expect(pill).toHaveCount(0);
       });
 
-      await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s left and bottom edges', async () => {
+      await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s right and bottom edges', async () => {
         await panel.getByRole('button', { name: 'Add a tool' }).click();
         await page.getByRole('menuitem', { name: 'Session info' }).click();
         await expect(panel.locator(`[data-session-info="${USAGE_ID}"]`)).toBeVisible();
         await expect(card).toBeVisible();
+        // P4-B3 (parent Decision Log 15.7): the card sits at the panel body's bottom right (it sat at the bottom left)
         const near = async () => {
           const [region, box] = [(await panel.boundingBox())!, (await card.boundingBox())!];
-          return { left: Math.round(box.x - region.x), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
+          return { right: Math.round(region.x + region.width - (box.x + box.width)), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
         };
-        // The region's 1 px left border sits outside the body the card is placed in
-        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        // The region's 1 px border is on its left, outside the card's side
+        expect(await near()).toEqual({ right: 16, bottom: 16 });
         await panel.getByRole('button', { name: 'Add a tool' }).click();
         await page.getByRole('menuitem', { name: 'Artifacts' }).click(); // P3-L M6b: Deliverables' place
         await expect(panel.locator('[data-artifacts-list]')).toBeVisible();
-        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        expect(await near()).toEqual({ right: 16, bottom: 16 });
         // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
         // top, so the strip above it and its controls stay clear
-        const handle = card.locator('[data-card-resize="top-right"]');
+        const handle = card.locator('[data-card-resize="top-left"]'); // P4-B3: the corner mirrored with the card
         const from = (await handle.boundingBox())!;
-        await dragBy(page, handle, 2000, 1 - from.y);
+        await dragBy(page, handle, -2000, 1 - from.y);
         const [strip, body, box] = [
           (await panel.getByRole('tablist', { name: 'Panel tools' }).boundingBox())!,
           (await panel.locator('#panel-host-body').boundingBox())!,
@@ -1144,7 +1148,7 @@ test.describe('the floating session card (P3-G)', () => {
         expect(Math.round(box.y - body.y), 'the card’s top 16 px under the tool body’s').toBe(16);
         expect(box.y, 'the card below the strip').toBeGreaterThan(strip.y + strip.height);
         await panel.getByRole('button', { name: 'Add a tool' }).click({ trial: true }); // nothing covers it
-        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        expect(await near()).toEqual({ right: 16, bottom: 16 });
       });
 
       await test.step('acceptance 4: Dock restores the column at its width, and the main pane’s composer has the keyboard', async () => {
@@ -1172,8 +1176,8 @@ test.describe('the floating session card (P3-G)', () => {
       await (await sidebarRow(page, SIDEBAR_DRAG)).click(); // its permission is pending in nine-sessions.json
       await menu(app, 'panel.float');
       await expect(request.getByTestId('request-input')).toHaveText('git log --oneline');
-      const handle = card.locator('[data-card-resize="top-right"]');
-      await dragBy(page, handle, -2000, 2000);
+      const handle = card.locator('[data-card-resize="top-left"]'); // P4-B3: the corner mirrored with the card
+      await dragBy(page, handle, 2000, 2000);
       const frame = (await card.boundingBox())!;
       expect([Math.round(frame.width), Math.round(frame.height)], 'the card at its minimum').toEqual([360, 240]);
 
@@ -1200,6 +1204,217 @@ test.describe('the floating session card (P3-G)', () => {
       expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
       await expect(card.getByRole('heading', { name: SIDEBAR_DRAG })).toBeInViewport();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
+});
+
+// ---- P4-B3: the main split's float (docs/doperpowers/plans/2026-10-20-p4-b3-layout.md, M6; the P4 composite's §2 item 5) -
+
+// A session read from the engine's store (index mode, a scratch config home: maws-tools' scene), its transcript forty
+// exchanges long, several screens in a pane, so the round trip's scroll rule has a place to keep.
+const FLOAT_TITLE = 'P4-B3 float: a chat beside a wide tab';
+async function withLongSession(body: (s: Scene, id: AppSessionId) => Promise<void>): Promise<void> {
+  const scratch = scratchProject({ titles: [FLOAT_TITLE], label: 'p4b3-float' });
+  try {
+    const engineId = scratch.engineIds[0]!;
+    const t = transcript({ sessionId: engineId, cwd: scratch.repo, start: Date.UTC(2026, 9, 20, 9, 0, 0) });
+    const uuid = (k: number, n: number) => `b3f10000-0000-4000-8000-${String(k * 10 + n).padStart(12, '0')}`;
+    t.user(uuid(0, 0), FLOAT_TITLE);
+    for (let k = 1; k <= 40; k++) {
+      t.text(uuid(k, 1), `Answer ${k}. ${'A paragraph long enough to wrap over a few lines in the narrower card. '.repeat(3)}`);
+      t.turnEnd(uuid(k, 2));
+      t.user(uuid(k, 3), `Question ${k + 1}`);
+    }
+    t.text(uuid(41, 1), 'The last answer.');
+    t.turnEnd(uuid(41, 2));
+    seedTranscript(scratch.config, scratch.repo, engineId, t.records);
+    const s = await launchScene(scratch);
+    try {
+      await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())!.setContentSize(1440, 860));
+      await s.page.waitForFunction(() => window.innerWidth === 1440 && window.innerHeight === 860);
+      await body(s, s.ids[0]!);
+    } catch (error) {
+      await s.maws.cleanup();
+      throw error;
+    }
+    await closeScene(s);
+  } finally {
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
+}
+
+// The id of the first transcript row in view at the scroller's top, and whether the scroller rests at its end.
+const firstRowInView = (scroller: Locator) =>
+  scroller.evaluate((el) => {
+    const top = el.getBoundingClientRect().top;
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-row-id]'))
+      .map((row) => ({ id: row.dataset.rowId!, box: row.getBoundingClientRect() }))
+      .filter((row) => row.box.bottom > top + 1)
+      .sort((a, b) => a.box.top - b.box.top);
+    return rows[0]?.id ?? null;
+  });
+const atEnd = (scroller: Locator) => scroller.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 2);
+
+// The most composers of `id` the page held at once since this call, sampled after every DOM change.
+async function watchComposers(page: Page, id: string): Promise<() => Promise<number>> {
+  await page.evaluate((id) => {
+    const w = window as unknown as { __b3Composers: number };
+    const count = () => (w.__b3Composers = Math.max(w.__b3Composers, document.querySelectorAll(`section[data-composer="${id}"]`).length));
+    w.__b3Composers = 0;
+    count();
+    new MutationObserver(count).observe(document.body, { childList: true, subtree: true });
+  }, id);
+  return () => page.evaluate(() => (window as unknown as { __b3Composers: number }).__b3Composers);
+}
+
+test.describe('the main split’s float (P4-B3)', () => {
+  test('the divider holds a session at 320, arms past 160, disarms, floats on release; the card at the bottom right; the round trip; Close, the pill, ⌥⌘B; the panel card at the bottom right', async () => {
+    test.setTimeout(120_000);
+    await withLongSession(async (s, id) => {
+      const { page } = s;
+      const app = s.maws.app;
+      const main = page.locator('[data-region="main"]');
+      const area = page.locator('[data-main-area]');
+      const divider = main.getByRole('separator', { name: 'Resize panes' });
+      const card = main.getByRole('region', { name: 'Session card' });
+      const pill = main.getByRole('button', { name: 'Show session card' });
+      const composers = page.locator(`section[data-composer="${id}"]`);
+      const left = page.locator('[data-pane="0"]');
+      const right = page.locator('[data-pane="1"]');
+      // the left column's width, as the main area's grid lays it out (a collapsed pane's body keeps its width, hidden)
+      const leftWidth = () => area.evaluate((el) => Math.round(parseFloat(getComputedStyle(el).gridTemplateColumns.split(' ')[0]!)));
+      const valueNow = async () => Number(await divider.getAttribute('aria-valuenow'));
+      const corner = async (of: Locator, within: Locator) => {
+        const [region, box] = [(await within.boundingBox())!, (await of.boundingBox())!];
+        return { right: Math.round(region.x + region.width - (box.x + box.width)), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
+      };
+
+      // The session in the left pane; Diagnostics (a tab of no session, so it only ever clamps) moved into the right one
+      await show(s, id);
+      await menu(app, 'diagnostics.open');
+      await menu(app, 'pane.split');
+      await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: /^Diagnostics/ })).toBeVisible();
+      await expect(left.locator(`section[data-composer="${id}"]`)).toBeVisible();
+      const paneScroller = left.locator('[data-transcript-scroller]');
+      await expect(paneScroller.locator('[data-row-id]').first()).toBeVisible();
+
+      // The draft, and a reader several screens up, in the pane
+      const DRAFT = 'kept across the round trip';
+      await left.getByRole('textbox', { name: 'Message' }).click();
+      await page.keyboard.type(DRAFT);
+      const scrollerBox = (await paneScroller.boundingBox())!;
+      await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
+      await page.mouse.wheel(0, -2500);
+      await expect(left.getByRole('button', { name: 'Jump to latest' })).toBeVisible();
+      await expect.poll(() => atEnd(paneScroller)).toBe(false);
+      const maxComposers = await watchComposers(page, id);
+
+      const region = (await area.boundingBox())!;
+      const r0 = await valueNow();
+      expect(region.width, 'the main area is wide enough for both floors and a drag to 400').toBeGreaterThanOrEqual(720);
+
+      // The reader's row as the pane is held at its floor is the place a float carries: the narrowing from r0 re-wraps
+      // the rows, and the transcript's own anchoring may move the row at the top by one as it does (any resize, before P4).
+      let heldRow: string | null = null;
+      await test.step('the drag: 400 follows the pointer, 200 holds at 320, 159 arms, 161 disarms at 320 as it was, release at 150 floats', async () => {
+        const box = (await divider.boundingBox())!;
+        const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        // the pointer where the left pane's pointer-implied width is `implied` px (its width at pointer-down plus the travel)
+        const to = (implied: number) => page.mouse.move(from.x + implied - r0, from.y, { steps: 4 });
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        await to(400);
+        await expect.poll(valueNow).toBe(400);
+        expect(await leftWidth()).toBe(400);
+        await to(200);
+        await expect.poll(valueNow, 'held at S_MIN_PX').toBe(320);
+        expect(await leftWidth()).toBe(320);
+        await expect.poll(() => paneScroller.evaluate((el) => el.clientWidth)).toBeLessThanOrEqual(320);
+        heldRow = await firstRowInView(paneScroller);
+        expect(heldRow, 'a row in view').not.toBeNull();
+        await to(159);
+        await expect.poll(leftWidth, 'armed: the session’s column collapsed live').toBe(0);
+        expect(Math.round((await right.locator(':scope > [role="tabpanel"]').boundingBox())!.width), 'the other pane spans the area').toBeGreaterThanOrEqual(Math.round(region.width) - 1);
+        await expect(composers, 'S stays mounted while armed').toHaveCount(1);
+        await expect(card, 'no card before release').toHaveCount(0);
+        await to(161);
+        await expect.poll(leftWidth, 'disarmed: back at the floor').toBe(320);
+        expect(await firstRowInView(paneScroller), 'a disarm is lossless: the same row at the top').toBe(heldRow);
+        await to(150);
+        await expect.poll(leftWidth).toBe(0);
+        await page.mouse.up();
+        await expect(card).toBeVisible();
+        await expect(divider, 'no divider while floating').toHaveCount(0);
+      });
+
+      const cardScroller = card.locator('[data-transcript-scroller]');
+      await test.step('the card: at the main area’s bottom right, the session’s one composer with the keyboard, the draft and the reader’s row', async () => {
+        expect(await corner(card, area)).toEqual({ right: 16, bottom: 16 });
+        await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+        await expect(card.getByRole('textbox', { name: 'Message' })).toHaveText(DRAFT);
+        await expect(composers).toHaveCount(1);
+        await expect.poll(() => firstRowInView(cardScroller), 'the same row at the top').toBe(heldRow);
+        await expect(card.getByRole('button', { name: 'Jump to latest' })).toBeVisible();
+      });
+
+      await test.step('Dock: the split at r0 to the pixel; the text typed in the card and the card’s row in the pane', async () => {
+        await page.keyboard.type(' and in the card');
+        const box = (await cardScroller.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.wheel(0, -600);
+        let cardRow: string | null = null;
+        await expect.poll(async () => (cardRow = await firstRowInView(cardScroller))).not.toBe(heldRow);
+        await card.getByRole('button', { name: 'Dock session' }).click();
+        await expect(card).toHaveCount(0);
+        await expect.poll(valueNow, 'the ratio at pointer-down').toBe(r0);
+        expect(await leftWidth()).toBe(r0);
+        await expect(left.getByRole('textbox', { name: 'Message' })).toBeFocused();
+        await expect(left.getByRole('textbox', { name: 'Message' })).toHaveText(`${DRAFT} and in the card`);
+        await expect.poll(() => firstRowInView(paneScroller), 'the card’s row').toBe(cardRow);
+        await expect(composers).toHaveCount(1);
+      });
+
+      await test.step('a reader at the end floats and stays at the end', async () => {
+        await left.getByRole('button', { name: 'Jump to latest' }).click();
+        await expect.poll(() => atEnd(paneScroller)).toBe(true);
+        const box = (await divider.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(region.x + 100, box.y + box.height / 2, { steps: 6 });
+        await page.mouse.up();
+        await expect(card).toBeVisible();
+        await expect.poll(() => atEnd(cardScroller)).toBe(true);
+        await expect(card.getByRole('button', { name: 'Jump to latest' })).toHaveCount(0);
+      });
+
+      await test.step('Close leaves the pill at the bottom right with no composer behind it; the pill reopens the card', async () => {
+        await card.getByRole('button', { name: 'Close session card' }).click();
+        await expect(card).toHaveCount(0);
+        await expect(pill).toBeVisible();
+        expect(await corner(pill, area)).toEqual({ right: 16, bottom: 16 });
+        await expect(composers, 'no composer behind the pill').toHaveCount(0);
+        await pill.click();
+        await expect(card).toBeVisible();
+        await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+      });
+
+      await test.step('⌥⌘B docks the split card first; a second press floats the panel, its card at the panel’s bottom right', async () => {
+        await menu(app, 'panel.float');
+        await expect(card).toHaveCount(0);
+        await expect.poll(valueNow).toBe(r0);
+        await expect(left.locator(`section[data-composer="${id}"]`)).toBeVisible();
+        await expect.poll(() => atEnd(paneScroller), 'docked at the end').toBe(true);
+        const panelCard = s.panel.getByRole('region', { name: 'Session card' });
+        await expect(panelCard).toHaveCount(0);
+        await menu(app, 'panel.float');
+        await expect(panelCard).toBeVisible();
+        await expect(panelCard.getByRole('textbox', { name: 'Message' })).toHaveText(`${DRAFT} and in the card`);
+        expect(await corner(panelCard, s.panel)).toEqual({ right: 16, bottom: 16 });
+        await menu(app, 'panel.float');
+        await expect(panelCard).toHaveCount(0);
+        await expect(composers).toHaveCount(1);
+      });
+      expect(await maxComposers(), 'never two composers of the session at once').toBe(1);
     });
   });
 });

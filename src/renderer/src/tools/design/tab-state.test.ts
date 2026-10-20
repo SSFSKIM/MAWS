@@ -9,6 +9,8 @@ import { writeBoardEntry, writeCanvasKeys } from '@artifacts/design/model';
 import { importSlide } from '@artifacts/slides/model';
 import { loadSlide } from '@artifacts/slides/parse';
 import { openDeckTabs } from '../presentation/tab-state';
+import { adoptStagedArtifactEditorState, artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors, stageArtifactEditorState } from '../../artifacts/registry'; // P4-B3 M5
+import { registerDesignEditor } from './index'; // P4-B3 M5
 import { DesignTabState, openDesignTabs } from './tab-state';
 
 function designDoc() {
@@ -106,5 +108,34 @@ describe('a design tab’s state', () => {
     state.fitAll();
     expect(state.view.snapshot().viewport!.zoom).toBeCloseTo((800 - 96) / 9000, 6); // the live design again: every board
     state.dispose();
+  });
+});
+
+// P4-B3 M5 (X38's carry table): a design moved between the panel and a main tab carries the workbench's view through the
+// hold (the registry's hand-off, M4): the viewport and the selected board, with the state's surface following it.
+describe('a design moved between a main tab and the panel', () => {
+  it('comes across with its viewport and selected board, its surface the target’s', async () => {
+    const handle = handleOf();
+    const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
+    const off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard: async () => true }));
+    const main = { surface: 'main', tabId: 'artifact:design-1' } as const;
+    const panel = { surface: 'panel', tabId: 'p1' } as const;
+    const { state } = holdArtifactEditorState<DesignTabState>(main, 'design-1', 'design', artifactEditorFor('design') as never);
+    await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
+    state.view.setRoom({ w: 900, h: 700 });
+    state.view.setViewport({ zoom: 0.5, x: 10, y: 20 });
+    state.view.selectFrame('poster');
+
+    stageArtifactEditorState(main);
+    releaseArtifactEditorState(main);
+    adoptStagedArtifactEditorState('design-1', panel);
+    expect(state.surface).toBe('panel');
+    expect(state.view.snapshot()).toMatchObject({ viewport: { zoom: 0.5, x: 10, y: 20 }, frame: 'poster' });
+    expect(openDesignTabs()).toContain(state);
+    expect(handle.closed).toBe(false);
+
+    releaseArtifactEditorState(panel);
+    off();
+    resetArtifactEditors();
   });
 });

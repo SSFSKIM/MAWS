@@ -15,7 +15,7 @@ import { registerAction } from '../keymap/actions-runtime';
 import { shownSession } from '../panel/host';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab, currentSet } from '../stores/layout-model';
+import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown } from '../side/store';
@@ -58,6 +58,7 @@ function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined): 
 // docked card (C7); a toast would only cover the panel's action bar. A file tab of the session does not count (the
 // docked card is in the session's own pane), and neither does a pane under a maximized panel (visibility.ts's rule). P3-G:
 // nor one under a floating panel, where the open floating card is the session's pane (its docked request included).
+// P4-B3: nor a pane floating in the split's card, which counts while it is open, as the panel's card does.
 // W-C review m1: an ask's surface is the panel's Question sheet, which E1 opens whenever the session is the shown one
 // (a file tab of it counting), so for a `maws` ask the open panel showing that session is on screen too. Scale-review C
 // scalpel-3#1: only a `maws` ask; the engine's AskUserQuestion is a `question` item as well, but its card docks in the
@@ -66,7 +67,9 @@ function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined): 
 function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undefined): boolean {
   const { main, regions } = useLayout.getState();
   const panelOpen = !regions.panel.collapsed;
-  const inFront = currentSet(main).panes.some((pane) => pane.activeTabId === tabId({ kind: 'session', appSessionId }));
+  const set = currentSet(main);
+  // P4-B3: a pane that yielded into the split's card is not in front (its tab stays active); the open card is (below)
+  const inFront = set.panes.some((pane, i) => i !== floatingPane(set) && pane.activeTabId === tabId({ kind: 'session', appSessionId }));
   if (inFront && !panelInMain(regions)) return true;
   if (openCardSession({ main, regions }) === appSessionId) return true; // P3-G
   const shown = shownSession(main);

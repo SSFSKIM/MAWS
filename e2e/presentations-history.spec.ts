@@ -352,7 +352,7 @@ test('a live editor and a version’s preview of one deck in one window each dra
   const monoRef = await upload('lab-mono.woff2', 'KaTeX_Typewriter-Regular.woff2');
   await seam(page, 'seed', id, faceDeck(serifRef));
 
-  // the deck in the panel's Artifacts tool beside a chat, pinned, then moved to a main tab (Open in tab, P3-F wave S,
+  // the deck in the panel's Artifacts tool beside a chat, pinned, then moved to a main tab (Move to tab, P3-F wave S,
   // F16) and opened from the pinned tab's list again: two replicas (the parent's Decision Log 8)
   const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
   await openProject(page, project.name);
@@ -365,7 +365,7 @@ test('a live editor and a version’s preview of one deck in one window each dra
   const inPanel = panel.locator(`[data-deck-artifact="${id}"]`);
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await panel.getByRole('button', { name: /^Pin / }).first().click();
-  await panel.getByRole('button', { name: 'Open in tab' }).click();
+  await panel.getByRole('button', { name: 'Move to tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
   await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await panel.getByRole('tab', { name: 'Artifacts' }).click();

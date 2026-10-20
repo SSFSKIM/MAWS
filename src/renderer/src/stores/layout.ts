@@ -11,6 +11,8 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import {
   LAYOUT_DEFAULTS,
   NO_PROJECT,
+  PanelActiveNoSessionSchema,
+  PanelParamsSchema,
   PanelPinnedSchema,
   PanelSessionStateSchema,
   StoredMainSchema,
@@ -35,11 +37,17 @@ export interface LayoutState {
   main: LayoutMain;
   panelPinned: PanelTabRef[];
   panelBySession: Map<AppSessionId, PanelSessionState>;
-  // The selected panel tab while no session is in view, when only the pins show. Transient: a session's own selection
-  // persists in `panel.<appSessionId>`, but with no session there is no key to hold it. Always a pin's id or null.
+  // The selected panel tab while no session is in view, when only the pins show; always a pin's id or null. A session's
+  // own selection persists in `panel.<appSessionId>`; this one in `panelTools.activeNoSession` (P4-B3: it was transient,
+  // so a pinned tab selected with no session came back as the Session overview at a relaunch).
   panelActiveNoSession: string | null;
+  // P4-B3 (its Decision Log 22; X5 as amended): what each panel tool persisted of a tab, by panel tab id
+  // (`panelTools.params`), handed back as the restored instance's `init.params`.
+  panelParams: Record<string, unknown>;
   hydrated: boolean;
-  dragging: { tabId: string; fromPane: Pane } | null;
+  // The tab being dragged (P4-B3, X38; its Decision Log 16): a main tab, or a panel tab showing an artifact's record.
+  // Transient; the drop targets decide acceptance from it (`shell/transfer.ts`).
+  dragging: { source: 'main'; tabId: string; fromPane: Pane } | { source: 'panel'; tabId: string; toolId: string; artifactId: string } | null;
   // W5: whether the floating Overview is open (transient: the app opens to the last active tab, §5.2 as amended); its
   // rect persists in `regions.overview`.
   overviewOpen: boolean;
@@ -61,7 +69,7 @@ export interface LayoutState {
   setCurrentProject(projectId: ProjectId | null): void;
   // W12: tabs whose session's project changed move to its set (the shell calls it when records or intents change).
   refileTabs(): void;
-  closeTab(id: string): void;
+  closeTab(id: string, opts?: model.CloseOptions): void; // P4-B3: `remember: false` for a move (no ⌘⇧T entry)
   retargetTab(id: string, target: TabTarget): void; // cua #90: `model.retargetTab`
   reopenClosed(): void;
   moveTab(id: string, toPane: Pane, index: number): void;
@@ -73,6 +81,9 @@ export interface LayoutState {
   splitWithActive(): void;
   focusPane(i: Pane): void;
   setSplitRatio(r: number): void;
+  // P4-B3 (X37): the split's float, `model.floatSplit` / `model.dockSplit` on the current set.
+  floatSplit(sessionTabId: string): void;
+  dockSplit(): void;
   dropSession(appSessionId: AppSessionId): void; // session.removed
   // A patch, or an updater for a change that depends on the sidebar it lands on (an early one is replayed over the
   // hydrated value, not the default it was made against).
@@ -83,8 +94,9 @@ export interface LayoutState {
   // P3-G (§D1.2): brings the main area back, a maximized or floating panel docking (the Overview opening over main,
   // attention navigation showing a session's pane).
   revealMain(): void;
-  // P3-G (§D1.5): the floating card's size over a panel tab (its id, or 'summary'); entries of tabs in no panel list are
-  // dropped and at most FLOATING_CARD_SIZES_MAX kept, the oldest first out.
+  // P3-G (§D1.5): the floating card's size over a panel tab (its id, or 'summary'), or (P4-B3) the split card's over a
+  // main tab (`mainCardKey`); entries of tabs no longer open in a panel list or in main are dropped and at most
+  // FLOATING_CARD_SIZES_MAX kept, the oldest first out.
   setFloatingCardSize(key: string, size: FloatingCardSize): void;
   setOverviewOpen(open: boolean): void;
   setOverviewRect(rect: LayoutRegions['overview']): void;
@@ -100,6 +112,9 @@ export interface LayoutState {
   // as the no-session selection does (`pinSelection`).
   panelTabsOf(appSessionId: AppSessionId): PanelTabRef[];
   updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activeTabId?: string }): void;
+  // P4-B3 (Decision Log 22): a tool's persistable params for one of its tabs, null clearing them. Every write keeps only
+  // the params of panel tabs some list holds, and the tab written (whose instance exists before its ref is written).
+  setPanelParams(tabId: string, params: unknown): void;
   setDragging(dragging: LayoutState['dragging']): void;
 }
 
@@ -152,9 +167,28 @@ export function panelAfter(panel: PanelRegionState, patch: Partial<PanelRegionSt
 export const FLOATING_CARD_SIZES_MAX = 64;
 // The panel tab key of the resting summary (no tab selected), in `regions.floatingCard`.
 export const SUMMARY_CARD_KEY = 'summary';
+// P4-B3 (its Decision Log 10): the key of the split card's size over a main tab (the pane beside the card), pruned with
+// the open main tabs as a panel tab's key is with the panel lists.
+export const mainCardKey = (tabId: string): string => `main:${tabId}`;
 
 const samePins = (a: PanelTabRef[], b: PanelTabRef[]) =>
   a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
+
+// Two JSON values alike, whatever order their keys were written in (a key holding undefined counts as absent, as JSON
+// drops it): what the reader made of a stored value against the value itself, and a tool's params against those held.
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) return a.length === (b as unknown[]).length && a.every((v, i) => sameJson(v, (b as unknown[])[i]));
+  const keys = (o: object) => Object.entries(o).filter(([, v]) => v !== undefined);
+  const left = keys(a);
+  const right = new Map(keys(b));
+  return left.length === right.size && left.every(([k, v]) => right.has(k) && sameJson(v, right.get(k)));
+}
+
+// The panel tab ids some list holds: the pins and every session's own tabs.
+const livePanelTabIds = (pinned: PanelTabRef[], bySession: Map<AppSessionId, PanelSessionState>): Set<string> =>
+  new Set([...pinned.map((t) => t.id), ...[...bySession.values()].flatMap((s) => s.tabs.map((t) => t.id))]);
 
 // A panel selection once its tabs go from `before` to `after` (the pins, for the no-session selection; a session's
 // effective tabs, for `updatePanelTabs`): the requested id if it is still there, else the current one if it is, else
@@ -211,6 +245,7 @@ export function createLayoutStore() {
       panelPinned: LAYOUT_DEFAULTS.panelPinned,
       panelBySession: new Map(),
       panelActiveNoSession: null,
+      panelParams: {},
       hydrated: false,
       dragging: null,
       overviewOpen: false,
@@ -219,6 +254,7 @@ export function createLayoutStore() {
       async hydrate(client, known, opts = {}) {
         if (opts.projectOf) set({ projectOf: opts.projectOf });
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
+        const readAs = new Map<LayoutKey, unknown>(); // each key read as a valid value, as layout.json holds it
         const read = async <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => {
           const result = await client.invoke('layout.get', { key });
           if (!result.ok) {
@@ -231,19 +267,26 @@ export function createLayoutStore() {
           }
           const parsed = schema.safeParse(result.value.value);
           if (!parsed.success) console.warn(`[layout] ${key} is not a valid value; using the default`);
+          else readAs.set(key, result.value.value);
           return parsed.success ? parsed.data : fallback;
         };
         const listed = await client.invoke('layout.list', undefined);
+        // P4-B3's keys are read only when layout.json holds them (as a session's panel key is), so a layout without them
+        // costs no read.
+        const held = new Set<string>(listed.ok ? listed.value.keys : []);
+        const readHeld = <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => (held.has(key) ? read(key, schema, fallback) : Promise.resolve(fallback));
         const panelIds = listed.ok
           ? listed.value.keys.flatMap((key) => {
               const match = PANEL_KEY.exec(key);
               return match && key !== 'panel.pinned' ? [match[1] as AppSessionId] : [];
             })
           : [];
-        const [persistedRegions, persistedMain, panelPinned, ...panels] = await Promise.all([
+        const [persistedRegions, persistedMain, panelPinned, storedParams, storedNoSession, ...panels] = await Promise.all([
           read('regions', StoredRegionsSchema, LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
           read('main.tabs', StoredMainSchema, LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped; W12: version 1 is filed by project
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
+          readHeld('panelTools.params', PanelParamsSchema, { version: 1, params: {} }),
+          readHeld('panelTools.activeNoSession', PanelActiveNoSessionSchema, { version: 1, activeTabId: null }),
           ...panelIds.map((id) => read(`panel.${id}`, PanelSessionStateSchema.nullable(), null)),
         ]);
         opts.settle?.();
@@ -257,14 +300,22 @@ export function createLayoutStore() {
         const stored = persistedMain.version === 1 ? model.fromV1(persistedMain, setOfTab) : persistedMain;
         const hydratedMain = replayed.reduce((m, change) => change(m), model.refile(model.repairMain(stored, known), setOfTab));
         const regions = earlyRegions.splice(0).reduce((r, change) => change(r), persistedRegions);
-        set({ regions, main: hydratedMain, ...pins(panelPinned), panelBySession, hydrated: true });
+        // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
+        // no-session selection is read back if it still names a pin.
+        const live = livePanelTabIds(panelPinned, panelBySession);
+        const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
+        set({ regions, main: hydratedMain, ...pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId), panelBySession, panelParams, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
         // and persistence takes the hydrated state as its baseline, so they are written here too. Everything after this
         // is written only when it changes. A version-1 `main.tabs` is written back filed by project (W12), since its
         // filing reads records that may differ at the next launch.
+        // P4-B3 (its Decision Log 23, tracker row 126): a `main.tabs` the reader rewrote (a tab of an unknown or retired kind
+        // dropped, a deliverable tab converted) is written back too, so its warning is said once and a later build's kind
+        // read after a downgrade is gone from layout.json for good.
         const unsaved = new Set(absent);
-        if (persistedMain.version === 1 || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
+        const rewritten = readAs.has('main.tabs') && !sameJson(readAs.get('main.tabs'), persistedMain);
+        if (persistedMain.version === 1 || rewritten || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
         if (regions !== persistedRegions) unsaved.add('regions');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
         for (const key of unsaved) {
@@ -331,10 +382,10 @@ export function createLayoutStore() {
         const next = model.refile(get().main, setOfTab);
         if (next !== get().main) set({ main: next });
       },
-      closeTab(id) {
+      closeTab(id, opts = {}) {
         const found = model.locateTab(get().main, id);
-        if (found) closedAt.set(id, found.index);
-        main((m) => model.closeTab(m, id));
+        if (found && opts.remember !== false) closedAt.set(id, found.index);
+        main((m) => model.closeTab(m, id, opts));
       },
       retargetTab: (id, target) => main((m) => model.retargetTab(m, id, target)), // cua #90
       reopenClosed() {
@@ -356,6 +407,8 @@ export function createLayoutStore() {
       splitWithActive: () => main(model.splitWithActive),
       focusPane: (i) => main((m) => model.focusPane(m, i)),
       setSplitRatio: (r) => main((m) => model.setSplitRatio(m, r)),
+      floatSplit: (sessionTabId) => main((m) => model.floatSplit(m, sessionTabId)),
+      dockSplit: () => main(model.dockSplit),
       dropSession(appSessionId) {
         main((m) => model.dropSession(m, appSessionId));
         if (get().panelBySession.has(appSessionId)) {
@@ -371,7 +424,7 @@ export function createLayoutStore() {
       setFloatingCardSize(key, size) {
         regions((r) => {
           const state = get();
-          const live = new Set([SUMMARY_CARD_KEY, ...state.panelPinned.map((t) => t.id), ...[...state.panelBySession.values()].flatMap((s) => s.tabs.map((t) => t.id))]);
+          const live = new Set([SUMMARY_CARD_KEY, ...livePanelTabIds(state.panelPinned, state.panelBySession), ...model.allTabs(state.main).map((t) => mainCardKey(t.id))]); // P4-B3: main keys
           const kept = Object.entries(r.floatingCard).filter(([k]) => k !== key && live.has(k));
           return { ...r, floatingCard: Object.fromEntries([...kept, [key, size]].slice(-FLOATING_CARD_SIZES_MAX)) };
         });
@@ -418,6 +471,13 @@ export function createLayoutStore() {
         const current = get().panelBySession.get(appSessionId)?.activeTabId ?? null;
         get().setPanelTabs(appSessionId, { tabs: after, activeTabId: pinSelection(before, after, current, opts?.activeTabId ?? current) });
       },
+      setPanelParams(tabId, params) {
+        const held = get().panelParams;
+        if (params === null ? !(tabId in held) : sameJson(held[tabId], params)) return;
+        const live = livePanelTabIds(get().panelPinned, get().panelBySession);
+        const kept = Object.entries(held).filter(([id]) => id !== tabId && live.has(id));
+        set({ panelParams: Object.fromEntries(params === null ? kept : [...kept, [tabId, params]]) });
+      },
       setDragging: (dragging) => set({ dragging }),
     };
   });
@@ -429,15 +489,25 @@ export const useLayout = createLayoutStore();
 
 export const LAYOUT_WRITE_DELAY_MS = 250;
 
-// Each persisted key and the state slice it holds; a slice is replaced (never mutated) when it changes.
+// Each persisted key and the state slice it holds; a slice is replaced (never mutated) when it changes, and is written
+// as `storedValue` makes it.
 function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
   const keys = new Map<LayoutKey, unknown>([
     ['regions', state.regions],
     ['main.tabs', state.main],
     ['panel.pinned', state.panelPinned],
+    ['panelTools.params', state.panelParams], // P4-B3
+    ['panelTools.activeNoSession', state.panelActiveNoSession], // P4-B3
   ]);
   for (const [id, panel] of state.panelBySession) keys.set(`panel.${id}`, panel);
   return keys;
+}
+
+// The value a key's slice is written as: P4-B3's two keys wrap theirs in a versioned value, every other key is its slice.
+function storedValue(key: LayoutKey, slice: unknown): unknown {
+  if (key === 'panelTools.params') return { version: 1, params: slice };
+  if (key === 'panelTools.activeNoSession') return { version: 1, activeTabId: slice };
+  return slice;
 }
 
 // Writes each changed key through `layout.set`, 250 ms after that key's last change, and every pending key at once on
@@ -447,8 +517,8 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
   const pending = new Map<LayoutKey, { timer: ReturnType<typeof setTimeout>; value: unknown }>();
   let written: Map<LayoutKey, unknown> | null = store.getState().hydrated ? persistedKeys(store.getState()) : null;
 
-  const write = (key: LayoutKey, value: unknown) => {
-    void client.invoke('layout.set', { key, value }).then((result) => {
+  const write = (key: LayoutKey, slice: unknown) => {
+    void client.invoke('layout.set', { key, value: storedValue(key, slice) }).then((result) => {
       if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
     });
   };

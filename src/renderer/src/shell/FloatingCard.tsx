@@ -3,10 +3,16 @@
 // header: the shown session's whole pane (`SessionPane`: the report bar, the transcript, the docked request, the tab
 // notes, the composer) under a header with the session's title, Dock and Close; or, closed, its pill (`FloatingPill.tsx`).
 // Never `role="dialog"` and never a portal into `body`: the browser's cover watch classifies both as
-// covering and would freeze the page under it. The card is resized by its top and right edges and the top-right corner,
-// never moved; the size is written once on pointer-up, per panel tab (`cardSizeKey`). M2 (§D3): while a pane reserves a
-// column for it (the browser pane, over a page, a native view the card cannot float over), the card lies on the column's
-// rect instead, full height, resized by its right edge only; the drag's width goes live to the pane through the store.
+// covering and would freeze the page under it. The card is never moved; the size is written once on pointer-up, per what
+// it sits over (`cardSizeKey`). M2 (§D3): while a pane reserves a column for it (the browser pane, over a page, a native
+// view the card cannot float over), the card lies on the column's rect instead, full height; the drag's width goes live
+// to the pane through the store.
+//
+// P4-B3 M2 (X37, X30 amendment; its Decision Log 9, 10, 15): both cards sit at the bottom right, 16 px from the right and
+// bottom edges, resized by the top edge, the left edge and the top-left corner (a column by its left edge), and both
+// pills at the bottom right. The main split's card is drawn by `SplitCardLayer` in the main area's grid, on the content
+// row across every column (never over a tab strip), over the pane beside the floating one; a press or focus in it
+// focuses the floating pane, which it stands for. The open card publishes its rect and region (`useFloatingCard`).
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize } from '@shared/ipc/schema/layout';
@@ -14,7 +20,7 @@ import { IconButton, MaximizeIcon } from '../app/IconButton';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
-import { CARD_MARGIN, CARD_MIN, cardSession, cardSizeKey, closeCard, dockPanel, placeCard, useFloatingCard, type ColumnDrag } from './floating';
+import { CARD_MARGIN, CARD_MIN, cardHost, cardSession, cardSizeKey, closeCard, dockCard, placeCard, splitFloat, useFloatingCard, type CardHost, type CardRect, type ColumnDrag } from './floating';
 import { Pill, useSessionTitle } from './FloatingPill';
 
 type Bounds = { width: number; height: number };
@@ -57,7 +63,9 @@ function useBodyTop(layer: RefObject<HTMLElement | null>, body: RefObject<HTMLEl
   return top;
 }
 
-type Rect = { left: number; top: number; width: number; height: number };
+type Rect = CardRect;
+const sameRect = (a: Rect | null, b: Rect) => a !== null && (['left', 'top', 'width', 'height'] as const).every((k) => a[k] === b[k]);
+const rounded = (r: DOMRect): Rect => ({ left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) });
 
 // `element`'s rect in px from the layer's top left, followed through either's resizes (a column's width and the pane's
 // height change its size; the layer moving with the header's height resizes the layer).
@@ -69,10 +77,7 @@ function useRectIn(layer: RefObject<HTMLElement | null>, element: HTMLElement | 
     const measure = () => {
       const [outer, inner] = [frame.getBoundingClientRect(), element.getBoundingClientRect()];
       const rect = { left: Math.round(inner.left - outer.left), top: Math.round(inner.top - outer.top), width: Math.round(inner.width), height: Math.round(inner.height) };
-      setMeasured((last) => {
-        const same = last?.element === element && (['left', 'top', 'width', 'height'] as const).every((k) => last.rect[k] === rect[k]);
-        return same ? last : { element, rect };
-      });
+      setMeasured((last) => (last?.element === element && sameRect(last.rect, rect) ? last : { element, rect }));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -84,50 +89,71 @@ function useRectIn(layer: RefObject<HTMLElement | null>, element: HTMLElement | 
   return measured !== null && measured.element === element ? measured.rect : null;
 }
 
-// The layer over the panel host's tool body (`body`: the region's element holding the host): the card, or the pill,
-// for the session the card draws; nothing when no session is shown (§D1.4). The card lies on a reserved column once its
-// rect is measured (§D3): the measure is a layout effect, so a reservation arriving re-lays the card before paint, and
-// the card stays mounted through it (its session's composer keeps the keyboard). A browser chrome hosting the pill in its
-// row leaves the layer none to draw.
+// The layer over the panel host's tool body (`body`: the region's element holding the host): the panel's card, or its
+// pill, for the session the card draws; nothing when no session is shown (§D1.4). The card lies on a reserved column
+// once its rect is measured (§D3): the measure is a layout effect, so a reservation arriving re-lays the card before
+// paint, and the card stays mounted through it (its session's composer keeps the keyboard). A browser chrome hosting the
+// pill in its row leaves the layer none to draw.
 export function FloatingCardLayer({ body }: { body: RefObject<HTMLElement | null> }) {
-  const session = useLayout(cardSession);
-  const closed = useFloatingCard((s) => s.closed);
-  const column = useFloatingCard((s) => s.column?.element ?? null);
   const area = useRef<HTMLDivElement>(null);
   const top = useBodyTop(area, body);
   const bounds = useSize(area);
-  const columnRect = useRectIn(area, column);
-  const pillHosted = useFloatingCard((s) => s.pillHost !== null);
   return (
     // P3-G (§D4.1): a layer over panel content, hidden while the DOM route takes a mark-up still (markup/surface.ts)
     <div ref={area} data-floating-layer data-markup-occluder className="pointer-events-none absolute inset-x-0 bottom-0 z-20" style={{ top: top ?? 0 }}>
-      {session !== null &&
-        top !== null &&
-        bounds &&
-        (closed ? (
-          !pillHosted && <Pill appSessionId={session} placement="floating" />
-        ) : (
-          <Card key={session} appSessionId={session} bounds={bounds} column={column && columnRect && { element: column, rect: columnRect }} />
-        ))}
+      {top !== null && bounds && <CardOrPill host="panel" area={area} bounds={bounds} />}
     </div>
   );
 }
 
-// `drag`: a column's width drag (the store's, so the pane's spacer follows it); null for the floating card's own size.
-type Gesture = { top: boolean; right: boolean; pointerX: number; pointerY: number; start: FloatingCardSize; key: string; drag: ColumnDrag | null };
-type Column = { element: HTMLElement; rect: Rect };
+// P4-B3 (its Decision Log 10): the main split's layer, a cell of the main area's grid on the content row across every
+// column (below the strips, never over one), pointer-transparent but for the card and the pill. The main area renders it
+// while the current set floats a pane.
+export function SplitCardLayer() {
+  const area = useRef<HTMLDivElement>(null);
+  const bounds = useSize(area);
+  return (
+    <div ref={area} data-floating-layer data-markup-occluder className="pointer-events-none relative z-20 min-h-0 min-w-0" style={{ gridRow: 3, gridColumn: '1 / -1' }}>
+      {bounds && <CardOrPill host="split" area={area} bounds={bounds} />}
+    </div>
+  );
+}
 
-function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bounds: Bounds; column: Column | null }) {
+// The card or its pill of the `host` region's card, while that card is up.
+function CardOrPill({ host, area, bounds }: { host: CardHost; area: RefObject<HTMLElement | null>; bounds: Bounds }) {
+  const session = useLayout((s) => (cardHost(s) === host ? cardSession(s) : null));
+  const closed = useFloatingCard((s) => s.closed);
+  const column = useFloatingCard((s) => s.column?.element ?? null);
+  const columnRect = useRectIn(area, column);
+  const pillHosted = useFloatingCard((s) => s.pillHost !== null);
+  if (session === null) return null;
+  if (closed) return !pillHosted && <Pill appSessionId={session} placement="floating" />;
+  return <Card key={session} host={host} appSessionId={session} area={area} bounds={bounds} column={column && columnRect && { element: column, rect: columnRect }} />;
+}
+
+// `drag`: a column's width drag (the store's, so the pane's spacer follows it); null for the floating card's own size.
+type Gesture = { top: boolean; left: boolean; pointerX: number; pointerY: number; start: FloatingCardSize; key: string; drag: ColumnDrag | null };
+type Column = { element: HTMLElement; rect: Rect };
+type Edge = { name: 'top' | 'left' | 'top-left'; top: boolean; left: boolean; className: string };
+const EDGES: Edge[] = [
+  { name: 'top', top: true, left: false, className: 'inset-x-0 top-0 h-1.5 cursor-ns-resize' },
+  { name: 'left', top: false, left: true, className: 'inset-y-0 left-0 w-1.5 cursor-ew-resize' },
+  { name: 'top-left', top: true, left: true, className: 'top-0 left-0 size-3 cursor-nwse-resize' },
+];
+
+function Card({ host, appSessionId, area, bounds, column }: { host: CardHost; appSessionId: AppSessionId; area: RefObject<HTMLElement | null>; bounds: Bounds; column: Column | null }) {
   const title = useSessionTitle(appSessionId);
-  const paneIndex = useLayout((s) => currentSet(s.main).focusedPane);
+  // The pane the session stands in: the split's floating pane, or the focused pane the panel follows.
+  const paneIndex = useLayout((s) => (host === 'split' ? (splitFloat(s.main)?.pane ?? 0) : currentSet(s.main).focusedPane));
   const sizeKey = useLayout(cardSizeKey);
   const stored = useLayout((s) => s.regions.floatingCard[sizeKey]);
   const [live, setLive] = useState<FloatingCardSize | null>(null); // the size while an edge is dragged
   const gesture = useRef<Gesture | null>(null);
+  const self = useRef<HTMLDivElement>(null);
   const size = live ?? placeCard(stored, bounds);
   const columnElement = column?.element ?? null;
 
-  // A gesture the card loses (it unmounts, docked mid-drag; the column comes or goes; the panel tab under it changes) is
+  // A gesture the card loses (it unmounts, docked mid-drag; the column comes or goes; what it sits over changes) is
   // abandoned, unwritten: its live size goes, and its column drag ends itself only, never a successor's.
   useEffect(
     () => () => {
@@ -138,20 +164,48 @@ function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bo
     [columnElement, sizeKey],
   );
 
-  const begin = (edges: { top: boolean; right: boolean }, event: ReactPointerEvent<HTMLElement>) => {
+  // P4-B3 (X37, its Decision Log 15): the open card's rect in client px, after every render (a resize, a column) and
+  // whenever it or its layer resizes (the window, the regions); withdrawn as it goes.
+  const publish = () => {
+    const element = self.current;
+    if (!element) return;
+    const rect = rounded(element.getBoundingClientRect());
+    const now = useFloatingCard.getState();
+    if (now.host !== host || !sameRect(now.rect, rect)) useFloatingCard.setState({ rect, host });
+  };
+  useLayoutEffect(publish);
+  useLayoutEffect(() => {
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
+    if (self.current) observer?.observe(self.current);
+    if (area.current) observer?.observe(area.current);
+    return () => {
+      observer?.disconnect();
+      if (useFloatingCard.getState().host === host) useFloatingCard.setState({ rect: null, host: null });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `publish` reads the element and the host of the moment
+  }, [host, area]);
+
+  // The split's card stands for its floating pane (its Decision Log 7): a press or focus in it focuses that pane.
+  const focusPane = () => {
+    const state = useLayout.getState();
+    const split = host === 'split' ? splitFloat(state.main) : null;
+    if (split !== null && currentSet(state.main).focusedPane !== split.pane) state.focusPane(split.pane);
+  };
+
+  const begin = (edge: { top: boolean; left: boolean }, event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId); // as the Resizer does: happy-dom has none
     const start = column ? { w: column.rect.width, h: size.h } : size;
     gesture.current?.drag?.end();
     const drag = column ? useFloatingCard.getState().startColumnDrag() : null;
-    gesture.current = { ...edges, pointerX: event.clientX, pointerY: event.clientY, start, key: sizeKey, drag };
+    gesture.current = { ...edge, pointerX: event.clientX, pointerY: event.clientY, start, key: sizeKey, drag };
   };
   const move = (event: ReactPointerEvent<HTMLElement>) => {
     const g = gesture.current;
     if (!g) return;
-    // Anchored at the bottom left: the right edge grows the width, the top edge (dragged up) the height.
-    const w = g.start.w + (g.right ? event.clientX - g.pointerX : 0);
+    // Anchored at the bottom right: the left edge (dragged left) grows the width, the top edge (dragged up) the height.
+    const w = g.start.w + (g.left ? g.pointerX - event.clientX : 0);
     const h = g.start.h + (g.top ? g.pointerY - event.clientY : 0);
     // A column's width goes to the pane, whose spacer holds the page's floor; the card follows the spacer's rect.
     if (g.drag) g.drag.width(Math.round(Math.max(CARD_MIN.w, w)));
@@ -163,7 +217,7 @@ function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bo
     gesture.current = null;
     if (g.drag) {
       // What the pane gave the column (the page's floor may have held it narrower than the drag); the height stays the
-      // panel tab's, for a card floating over it when another pane shows its page.
+      // key's, for a card floating over it when another pane shows its page.
       if (column && useFloatingCard.getState().columnDrag !== null) useLayout.getState().setFloatingCardSize(g.key, { w: Math.round(column.element.getBoundingClientRect().width), h: size.h });
       g.drag.end();
       return;
@@ -172,21 +226,25 @@ function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bo
     setLive(null);
   };
   const place = column
-    ? { style: { left: column.rect.left, top: column.rect.top, width: column.rect.width, height: column.rect.height }, frame: 'border-r border-border' }
-    : { style: { left: CARD_MARGIN, bottom: CARD_MARGIN, width: size.w, height: size.h }, frame: 'rounded-lg border border-border-strong shadow-float' };
+    ? { style: { left: column.rect.left, top: column.rect.top, width: column.rect.width, height: column.rect.height }, frame: 'border-l border-border' }
+    : { style: { right: CARD_MARGIN, bottom: CARD_MARGIN, width: size.w, height: size.h }, frame: 'rounded-lg border border-border-strong shadow-float' };
   return (
     <div
+      ref={self}
       role="region"
       aria-label="Session card"
       data-floating-card={column ? 'column' : 'card'}
+      data-card-host={host}
       style={place.style}
+      onPointerDownCapture={focusPane}
+      onFocusCapture={focusPane}
       className={`pointer-events-auto absolute flex flex-col overflow-hidden bg-bg ${place.frame}`}
     >
       <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border bg-bg-raised pr-1 pl-3">
         <h2 title={title} className="m-0 min-w-0 flex-1 truncate text-ui font-semibold text-fg">
           {title}
         </h2>
-        <IconButton label="Dock session" action="panel.float" onClick={dockPanel}>
+        <IconButton label="Dock session" action="panel.float" onClick={dockCard}>
           <MaximizeIcon />
         </IconButton>
         <IconButton label="Close session card" onClick={closeCard}>
@@ -203,37 +261,18 @@ function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bo
       <div data-pane="card" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
         <SessionPane appSessionId={appSessionId} paneIndex={paneIndex} />
       </div>
-      {!column && (
+      {EDGES.filter((edge) => !column || edge.name === 'left').map((edge) => (
         <div
+          key={edge.name}
           aria-hidden
-          data-card-resize="top"
-          onPointerDown={(event) => begin({ top: true, right: false }, event)}
+          data-card-resize={edge.name}
+          onPointerDown={(event) => begin(edge, event)}
           onPointerMove={move}
           onPointerUp={end}
           onPointerCancel={end}
-          className="absolute inset-x-0 top-0 h-1.5 cursor-ns-resize"
+          className={`absolute ${edge.className}`}
         />
-      )}
-      <div
-        aria-hidden
-        data-card-resize="right"
-        onPointerDown={(event) => begin({ top: false, right: true }, event)}
-        onPointerMove={move}
-        onPointerUp={end}
-        onPointerCancel={end}
-        className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize"
-      />
-      {!column && (
-        <div
-          aria-hidden
-          data-card-resize="top-right"
-          onPointerDown={(event) => begin({ top: true, right: true }, event)}
-          onPointerMove={move}
-          onPointerUp={end}
-          onPointerCancel={end}
-          className="absolute top-0 right-0 size-3 cursor-nesw-resize"
-        />
-      )}
+      ))}
     </div>
   );
 }
