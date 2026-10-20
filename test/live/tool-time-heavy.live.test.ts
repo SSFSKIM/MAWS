@@ -4,7 +4,8 @@
 // registers them, so the session's journal carries the `tools/call` and `control_response` frames the guard reads:
 // E1's 24-board bench design created, read and published whole (row 187's board), S6's 100-slide bench deck created,
 // read and published whole, and S7b's 200-page document (e2e/support/document-seed.ts, seeded as the scale gate's seam
-// seeds it) read whole, then edited by one 20-op batch spread across it. One session runs the three cases in turn, as
+// seeds it) read whole, then edited by one 20-op batch spread across it, then searched for a paragraph the batch
+// inserted (P4-B4: `artifact_search` re-extracting the changed document). One session runs the three cases in turn, as
 // one agent would: each case holds every call under the bound and prints its numbers with the 1-minute load, and the
 // run ends with `guardToolTime` over the session's whole journal, as a live spec ends (the median is the spec's).
 // A vitest file of the `live` project rather than the ledger's `e2e/tool-time-heavy-live.spec.ts`: the tool server
@@ -126,7 +127,7 @@ describe.skipIf(process.env.MAWS_LIVE !== '1')(`the tool-time guard's heavy case
     expect((await perCall('deck, 100 slides', from, annotate)).calls).toBe(3);
   });
 
-  it('S7b’s 200-page document: read whole, then one 20-op batch across it, each call under the bound', async ({ annotate }) => {
+  it('S7b’s 200-page document: read whole, then one 20-op batch across it and a search for what it inserted, each call under the bound', async ({ annotate }) => {
     const { state, stats } = seedDocument(DOCUMENT_SECTIONS);
     // created by the owner, its first tab replaced by the seed's in one write as the human (the scale gate's seam)
     const { id } = await s.documents.store.create({ kind: 'document', title: 'Heavy 200' }, HUMAN);
@@ -172,7 +173,13 @@ describe.skipIf(process.env.MAWS_LIVE !== '1')(`the tool-time guard's heavy case
     });
     const edited = await s.call<{ status: string }>('artifact_edit', { artifact: id, baseRevision: first.revision, ops });
     expect(edited.status).toBe('edited');
-    const label = `document, ${stats.sections} sections (${stats.topBlocks} top blocks, ${stats.words} words) read whole, then a ${ops.length}-op batch`;
+    // P4-B4 M5: a search right after the batch, for the paragraph it inserted in the last section, re-extracts the whole
+    // document into the mirror (it changed since its row was written) before it answers, inside the same bound
+    const lastSection = BATCH_SECTIONS.at(-1)! + 1;
+    const searched = await s.call<{ hits: { id: string; read?: { tab?: string; from?: string } }[] }>('artifact_search', { query: `"heavy batch inserted in section ${lastSection}"` });
+    expect(searched.hits.map((hit) => hit.id), 'the search finds the batch’s paragraph in the 200-page document').toEqual([id]);
+    expect(searched.hits[0]!.read?.from, 'at its block').toEqual(expect.any(String));
+    const label = `document, ${stats.sections} sections (${stats.topBlocks} top blocks, ${stats.words} words) read whole, then a ${ops.length}-op batch, then a search`;
     expect((await perCall(label, from, annotate)).calls).toBeGreaterThanOrEqual(3);
   });
 

@@ -9,6 +9,8 @@
 // the design kind and its board or element target), the replica held by the tab while the card's overlay writes; the
 // header's Version history and Comments and its open-thread count; the history over the tab's history api read through
 // the design model, its new-change pill counting the design's projection (C's `countChanges` hook, Decision Log 23).
+// P4-B4: an open's place (a link's fragment, `show_pane`'s `at`) reaches the workbench as its `reveal`, the open request
+// for this artifact on this surface, taken once the workbench has it.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DesignWorkbench } from '@artifacts/design/editor/DesignWorkbench';
 import { countDesignChanges } from '@artifacts/design/history';
@@ -17,6 +19,7 @@ import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
+import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F (L230)
 import { useDocumentComments } from '../document/comments';
 import { chooseDeckSystem } from '../presentation/commands';
@@ -103,6 +106,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
     },
     [session],
   );
+  const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4: an open's place (a link's board or version)
 
   if (snapshot.failed !== null) return <Notice>{`This design could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.handle || !session) return <Notice>Opening the design…</Notice>;
@@ -126,6 +130,8 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
         history={history}
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
+        reveal={reveal} /* P4-B4 */
+        onRevealed={takeOpenRequest}
       />
     </div>
   );

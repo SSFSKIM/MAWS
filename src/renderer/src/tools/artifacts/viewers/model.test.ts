@@ -2,7 +2,7 @@
 // version list in order with its labels, and which version a picker choice or a row's Open shows.
 import { describe, expect, it } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
-import { bodyOf, placeOfNumber, placeOfOpenAt, selectionAt, selectionOf, shownVersion, versionLabel, versionsInOrder } from './model';
+import { bodyOf, placeOfNumber, placeOfOpenAt, selectionAt, selectionOf, selectionOfOpen, selectionOfVersionId, shownVersion, versionLabel, versionsInOrder } from './model';
 
 const version = (id: number, seq: number): ArtifactVersion => ({ id, seq, at: seq * 1000, actor: { kind: 'human' }, kind: 'auto', assetRefs: [] });
 
@@ -55,6 +55,19 @@ describe('versions', () => {
     expect(selectionOf(list, { version: 3 })).toBe('latest');
     expect(selectionOf(list, { revision: 5 })).toEqual({ revision: 5 });
     expect(selectionOf(list, 'latest')).toBe('latest');
+  });
+
+  // P4-B4: a link's `#v<id>` names a retained version by its id (what artifact_read lists): that version, kept by its
+  // revision even when it is the latest now; an id the artifact does not retain opens the latest, as a plain open does
+  it('places a retained version named by its id at its revision, and an id not retained at the latest', () => {
+    const list = versionsInOrder([version(7, 4), version(9, 9), version(8, 14)]);
+    expect(selectionOfVersionId(list, 9)).toEqual({ revision: 9 });
+    expect(selectionOfVersionId(list, 8)).toEqual({ revision: 14 });
+    expect(selectionOfVersionId(list, 2)).toBe('latest');
+    // an open's ask (the request's, a card's showVersion): the place's version over `at`, else `at`
+    expect(selectionOfOpen(list, { revision: 4 }, { version: 9 })).toEqual({ revision: 9 });
+    expect(selectionOfOpen(list, { revision: 4 }, { block: 'b1' })).toEqual({ revision: 4 });
+    expect(selectionOfOpen(list, 'latest')).toBe('latest');
   });
 
   // M6b fix wave 1 (Decision Log 39c): a version number from outside (a legacy anchor's or a transcript row's `n`) is

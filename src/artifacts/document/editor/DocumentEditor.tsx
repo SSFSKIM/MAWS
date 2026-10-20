@@ -23,6 +23,10 @@
 // P4-A2 (X35): the agent's batch drawn as it is written, the live editor's provisional layer (provisional.ts), its growth
 // bumping the comment overlay's `layoutKey` once a frame.
 // P3-F1: the rail beside the page in a body 720 px wide or more, a drawer over the page's right side below (rail-layout.ts).
+// P4-B4 ("Opening at a place"): a reveal asked from outside (a link's fragment, `show_pane`'s `at`) selects the block's
+// tab (or the tab named), puts the caret at the block's start and scrolls it into view once that tab's editor has bound
+// (the thread-showing path's retry), and opens the history rail previewing a version named by its id; a place the
+// document does not have changes nothing, as a plain open. Without a version, a preview shown gives way to the live page.
 // P4-B1 (the P4 spec §4.3): the shown tab's open threads are cards in a margin beside the page (comments/MarginThreads.tsx,
 // inside the page's scroll box), activated only by the human; the threads list is the All comments panel (`rail`
 // 'comments'), mutually exclusive with the margin; `rail` 'margin' says a margin thread is active with no rail open
@@ -30,6 +34,8 @@
 // frame otherwise. View › Comments (Expand, Minimize, Hide) comes from the host (`commentsView`).
 import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
+import { NodeSelection, Selection } from '@tiptap/pm/state'; // P4-B4
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
 import { useCallback /* P4-B1 */, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
@@ -38,7 +44,7 @@ import { isBindingTransaction, type Carry, type Doc } from '../../yjs'; // P3-E:
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
-import { tabBody } from '../tabs';
+import { listTabs, tabBody, tabOfBlock } from '../tabs'; // P4-B4: listTabs, tabOfBlock
 import { discardThread, getThread, reopen, reply, resolve } from '../threads'; // P4-B1: isBlockAnchor moved to comments/locate.ts
 import type { ExtraChange } from '../history'; // P3-E
 import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges, type CommentsOptions /* P3-E */ } from './comments/plugins';
@@ -122,6 +128,15 @@ export interface DocumentEditorProps {
   /** E2 M4 (E's Decision Log 28): the quote of a selected block commented whole (a dashboard's chart); absent, text only. */
   blockCommentQuote?(node: PMNode): string | undefined;
   // P3-E end
+  /** P4-B4: a place to show, asked from outside the editor; each serial is handled once, then told to `onRevealed`. */
+  reveal?: DocumentReveal | null;
+  onRevealed?(serial: number): void;
+}
+
+/** P4-B4: a place in the document to show (a document's tab or block, a retained version by its id), a new serial per ask. */
+export interface DocumentReveal {
+  serial: number;
+  location?: ArtifactLocation;
 }
 
 /** P4-B1: 'margin' says a margin thread is active with no rail open (D5): the header's Comments toggles the panel against it. */
@@ -150,6 +165,11 @@ interface Showing {
   threadId: string;
   serial: number;
 }
+/** P4-B4: a block to put the caret at, in the tab that holds it, once its editor has bound. */
+interface Revealing {
+  blockId: string;
+  serial: number;
+}
 
 const NO_DRAFTS: ReadonlyMap<string, string> = new Map(); // P4-B1
 
@@ -167,6 +187,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const typing = useMemo(() => new TypingPause(hold), [hold]); // the review waits for the person's pause
   const provisional = useProvisionalLayers(props.handle); // P4-A2 (X35): per handle, so a tab switch keeps the layers that stand
   const [showing, setShowing] = useState<Showing | null>(null);
+  const [revealing, setRevealing] = useState<Revealing | null>(null); // P4-B4
+  const endRevealing = useCallback(() => setRevealing(null), []); // P4-B4
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   // P4-B1: the margin draws unless the view hides it, the panel is open or a version shows; its tier (off under a
   // 720 px body) is the margin's own reading, told back here
@@ -243,6 +265,43 @@ export function DocumentEditor(props: DocumentEditorProps) {
     if (!held) setOwnRail('history');
     onRailChange?.('history');
   }, [saveVersionRequest, history, held, onRailChange]);
+  // P4-B4: a reveal asked from outside, handled once its serial is new and the document has its tabs. A block names its
+  // own tab; a version is previewed only once the history says the document retains it.
+  const { reveal, onRevealed } = props;
+  const revealed = useRef<number | null>(null);
+  const hasTabs = tabs.length > 0;
+  // whether the editor is still mounted when a version's check answers (the reveal itself is gone by then: it was taken)
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!reveal || !hasTabs || revealed.current === reveal.serial) return;
+    revealed.current = reveal.serial;
+    onRevealed?.(reveal.serial);
+    const { tab, block, version } = reveal.location ?? {};
+    const blockTab = block === undefined ? null : tabOfBlock(doc, block);
+    const tabId = blockTab ?? (tab !== undefined && listTabs(doc).some((t) => t.id === tab) ? tab : null);
+    if (tabId !== null) setSelected(tabId);
+    if (blockTab !== null) setRevealing({ blockId: block!, serial: reveal.serial });
+    if (version === undefined || !history) {
+      if (tabId !== null) history?.close(); // a place in the live document: the live page shows
+      return;
+    }
+    const asked = reveal.serial;
+    void history.hasVersion(version).then(
+      (retained) => {
+        if (!retained || !mounted.current || revealed.current !== asked) return; // gone, or a later reveal took over
+        if (!held) setOwnRail('history');
+        onRailChange?.('history');
+        void history.select(version);
+      },
+      () => {}, // the list unread: a plain open
+    );
+  }, [reveal, onRevealed, hasTabs, doc, history, held, onRailChange]);
   // P3-F1: the rail beside the page in a wide body, a drawer over the page's right side in a narrow one (rail-layout.ts)
   const body = useRef<HTMLDivElement>(null);
   const railShown = rail === 'comments' || (rail === 'history' && Boolean(history && snapshot));
@@ -302,6 +361,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
               openRail={openRail}
               showing={showing}
               onShown={() => setShowing(null)}
+              revealing={revealing}
+              onRevealed={endRevealing}
               onActiveThread={setActiveThreadId}
               onPassageClick={(cause) => {
                 // P4-B1: with the margin drawing, an activation is the margin's (D5 reports it above); without it (a
@@ -372,6 +433,9 @@ interface TabEditorProps extends DocumentEditorProps {
   readOnly: boolean;
   showing: Showing | null;
   onShown(): void;
+  /** P4-B4: a block to put the caret at once this tab's editor holds it; `onRevealed` once it is there. */
+  revealing: Revealing | null;
+  onRevealed(): void;
   /** The editor's active thread, as it changes (the rail selects it). */
   onActiveThread(threadId: string | null): void;
   /** A click, the caret or a chord activated a passage's thread (P4-B1: with its cause). */
@@ -386,7 +450,7 @@ interface TabEditorProps extends DocumentEditorProps {
   previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, provisional, readOnly, showing, onShown, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, provisional, readOnly, showing, onShown, revealing, onRevealed /* P4-B4 */, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -499,6 +563,44 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
       editor.off('transaction', retry);
     };
   }, [showing, editor, onShown, handle]);
+
+  // P4-B4: put the caret at a revealed block's start and scroll it into view, once it is in this tab's editor (a switched
+  // tab binds a moment later). The keyboard stays where it was: a reveal the agent asked must not take it from the owner.
+  // So the block's own DOM is scrolled to: ProseMirror scrolls a transaction's selection only when the DOM selection is
+  // in the editor, which needs its focus (prosemirror-view's `editorOwnsSelection`).
+  useEffect(() => {
+    if (!revealing) return;
+    // the block's position and its start (a leaf block selected whole), or null while this editor does not hold it
+    const startOf = (): { pos: number; selection: Selection } | null => {
+      const { doc } = editor.state;
+      let at = -1;
+      doc.descendants((node, pos) => {
+        if (at >= 0) return false;
+        if (node.attrs.id === revealing.blockId) at = pos;
+        return at < 0;
+      });
+      if (at < 0) return null;
+      return { pos: at, selection: doc.nodeAt(at)!.isLeaf ? NodeSelection.create(doc, at) : Selection.near(doc.resolve(at + 1)) };
+    };
+    const reveal = ({ pos, selection }: { pos: number; selection: Selection }) => {
+      editor.view.dispatch(editor.state.tr.setSelection(selection));
+      const block = editor.view.nodeDOM(pos);
+      if (block instanceof Element) block.scrollIntoView({ block: 'center' });
+      onRevealed();
+    };
+    const now = startOf();
+    if (now) return reveal(now);
+    const retry = () => {
+      const found = startOf();
+      if (!found) return;
+      editor.off('transaction', retry); // before the reveal's own transaction
+      reveal(found);
+    };
+    editor.on('transaction', retry);
+    return () => {
+      editor.off('transaction', retry);
+    };
+  }, [revealing, editor, onRevealed]);
 
   const toggleHistory = () => openRail(rail === 'history' ? null : 'history');
   // P3-F: Find (Mod-F, the toolbar's) opens the bar, its field taking the keyboard as it mounts; with the bar open, the

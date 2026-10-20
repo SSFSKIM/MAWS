@@ -28,6 +28,7 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { CommentCard } from './CommentCard';
 import { caretOf, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax } from './placement';
@@ -38,7 +39,7 @@ export interface CardFrame {
   offset: { x: number; y: number };
   key: string; // changes when the frame is replaced (the viewer's `frame` string)
   locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: one function per mounted frame
-  showVersion?(at: ArtifactOpenAt): void; // the host viewer's: a version asked for from a card thread's row (P3-L M6b fix wave 2)
+  showVersion?(at: ArtifactOpenAt, location?: ArtifactLocation): void; // the host viewer's: a version asked for from a card thread's row (P3-L M6b fix wave 2); P4-B4: or by a link's place (its version id)
   // P3-B start (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a document's own card controls, drawn in the
   // card's header before Close (its Resolve or Reopen), and a send of the card's composer as it sets out; the call it
   // returns is told whether the send went, before the card turns into its thread or closes, and also after the card went

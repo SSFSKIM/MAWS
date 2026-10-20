@@ -51,6 +51,13 @@ describe('classification table', () => {
     expect(presentationOf(`mcp__maws__${tool}`)).toBe('cell');
   });
 
+  // P4-B4: the library search is a cell of its own, as the namespace's other readers (artifact_list, artifact_read) are
+  it('artifact_search is a cell of its own, never folded into a group of MCP calls', () => {
+    const c = classifyTool('mcp__maws__artifact_search', {}, base);
+    expect([c.category, c.groupable, c.hidden]).toEqual(['other', false, false]);
+    expect(presentationOf('mcp__maws__artifact_search')).toBe('cell');
+  });
+
   it('routes the row-kind tools out of the cell table', () => {
     expect(presentationOf('Agent')).toBe('subagent');
     expect(presentationOf('Task')).toBe('subagent');

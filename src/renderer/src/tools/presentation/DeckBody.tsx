@@ -11,6 +11,8 @@
 // P3-F (L233): the header's Export exports what the editor shows (the session's `shown`), read when an entry is chosen.
 // P3-F: Present is offered while the deck has a slide to show (the show's own reading), following the deck live; a deck
 // with no slide is shown once its stage shows the empty deck (no slide is drawn to report it).
+// P4-B4: an open's place (a link's fragment, `show_pane`'s `at`) reaches the editor as its `reveal`, the open request for
+// this artifact on this surface, taken once the editor has it.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost } from '@artifacts/host';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
@@ -22,6 +24,7 @@ import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
+import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F1
 import { useDocumentComments } from '../document/comments'; // M7: B's surface
 import { chooseDeckSystem, presentDeck } from './commands';
@@ -129,6 +132,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   const history = useMemo(() => (state.history && handle ? { api: state.history, handle } : undefined), [state.history, handle]);
   const onPreviewDrawn = useCallback((ms: number) => session && recordPreview(session, ms), [session]);
   const onThumbnailsDrawn = useCallback((thumbnails: number) => session?.markDrawn(thumbnails), [session]);
+  const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4: an open's place (a link's slide or version)
 
   if (snapshot.failed !== null) return <Notice>{`This presentation could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.handle || !session) return <Notice>Opening the presentation…</Notice>;
@@ -152,6 +156,8 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
         onPreviewDrawn={onPreviewDrawn}
+        reveal={reveal} /* P4-B4 */
+        onRevealed={takeOpenRequest}
       />
     </div>
   );

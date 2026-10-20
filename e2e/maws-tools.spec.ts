@@ -611,7 +611,7 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
 
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
-test('the SDK MCP round trip: the app answers the engine’s handshake with the seventeen tools and refuses the probe’s own tool', async () => {
+test('the SDK MCP round trip: the app answers the engine’s handshake with the eighteen tools and refuses the probe’s own tool', async () => {
   // The probe's journal: its scratch directory is the engine cwd, and from seq 96 on it holds at the probe's own writes,
   // which the app never makes (M1's decisions), so the case ends after the first turn.
   await scene({ titles: ['E1 tools: round trip'] }, async (s) => {
@@ -648,6 +648,8 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['artifact_comments', { title: 'List document comments', readOnlyHint: true, openWorldHint: false }],
       ['artifact_reply', { title: 'Reply to a document comment', readOnlyHint: false, openWorldHint: false }],
       ['artifact_resolve', { title: 'Resolve a document comment', readOnlyHint: false, openWorldHint: false }],
+      // P4-B4 (X33): the search tool, after B's; read-only
+      ['artifact_search', { title: 'Search artifacts', readOnlyHint: true, openWorldHint: false }],
     ]);
     const [echo] = mcpCalls(rows);
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });

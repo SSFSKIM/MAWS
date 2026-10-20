@@ -929,6 +929,9 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('maws.ask.answer', { outcome: 'write_failed' }).ok).toBe(true);
       expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'file', target: '/r/a.ts', line: 3 }).ok).toBe(true);
       expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'nope', target: null, line: null }).ok).toBe(false);
+      // P4-B4: an artifact pane's place, absent when none; a place outside the link grammar is refused
+      expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'artifact', target: 'x', line: null, at: { tab: 't1', block: 'b2', version: 3 } }).ok).toBe(true);
+      expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'artifact', target: 'x', line: null, at: { block: 'not an id' } }).ok).toBe(false);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'show_pane: the artifact pane is not available in this build of MAWS' } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false } }).ok).toBe(false);

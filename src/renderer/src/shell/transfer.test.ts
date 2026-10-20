@@ -18,7 +18,7 @@ import { fail, installFakeMain, ok } from '../test-support/code';
 import { A, B, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
-import { requestArtifactVersion, resetVersionRequests, useVersionRequest } from '../tools/artifacts/viewers/requests';
+import { requestArtifactOpen, resetOpenRequests, useOpenRequest } from '../tools/artifacts/viewers/requests'; // P4-B4 renamed the version request the open request
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5
 import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal } from './transfer';
 
@@ -42,7 +42,7 @@ let editor: ReturnType<typeof makeEditor>;
 beforeEach(() => {
   resetPanelStores();
   resetArtifactEditors();
-  resetVersionRequests();
+  resetOpenRequests();
   installFakeMain((name) => {
     if (name === 'layout.get') return ok({ value: null });
     if (name === 'layout.set') return ok();
@@ -305,8 +305,8 @@ describe('the version a moved viewer shows', () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     addArtifacts(A); // a list tab, which the move re-targets
     mounted(mainScope());
-    requestArtifactVersion(DOC, 'latest', 'panel'); // a stale ask for the panel's viewer of DOC
-    const asked = renderHook(() => useVersionRequest(DOC, 'panel'));
+    requestArtifactOpen(DOC, 'latest', 'panel'); // a stale ask for the panel's viewer of DOC
+    const asked = renderHook(() => useOpenRequest(DOC, 'panel'));
     expect(asked.result.current).not.toBeNull();
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(asked.result.current).toBeNull();
@@ -315,15 +315,41 @@ describe('the version a moved viewer shows', () => {
   it('a new Artifacts tab made for the move asks for none either', async () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     mounted(mainScope());
-    const asked = renderHook(() => useVersionRequest(DOC, 'panel'));
+    const asked = renderHook(() => useOpenRequest(DOC, 'panel'));
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC });
     expect(asked.result.current).toBeNull();
   });
 
+  // P4-B4 (the B3 merge's review): a link's open of a main tab left before its editor took it is stale for the main
+  // viewer a move lands in, on both paths (the carried state adopted by a new tab, an existing tab activated)
+  it('panel → main into a new main tab withdraws an ask left for that artifact’s main viewer', async () => {
+    useLayout.setState({ main: panes([sessionTab(A)]) });
+    const src = addArtifacts(A, DOC);
+    mounted(panelScope(src));
+    requestArtifactOpen(DOC, 'latest', 'main', { version: 2 }); // a link's ask whose main tab was closed first
+    const asked = renderHook(() => useOpenRequest(DOC, 'main'));
+    expect(asked.result.current).not.toBeNull();
+    expect(await move(() => moveArtifactToTab(src))).toBe(true);
+    expect(asked.result.current, 'the carried state adopted by a new main tab').toBeNull();
+  });
+
+  it('panel → main onto a main tab already showing it withdraws the ask left for that tab’s viewer', async () => {
+    useLayout.setState({ main: panes([DOC_TAB, sessionTab(A)]) });
+    const again = addArtifacts(A, DOC);
+    mounted(panelScope(again));
+    mounted(mainScope());
+    guard(panelScope(again), () => true);
+    requestArtifactOpen(DOC, 'latest', 'main', { block: 'b7' });
+    const left = renderHook(() => useOpenRequest(DOC, 'main'));
+    expect(left.result.current).not.toBeNull();
+    expect(await move(() => moveArtifactToTab(again))).toBe(true);
+    expect(left.result.current, 'an existing main tab activated').toBeNull();
+  });
+
   it('an ordinary open in the panel still asks for its version', () => {
     const id = addArtifacts(A);
-    const asked = renderHook(() => useVersionRequest(DOC, 'panel'));
+    const asked = renderHook(() => useOpenRequest(DOC, 'panel'));
     act(() => void handleOf(id)!.open({ target: DOC, at: { version: 1 } }));
     expect(asked.result.current?.at).toEqual({ version: 1 });
   });

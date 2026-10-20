@@ -5,6 +5,7 @@
 // never an X1 event, so a reload or a disk replay re-opens nothing), answered by `maws.pane.answer`, the first answer
 // winning.
 import * as z from 'zod';
+import { ArtifactLocationSchema } from '../../artifacts/link'; // P4-B4
 import { AppSessionIdSchema, RequestIdSchema } from '../../graph/ids';
 import { PendingAskSchema } from '../../maws/ask';
 import { PaneSchema } from '../../maws/panes';
@@ -22,6 +23,7 @@ export const MawsPaneShowSchema = z.strictObject({
   pane: PaneSchema,
   target: z.string().nullable(), // resolved against the session's cwd for `diff` and `file`, else as the model gave it
   line: z.number().int().nullable(),
+  at: ArtifactLocationSchema.optional(), // P4-B4: the place an `artifact` pane opens its artifact at; absent when none
 });
 export type MawsPaneShow = z.infer<typeof MawsPaneShowSchema>;
 

@@ -4,6 +4,7 @@
 // artifacts, never the host: it is logged and the host serves its sessions without them (M4's `artifacts.status`
 // surfaces the state).
 import { join } from 'node:path';
+import { startArtifactSearch } from './search'; // P4-B4
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore } from './store';
@@ -28,11 +29,14 @@ export function openDocuments(userData: string, log: (line: string) => void = (l
   const store = new ArtifactStore(service, storage, { root, log });
   store.collectRetiredAssets(); // E3: at the reopen, no hold survives a restart (retention.ts)
   store.maintenance.start();
+  // P4-B4: `artifact_search`'s mirror kept fresh beside the searches' own catch-up (its refresher and its sweep)
+  const search = startArtifactSearch(store, { log });
   return {
     storage,
     service,
     store,
     close: () => {
+      search.close(); // P4-B4: its timers and its change listener, before the store goes
       store.close();
       service.close();
       storage.close();
