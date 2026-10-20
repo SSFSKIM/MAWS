@@ -40,6 +40,8 @@ function positionOf(style: CardStyle): CSSProperties {
       return { left: DOCK_INSET, bottom: DOCK_INSET, width: style.width, maxHeight: style.maxHeight };
     case 'strip': // P2-E2: in flow in its host's strip, the margin its inset
       return { margin: DOCK_INSET, width: style.width, maxHeight: style.maxHeight };
+    case 'margin': // P4-B1: in flow in the document margin's stack, at the column's width (M4 hosts it)
+      return { width: style.width, maxHeight: style.maxHeight };
   }
 }
 
