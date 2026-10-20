@@ -20,7 +20,7 @@
 // change. The compose card (P2's, hosted by the renderer through `overlay`) is an entry of the stack at the thread it
 // is on (`hosting`), measured like any other; that thread's card yields to it meanwhile.
 import type { Editor } from '@tiptap/core';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject /* P4-B1 */ } from 'react';
+import { memo /* P4-B1 */, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject /* P4-B1 */ } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { layoutMargin, MARGIN_ACTIVE_SHIFT_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
 import { ICON_PX, tierFor, type MarginTier } from '../../../comments/margin-tiers';
@@ -77,6 +77,35 @@ type Cause = 'activation' | 'set' | 'layout';
 
 const ANIMATED: ReadonlySet<Cause> = new Set<Cause>(['activation', 'set']);
 
+// P4-B1: the margin's own quiet moment before it re-reads the thread list. The 200-page workload's keys arrive 60 to 180
+// ms apart, and a re-read per pause scans every tab's marks (`liveThreadIds`), so the panel's 50 ms would re-read after
+// almost every key; the measured run (D13) re-bases it. An orphan leaves the margin, and returns after undo, within it.
+export const MARGIN_LIST_QUIET_MS = 400;
+
+// P4-B1: one entry's handlers, kept per thread id across renders (each reads the margin's latest actions), so a memoized
+// card sees the same functions while its thread is drawn
+interface EntryHandlers {
+  onDraftChange(text: string): void;
+  onActivate(): void;
+  onReply(body: string): void;
+  onResolve(): void;
+  onReopen(): void;
+  onNext(): void;
+  onPrevious(): void;
+  onExit(): void;
+  onDot(): void;
+}
+interface EntryActions {
+  draft(id: string, text: string): void;
+  activate(id: string): void;
+  reply(id: string, body: string): void;
+  resolve(id: string): void;
+  reopen(id: string): void;
+  step(id: string, by: 1 | -1): void;
+  exit(): void;
+  dot(id: string): void;
+}
+
 // P4-B1 (N2): in the icon tier, entry id → how many entries its dot stands for (a group's first), or 0 (a later member
 // of a group, drawn under the first's dot); an entry not named has a dot of its own
 type Groups = ReadonlyMap<string, number>;
@@ -84,7 +113,7 @@ const NO_GROUPS: Groups = new Map();
 
 export function MarginThreads({ editor, doc, tabId, author, readOnly, view, relayoutRef, hosting, overlay, onComment, onTier, enterRef, drafts, onDraftChange }: MarginThreadsProps) {
   const column = useRef<HTMLDivElement>(null);
-  const states = useThreadStates(doc);
+  const states = useThreadStates(doc, { quietMs: MARGIN_LIST_QUIET_MS }); // P4-B1: the margin's quiet moment
   const locator = useMemo(() => new MarginLocator(editor, doc), [editor, doc]);
 
   // ── the tier: the body's, the scroll box's and the page's widths through one observer ──
@@ -362,6 +391,50 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     if (notes.length > 0) setAnnounced(notes.join('. '));
   }, [states, active]);
 
+  // P4-B1: the entries' actions as of this render, reached through each entry's kept handlers
+  const write = (change: () => void) => !readOnly && change();
+  const actions = useRef<EntryActions | null>(null);
+  actions.current = {
+    draft: (id, text) => onDraftChange(id, text),
+    activate: (id) => activate(id),
+    reply: (id, body) => write(() => reply(doc, id, { id: `${id}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN)),
+    resolve: (id) => write(() => resolve(doc, id, author.actor, author.now(), COMMENTS_ORIGIN)),
+    reopen: (id) => write(() => reopen(doc, id, author.actor, author.now(), COMMENTS_ORIGIN)),
+    step,
+    exit,
+    dot: (id) => {
+      // the group's first opens; the dot of an open group closes it
+      const at = entries.findIndex((entry) => entry.id === id);
+      const open = active !== null && entries.slice(at, at + (groups.get(id) ?? 1)).some((member) => member.id === active);
+      activate(open ? null : id);
+      if (!open) scrollPassage(editor, id);
+    },
+  };
+  const handlers = useRef(new Map<string, EntryHandlers>());
+  const handlersFor = (id: string): EntryHandlers => {
+    let kept = handlers.current.get(id);
+    if (!kept) {
+      const now = () => actions.current!;
+      kept = {
+        onDraftChange: (text) => now().draft(id, text),
+        onActivate: () => now().activate(id),
+        onReply: (body) => now().reply(id, body),
+        onResolve: () => now().resolve(id),
+        onReopen: () => now().reopen(id),
+        onNext: () => now().step(id, 1),
+        onPrevious: () => now().step(id, -1),
+        onExit: () => now().exit(),
+        onDot: () => now().dot(id),
+      };
+      handlers.current.set(id, kept);
+    }
+    return kept;
+  };
+  useEffect(() => {
+    const ids = new Set(entries.map(({ id }) => id));
+    for (const id of handlers.current.keys()) if (!ids.has(id)) handlers.current.delete(id);
+  }, [entries]);
+
   // off (a narrow body): the column stays in the row, 0 wide and empty, so its measurements go on (the tier returns
   // when the body widens); it is no region then
   if (tier.kind === 'off') return <div ref={column} className="doc-margin" data-margin-tier="off" style={{ '--doc-margin-reserve': '0px' } as CSSProperties} />;
@@ -371,42 +444,22 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     '--doc-margin-gap': `${MARGIN_GAP_PX}px`,
     '--doc-margin-overlap': `${tier.kind === 'icons' && reserved ? tier.overlap : 0}px`,
   } as CSSProperties;
-  const write = (change: () => void) => !readOnly && change();
-  const card = (entry: Entry, index: number, compact: boolean) => {
-    const { thread } = entry;
-    if (!thread) return null;
-    return (
-      <ThreadCard
-        thread={thread}
-        active={entry.id === active}
-        compact={compact}
-        position={{ index: index + 1, count: entries.length }}
-        readOnly={readOnly}
-        draft={draftOf(entry.id)}
-        onDraftChange={(text: string) => onDraftChange(entry.id, text)}
-        onActivate={() => activate(entry.id)}
-        onReply={(body: string) => write(() => reply(doc, entry.id, { id: `${entry.id}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN))}
-        onResolve={() => write(() => resolve(doc, entry.id, author.actor, author.now(), COMMENTS_ORIGIN))}
-        onReopen={() => write(() => reopen(doc, entry.id, author.actor, author.now(), COMMENTS_ORIGIN))}
-        onNext={() => step(entry.id, 1)}
-        onPrevious={() => step(entry.id, -1)}
-        onExit={exit}
-      />
-    );
-  };
+  // P4-B1: a memoized card per entry (MarginCard)
+  const card = (entry: Entry, index: number, compact: boolean) =>
+    entry.thread && <MarginCard thread={entry.thread} active={entry.id === active} compact={compact} index={index + 1} count={entries.length} readOnly={readOnly} draft={draftOf(entry.id)} handlers={handlersFor(entry.id)} />;
   return (
     <div ref={column} className="doc-margin" role="region" aria-label="Comments" data-margin-tier={tier.kind} data-markup-occluder style={style}>
       {tier.kind === 'cards' &&
         entries.map((entry, index) => (
           <div key={entry.id} ref={attach(entry.id)} className="doc-margin-entry" data-margin-entry={entry.id} data-active={entry.id === active ? '' : undefined} data-compose={entry.id === hosting ? '' : undefined}>
-            {entry.id === hosting && overlay ? overlay() : card(entry, index, entry.id !== active)}
+            {entry.id === hosting && overlay ? <Hosted render={overlay} /> : card(entry, index, entry.id !== active)}
           </div>
         ))}
-      {tier.kind === 'icons' && <IconRail entries={entries} groups={groups} active={active} hosting={hosting} overlay={overlay} attach={attach} card={card} onActivate={activate} editor={editor} />}
+      {tier.kind === 'icons' && <IconRail entries={entries} groups={groups} active={active} hosting={hosting} overlay={overlay} attach={attach} card={card} handlersFor={handlersFor} />}
       {/* the surface's card host stays mounted while no card is up (it claims a card as it opens and then names its thread) */}
       {overlay && (hosting === null || !entries.some((entry) => entry.id === hosting)) && (
         <div className="doc-margin-slot" data-margin-slot>
-          {overlay()}
+          <Hosted render={overlay} />
         </div>
       )}
       {onComment && <AddComment editor={editor} column={column} hosting={hosting} onComment={onComment} updateRef={updateAdd} />}
@@ -473,8 +526,7 @@ function IconRail({
   overlay,
   attach,
   card,
-  onActivate,
-  editor,
+  handlersFor,
 }: {
   entries: Entry[];
   groups: Groups;
@@ -483,8 +535,7 @@ function IconRail({
   overlay: (() => ReactNode) | null;
   attach: (id: string) => (node: HTMLElement | null) => void;
   card: (entry: Entry, index: number, compact: boolean) => ReactNode;
-  onActivate: (id: string | null) => void;
-  editor: Editor;
+  handlersFor: (id: string) => EntryHandlers;
 }) {
   const open = hosting !== null ? entries.find((entry) => entry.id === hosting) : undefined;
   return (
@@ -496,24 +547,17 @@ function IconRail({
         return (
           <div key={entry.id} ref={attach(entry.id)} className="doc-margin-entry" data-margin-entry={entry.id} data-icon-entry="" data-active={entry.id === active ? '' : undefined}>
             {count > 0 && (
-              <button
-                type="button"
-                className="doc-margin-icon"
-                data-active={groupActive ? '' : undefined}
-                aria-label={count > 1 ? `${name}, and ${count - 1} more` : name}
+              <IconDot
+                label={count > 1 ? `${name}, and ${count - 1} more` : name}
                 title={entry.thread ? `${actorDisplay(entry.thread.createdBy).name}: ${firstWords(entry.thread)}` : undefined}
-                onClick={() => {
-                  // the group's first opens; the dot of an open group closes it
-                  onActivate(groupActive ? null : entry.id);
-                  if (!groupActive) scrollPassage(editor, entry.id);
-                }}
-              >
-                {count > 1 ? String(count) : ''}
-              </button>
+                count={count}
+                active={groupActive}
+                onDot={handlersFor(entry.id).onDot}
+              />
             )}
             {(entry.id === hosting && overlay) || (entry.id === active && !open) ? (
               <div className="doc-margin-overlay" data-compose={entry.id === hosting ? '' : undefined}>
-                {entry.id === hosting && overlay ? overlay() : card(entry, index, false)}
+                {entry.id === hosting && overlay ? <Hosted render={overlay} /> : card(entry, index, false)}
               </div>
             ) : null}
           </div>
@@ -522,6 +566,43 @@ function IconRail({
     </>
   );
 }
+
+// P4-B1: a thread's card, re-rendered only when its own inputs change (a list re-read hands an unchanged thread the
+// same object, `useStableThreads`, and the handlers are kept per id)
+const MarginCard = memo(function MarginCard({ thread, active, compact, index, count, readOnly, draft, handlers }: { thread: ThreadState; active: boolean; compact: boolean; index: number; count: number; readOnly: boolean; draft: string; handlers: EntryHandlers }) {
+  return (
+    <ThreadCard
+      thread={thread}
+      active={active}
+      compact={compact}
+      position={{ index, count }}
+      readOnly={readOnly}
+      draft={draft}
+      onDraftChange={handlers.onDraftChange}
+      onActivate={handlers.onActivate}
+      onReply={handlers.onReply}
+      onResolve={handlers.onResolve}
+      onReopen={handlers.onReopen}
+      onNext={handlers.onNext}
+      onPrevious={handlers.onPrevious}
+      onExit={handlers.onExit}
+    />
+  );
+});
+
+// P4-B1: the icon tier's dot, memoized the same way
+const IconDot = memo(function IconDot({ label, title, count, active, onDot }: { label: string; title: string | undefined; count: number; active: boolean; onDot: () => void }) {
+  return (
+    <button type="button" className="doc-margin-icon" data-active={active ? '' : undefined} aria-label={label} title={title} onClick={onDot}>
+      {count > 1 ? String(count) : ''}
+    </button>
+  );
+});
+
+// P4-B1: the renderer's compose card (the overlay surface), drawn again only when the page frame hands a new `render`
+const Hosted = memo(function Hosted({ render }: { render: () => ReactNode }) {
+  return <>{render()}</>;
+});
 
 // P4-B1: whether React's entries are the located ones (the same ids, in order, with the same threads)
 function sameEntries(now: readonly Entry[], next: readonly Located[]): boolean {

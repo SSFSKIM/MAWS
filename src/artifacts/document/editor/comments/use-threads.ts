@@ -8,8 +8,12 @@ import { listThreads, liveThreadIds, observeThreads, threadStates, threadStatus,
 
 const LIST_QUIET_MS = 50;
 
-/** Every thread with its derived state, oldest first; follows the document once it has been quiet a moment. */
-export function useThreadStates(doc: Doc): ThreadState[] {
+/**
+ * Every thread with its derived state, oldest first; follows the document once it has been quiet a moment (P4-B1:
+ * `quietMs`, 50 ms unless the caller names its own; the margin waits longer, MARGIN_LIST_QUIET_MS).
+ */
+export function useThreadStates(doc: Doc, options: { quietMs?: number } = {}): ThreadState[] {
+  const quietMs = options.quietMs ?? LIST_QUIET_MS; // P4-B1
   const [states, setStates] = useState(() => threadStates(doc, liveThreadIds(doc)));
   useEffect(() => {
     setStates(threadStates(doc, liveThreadIds(doc)));
@@ -20,13 +24,13 @@ export function useThreadStates(doc: Doc): ThreadState[] {
       timer = setTimeout(() => {
         timer = null;
         setStates(threadStates(doc, liveThreadIds(doc)));
-      }, LIST_QUIET_MS);
+      }, quietMs);
     });
     return () => {
       off();
       if (timer !== null) clearTimeout(timer);
     };
-  }, [doc]);
+  }, [doc, quietMs]);
   return states;
 }
 
