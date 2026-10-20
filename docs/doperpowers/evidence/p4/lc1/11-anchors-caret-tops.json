@@ -1,0 +1,120 @@
+{
+ "alpha": {
+  "caretTopInPlugin": 213,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 168.5,
+  "active": [
+   "c-alpha"
+  ]
+ },
+ "bravo": {
+  "caretTopInPlugin": 233,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 168.5,
+  "active": [
+   "c-bravo"
+  ]
+ },
+ "charlie": {
+  "caretTopInPlugin": 252,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 168.5,
+  "active": [
+   "c-charlie"
+  ]
+ },
+ "oneline": {
+  "caretTopInPlugin": 427,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 168.5,
+  "active": [
+   "c-oneline"
+  ]
+ },
+ "wrap": {
+  "caretTopInPlugin": 562,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 168.5,
+  "active": [
+   "c-wrap"
+  ]
+ },
+ "span": {
+  "caretTopInPlugin": 756,
+  "caretH": 16.86,
+  "caretX": 527,
+  "scrollTop": 254.5,
+  "active": []
+ },
+ "heading": {
+  "caretTopInPlugin": 938,
+  "caretH": 30.66,
+  "caretX": 397,
+  "scrollTop": 450,
+  "active": [
+   "c-heading"
+  ]
+ },
+ "list": {
+  "caretTopInPlugin": 1308,
+  "caretH": 16.86,
+  "caretX": 445,
+  "scrollTop": 805.5,
+  "active": [
+   "c-list"
+  ]
+ },
+ "softwrap": {
+  "caretTopInPlugin": 1463,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 941,
+  "active": [
+   "c-softwrap"
+  ]
+ },
+ "orphan": {
+  "caretTopInPlugin": 1618,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 1116,
+  "active": [
+   "c-orphan"
+  ]
+ },
+ "caret": {
+  "caretTopInPlugin": 1754,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 1251.5,
+  "active": [
+   "c-caret"
+  ]
+ },
+ "table": {
+  "caretTopInPlugin": 1917,
+  "caretH": 16.86,
+  "caretX": 455,
+  "scrollTop": 1414.5,
+  "active": []
+ },
+ "topline": {
+  "caretTopInPlugin": 97,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 52,
+  "active": []
+ },
+ "plain": {
+  "caretTopInPlugin": 4272,
+  "caretH": 16.86,
+  "caretX": 397,
+  "scrollTop": 3769.5,
+  "active": []
+ }
+}

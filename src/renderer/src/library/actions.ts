@@ -4,11 +4,13 @@
 // store's refusal read back (`artifactRefusalOf`: `designSystemInUse {artifactIds}`, `notFound`, …), null when the
 // failure is not the store's (a timeout, an unavailable host).
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { CommandInput, CommandName, CommandOutput, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf, type ArtifactRefusal, type ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { Space } from '@shared/artifacts/entity';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
+import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4-B4
 
 export type LibraryActionResult<T> = { ok: true; value: T } | { ok: false; error: IpcError; refusal: ArtifactRefusal | null };
 
@@ -47,7 +49,10 @@ export const deleteSpace = (spaceId: string, client: MawsBridge = ipc) => run(cl
 
 // An artifact in a main tab of its own (one per artifact: opened again, its tab is activated), in the current tab set.
 // The tab lives in the main area, so a maximized or floating panel docks first, as `openArtifacts` does for the library.
-export function openArtifactTab(artifactId: string): void {
+// P4-B4: at the place `location` names (an artifact link's fragment), asked of the tab's editor at the latest version
+// unless it names one; a plain open asks nothing of the editor, so a tab opened again keeps the version it shows.
+export function openArtifactTab(artifactId: string, location?: ArtifactLocation): void {
+  if (location !== undefined) requestArtifactOpen(artifactId, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();
   layout.openTab({ kind: 'artifact', artifactId });

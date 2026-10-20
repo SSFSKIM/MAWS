@@ -6,7 +6,7 @@
 // killed and restarted (M7: with a write main's index had missed, through main's e2e seam). M7's upgrade case: an index rewound
 // to version 9 beside a populated host store migrates to 10 at launch and the first connection's snapshot fills it. M5b:
 // an HTML artifact a session made (on C3's replay transport, `support/library-session.ts`) in the panel's Artifacts
-// tool, its versions, P2's comment card and its Side thread, Open in tab and Export to PDF; a PDF, a video and an audio
+// tool, its versions, P2's comment card and its Side thread, Move to tab and Export to PDF; a PDF, a video and an audio
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // P3-H (P3 Decision Log 92): a row menu's Export on its first opening.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
@@ -391,7 +391,7 @@ async function pinnedUnder(element: Locator, card: Locator): Promise<boolean> {
   return box !== null && placed !== null && Math.abs(placed.y - (box.y + box.height + 4)) <= 1 && Math.abs(placed.x - box.x) <= 1;
 }
 
-test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Comment opens P2’s card and its Side thread, Open in tab shows it in a main tab, and Export to PDF saves a PDF', async () => {
+test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Comment opens P2’s card and its Side thread, Move to tab shows it in a main tab, and Export to PDF saves a PDF', async () => {
   test.setTimeout(180_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-viewer-'));
   const saved = join(scratch, 'saved');
@@ -457,8 +457,8 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   await expect(card.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
   await expect(card.getByText(CARD_COMMENT, { exact: true })).toBeVisible();
 
-  // Open in tab: the same artifact in a main tab of its own
-  await panel.getByRole('button', { name: 'Open in tab' }).click();
+  // Move to tab: the same artifact in a main tab of its own
+  await panel.getByRole('button', { name: 'Move to tab' }).click();
   const tab = page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
   await expect(tab.locator('[data-artifact-viewer]')).toBeVisible();
   await expect(tab.frameLocator('[data-artifact-frame="html"]').locator('#version')).toHaveText('VERSION_TWO');

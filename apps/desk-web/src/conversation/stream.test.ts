@@ -3,9 +3,10 @@
 // a direct channel is one session's exchange with the human, the working record between folded. Pending requests sit
 // where they were first seen; an async question's request is its `question` event's.
 import { describe, expect, it } from 'vitest';
-import type { LogEvent } from 'desk-hub/protocol';
+import type { JsonObject, LogEvent } from 'desk-hub/protocol';
+import scopeVectors from '../../test/fixtures/sminos-scope/scope-labels.json' with { type: 'json' };
 import { requestKey } from '../project/conversation';
-import { buildStream, crossProject, placedRequest, type PlacedRequest, type StreamItem } from './stream';
+import { broadcastLabel, buildStream, crossProject, placedRequest, scopeLabel, type PlacedRequest, type StreamItem } from './stream';
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b'; // maws-45 @mini
 const S2 = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a'; // maws-fe @SK.local
@@ -222,9 +223,23 @@ describe('across projects', () => {
   const at = (fields: Record<string, unknown>) => ({ ts: 't', writer: `mini/${S1}`, seq: 1, kind: 'say', mac: { nonce: 'n', value: 'v' }, from: 'maws-45', text: 'hi', ...fields }) as LogEvent;
 
   it("tells the sender's copy by its `copy` key, its destination the delivering event's project", () => {
-    expect(crossProject(at({ to: [{ session: S2, alias: 'mini-7c', project: THERE }], copy: `${THERE}:mini/${S2}:4` }), HERE)).toEqual({ to: THERE });
+    expect(crossProject(at({ to: [{ session: S2, alias: 'mini-7c', project: THERE }], copy: `${THERE}:mini/${S2}:4` }), HERE)).toEqual({ to: [THERE] });
     // A copy whose position does not parse still names its recipients' project.
-    expect(crossProject(at({ to: [{ session: S2, alias: 'mini-7c', project: THERE }], copy: 'x' }), HERE)).toEqual({ to: THERE });
+    expect(crossProject(at({ to: [{ session: S2, alias: 'mini-7c', project: THERE }], copy: 'x' }), HERE)).toEqual({ to: [THERE] });
+  });
+
+  it("names every destination of a broadcast's copy, whose `copy` lists the delivering events (sminos 1.2.0)", () => {
+    const YONDER = 'c2a8e5f1-3b47-5d9e-a6c0-91f2e4d8b733';
+    const to = [
+      { session: S2, alias: 'mini-7c', project: THERE },
+      { session: S1, alias: 'maws-45', project: YONDER },
+    ];
+    expect(crossProject(at({ to, wake: true, scope: {}, copy: [`${THERE}:mini/${S2}:4`, `${YONDER}:mini/${S2}:2`] }), HERE)).toEqual({ to: [THERE, YONDER] });
+    // Entries that are no position are passed over; with none left, the recipients' projects stand, each once.
+    expect(crossProject(at({ to, copy: [`${THERE}:mini/${S2}:4`, 7, 'x'] }), HERE)).toEqual({ to: [THERE] });
+    expect(crossProject(at({ to: [...to, { session: 'x', alias: 'x', project: THERE }], copy: ['x', null] }), HERE)).toEqual({ to: [THERE, YONDER] });
+    // A copy that names no project at all is drawn as an event of this project.
+    expect(crossProject(at({ to: [{ session: S2, alias: 'mini-7c' }], copy: [] }), HERE)).toBeNull();
   });
 
   it('tells a delivering event from another project by its origin, and an event of this project as neither', () => {
@@ -251,5 +266,24 @@ describe('across projects', () => {
       ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '', cwd: '/w/x', relocated: true }),
     ];
     expect(shape(buildStream({ kind: 'group' }, entries, aliases, []))).toEqual(['system:1']);
+  });
+});
+
+// sminos 1.2.0's scoped broadcast (the org directory's §5a): each project's event carries its selector as `scope`, which
+// the desk names as sminos does. The vectors are sminos's own output (test/fixtures/sminos-scope/generate.py runs its
+// `scope_label`, `target_label` and `chat_line`), the first six scopes the ones its test-broadcast.sh asserts.
+describe("a broadcast's scope, as sminos names it", () => {
+  const names = (id: string) => (scopeVectors.projects as Record<string, string>)[id] ?? id;
+
+  it.each(scopeVectors.labels)('$why: $label', ({ scope, label }) => {
+    expect(scopeLabel(scope as unknown as JsonObject, names)).toBe(label);
+  });
+
+  it.each(scopeVectors.events)('$why: → $target', ({ event, target, destinations }) => {
+    const e = event as unknown as LogEvent;
+    // sminos's target_label of a broadcast; a tagged say's names its recipients, which the desk draws by alias.
+    if (e.wake === true) expect(broadcastLabel(e.scope, names)).toBe(target);
+    const other = crossProject(e, 'somewhere-else');
+    expect(other !== null && 'to' in other ? other.to.map(names).join(', ') : null).toBe(destinations);
   });
 });

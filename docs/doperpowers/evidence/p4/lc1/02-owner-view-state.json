@@ -1,0 +1,5 @@
+{"read_at": "2026-10-19T20:22 PDT", "menu": "보기 › 댓글 (View › Comments)", "items": [
+ {"t": "댓글 숨기기 (Hide comments) ⌘+Option+Shift+J", "aria-checked": "false"},
+ {"t": "댓글 최소화 (Minimize comments) ⌘+Option+Shift+W ⌘+Option+Shift+M", "aria-checked": "false"},
+ {"t": "댓글 펼치기 (Expand comments) ⌘+Option+Shift+W ⌘+Option+Shift+E", "aria-checked": "true"},
+ {"t": "모든 댓글 보기 (Show all comments) ⌘+Option+Shift+A", "aria-checked": "false"}]}

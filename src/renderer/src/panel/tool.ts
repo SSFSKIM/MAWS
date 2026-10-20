@@ -13,7 +13,10 @@ export interface PanelToolInit<P = void> {
   appSessionId: AppSessionId | null; // the target session; null only for a pinned tool opened with no session shown
   session: SessionRecord | null; // C5's X1 record for it: directory, additionalDirectories, worktree, holder
   instanceId: string; // the PanelTabRef.id; C9 uses it as the terminal label
-  params: P; // the addTool call's params, `undefined` when it gave none; `undefined` too for a tab restored from layout.json (every P is void or all-optional)
+  // the addTool call's params, `undefined` when it gave none (every P is void or all-optional). P4-B3 (X5 as amended): for a
+  // tab restored from layout.json, what the tool persisted for it through the layout store's `setPanelParams` (stored
+  // JSON the tool must validate), else `undefined`
+  params: P;
   restored?: true; // E10: set only for a tab restored from layout.json (the host's restore path); a tab an addTool opened has none
 }
 

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type TabRef, type TabSet, type TabSetKey, type TabTarget } from '@shared/ipc/schema/layout';
 import {
-  activateTab, activeTab, closeTab, currentSet, cycleTab, dropSession, focusPane, fromV1, moveTab, openSession, openTab, refile, reopenClosed, repairMain,
-  replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
+  activateTab, activeTab, closeTab, currentSet, cycleTab, dockSplit, dropSession, floatingPane, floatSplit, focusPane, fromV1, moveTab, openSession, openTab,
+  refile, reopenClosed, repairMain, replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
 } from './layout-model';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
@@ -54,6 +54,15 @@ describe('layout store transitions', () => {
     expect(active(closeTab(abc(), 'session:a'))).toEqual(['session:c']); // an inactive tab leaves the active one alone
   });
 
+  // P4-B3 (its Decision Log 32): a move is not a close, so a tab the transfer takes away leaves no ⌘⇧T entry.
+  it('closeTab with remember: false removes it the same way and leaves the closed-tab history as it was', () => {
+    const before = closeTab(abc(), 'session:a');
+    const m = closeTab(activateTab(before, 'session:b'), 'session:b', { remember: false });
+    expect(ids(m)).toEqual([['session:c']]);
+    expect(active(m)).toEqual(['session:c']);
+    expect(m.closedTabs).toBe(before.closedTabs);
+  });
+
   it('closeTab: an emptied pane 1 collapses the split and focuses pane 0', () => {
     const m = closeTab(split(), 'session:d');
     expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c']]);
@@ -61,7 +70,7 @@ describe('layout store transitions', () => {
   });
 
   it('closeTab: an emptied pane 0 hands its place to pane 1', () => {
-    const emptied = ['session:a', 'session:b', 'session:c'].reduce(closeTab, focusPane(split(), 0));
+    const emptied = ['session:a', 'session:b', 'session:c'].reduce((m, id) => closeTab(m, id), focusPane(split(), 0));
     expect(ids(emptied)).toEqual([['session:d']]);
     expect(cur(emptied).focusedPane).toBe(0);
   });
@@ -77,7 +86,7 @@ describe('layout store transitions', () => {
     const m = closeTab(openTab(base, S('a')), 'session:a');
     expect(m).toEqual({ ...base, closedTabs: [{ id: 'session:a', ...S('a'), pinned: false }] });
     expect(LayoutMainSchema.safeParse(m).success).toBe(true);
-    const all = ['session:d', 'session:a', 'session:b', 'session:c'].reduce(closeTab, split());
+    const all = ['session:d', 'session:a', 'session:b', 'session:c'].reduce((m, id) => closeTab(m, id), split());
     expect(cur(all)).toMatchObject({ panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0 });
     const back = reopenClosed(m, 0);
     expect(ids(back)).toEqual([['session:a']]);
@@ -170,9 +179,14 @@ describe('layout store transitions', () => {
     expect(ids(crossed)).toEqual([['session:a', 'session:c'], ['session:b', 'session:d']]);
   });
 
-  it('clamps the split ratio to 0.25–0.75', () => {
-    expect(cur(setSplitRatio(split(), 0.9)).splitRatio).toBe(0.75);
-    expect(cur(setSplitRatio(split(), 0.1)).splitRatio).toBe(0.25);
+  // P4-B3 M1 (Decision Log 3): the pixel floors are the divider's and the render's; the model keeps a sanity clamp only.
+  it('keeps the split ratio within 0.01–0.99, a non-finite one reading 0.5', () => {
+    expect(cur(setSplitRatio(split(), 0.9)).splitRatio).toBe(0.9);
+    expect(cur(setSplitRatio(split(), 0.1)).splitRatio).toBe(0.1);
+    expect(cur(setSplitRatio(split(), 1.4)).splitRatio).toBe(0.99);
+    expect(cur(setSplitRatio(split(), -1)).splitRatio).toBe(0.01);
+    expect(cur(setSplitRatio(split(), Number.NaN)).splitRatio).toBe(0.5);
+    expect(cur(setSplitRatio(split(), Number.POSITIVE_INFINITY)).splitRatio).toBe(0.5);
   });
 
   // W5: hydration no longer re-inserts an Overview; a layout left with nothing falls back to the default's empty pane.
@@ -397,7 +411,7 @@ describe('tab sets per project', () => {
   it('setCurrentProject switches the strip; an emptied set stays current and shows the empty pane', () => {
     const m = switchSet(two(), X);
     expect(ids(m)).toEqual([['session:a', 'session:b']]);
-    const emptied = ['session:a', 'session:b'].reduce(closeTab, m);
+    const emptied = ['session:a', 'session:b'].reduce((acc, id) => closeTab(acc, id), m);
     expect(emptied.current).toBe(X);
     expect(ids(emptied)).toEqual([[]]);
     expect(Object.keys(emptied.sets).sort()).toEqual([X, Y].sort());
@@ -520,5 +534,103 @@ describe('tab sets per project', () => {
     expect(Object.keys(repairMain(m, (id) => id !== 'zz' && id !== 'n1').sets).sort()).toEqual([X, Y].sort());
     // nothing open: the no-project set, one empty pane
     expect(fromV1({ version: 1, ...EMPTY_TAB_SET, closedTabs: [] }, setOf)).toEqual(base);
+  });
+});
+
+// P4-B3 M1 (parent §4.5, X37; Decision Log 1, 2, 6): the split's float state beside `splitRatio`, which a float never
+// writes, and the one validity rule every transition and hydration applies.
+describe('the split’s float', () => {
+  const ART: TabTarget = { kind: 'artifact', artifactId: 'doc-1' };
+  const X = 'proj-x' as ProjectId;
+  // Pane 0: the document; pane 1: sessions d (active) and e; the ratio 0.4 (r0).
+  const docked = () => setSplitRatio(openTab(openTab(openTab(base, ART), S('d'), { pane: 1 }), S('e'), { pane: 1, activate: false }), 0.4);
+  const floated = () => floatSplit(docked(), 'session:d');
+
+  it('floats the pane whose active tab is that session, leaving the ratio as it was', () => {
+    const m = floated();
+    expect(cur(m).floating).toEqual({ sessionTabId: 'session:d' });
+    expect(cur(m).splitRatio).toBe(0.4);
+    expect(floatingPane(cur(m))).toBe(1);
+    expect(floatingPane(cur(docked()))).toBeNull();
+    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+    expect(floatSplit(m, 'session:d')).toBe(m); // already floating
+  });
+
+  it('floats nothing unless the current set is a split with that session tab active in a pane', () => {
+    const m = docked();
+    expect(floatSplit(m, 'session:e')).toBe(m); // not active
+    expect(floatSplit(m, 'artifact:doc-1')).toBe(m); // not a session
+    expect(floatSplit(m, 'session:zz')).toBe(m); // not open
+    const single = openTab(base, S('d'));
+    expect(floatSplit(single, 'session:d')).toBe(single); // no split
+  });
+
+  it('docks back to the very value it floated from: no `floating` key, the ratio r0', () => {
+    const m = dockSplit(floated());
+    expect('floating' in cur(m)).toBe(false);
+    expect(JSON.stringify(m)).toBe(JSON.stringify(docked()));
+    const d = docked();
+    expect(dockSplit(d)).toBe(d); // a docked set is left as it is
+  });
+
+  it('A’s last tab closing shows S full width, docked', () => {
+    const m = closeTab(floated(), 'artifact:doc-1');
+    expect(ids(m)).toEqual([['session:d', 'session:e']]);
+    expect('floating' in cur(m)).toBe(false);
+  });
+
+  it('S’s session tab closing docks the split at r0 on S’s next tab, or leaves A alone', () => {
+    const next = closeTab(floated(), 'session:d');
+    expect(ids(next)).toEqual([['artifact:doc-1'], ['session:e']]);
+    expect('floating' in cur(next)).toBe(false);
+    expect(cur(next).splitRatio).toBe(0.4);
+    const alone = closeTab(closeTab(floated(), 'session:e'), 'session:d');
+    expect(ids(alone)).toEqual([['artifact:doc-1']]);
+    expect('floating' in cur(alone)).toBe(false);
+  });
+
+  it('a tab change in S docks; one in A, or focus moving, keeps the float', () => {
+    expect('floating' in cur(activateTab(floated(), 'session:e'))).toBe(false);
+    const inA = openTab(focusPane(floated(), 0), { kind: 'settings', section: null });
+    expect(ids(inA)).toEqual([['artifact:doc-1', 'settings'], ['session:d', 'session:e']]);
+    expect(cur(inA).floating).toEqual({ sessionTabId: 'session:d' });
+    expect(floatingPane(cur(activateTab(inA, 'artifact:doc-1')))).toBe(1);
+  });
+
+  // The review's repro: S's session tab carried into A's pane, where it is active, would otherwise keep the float and
+  // hide the pane the person widened. A float belongs to the pane that collapsed; a change of pane docks it.
+  it('S’s session tab moved into A’s pane docks the split rather than floating A’s pane', () => {
+    const m = floated();
+    expect(cur(m).focusedPane).toBe(1);
+    const viaSplit = splitWithActive(m); // ⌘\ with S's pane focused
+    expect(ids(viaSplit)).toEqual([['artifact:doc-1', 'session:d'], ['session:e']]);
+    expect('floating' in cur(viaSplit)).toBe(false);
+    expect(floatingPane(cur(viaSplit))).toBeNull();
+    const viaOpen = openSession(m, 'd' as AppSessionId, { split: true }); // "Open in split" on the floating session
+    expect(ids(viaOpen)).toEqual([['artifact:doc-1', 'session:d'], ['session:e']]);
+    expect('floating' in cur(viaOpen)).toBe(false);
+    const viaMove = moveTab(m, 'session:d', 0, 1); // a drag between the strips
+    expect('floating' in cur(viaMove)).toBe(false);
+  });
+
+  it('S’s session removed docks it the same way', () => {
+    expect('floating' in cur(dropSession(floated(), 'd' as AppSessionId))).toBe(false);
+  });
+
+  it('belongs to its set: another set shows no float, and the float is there again on return', () => {
+    const away = openTab(switchSet(floated(), X), S('x'), { set: X });
+    expect(away.current).toBe(X);
+    expect(floatingPane(cur(away))).toBeNull();
+    expect(away.sets[NO_PROJECT]?.floating).toEqual({ sessionTabId: 'session:d' });
+    expect(floatingPane(cur(switchSet(away, NO_PROJECT)))).toBe(1);
+  });
+
+  it('hydration keeps a valid float and drops one that no longer names a floating session pane', () => {
+    expect(cur(repairMain(floated(), () => true)).floating).toEqual({ sessionTabId: 'session:d' });
+    const at = (floating: TabSet['floating']): LayoutMain => ({ ...floated(), sets: { [NO_PROJECT]: { ...cur(floated()), floating } } });
+    expect('floating' in cur(repairMain(at({ sessionTabId: 'session:e' }), () => true))).toBe(false); // not active
+    expect('floating' in cur(repairMain(at({ sessionTabId: 'artifact:doc-1' }), () => true))).toBe(false); // not a session
+    expect('floating' in cur(repairMain(floated(), (id) => id !== 'd'))).toBe(false); // its session is gone
+    expect(ids(repairMain(floated(), (id) => id !== 'd'))).toEqual([['artifact:doc-1'], ['session:e']]);
   });
 });

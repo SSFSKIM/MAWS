@@ -1,7 +1,7 @@
 // The slot component C8a registers into C5's `panelHost` slot (C8a execution document, M1): the strip above the
 // selected tool's body, or the resting summary when no tab is selected. What the strip is about to show is decided
 // here: restored Log refs are dropped before it renders them (and pruned from the store once), and a tab appearing for
-// the first time gets its instance (`createState` with the shown session and no params).
+// the first time gets its instance (`createState` with the shown session and, P4-B3, the params its tool persisted).
 import { useLayoutEffect } from 'react';
 import { ensureShownInstances, isRestoredLog, pruneRestoredLogs, setMountedHost, usePanelHost } from './host';
 import type { PanelHostProps } from './host-slot';

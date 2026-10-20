@@ -24,7 +24,15 @@ export interface EditorHostRegistration {
   unresolved?: number; // 0 or absent: no count
   actions?: readonly EditorHostAction[]; // version history, Open in tab, comments, …
   exports?: readonly EditorHostExport[];
-  closeGuard?: (() => Promise<boolean>) | null; // false keeps the tab open (the editor shows its own confirmation)
+  closeGuard?: ((ask?: CloseAsk) => Promise<boolean>) | null; // false keeps the tab open (the editor shows its own confirmation)
+}
+/**
+ * P4-B3 (its Decision Log 39): why a close is asked, when it is not the owner's own. `moving`: a move onto a surface
+ * already showing the artifact closes this tab and keeps that view, which takes what the editor hands over
+ * (`ArtifactEditor.handOver`, as the tab closes); the guard leaves that out of what it asks about.
+ */
+export interface CloseAsk {
+  moving?: true;
 }
 export type EditorHostScope = { surface: 'panel'; tabId: string } | { surface: 'main'; tabId: string };
 export interface EditorHostHandle { update(patch: Partial<EditorHostRegistration>): void; dispose(): void }
@@ -118,12 +126,12 @@ export function useEditorHostRegistration(scope: EditorHostScope | null): Editor
 // Asked by both close paths before the tab's own guard: the registration's closeGuard answer, a guard that throws keeping
 // the tab as the shell's kind guards do; null when the tab has no closeGuard, so a caller with nothing to ask awaits
 // nothing and its own guard runs in the same tick as before X32.
-export function askEditorHostClose(scope: EditorHostScope): Promise<boolean> | null {
+export function askEditorHostClose(scope: EditorHostScope, ask?: CloseAsk): Promise<boolean> | null {
   const guard = editorHostOf(scope)?.closeGuard;
   if (!guard) return null;
   return (async () => {
     try {
-      return await guard();
+      return await guard(ask);
     } catch (error) {
       console.error(`[editor-host] closeGuard for ${keyOf(scope)} failed; keeping the tab`, error);
       return false;

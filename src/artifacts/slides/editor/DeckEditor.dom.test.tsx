@@ -13,6 +13,7 @@ import { DECK_LIMITS } from '../deck';
 import { loadSlide } from '../parse';
 import { addThread } from '../threads';
 import { DeckEditor } from './DeckEditor';
+import type { DeckReveal } from './reveal';
 import { DeckSession } from './session';
 
 function deck(): Doc {
@@ -351,6 +352,56 @@ describe('what the editor shows, for the header’s Export (L233)', () => {
     await waitFor(() => expect(session.snapshot().shown).toBe('compare'));
     act(() => session.toggleRail('history'));
     await waitFor(() => expect(session.snapshot().shown).toBeNull());
+  });
+});
+
+// P4-B4 (the link grammar; "Opening at a place"): a reveal asked from outside the editor (a link's `#slide=`, `#v<id>`)
+// selects the slide on the stage and opens the history rail previewing a version named by its id; a place the deck does
+// not have changes nothing, as a plain open; each reveal is taken once
+describe('a reveal asked from outside', () => {
+  function revealing() {
+    const doc = deck();
+    const versions: ArtifactVersion[] = [{ id: 7, seq: 1, at: Date.UTC(2026, 9, 18, 9), actor: { kind: 'human' }, kind: 'named', label: 'Draft', assetRefs: [] }];
+    const api: HistoryApi = {
+      versions: async () => versions,
+      lastViewedAt: async () => null,
+      versionState: async () => stateV2(doc),
+      attributions: async () => encodeMap(mergeMaps([])),
+      saveVersion: async () => ({ versionId: 8 }),
+      restore: async () => ({ revision: 3, versionId: 8 }),
+      duplicate: async () => ({ artifactId: 'copy' }),
+      markViewed: async () => {},
+    };
+    const session = new DeckSession(doc);
+    const revealed = vi.fn();
+    const view = (reveal: DeckReveal | null) => <DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} history={{ api, handle: { doc, onRestored: () => () => {} } }} reveal={reveal} onRevealed={revealed} />;
+    const utils = render(view(null));
+    return { session, revealed, container: utils.container, reveal: (reveal: DeckReveal) => utils.rerender(view(reveal)) };
+  }
+
+  it('selects the slide a link names, on the stage', () => {
+    const { session, revealed, container, reveal } = revealing();
+    expect(session.snapshot().currentSlide).toBe('a');
+    reveal({ serial: 1, location: { slide: 'c' } });
+    expect(session.snapshot().currentSlide).toBe('c');
+    expect(container.querySelector('[data-stage-slide="c"]')).not.toBeNull();
+    expect(revealed).toHaveBeenCalledWith(1);
+  });
+
+  it('opens the history rail previewing a version named by its id', async () => {
+    const { session, reveal, container } = revealing();
+    reveal({ serial: 2, location: { version: 7 } });
+    await waitFor(() => expect(session.snapshot().shown).toEqual({ versionId: 7 }));
+    expect(session.snapshot().rail).toBe('history');
+    expect(container.querySelector('[data-history-previewing]')).not.toBeNull();
+  });
+
+  it('opens a place the deck does not have as a plain open', async () => {
+    const { session, revealed, reveal } = revealing();
+    reveal({ serial: 3, location: { slide: 'gone', version: 99 } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(session.snapshot()).toMatchObject({ currentSlide: 'a', rail: null, shown: null });
+    expect(revealed).toHaveBeenCalledWith(3);
   });
 });
 

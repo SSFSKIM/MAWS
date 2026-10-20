@@ -13,13 +13,15 @@
 // the Artifacts tool): the `artifact` pane resolves its target through the engine host's store first, so the answer
 // waits on that read (the bridge allows 8 s; a read takes milliseconds). An artifact that exists opens the Artifacts
 // tool on it; a target no artifact answers to is the model's error to read (`artifactNotFound`), never "shown" over a
-// list; no target opens the list.
+// list; no target opens the list. P4-B4: `at` (the place to open it at) is given to the tool as the open's location, as
+// an artifact link's fragment is; with no target there is no artifact to place, and the list opens.
 //
 // E4a (E4a execution document, Interfaces "The renderer"; Decision Log 7): the `browser` pane checks its target as main
 // will (`validateBrowserUrl`), so a refused address answers `navigationRefused` before anything opens; otherwise the
 // Browser tool opens with the parsed URL, the session and the request's own id (main makes one tab of a request two
 // windows both handle).
 import * as z from 'zod';
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import { validateBrowserUrl } from '@shared/browser/url'; // E4a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -53,7 +55,7 @@ function selectTerminal(tool: PanelTool<unknown, unknown>, appSessionId: AppSess
   return existing.id;
 }
 
-export function showPane({ appSessionId, requestId, pane, target, line }: MawsPaneShow, client: MawsBridge = ipc): MawsPaneAnswerResult | Promise<MawsPaneAnswerResult> {
+export function showPane({ appSessionId, requestId, pane, target, line, at }: MawsPaneShow, client: MawsBridge = ipc): MawsPaneAnswerResult | Promise<MawsPaneAnswerResult> {
   const where = PANES[pane];
   if ('mainTab' in where || pane === 'file') {
     if (target === null) return { ok: false, error: TOOL_ERRORS.targetRequired(pane) }; // the host resolves one for `file`
@@ -63,7 +65,7 @@ export function showPane({ appSessionId, requestId, pane, target, line }: MawsPa
   }
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
-  if (pane === 'artifact') return showArtifact(tool, appSessionId, target, client); // E2; P3-L M6b
+  if (pane === 'artifact') return showArtifact(tool, appSessionId, target, at, client); // E2; P3-L M6b; P4-B4: at
   if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target); // E4a
   const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
@@ -124,8 +126,8 @@ async function artifactOf(client: MawsBridge, appSessionId: AppSessionId, target
   return null;
 }
 
-async function showArtifact(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, target: string | null, client: MawsBridge): Promise<MawsPaneAnswerResult> {
-  const open = (params: Record<string, string>): MawsPaneAnswerResult => {
+async function showArtifact(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, target: string | null, at: ArtifactLocation | undefined, client: MawsBridge): Promise<MawsPaneAnswerResult> {
+  const open = (params: { target?: string; location?: ArtifactLocation }): MawsPaneAnswerResult => {
     const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true });
     return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
   };
@@ -133,7 +135,7 @@ async function showArtifact(tool: PanelTool<unknown, unknown>, appSessionId: App
   const found = await artifactOf(client, appSessionId, target);
   if (found === null) return { ok: false, error: TOOL_ERRORS.artifactNotFound(target) };
   if ('error' in found) return { ok: false, error: TOOL_ERRORS.artifactUnreadable(target, found.error) };
-  return open({ target: found.id });
+  return open({ target: found.id, ...(at !== undefined && { location: at }) });
 }
 // E2 end
 

@@ -224,6 +224,26 @@ describe('a comment from a document with no chat beside it', () => {
     expect(sessionCalls()).toEqual([]);
   });
 
+  // P4-B1 (D7): in the margin the notice is in flow in the hosting thread's entry, above the card host, not pinned over
+  // the page; the margin is told the thread it is on
+  it('no context, in the margin: the notice is in flow at the entry’s width and the margin hosts its thread', async () => {
+    const reach = { ...editorReach(), placement: 'margin' as const, hosting: vi.fn() };
+    let open: ((p: typeof passage) => void) | null = null;
+    render(<Editor artifactId={crypto.randomUUID()} reach={reach} given={{ context: { kind: 'none' } }} onOpen={(o) => (open = o)} />);
+    act(() => open!(passage));
+    await act(async () => {});
+    expect(reach.hosting).toHaveBeenLastCalledWith(passage.threadId);
+    const flow = notice()!.parentElement!;
+    expect(flow.hasAttribute('data-notice-flow')).toBe(true);
+    expect(flow.className).not.toContain('absolute');
+    expect(notice()!.className).toContain('relative');
+    expect(notice()!.style.left).toBe('');
+    expect(notice()!.style.top).toBe('');
+    expect(flow.nextElementSibling?.hasAttribute('data-card-margin')).toBe(true); // the card host below it
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(reach.hosting).toHaveBeenLastCalledWith(null);
+  });
+
   it('no context: Escape inside the card withdraws it too', async () => {
     const { reach, comment } = mount({ context: { kind: 'none' } });
     comment();

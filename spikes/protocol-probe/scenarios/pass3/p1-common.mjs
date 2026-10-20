@@ -96,10 +96,10 @@ export const resultSummary=r=>r?{subtype:r.subtype,is_error:r.is_error,num_turns
 // recording never leaves one open. Throws when the scenario body failed, the engine exited non-zero or the owner-file
 // delta is not empty. `sessionId: null` passes no --session-id (a plain `--resume <id>` launch, E7), as `pinned: false`
 // does; `spendCap` is the probe's --max-budget-usd guard; `debugPattern` picks the debug lines copied into the fixture.
-export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true,spendCap=SPEND_CAP,debugPattern=DEBUG_RE}={},body){
+export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true,spendCap=SPEND_CAP,debugPattern=DEBUG_RE,dir='fixtures/pass3/',relay=true}={},body){
  const env=engineEnv(run.home,vars);
  const {configHome,globalConfig}=assertScratch(env);
- await relayReady();
+ if(relay)await relayReady(); // P4-B4: a launch against the stub API (stub-api.mjs) needs no relay
  const before=ownerTmpKeys();
  let failure;
  const p=await harnessRun(name,async p=>{
@@ -113,7 +113,7 @@ export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance
   p.on('ui_prompt_suggest',()=>({shown:false}));
   try{await body(p,{sessionId,run});}catch(e){failure=e;throw e;}
   finally{noteDebug(p,debugFile,debugPattern);p.note({event:'spend',result:resultSummary(lastResult(p))});}
- },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,...(pinned&&sessionId?['--session-id',sessionId]:[]),'--max-budget-usd',spendCap,'--debug-file',debugFile,...flags]});
+ },{cwd:run.cwd,env,bin:BIN,dir,model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,...(pinned&&sessionId?['--session-id',sessionId]:[]),'--max-budget-usd',spendCap,'--debug-file',debugFile,...flags]});
  const exit=await p.closed;
  const after=ownerTmpKeys();
  const same=JSON.stringify(after)===JSON.stringify(before);

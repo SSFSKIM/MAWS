@@ -3,7 +3,8 @@
 // state L's registry made for this tab), the X32 header registered under the scope the surface gives, the page
 // registered as a Mark-up surface, comments going to the session the main area shows (P3-F1: with none shown, the
 // artifact's own context), the history rail on A's IPC, the page in the governing design system's scope when D's is
-// provided, `onShown` once the document is on screen.
+// provided, `onShown` once the document is on screen. P4-B4: an open's place (a link's fragment, `show_pane`'s `at`)
+// reaches the editor as its `reveal`, the open request for this artifact on this surface, taken once the editor has it.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DocumentEditor, type DocumentRail, type DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { Editor } from '@tiptap/core';
@@ -12,16 +13,21 @@ import type { Doc } from '@artifacts/yjs'; // P3-E
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import type { ViewEnvironment } from '@artifacts/document/editor/nodes/views'; // P3-E
 import type { EditorHostAction } from '../../panel/editor-host'; // P3-E
-import type { ArtifactEditorProps } from '../../artifacts/registry';
+import { takeCarriedView, useArtifactViewCapture, type ArtifactEditorProps } from '../../artifacts/registry'; // P4-B3 M5: the view carry
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
 import { useSendToAction } from '../../delivery/header'; // P4-B5
+import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from './comment-session'; // P3-F1
-import { useDocumentComments } from './comments';
+import { forgetCardActivation, useDocumentComments } from './comments'; // P4-B3: forgetCardActivation
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
+import { setCommentsView } from './comments-view'; // P4-B1
+import { useSettings } from '../../stores/settings'; // P4-B1
+import type { CommentsView } from '@artifacts/comments/view'; // P4-B1
 import type { DocumentTabState } from './tab-state';
+import { captureDocumentView, keepUndoManager, liveBody, restoreDocumentViewWhenDrawn, type DocumentView } from './view-carry'; // P4-B3 M5
 
 export type DocumentEditorProps = ArtifactEditorProps<DocumentTabState>;
 
@@ -72,7 +78,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   // the artifact's own context (its session, a session its directory starts on Comment, or a card saying why not);
   // not offered only while that is unread.
   const target = useArtifactCommentTarget(artifactId);
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */ });
+  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */, draftRule: true /* P4-B1: X36's draft rule, the document's (its Comment asks draft(), its tab's close guard reads it) */, hostId: state.commentHostId /* P4-B3 M6: a move keeps the composing card */ });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);
@@ -86,8 +92,8 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   // The owner's view (L's `onShown`, then `markViewed`): once per showing (the tab's state remembers it), only once the
   // synced document is drawn (an editor bound to its tab, a frame later) while the body is visible; a body that goes or
   // hides first cancels the frame.
-  const [drawn, setDrawn] = useState(false);
-  const onEditor = useCallback((editor: Editor | null) => setDrawn(editor !== null), []);
+  const [editor, setEditor] = useState<Editor | null>(null); // P4-B3 M5: the live editor (was only whether there is one)
+  const drawn = editor !== null;
   useEffect(() => {
     if (!visible || !drawn || state.shown()) return;
     const frame = requestAnimationFrame(() => {
@@ -107,8 +113,50 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
       returnedTo(state.history);
     }
   }, [visible, drawn, state]);
+  // P4-B3 M5 (view-carry.ts): the tab's undo history in every editor this body mounts, so ⌘Z after a remount (a tab
+  // switch, a move) undoes what was typed before it; and where the owner was, captured for a move and restored once by
+  // the first mount it moved to.
+  useEffect(() => {
+    const body = editor && liveBody(editor);
+    const manager = body && state.undoManagerFor(body);
+    return editor && manager ? keepUndoManager(editor, manager) : undefined;
+  }, [editor, state]);
+  useArtifactViewCapture(scope, () => {
+    if (!editor) return undefined;
+    forgetCardActivation(state.commentHostId); // Decision Log 37: the card activates its thread in the editor it moves to
+    return captureDocumentView(editor, page.current) ?? undefined;
+  });
+  const carried = useRef<DocumentView | null | undefined>(undefined); // undefined: not taken yet
+  const restoring = useRef<(() => void) | null>(null); // the carried restore's cancel, until it has settled or gone
+  useEffect(() => {
+    if (carried.current === undefined) carried.current = (takeCarriedView(scope) as DocumentView | undefined) ?? null;
+  }, [scope]);
+  useEffect(() => {
+    const view = carried.current;
+    if (!editor || !view) return;
+    const cancel = restoreDocumentViewWhenDrawn(editor, () => page.current, view, () => (carried.current = null));
+    restoring.current = cancel;
+    return () => {
+      cancel();
+      restoring.current = null;
+    };
+  }, [editor]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
+  // P4-B1 (the P4 spec §4.3; settings version 15): View › Comments, per user, read from the settings and written through
+  // them (the editor is portable and takes the value and the setter)
+  const commentsView = useSettings((s) => s.state?.settings.artifacts.commentsView ?? 'expand');
+  const onCommentsViewChange = useCallback((view: CommentsView) => void setCommentsView(view), []);
   const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
+  const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4
+  // P4-B4 (the B3 merge's review): a place asked after a move's hand-off (a link, show_pane's at) is newer than the view
+  // the move carried: the carried restore (its scheduled frame, its scroll held while the page settles) gives way to it
+  const placed = reveal?.location !== undefined;
+  useEffect(() => {
+    if (!placed) return;
+    carried.current = null;
+    restoring.current?.();
+    restoring.current = null;
+  }, [placed, reveal]);
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.ready || !snapshot.handle) return <Notice>Opening the document…</Notice>;
@@ -124,15 +172,19 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         suggestions={state.host}
         rail={snapshot.rail}
         onRailChange={onRailChange}
+        commentsView={commentsView} /* P4-B1 */
+        onCommentsViewChange={onCommentsViewChange} /* P4-B1 */
         saveVersionRequest={snapshot.saveVersionRequest}
         pageScope={SystemPage}
         onPage={onPage}
         onPreviewChange={onPreviewChange}
-        onEditor={onEditor}
+        onEditor={setEditor}
         mentions={state.mentions}
         renderChart={renderChart} /* P3-E */
         onDisplayedDocument={onDisplayedDocument}
         blockCommentQuote={blockCommentQuote}
+        reveal={reveal} /* P4-B4 */
+        onRevealed={takeOpenRequest}
       />
     </SystemScope>
   );

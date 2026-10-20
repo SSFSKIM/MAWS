@@ -222,6 +222,23 @@ describe('layout store actions', () => {
     expect(keys.at(-1)).toBe('m69');
   });
 
+  // P4-B3 (its Decision Log 10): the split card's size over a main tab is kept as `main:<tab id>`, in any tab set, and
+  // goes with the tab at the next write
+  it('keeps the split card’s size per open main tab, in any set, and drops a closed tab’s', () => {
+    const store = createLayoutStore();
+    store.getState().openTab({ kind: 'diagnostics' });
+    store.getState().openTab({ kind: 'settings', section: null });
+    store.getState().setFloatingCardSize('main:diagnostics', { w: 400, h: 300 });
+    store.getState().setFloatingCardSize('main:settings', { w: 440, h: 320 });
+    store.getState().setCurrentProject('elsewhere' as ProjectId);
+    store.getState().setFloatingCardSize('main:gone', { w: 500, h: 400 });
+    expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'main:settings', 'main:gone']);
+    store.getState().setCurrentProject(null);
+    store.getState().closeTab('settings');
+    store.getState().setFloatingCardSize('summary', { w: 420, h: 380 });
+    expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'summary']);
+  });
+
   // W5: the floating Overview's rect persists with the regions; whether it is open does not (the app opens on the tabs).
   it('keeps the Overview’s rect in the regions and its open state outside them', () => {
     const store = createLayoutStore();

@@ -1,26 +1,27 @@
 // The panel's Artifacts tool (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5a; Decision Log 8, 15, 21a, 23, 25b)
 // over a fake main: the session's list (its lineage's artifacts by kind) and All, "Open library", the record view
 // mounting the kind's registered `Panel` with the tab's state and X32 scope, `markViewed` once per showing, the state
-// given back on Back, on a re-target and when the instance goes, Open in tab, a kind with no editor yet, and a pinned
+// given back on Back, on a re-target and when the instance goes, Move to tab, a kind with no editor yet, and a pinned
 // tab following the shown session.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
-import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
+import { heldArtifactEditorState, registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectLibrary, resetLibrary, watchLibraryRow } from '../../library/store';
 import { editorHostOf, registerEditorHost, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
-import { panelHost, registerPanelTool } from '../../panel/host';
+import { connectPanelHost, instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
-import { useLayout } from '../../stores/layout';
+import { persistLayout, useLayout } from '../../stores/layout';
 import { activeTab, allTabs } from '../../stores/layout-model';
 import { fail, installFakeMain, ok } from '../../test-support/code';
-import { A, B, panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
+import { A, B, heldBridge, hydrateHeld, panelOf, persisted, resetPanelStores, TestHost } from '../../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
 import { ArtifactsSummary } from './Summary';
-import { resetVersionRequests, useVersionRequest } from './viewers/requests';
+import { resetOpenRequests, useOpenRequest } from './viewers/requests';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = Date.now();
@@ -445,7 +446,7 @@ describe('the record view', () => {
     const { handle } = await mount({ target: NOTES.id });
     await screen.findByText(`panel editor for ${NOTES.id} in panel:${TAB}`);
     function Asked() {
-      const request = useVersionRequest(OTHER.id, 'panel');
+      const request = useOpenRequest(OTHER.id, 'panel');
       return <p data-asked="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
     }
     render(<Asked />);
@@ -523,36 +524,6 @@ describe('the record view', () => {
     expect(listed()).toHaveLength(5);
   });
 
-  // P3-F wave S (F16, obs 7a): Open in tab moves the artifact: it opens in a main tab of its own and the record here goes
-  // Back, through the editor's closeGuard as Back does, so a replica with unacknowledged edits stays until it allows
-  it('Open in tab moves the artifact to a main tab of its own: the record goes Back', async () => {
-    const editor = testEditor();
-    const { handle } = await mount({ target: NOTES.id });
-    await screen.findByText(/panel editor for/);
-    fireEvent.click(button('Open in tab')!);
-    await settle();
-    expect(allTabs(useLayout.getState().main).find((t) => t.kind === 'artifact')).toMatchObject({ artifactId: NOTES.id });
-    expect(handle.snapshot().view).toEqual({ kind: 'list' });
-    expect(editor.dispose).toHaveBeenCalledTimes(1);
-    expect(listed()).toHaveLength(5);
-  });
-
-  it('Open in tab asks the editor’s closeGuard before the record goes: false keeps it, the main tab open', async () => {
-    const editor = testEditor({ guarded: true });
-    const { handle } = await mount({ target: NOTES.id });
-    await screen.findByText(/panel editor for/);
-    fireEvent.click(button('Open in tab')!);
-    await settle();
-    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toMatchObject([{ artifactId: NOTES.id }]);
-    expect(handle.snapshot().view, 'the guard kept it').toEqual({ kind: 'record', artifactId: NOTES.id });
-    expect(editor.dispose).not.toHaveBeenCalled();
-    (editor.createState.mock.results[0]!.value as TestState).allowClose = true;
-    fireEvent.click(button('Open in tab')!);
-    await settle();
-    expect(handle.snapshot().view).toEqual({ kind: 'list' });
-    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact'), 'one tab per artifact').toHaveLength(1);
-  });
-
   it('a pinned tab keeps its record when the shown session changes; its list follows the session', async () => {
     testEditor();
     const handle = create({ target: NOTES.id });
@@ -568,14 +539,91 @@ describe('the record view', () => {
   });
 });
 
+// P4-B3 (M3; its Decision Log 22, tracker row 290): the record a tab shows is its persisted params (`{target}`, none for
+// the list), read back by a restored tab, so the tab shows the same record after a relaunch, pinned or a session's.
+describe('restore', () => {
+  const paramsOf = (tabId: string) => useLayout.getState().panelParams[tabId];
+
+  it('writes the record it shows as its tab’s params, and none at Back, on a re-target to the list and when the instance goes', async () => {
+    testEditor();
+    const { handle } = await mount();
+    expect(paramsOf(TAB)).toBeUndefined();
+    await openRow(1);
+    expect(paramsOf(TAB)).toEqual({ target: NOTES.id });
+    act(() => handle.open({ target: SPEC.id }));
+    await settle();
+    expect(paramsOf(TAB)).toEqual({ target: SPEC.id });
+    fireEvent.click(button('Back')!);
+    await settle();
+    expect(paramsOf(TAB)).toBeUndefined();
+    await openRow(1);
+    act(() => handle.open(undefined));
+    await settle();
+    expect(paramsOf(TAB)).toBeUndefined();
+    await openRow(1);
+    artifactsTool.dispose(handle);
+    expect(paramsOf(TAB)).toBeUndefined();
+  });
+
+  it('a restored tab shows the record its params name; params it cannot read show the list', async () => {
+    testEditor();
+    const restore = (params: unknown) => {
+      const handle = artifactsTool.createState({ appSessionId: A, session: null, instanceId: TAB, params: params as ArtifactsParams, restored: true });
+      handles.push(handle);
+      return handle.snapshot().view;
+    };
+    expect(restore({ target: NOTES.id })).toEqual({ kind: 'record', artifactId: NOTES.id });
+    for (const unreadable of [undefined, null, 'x', 7, [], {}, { target: 7 }, { target: '' }, { target: null }]) expect(restore(unreadable), JSON.stringify(unreadable)).toEqual({ kind: 'list' });
+  });
+
+  // A launch over layout.json as the last one left it: the host forgets its instances (nothing is disposed at a quit),
+  // the layout store reads the keys back, the host passes its barrier and the panel draws.
+  async function launch(layoutJson: Record<string, unknown>) {
+    cleanup();
+    resetPanelHost();
+    useLayout.setState({ hydrated: false, regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, panelParams: {} });
+    const bridge = heldBridge(layoutJson);
+    offs.push(persistLayout(bridge.client), connectPanelHost());
+    registerPanelTool(artifactsTool);
+    await hydrateHeld(bridge);
+    render(<TestHost />);
+    await settle();
+    const quit = () => offs.splice(0).forEach((off) => off()); // persistence flushes what is pending
+    return { left: () => (quit(), { ...layoutJson, ...Object.fromEntries(bridge.sets.map((s) => [s.key, s.value])) }) };
+  }
+  const overview = () => document.querySelector('[role="tabpanel"][aria-label="Session overview"]');
+
+  it.each([
+    ['a pinned tab, with no session in view', null, LAYOUT_DEFAULTS.main],
+    ['a session’s tab', A, persisted({})['main.tabs']],
+  ])('%s shows the same record after a relaunch, never the Session overview or the list; after Back, the list', async (_, appSessionId, shown) => {
+    testEditor();
+    const first = await launch(persisted({ 'main.tabs': shown }));
+    let tabId = '';
+    act(() => void (tabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params: { target: NOTES.id } })));
+    await screen.findByText(`panel editor for ${NOTES.id} in panel:${tabId}`);
+
+    const second = await launch(first.left());
+    expect(overview()).toBeNull();
+    expect(screen.getByText(`panel editor for ${NOTES.id} in panel:${tabId}`)).toBeTruthy();
+    fireEvent.click(button('Back')!);
+    await settle();
+
+    await launch(second.left());
+    expect(overview()).toBeNull();
+    expect(document.querySelector('[data-artifacts-list]')).toBeTruthy();
+    expect(screen.queryByText(/panel editor for/)).toBeNull();
+  });
+});
+
 // M6b: a transcript row's Open (`TranscriptActions.openArtifact`): the tool in the row's session on the artifact, the
 // version the row names asked of the panel's viewer of it; nothing while no build registers the tool. Fix wave 2: every
 // open asks (the latest when it names none), the next open supersedes, and an open the guard refused cancels its own.
 describe('openArtifactInPanel (M6b)', () => {
-  beforeEach(() => resetVersionRequests()); // every open asks, the earlier cases' too
-  afterEach(() => resetVersionRequests());
+  beforeEach(() => resetOpenRequests()); // every open asks, the earlier cases' too
+  afterEach(() => resetOpenRequests());
   function Request() {
-    const request = useVersionRequest(NOTES.id, 'panel');
+    const request = useOpenRequest(NOTES.id, 'panel');
     return <p data-request="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
   }
   const asked = () => document.querySelector('[data-request]')!.textContent;
@@ -593,6 +641,25 @@ describe('openArtifactInPanel (M6b)', () => {
     expect(asked()).toBe('"latest"');
     act(() => openArtifactInPanel(B, NOTES.id, { revision: 7 }));
     expect(asked()).toBe('{"revision":7}');
+  });
+
+  // P4-B4: a link's place rides the same ask, to the editor of the artifact on that surface, whether the tab is opening
+  // on it or already shows it; a later plain open supersedes it
+  it('asks for the place a link names, beside the version, also of a tab already showing the artifact', () => {
+    function Place() {
+      const request = useOpenRequest(NOTES.id, 'panel');
+      return <p data-place="">{request === null ? 'none' : JSON.stringify([request.at, request.location ?? null])}</p>;
+    }
+    const place = () => document.querySelector('[data-place]')!.textContent;
+    render(<Place />);
+    registerPanelTool(artifactsTool);
+    act(() => openArtifactInPanel(B, NOTES.id, undefined, { tab: 't2', block: 'b7' }));
+    expect(place()).toBe('["latest",{"tab":"t2","block":"b7"}]');
+    act(() => openArtifactInPanel(B, NOTES.id, undefined, { version: 4 })); // the same tab, already on the artifact
+    expect(panelOf(B)!.tabs).toHaveLength(1);
+    expect(place()).toBe('["latest",{"version":4}]');
+    act(() => openArtifactInPanel(B, NOTES.id));
+    expect(place()).toBe('["latest",null]');
   });
 
   it('cancels the ask of an open the shown artifact’s guard refused', async () => {
@@ -651,6 +718,26 @@ describe('in the panel', () => {
     await act(() => panelHost.closeTab(tabId));
     expect(editor.dispose).toHaveBeenCalledTimes(2);
     expect(editorHostOf({ surface: 'panel', tabId })).toBeNull();
+  });
+
+  // P3-F wave S (F16, obs 7a): the record bar's button moves the artifact to a main tab of its own. P4-B3 (X38; its
+  // Decision Log 19, 21): "Move to tab" (it was "Open in tab"), its editor's state going with it, so its guard has nothing
+  // to ask; the move's rows are the transfer's (shell/transfer.test.ts).
+  it('Move to tab moves the artifact to a main tab with its editor’s state, asking no guard: the record goes Back', async () => {
+    const editor = testEditor({ guarded: true }); // a guard that would keep it
+    registerPanelTool(artifactsTool);
+    render(<TestHost />);
+    let tabId = '';
+    act(() => void (tabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: NOTES.id } })));
+    await screen.findByText(`panel editor for ${NOTES.id} in panel:${tabId}`);
+    expect(button('Open in tab'), 'renamed').toBeNull();
+    fireEvent.click(button('Move to tab')!);
+    await settle();
+    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toMatchObject([{ artifactId: NOTES.id }]);
+    expect((instanceOf(tabId)!.state as ArtifactsHandle).snapshot().view).toEqual({ kind: 'list' });
+    expect(heldArtifactEditorState({ surface: 'main', tabId: `artifact:${NOTES.id}` })?.state).toBe(editor.createState.mock.results[0]!.value);
+    expect(editor.createState).toHaveBeenCalledTimes(1);
+    expect(editor.dispose).not.toHaveBeenCalled();
   });
 
   // While the tab is closing (from the host marking it closing, in the tick it asks the shown editor's guard, until the

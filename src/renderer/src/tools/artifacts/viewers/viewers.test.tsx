@@ -24,7 +24,7 @@ import { registerCommentComposer, type CommentContext } from '../../code/anchor/
 import { useViewer } from '../../code/viewer/viewer-store';
 import { byteViewer, type ByteViewerState } from './ByteViewer';
 import { resetArtifactConsole } from './console';
-import { requestArtifactVersion, resetVersionRequests } from './requests';
+import { requestArtifactOpen, resetOpenRequests } from './requests';
 
 // The frame the viewer last handed its card host, so a case can call what a card thread's artifact row calls
 // (`showVersion`); the host itself is the real one.
@@ -79,7 +79,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetArtifactEditors();
   resetArtifactConsole();
-  resetVersionRequests();
+  resetOpenRequests();
   cardFrames.length = 0;
   useViewer.getState().reset();
   useCommentCard.setState({ open: null });
@@ -213,7 +213,7 @@ describe('the HTML viewer', () => {
   // whole-branch review: a revision asked for is exported as that version even while it is the latest, so a publish
   // between the read and the export never exports the newer one; only the latest followed exports live
   it('exports a revision asked for by its version id though it is the latest, and the followed latest live', async () => {
-    requestArtifactVersion(ID, { revision: 9 }, 'panel');
+    requestArtifactOpen(ID, { revision: 9 }, 'panel');
     const first = mount('html');
     await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
     act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
@@ -257,7 +257,7 @@ describe('a version asked for from outside', () => {
   });
 
   it('shows the n-th version by revision when it mounts, never revision n, and takes the request once', async () => {
-    requestArtifactVersion(ID, { version: 2 }, 'panel');
+    requestArtifactOpen(ID, { version: 2 }, 'panel');
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
     expect(main.callsOf('library.content')).not.toContainEqual({ artifactId: ID, revision: 2 });
@@ -269,13 +269,13 @@ describe('a version asked for from outside', () => {
   it('moves a viewer already showing the artifact, follows the latest for the last place, and leaves another surface’s or artifact’s alone', async () => {
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
-    act(() => void requestArtifactVersion(ID, { version: 1 }, 'main'));
-    act(() => void requestArtifactVersion('00000000-0000-4000-8000-0000000000ff', { version: 1 }, 'panel'));
+    act(() => void requestArtifactOpen(ID, { version: 1 }, 'main'));
+    act(() => void requestArtifactOpen('00000000-0000-4000-8000-0000000000ff', { version: 1 }, 'panel'));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html'));
-    act(() => void requestArtifactVersion(ID, { version: 1 }, 'panel'));
+    act(() => void requestArtifactOpen(ID, { version: 1 }, 'panel'));
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
-    act(() => void requestArtifactVersion(ID, { version: 3 }, 'panel'));
+    act(() => void requestArtifactOpen(ID, { version: 3 }, 'panel'));
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
     expect(document.querySelector('[data-artifact-viewer]')?.getAttribute('data-version')).toBe('3');
   });
@@ -284,7 +284,7 @@ describe('a version asked for from outside', () => {
   it('shows X12’s version n of an imported page where the history before it thinned', async () => {
     versions = [{ ...version(1, 4), kind: 'import', label: 'v1' }, { ...version(3, 14), kind: 'import', label: 'v3' }, version(4, 20)]; // v2 gone
     names = { 4: 'index.html', 14: 'index.html', 20: 'index.html' };
-    requestArtifactVersion(ID, { version: 3 }, 'panel');
+    requestArtifactOpen(ID, { version: 3 }, 'panel');
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
   });
@@ -292,12 +292,26 @@ describe('a version asked for from outside', () => {
   // M6b fix wave 2: a row of a call whose answer named its revision opens that revision, wherever thinning moved its
   // place; a revision thinning dropped is stood for by the next kept version
   it('shows the version that captured a revision, the next kept one when thinning dropped it', async () => {
-    requestArtifactVersion(ID, { revision: 4 }, 'panel');
+    requestArtifactOpen(ID, { revision: 4 }, 'panel');
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
-    act(() => void requestArtifactVersion(ID, { revision: 5 }, 'panel')); // revision 5's version thinned: 9 kept after it
+    act(() => void requestArtifactOpen(ID, { revision: 5 }, 'panel')); // revision 5's version thinned: 9 kept after it
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
-    act(() => void requestArtifactVersion(ID, { revision: 14 }, 'panel'));
+    act(() => void requestArtifactOpen(ID, { revision: 14 }, 'panel'));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+  });
+
+  // P4-B4: a link's `#v<id>` (a location's version) names a retained version by its id, over the version the open asked
+  // (a link asks the latest); an id the page does not retain shows the latest; a location without one, the version asked
+  it('shows the retained version a link names by its id, the latest for an id not retained', async () => {
+    requestArtifactOpen(ID, 'latest', 'panel', { version: 1 }); // version 1 captured revision 4
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    act(() => void requestArtifactOpen(ID, { revision: 9 }, 'panel', { version: 42 })); // not retained: the latest
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    act(() => void requestArtifactOpen(ID, { revision: 9 }, 'panel', { block: 'b1' })); // no version in the place
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    act(() => void requestArtifactOpen(ID, 'latest', 'panel', { version: 3 })); // the latest now, kept by its revision
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
   });
 
@@ -305,7 +319,7 @@ describe('a version asked for from outside', () => {
   // versions read: a version before it thinned away, a Reload and a refresh of the row still show that revision; the
   // picker's own choice is an identity too
   it('keeps showing a revision asked for after an earlier version thins, across a Reload and a refresh', async () => {
-    requestArtifactVersion(ID, { revision: 9 }, 'panel');
+    requestArtifactOpen(ID, { revision: 9 }, 'panel');
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
     versions = [version(2, 9), version(3, 14)]; // revision 4's version thinned: 9 is now the first place
@@ -327,7 +341,7 @@ describe('a version asked for from outside', () => {
   // thread's artifact row meanwhile lands
   describe('while a publish reads the versions again', () => {
     async function shownAt9() {
-      requestArtifactVersion(ID, { revision: 9 }, 'panel');
+      requestArtifactOpen(ID, { revision: 9 }, 'panel');
       const mounted = mount('html');
       await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(2)); // before the row is read, and after
       await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
@@ -412,7 +426,7 @@ describe('a version asked for from outside', () => {
   it('takes a request after a slow versions read, and a later open asking for the latest supersedes an earlier one', async () => {
     const slow = deferred<ReturnType<typeof ok>>();
     versionsAnswer = () => slow.promise;
-    requestArtifactVersion(ID, { version: 1 }, 'panel');
+    requestArtifactOpen(ID, { version: 1 }, 'panel');
     mount('html');
     await new Promise((resolve) => setTimeout(resolve, 30));
     const later = Date.now() + 60_000; // the read answers a minute later
@@ -422,8 +436,8 @@ describe('a version asked for from outside', () => {
     clock.mockRestore();
     cleanup();
     versionsAnswer = null;
-    requestArtifactVersion(ID, { version: 1 }, 'panel');
-    requestArtifactVersion(ID, 'latest', 'panel'); // the next open, naming no version
+    requestArtifactOpen(ID, { version: 1 }, 'panel');
+    requestArtifactOpen(ID, 'latest', 'panel'); // the next open, naming no version
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
   });

@@ -593,4 +593,24 @@ describe('the thread’s artifact row', () => {
     expect(showVersion).toHaveBeenCalledTimes(2);
     expect(registered).toHaveBeenCalledWith(PARENT, '00000000-0000-4000-8000-0000000000e2', { version: 4 });
   });
+
+  // P4-B4: an artifact link's place reaches the open too: the card's own page shows the version a `#v<id>` names in the
+  // card's viewer; another artifact opens at its place through the registered action
+  it('a link in the thread opens at its place: the card’s page at the version it names, another artifact at its block', async () => {
+    const registered = vi.fn();
+    const OTHER = '00000000-0000-4000-8000-0000000000e3';
+    offs.push(registerTranscriptActions({ openArtifact: registered, openArtifactTab: vi.fn() }));
+    const b = builder();
+    b.turn('t1', anchoredMessage({ anchor: ANCHOR, text: COMMENT, destination: 'thread', screenshot: false }));
+    b.text('m1', 0, `Compare [the draft](maws-artifact:${RECORD}#v2) and [the plan](maws-artifact:${OTHER}#block=b7).`);
+    b.end(['t1']);
+    snapshot = b.events;
+    await intoThread();
+    withRecord();
+    const chip = async (name: string) => within(card()!).findByRole('button', { name });
+    fireEvent.click(await chip('the draft'));
+    expect(showVersion).toHaveBeenLastCalledWith('latest', { version: 2 });
+    fireEvent.click(await chip('the plan'));
+    expect(registered).toHaveBeenLastCalledWith(expect.any(String), OTHER, undefined, { block: 'b7' });
+  });
 });

@@ -1,0 +1,79 @@
+engine /Users/new/.local/share/claude/versions/2.1.304 (2.1.304); model haiku; scratch home /private/tmp/maws-p4b4-config-jHTEiM; userData /private/tmp/maws-p4b4-live-Douh9n
+A-15 before: 174 keys
+case 1's prompt: "지난주 회의에서 정한 하반기 로드맵 말이야, 검색 기능 출시일이 언제로 정해졌고 담당자가 누구였지? 그 내용이 적힌 곳을 내가 바로 열어볼 수 있게 해줘. 도구는 에이전트를 시키지 말고 직접 호출해."
+case 1: target 956caa73-c1a1-4799-906c-8d46b5a58bb7 "하반기 제품 로드맵 회의록", the answer in block Zp9dH4sE (the third of four); its links before []
+p4-b4-artifact-search: session live-de709056; init tools hold ToolSearch true, mcp__maws__artifact_search true
+p4-b4-artifact-search: tool uses [{"name":"ToolSearch","input":{"query":"select:mcp__maws__artifact_search,mcp__maws__artifact_read","max_results":2},"parent":null},{"name":"mcp__maws__artifact_search","input":{"query":"하반기 로드맵","limit":10},"parent":null},{"name":"mcp__maws__artifact_search","input":{"query":"roadmap 검색","limit":10},"parent":null},{"name":"mcp__maws__artifact_read","input":{"artifact":"956caa73-c1a1-4799-906c-8d46b5a58bb7","tab":"m24kz7uv"},"parent":null}]
+p4-b4-artifact-search: tool time (X34): 3 store calls, median 20 ms, max 21 ms (bound 1,000 ms, median 500 ms); 0 render calls, max 0 ms (bound 3,500 ms)
+p4-b4-artifact-search: answer "지난주 회의록에 따르면 검색 기능 출시일은 **12월 9일**이고, 출시 담당자는 **박서연 매니저**입니다.\n\n문서는 [하반기 제품 로드맵 회의록](maws-artifact:956caa73-c1a1-4799-906c-8d46b5a58bb7#block=Zp9dH4sE)에 있고, 링크를 누르면 해당 문단으로 바로 열립니다."
+journal: /private/tmp/maws-p4b4-live-Douh9n/engine-host/journal/live-de709056/5fbrc75q.jsonl (total_cost_usd 0.0038)
+exported: /private/tmp/maws-p4b4-live-Douh9n/exports/p4-b4-artifact-search.jsonl (from /private/tmp/maws-p4b4-live-Douh9n/engine-host/journal/live-de709056/5fbrc75q.jsonl)
+exported: /private/tmp/maws-p4b4-live-Douh9n/exports/p4-b4-artifact-search-transcript.jsonl (transcript /private/tmp/maws-p4b4-config-jHTEiM/projects/-private-tmp-maws-p4b4-repo-IECJCg/dcc02ba1-9d25-4dba-b70c-501f36448d15.jsonl)
+init plugins: [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}]
+A-15 after: 174 keys (identical)
+p4-b4-artifact-search: spend total_cost_usd 0.0038 (maxBudgetUsd 0.22)
+case 1: artifact_search {"query":"하반기 로드맵","limit":10} answered {
+  "status": "found",
+  "hits": [
+    {
+      "id": "956caa73-c1a1-4799-906c-8d46b5a58bb7",
+      "kind": "document",
+      "title": "하반기 제품 로드맵 회의록",
+      "revision": 1,
+      "updatedAt": "2026-10-20T06:06:53.701Z",
+      "lastEditor": {
+        "by": "user",
+        "at": "2026-10-20T06:06:53.645Z"
+      },
+      "snippet": "지난주 목요일 회의에서 하반기 제품 로드맵을 팀장들과 함께 검토했다.",
+      "read": {
+        "tab": "m24kz7uv",
+        "from": "Rk3vQ8aT"
+      }
+    },
+    {
+      "id": "204efc09-32d3-4e02-8e2a-1eddcaa56904",
+      "kind": "document",
+      "title": "상반기 로드맵 초안",
+      "revision": 2,
+      "updatedAt": "2026-10-20T06:06:53.715Z",
+      "lastEditor": {
+        "by": "another session",
+        "appSessionId": "app-p4b4-elsewhere",
+        "at": "2026-10-20T06:06:53.711Z"
+      },
+      "snippet": "검색 기능은 하반기 회의에서 다시 논의하기로 했다.",
+      "read": {
+        "tab": "zp644qui",
+        "from": "Ma3Na4Oa"
+      }
+    }
+  ],
+  "more": false
+}
+case 1: artifact_search {"query":"roadmap 검색","limit":10} answered {
+  "status": "found",
+  "hits": [],
+  "more": false,
+  "hint": "No match; try fewer or other words, or the other language."
+}
+case 1: maws calls [{"name":"artifact_search","args":{"query":"하반기 로드맵","limit":10}},{"name":"artifact_search","args":{"query":"roadmap 검색","limit":10}},{"name":"artifact_read","args":{"artifact":"956caa73-c1a1-4799-906c-8d46b5a58bb7","tab":"m24kz7uv"}}]
+case 1: target links after [{"artifactId":"956caa73-c1a1-4799-906c-8d46b5a58bb7","appSessionId":"live-de709056","role":"viewed","lastAt":1792476419857}]
+case 1: links in the answer [{"text":"하반기 제품 로드맵 회의록","href":"maws-artifact:956caa73-c1a1-4799-906c-8d46b5a58bb7#block=Zp9dH4sE","artifactId":"956caa73-c1a1-4799-906c-8d46b5a58bb7","at":{"block":"Zp9dH4sE"}}]
+case 1: verdict: searched true; linked at the answer's block true (linked blocks ["Zp9dH4sE"]); the date true; the owner true
+case 2: artifact 2448adc9-4b3e-4212-99bd-fee0d59fb58e "Q3 launch checklist"
+p4-b4-link-form: session live-4ee922e5; init tools hold ToolSearch true, mcp__maws__artifact_search true
+p4-b4-link-form: tool uses []
+p4-b4-link-form: tool time (X34): 0 store calls, median 0 ms, max 0 ms (bound 1,000 ms, median 500 ms); 0 render calls, max 0 ms (bound 3,500 ms)
+p4-b4-link-form: answer "Open it at [Q3 launch checklist](maws-artifact:2448adc9-4b3e-4212-99bd-fee0d59fb58e) in MAWS, by clicking that link."
+journal: /private/tmp/maws-p4b4-live-Douh9n/engine-host/journal/live-4ee922e5/y4hpmtif.jsonl (total_cost_usd 0.0011)
+exported: /private/tmp/maws-p4b4-live-Douh9n/exports/p4-b4-link-form.jsonl (from /private/tmp/maws-p4b4-live-Douh9n/engine-host/journal/live-4ee922e5/y4hpmtif.jsonl)
+exported: /private/tmp/maws-p4b4-live-Douh9n/exports/p4-b4-link-form-transcript.jsonl (transcript /private/tmp/maws-p4b4-config-jHTEiM/projects/-private-tmp-maws-p4b4-repo-5JVEHE/fe27f735-2588-4de2-a0d2-acf64138f080.jsonl)
+init plugins: [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}]
+A-15 after: 174 keys (identical)
+p4-b4-link-form: spend total_cost_usd 0.0011 (maxBudgetUsd 0.08)
+case 2: ToolSearch calls 0 (none: no deferred maws tool was loaded); maws calls 0
+case 2: links in the answer [{"text":"Q3 launch checklist","href":"maws-artifact:2448adc9-4b3e-4212-99bd-fee0d59fb58e","artifactId":"2448adc9-4b3e-4212-99bd-fee0d59fb58e"}]
+case 2: verdict: no maws call true; no ToolSearch true; the link form true
+A-15 after the run: 174 keys
+vitest: both cases passed (the acceptance prompt; ran at b2fb2d5af, whose source is 8e4aa5fd5, before the anchor fix: the snippet kept inside the read's block, Decision Logs 20 to 22). run 4 spend: 0.0038 + 0.0011 = 0.0049 USD

@@ -252,7 +252,8 @@ describe('shell renders the panel host in the region', () => {
           [`panel.${B}`]: { tabs: [ref('t:bbbbbbbb')], activeTabId: 'session-info:restored' },
         }),
       );
-      // The no-session selection is transient (no layout key): a pin selected on the Overview earlier in this launch.
+      // A pin selected on the Overview earlier in this launch, before the layout is read (it holds no
+      // `panelTools.activeNoSession`, so this selection is the one hydration keeps).
       useLayout.setState({ panelActiveNoSession: 'session-info:restored' });
       const stopPersistence = persistLayout(bridge.client);
       connect();
