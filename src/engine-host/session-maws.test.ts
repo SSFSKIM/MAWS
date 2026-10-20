@@ -99,6 +99,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
       // P3-B (M7): the document tools, appended after A's
       ['artifact_edit', { readOnlyHint: false, openWorldHint: false, title: 'Edit document' }], ['artifact_comments', { ...MAWS_TOOL_ANNOTATIONS, title: 'List document comments' }],
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }], ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
+      ['artifact_search', { ...MAWS_TOOL_ANNOTATIONS, title: 'Search artifacts' }], // P4-B4: after B's
     ]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);

@@ -4,6 +4,7 @@
 // `artifact_publish`; one `ArtifactSession` per session holds what its calls remember between them.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PendingAsk } from '@shared/maws/ask';
+import { TOOL_ERRORS } from '@shared/maws/tools'; // P4-B4 (M1)
 import type { ArtifactStore } from '../documents/store';
 import { importSettled } from '../library/import-gate';
 import { artifactListAssetsTool, artifactUploadAssetTool } from './artifact-assets';
@@ -16,7 +17,7 @@ import { askTool } from './ask';
 import type { AskCancelReason, AskTable } from './asks';
 import type { PaneBridge } from './panes';
 import { sendFileTool } from './send-file';
-import type { McpToolDefinition } from './server';
+import { defineMawsTool, toolError, type McpToolDefinition } from './server';
 import { showPaneTool } from './show-pane';
 import { documentCreateTool, documentReadTool, documentTools, DocumentToolSession } from './documents'; // P3-B (M7)
 import { presentationThreadTools } from '../presentations/threads'; // P3-C (M7)
@@ -66,5 +67,12 @@ export function mawsTools(deps: {
       // P3-B (M7); P3-C (M7): B's thread tools answer a deck from its threads; P3-E: a design (E1's M2) and a dashboard (E2 M2) from their own
       ...dashboardThreadTools(documents, designThreadTools(documents, presentationThreadTools(documents, documentTools(documents)))),
     ], genericRead).map(afterImport),
+    artifactSearchPending(), // P4-B4 (M1)
   ];
 }
+
+// P4-B4 (M1; docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md): `artifact_search` is listed from M1, so the
+// server's `tools/list` is the contract's; until M2's mirror serves it, a call is refused as the store's `unavailable`.
+// M2 replaces this with its tool, registered here after the document tools.
+const artifactSearchPending = (): McpToolDefinition =>
+  defineMawsTool('artifact_search', async () => toolError(TOOL_ERRORS.refused('artifact_search', { reason: 'unavailable' }, 'artifact search is not available in this build of MAWS')));
