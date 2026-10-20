@@ -1,0 +1,16 @@
+{"read_at": "2026-10-19T20:31 PDT, viewport 1512x723 @2x, Expand view, no card carrying an active class",
+ "container": ".kix-discussion-plugin at left:1096px top:15px inside .kix-appview-editor (the scroller); page .kix-page-paginated x=301 w=794",
+ "cards (comment, inline style, rect x/w/h where laid out)": [
+  ["c-alpha", "left: 25px; top: 30.1602px; display: none"],
+  ["c-bravo", "left: 25px; top: 143.16px; display: none"],
+  ["c-charlie", "left: 25px; top: 256.16px; display: none"],
+  ["c-oneline", "left: 25px; top: 430.715px; display: none"],
+  ["c-wrap", "left: 25px; top: 566.48px; display: none"],
+  ["c-span", "left: 25px; top: 760.431px; display: none"],
+  ["c-heading", "left: 25px; top: 942.257px", 1121, 350, 103],
+  ["c-list", "left: 25px; top: 1311.58px", 1121, 350, 103],
+  ["c-softwrap", "left: 25px; top: 1466.74px", 1121, 350, 103],
+  ["c-orphan", "left: 25px; top: 1621.9px", 1121, 350, 103],
+  ["c-caret", "left: 25px; top: 1757.67px", 1121, 350, 103],
+  ["c-table", "left: 25px; top: 1920.83px", 1121, 350, 103]],
+ "note": "display:none = virtualised off-screen; the inline top is still the laid position. Earlier (20:28) c-oneline alone: rect x=1121 y=522.7 w=350 h=103, style left:25px top:430.715px."}
