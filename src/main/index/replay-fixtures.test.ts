@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ReplayFixtureSchema } from '@shared/ipc/schema/session';
@@ -41,6 +41,8 @@ describe('replay fixtures in the index', () => {
     const expected = [
       ...listJournals('pass1').map((name) => join(FIXTURE_DIR, `${name}.jsonl`)),
       ...(['pass2', 'pass3'] as const).flatMap((pass) => listJournals(pass).map((name) => join(FIXTURE_DIR, pass, `${name}.jsonl`))),
+      // P4-B4's probe journals (the engine against the scripted API stand-in; not a conformance pass)
+      ...readdirSync(join(FIXTURE_DIR, 'p4')).filter((name) => name.endsWith('.jsonl')).map((name) => join(FIXTURE_DIR, 'p4', name)),
     ];
     expect(listJournals('pass3').length).toBeGreaterThan(0);
     expect(journals.map((f) => f.path).sort()).toEqual(expected.sort());
