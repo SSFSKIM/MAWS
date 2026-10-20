@@ -1073,8 +1073,9 @@
   left: auto;
   right: var(--doc-margin-gap, 8px);
 }
-/* the compose card's entry hosts P2's card in flow (CommentCardHost's margin layout) */
-.doc-margin-entry[data-compose] > * {
+/* the compose card's entry hosts P2's card in flow (CommentCardHost's margin layout); in the icon tier the entry is
+   marked too, but its dot and overlay keep their own placing */
+.doc-margin-entry[data-compose]:not([data-icon-entry]) > * {
   position: relative;
 }
 /* the live region (K4): announced, never seen */

@@ -16,7 +16,7 @@ import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
 import { resetScene, resized, scene, shiftOf, stubCoords, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
-import { activeThread, commentSelection } from './plugins';
+import { activeThread, commentDisplayKey, commentSelection } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { agentActor, findPos, now, owner as ownerActor, select } from './test-support';
 
@@ -81,7 +81,7 @@ async function mount(content: JSONContent, initial: { rail?: DocumentRail; comme
     overlay: (props) => {
       overlay = props;
       state.overlays += 1;
-      return <div data-testid="overlay" data-placement={props.placement ?? 'frame'} />;
+      return <div data-testid="overlay" data-comment-card="" data-placement={props.placement ?? 'frame'} />; // the card's attribute, as P2's host draws it
     },
   };
   const rails: DocumentRail[] = [];
@@ -271,6 +271,54 @@ describe('re-layout (R1 to R6)', () => {
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
   });
 
+  // P4-B1 (D4, Z1): a resolve closes the stack up animated. The display's redraw for the threads map reaches the margin
+  // before React's re-read of the list, so that first pass, the one that moves the cards, carries the cause 'set'
+  it('animates the close-up after a resolve, from the display’s redraw on (D4, Z1)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'design review', 150);
+    comment(m, 't3', 'track the budget', 160);
+    await settle();
+    act(() => void m.editor().commands.setActiveThread(null));
+    const stacked = 140 - scene.columnTop;
+    const step = scene.entryHeight + MARGIN_GAP_PX;
+    expect(topOf(entry('t3'))).toBe(stacked + 2 * step);
+    scene.lines.set('t1', { top: 160, height: 20 }); // a line typed above: an edit's move, not animated
+    scene.lines.set('t2', { top: 170, height: 20 });
+    scene.lines.set('t3', { top: 180, height: 20 });
+    type(m, 'X', 'The plan');
+    await frame();
+    expect(margin()!.hasAttribute('data-animate')).toBe(false);
+    // the margin's attribute and t3's transform in the order they were written, each with the value it was written to
+    // (the next record's old value, or the value at the end), so a later pass re-setting the attribute cannot make a
+    // move already written look animated
+    const root = margin()!;
+    const t3 = entry('t3')!;
+    const seen: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => seen.push(...batch));
+    observer.observe(root, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-animate', 'style'] });
+    act(() => resolve(m.agent.doc, 't2', agentActor, now(), 'agent'));
+    await settle();
+    expect(entry('t2')).toBeNull();
+    expect(topOf(entry('t3'))).toBe(stacked + 20 + step); // closed up under t1
+    const records = [...seen, ...observer.takeRecords()].filter((record) => (record.target === root && record.attributeName === 'data-animate') || (record.target === t3 && record.attributeName === 'style'));
+    observer.disconnect();
+    const written = records.map((record, i) => records.slice(i + 1).find((later) => later.target === record.target && later.attributeName === record.attributeName)?.oldValue ?? (record.target as Element).getAttribute(record.attributeName!));
+    const styled = (style: string) => {
+      const element = document.createElement('div');
+      element.setAttribute('style', style);
+      return element;
+    };
+    let animated = false;
+    const moves: boolean[] = [];
+    records.forEach((record, i) => {
+      if (record.target === root) animated = written[i] !== null;
+      else if (topOf(styled(written[i] ?? '')) === stacked + 20 + step) moves.push(animated);
+    });
+    expect(moves.length).toBeGreaterThan(0);
+    expect(moves.every(Boolean)).toBe(true); // the close-up written while the margin animates
+  });
+
   // P4-B1 (Z3): what is drawn is the display's decorations, which an undo brings back with the mark in one transaction,
   // so a passage deleted and restored at once has its card back at the next frame, and no pass searches the page
   it('a passage deleted and restored by undo within 100 ms has its card back, and no pass queries the page (Z3)', async () => {
@@ -407,6 +455,22 @@ describe('the tiers (N1 to N6) and the view states', () => {
 });
 
 describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', () => {
+  // P4-B1 (D13): a redraw for the threads map that changes nothing draws decorations equal to the last ones (their specs
+  // compare shallowly), so the view re-patches no commented node
+  it('a redraw for the same threads draws equal decorations, text and block', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    act(() => addThread(m.handle.doc, { threadId: 'b1', tabId: TAB, blockId: 'p3', quote: 'Third paragraph keeps going here.', anchor: { kind: 'block' }, by: ownerActor, at: now() }, 'test'));
+    await settle();
+    const drawn = () => commentDisplayKey.getState(m.editor().state)!.decorations.find() as unknown as Array<{ spec: { blockComment?: true }; eq(other: unknown): boolean }>;
+    const before = drawn();
+    expect(before.some((decoration) => decoration.spec.blockComment === true)).toBe(true);
+    act(() => m.editor().view.dispatch(m.editor().state.tr.setMeta(commentDisplayKey, { threads: true }).setMeta('addToHistory', false)));
+    const after = drawn();
+    expect(after).toHaveLength(before.length);
+    expect(after.every((decoration, i) => decoration !== before[i] && decoration.eq(before[i]))).toBe(true);
+  });
+
   it('resolving removes the card and keeps the mark, the margin un-reserved after the last; reopening brings it back (Z1, Z2)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
@@ -524,8 +588,24 @@ describe('the activation table and the keys', () => {
     expect(hosted.hasAttribute('data-compose')).toBe(true);
     expect(within(hosted).queryByRole('group')).toBeNull();
     expect(within(hosted).getByTestId('overlay')).toBeDefined();
+    expect(margin()!.querySelector('[data-margin-entry][data-compose] [data-comment-card]')).not.toBeNull(); // the e2e cases' selector
     act(() => m.overlay()!.hosting?.(null));
     expect(within(entry('t1')!).getByRole('group')).toBeDefined();
+  });
+
+  // P4-B1: in the icon tier the compose card sits in the entry's overlay beside the dot; the entry carries data-compose
+  // as in the cards tier, so one selector finds the hosted card in both
+  it('the compose card is hosted in the icon tier’s overlay, its entry marked as the cards tier’s is', async () => {
+    const m = await mount(content(), { commentsView: 'minimize' });
+    comment(m, 't1', 'ships quarterly', 140);
+    await settle();
+    expect(margin()!.dataset.marginTier).toBe('icons');
+    act(() => m.overlay()!.hosting?.('t1'));
+    expect(entry('t1')!.hasAttribute('data-compose')).toBe(true);
+    expect(entry('t1')!.querySelector('.doc-margin-overlay [data-testid="overlay"]')).not.toBeNull();
+    expect(margin()!.querySelector('[data-margin-entry][data-compose] [data-comment-card]')).not.toBeNull();
+    act(() => m.overlay()!.hosting?.(null));
+    expect(entry('t1')!.hasAttribute('data-compose')).toBe(false);
   });
 
   it('the Add comment button sits at the selection head’s line while text is selected and the editor focused (C1)', async () => {
