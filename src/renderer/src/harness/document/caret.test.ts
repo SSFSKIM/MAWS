@@ -10,9 +10,15 @@ import { placeCaret } from './caret';
 let editor: Editor;
 let elsewhere: HTMLInputElement;
 let frames: FrameRequestCallback[];
+// While set, ProseMirror hears no selectionchange: a selection the test changes stays unread, as in Chromium until the
+// queued event runs (happy-dom fires it at once). Added before each editor, so it runs before the editor's own listener.
+let unread = false;
+const holdSelectionChange = (event: Event) => void (unread && event.stopImmediatePropagation());
 
 beforeEach(() => {
   frames = [];
+  unread = false;
+  document.addEventListener('selectionchange', holdSelectionChange, true);
   // Frames run only when the test says so, as under a busy renderer.
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
   elsewhere = document.body.appendChild(document.createElement('input'));
@@ -36,6 +42,7 @@ afterEach(() => {
   editor.destroy();
   element?.remove();
   elsewhere.remove();
+  document.removeEventListener('selectionchange', holdSelectionChange, true);
   vi.unstubAllGlobals();
 });
 
@@ -61,6 +68,18 @@ it('waits for a focus that arrives late', async () => {
   await placed;
   expect(editor.view.dom.contains(document.activeElement)).toBe(true);
   expect(caretPosition()).toBe(3);
+});
+
+// ProseMirror's focus handler checks the DOM selection again 20 ms after the editor takes the focus and puts its own
+// back where they differ; keys that extend the selection before ProseMirror has read it would lose what they selected.
+it('resolves only after ProseMirror’s own check after the focus, so a selection the keys extend stays', async () => {
+  const end = 1 + 'The owner types here.'.length;
+  await placeCaret(editor, end);
+  unread = true;
+  const selection = document.getSelection()!;
+  selection.extend(selection.focusNode!, selection.focusOffset - 'here.'.length); // as Shift+ArrowLeft does
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(selection.toString()).toBe('here.');
 });
 
 it('fails within its bound when the editor never takes the focus', async () => {
