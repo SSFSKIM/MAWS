@@ -321,8 +321,20 @@ export type AttachTab = z.infer<typeof AttachTabSchema>;
 export const AttachTabsSchema = z.strictObject({ version: z.literal(1), tabs: z.array(AttachTabSchema) });   // key `sessions.attachTabs`
 // C10 end
 
+// P4-B3 start (its Decision Log 22; X5 as amended, additive): what a panel tool persists of a tab, by panel tab id
+// (`setPanelParams`; the Artifacts tool's record, so a relaunch shows it again), opaque here and validated by the tool that
+// reads it back as a restored instance's `init.params`; and the pin selection while no session is in view, which no
+// `panel.<appSessionId>` key holds. Both outside the `panel.` namespace (hydration reads every `panel.<x>` key as a
+// session's list), each at its own version 1, no X15 slot.
+export const PanelParamsSchema = z.strictObject({ version: z.literal(1), params: z.record(z.string(), z.unknown()) });   // key `panelTools.params`
+export const PanelActiveNoSessionSchema = z.strictObject({ version: z.literal(1), activeTabId: z.string().nullable() });   // key `panelTools.activeNoSession`
+// P4-B3 end
+
 export const LayoutKeySchema = z.union([
   z.literal('regions'), z.literal('main.tabs'), z.literal('panel.pinned'), z.string().regex(/^panel\.[^.]+$/), z.literal('window.main'),
+  // P4-B3 start
+  z.literal('panelTools.params'), z.literal('panelTools.activeNoSession'),
+  // P4-B3 end
   // C8a start
   z.literal('summary.sections'),
   // C8a end
