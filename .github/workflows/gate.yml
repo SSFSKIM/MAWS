@@ -64,14 +64,15 @@ env:
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
   # The paid live groups, each one spec that skips itself unless its run flag is `1` (MAWS_LIBRARY_LIVE for library-live,
-  # MAWS_LIVE_DOCUMENT for document-live, MAWS_LIVE for the rest; design-live and dashboard-live set theirs in their
+  # MAWS_LIVE_DOCUMENT for document-live and document-provisional-live (P4-A2, the edit seen as it is written on the installed
+  # engine), MAWS_LIVE for the rest; design-live and dashboard-live set theirs in their
   # package scripts) and caps its own spend. A `Live: yes` run sets the three flags on the e2e job and takes these groups
   # alone, since `default`'s bare `pnpm e2e` collects every one of their specs; any other run refuses them, since
   # design-live and dashboard-live would spend under their scripts' own flag (Decision Log 75). tool-time-heavy-live
   # (P4-A2, X34) is the tool-time guard's heavy-case fixture, a vitest file of the `live` project that sets MAWS_LIVE in
   # its script and spends nothing; LIVE_GUARD_E2E adds it to every live run, so every gate that runs the live specs holds
   # the heaviest known cases under the guard's bound.
-  LIVE_E2E: library-live document-live presentations-live design-systems-live send-to-live design-live dashboard-live tool-time-heavy-live
+  LIVE_E2E: library-live document-live document-provisional-live presentations-live design-systems-live send-to-live design-live dashboard-live tool-time-heavy-live
   LIVE_GUARD_E2E: tool-time-heavy-live
   # The timing-measured groups, whose bounds were calibrated on the mini at @2x with no viewer and no foreign load, so a
   # result read under another posture is void (Decision Log 75's posture go). On a Mac each job's first step is ci-kit's
