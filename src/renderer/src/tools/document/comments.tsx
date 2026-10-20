@@ -146,6 +146,9 @@ const draftsByHost = new Map<string, Drafts>();
 // The card hosts whose overlay is mounted. DocumentEditor remounts the overlay with the page on every tab switch while the
 // host id stays the document's, and P2's card host keeps its card through a remount within a microtask; so does this.
 const mountedOverlays = new Set<string>();
+// P4-B1: per host, the card whose thread the host last drew active; a remount drawing the same card (the margin moving
+// it, the panel's round trip) leaves the active thread as the human last set it (only the human activates)
+const activatedCard = new Map<string, number>();
 function draftsOf(hostId: string): Drafts {
   let drafts = draftsByHost.get(hostId);
   if (!drafts) draftsByHost.set(hostId, (drafts = new Drafts(hostId)));
@@ -255,7 +258,9 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       dropCommentDraft(artifactId, hostId, mine?.phase.kind === 'composing' ? { serial: mine.serial } : undefined);
       if (threadId !== shown) {
         shown = threadId;
-        setActive(threadId);
+        if (mine === null || activatedCard.get(hostId) !== mine.serial) setActive(threadId); // P4-B1: not again for the same card
+        if (mine === null) activatedCard.delete(hostId);
+        else activatedCard.set(hostId, mine.serial); // P4-B1
         hosting?.(threadId); // P4-B1: the margin hosts the card in that thread's entry
       }
     };
@@ -273,6 +278,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
             cancelPendingComment(hostId); // P3-F1: the editor went, and the comment waiting on its session with it
             draftsOf(hostId).follow(null, discard);
             dropCommentDraft(artifactId, hostId); // P4-B1
+            activatedCard.delete(hostId); // P4-B1
           }
         } finally {
           release?.();

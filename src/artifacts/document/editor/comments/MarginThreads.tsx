@@ -131,7 +131,12 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     if (body) observer?.observe(body);
     return () => observer?.disconnect();
   }, [view]);
-  useEffect(() => onTier?.(tier), [tier, onTier]);
+  // the tier told as it changes, and off when the margin goes (the panel opening, Hide, a version shown), so the editor
+  // never reads a tier the margin no longer draws; the latest callback through a ref, so a new one is not a going
+  const onTierRef = useRef(onTier);
+  onTierRef.current = onTier;
+  useEffect(() => void onTierRef.current?.(tier), [tier]);
+  useEffect(() => () => onTierRef.current?.({ kind: 'off' }), []);
 
   // ── the active thread, the editor's ──
   const [active, setActive] = useState<string | null>(() => activeThread(editor.state));
@@ -165,6 +170,9 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   const heights = useRef(new Map<string, number>());
   const nodes = useRef(new Map<string, HTMLElement>());
   const tops = useRef(new Map<string, number>());
+  // P4-B1: the entries the last pass put at the column's top for want of a passage (the compose card's thread before
+  // the display draws it, or another tab's)
+  const unlocated = useRef(new Set<string>());
   const passes = useRef(0);
   // P4-B1: what a pass reads (the committed render's), the last pass's located entries and cause, the groups drawn
   const latest = useRef({ wantedKey, byId, hosting, active, tier, entries });
@@ -221,16 +229,29 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     // P4-B1: an animated cause animates its moves; an unanimated pass that moves nothing (the edit's own frame after an
     // add, which now reaches the margin in the same task) leaves a running transition alone, and one that moves a card
     // ends it there (an edit's moves never animate)
-    const moves: Array<[HTMLElement, string]> = [];
+    // An entry the last pass put at the top for want of its passage, now located (the compose card's thread once the
+    // display draws it), jumps to its line unanimated: the card appears there rather than flying in from the top
+    const moves: Array<[HTMLElement, string, boolean]> = [];
+    const wasUnlocated = unlocated.current;
+    unlocated.current = new Set(list.filter((entry) => entry.from === null).map((entry) => entry.id));
     for (const [id, top] of placed) {
       const node = nodes.current.get(id);
       const transform = transformOf(latest.current, id, top);
-      if (node && node.style.transform !== transform) moves.push([node, transform]);
+      if (node && node.style.transform !== transform) moves.push([node, transform, wasUnlocated.has(id) && !unlocated.current.has(id)]);
     }
     if (ANIMATED.has(cause)) root.setAttribute('data-animate', '');
     else if (moves.length > 0) root.removeAttribute('data-animate');
     root.style.setProperty('--doc-margin-height', `${Math.ceil(laid.height)}px`);
-    for (const [node, transform] of moves) node.style.transform = transform;
+    for (const [node, transform, jump] of moves) {
+      if (!jump) {
+        node.style.transform = transform;
+        continue;
+      }
+      node.style.transition = 'none';
+      node.style.transform = transform;
+      void getComputedStyle(node).transform; // the jump applied before the transition is restored
+      node.style.transition = '';
+    }
     passes.current += 1;
     root.dataset.relayouts = String(passes.current);
     updateAdd.current();

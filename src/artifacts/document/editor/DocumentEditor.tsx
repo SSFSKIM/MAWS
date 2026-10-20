@@ -300,9 +300,9 @@ export function DocumentEditor(props: DocumentEditorProps) {
               onActiveThread={setActiveThreadId}
               onPassageClick={(cause) => {
                 // P4-B1: with the margin drawing, an activation is the margin's (D5 reports it above); without it (a
-                // narrow body, Hide), a click opens the list as before, the caret never
+                // narrow body, Hide), a click or a chord opens the list, the caret never
                 if (preview || marginHosts) return;
-                if (cause === 'click') openRail('comments');
+                if (cause !== 'caret') openRail('comments');
               }}
               marginView={marginOn ? commentsView : null}
               drafts={drafts} // P4-B1
@@ -335,8 +335,9 @@ export function DocumentEditor(props: DocumentEditorProps) {
               setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1 });
               // P4-B1 (the activation table): where the margin would host, the item chosen closes the panel and the
               // margin returns with that thread active (the shown thread's activation reports 'margin', D5); the drawer
-              // stays open as before
-              if (commentsView !== 'hide' && marginTier !== 'off') openRail(null);
+              // stays open as before, and so does the panel for an orphan, which the margin cannot draw (Z3). The margin
+              // is not drawn while the panel is, so the panel's own layout says whether it would host (the same 720 px)
+              if (!thread.orphan && commentsView !== 'hide' && railLayout.mode === 'beside') openRail(null);
             }}
             onClose={() => openRail(null)}
           />
@@ -606,11 +607,18 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   // frame the text moved in; the frame-level overlay's key is bumped only while that overlay is drawn
   const relayoutRef = useRef<() => void>(() => {});
   const overlayDrawn = useRef(false);
+  // P4-B1: the frame callbacks run, written on the page (`data-frames`, no render) beside the margin's `data-relayouts`,
+  // so the scale gate reads the margin's passes per frame (D13: at most one); an agent's edit and the layer's growth
+  // run callbacks of their own, not only the owner's keystrokes
+  const page = useRef<HTMLDivElement>(null);
+  const frames = useRef(0);
   const moved = useMemo(
     () => () => {
       if (pending.current !== null) return;
       pending.current = requestAnimationFrame(() => {
         pending.current = null;
+        frames.current += 1; // P4-B1
+        page.current?.setAttribute('data-frames', String(frames.current)); // P4-B1
         relayoutRef.current(); // P4-B1
         if (overlayDrawn.current) setLayout((n) => n + 1); // P4-B1: only while the frame-level overlay is drawn
       });
@@ -692,7 +700,6 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   // the page would shadow), else declared on the page itself
   const tokens = preview ? (preview.tokens as CSSProperties) : undefined;
   const declared = Scope ? undefined : tokens;
-  const page = useRef<HTMLDivElement>(null);
   const ground = usePageGround(page, tokens);
   useLayoutEffect(() => {
     onPage?.(page.current);

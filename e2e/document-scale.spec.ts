@@ -233,8 +233,10 @@ const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} $
 // the margin's re-layout on the layer's growth is in the measurement (`streamWhile`: started with the typing, stopped
 // when it ends, its answer recorded in the row's note). Without `stream` (A2 not on this tree) the row is recorded
 // without the layer and says so; the acceptance's tree carries A2 (the child's Decision Log 6). Rows:
-// `1m p95` ≤ 20 ms (the mini's calibration), `1m max` ≤ 50 ms, `1m relayouts` (the margin's layout passes per keystroke,
-// at most one; the scripted scroll afterwards adds none, R4). Results in test-results/document-scale-margin.json.
+// `1m p95` ≤ 20 ms (the mini's calibration), `1m max` ≤ 50 ms, `1m relayouts` (the margin's layout passes per frame
+// callback the page ran, `data-relayouts` over the page's `data-frames`, at most one: the agents' edits and the layer's
+// growth run frames of their own, so a ratio per keystroke would count them against the owner; the scripted scroll
+// afterwards adds none, R4). Results in test-results/document-scale-margin.json.
 const MARGIN_RESULTS = join(REPO_ROOT, 'test-results', 'document-scale-margin.json');
 const STREAM_SECTION = TYPING_SECTION + 2; // kept clear of the agents, two sections under the caret: on screen with it
 const STREAM_TICK_MS = 120; // P4-B1: the layer's pace, a piece every 120 ms and the seam's round trip (the typing is about 36 s)
@@ -313,6 +315,7 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     await ok(page, 'artifacts.testLoopDelay', { reset: true });
     await seam.send({ cmd: 'loop', reset: true });
     const relayoutsBefore = Number(await margin.getAttribute('data-relayouts'));
+    const framesBefore = Number(await main.locator('.ds-doc').getAttribute('data-frames')); // P4-B1: the page frame's callbacks
     await startMeasuring(page);
     loads.steadyStart = load1();
     const reads: Array<{ session: string; answer: CallAnswer<ReadResult> }> = [];
@@ -336,6 +339,7 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     const counted = everyKeystroke(report, await remoteSeen(pageB), drained.end);
     const relayoutsAfter = Number(await margin.getAttribute('data-relayouts'));
     const passes = relayoutsAfter - relayoutsBefore;
+    const frames = Number(await main.locator('.ds-doc').getAttribute('data-frames')) - framesBefore;
     // R4: a scripted scroll of the page runs no layout pass
     await main.locator('.ds-doc').evaluate((el) => {
       el.scrollTop += 400;
@@ -349,10 +353,10 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     const note = `${keys.keystrokes} keystrokes; ${cards} cards, th${near} active; agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}; ${layerNote}`;
     rows.add('1m p95', 'keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (the mini’s calibration, P3 Decision Log 109; MacBook target 16)', note);
     rows.add('1m max', 'keystroke → frame in A, max, the margin open', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
-    rows.add('1m relayouts', 'the margin’s layout passes per keystroke (one pass per animation frame)', +(passes / Math.max(1, keys.keystrokes)).toFixed(2), 'passes', 1, '≤ 1 per keystroke', `${passes} passes over ${keys.keystrokes} keys; after a scripted scroll ${afterScroll - relayoutsAfter} more (R4: none)`);
+    rows.add('1m relayouts', 'the margin’s layout passes per frame callback (one pass per edit frame, never more)', +(passes / Math.max(1, frames)).toFixed(2), 'passes', 1, '≤ 1 per frame', `${passes} passes over ${frames} frame callbacks (${keys.keystrokes} keys); after a scripted scroll ${afterScroll - relayoutsAfter} more (R4: none)`);
     rows.add('1m ack p95', 'keystroke → durable ack, p95, the margin open', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked`);
     rows.add('5m p99', 'host event-loop delay over the run, p99, the margin open', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
-    rows.write({ margin: { loads, cards, active: `th${near}`, layer: streamed, typing: { ...keys, ack: counted.ack }, relayouts: { passes, keystrokes: keys.keystrokes, afterScroll: afterScroll - relayoutsAfter }, loop } });
+    rows.write({ margin: { loads, cards, active: `th${near}`, layer: streamed, typing: { ...keys, ack: counted.ack }, relayouts: { passes, frames, keystrokes: keys.keystrokes, afterScroll: afterScroll - relayoutsAfter }, loop } });
     expect(afterScroll - relayoutsAfter, 'a scroll runs no layout pass (R4)').toBe(0);
     expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
     const landed = (await blockText(page, id, `s${TYPING_SECTION}p2`)) ?? '';

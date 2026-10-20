@@ -118,11 +118,14 @@
 }
 /* P4-B1 (the prior art's Z6): a tab with open comment threads, in the passages' highlight colour */
 .doc-tab-dot {
+  display: inline-block;
   width: 6px;
   height: 6px;
   flex-shrink: 0;
+  margin-left: var(--space);
   border-radius: 50%;
   background: var(--warning);
+  vertical-align: middle;
 }
 .doc-tab-close:hover {
   color: var(--fg);
@@ -1086,16 +1089,6 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-/* the tab strip's dot for a tab with open threads (Z6) */
-.doc-tab-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-left: var(--space);
-  border-radius: 50%;
-  background: var(--warning);
-  vertical-align: middle;
 }
 /* the toolbar's view menu (View › Comments: Expand, Minimize, Hide) */
 .doc-menu [role='menuitemradio'][aria-checked='true']::before {

@@ -257,6 +257,24 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(hosting).toHaveBeenLastCalledWith(null);
   });
 
+  // P4-B1 (review finding 5): only the human activates; the host activates its card's thread when the card opens, and a
+  // remount of the host (the margin moving it, the panel's round trip) draws the same card without activating again
+  it('a remount with the same composing card does not activate its thread again', async () => {
+    const m = mountMargin();
+    await opened(m);
+    const setActive = vi.mocked(m.reach.setActive);
+    expect(setActive).toHaveBeenLastCalledWith(passage.threadId);
+    setActive.mockClear();
+    m.remount();
+    m.remount('c');
+    await act(async () => {});
+    expect(card()).not.toBeNull();
+    expect(setActive).not.toHaveBeenCalled();
+    expect(m.reach.hosting).toHaveBeenLastCalledWith(passage.threadId); // the margin still told the thread it is on
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(setActive).toHaveBeenLastCalledWith(null); // the card closing still clears what it drew
+  });
+
   it('records the typed draft as the artifact’s, which draft() names; an emptied field or the card closing clears it', async () => {
     const m = mountMargin();
     await opened(m);
