@@ -226,8 +226,10 @@ const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} $
 
 // P4-B1 (the P4 spec §5 B1's "the keystroke p95 on the 200-page two-agent workload with the margin open within the
 // re-based bound (P3 Decision Log 108, 109) measured on the mini"; docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md
-// D13): step 1 again with the margin open. The window at 1800 × 900 so the main tab reaches the cards tier (LC-1's least
-// card and gutters need 333 px beside the page; at 1600 the main tab's box left about 330 and the margin drew icons); the seed's
+// D13): step 1 again with the margin open. The window at 1920 × 1080 so the main tab reaches the cards tier: the app's
+// default layout keeps the sidebar (300) and the panel (380) open, the page is 816 and LC-1's least card with its gutters
+// needs 333 beside it, 1,829 in all; 1920 leaves 424 beside the page, a 357 px card (1600 and 1800 drew icons on the mini:
+// runs 39382175044 and 39383570754); the seed's
 // threads (one in every third section, about 53 open) are cards in the margin, one near the typing section activated;
 // then the owner's 300 keystrokes with the two agents batching, and, through the seam's `stream` (P4-A2's provisional
 // emitter, X35), a layer growing in a block of a section two away from the typing one for the typing's whole span, so
@@ -274,8 +276,8 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
   rmSync(MARGIN_RESULTS, { force: true });
   const { large } = seedsOnce();
   const { page, app, seam } = await start();
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1800, 900));
-  await page.waitForFunction(() => window.innerWidth === 1800);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1920, 1080));
+  await page.waitForFunction(() => window.innerWidth === 1920);
   const rows = new Rows(MARGIN_RESULTS, { run: new Date().toISOString(), seed: { large: large.stats }, margin: true });
   const loads: Record<string, number> = { launched: load1() };
   const id = await seeded(page, seam, 'Scale 200 margin', large.state);
