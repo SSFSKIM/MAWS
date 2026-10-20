@@ -6,8 +6,8 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MARGIN_ACTIVE_SHIFT_PX, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
-import { CARD_MAX_PX } from '../../../comments/margin-tiers';
+import { ICON_GAP_PX, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
+import { CARD_MIN_PX, ICON_PX, MARGIN_PAGE_GUTTER_PX } from '../../../comments/margin-tiers';
 import type { CommentsView } from '../../../comments/view';
 import { addTab } from '../../tabs';
 import { addThread, getThread, reopen, reply, resolve } from '../../threads';
@@ -17,7 +17,7 @@ import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
 import { resetScene, resized, scene, shiftOf, stubCoords, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
 import { MarginThreads } from './MarginThreads';
-import { activeThread, commentDisplayKey, commentSelection } from './plugins';
+import { activeThread, commentDisplayKey, commentSelection, pinnedThread } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { agentActor, findPos, now, owner as ownerActor, select } from './test-support';
 
@@ -145,6 +145,8 @@ const entry = (id: string) => document.querySelector<HTMLElement>(`[data-margin-
 const relayouts = () => Number(margin()?.getAttribute('data-relayouts') ?? 0);
 const frames = () => Number(document.querySelector('.ds-doc')?.getAttribute('data-frames') ?? 0); // the page frame's callbacks run
 const reserve = () => margin()?.style.getPropertyValue('--doc-margin-reserve') ?? null;
+const cardWidth = () => margin()?.style.getPropertyValue('--doc-margin-card') ?? null; // P4-B1: the drawn card's width
+const overlap = () => margin()?.style.getPropertyValue('--doc-margin-overlap') ?? null;
 // ⌃⌘ and a key, as the keyboard sends it (activation.dom.test.tsx's: Ctrl off a Mac, one ctrlKey here)
 const chord = (editor: Editor, key: string): boolean => {
   const event = new KeyboardEvent('keydown', { key, code: `Key${key.toUpperCase()}`, ctrlKey: true, metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true });
@@ -167,24 +169,28 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     comment(m, 't1', 'ships quarterly', 140);
     comment(m, 't2', 'track the budget', 300);
     await settle();
-    expect(reserve()).toBe(`${CARD_MAX_PX + 2 * MARGIN_GAP_PX}px`);
+    // the scene's 584 px of side space (LC-1 item 6): the page centred with its gutter and the least card (the reserve),
+    // the card widening into the space on its right to 584 − 138 (the page's left) − 26 − 25
+    expect(reserve()).toBe(`${MARGIN_PAGE_GUTTER_PX + CARD_MIN_PX}px`);
+    expect(cardWidth()).toBe('395px');
     expect(topOf(entry('t1'))).toBe(140 - scene.columnTop + MARGIN_CARD_INSET_PX); // P1: the line's top, in the column's coordinates, plus the card's inset
     expect(topOf(entry('t2'))).toBe(300 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(margin()!.style.getPropertyValue('--doc-margin-height')).toBe(`${300 - scene.columnTop + MARGIN_CARD_INSET_PX + scene.entryHeight + MARGIN_GAP_PX}px`); // L6
   });
 
-  it('stacks colliding cards by the gap, the active one pinned at its anchor and shifted left, its neighbour pushed (L2, L3)', async () => {
+  it('stacks colliding cards by the gap, the pinned one at its anchor and no card shifted, its neighbour pushed (L2, L3)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 200);
     comment(m, 't2', 'track the budget', 210); // 10 px under t1's line: no room for t1's 60 px card between them
     await settle();
-    expect(activeThread(m.editor().state)).toBe('t2'); // the last comment written is active (the editor's rule)
+    expect(activeThread(m.editor().state)).toBe('t2'); // the last comment written is active (the editor's rule), and pinned
+    expect(pinnedThread(m.editor().state)).toBe('t2');
     expect(topOf(entry('t2'))).toBe(110 + MARGIN_CARD_INSET_PX);
-    expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
+    expect(shiftOf(entry('t2'))).toBe(0); // Docs marks the active card by its elevation, not a shift (LC-1 item 2)
     expect(topOf(entry('t1'))).toBe(110 + MARGIN_CARD_INSET_PX - MARGIN_GAP_PX - scene.entryHeight); // pushed up above the active one
     act(() => void m.editor().commands.setActiveThread('t1'));
     expect(topOf(entry('t1'))).toBe(100 + MARGIN_CARD_INSET_PX);
-    expect(shiftOf(entry('t1'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
+    expect(shiftOf(entry('t1'))).toBe(0);
     expect(topOf(entry('t2'))).toBe(100 + MARGIN_CARD_INSET_PX + scene.entryHeight + MARGIN_GAP_PX); // pushed down below it
     expect(shiftOf(entry('t2'))).toBe(0);
     expect(margin()!.hasAttribute('data-animate')).toBe(true); // an activation animates
@@ -207,6 +213,64 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     type(m, ' ', 'Owners');
     await frame();
     expect(topOf(entry('t1'))).toBe(420 - scene.columnTop + MARGIN_CARD_INSET_PX);
+  });
+});
+
+// P4-B1 (D2 as Docs, LC-1 item 3): the stack is walked from the pin, the last thread the human activated, which a
+// deselect keeps; a resolve of the pinned thread drops it and the stack relaxes to the plain walk
+describe('the pin (D2, LC-1 item 3)', () => {
+  const SIX = ['The plan', 'ships', 'quarterly', 'design', 'review notes', 'Owners'] as const;
+  const ids = SIX.map((_, i) => `s${i + 1}`);
+  const topsOf = () => ids.map((id) => topOf(entry(id)));
+  const anchor = 600 - 100 + MARGIN_CARD_INSET_PX; // the scene's column at 100
+  const step = 60 + MARGIN_GAP_PX; // the scene's entries 60 tall
+
+  it('keeps the stack where the pin left it when a click on plain text clears the active thread', async () => {
+    const m = await mount(content());
+    SIX.forEach((needle, i) => comment(m, ids[i]!, needle, 600)); // six comments on one line, the last active
+    await settle();
+    const pinned = ids.map((_, i) => anchor - (ids.length - 1 - i) * step); // walked up from the last
+    expect(topsOf()).toEqual(pinned);
+    plainClick(m, 'Third');
+    expect(activeThread(m.editor().state)).toBeNull();
+    expect(pinnedThread(m.editor().state)).toBe('s6');
+    await settle();
+    expect(topsOf()).toEqual(pinned); // not relaxed: the plain walk would put the first card at the line
+  });
+
+  it('relaxes the stack to the plain walk, animated, when the pinned thread resolves', async () => {
+    const m = await mount(content());
+    SIX.slice(0, 3).forEach((needle, i) => comment(m, ids[i]!, needle, 600));
+    await settle();
+    plainClick(m, 'Third');
+    await settle();
+    expect(topsOf().slice(0, 3)).toEqual([anchor - 2 * step, anchor - step, anchor]);
+    act(() => resolve(m.agent.doc, 's3', agentActor, now(), 'agent'));
+    await settle();
+    expect(pinnedThread(m.editor().state)).toBeNull();
+    expect(entry('s3')).toBeNull();
+    expect(topsOf().slice(0, 2)).toEqual([anchor, anchor + step]); // the plain downward walk from the line
+    expect(margin()!.hasAttribute('data-animate')).toBe(true);
+  });
+
+  it('animates the stack’s move when a click on another passage moves the pin', async () => {
+    const m = await mount(content());
+    SIX.slice(0, 3).forEach((needle, i) => comment(m, ids[i]!, needle, 600));
+    await settle();
+    plainClick(m, 'Third');
+    await settle();
+    margin()!.removeAttribute('data-animate'); // the activations' attribute cleared, to read the next pass's
+    // a click on the first passage: the pin on s1, the stack walked down from its line
+    const pos = findPos(m.editor(), 'The plan') + 1;
+    const { node } = m.editor().view.domAtPos(pos);
+    const target = node.nodeType === Node.TEXT_NODE ? node.parentElement! : (node as Element);
+    let event: MouseEvent | null = null;
+    target.addEventListener('click', (e) => void (event = e as MouseEvent), { once: true });
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    act(() => void m.editor().view.someProp('handleClick', (f) => f(m.editor().view, pos, event!)));
+    expect(pinnedThread(m.editor().state)).toBe('s1');
+    expect(topsOf().slice(0, 3)).toEqual([anchor, anchor + step, anchor + 2 * step]);
+    expect(margin()!.hasAttribute('data-animate')).toBe(true);
   });
 });
 
@@ -250,8 +314,8 @@ describe('re-layout (R1 to R6)', () => {
   });
 
   // P4-B1: the layout pass runs in the frame's callback, so the card moves in the frame its text moved in, and no
-  // React render is needed for the move (the cards' elements and the active one's shift are left as the pass wrote them)
-  it('an edit moves the cards in the frame callback itself, the active card keeping its shift (R1)', async () => {
+  // React render is needed for the move (the cards' elements and their transforms are left as the pass wrote them)
+  it('an edit moves the cards in the frame callback itself, the active card unshifted (R1)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
     comment(m, 't2', 'track the budget', 300);
@@ -262,11 +326,11 @@ describe('re-layout (R1 to R6)', () => {
     act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'The plan'))));
     await new Promise((r) => requestAnimationFrame(() => r(null))); // outside act: nothing React does may help
     expect(topOf(entry('t2'))).toBe(320 - scene.columnTop + MARGIN_CARD_INSET_PX);
-    expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
+    expect(shiftOf(entry('t2'))).toBe(0);
     expect(within(entry('t2')!).getByRole('group')).toBe(card);
-    // a re-render that runs no pass (a reply being typed in the active card) keeps the shift
+    // a re-render that runs no pass (a reply being typed in the active card) keeps the transform
     act(() => fireEvent.change(within(entry('t2')!).getByRole('textbox', { name: 'Reply' }), { target: { value: 'Typing a reply' } }));
-    expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
+    expect(shiftOf(entry('t2'))).toBe(0);
     expect(topOf(entry('t2'))).toBe(320 - scene.columnTop + MARGIN_CARD_INSET_PX);
   });
 
@@ -307,6 +371,9 @@ describe('re-layout (R1 to R6)', () => {
     comment(m, 't2', 'design review', 150);
     comment(m, 't3', 'track the budget', 160);
     await settle();
+    // the pin on t1 (a deselect keeps it, LC-1 item 3), so the stack walks down from t1's anchor and the resolve of t2
+    // closes it up under t1
+    act(() => void m.editor().commands.setActiveThread('t1'));
     act(() => void m.editor().commands.setActiveThread(null));
     const stacked = 140 - scene.columnTop + MARGIN_CARD_INSET_PX;
     const step = scene.entryHeight + MARGIN_GAP_PX;
@@ -479,43 +546,55 @@ describe('re-layout (R1 to R6)', () => {
 });
 
 describe('the tiers (N1 to N6) and the view states', () => {
-  it('cards shrink to the side space before anything collapses (N1), then the icon rail (N2), then off under 720 px (N3)', async () => {
+  // P4-B1 (LC-1 item 6's sweep): the page centred with its gutter and the least card while they fit, the card taking
+  // what is free on its right; then the page giving way to the box's left edge, the reserve rising to the least card and
+  // both gutters (333); under that the icon rail, hanging over the page's right padding when even it is short
+  it('cards narrow to the least card as the page gives way (N1, N6), then the icon rail over the page (N2), then off under 720 px (N3)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
     await settle();
     expect(margin()!.dataset.marginTier).toBe('cards');
-    scene.scrollWidth = 816 + 250; // 250 of side space: a card 250 less the two gaps wide
+    scene.scrollWidth = 816 + 400; // the page 46 px from the box's left: a card 400 − 46 − 26 − 25 wide
     resized();
-    expect(reserve()).toBe('250px');
-    scene.scrollWidth = 816 + 100; // under the card's minimum: icons
+    expect([reserve(), cardWidth()]).toEqual(['308px', '303px']);
+    scene.scrollWidth = 816 + 333; // the page at the box's left edge: the least card and both gutters
     resized();
-    expect(margin()!.dataset.marginTier).toBe('icons');
+    expect([margin()!.dataset.marginTier, reserve(), cardWidth()]).toEqual(['cards', '333px', `${CARD_MIN_PX}px`]);
+    scene.scrollWidth = 816 + 332; // under the least card: icons, the rail an icon and both gutters wide
+    resized();
+    expect([margin()!.dataset.marginTier, reserve(), overlap()]).toEqual(['icons', '83px', '0px']);
+    scene.scrollWidth = 816 + 60; // the rail hangs 23 px over the page's right padding
+    resized();
+    expect([margin()!.dataset.marginTier, reserve(), overlap()]).toEqual(['icons', '60px', '23px']);
     expect(within(margin()!).getByRole('button', { name: /^Comment by You/ })).toBeDefined();
     scene.bodyWidth = 600; // the drawer's range: the margin is off
     resized();
     expect(margin()).toBeNull();
   });
 
-  it('icons closer than one icon merge into a count; a click opens the overlaid card, active (N2)', async () => {
+  // P4-B1 (N2 on LC-1 item 7): Docs' Minimize stacked three threads on adjacent lines as three icons 46 px apart, the
+  // first at its line + 4; none merged
+  it('three threads on adjacent lines give three icons stacked by the icon gap; a click opens the overlaid card, active (N2)', async () => {
     const m = await mount(content(), { commentsView: 'minimize' });
     comment(m, 't1', 'ships quarterly', 140);
-    comment(m, 't2', 'design review', 150);
+    comment(m, 't2', 'design review', 160);
+    comment(m, 't3', 'track the budget', 180);
     await settle();
+    act(() => void m.editor().commands.setActiveThread('t1')); // the pin on the first: the stack walks down from it
     act(() => void m.editor().commands.setActiveThread(null));
     expect(margin()!.dataset.marginTier).toBe('icons');
-    // P4-B1 (N2): one dot for the pair, carrying the count, at the first one's anchor
     const icons = within(margin()!).getAllByRole('button', { name: /^Comment by/ });
-    expect(icons).toHaveLength(1);
-    expect(icons[0]!.textContent).toBe('2');
-    expect(topOf(entry('t1'))).toBe(140 - scene.columnTop);
-    expect(topOf(entry('t2'))).toBe(140 - scene.columnTop);
+    expect(icons).toHaveLength(3);
+    expect(icons.map((icon) => icon.textContent)).toEqual(['', '', '']);
+    const first = 140 - scene.columnTop + MARGIN_CARD_INSET_PX;
+    expect(['t1', 't2', 't3'].map((id) => topOf(entry(id)))).toEqual([first, first + ICON_PX + ICON_GAP_PX, first + 2 * (ICON_PX + ICON_GAP_PX)]);
     act(() => fireEvent.click(icons[0]!));
     expect(activeThread(m.editor().state)).toBe('t1');
     expect(margin()!.querySelector('.doc-margin-overlay [data-thread="t1"]')).not.toBeNull();
     act(() => fireEvent.keyDown(within(margin()!.querySelector<HTMLElement>('.doc-margin-overlay')!).getByRole('group'), { key: 'j' }));
-    expect(activeThread(m.editor().state)).toBe('t2'); // J reaches the second of the pair
+    expect(activeThread(m.editor().state)).toBe('t2'); // J reaches the next icon's thread
     expect(margin()!.querySelector('.doc-margin-overlay [data-thread="t2"]')).not.toBeNull();
-    act(() => fireEvent.click(within(margin()!).getByRole('button', { name: /^Comment by/ }))); // the open dot again closes it
+    act(() => fireEvent.click(within(entry('t2')!).getByRole('button', { name: /^Comment by/ }))); // the open card's icon closes it
     expect(activeThread(m.editor().state)).toBeNull();
   });
 
@@ -528,7 +607,10 @@ describe('the tiers (N1 to N6) and the view states', () => {
     expect(margin()!.dataset.marginTier).toBe('icons');
     m.rerender({ commentsView: 'hide' });
     expect(margin()).toBeNull();
-    expect(m.editor().view.dom.querySelector('.comment-t1')).not.toBeNull(); // the highlight stays (LC-1 item 7)
+    // Hide draws the passages plain (LC-1 item 7: Docs drops the highlights), through the tab editor's view state that
+    // chrome.css reads; the display's decoration stays, so Expand brings the highlight back with no redraw
+    expect(document.querySelector('.doc-tab-editor[data-comments-view="hide"]')).not.toBeNull();
+    expect(m.editor().view.dom.querySelector('.comment-t1')).not.toBeNull();
     m.rerender({ commentsView: 'expand' });
     expect(margin()!.dataset.marginTier).toBe('cards');
   });

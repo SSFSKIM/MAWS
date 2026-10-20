@@ -1,19 +1,23 @@
 // The margin (P4-B1; docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md D1 to D5, D7, D11, D12; the P4 spec
 // §4.3): the shown tab's open threads as cards beside the page, each at its passage's first line, stacked by the pure
-// layout (src/artifacts/comments/margin-layout.ts) with the active thread pinned at its anchor and shifted left, its
-// neighbours pushed both ways. Rendered inside the page's scroll box as the page's flex sibling (theme.css's row), so
-// the cards scroll with the text and a scroll runs no layout; re-laid when the passages may have moved (an edit, a frame
-// resize, the provisional layer's growth, X35: the page frame calls `relayoutRef` from its frame callback, P4-B1), and on
-// the thread set, the active thread, a card's resize, a tab switch and a font load. Positions are written to the
-// entries' elements directly from the layout pass, so a keystroke re-renders nothing in React and the cards move in the
-// frame the text moved in: the pass re-reads the anchors (the display's decorations, P4-B1), runs the layout and sets
-// transforms. Moves caused by an activation, an add or a resolve animate; moves caused by edits never.
+// layout (src/artifacts/comments/margin-layout.ts) from the pin, the last thread the human activated (the display
+// plugin's `pinnedThread`), at its anchor, its neighbours pushed both ways; the pin outlives a deselect, so the stack
+// stays where it left it, as Google Docs' does (LC-1, docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md item 3). The
+// active card is marked by its form and its elevation, not moved sideways (item 2). Rendered inside the page's scroll
+// box as the page's flex sibling (theme.css's row), so the cards scroll with the text and a scroll runs no layout;
+// re-laid when the passages may have moved (an edit, a frame resize, the provisional layer's growth, X35: the page frame
+// calls `relayoutRef` from its frame callback, P4-B1), and on the thread set, the active thread, the pin, a card's
+// resize, a tab switch and a font load. Positions are written to the entries' elements directly from the layout pass, so
+// a keystroke re-renders nothing in React and the cards move in the frame the text moved in: the pass re-reads the
+// anchors (the display's decorations, P4-B1), runs the layout and sets transforms. Moves caused by an activation, an add
+// or a resolve animate; moves caused by edits never.
 //
-// Three tiers by the side space beside the page (margin-tiers.ts): cards, the icon rail (Docs' Minimize form: a dot at
-// each anchor, dots closer than one dot merged into one carrying the count, the active thread's card overlaid beside its
-// dot), and off under a 720 px body, where the drawer applies (DocumentEditor hides the margin then). View › Minimize
-// gives the icon rail at any width; Hide hides the margin (DocumentEditor). The column reserves its width only while a
-// thread or the compose card is open on the shown tab; otherwise it is 0 wide and the page sits centred alone.
+// Three tiers by the side space beside the page (margin-tiers.ts): cards, the icon rail (Docs' Minimize form: an icon
+// per thread laid by the same stack at the icon gap, none merged, as Docs' three icons on adjacent lines, LC-1 item 7;
+// the active thread's card overlaid beside its icon), and off under a 720 px body, where the drawer applies
+// (DocumentEditor hides the margin then). View › Minimize gives the icon rail at any width; Hide hides the margin
+// (DocumentEditor). The column reserves its width only while a thread or the compose card is open on the shown tab;
+// otherwise it is 0 wide and the page sits centred alone.
 //
 // Only the human activates a thread [binding]: the editor's display plugin (a click, the local caret, the chords) and
 // this margin's own clicks, J and K; the margin reads `active` from the editor's state and never sets it on a remote
@@ -22,14 +26,14 @@
 import type { Editor } from '@tiptap/core';
 import { memo /* P4-B1 */, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject /* P4-B1 */ } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
-import { layoutMargin, MARGIN_ACTIVE_SHIFT_PX, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
-import { ICON_PX, tierFor, type MarginTier } from '../../../comments/margin-tiers';
+import { ICON_GAP_PX, layoutMargin, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
+import { CARD_MIN_PX, ICON_PX, MARGIN_EDGE_GUTTER_PX, MARGIN_PAGE_GUTTER_PX, tierFor, type MarginTier } from '../../../comments/margin-tiers';
 import { ThreadCard, type ThreadCardThread } from '../../../comments/ThreadCard';
 import type { CommentsView } from '../../../comments/view';
 import type { Doc } from '../../../yjs';
 import { nanoid8 } from '../../schema';
 import { getThread, reopen, reply, resolve, type Thread } from '../../threads';
-import { activeThread, commentDisplayKey, COMMENTS_ORIGIN, drawnThreads } from './plugins';
+import { activeThread, commentDisplayKey, COMMENTS_ORIGIN, drawnThreads, pinnedThread } from './plugins';
 import type { CommentAuthor } from './surface';
 import { useOpenThreads } from './use-threads';
 
@@ -101,11 +105,6 @@ interface EntryActions {
   dot(id: string): void;
 }
 
-// P4-B1 (N2): in the icon tier, entry id → how many entries its dot stands for (a group's first), or 0 (a later member
-// of a group, drawn under the first's dot); an entry not named has a dot of its own
-type Groups = ReadonlyMap<string, number>;
-const NO_GROUPS: Groups = new Map();
-
 export function MarginThreads({ editor, doc, tabId, author, readOnly, view, relayoutRef, hosting, overlay, onComment, onTier, enterRef, drafts, onDraftChange }: MarginThreadsProps) {
   const column = useRef<HTMLDivElement>(null);
   // P4-B1: the tab's open threads from the threads map, at once (a reply, a resolve, a new thread in the task it lands in)
@@ -138,17 +137,22 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   useEffect(() => void onTierRef.current?.(tier), [tier]);
   useEffect(() => () => onTierRef.current?.({ kind: 'off' }), []);
 
-  // ── the active thread, the editor's ──
+  // ── the active thread and the pin, the editor's ──
   const [active, setActive] = useState<string | null>(() => activeThread(editor.state));
+  // P4-B1: the pin as React last saw it, so a pin moving with no active change (a resolve of the pinned thread) still
+  // runs an animated pass; the pass itself reads the editor's
+  const [pin, setPin] = useState<string | null>(() => pinnedThread(editor.state));
   const passSoon = useRef<() => void>(() => {});
   useEffect(() => {
     const report = ({ transaction }: { transaction: { getMeta(key: unknown): unknown } }) => {
       setActive(activeThread(editor.state));
+      setPin(pinnedThread(editor.state));
       // P4-B1: the display redrawn for the threads map (a reopen, a new thread drawn): what is drawn may have changed
       const meta = transaction.getMeta(commentDisplayKey) as { threads?: true } | undefined;
       if (meta?.threads) passSoon.current();
     };
     setActive(activeThread(editor.state));
+    setPin(pinnedThread(editor.state));
     editor.on('transaction', report);
     return () => {
       editor.off('transaction', report);
@@ -158,7 +162,6 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   // ── the entries: the open threads of this tab drawn here, in document order ──
   const byId = useMemo(() => new Map(open.map((thread) => [thread.id, thread])), [open]);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [groups, setGroups] = useState<Groups>(NO_GROUPS);
   // P4-B1: the threads wanted here, the compose card's among them regardless; which are drawn (an orphan is not, Z3) and
   // where is read from the display's decorations at each pass
   const wantedKey = useMemo(() => {
@@ -174,58 +177,33 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   // the display draws it, or another tab's)
   const unlocated = useRef(new Set<string>());
   const passes = useRef(0);
-  // P4-B1: what a pass reads (the committed render's), the last pass's located entries and cause, the groups drawn
-  const latest = useRef({ wantedKey, byId, hosting, active, tier, entries });
+  // P4-B1: what a pass reads (the committed render's), the last pass's located entries and cause
+  const latest = useRef({ wantedKey, byId, hosting, tier, entries });
   useLayoutEffect(() => {
-    latest.current = { wantedKey, byId, hosting, active, tier, entries };
+    latest.current = { wantedKey, byId, hosting, tier, entries };
   });
   const located = useRef<Located[]>([]);
   const lastCause = useRef<Cause>('layout');
-  const groupsKey = useRef('');
   const updateAdd = useRef<() => void>(() => {});
 
   // P4-B1: the layout pass, with its cause: the anchors re-read (the character after each thread's first position, so a
-  // passage starting at a soft wrap anchors on the line its first character is drawn on, P6), the stack laid, the
-  // transforms written. The icon tier lays its groups (a dot each, ICON_PX tall) rather than its entries.
+  // passage starting at a soft wrap anchors on the line its first character is drawn on, P6), the stack laid from the
+  // pin (the editor's, read here; one drawn nowhere here, an orphan's or another tab's, is no pin), the transforms
+  // written. Each entry sits Docs' inset below its line (LC-1 items 1 and 7: a card's top and an icon's alike); the icon
+  // tier lays every entry as an icon, ICON_PX tall at the icon gap.
   const place = useCallback((cause: Cause) => {
     const root = column.current;
     if (!root) return;
-    const { active, tier } = latest.current;
+    const { tier } = latest.current;
     const list = located.current;
     const origin = root.getBoundingClientRect().top;
     const anchorOf = (entry: Located) => (entry.from === null || editor.isDestroyed ? 0 : Math.round(editor.view.coordsAtPos(entry.from, 1).top - origin));
-    const leaderOf = new Map<string, string>();
-    let items: Array<{ id: string; anchor: number; height: number }>;
-    if (tier.kind === 'icons') {
-      const counts = new Map<string, number>();
-      items = [];
-      let lead: { id: string; anchor: number } | null = null;
-      for (const entry of list) {
-        const anchor = anchorOf(entry);
-        if (lead && Math.abs(anchor - lead.anchor) < ICON_PX) {
-          leaderOf.set(entry.id, lead.id);
-          counts.set(lead.id, (counts.get(lead.id) ?? 1) + 1);
-          counts.set(entry.id, 0);
-          continue;
-        }
-        lead = { id: entry.id, anchor };
-        leaderOf.set(entry.id, entry.id);
-        counts.set(entry.id, 1);
-        items.push({ id: entry.id, anchor, height: ICON_PX });
-      }
-      const key = [...counts].map(([id, n]) => `${id}:${n}`).join(' ');
-      if (key !== groupsKey.current) {
-        groupsKey.current = key;
-        setGroups(counts);
-      }
-    } else items = list.map((entry) => ({ id: entry.id, anchor: anchorOf(entry) + MARGIN_CARD_INSET_PX, height: heights.current.get(entry.id) ?? 0 })); // the card's top below the line's by Docs' inset (LC-1 item 1)
-    const laid = layoutMargin({ entries: items, active: active === null ? null : (leaderOf.get(active) ?? active), gap: MARGIN_GAP_PX });
-    const placed = new Map<string, number>();
-    for (const { id } of list) {
-      const top = laid.tops.get(leaderOf.get(id) ?? id);
-      if (top !== undefined) placed.set(id, top);
-    }
-    tops.current = placed;
+    const icons = tier.kind === 'icons';
+    const items = list.map((entry) => ({ id: entry.id, anchor: anchorOf(entry) + MARGIN_CARD_INSET_PX, height: icons ? ICON_PX : (heights.current.get(entry.id) ?? 0) }));
+    const pin = editor.isDestroyed ? null : pinnedThread(editor.state);
+    const pinned = pin !== null && list.some((entry) => entry.id === pin && entry.from !== null) ? pin : null;
+    const placed = layoutMargin({ entries: items, pinned, gap: icons ? ICON_GAP_PX : MARGIN_GAP_PX });
+    tops.current = placed.tops;
     // P4-B1: an animated cause animates its moves; an unanimated pass that moves nothing (the edit's own frame after an
     // add, which now reaches the margin in the same task) leaves a running transition alone, and one that moves a card
     // ends it there (an edit's moves never animate)
@@ -234,14 +212,14 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     const moves: Array<[HTMLElement, string, boolean]> = [];
     const wasUnlocated = unlocated.current;
     unlocated.current = new Set(list.filter((entry) => entry.from === null).map((entry) => entry.id));
-    for (const [id, top] of placed) {
+    for (const [id, top] of placed.tops) {
       const node = nodes.current.get(id);
-      const transform = transformOf(latest.current, id, top);
+      const transform = transformOf(top);
       if (node && node.style.transform !== transform) moves.push([node, transform, wasUnlocated.has(id) && !unlocated.current.has(id)]);
     }
     if (ANIMATED.has(cause)) root.setAttribute('data-animate', '');
     else if (moves.length > 0) root.removeAttribute('data-animate');
-    root.style.setProperty('--doc-margin-height', `${Math.ceil(laid.height)}px`);
+    root.style.setProperty('--doc-margin-height', `${Math.ceil(placed.height)}px`);
     for (const [node, transform, jump] of moves) {
       if (!jump) {
         node.style.transform = transform;
@@ -289,16 +267,16 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   // not React's later one, is the one that moves the cards
   passSoon.current = () => passRef.current('set', false);
 
-  // the passes React's state asks for: the thread set, the active thread, the tier and the hosting thread (the first
-  // layout is not animated, D4)
-  const previous = useRef<{ active: string | null; set: string } | null>(null);
+  // the passes React's state asks for: the thread set, the active thread, the pin, the tier and the hosting thread (the
+  // first layout is not animated, D4; the pin's move is an activation's)
+  const previous = useRef<{ active: string | null; pin: string | null; set: string } | null>(null);
   useLayoutEffect(() => {
     if (tier.kind === 'off') return;
     const set = `${wantedKey}|${hosting ?? ''}`;
     const was = previous.current;
-    previous.current = { active, set };
-    pass(was === null ? 'layout' : was.active !== active ? 'activation' : was.set !== set ? 'set' : 'layout', true);
-  }, [wantedKey, byId, hosting, active, tier, pass]);
+    previous.current = { active, pin, set };
+    pass(was === null ? 'layout' : was.active !== active || was.pin !== pin ? 'activation' : was.set !== set ? 'set' : 'layout', true);
+  }, [wantedKey, byId, hosting, active, pin, tier, pass]);
   // P4-B1: the passages' moves (an edit, a frame resize, the layer's growth) are the page frame's to report, from its
   // frame callback: an edit costs this pass and no render
   useEffect(() => {
@@ -356,7 +334,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
       }
     }
     const top = tops.current.get(id);
-    if (top !== undefined) node.style.transform = transformOf(latest.current, id, top);
+    if (top !== undefined) node.style.transform = transformOf(top);
     resizes?.observe(node);
   });
   const attach = (id: string) => {
@@ -447,9 +425,8 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     step,
     exit,
     dot: (id) => {
-      // the group's first opens; the dot of an open group closes it
-      const at = entries.findIndex((entry) => entry.id === id);
-      const open = active !== null && entries.slice(at, at + (groups.get(id) ?? 1)).some((member) => member.id === active);
+      // an icon opens its thread's card; the open card's icon closes it
+      const open = id === active;
       activate(open ? null : id);
       if (!open) scrollPassage(editor, id);
     },
@@ -483,9 +460,16 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   // when the body widens); it is no region then
   if (tier.kind === 'off') return <div ref={column} className="doc-margin" data-margin-tier="off" style={{ '--doc-margin-reserve': '0px' } as CSSProperties} />;
   const reserved = entries.length > 0 || hosting !== null;
+  // P4-B1: the geometry chrome.css draws from (LC-1 items 6 and 7): the column's basis, the drawn card's width (the
+  // icon tier's overlaid card at the least card's), the gutters, the gaps and the icon
   const style = {
     '--doc-margin-reserve': `${reserved ? tier.reserve : 0}px`,
+    '--doc-margin-card': `${tier.kind === 'cards' ? Math.floor(tier.width) : CARD_MIN_PX}px`,
+    '--doc-margin-page-gutter': `${MARGIN_PAGE_GUTTER_PX}px`,
+    '--doc-margin-edge-gutter': `${MARGIN_EDGE_GUTTER_PX}px`,
     '--doc-margin-gap': `${MARGIN_GAP_PX}px`,
+    '--doc-margin-icon': `${ICON_PX}px`,
+    '--doc-margin-icon-gap': `${ICON_GAP_PX}px`,
     '--doc-margin-overlap': `${tier.kind === 'icons' && reserved ? tier.overlap : 0}px`,
   } as CSSProperties;
   // P4-B1: a memoized card per entry (MarginCard)
@@ -499,7 +483,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
             {entry.id === hosting && overlay ? <Hosted render={overlay} /> : card(entry, index, entry.id !== active)}
           </div>
         ))}
-      {tier.kind === 'icons' && <IconRail entries={entries} groups={groups} active={active} hosting={hosting} overlay={overlay} attach={attach} card={card} handlersFor={handlersFor} />}
+      {tier.kind === 'icons' && <IconRail entries={entries} active={active} hosting={hosting} overlay={overlay} attach={attach} card={card} handlersFor={handlersFor} />}
       {/* the surface's card host stays mounted while no card is up (it claims a card as it opens and then names its thread) */}
       {overlay && (hosting === null || !entries.some((entry) => entry.id === hosting)) && (
         <div className="doc-margin-slot" data-margin-slot>
@@ -514,10 +498,10 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   );
 }
 
-// P4-B1: the transform the pass writes for an entry at `top` (the active card's left shift in the cards tier); a card
-// mounting later is given the same
-function transformOf(now: { active: string | null; tier: MarginTier }, id: string, top: number): string {
-  return id === now.active && now.tier.kind === 'cards' ? `translate(${-MARGIN_ACTIVE_SHIFT_PX}px, ${top}px)` : `translateY(${top}px)`;
+// P4-B1: the transform the pass writes for an entry at `top` (no sideways shift: Docs' active card stays in the column,
+// LC-1 item 2); a card mounting later is given the same
+function transformOf(top: number): string {
+  return `translateY(${top}px)`;
 }
 
 // The Add comment button beside a non-empty selection (C1), at the selection head's line. P4-B1: a component of its own,
@@ -559,12 +543,10 @@ function AddComment({ editor, column, hosting, onComment, updateRef }: { editor:
   );
 }
 
-// The icon tier: a dot per group of entries whose anchors lie within one dot's height of the group's first (P4-B1, N2:
-// the pass forms the groups and lays them, each member at its group's top), the dot carrying the group's count; the
-// active thread's card (or the compose card) is overlaid beside the dot, reaching left over the page.
+// The icon tier: an icon per thread (P4-B1, N2 on LC-1 item 7: none merged, the pass lays them as it lays cards); the
+// active thread's card (or the compose card) is overlaid beside its icon, reaching left over the page.
 function IconRail({
   entries,
-  groups,
   active,
   hosting,
   overlay,
@@ -573,7 +555,6 @@ function IconRail({
   handlersFor,
 }: {
   entries: Entry[];
-  groups: Groups;
   active: string | null;
   hosting: string | null;
   overlay: (() => ReactNode) | null;
@@ -585,20 +566,10 @@ function IconRail({
   return (
     <>
       {entries.map((entry, index) => {
-        const count = groups.get(entry.id) ?? 1; // 0: drawn under an earlier entry's dot
-        const groupActive = active !== null && entries.slice(index, index + count).some((member) => member.id === active);
         const name = entry.thread ? `Comment by ${actorDisplay(entry.thread.createdBy).name}: ${firstWords(entry.thread)}` : 'Comment';
         return (
           <div key={entry.id} ref={attach(entry.id)} className="doc-margin-entry" data-margin-entry={entry.id} data-icon-entry="" data-active={entry.id === active ? '' : undefined} data-compose={entry.id === hosting && overlay ? '' : undefined}>
-            {count > 0 && (
-              <IconDot
-                label={count > 1 ? `${name}, and ${count - 1} more` : name}
-                title={entry.thread ? `${actorDisplay(entry.thread.createdBy).name}: ${firstWords(entry.thread)}` : undefined}
-                count={count}
-                active={groupActive}
-                onDot={handlersFor(entry.id).onDot}
-              />
-            )}
+            <IconDot label={name} title={entry.thread ? `${actorDisplay(entry.thread.createdBy).name}: ${firstWords(entry.thread)}` : undefined} active={entry.id === active} onDot={handlersFor(entry.id).onDot} />
             {(entry.id === hosting && overlay) || (entry.id === active && !open) ? (
               <div className="doc-margin-overlay">
                 {entry.id === hosting && overlay ? <Hosted render={overlay} /> : card(entry, index, false)}
@@ -634,13 +605,9 @@ const MarginCard = memo(function MarginCard({ thread, active, compact, index, co
   );
 });
 
-// P4-B1: the icon tier's dot, memoized the same way
-const IconDot = memo(function IconDot({ label, title, count, active, onDot }: { label: string; title: string | undefined; count: number; active: boolean; onDot: () => void }) {
-  return (
-    <button type="button" className="doc-margin-icon" data-active={active ? '' : undefined} aria-label={label} title={title} onClick={onDot}>
-      {count > 1 ? String(count) : ''}
-    </button>
-  );
+// P4-B1: the icon tier's icon, memoized the same way
+const IconDot = memo(function IconDot({ label, title, active, onDot }: { label: string; title: string | undefined; active: boolean; onDot: () => void }) {
+  return <button type="button" className="doc-margin-icon" data-active={active ? '' : undefined} aria-label={label} title={title} onClick={onDot} />;
 });
 
 // P4-B1: the renderer's compose card (the overlay surface), drawn again only when the page frame hands a new `render`

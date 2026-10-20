@@ -138,7 +138,7 @@ export function topOf(element: Element | null): number | null {
   return match ? Number(match[2]) : null;
 }
 
-/** The transform's translateX of an entry (the active shift), 0 when none. */
+/** The transform's translateX of an entry, 0 when none (P4-B1: no card is shifted since LC-1 item 2; the cases read 0). */
 export function shiftOf(element: Element | null): number {
   const transform = (element as HTMLElement | null)?.style.transform ?? '';
   const match = /translate\((-?[\d.]+)px, /.exec(transform);
