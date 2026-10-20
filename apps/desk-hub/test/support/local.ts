@@ -43,6 +43,8 @@ import {
   SUMMARY_AS_PREVIOUS_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
+  WRITE_STALL_PATH,
+  PROJECT_MACHINES_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -100,10 +102,11 @@ export async function startLocalHub() {
   };
 
   // workerd's own log lines. A line a suite said it expects (`expectRuntimeLog`) is kept for it to assert and not
-  // printed, as is the hub's own record of a machine's stream (`{"desk":"machine-stream",…}`, a few per test); every
+  // printed, as is the hub's own record of a machine's stream and of a project's failed frame or send
+  // (`{"desk":"machine-stream",…}`, `{"desk":"project",…}`, a few per test, many where a suite injects failures); every
   // other goes out as Miniflare's default handler would print it, so an unexpected error stays visible.
   const runtimeLogs: Array<{ level: string; message: string }> = [];
-  const expectedLogs: RegExp[] = [/^\{"desk":"machine-stream"/];
+  const expectedLogs: RegExp[] = [/^\{"desk":"(machine-stream|project)"/];
   const handleStructuredLogs = ({ level, message }: { level: string; message: string }) => {
     if (expectedLogs.some((pattern) => pattern.test(message))) return void runtimeLogs.push({ level, message });
     if (level === 'error' || level === 'warn') console.error(message);
@@ -197,7 +200,7 @@ export async function startLocalHub() {
     },
     /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given, and its probe); set before
      * its stream opens (the suites' Worker only). */
-    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number }) {
+    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number; writeTimeoutMs?: number }) {
       const query = new URLSearchParams(Object.entries(timing).map(([name, value]) => [name, String(value)]));
       await seam('MACHINE', machine, `${TIMING_PATH}?${query}`);
     },
@@ -258,6 +261,15 @@ export async function startLocalHub() {
     async holdSend(machine: string, kind: string) {
       await seam('MACHINE', machine, `${SEND_HOLD_PATH}?kind=${kind}`);
     },
+    /** Stalls the machine's next write of a `kind` frame for good, as a stream whose client stopped reading never takes
+     * it (the suites' Worker only); the write bound ends the stream. */
+    async stallNextWrite(machine: string, kind: string) {
+      await seam('MACHINE', machine, `${WRITE_STALL_PATH}?kind=${kind}`);
+    },
+    /** The machine streams a project fans out to: its `machines` rows. */
+    async projectMachines(project: string): Promise<Array<{ name: string; generation: number }>> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_MACHINES_PATH)) as Array<{ name: string; generation: number }>;
+    },
     /** Releases the machine's held send, once it is held (waiting for it to be). */
     async releaseSend(machine: string) {
       const deadline = Date.now() + 10_000;
@@ -287,7 +299,7 @@ export async function startLocalHub() {
     async holdArchiveLookups(project: string, hold: boolean) {
       await seam('PROJECT', project, PROJECT_ARCHIVE_HOLD_PATH, { hold });
     },
-    /** A project's send queues, `<machine>#<generation>`. */
+    /** A project's send queues, `<machine>#<generation>#<lane>`. */
     async projectQueues(project: string): Promise<string[]> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_QUEUES_PATH)) as string[];
     },

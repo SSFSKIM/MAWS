@@ -1,0 +1,360 @@
+{
+  "about": "How sminos names a broadcast's scope and a copy's destinations, written by generate.py beside this file from sminos's own scope_label, target_label and chat_line; see its docstring.",
+  "source": "doperpowers df089d8d sminos/skills/sminos/scripts/sminos.py",
+  "projects": {
+    "1f0c6a52-6a0e-4a4b-9a55-0c2d7c1e9a11": "projA",
+    "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22": "projB",
+    "c2a8e5f1-3b47-5d9e-a6c0-91f2e4d8b733": "beta"
+  },
+  "labels": [
+    {
+      "scope": {
+        "machines": [
+          "beta"
+        ]
+      },
+      "label": "@all on beta",
+      "why": "--machine beta (test-broadcast.sh)"
+    },
+    {
+      "scope": {
+        "projects": [
+          "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22"
+        ],
+        "machines": [
+          "beta"
+        ]
+      },
+      "label": "@all in projB on beta",
+      "why": "--project projB --machine beta (test-broadcast.sh)"
+    },
+    {
+      "scope": {
+        "projects": [
+          "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22",
+          "c2a8e5f1-3b47-5d9e-a6c0-91f2e4d8b733"
+        ]
+      },
+      "label": "@all in projB,beta",
+      "why": "--project projB,beta (test-broadcast.sh)"
+    },
+    {
+      "scope": {},
+      "label": "@org",
+      "why": "--org (test-broadcast.sh)"
+    },
+    {
+      "scope": {
+        "here": "alpha"
+      },
+      "label": "@all on alpha",
+      "why": "--here on alpha (test-broadcast.sh)"
+    },
+    {
+      "scope": {
+        "states": [
+          "waiting"
+        ]
+      },
+      "label": "@org (waiting)",
+      "why": "--state waiting (test-broadcast.sh)"
+    },
+    {
+      "scope": {
+        "machines": [
+          "beta",
+          "mini"
+        ],
+        "here": "alpha"
+      },
+      "label": "@all on beta,mini,alpha",
+      "why": "--machine beta,mini --here: here's machine last"
+    },
+    {
+      "scope": {
+        "projects": [
+          "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22"
+        ],
+        "states": [
+          "busy",
+          "idle"
+        ]
+      },
+      "label": "@all in projB (busy,idle)",
+      "why": "--project projB --state busy,idle"
+    },
+    {
+      "scope": {
+        "projects": [
+          "1f0c6a52-6a0e-4a4b-9a55-0c2d7c1e9a11",
+          "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22"
+        ],
+        "machines": [
+          "beta"
+        ],
+        "here": "alpha",
+        "states": [
+          "waiting"
+        ]
+      },
+      "label": "@all in projA,projB on beta,alpha (waiting)",
+      "why": "every key"
+    },
+    {
+      "scope": {
+        "projects": [
+          "e9d4c3b2-a1f0-4e8d-9c7b-6a5f4e3d2c44"
+        ]
+      },
+      "label": "@all in e9d4c3b2-a1f0-4e8d-9c7b-6a5f4e3d2c44",
+      "why": "a project not known here stands as its id"
+    },
+    {
+      "scope": {
+        "machines": [
+          "SK.local"
+        ],
+        "states": [
+          "busy"
+        ]
+      },
+      "label": "@all on SK.local (busy)",
+      "why": "a machine name with a dot and capitals"
+    },
+    {
+      "scope": {
+        "projects": "projB",
+        "machines": [
+          3,
+          "beta",
+          null
+        ],
+        "here": "",
+        "states": []
+      },
+      "label": "@all on beta",
+      "why": "values not lists of words are passed over"
+    },
+    {
+      "scope": {
+        "here": 7,
+        "states": "waiting"
+      },
+      "label": "@org",
+      "why": "a here that is not a name, states not a list: the whole org"
+    }
+  ],
+  "events": [
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "wake": true,
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb"
+          }
+        ]
+      },
+      "target": "@all",
+      "destinations": null,
+      "chat": "08:00:00 0a1b2c3d:4 sa → @all  beta reboots at three",
+      "why": "a bare @all: no scope"
+    },
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "wake": true,
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb"
+          }
+        ],
+        "scope": {
+          "machines": [
+            "beta"
+          ]
+        }
+      },
+      "target": "@all on beta",
+      "destinations": null,
+      "chat": "08:00:00 0a1b2c3d:4 sa → @all on beta  beta reboots at three",
+      "why": "a delivering event of say --machine beta"
+    },
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "wake": true,
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb"
+          }
+        ],
+        "scope": {}
+      },
+      "target": "@org",
+      "destinations": null,
+      "chat": "08:00:00 0a1b2c3d:4 sa → @org  beta reboots at three",
+      "why": "a delivering event of say --org"
+    },
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "wake": true,
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb"
+          }
+        ],
+        "scope": "beta"
+      },
+      "target": "@all",
+      "destinations": null,
+      "chat": "08:00:00 0a1b2c3d:4 sa → @all  beta reboots at three",
+      "why": "a scope that is not an object: a bare @all"
+    },
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "wake": true,
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb",
+            "project": "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22"
+          }
+        ],
+        "scope": {
+          "projects": [
+            "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22"
+          ],
+          "machines": [
+            "beta"
+          ]
+        },
+        "copy": "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22:alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:4"
+      },
+      "target": "@all in projB on beta",
+      "destinations": "projB",
+      "chat": "08:00:00 0a1b2c3d:4 sa → @all in projB on beta → projB  beta reboots at three",
+      "why": "a copy of one project's event: copy a string (test-broadcast.sh)"
+    },
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "wake": true,
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb",
+            "project": "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22"
+          },
+          {
+            "session": "8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5968",
+            "alias": "mb",
+            "project": "c2a8e5f1-3b47-5d9e-a6c0-91f2e4d8b733"
+          }
+        ],
+        "scope": {
+          "projects": [
+            "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22",
+            "c2a8e5f1-3b47-5d9e-a6c0-91f2e4d8b733"
+          ]
+        },
+        "copy": [
+          "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22:alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:5",
+          "c2a8e5f1-3b47-5d9e-a6c0-91f2e4d8b733:alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:2"
+        ]
+      },
+      "target": "@all in projB,beta",
+      "destinations": "projB, beta",
+      "chat": "08:00:00 0a1b2c3d:4 sa → @all in projB,beta → projB, beta  beta reboots at three",
+      "why": "a copy of two projects' events: copy a list (test-broadcast.sh)"
+    },
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "wake": true,
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb",
+            "project": "e9d4c3b2-a1f0-4e8d-9c7b-6a5f4e3d2c44"
+          }
+        ],
+        "scope": {
+          "states": [
+            "idle"
+          ]
+        },
+        "copy": [
+          "e9d4c3b2-a1f0-4e8d-9c7b-6a5f4e3d2c44:alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:9"
+        ]
+      },
+      "target": "@org (idle)",
+      "destinations": "e9d4c3b2-a1f0-4e8d-9c7b-6a5f4e3d2c44",
+      "chat": "08:00:00 0a1b2c3d:4 sa → @org (idle) → e9d4c3b2-a1f0-4e8d-9c7b-6a5f4e3d2c44  beta reboots at three",
+      "why": "a copy whose list holds one event, in a project not known here"
+    },
+    {
+      "event": {
+        "ts": "2026-10-20T08:00:00.000Z",
+        "writer": "alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "seq": 4,
+        "kind": "say",
+        "from": "sa",
+        "text": "beta reboots at three",
+        "to": [
+          {
+            "session": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+            "alias": "rb",
+            "project": "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22"
+          }
+        ],
+        "copy": "7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22:alpha/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:6"
+      },
+      "target": "@rb",
+      "destinations": "projB",
+      "chat": "08:00:00 0a1b2c3d:4 sa → @rb → projB  beta reboots at three",
+      "why": "a copy of a tagged say, before 1.2.0 as since"
+    }
+  ]
+}
