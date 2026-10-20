@@ -298,21 +298,8 @@ test.describe('the document editor', () => {
       const r = el.getClientRects()[0]!;
       return { left: r.left, top: r.top };
     });
-    const box = (await card.boundingBox())!;
-    // the margin's geometry as the page has it, read into the assertion's message (the mini's run is the only evidence)
-    const geometry = await margin.evaluate((el) => {
-      const rect = (node: Element | null | undefined) => (node ? JSON.stringify(node.getBoundingClientRect().toJSON()) : 'none');
-      const hosted = el.querySelector<HTMLElement>('[data-margin-entry][data-compose]');
-      return {
-        tier: (el as HTMLElement).dataset.marginTier,
-        relayouts: (el as HTMLElement).dataset.relayouts,
-        column: rect(el),
-        entries: Array.from(el.querySelectorAll<HTMLElement>('[data-margin-entry]')).map((node) => `${node.dataset.marginEntry}: ${node.style.transform || 'no transform'} ${rect(node)}`),
-        overlay: rect(hosted?.querySelector('.doc-margin-overlay')),
-        card: rect(hosted?.querySelector('[data-comment-card]')),
-      };
-    });
-    expect(Math.abs(box.y - line.top), `the compose card at the passage’s first line (line ${JSON.stringify(line)}, card ${JSON.stringify(box)}, margin ${JSON.stringify(geometry)})`).toBeLessThanOrEqual(2);
+    // the stack's moves animate (200 ms), so the card is read once it has settled at the line
+    await expect.poll(async () => Math.abs((await card.boundingBox())!.y - line.top), { message: 'the compose card at the passage’s first line' }).toBeLessThanOrEqual(2);
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
 
     await card.getByRole('button', { name: 'Resolve' }).click();

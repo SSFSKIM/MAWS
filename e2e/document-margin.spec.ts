@@ -150,7 +150,7 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
   });
   const centredLeft = (await pageBox()).x;
   const t1 = await keep(page, main, text, 1, 'budget review');
-  const t2 = await keep(page, main, text, 6, 'listed below');
+  const t2 = await keep(page, main, text, 4, 'listed below'); // the fifth paragraph: two agenda lines between the passages
   const entry = (threadId: string) => margin.locator(`[data-margin-entry="${threadId}"]`);
   const lineTop = (threadId: string) => text.locator(`[data-thread="${threadId}"]`).first().evaluate((el) => el.getClientRects()[0]!.top);
   const entryTop = async (threadId: string) => (await entry(threadId).boundingBox())!.y;
