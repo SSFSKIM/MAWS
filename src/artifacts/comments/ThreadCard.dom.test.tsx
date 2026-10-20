@@ -32,9 +32,10 @@ const thread = (over: Partial<ThreadCardThread> = {}): ThreadCardThread => ({
   ...over,
 });
 
-type Handlers = Pick<ThreadCardProps, 'onActivate' | 'onReply' | 'onResolve' | 'onReopen' | 'onDraftChange' | 'onNext' | 'onPrevious' | 'onExit'>;
-function handlers(): { [K in keyof Handlers]-?: ReturnType<typeof vi.fn> } {
-  return { onActivate: vi.fn(), onReply: vi.fn(), onResolve: vi.fn(), onReopen: vi.fn(), onDraftChange: vi.fn(), onNext: vi.fn(), onPrevious: vi.fn(), onExit: vi.fn() };
+function handlers() {
+  const callback = () => vi.fn<() => void>();
+  const text = () => vi.fn<(text: string) => void>();
+  return { onActivate: callback(), onReply: text(), onResolve: callback(), onReopen: callback(), onDraftChange: text(), onNext: callback(), onPrevious: callback(), onExit: callback() };
 }
 
 function show(props: Partial<ThreadCardProps> = {}) {
