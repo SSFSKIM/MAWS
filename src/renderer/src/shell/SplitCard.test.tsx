@@ -2,7 +2,8 @@
 // C5's real Shell. S (session A) on the left beside Settings on the right (an editor that registers X32, so its header
 // draws Expand), the main area 1500 px wide, its content row 1000 × 700. The composer slot is a probe that registers a
 // focus target as C7's composer does and counts its mounts, so "one composer per session" is counted at every commit.
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useLayoutEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,6 +25,11 @@ import { installResizeObserver } from '../test-support/resize';
 import { resetShellStores } from '../test-support/shell-stores';
 import { useFloatingCard } from './floating';
 import { ChromePill } from './FloatingPill';
+import { Composer } from '../composer/Composer'; // M2 review: the round trip's draft
+import { useTranscriptStore } from '../stores/transcript'; // M2 review: the round trip's scroll
+import { builder } from '../transcript/model/test-events';
+import type { TranscriptSource } from '../transcript/source/types';
+import { Transcript } from '../transcript/view/Transcript';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -322,5 +328,125 @@ describe('the split’s floating card in the Shell', () => {
     expect(card()).not.toBeNull();
     expect(set().focusedPane).toBe(0);
     expect(focused).toEqual([A]);
+  });
+});
+
+// M2 review (P2): the round trip with the real transcript and the real composer. The transcript's place and the draft
+// come back in both directions: float (pane to card) and dock (card to pane, in one commit). The transcript gets a
+// viewport and its rows a height (happy-dom lays nothing out), and its scroller's metrics by hand; the composer keeps its
+// draft through `session.drafts.*`, as main's drafts table does.
+describe('the round trip with the real transcript and composer', () => {
+  type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean }; getText(): string } };
+  const sources = new Map<string, TranscriptSource>();
+  const sourceOf = (id: AppSessionId): TranscriptSource => {
+    if (!sources.has(id)) {
+      const b = builder();
+      for (let i = 0; i < 80; i++) {
+        b.turn(`u${i}`);
+        b.text(`m${i}`, 0, `Answer ${i}`);
+        b.end([`u${i}`]);
+      }
+      sources.set(id, { key: id, subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) });
+    }
+    return sources.get(id)!;
+  };
+  const drafts = new Map<string, unknown>();
+  let top = 0;
+  const scrolls: number[] = [];
+  const scroller = () => document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+  const rows = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')];
+  const startOf = (row: HTMLElement) => Number(/translateY\((-?[\d.]+)px\)/.exec(row.style.transform)![1]);
+  const rowAt = (y: number) => rows().find((row) => startOf(row) <= y && y < startOf(row) + 40)!.dataset.rowId!;
+  const shownAt = (id: string) => startOf(rows().find((row) => row.dataset.rowId === id)!);
+  const scrollTo = (y: number) =>
+    act(() => {
+      top = y;
+      fireEvent.scroll(scroller());
+    });
+  const editor = () => screen.getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
+  const jumpButton = () => screen.queryByRole('button', { name: 'Jump to latest' });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function TranscriptOver({ appSessionId }: { appSessionId: AppSessionId }) {
+    return <Transcript source={sourceOf(appSessionId)} variant="session" />;
+  }
+  function RealComposer(props: { appSessionId: AppSessionId; paneIndex: 0 | 1 }) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <Composer {...props} />
+      </QueryClientProvider>
+    );
+  }
+
+  beforeEach(() => {
+    sources.clear();
+    drafts.clear();
+    top = 0;
+    scrolls.length = 0;
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-transcript-scroller')) return 2000;
+      return this.hasAttribute('data-index') ? 40 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      if (typeof options !== 'object' || options.top === undefined || !this.hasAttribute('data-transcript-scroller')) return;
+      top = options.top;
+      scrolls.push(top);
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-transcript-scroller') ? top : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(20_000);
+    window.maws = fakeClient({
+      'session.queue.list': { entries: [], paused: false, pauseReason: null },
+      'session.history.list': { entries: [] },
+      'session.drafts.get': (input: { appSessionId: string }) => drafts.get(input.appSessionId) ?? null,
+      'session.drafts.set': (input: { appSessionId: string; draft: unknown }) => void drafts.set(input.appSessionId, input.draft),
+    }).client;
+    registerSlot('transcript', TranscriptOver);
+    registerSlot('composer', RealComposer);
+  });
+  afterEach(() => {
+    delete (window as { maws?: unknown }).maws;
+  });
+
+  async function live(): Promise<void> {
+    await waitFor(() => expect(useTranscriptStore.getState().entries[A]?.phase).toBe('live'));
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+  }
+
+  it('float, then dock: a pinned reader stays pinned; the row a reader scrolled to and the draft come back each way', async () => {
+    shell();
+    await live();
+    // A reader at the end: pinned in the card, and pinned again in the pane after the dock (one commit: card out, pane in)
+    dragTo(150);
+    await waitFor(() => expect(scrolls.at(-1), 'the card at the end').toBeGreaterThan(2_000));
+    expect(jumpButton()).toBeNull();
+    act(() => runAction('panel.float')); // ⌥⌘B docks the split's card
+    expect(card()).toBeNull();
+    scrolls.length = 0;
+    await waitFor(() => expect(scrolls.at(-1), 'the pane at the end').toBeGreaterThan(2_000));
+    expect(jumpButton()).toBeNull();
+
+    // A reader scrolled up, with a draft: the same row and the draft in the card, then the card's row and the draft
+    // grown in the card back in the pane
+    act(() => void editor().editor.commands.insertContent('kept across the round trip'));
+    scrollTo(18_000);
+    scrollTo(410);
+    const inPane = rowAt(410);
+    act(() => useLayout.getState().focusPane(1));
+    act(() => runAction('main.expandArtifactPane')); // float from the editor beside it
+    expect(card()).not.toBeNull();
+    await waitFor(() => expect(editor().editor.getText()).toBe('kept across the round trip'));
+    await waitFor(() => expect(scrolls.at(-1)).toBe(shownAt(inPane)));
+    expect(jumpButton()).not.toBeNull();
+
+    scrollTo(810); // the reader moves on in the card
+    const inCard = rowAt(810);
+    expect(inCard).not.toBe(inPane);
+    act(() => void editor().editor.commands.insertContent(' and back'));
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Dock session' })); // one commit: card out, pane in
+    expect(card()).toBeNull();
+    await waitFor(() => expect(scrolls.at(-1)).toBe(shownAt(inCard)));
+    expect(jumpButton()).not.toBeNull();
+    await waitFor(() => expect(editor().editor.getText()).toBe('kept across the round trip and back'));
   });
 });

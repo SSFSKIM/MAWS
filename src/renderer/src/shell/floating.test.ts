@@ -460,4 +460,18 @@ describe('the split’s card', () => {
     dockPanel();
     expect(takeTranscriptCarry(A)).toEqual(scroll);
   });
+
+  // M2 review (P3): a file tab of the session has no transcript of it mounted, so neither the panel's float nor its dock
+  // over that tab marks a carry (the mark would wait for whatever mount of the session came next)
+  it('the panel’s float and dock over a file tab of the session mark no carry', () => {
+    const file: TabRef = { id: 'file:/x', kind: 'file', path: '/x', line: null, appSessionId: A, pinned: false };
+    takeTranscriptCarry(A);
+    recordTranscriptScroll(A, { following: false, offset: 900, signature: '3:r3', anchor: 'r2' });
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [file], activeTabId: file.id }], focusedPane: 0, splitRatio: 0.5 } } } });
+    floatPanel();
+    expect(layout().regions.panel.floating).toBe(true);
+    expect(takeTranscriptCarry(A)).toBeNull();
+    dockPanel();
+    expect(takeTranscriptCarry(A)).toBeNull();
+  });
 });

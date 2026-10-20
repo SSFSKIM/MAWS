@@ -1,7 +1,8 @@
 // The transcript's scroll across a card's float and dock (P4-B3, its Decision Log 14; parent §4.5, Claude's rule). A
 // transcript mounts at its end, and a float or dock moves a session between a pane and a card by a remount, so the
 // reader's place would be lost. Every mounted transcript records where it was as it unmounts; a float or dock (either
-// card, `shell/floating.ts`) marks the session's next mount to come back there: a following reader at the end; else,
+// card, `shell/floating.ts`) marks the session's next mount, which takes the mark as it mounts (after the unmount it
+// replaces in the same commit has recorded), to come back there: a following reader at the end; else,
 // when the content is unchanged (the same row count and last row), the same place; else the end. The place is the first
 // visible row (the offset beside it, for a row no longer there): the pane and the card differ in width, and a new mount
 // knows no row's size until it measures it, so the same offset would land on other rows. Only a mark restores, and only

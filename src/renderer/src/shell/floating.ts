@@ -271,7 +271,9 @@ export function floatPanel(patch: { width?: number } = {}): void {
     layout().dockSplit();
   }
   markFocusOnMount(session);
-  markTranscriptCarry(session);
+  // The carry only from the session's own tab: a file tab of it has no transcript of it mounted to come back from, and
+  // the mark would wait for whatever mount of it came next (as `dockPanel` marks).
+  if (activeTab(layout().main)?.kind === 'session') markTranscriptCarry(session);
   layout().setPanel({ ...patch, floating: true });
 }
 

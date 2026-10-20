@@ -519,4 +519,67 @@ describe('the scroll carried across a card’s float and dock', () => {
     recordTranscriptScroll(key, { following: false, offset: 120, signature: same, anchor: ids[3] });
     await ends(key); // not marked
   });
+
+  // M2 review (P2): a dock renders the pane's transcript in the same commit that removes the card's, so the new mount
+  // must take the place the removed one recorded in that commit, not an older record. Both directions, each one commit.
+  describe('a mount swapped for another in one commit (a dock, a float)', () => {
+    function Swap({ source, at }: { source: TranscriptSource; at: 'pane' | 'card' }) {
+      return at === 'pane' ? (
+        <section data-at="pane">
+          <Transcript source={source} variant="session" />
+        </section>
+      ) : (
+        <aside data-at="card">
+          <Transcript source={source} variant="session" />
+        </aside>
+      );
+    }
+    const rowAt = (top: number) => rendered().find((row) => startOf(row) <= top && top < startOf(row) + 40)!.dataset.rowId!;
+    const shownAt = (id: string) => startOf(rendered().find((row) => row.dataset.rowId === id)!);
+
+    async function swapScene() {
+      const metrics = scrollMetrics();
+      const key = `transcript-test-${++keys}`;
+      const source: TranscriptSource = { key, subscribe: () => () => {}, snapshot: () => Promise.resolve(turns()) };
+      const view = render(<Swap source={source} at="pane" />);
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+      const ids = useTranscriptStore.getState().entries[key].rows.map((row) => row.id);
+      // an older record of this session (the last float's), which the swap must not restore
+      recordTranscriptScroll(key, { following: false, offset: 120, signature: scrollSignature(ids.map((id) => ({ id }))), anchor: ids[3] });
+      const swap = (at: 'pane' | 'card') =>
+        act(() => {
+          markTranscriptCarry(key);
+          view.rerender(<Swap source={source} at={at} />);
+        });
+      return { metrics, ids, swap, inCard: () => document.querySelector('[data-at="card"] [data-transcript-scroller]') !== null };
+    }
+
+    it('a reader scrolled up comes back at the row the removed mount showed, pane to card and card to pane', async () => {
+      const { metrics, ids, swap, inCard } = await swapScene();
+      metrics.scrollTo(18_000);
+      metrics.scrollTo(410);
+      const there = rowAt(410);
+      expect(there).not.toBe(ids[3]);
+      swap('card');
+      expect(inCard()).toBe(true);
+      // the virtualiser re-aims at the row over the next frames, as the rows above it measure
+      await waitFor(() => expect(metrics.scrolls.at(-1)).toBe(shownAt(there)));
+      expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
+      metrics.scrollTo(810);
+      const back = rowAt(810);
+      expect(back).not.toBe(there);
+      swap('pane');
+      expect(inCard()).toBe(false);
+      await waitFor(() => expect(metrics.scrolls.at(-1)).toBe(shownAt(back)));
+      expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
+    });
+
+    it('a reader at the end stays pinned: the swapped-in mount follows at the end', async () => {
+      const { metrics, swap } = await swapScene();
+      metrics.scrollTo(18_000);
+      swap('card');
+      expect(metrics.scrolls.at(-1), 'at the end').toBeGreaterThan(2_000);
+      expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
+    });
+  });
 });
