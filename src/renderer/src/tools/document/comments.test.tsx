@@ -283,20 +283,21 @@ describe('the compose card in the margin and the draft rule', () => {
     addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), placement: 'margin' };
     let surface: DocumentComments | null = null;
-    function Body({ hostId }: { hostId?: string }) {
+    function Body({ hostId, onSurface }: { hostId?: string; onSurface(surface: DocumentComments): void }) {
       const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', draftRule: true, ...(hostId !== undefined && { hostId }) });
-      surface = comments;
+      onSurface(comments);
       return (
         <div className="ds-doc">
           <div data-margin-entry={passage.threadId}>{comments.overlay(reach)}</div>
         </div>
       );
     }
-    const view = render(<Body key="panel" hostId="document:tab-state-1" />);
+    const onSurface = (next: DocumentComments) => (surface = next);
+    const view = render(<Body key="panel" hostId="document:tab-state-1" onSurface={onSurface} />);
     act(() => surface!.opened(passage));
     await act(async () => {});
     await userEvent.type(field(), 'Monthly?');
-    view.rerender(<Body key="main" hostId="document:tab-state-1" />); // the move: another body, one commit
+    view.rerender(<Body key="main" hostId="document:tab-state-1" onSurface={onSurface} />); // the move: another body, one commit
     await act(async () => {});
     expect(field().value).toBe('Monthly?');
     expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
