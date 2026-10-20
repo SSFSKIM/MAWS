@@ -51,7 +51,7 @@ env:
   CLASS1_E2E: >-
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
-    design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth
+    design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
@@ -72,7 +72,7 @@ env:
   # (P4-A2, X34) is the tool-time guard's heavy-case fixture, a vitest file of the `live` project that sets MAWS_LIVE in
   # its script and spends nothing; LIVE_GUARD_E2E adds it to every live run, so every gate that runs the live specs holds
   # the heaviest known cases under the guard's bound.
-  LIVE_E2E: library-live document-live document-provisional-live presentations-live design-systems-live send-to-live design-live dashboard-live tool-time-heavy-live
+  LIVE_E2E: library-live document-live document-provisional-live presentations-live design-systems-live design-live dashboard-live tool-time-heavy-live
   LIVE_GUARD_E2E: tool-time-heavy-live
   # The timing-measured groups, whose bounds were calibrated on the mini at @2x with no viewer and no foreign load, so a
   # result read under another posture is void (Decision Log 75's posture go). On a Mac each job's first step is ci-kit's

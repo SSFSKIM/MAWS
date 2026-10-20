@@ -16,6 +16,7 @@ import type { DeckSession } from '@artifacts/slides/editor/session';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
+import { sendToSubject, useSendToAction } from '../../delivery/header'; // P4-B5
 import { useEditorHost } from '../../panel/editor-host';
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F (L230)
 import { useDocumentComments } from '../document/comments';
@@ -58,7 +59,9 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
     const board = exportShown !== null && exportShown !== 'compare' ? exportShown.board : (exportBoard ?? activeBoard);
     return designExports({ shown: exportShown, board }, (entry) => void runDesignExport(artifactId, entry, state.exportContext()));
   }, [exportShown, exportBoard, activeBoard, state, artifactId]);
-  useEditorHost(scope, designHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, rail, unresolved: snapshot.unresolved, history: state.designHistory !== null, exports, previewing: exportShown !== null }, commands));
+  const header = designHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, rail, unresolved: snapshot.unresolved, history: state.designHistory !== null, exports, previewing: exportShown !== null }, commands);
+  const sendTo = useSendToAction(sendToSubject(artifactId, 'design', row?.title, exportShown)); // P4-B5
+  useEditorHost(scope, sendTo ? { ...header, actions: [...(header.actions ?? []), sendTo] } : header);
 
   // M4: comments go to the session the main area shows (its Side thread, or its conversation). P3-F (L230): with none
   // shown, to the design's own context, as the document's and the deck's (P3-F1); not offered only while that is unread

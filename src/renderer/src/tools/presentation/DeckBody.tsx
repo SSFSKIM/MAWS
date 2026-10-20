@@ -21,6 +21,7 @@ import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
+import { sendToSubject, useSendToAction } from '../../delivery/header'; // P4-B5
 import { useEditorHost } from '../../panel/editor-host';
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F1
 import { useDocumentComments } from '../document/comments'; // M7: B's surface
@@ -79,7 +80,9 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
     () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
     [opened, artifactId],
   );
-  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, unresolved: snapshot.unresolved, history: state.history !== null }, commands));
+  const header = deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, unresolved: snapshot.unresolved, history: state.history !== null }, commands);
+  const sendTo = useSendToAction(sendToSubject(artifactId, 'presentation', row?.title, shown)); // P4-B5
+  useEditorHost(scope, sendTo ? { ...header, actions: [...(header.actions ?? []), sendTo] } : header);
 
   // M7: comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown,
   // to the deck's own context; not offered only while that is unread

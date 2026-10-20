@@ -135,6 +135,10 @@ import { registerPresentationEditor } from './tools/presentation';
 import { registerDesignEditor } from './tools/design';
 import { registerDashboardEditor } from './tools/dashboard';
 // P3-E end
+// P4-B5 start
+import { connectDelivery } from './delivery/store';
+import { SendToHost } from './delivery/SendToSheet';
+// P4-B5 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -326,6 +330,7 @@ export function App() {
   // panel's Artifacts tool mount it)
   useEffect(() => registerDesignEditor(), []);
   // P3-E end
+  useEffect(() => connectDelivery(), []); // P4-B5: main's Send to receipts, for the headers and the library's rows
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -363,6 +368,8 @@ export function App() {
       {/* E3 end */}
       {/* cua #90: the profile popover's Re-import this profile…, the removal's then the import's sheet */}
       <ProfileSheets />
+      {/* P4-B5: the Send to sheet, from an editor header's Send to or a library row's Export menu */}
+      <SendToHost />
       {/* P3-D start */}
       </DesignSystemHostProvider>
       {/* P3-D end */}

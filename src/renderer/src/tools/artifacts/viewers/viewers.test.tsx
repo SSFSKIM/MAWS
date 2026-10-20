@@ -154,7 +154,7 @@ describe('the HTML viewer', () => {
   it('registers its header: the title, read-only, Comment and the actions, and the Export menu of the kind’s formats', async () => {
     mount('html');
     await waitFor(() => expect(header().exports?.map((e) => e.label)).toEqual(['PDF', 'PNG']));
-    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Reload', 'Open externally', 'Reveal in Finder']));
+    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Reload', 'Open externally', 'Reveal in Finder', 'Send to…' /* P4-B5 */]));
     expect(header()).toMatchObject({ title: 'Dashboard', saved: 'readonly' });
   });
 
@@ -644,12 +644,12 @@ describe('an HTML page’s connectors', () => {
     await waitFor(() => expect(frame('html')).not.toBeNull());
     const ports = pagePorts(frame('html')!);
     load(frame('html')!);
-    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Reload', 'Open externally', 'Reveal in Finder']));
+    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Reload', 'Open externally', 'Reveal in Finder', 'Send to…' /* P4-B5 */]));
     const answers: unknown[] = [];
     ports[0]!.onmessage = (event) => void answers.push(event.data);
     ports[0]!.postMessage({ id: 1, op: 'declare', tools: [TOOL] });
     await waitFor(() => expect(answers).toEqual([{ id: 1, answer: { ok: true, declared: [TOOL] } }]));
-    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Connectors', 'Reload', 'Open externally', 'Reveal in Finder']));
+    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Connectors', 'Reload', 'Open externally', 'Reveal in Finder', 'Send to…' /* P4-B5 */]));
     expect(document.querySelector('[data-connectors-sheet]')).toBeNull();
     act(() => action('Connectors').onSelect());
     const sheet = await waitFor(() => document.querySelector<HTMLElement>('[data-connectors-sheet]')!);

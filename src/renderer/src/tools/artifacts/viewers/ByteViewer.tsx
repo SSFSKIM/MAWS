@@ -53,6 +53,7 @@ import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../lib
 import { useLibraryRow } from '../../../library/store';
 import { useRegionMarkupSurface } from '../../../markup/surface';
 import { focusEditorHostAction, useEditorHost, type EditorHostAction, type EditorHostExport } from '../../../panel/editor-host';
+import { sendToSubject, useSendToAction } from '../../../delivery/header'; // P4-B5
 import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
 import type { OpenCard } from '../../../side/card/store';
 import { useSessions } from '../../../stores/sessions';
@@ -451,6 +452,9 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
       },
     });
   }
+  // P4-B5: Send to, the revision the viewer shows (a version's when it is not the latest followed)
+  const sendTo = useSendToAction(selection === null ? null : sendToSubject(artifactId, kind, title, selection.versionId === undefined ? null : { versionId: selection.versionId }));
+  if (sendTo && formats.length > 0) actions.push(sendTo);
   useEditorHost(scope, { title, saved: 'readonly', actions, exports });
 }
 
