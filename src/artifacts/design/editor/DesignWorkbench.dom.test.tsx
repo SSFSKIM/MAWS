@@ -674,3 +674,22 @@ describe('the board inspector beside other writers (design-workbench fix wave)',
       }
   });
 });
+
+// P4-B4 (the link grammar; "Opening at a place"): a link's `#slide=` names a design's board: it is selected and brought
+// into view, as a shown thread's board is; a board the design does not have changes nothing; each reveal is taken once
+describe('a board a link names', () => {
+  it('is selected and brought into view; one the design does not have changes nothing', () => {
+    const { session, view, rerender } = mount();
+    const revealed = vi.fn();
+    const at = (slide: string, serial: number) => rerender(<DesignWorkbench session={session} view={view} assetUrl={ASSET_URL} system={null} readOnly={false} reveal={{ serial, location: { slide } }} onRevealed={revealed} />);
+    act(() => at('b3', 1)); // the poster, out of the 1000 × 800 room at zoom 1
+    expect(session.snapshot().currentSlide).toBe('b3');
+    expect(view.snapshot().frame).toBe('b3');
+    const { zoom, x } = view.snapshot().viewport!;
+    expect(x + 2100 * zoom).toBeLessThan(1000); // its left edge now inside the room
+    act(() => at('gone', 2));
+    expect(session.snapshot().currentSlide).toBe('b3');
+    expect(view.snapshot().frame).toBe('b3');
+    expect(revealed.mock.calls).toEqual([[1], [2]]);
+  });
+});
