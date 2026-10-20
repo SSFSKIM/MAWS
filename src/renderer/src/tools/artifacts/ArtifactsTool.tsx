@@ -37,7 +37,7 @@ import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
 import { ArtifactRecordView } from './RecordView';
 import { ArtifactsSummary } from './Summary';
-import { cancelVersionRequest, requestArtifactVersion } from './viewers/requests';
+import { cancelVersionRequest, requestArtifactVersion, withdrawVersionRequest } from './viewers/requests';
 
 // The panel tool's id (shared with `show_pane`'s `artifact` pane); E2's Deliverables tool's (`deliverables`) gave way
 // to it at the cutover (Decision Log 10).
@@ -49,6 +49,9 @@ export interface ArtifactsParams {
   target?: string;
   at?: ArtifactOpenAt;
   scope?: ArtifactsScope;
+  // P4-B3: the open brings the editor's state with it (a move from a main tab, `shell/transfer.ts`), so its viewer is
+  // asked for no version (`at` is not read): the moved state shows the one it showed. Never persisted.
+  carried?: true;
 }
 
 // What the tool persisted for a restored tab, read back: the record's artifact id, else (anything else stored) the list.
@@ -170,10 +173,11 @@ export class ArtifactsHandle {
     if (params?.scope !== undefined && params.scope !== this.state.scope) this.update({ scope: params.scope, scrollTop: 0 });
     const target = params?.target;
     if (target === undefined) return this.back();
-    const serial = requestArtifactVersion(target, params?.at ?? 'latest', this.editorScope.surface);
+    const serial = params?.carried ? null : requestArtifactVersion(target, params?.at ?? 'latest', this.editorScope.surface);
+    if (serial === null) withdrawVersionRequest(target, this.editorScope.surface);
     const { view } = this.state;
     if (view.kind === 'record' && view.artifactId === target) return this.withdraw();
-    this.leaveThen({ kind: 'record', artifactId: target }, () => cancelVersionRequest(serial));
+    this.leaveThen({ kind: 'record', artifactId: target }, () => serial !== null && cancelVersionRequest(serial));
   };
 
   back = () => {

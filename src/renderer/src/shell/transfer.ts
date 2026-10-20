@@ -136,7 +136,7 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
     // T5: the panel shows it already. That view is activated, unmounted nothing, and the tab closes through its guard.
     if (!(await mainGuardAllows(mainTabId))) return false;
     if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelRecordOf(dest.id) !== artifactId) return false;
-    layout().closeTab(mainTabId);
+    layout().closeTab(mainTabId, { remember: false }); // a move is not a close (Decision Log 32): no ⌘⇧T entry
     panelHost.selectTab(dest.id);
     return true;
   }
@@ -150,8 +150,9 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   if (shown !== null) return false; // it came to show another one: nothing moved
   // The hand-off, synchronous from here to the adoption.
   stageArtifactEditorState({ surface: 'main', tabId: mainTabId });
-  layout().closeTab(mainTabId);
-  const panelTabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: now, pin: now === null, params: { target: artifactId }, activate: true });
+  layout().closeTab(mainTabId, { remember: false });
+  // `carried`: the editor's state comes with it, so the record asks its viewer for no version (it keeps the one it shows).
+  const panelTabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: now, pin: now === null, params: { target: artifactId, carried: true }, activate: true });
   // A tab reserved before the layout is read has no instance yet (its id may change at the barrier): the staged state
   // is then left to the sweep, and the record makes its own.
   if (instanceOf(panelTabId)) adoptStagedArtifactEditorState(artifactId, { surface: 'panel', tabId: panelTabId });
@@ -276,12 +277,27 @@ export function dropPanelRecord(event: DragEvent, at: TabPlace): void {
 
 // Whether the drag under way is one a kind of target takes (a refused drag finds no target there). The panel takes an
 // artifact main tab its refusal allows; main's strips and panes' bodies a panel record; the right edge opens a second
-// pane with either, a main tab only when its pane keeps another (T16: never the only tab of the only pane).
+// pane beside a tab: a panel record when main shows one (an empty main has nothing to split beside), a main tab when
+// its pane keeps another (T16: never the only tab of the only pane).
 export type DropTargetKind = 'panel' | 'main' | 'edge';
 export function dragAccepted(where: DropTargetKind, dragging: Dragging | null = layout().dragging): boolean {
   if (dragging === null) return false;
-  if (dragging.source === 'panel') return where !== 'panel' && transferRefusal({ to: 'tab', panelTabId: dragging.tabId }) === null;
+  const panes = currentSet(layout().main).panes;
+  if (dragging.source === 'panel') {
+    if (where === 'panel' || transferRefusal({ to: 'tab', panelTabId: dragging.tabId }) !== null) return false;
+    return where === 'main' || panes.some((p) => p.tabs.length > 0);
+  }
   if (where === 'panel') return transferRefusal({ to: 'panel', mainTabId: dragging.tabId }) === null;
-  return where === 'edge' && (currentSet(layout().main).panes[dragging.fromPane]?.tabs.length ?? 0) > 1;
+  return where === 'edge' && (panes[dragging.fromPane]?.tabs.length ?? 0) > 1;
 }
 export const useDragAccepted = (where: DropTargetKind): boolean => useSyncExternalStore(subscribeTransfer, () => dragAccepted(where));
+
+// A layer over a surface's content (the panel; a main pane's body) during every drag from the other surface: 'accepted'
+// when the transfer takes it there, 'refused' otherwise, null with no such drag. The layer covers the content for a
+// refused drag too, so content that takes every drag (an editable document) never shows it a drop cursor (Z2, M5).
+export type CoverState = 'accepted' | 'refused' | null;
+export function coverState(where: 'panel' | 'main', dragging: Dragging | null = layout().dragging): CoverState {
+  if (dragging === null || dragging.source === where) return null;
+  return dragAccepted(where, dragging) ? 'accepted' : 'refused';
+}
+export const useCoverState = (where: 'panel' | 'main'): CoverState => useSyncExternalStore(subscribeTransfer, () => coverState(where));

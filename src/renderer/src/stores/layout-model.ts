@@ -232,13 +232,14 @@ function openIn(view: View, target: TabTarget, pane: PaneTarget, activate: boole
   return place(view, toRef(target), paneOf(view, pane), 'afterActive', activate);
 }
 
-// Removes tab `id`, remembered for ⌘⇧T.
-function closeIn(view: View, id: string): View {
+// Removes tab `id`, remembered for ⌘⇧T unless `remember` is false (P4-B3: a tab moved to the panel did not close).
+function closeIn(view: View, id: string, remember = true): View {
   const found = locate(view, id);
   if (!found) return view;
   const tab = paneAt(view, found.pane).tabs[found.index];
   const panes = view.panes.map((p, i) => (i === found.pane ? without(p, id) : p));
-  return { ...withPanes(view, panes, view.focusedPane), closedTabs: [...view.closedTabs.filter((t) => t.id !== id), tab].slice(-CLOSED_MAX) };
+  const next = withPanes(view, panes, view.focusedPane);
+  return remember ? { ...next, closedTabs: [...view.closedTabs.filter((t) => t.id !== id), tab].slice(-CLOSED_MAX) } : next;
 }
 
 function moveIn(view: View, id: string, toPane: Pane, index: number): View {
@@ -350,9 +351,13 @@ export function focusPane(main: LayoutMain, pane: Pane): LayoutMain {
   return onCurrent(main, (v) => (pane < v.panes.length && pane !== v.focusedPane ? { ...v, focusedPane: pane } : v));
 }
 
-export function closeTab(main: LayoutMain, id: string): LayoutMain {
+// `remember: false` (P4-B3, its Decision Log 32): a move is not a close, so the tab leaves no ⌘⇧T entry.
+export interface CloseOptions {
+  remember?: boolean;
+}
+export function closeTab(main: LayoutMain, id: string, opts: CloseOptions = {}): LayoutMain {
   const found = locateTab(main, id);
-  return found ? onSet(main, found.set, (v) => closeIn(v, id)) : main;
+  return found ? onSet(main, found.set, (v) => closeIn(v, id, opts.remember ?? true)) : main;
 }
 
 // Within the current set (the strips show only it).

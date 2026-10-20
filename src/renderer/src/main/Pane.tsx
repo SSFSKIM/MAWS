@@ -2,7 +2,8 @@
 // press or focus anywhere inside makes it the focused pane, the target of ⌘1…9, ⌘\ and ⌃Tab. Only the active tab's
 // content is mounted; a tab's content remounts when it becomes active again. With no tab open (W5: the Overview is no
 // tab), the pane offers the Overview and a new session, once the saved layout has applied. P4-B3 (X38): while a panel
-// record is dragged, the pane's body is a target that appends it here as a main tab, the whole pane highlighted.
+// tab is dragged, the pane's body is covered by a target that appends a record here as a main tab, the whole pane
+// highlighted, and refuses (no drop cursor) what the transfer refuses.
 import { useId, useRef } from 'react';
 import type { TabRef, TabSet } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
@@ -16,7 +17,7 @@ import { ArtifactTab } from '../library/ArtifactTab'; // P3-L
 import { SessionPane } from '../session/SessionPane';
 import { cardSession, expandPane } from '../shell/floating'; // P3-G; P4-B3: expandPane
 import { DropOverlay } from '../shell/DropOverlay'; // P4-B3 M4
-import { dropPanelRecord, useDragAccepted } from '../shell/transfer'; // P4-B3 M4
+import { dropPanelRecord, useCoverState } from '../shell/transfer'; // P4-B3 M4
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3 M4
 import { useLayout } from '../stores/layout';
 import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
@@ -32,7 +33,7 @@ const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
 export function Pane({ index, split, column, collapsed = false }: { index: PaneIndex; split: boolean; column: number; collapsed?: boolean }) {
   const pane = useLayout((s) => currentSet(s.main).panes[index]);
   const hydrated = useLayout((s) => s.hydrated);
-  const takesRecord = useDragAccepted('main'); // P4-B3 (Z5): a panel record dragged here appends to this pane
+  const cover = useCoverState('main'); // P4-B3 (Z5): a panel record dragged here appends to this pane
   const idPrefix = useId();
   const element = useRef<HTMLElement>(null);
   // ⌃Tab and ⌃⇧Tab cycle the pane that owns the focused element (renderer sink, pane scope: a tab or a card may take
@@ -77,7 +78,9 @@ export function Pane({ index, split, column, collapsed = false }: { index: PaneI
         {/* Until the saved layout applies, an empty pane is only not yet restored: it draws nothing rather than "No open
             tabs" (a relaunch flashed it). A tab opened before then draws at once. */}
         {active ? <TabBody key={active.id} tab={active} paneIndex={index} /> : hydrated && <EmptyPane />}
-        {takesRecord && !collapsed && <DropOverlay data-pane-drop-target={index} label={TRANSFER_COPY.moveToTab} onDrop={(event) => dropPanelRecord(event, { pane: index })} />}
+        {cover !== null && !collapsed && (
+          <DropOverlay data-pane-drop-target={index} accepts={cover === 'accepted'} label={TRANSFER_COPY.moveToTab} onDrop={(event) => dropPanelRecord(event, { pane: index })} />
+        )}
       </div>
     </section>
   );

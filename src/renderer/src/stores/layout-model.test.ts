@@ -54,6 +54,15 @@ describe('layout store transitions', () => {
     expect(active(closeTab(abc(), 'session:a'))).toEqual(['session:c']); // an inactive tab leaves the active one alone
   });
 
+  // P4-B3 (its Decision Log 32): a move is not a close, so a tab the transfer takes away leaves no ⌘⇧T entry.
+  it('closeTab with remember: false removes it the same way and leaves the closed-tab history as it was', () => {
+    const before = closeTab(abc(), 'session:a');
+    const m = closeTab(activateTab(before, 'session:b'), 'session:b', { remember: false });
+    expect(ids(m)).toEqual([['session:c']]);
+    expect(active(m)).toEqual(['session:c']);
+    expect(m.closedTabs).toBe(before.closedTabs);
+  });
+
   it('closeTab: an emptied pane 1 collapses the split and focuses pane 0', () => {
     const m = closeTab(split(), 'session:d');
     expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c']]);
@@ -61,7 +70,7 @@ describe('layout store transitions', () => {
   });
 
   it('closeTab: an emptied pane 0 hands its place to pane 1', () => {
-    const emptied = ['session:a', 'session:b', 'session:c'].reduce(closeTab, focusPane(split(), 0));
+    const emptied = ['session:a', 'session:b', 'session:c'].reduce((m, id) => closeTab(m, id), focusPane(split(), 0));
     expect(ids(emptied)).toEqual([['session:d']]);
     expect(cur(emptied).focusedPane).toBe(0);
   });
@@ -77,7 +86,7 @@ describe('layout store transitions', () => {
     const m = closeTab(openTab(base, S('a')), 'session:a');
     expect(m).toEqual({ ...base, closedTabs: [{ id: 'session:a', ...S('a'), pinned: false }] });
     expect(LayoutMainSchema.safeParse(m).success).toBe(true);
-    const all = ['session:d', 'session:a', 'session:b', 'session:c'].reduce(closeTab, split());
+    const all = ['session:d', 'session:a', 'session:b', 'session:c'].reduce((m, id) => closeTab(m, id), split());
     expect(cur(all)).toMatchObject({ panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0 });
     const back = reopenClosed(m, 0);
     expect(ids(back)).toEqual([['session:a']]);
@@ -402,7 +411,7 @@ describe('tab sets per project', () => {
   it('setCurrentProject switches the strip; an emptied set stays current and shows the empty pane', () => {
     const m = switchSet(two(), X);
     expect(ids(m)).toEqual([['session:a', 'session:b']]);
-    const emptied = ['session:a', 'session:b'].reduce(closeTab, m);
+    const emptied = ['session:a', 'session:b'].reduce((acc, id) => closeTab(acc, id), m);
     expect(emptied.current).toBe(X);
     expect(ids(emptied)).toEqual([[]]);
     expect(Object.keys(emptied.sets).sort()).toEqual([X, Y].sort());

@@ -3,7 +3,7 @@
 // a move never adds a view (INV-1), never leaves an artifact nowhere (INV-2), and a refusal leaves both surfaces exactly
 // as they were (INV-4). The editor's state travels: the hold the source made is the one the target shows (S3: every edit
 // typed is in that replica, exactly once), never disposed on the way and never made again.
-import { act } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef, type TabSet } from '@shared/ipc/schema/layout';
@@ -18,7 +18,8 @@ import { fail, installFakeMain, ok } from '../test-support/code';
 import { A, B, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
-import { moveArtifactToPanel, moveArtifactToTab, transferRefusal } from './transfer';
+import { requestArtifactVersion, resetVersionRequests, useVersionRequest } from '../tools/artifacts/viewers/requests';
+import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal } from './transfer';
 
 const DOC = 'doc-1';
 const OTHER = 'doc-2';
@@ -40,6 +41,7 @@ let editor: ReturnType<typeof makeEditor>;
 beforeEach(() => {
   resetPanelStores();
   resetArtifactEditors();
+  resetVersionRequests();
   installFakeMain((name) => {
     if (name === 'layout.get') return ok({ value: null });
     if (name === 'layout.set') return ok();
@@ -235,7 +237,91 @@ describe('main → panel', () => {
   });
 });
 
+// P4-B3 (its Decision Log 32): a move is not a close. Neither move leaves a ⌘⇧T entry, so reopening never makes a second
+// view of the artifact the owner moved.
+describe('the closed-tab history', () => {
+  it('is unchanged by a hand-off into the panel (T1) and by an activate-existing move (T5)', async () => {
+    useLayout.setState({ main: { ...panes([DOC_TAB, sessionTab(A), artifactTab(OTHER)]), closedTabs: [artifactTab('old')] } }); // each move shows A's panel next
+    const closed = useLayout.getState().main.closedTabs;
+    expect(await move(() => moveArtifactToPanel(artifactTab(OTHER).id))).toBe(true); // T1: the hand-off
+    expect(useLayout.getState().main.closedTabs).toBe(closed);
+    const dest = artifactsTab(A)!;
+    act(() => void handleOf(dest)!.open({ target: DOC })); // the panel shows DOC too
+    act(() => useLayout.getState().activateTab(DOC_TAB.id));
+    expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true); // T5: activate-existing
+    expect(allTabs(useLayout.getState().main).some((t) => t.id === DOC_TAB.id)).toBe(false);
+    expect(useLayout.getState().main.closedTabs).toBe(closed);
+    act(() => useLayout.getState().reopenClosed());
+    expect(viewsOf(DOC), '⌘⇧T reopens what was closed, never what moved').toBe(1);
+  });
+});
+
+// P4-B3 fix wave (the M4 review's P2): a byte viewer's state holds the version its switcher shows, and the panel's open
+// of a moved record must not ask its viewer for another (an ask the moved state's viewer takes, resetting it to latest).
+describe('the version a moved viewer shows', () => {
+  it('main → panel asks the panel’s viewer for no version, and withdraws an ask left for that artifact there', async () => {
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    addArtifacts(A); // a list tab, which the move re-targets
+    mounted(mainScope());
+    requestArtifactVersion(DOC, 'latest', 'panel'); // a stale ask for the panel's viewer of DOC
+    const asked = renderHook(() => useVersionRequest(DOC, 'panel'));
+    expect(asked.result.current).not.toBeNull();
+    expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
+    expect(asked.result.current).toBeNull();
+  });
+
+  it('a new Artifacts tab made for the move asks for none either', async () => {
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    mounted(mainScope());
+    const asked = renderHook(() => useVersionRequest(DOC, 'panel'));
+    expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
+    expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC });
+    expect(asked.result.current).toBeNull();
+  });
+
+  it('an ordinary open in the panel still asks for its version', () => {
+    const id = addArtifacts(A);
+    const asked = renderHook(() => useVersionRequest(DOC, 'panel'));
+    act(() => void handleOf(id)!.open({ target: DOC, at: { version: 1 } }));
+    expect(asked.result.current?.at).toEqual({ version: 1 });
+  });
+});
+
+describe('the right edge’s offer (P4-B3 fix wave)', () => {
+  it('a panel record is offered the edge only when main has a tab to split beside', () => {
+    const src = addArtifacts(A, DOC);
+    const dragging = { source: 'panel' as const, tabId: src, toolId: ARTIFACTS_TOOL_ID, artifactId: DOC };
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    expect(dragAccepted('edge', dragging), 'an empty main: no split to promise').toBe(false);
+    expect(dragAccepted('main', dragging), 'its body still takes it').toBe(true);
+    useLayout.setState({ main: panes([sessionTab(A)]) });
+    expect(dragAccepted('edge', dragging)).toBe(true);
+  });
+});
+
 describe('panel → main', () => {
+  it('T8 with main losing its tab while the record’s guard asks: the record moves after all, with its state', async () => {
+    useLayout.setState({ main: panes([DOC_TAB, sessionTab(A)]) });
+    const src = addArtifacts(A, DOC);
+    const panelHold = mounted(panelScope(src));
+    let answer!: (allowed: boolean) => void;
+    const asked = guard(panelScope(src), () => new Promise<boolean>((resolve) => (answer = resolve)));
+    let moved: Promise<boolean> = Promise.resolve(false);
+    act(() => void (moved = moveArtifactToTab(src, { pane: 0, index: 0 })));
+    await act(async () => {});
+    expect(asked).toHaveBeenCalledTimes(1);
+    act(() => useLayout.getState().closeTab(DOC_TAB.id)); // meanwhile the owner closes main's tab of it
+    expect(viewsOf(DOC)).toBe(1);
+    await act(async () => answer(true));
+    expect(await moved).toBe(true);
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([DOC_TAB.id, sessionTab(A).id]);
+    expect(recordOf(src)).toEqual({ kind: 'list' });
+    expect(heldArtifactEditorState(mainScope()), 'the record’s state, carried').toBe(panelHold);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(editor.dispose).not.toHaveBeenCalledWith(panelHold.state);
+    expect(viewsOf(DOC)).toBe(1);
+  });
+
   it('T7: inserted at the drop point, active, its pane focused; the panel back on its list; the state travels', async () => {
     const t1 = artifactTab('t-1');
     const t2 = artifactTab('t-2');

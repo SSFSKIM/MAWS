@@ -1,36 +1,41 @@
 // The drop targets of a cross-surface move (P4-B3, X38; its Decision Log 18): a layer drawn over a surface (the panel, a
-// main pane's body) only while a drag it takes is under way, so the content beneath (an editor, a frame that would swallow
-// the drag's events) never sees it. It accepts every `dragover` (`dropEffect = 'move'`), shows the place the artifact
-// will take while hovered with the outcome's label (an HTML5 drag image is fixed at `dragstart`, so the label is drawn
-// here, Z7), and on `drop` ends the drag and hands the event to its owner, which reads the payload.
+// main pane's body) for every drag from the other surface, so the content beneath (an editor that takes every drag, a
+// frame that would swallow its events) never sees one. Accepting (`accepts`), it takes every `dragover` (`dropEffect =
+// 'move'`), shows the place the artifact will take while hovered with the outcome's label (an HTML5 drag image is fixed
+// at `dragstart`, so the label is drawn here, Z7), and on `drop` ends the drag and hands the event to its owner, which
+// reads the payload. Refusing, it takes nothing: no `preventDefault`, `dropEffect` left 'none', so the cursor says
+// no-drop (Z2, M5).
 import { useState, type CSSProperties, type DragEvent } from 'react';
 import { endDrag } from './transfer';
 
-export function DropOverlay({ label, onDrop, ...data }: { label: string; onDrop(event: DragEvent): void } & Record<`data-${string}`, string | number>) {
+export function DropOverlay({ label, accepts, onDrop, ...data }: { label: string; accepts: boolean; onDrop(event: DragEvent): void } & Record<`data-${string}`, string | number>) {
   const [over, setOver] = useState(false);
   const accept = (event: DragEvent) => {
+    if (!accepts) return false;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
+    return true;
   };
   return (
     <div
       {...data}
+      data-drop-overlay={accepts ? 'accepted' : 'refused'}
       onDragEnter={(event) => {
-        accept(event);
-        setOver(true);
+        if (accept(event)) setOver(true);
       }}
       onDragOver={accept}
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
       }}
       onDrop={(event) => {
+        if (!accepts) return;
         event.preventDefault();
         endDrag();
         onDrop(event);
       }}
       className="absolute inset-0 z-10"
     >
-      {over && <DropHighlight label={label} />}
+      {over && accepts && <DropHighlight label={label} />}
     </div>
   );
 }
