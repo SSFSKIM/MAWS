@@ -303,6 +303,29 @@ test.describe('the document editor', () => {
     });
     // the stack's moves animate (350 ms), so the card is read once it has settled at the line
     await expect.poll(async () => Math.abs((await card.boundingBox())!.y - line.top - CARD_INSET_PX), { message: 'the compose card at the passage’s first line' }).toBeLessThanOrEqual(2);
+    // P4-B1 (the fix wave): with less side space than the icon rail's 33 px past the page gutter, the rail hangs over
+    // the page's padding without moving the page: the page at the box's left edge, the icon and the card inside it (the
+    // rail moved by a negative margin had pushed the page right and both past the box's right edge)
+    const across = await replica(page, 'a')
+      .locator('.ds-doc')
+      .evaluate((box) => {
+        const outer = box.getBoundingClientRect();
+        const pageBox = box.querySelector('.ds-doc-page')!.getBoundingClientRect();
+        const rightOf = (selector: string) => box.querySelector(selector)!.getBoundingClientRect().right;
+        return {
+          side: box.clientWidth - pageBox.width,
+          left: outer.left + box.clientLeft,
+          right: outer.left + box.clientLeft + box.clientWidth,
+          page: pageBox.left,
+          icon: rightOf('[data-margin-entry][data-compose] .doc-margin-icon'),
+          card: rightOf('[data-margin-entry][data-compose] [data-comment-card]'),
+        };
+      });
+    if (across.side < 33) {
+      expect(Math.abs(across.page - across.left), 'the page at the box’s left edge').toBeLessThanOrEqual(1);
+      expect(across.icon, 'the icon inside the box').toBeLessThanOrEqual(across.right + 1);
+      expect(across.card, 'the compose card inside the box').toBeLessThanOrEqual(across.right + 1);
+    }
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
 
     await card.getByRole('button', { name: 'Resolve' }).click();

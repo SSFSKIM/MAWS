@@ -6,7 +6,7 @@
 // LC-1 item 3 in docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): the last thread the human activated, kept when
 // the active thread clears, cleared when that thread resolves; a click on a passage puts the caret at the click.
 import type { Editor } from '@tiptap/core';
-import { Selection } from '@tiptap/pm/state';
+import { Selection, TextSelection } from '@tiptap/pm/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { reply, resolve } from '../../threads';
 import { TAB, World, ticks } from '../test-world';
@@ -161,7 +161,7 @@ describe('the chords', () => {
 describe('a click on a passage', () => {
   // Surprise 7: ProseMirror calls handleClick from its mouseup, and the activation's redraw of the passage could write
   // the stale state selection back over the native caret; the activation itself puts the caret at the click
-  it('puts the caret at the click and activates the passage, even when its thread is already active; a shift-click leaves the selection alone', async () => {
+  it('puts the caret at the click and activates the passage, even when its thread is already active; a right-click and a ctrl-click leave the selection alone', async () => {
     const { A, activated } = await build();
     caretTo(A.editor, findPos(A.editor, 'The plan'));
     const at = findPos(A.editor, 'quarterly') + 3;
@@ -174,12 +174,18 @@ describe('a click on a passage', () => {
     const again = findPos(A.editor, 'design review') + 2;
     clickAt(A.editor, again);
     expect(A.editor.state.selection.from).toBe(again);
-    // a shift-click extends the native selection: the state selection is not set
-    caretTo(A.editor, findPos(A.editor, 'Owners'));
+    // a right-click and macOS's Ctrl-click open a context menu (ProseMirror's mouseup hands them to handleClick too):
+    // the selection under it stays, the passage still activates
+    const selected = { from: findPos(A.editor, 'Owners'), to: findPos(A.editor, 'Owners') + 4 };
+    A.editor.view.dispatch(A.editor.state.tr.setSelection(TextSelection.create(A.editor.state.doc, selected.from, selected.to)));
     const before = A.editor.state.selection;
-    clickAt(A.editor, findPos(A.editor, 'going') + 2, { shiftKey: true });
+    clickAt(A.editor, findPos(A.editor, 'going') + 2, { button: 2 });
     expect(activeThread(A.editor.state)).toBe('t3');
     expect(A.editor.state.selection.eq(before)).toBe(true);
+    clickAt(A.editor, findPos(A.editor, 'quarterly') + 2, { ctrlKey: true });
+    expect(activeThread(A.editor.state)).toBe('t1');
+    expect(A.editor.state.selection.eq(before)).toBe(true);
+    expect(activated.slice(-2)).toEqual([['t3', 'click'], ['t1', 'click']]);
   });
 });
 

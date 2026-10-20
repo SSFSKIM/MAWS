@@ -8,6 +8,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ICON_GAP_PX, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
 import { CARD_MIN_PX, ICON_PX, MARGIN_PAGE_GUTTER_PX } from '../../../comments/margin-tiers';
+import chromeCss from '../chrome.css?raw';
 import type { CommentsView } from '../../../comments/view';
 import { addTab } from '../../tabs';
 import { addThread, getThread, reopen, reply, resolve } from '../../threads';
@@ -566,6 +567,12 @@ describe('the tiers (N1 to N6) and the view states', () => {
     scene.scrollWidth = 816 + 60; // the rail hangs 23 px over the page's right padding
     resized();
     expect([margin()!.dataset.marginTier, reserve(), overlap()]).toEqual(['icons', '60px', '23px']);
+    // the rail is moved by `left` from the overlap, never by a negative margin (which would shrink the row `.ds-doc`
+    // centres and push the page right; the e2e icon-tier case measures it): no margin on the column, chrome.css reads it
+    expect(margin()!.style.marginLeft).toBe('');
+    const rule = /\n\.doc-margin \{([^}]*)\}/.exec(chromeCss)?.[1] ?? '';
+    expect(rule).toContain('left: calc(-1 * var(--doc-margin-overlap, 0px));');
+    expect(rule).not.toMatch(/margin(-left)?:/);
     expect(within(margin()!).getByRole('button', { name: /^Comment by You/ })).toBeDefined();
     scene.bodyWidth = 600; // the drawer's range: the margin is off
     resized();

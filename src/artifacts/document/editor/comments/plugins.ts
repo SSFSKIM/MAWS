@@ -270,8 +270,9 @@ function display(ydoc: Doc, onActivate: ((threadId: string, cause: ActivationCau
         const ids = threadsClicked(event.target, view.dom);
         const threadId = ids.length === 0 ? null : innermost(view.state.doc, pos, ids, ydoc);
         // P4-B1 (Surprise 7): the caret goes to the click in the activation's own transaction, the thread already
-        // active or not; a shift-click's extension is the native selection's
-        const caret = threadId !== null && !event.shiftKey;
+        // active or not; only for a primary click (ProseMirror's mouseup calls this for every button, so a right-click
+        // and macOS's Ctrl-click, which open a context menu, would collapse its selection; it skips a shift-click)
+        const caret = threadId !== null && event.button === 0 && !event.ctrlKey;
         if (threadId !== activeThread(view.state) || caret) {
           const tr = view.state.tr.setMeta(commentDisplayKey, { active: threadId, cause: 'click' } satisfies DisplayMeta).setMeta('addToHistory', false);
           view.dispatch(caret ? tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))) : tr);
