@@ -20,6 +20,8 @@
 // selection) come with it. M9 (the scale gate): the version is drawn by an editor of its own, read-only, bound to the
 // version's doc from its creation, while the live editor stays bound to the tab, hidden: entering and leaving history
 // never re-binds (and re-renders) the live tab, and leaving keeps its undo. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
+// P4-A2 (X35): the agent's batch drawn as it is written, the live editor's provisional layer (provisional.ts), its growth
+// bumping the comment overlay's `layoutKey` once a frame.
 // P3-F1: the rail beside the page in a body 720 px wide or more, a drawer over the page's right side below (rail-layout.ts).
 import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
@@ -57,6 +59,8 @@ import { Toolbar } from './Toolbar';
 import { Suggestions, type SuggestionHost } from './Suggestions';
 import { useReadOnly } from './read-only';
 import { useRailLayout } from './rail-layout'; // P3-F1
+import type { ProvisionalLayers } from '../../provisional'; // P4-A2 (X35)
+import { useProvisionalLayers } from './provisional'; // P4-A2 (X35)
 import './chrome.css';
 import './theme.css';
 
@@ -145,6 +149,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const [pendingSuggestions, setPendingSuggestions] = useState(false);
   const hold = useMemo(() => new JointHold(props.handle), [props.handle]); // the live editor's, the suggestion replica's too
   const typing = useMemo(() => new TypingPause(hold), [hold]); // the review waits for the person's pause
+  const provisional = useProvisionalLayers(props.handle); // P4-A2 (X35): per handle, so a tab switch keeps the layers that stand
   const [showing, setShowing] = useState<Showing | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
@@ -257,6 +262,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               historyController={history}
               historySnapshot={snapshot}
               hold={hold}
+              provisional={provisional}
               readOnly={readOnly}
               previewRevision={shownVersion} /* P3-E */
             />
@@ -299,6 +305,8 @@ interface TabEditorProps extends DocumentEditorProps {
   historySnapshot: HistorySnapshot | null;
   /** The composition hold: the base replica's, and the suggestion replica's beside it. */
   hold: JointHold;
+  /** P4-A2 (X35): the agent's streaming edits over this handle, drawn by the live editor. */
+  provisional: ProvisionalLayers;
   /** The store is read-only: the page is not editable. */
   readOnly: boolean;
   showing: Showing | null;
@@ -311,7 +319,7 @@ interface TabEditorProps extends DocumentEditorProps {
   previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, provisional, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -321,6 +329,10 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
     latest.current = { comments, author, tabTitle, onPassageClick, blockCommentQuote /* P3-E */ };
   });
   const commentRef = useRef<() => boolean>(() => false);
+  // P4-A2 (X35): the layer's growth moves the passages the comment overlay places, so it bumps the page frame's
+  // `layoutKey` through the frame's own `moved` (one bump per animation frame). The editor is built before the frame
+  // mounts and outlives its renders, so the extension calls through this ref, which the frame fills while it shows.
+  const growRef = useRef<() => void>(detached);
 
   const editor = useEditor(
     {
@@ -335,12 +347,13 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         },
         comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick(), blockQuote: (node) => latest.current.blockCommentQuote?.(node), artifactId /* P3-E */ },
         env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}), ...(renderChart ? { renderChart, displayed: displayedDocument(handle.doc) } : {}) /* P3-E */ },
+        provisional: { layers: provisional, onGrow: () => growRef.current() }, // P4-A2 (X35)
       }),
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
       shouldRerenderOnTransaction: false,
       editable: !readOnly,
     },
-    [tabId, handle, host, artifactId, hold],
+    [tabId, handle, host, artifactId, hold, provisional],
   );
   // the store turning read-only (or writable again, after a reconnect) does not re-create the editor
   useEffect(() => {
@@ -476,6 +489,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         pill={preview ? null : (historySnapshot?.pill ?? null)}
         pageScope={pageScope}
         onPage={onPage}
+        growRef={growRef}
         onNewChanges={() => {
           openRail('history');
           void historyController?.openNewChanges();
@@ -501,10 +515,12 @@ interface PageFrameProps {
   pill: HistorySnapshot['pill'];
   pageScope: DocumentEditorProps['pageScope'];
   onPage: DocumentEditorProps['onPage'];
+  /** P4-A2 (X35): filled with `moved` while the overlay is drawn, for the provisional layer's growth. */
+  growRef: { current: () => void };
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, onNewChanges }: PageFrameProps) {
+function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, growRef, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -532,6 +548,14 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       pending.current = null;
     };
   }, [editor, comments, moved]);
+  // P4-A2 (X35): the provisional layer grows the page without an editor update; with no overlay nothing reads the layout
+  useLayoutEffect(() => {
+    if (!comments) return;
+    growRef.current = moved;
+    return () => {
+      growRef.current = detached;
+    };
+  }, [growRef, comments, moved]);
 
   const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey'>>(() => {
     const { doc } = handle;
