@@ -160,7 +160,7 @@ function pageAccent(): string | null {
   return (sheet && /--ds-color-accent: ([^;]+);/.exec(sheet)?.[1]) ?? null;
 }
 const drawn = (accent: string, what: string) => until(() => page() !== null && pageAccent() === accent, what);
-const setDefaults = (artifacts: { defaultDesignSystem: string | null; spaceDesignSystems: Record<string, string> }) =>
+const setDefaults = (artifacts: { defaultDesignSystem: string | null; spaceDesignSystems: Record<string, string>; commentsView: 'expand' | 'minimize' | 'hide' /* P4-B1 */ }) =>
   act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V15, artifacts }, resolvedTheme: 'light' } }));
 
 describe('B’s document page under D’s scope', () => {
@@ -174,15 +174,15 @@ describe('B’s document page under D’s scope', () => {
     const house = houseSource(HOUSE);
     mount({ spaceId: SPACE }, house);
     await drawn(ACCENT[HOUSE], 'the house system, with no default');
-    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: {} });
+    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ });
     await drawn(ACCENT[OWNERS], 'the owner’s default');
-    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: { [SPACE]: HARBOR } });
+    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: { [SPACE]: HARBOR }, commentsView: 'expand' /* P4-B1 */ });
     await drawn(ACCENT[HARBOR], 'the Space’s default, before the owner’s');
     // the Space's system deleted: the library no longer lists it, and the chain skips it to the owner's default
     librarySystems = [HOUSE, OWNERS];
     act(() => main.emit('library.changed', { revision: 2 }));
     await drawn(ACCENT[OWNERS], 'the owner’s default once the Space’s system is gone');
-    setDefaults({ defaultDesignSystem: null, spaceDesignSystems: { [SPACE]: HARBOR } });
+    setDefaults({ defaultDesignSystem: null, spaceDesignSystems: { [SPACE]: HARBOR }, commentsView: 'expand' /* P4-B1 */ });
     await drawn(ACCENT[HOUSE], 'the house system once no default is live');
     // the house system deleted with none to follow it: the bundled floor
     act(() => house.set(null));

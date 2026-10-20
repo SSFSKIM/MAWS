@@ -19,6 +19,12 @@
   font-size: var(--ds-type-body-size, var(--text-prose));
   line-height: var(--ds-type-body-line, var(--lh-prose));
   font-weight: var(--ds-type-body-weight, 400);
+  /* P4-B1 (the P4 spec §4.3; MarginThreads.tsx): the page and, beside it, the comments' margin column are one centred
+     unit that scrolls together; the page alone centres as before. A row, so the column's cards sit at the page's right
+     edge however wide the box is (an auto margin on the page would push the column to the box's far edge). */
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .ds-doc-page {
@@ -26,8 +32,13 @@
   /* the system's page (D's `dev.maws.page`, X28), a US Letter page without one (D12), not the transcript's measure; its
      margin pads the text, never more than an eighth of a narrow column (a panel keeps a readable measure) */
   max-width: var(--ds-page-width, 8.5in);
-  margin: 0 auto;
+  margin: 0;
   padding: min(var(--ds-page-margin, 1in), 12cqi);
+  /* P4-B1: as the row's item, the whole box up to the page's cap, never narrowed by the margin column beside it (the
+     margin's tiers read the page's width, margin-tiers.ts); the row centres the pair */
+  width: 100%;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .ds-doc .doc-content {

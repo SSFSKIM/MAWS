@@ -147,12 +147,12 @@ describe('the header’s app actions', () => {
   }
 
   it('Set as my default writes settings 14, and is disabled once it is the default', async () => {
-    const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V15, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {} } }, resolvedTheme: 'light' }) : listed(input)));
+    const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V15, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' }) : listed(input)));
     await opened();
     expect(action('Set as my default').disabled).toBe(false);
     await act(async () => action('Set as my default').onSelect());
     expect(main.callsOf('settings.set')).toEqual([{ artifacts: { defaultDesignSystem: DS } }]);
-    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V15, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {} } }, resolvedTheme: 'light' } }));
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V15, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' } }));
     expect(action('Set as my default').disabled).toBe(true);
   });
 

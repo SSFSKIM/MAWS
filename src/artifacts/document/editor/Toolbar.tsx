@@ -16,6 +16,7 @@ import type { EditorHost } from './host-types';
 import { MentionPicker, type MentionSource } from './MentionPicker';
 import { tableJSON } from './nodes/table';
 import { useToolbarStrip } from './toolbar-strip'; // P3-F1
+import type { CommentsView } from '../../comments/view'; // P4-B1
 
 const BLOCK_STYLES = [
   ['p', 'Normal text'],
@@ -93,7 +94,16 @@ export interface CommentControls {
   railOpen: boolean;
   openCount: number;
   toggleRail(): void;
+  /** P4-B1 (the P4 spec §4.3): View › Comments, Expand, Minimize or Hide, when the host persists it. */
+  view?: { value: CommentsView; set(view: CommentsView): void };
 }
+
+// P4-B1: the view menu's items, Docs' names
+const VIEWS: ReadonlyArray<[CommentsView, string]> = [
+  ['expand', 'Expand'],
+  ['minimize', 'Minimize'],
+  ['hide', 'Hide'],
+];
 
 /** The toolbar's history control (M5): the version history rail, when the editor has a history to show. */
 export interface HistoryControls {
@@ -127,7 +137,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
       table: e.isActive('table'),
     }),
   });
-  const [menu, setMenu] = useState<'insert' | 'link' | 'mention' | null>(null);
+  const [menu, setMenu] = useState<'insert' | 'link' | 'mention' | 'comments-view' /* P4-B1 */ | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const imageFile = useRef<HTMLInputElement>(null);
   // P3-F1: one row, its tools in a scrolling strip and the comment, history and find controls after it (toolbar-strip.ts)
@@ -157,19 +167,23 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   // P3-F: the Insert menu also goes on Escape in the toolbar or the page (the keyboard back on Insert when it was in the
   // menu; a click leaves it in the page) and on a press anywhere outside the menu and its button
   const insertButton = useRef<HTMLButtonElement>(null);
+  const viewAnchor = useRef<HTMLSpanElement>(null); // P4-B1: the comments' view menu, closed as Insert's is
+  const viewButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (menu !== 'insert') return;
+    if (menu !== 'insert' && menu !== 'comments-view') return;
+    const anchor = menu === 'insert' ? insertAnchor : viewAnchor; // P4-B1
+    const button = menu === 'insert' ? insertButton : viewButton;
     const within = (element: Element | null, target: EventTarget | null) => target instanceof Node && Boolean(element?.contains(target));
     const onPointerDown = (event: PointerEvent) => {
-      if (!within(insertAnchor.current, event.target)) setMenu(null);
+      if (!within(anchor.current, event.target)) setMenu(null);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
-      const inMenu = within(insertAnchor.current, event.target);
+      const inMenu = within(anchor.current, event.target);
       if (!inMenu && !within(bar.current, event.target) && !within(editor.isDestroyed ? null : editor.view.dom, event.target)) return;
       event.preventDefault();
       setMenu(null);
-      if (inMenu) insertButton.current?.focus();
+      if (inMenu) button.current?.focus();
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown);
@@ -376,6 +390,33 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         <Tool label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail}>
           Comments{comments.openCount > 0 ? ` ${comments.openCount}` : ''}
         </Tool>
+        {comments.view && (
+          /* P4-B1: View › Comments beside the toolbar's Comments: Expand (cards in the margin), Minimize (icons), Hide */
+          <span ref={viewAnchor} className="doc-menu-anchor">
+            <Tool ref={viewButton} label="Comments view" expanded={menu === 'comments-view'} onClick={() => setMenu(menu === 'comments-view' ? null : 'comments-view')}>
+              ▾
+            </Tool>
+            {menu === 'comments-view' && (
+              <div role="menu" className="doc-menu" aria-label="Comments view">
+                {VIEWS.map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={comments.view!.value === value}
+                    onMouseDown={keepSelection}
+                    onClick={() => {
+                      setMenu(null);
+                      comments.view!.set(value);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+        )}
         {history && (
           <Tool label="Version history" active={history.open} onClick={history.toggle}>
             History

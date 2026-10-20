@@ -4,6 +4,7 @@
 // remote reply or a remote resolve never changes this editor's active thread; Docs' chords (⌃⌘ N then C, P then C, E
 // then C) go to the next and previous passage after the caret and enter the current one.
 import type { Editor } from '@tiptap/core';
+import { Selection } from '@tiptap/pm/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { reply, resolve } from '../../threads';
 import { TAB, World, ticks } from '../test-world';
@@ -47,7 +48,7 @@ async function build(): Promise<Built> {
   return { A, B, agent, activated, entered };
 }
 
-const caretTo = (editor: Editor, pos: number) => editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection.constructor.near(editor.state.doc.resolve(pos))));
+const caretTo = (editor: Editor, pos: number) => editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(pos))));
 // A chord as the keyboard sends it (Tiptap's `keyboardShortcut` command captures the handler's transaction and replays
 // its steps alone, dropping a selection and a meta, so it cannot drive a chord that sets the active thread); `Mod` is
 // Ctrl off a Mac, where this suite runs, so ⌃⌘ is one ctrlKey here. Answers whether the editor took it.

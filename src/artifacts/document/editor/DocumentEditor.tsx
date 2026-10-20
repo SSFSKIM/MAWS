@@ -21,21 +21,31 @@
 // version's doc from its creation, while the live editor stays bound to the tab, hidden: entering and leaving history
 // never re-binds (and re-renders) the live tab, and leaving keeps its undo. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
 // P3-F1: the rail beside the page in a body 720 px wide or more, a drawer over the page's right side below (rail-layout.ts).
+// P4-B1 (the P4 spec §4.3): the shown tab's open threads are cards in a margin beside the page (comments/MarginThreads.tsx,
+// inside the page's scroll box), activated only by the human; the threads list is the All comments panel (`rail`
+// 'comments'), mutually exclusive with the margin; `rail` 'margin' says a margin thread is active with no rail open
+// (D5). The compose card (the surface's overlay) is hosted in the margin's stack while the margin draws, over the
+// frame otherwise. View › Comments (Expand, Minimize, Hide) comes from the host (`commentsView`).
 import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback /* P4-B1 */, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { JointHold, TypingPause, type VersionView } from '../collab';
 import { isBindingTransaction, type Carry, type Doc } from '../../yjs'; // P3-E: Doc
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
 import { tabBody } from '../tabs';
-import { discardThread, getThread, isBlockAnchor /* P3-E */, reopen, reply, resolve } from '../threads';
+import { discardThread, getThread, reopen, reply, resolve } from '../threads'; // P4-B1: isBlockAnchor moved to comments/locate.ts
 import type { ExtraChange } from '../history'; // P3-E
 import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges, type CommentsOptions /* P3-E */ } from './comments/plugins';
-import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from './comments/surface';
+import type { CommentAuthor, CommentOverlayProps, DocumentComments } from './comments/surface';
+import { blockPos, passageRect } from './comments/locate'; // P4-B1
+import { MarginThreads } from './comments/MarginThreads'; // P4-B1
+import type { ActivationCause } from './comments/plugins'; // P4-B1
+import type { CommentsView } from '../../comments/view'; // P4-B1
+import type { MarginTier } from '../../comments/margin-tiers'; // P4-B1
 import { ThreadsRail } from './comments/ThreadsRail';
 import { useOpenThreadCount } from './comments/use-threads';
 import { editorExtensions } from './extensions';
@@ -81,6 +91,9 @@ export interface DocumentEditorProps {
    */
   rail?: DocumentRail;
   onRailChange?(rail: DocumentRail): void;
+  /** P4-B1 (the P4 spec §4.3): View › Comments, Expand, Minimize or Hide, when the host persists it; Expand without it. */
+  commentsView?: CommentsView;
+  onCommentsViewChange?(view: CommentsView): void;
   /** A new value opens the history rail on its Save version form (the header's Save version); the value at mount is not new. */
   saveVersionRequest?: number;
   /**
@@ -107,7 +120,8 @@ export interface DocumentEditorProps {
   // P3-E end
 }
 
-export type DocumentRail = 'comments' | 'history' | null;
+/** P4-B1: 'margin' says a margin thread is active with no rail open (D5): the header's Comments toggles the panel against it. */
+export type DocumentRail = 'comments' | 'history' | 'margin' | null;
 /**
  * P3-F (8.2, F7; the deck's DeckShown, L233): what the editor shows, for an export of it: one retained version its
  * history previews, two versions compared, or (null) the live document, its changes since the last view and a
@@ -147,6 +161,10 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const typing = useMemo(() => new TypingPause(hold), [hold]); // the review waits for the person's pause
   const [showing, setShowing] = useState<Showing | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  // P4-B1: the margin draws unless the view hides it, the panel is open or a version shows; its tier (off under a
+  // 720 px body) is the margin's own reading, told back here
+  const commentsView = props.commentsView ?? 'expand';
+  const [marginTier, setMarginTier] = useState<MarginTier['kind']>('off');
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
   const { host } = props;
   const author = useMemo<CommentAuthor>(() => ({ actor: host.identity().actor, now: () => Date.now() }), [host]);
@@ -176,6 +194,16 @@ export function DocumentEditor(props: DocumentEditorProps) {
     if (!held) setOwnRail(next);
     onRailChange?.(next);
   };
+  // P4-B1 (D5): a margin thread active with no rail open is the rail state 'margin' (so the panel and history are one
+  // slot with it); the active thread clearing takes it back to none
+  const marginOn = commentsView !== 'hide' && rail !== 'comments' && !previewing;
+  const marginHosts = marginOn && marginTier !== 'off';
+  useEffect(() => {
+    if (activeThreadId !== null && rail === null && marginHosts) openRail('margin');
+    else if (activeThreadId === null && rail === 'margin') openRail(null);
+    // openRail is a plain closure over the props
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeThreadId, rail, marginHosts]);
   useEffect(() => {
     if (rail !== 'history') {
       history?.close();
@@ -253,7 +281,14 @@ export function DocumentEditor(props: DocumentEditorProps) {
               showing={showing}
               onShown={() => setShowing(null)}
               onActiveThread={setActiveThreadId}
-              onPassageClick={() => !preview && openRail('comments')}
+              onPassageClick={(cause) => {
+                // P4-B1: with the margin drawing, an activation is the margin's (D5 reports it above); without it (a
+                // narrow body, Hide), a click opens the list as before, the caret never
+                if (preview || marginHosts) return;
+                if (cause === 'click') openRail('comments');
+              }}
+              marginView={marginOn ? commentsView : null}
+              onMarginTier={setMarginTier}
               historyController={history}
               historySnapshot={snapshot}
               hold={hold}
@@ -305,13 +340,16 @@ interface TabEditorProps extends DocumentEditorProps {
   onShown(): void;
   /** The editor's active thread, as it changes (the rail selects it). */
   onActiveThread(threadId: string | null): void;
-  /** A click on a highlighted passage activated its thread. */
-  onPassageClick(): void;
+  /** A click, the caret or a chord activated a passage's thread (P4-B1: with its cause). */
+  onPassageClick(cause: ActivationCause): void;
+  /** P4-B1: the margin's view while it draws (Expand or Minimize), null while it does not (Hide, the panel open, a preview). */
+  marginView: Exclude<CommentsView, 'hide'> | null;
+  onMarginTier(kind: MarginTier['kind']): void;
   /** P3-E: the previewed version's revision, its charts' displayed one. */
   previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, marginView, onMarginTier, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -321,6 +359,8 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
     latest.current = { comments, author, tabTitle, onPassageClick, blockCommentQuote /* P3-E */ };
   });
   const commentRef = useRef<() => boolean>(() => false);
+  // P4-B1: ⌃⌘ E then C enters the active thread's card: the margin fills this while it draws
+  const enterRef = useRef<(threadId: string) => void>(() => {});
 
   const editor = useEditor(
     {
@@ -333,7 +373,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           hold,
           onRestored: (listener) => handle.onRestored(listener),
         },
-        comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick(), blockQuote: (node) => latest.current.blockCommentQuote?.(node), artifactId /* P3-E */ },
+        comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: (_id, cause) => latest.current.onPassageClick(cause), onEnter: (id) => enterRef.current(id) /* P4-B1 */, blockQuote: (node) => latest.current.blockCommentQuote?.(node), artifactId /* P3-E */ },
         env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}), ...(renderChart ? { renderChart, displayed: displayedDocument(handle.doc) } : {}) /* P3-E */ },
       }),
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
@@ -361,6 +401,13 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
     commentRef.current = () => {
       const { comments: surface, author: by, tabTitle: title } = latest.current;
       if (!surface || editor.isDestroyed || !editor.isEditable) return false;
+      // P4-B1 (C7, X36's one draft per artifact): a comment being written takes the new one's place
+      const draft = surface.draft?.();
+      if (draft) {
+        editor.commands.setActiveThread(draft);
+        surface.focusDraft?.();
+        return true;
+      }
       const threadId = nanoid8();
       const comment = { threadId, tabId, by: by.actor, at: by.now() };
       // P3-E: a selected block the comments' `blockQuote` names is commented whole; otherwise B's passage
@@ -457,7 +504,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           artifactId={artifactId}
           host={host}
           onFind={openFind}
-          comments={{ comment: comments ? () => commentRef.current() : null, railOpen: rail === 'comments', openCount, toggleRail: () => openRail(rail === 'comments' ? null : 'comments') }}
+          comments={{ comment: comments ? () => commentRef.current() : null, railOpen: rail === 'comments', openCount, toggleRail: () => openRail(rail === 'comments' ? null : 'comments'), ...(onCommentsViewChange && { view: { value: commentsView ?? 'expand', set: onCommentsViewChange } }) /* P4-B1 */ }}
           history={historyController ? { open: rail === 'history', toggle: toggleHistory } : undefined}
           mentions={mentions}
         />
@@ -476,6 +523,11 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         pill={preview ? null : (historySnapshot?.pill ?? null)}
         pageScope={pageScope}
         onPage={onPage}
+        marginView={marginView}
+        onMarginTier={onMarginTier}
+        readOnly={readOnly}
+        onComment={comments ? () => commentRef.current() : null}
+        enterRef={enterRef}
         onNewChanges={() => {
           openRail('history');
           void historyController?.openNewChanges();
@@ -501,10 +553,17 @@ interface PageFrameProps {
   pill: HistorySnapshot['pill'];
   pageScope: DocumentEditorProps['pageScope'];
   onPage: DocumentEditorProps['onPage'];
+  // P4-B1: the margin beside the page while it draws (MarginThreads), the tier it reads told back, the Comment command
+  // for its Add button, and the chord's enter filled by it
+  marginView: Exclude<CommentsView, 'hide'> | null;
+  onMarginTier(kind: MarginTier['kind']): void;
+  readOnly: boolean;
+  onComment: (() => boolean) | null;
+  enterRef: { current: (threadId: string) => void };
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, onNewChanges }: PageFrameProps) {
+function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, readOnly, onComment, enterRef, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -519,6 +578,38 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     },
     [],
   );
+  // P4-B1: a scroll moves the passages under the frame-level overlay alone (the margin scrolls with the page and never
+  // re-lays on it, R4), so it has a key of its own, coalesced the same way
+  const [scroll, setScroll] = useState(0);
+  const scrollPending = useRef<number | null>(null);
+  const scrolled = useMemo(
+    () => () => {
+      if (scrollPending.current !== null) return;
+      scrollPending.current = requestAnimationFrame(() => {
+        scrollPending.current = null;
+        setScroll((n) => n + 1);
+      });
+    },
+    [],
+  );
+  useEffect(
+    () => () => {
+      if (scrollPending.current !== null) cancelAnimationFrame(scrollPending.current);
+    },
+    [],
+  );
+  // P4-B1: the thread the surface's compose card is on (its entry in the margin's stack), and the tier the margin reads
+  const [hosting, setHosting] = useState<string | null>(null);
+  const [tier, setTier] = useState<MarginTier>({ kind: 'off' });
+  const onTier = useCallback(
+    (next: MarginTier) => {
+      setTier(next);
+      onMarginTier(next.kind);
+    },
+    [onMarginTier],
+  );
+  const margin = marginView !== null && previewEditor === null;
+  const marginHosts = margin && tier.kind !== 'off';
   useEffect(() => {
     if (!comments) return;
     editor.on('update', moved);
@@ -533,13 +624,14 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     };
   }, [editor, comments, moved]);
 
-  const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey'>>(() => {
+  const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey' | 'placement'>>(() => {
     const { doc } = handle;
     // read when the overlay writes, not when it was drawn: the store may have turned read-only since
     const writable = () => !handle.state().readOnly;
     return {
       doc,
       locate: (threadId) => passageRect(editor, frame.current, threadId, doc /* P3-E */),
+      hosting: setHosting, // P4-B1
       setActive: (threadId) => void (!editor.isDestroyed && editor.commands.setActiveThread(threadId)),
       resolve: (threadId) => {
         if (writable() && getThread(doc, threadId)) resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
@@ -566,20 +658,38 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     onPage?.(page.current);
     return () => onPage?.(null);
   }, [onPage]);
+  // P4-B1: the margin's key never carries the scroll; the frame-level overlay's does
+  const marginKey = `${editor.instanceId}:${layout}`;
   const sheet = (
-    <div ref={page} className="ds-doc" style={declared} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
+    <div ref={page} className="ds-doc" style={declared} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments && !marginHosts ? scrolled : undefined}>
       <div className="ds-doc-page">
         <div className="doc-live" hidden={previewEditor !== null}>
           <EditorContent editor={live} />
         </div>
         {previewEditor && <PreviewMount editor={previewEditor} />}
       </div>
+      {margin && marginView !== null && (
+        <MarginThreads
+          editor={live}
+          doc={handle.doc}
+          tabId={tabId}
+          author={author}
+          readOnly={readOnly}
+          view={marginView}
+          layoutKey={marginKey}
+          hosting={hosting}
+          overlay={comments && marginHosts ? () => comments.overlay({ ...reach, layoutKey: marginKey, placement: 'margin' }) : null}
+          onComment={onComment}
+          onTier={onTier}
+          enterRef={enterRef}
+        />
+      )}
     </div>
   );
   return (
     <div ref={frame} className="doc-page-frame" onContextMenu={editors.onContextMenu}>
       <div className="doc-page-scope">{Scope ? <Scope pinned={preview?.pinned ?? undefined}>{sheet}</Scope> : sheet}</div>
-      {comments?.overlay({ ...reach, layoutKey: `${editor.instanceId}:${layout}` })}
+      {comments && !marginHosts && comments.overlay({ ...reach, layoutKey: `${editor.instanceId}:${layout}:${scroll}` })}
       {pill && (
         <div className="doc-pill" data-markup-occluder>
           <button type="button" className="doc-pill-open" onClick={onNewChanges}>
@@ -600,33 +710,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   );
 }
 
-const SAFE_ID = /^[\w-]+$/;
-
-// The first line box of a thread's live passage in the shown tab, in the frame's coordinates; null when no live text
-// of the thread is drawn here.
-function passageRect(editor: Editor, frame: HTMLElement | null, threadId: string, doc: Doc /* P3-E */): PassageRect | null {
-  if (!frame || editor.isDestroyed || !SAFE_ID.test(threadId)) return null;
-  // P3-E: a block thread's block, its top line box (resolved or open: the card stays on it)
-  const block = blockPos(editor, doc, threadId);
-  const span = block >= 0 ? editor.view.nodeDOM(block) : editor.view.dom.querySelector(`[data-thread="${threadId}"]`);
-  if (!(span instanceof Element)) return null;
-  const line = span.getClientRects()[0] ?? span.getBoundingClientRect();
-  const origin = frame.getBoundingClientRect();
-  return { x: line.left - origin.left, y: line.top - origin.top, width: line.width, height: line.height };
-}
-
-// P3-E (E2 M4): where a block thread's block is in the editor's doc, or -1 (not a block thread, or no such block here).
-function blockPos(editor: Editor, doc: Doc, threadId: string): number {
-  const thread = getThread(doc, threadId);
-  if (!thread || !isBlockAnchor(thread.anchor) || thread.blockId === null) return -1;
-  let at = -1;
-  editor.state.doc.descendants((node, pos) => {
-    if (at >= 0) return false;
-    if (node.attrs.id === thread.blockId) at = pos;
-    return !node.isTextblock;
-  });
-  return at;
-}
+// P4-B1: `passageRect` and `blockPos` moved to comments/locate.ts (the margin reads them too)
 
 // The preview's own editor (M9): read-only, bound to the version's view from its creation (the binding's microtask),
 // put on another view when the preview changes (a comparison, Show changes), its moved and retyped blocks labelled and
