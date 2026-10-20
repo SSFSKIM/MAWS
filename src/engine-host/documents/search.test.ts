@@ -224,6 +224,42 @@ describe('the refresher and the sweep', () => {
     }
   });
 
+  it('withdraws an artifact already queued when it unloads, so its extraction waits for the unload’s own settle', async () => {
+    const storage = SqliteDocumentStorage.open(join(w.userData, 'requeued', 'store.sqlite'), { log: () => {} });
+    const service = new DocumentService(storage, { kindOf: (artifactId) => storage.kindOf(artifactId), log: () => {}, idleUnloadMs: 30 });
+    const store = new ArtifactStore(service, storage, { root: join(w.userData, 'requeued'), log: () => {} });
+    try {
+      const id = (await store.create({ kind: 'dashboard', title: 'Board', initial: (doc) => doc.get('charts').insert(0, 'alpha') }, HUMAN)).id;
+      const other = (await store.create({ kind: 'html', title: 'Other', content: html('other') }, HUMAN)).id;
+      const replica = service.replica('app-holder' as AppSessionId, id);
+      await replica.whenSynced();
+      const rowOf = (artifactId: string) => storage.db.prepare('SELECT artifactId FROM artifact_text_rows WHERE artifactId = ?').get(artifactId);
+      const timers = manualTimers();
+      started(timers, store);
+      await timers.advance(MIRROR_SWEEP_DELAY_MS); // held: set aside
+      expect(rowOf(id)).toBeUndefined();
+      await store.update(id, { title: 'Renamed' }); // its settle, 2 s on
+      await turns();
+      await timers.advance(MIRROR_SETTLE_MS - 500);
+      await store.update(other, { title: 'Busy' }); // keeps the host busy past that settle
+      await turns();
+      await timers.advance(500); // the rename settled: queued, waiting for the quiet window
+      expect(rowOf(id)).toBeUndefined();
+      service.closeSession('app-holder' as AppSessionId);
+      for (let i = 0; i < 200 && service.loaded(id) !== null; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(service.loaded(id)).toBeNull(); // the unload's settle starts now
+      await timers.advance(MIRROR_QUIET_MS - 500); // the quiet window ends: the other artifact goes, this one does not
+      expect(rowOf(other)).toBeDefined();
+      expect(rowOf(id)).toBeUndefined();
+      await timers.advance(500); // the unload's settle
+      expect(rowOf(id)).toBeDefined();
+    } finally {
+      store.close();
+      service.close();
+      storage.close();
+    }
+  });
+
   it('waits for the host to be quiet: a commit inside MIRROR_QUIET_MS of the settle defers the extraction (Decision Log 24)', async () => {
     const id = await page('Live', 'before');
     const other = await page('Other', 'other text');

@@ -157,8 +157,13 @@ export class ArtifactSearch {
         if (change !== 'linked') this.settle(artifactId);
       }),
       this.store.service.onCommitted(() => this.busy()), // a document's every commit, before the feed coalesces them
+      // an unload settles like a change: an entry already queued (a change that settled while the host was busy) is
+      // withdrawn, so it waits for this settle too
       this.store.service.onUnload((artifactId) => {
-        if (this.untilUnloaded.delete(artifactId)) this.settle(artifactId);
+        const setAside = this.untilUnloaded.delete(artifactId);
+        if (!setAside && !this.queue.has(artifactId)) return;
+        this.queue.delete(artifactId);
+        this.settle(artifactId);
       }),
     ];
     this.sweepTimer = this.timers.setTimeout(() => this.sweep(), this.sweepDelayMs);
