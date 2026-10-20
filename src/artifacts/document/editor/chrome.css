@@ -558,91 +558,47 @@
   border: 0;
   padding: var(--space) 0;
 }
-.doc-thread {
+/* P4-B1: a thread in the panel is X36's card, styled by src/artifacts/comments/comments.css; the panel's filters: */
+.doc-rail-filters {
   display: flex;
-  flex-direction: column;
-  gap: var(--space);
-  padding: calc(var(--space) * 2);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space) calc(var(--space) * 2);
+  padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+}
+.doc-rail-segments {
+  display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-}
-.doc-thread[data-status='resolved'] {
-  background: var(--bg);
-  color: var(--fg-muted);
-}
-/* the editor's active thread (its card's, a shown or clicked passage's), in the passage's highlight colour */
-.doc-thread[aria-current='true'] {
-  border-color: var(--warning);
-  box-shadow: 0 0 0 1px var(--warning);
-}
-.doc-thread-quote {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font: inherit;
-  text-align: left;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  border-left: 3px solid var(--warning);
-  padding: 0 0 0 calc(var(--space) * 2);
-  cursor: pointer;
-}
-.doc-thread-quote-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
-.doc-thread-tab {
+.doc-rail-segment {
+  position: relative;
+  padding: 2px calc(var(--space) * 2);
   font-size: var(--text-ui-sm);
   color: var(--fg-muted);
+  cursor: default;
 }
-.doc-thread-note {
-  margin: 0;
-  font-size: var(--text-ui-sm);
-  color: var(--fg-muted);
+.doc-rail-segment + .doc-rail-segment {
+  border-left: 1px solid var(--border);
 }
-.doc-thread-messages {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.doc-rail-segment:has(input:checked) {
+  color: var(--fg);
+  background: var(--bg-active);
 }
-.doc-thread-message {
-  display: flex;
-  flex-direction: column;
+.doc-rail-segment:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
-.doc-thread-author {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space);
-  font-size: var(--text-ui-sm);
-  font-weight: 600;
+.doc-rail-segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
-.doc-thread-chip {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-sm);
-}
-.doc-thread-body {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.doc-thread-reply {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space);
-}
-.doc-thread-reply-field {
-  flex: 1;
+.doc-rail-search {
+  flex: 1 0 100%;
   min-width: 0;
-  max-height: calc(var(--space) * 30);
-  field-sizing: content;
-  resize: none;
   font: inherit;
   font-size: var(--text-ui-sm);
   color: var(--fg);
@@ -650,10 +606,6 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: var(--space) calc(var(--space) * 2);
-}
-.doc-thread-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 /* ── awareness (M5): the blocks an agent is editing, outlined in its colour and named ── */

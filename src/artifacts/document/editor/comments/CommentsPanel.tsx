@@ -6,8 +6,17 @@
 // text, and sit outside undo; a reply is the surface's identity's (the person's). The editor's active thread (its card's, a shown one's, a clicked passage's) is the rail's selected
 // one, scrolled into view. App chrome beside the page, so it reads the app's tokens (chrome.css). M5 adds History
 // beside it.
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+//
+// P4-B1 (docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md D9; the prior art's Z4): the rail is now the All
+// comments panel, still the complementary "Comments" (the margin and the panel are never on screen together). Each
+// thread is X36's card (src/artifacts/comments/ThreadCard.tsx) drawn whole with its quoted passage; a click on the card
+// or its quote shows the thread. The panel filters by status (All: the open threads, then the collapsible Resolved
+// section; Open; Resolved), by tab (All tabs; This tab) and by a search over the messages, the quotes and the authors'
+// names. Each card's reply draft is the panel's, kept while a filter hides the card. J and K move the focus between the
+// cards.
+import { useEffect, useId, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
+import { ThreadCard } from '../../../comments/ThreadCard';
 import type { Doc } from '../../../yjs';
 import { nanoid8 } from '../../schema';
 import { reopen, reply, resolve, type ThreadState } from '../../threads';
@@ -30,41 +39,108 @@ interface Props {
   onClose(): void;
 }
 
-export function ThreadsRail({ doc, tabs, activeTab, activeThread, author, readOnly = false, onShow, onClose }: Props) {
+type StatusFilter = 'all' | 'open' | 'resolved';
+type ScopeFilter = 'all' | 'tab';
+const STATUS: [StatusFilter, string][] = [
+  ['open', 'Open'],
+  ['resolved', 'Resolved'],
+  ['all', 'All'],
+];
+const SCOPE: [ScopeFilter, string][] = [
+  ['tab', 'This tab'],
+  ['all', 'All tabs'],
+];
+
+// A thread matches a search when any message's body, its quote, or the name of anyone who wrote in it holds the text.
+function matches(thread: ThreadState, needle: string): boolean {
+  if (needle === '') return true;
+  const has = (text: string) => text.toLowerCase().includes(needle);
+  return has(thread.quote) || has(actorDisplay(thread.createdBy).name) || thread.messages.some((message) => has(message.body) || has(actorDisplay(message.by).name));
+}
+
+export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, readOnly = false, onShow, onClose }: Props) {
   const threads = useThreadStates(doc);
   const [showResolved, setShowResolved] = useState(true);
-  const open = threads.filter((thread) => thread.status === 'open');
-  const resolved = threads.filter((thread) => thread.status === 'resolved');
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [scope, setScope] = useState<ScopeFilter>('all');
+  const [query, setQuery] = useState('');
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const body = useRef<HTMLDivElement>(null);
+  const name = useId();
+
+  const needle = query.trim().toLowerCase();
+  const shown = threads.filter((thread) => (scope === 'all' || thread.tabId === activeTab) && matches(thread, needle));
+  const open = status === 'resolved' ? [] : shown.filter((thread) => thread.status === 'open');
+  const resolved = status === 'open' ? [] : shown.filter((thread) => thread.status === 'resolved');
+  const listed = [...open, ...(status === 'all' && !showResolved ? [] : resolved)];
+
+  // the editor's active thread, scrolled into view when it changes (and when the panel opens on one)
+  useEffect(() => {
+    if (activeThread === null) return;
+    body.current?.querySelector(`[data-thread="${CSS.escape(activeThread)}"]`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeThread]);
+
+  const setDraft = (threadId: string, text: string) =>
+    setDrafts((current) => {
+      const next = new Map(current);
+      if (text === '') next.delete(threadId);
+      else next.set(threadId, text);
+      return next;
+    });
+  const focusCard = (threadId: string) => body.current?.querySelector<HTMLElement>(`[data-thread="${CSS.escape(threadId)}"]`)?.focus();
   const tabTitle = (thread: ThreadState) => (thread.tabId === activeTab ? null : (tabs.find((tab) => tab.id === thread.tabId)?.title ?? null));
-  const item = (thread: ThreadState) => (
-    <ThreadItem
-      key={thread.id}
-      thread={thread}
-      tabTitle={tabTitle(thread)}
-      selected={thread.id === activeThread}
-      readOnly={readOnly}
-      onShow={() => onShow(thread)}
-      onReply={(body) => !readOnly && reply(doc, thread.id, { id: `${thread.id}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN)}
-      onResolve={() => !readOnly && resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
-      onReopen={() => !readOnly && reopen(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
-    />
-  );
+  const card = (thread: ThreadState) => {
+    const at = listed.indexOf(thread);
+    const next = listed[at + 1];
+    const previous = listed[at - 1];
+    return (
+      <ThreadCard
+        key={thread.id}
+        thread={thread}
+        active={thread.id === activeThread}
+        compact={false}
+        showQuote
+        tabTitle={tabTitle(thread)}
+        readOnly={readOnly}
+        position={{ index: at + 1, count: listed.length }}
+        draft={drafts.get(thread.id) ?? ''}
+        onDraftChange={(text) => setDraft(thread.id, text)}
+        onActivate={() => onShow(thread)}
+        onReply={(text) => !readOnly && reply(doc, thread.id, { id: `${thread.id}:${nanoid8()}`, by: author.actor, at: author.now(), body: text }, COMMENTS_ORIGIN)}
+        onResolve={() => !readOnly && resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
+        onReopen={() => !readOnly && reopen(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
+        {...(next && { onNext: () => focusCard(next.id) })}
+        {...(previous && { onPrevious: () => focusCard(previous.id) })}
+      />
+    );
+  };
+  // nothing to list: under All, a search that only resolved threads match lists those without a note
+  const empty = status === 'resolved' ? resolved.length === 0 : open.length === 0 && (needle === '' || resolved.length === 0);
+  const emptyText = needle !== '' ? 'No comments match the search.' : status === 'resolved' ? 'No resolved comments.' : 'No open comments. Select text and choose Comment.';
+
   return (
     <aside className="doc-rail" aria-label="Comments">
       <header className="doc-rail-header">
-        <h2 className="doc-rail-title">Comments</h2>
+        <h2 className="doc-rail-title">All comments</h2>
         <button type="button" className="doc-tool" aria-label="Close comments" title="Close comments" onClick={onClose}>
           ×
         </button>
       </header>
-      <div className="doc-rail-body">
-        {open.length === 0 ? <p className="doc-rail-empty">No open comments. Select text and choose Comment.</p> : open.map(item)}
-        {resolved.length > 0 && (
+      <div className="doc-rail-filters">
+        <Segments<StatusFilter> name={`${name}-status`} label="Status" options={STATUS} value={status} onChange={setStatus} />
+        <Segments<ScopeFilter> name={`${name}-scope`} label="Scope" options={SCOPE} value={scope} onChange={setScope} />
+        <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder="Search comments" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </div>
+      <div ref={body} className="doc-rail-body">
+        {empty && <p className="doc-rail-empty">{emptyText}</p>}
+        {open.map(card)}
+        {status === 'resolved' && resolved.map(card)}
+        {status === 'all' && resolved.length > 0 && (
           <section className="doc-rail-resolved" aria-label={`Resolved (${resolved.length})`}>
             <button type="button" className="doc-rail-section" aria-expanded={showResolved} onClick={() => setShowResolved(!showResolved)}>
               Resolved ({resolved.length})
             </button>
-            {showResolved && resolved.map(item)}
+            {showResolved && resolved.map(card)}
           </section>
         )}
       </div>
@@ -72,95 +148,16 @@ export function ThreadsRail({ doc, tabs, activeTab, activeThread, author, readOn
   );
 }
 
-interface ItemProps {
-  thread: ThreadState;
-  tabTitle: string | null;
-  selected: boolean;
-  readOnly: boolean;
-  onShow(): void;
-  onReply(body: string): void;
-  onResolve(): void;
-  onReopen(): void;
-}
-
-function ThreadItem({ thread, tabTitle, selected, readOnly, onShow, onReply, onResolve, onReopen }: ItemProps) {
-  const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [selected]);
+// A segmented control: one choice of a few, as radio buttons (arrow keys move between them).
+function Segments<T extends string>({ name, label, options, value, onChange }: { name: string; label: string; options: [T, string][]; value: T; onChange(value: T): void }) {
   return (
-    <article
-      ref={ref}
-      className="doc-thread"
-      aria-current={selected ? 'true' : undefined}
-      data-thread={thread.id}
-      data-status={thread.status}
-      data-orphan={thread.orphan ? '' : undefined}
-      aria-label={`Comment on “${thread.quote}”`}
-    >
-      <button type="button" className="doc-thread-quote" aria-label={`Show passage: ${thread.quote}`} onClick={onShow}>
-        {tabTitle !== null && <span className="doc-thread-tab">{tabTitle}</span>}
-        <span className="doc-thread-quote-text">{thread.quote}</span>
-      </button>
-      {thread.orphan && <p className="doc-thread-note">The commented passage was removed.</p>}
-      {thread.messages.length > 0 && (
-        <ol className="doc-thread-messages">
-          {thread.messages.map((message) => {
-            const who = actorDisplay(message.by);
-            return (
-              <li key={message.id} className="doc-thread-message">
-                <span className="doc-thread-author">
-                  <span className="doc-thread-chip" style={{ background: `var(${who.color})` }} aria-hidden />
-                  {who.name}
-                </span>
-                <span className="doc-thread-body">{message.body}</span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-      {thread.status === 'open' && !readOnly && <ReplyField onReply={onReply} />}
-      <div className="doc-thread-actions">
-        {thread.status === 'open' ? (
-          <button type="button" className="doc-tool" disabled={readOnly} onClick={onResolve}>
-            Resolve
-          </button>
-        ) : (
-          <button type="button" className="doc-tool" disabled={readOnly} onClick={onReopen}>
-            Reopen
-          </button>
-        )}
-      </div>
-    </article>
-  );
-}
-
-// The thread's reply field: Enter posts (Shift+Enter breaks a line; an input method's composition keeps its Enter).
-function ReplyField({ onReply }: { onReply(body: string): void }) {
-  const [text, setText] = useState('');
-  const body = text.trim();
-  const post = () => {
-    if (body === '') return;
-    onReply(body);
-    setText('');
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    post();
-  };
-  return (
-    <form
-      className="doc-thread-reply"
-      onSubmit={(event) => {
-        event.preventDefault();
-        post();
-      }}
-    >
-      <textarea className="doc-thread-reply-field" aria-label="Reply" placeholder="Reply…" rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={onKeyDown} />
-      <button type="submit" className="doc-tool" disabled={body === ''}>
-        Reply
-      </button>
-    </form>
+    <div role="radiogroup" aria-label={label} className="doc-rail-segments">
+      {options.map(([option, text]) => (
+        <label key={option} className="doc-rail-segment">
+          <input type="radio" name={name} value={option} checked={value === option} onChange={() => onChange(option)} />
+          {text}
+        </label>
+      ))}
+    </div>
   );
 }

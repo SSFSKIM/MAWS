@@ -36,7 +36,7 @@ import { discardThread, getThread, isBlockAnchor /* P3-E */, reopen, reply, reso
 import type { ExtraChange } from '../history'; // P3-E
 import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges, type CommentsOptions /* P3-E */ } from './comments/plugins';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from './comments/surface';
-import { ThreadsRail } from './comments/CommentsPanel'; // P4-B1: the threads rail's new name (the All comments panel)
+import { CommentsPanel } from './comments/CommentsPanel'; // P4-B1: the threads rail became the All comments panel
 import { useOpenThreadCount } from './comments/use-threads';
 import { editorExtensions } from './extensions';
 import { FindBar } from './Find';
@@ -267,7 +267,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
           )}
         </div>
         {rail === 'comments' && (
-          <ThreadsRail
+          <CommentsPanel // P4-B1
             doc={doc}
             tabs={tabs}
             activeTab={active?.id ?? null}
