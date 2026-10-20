@@ -25,8 +25,11 @@ spec.loader.exec_module(prep)
 DESKTOP_T = os.path.join(HERE, 'fixtures', 'desktop-B1.jsonl')
 DECK = os.path.join(HERE, 'seed', 'maws-deck')
 B5 = "In the slide deck \"Autumn Workshops 2026\", on slide 2, change the session lead's date to 21 October. Change nothing else."
-URL = 'https://claude.ai/artifact/5d1c9a7e'
-OTHER = 'https://claude.ai/artifact/9e0b4f21'  # another Artifact, as a same-titled deck would be
+# The deck's url in the engine's two spellings (2.1.302 spells its own url either way): the short id is the uuid's
+# base58, the pair made by the engine's own encoder (cli.pretty.js `g`, its decoder `CW`).
+URL = 'https://claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA'
+URL_UUID = 'https://claude.ai/code/artifact/5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13'
+OTHER = 'https://claude.ai/artifact/LWvigD6DBBdof4qCcTGaKU'  # another Artifact, as a same-titled deck would be
 SLIDES = 'https://claude.ai/artifact-type/slides'
 
 
@@ -266,13 +269,87 @@ class CoworkDeck(Prep):
         self.assertEqual((r.published, r.url), ({'project/deck.json': '{}'}, None))
         r.apply(call({'url': URL + '/', 'root': 'd', 'file_path': 'd/project/deck.json'}))  # its url, learned from the seed
         self.assertEqual((r.url, r.url_from), (URL + '/', 'seed'))
-        r.apply(call({'action': 'read_file', 'url': URL + '?v=2', 'path': 'project/deck.json'}))  # another spelling of it
+        r.apply(call({'action': 'read_file', 'url': URL_UUID + '?v=2', 'path': 'project/deck.json'}))  # another spelling of it
         r.apply(call({'type_url': SLIDES, 'root': 'd', 'file_path': 'd/project/deck.json'}))  # the seed made another deck
         with self.assertRaisesRegex(prep.RebuildError, 'replaced'):
             r.apply(call({'url': URL, 'root': 'd', 'file_path': 'd/project/deck.json'}))
         r.timed(same_session=False)  # another session remembers none of the seed's files' urls
         with self.assertRaisesRegex(prep.RebuildError, 'naming no url'):
             r.apply(call({'root': 'd', 'file_path': 'd/project/deck.json'}))
+
+    def test_a_url_less_publish_follows_only_the_decks_latest_file(self):
+        """The engine keeps one file_path per Artifact, the one last published to it (2.1.302's publish drops the
+        Artifact's other frameUrls entries): a file published to the deck before another goes, with no url, to a new
+        standalone page; so does one whose create failed after making its Artifact."""
+        call = lambda inp, ok=True: dict(name='Artifact', input=inp, cwd='/w', ok=ok, id='t')
+        r = prep.Replay()
+        for name in ('a', 'b'):
+            r.apply(dict(call({}), name='Write', input={'file_path': '/w/%s.html' % name, 'content': '<p>%s</p>' % name}))
+            r.apply(call({'url': URL, 'file_path': '%s.html' % name}))
+        r.apply(call({'file_path': 'b.html'}))  # the deck's latest file follows
+        with self.assertRaisesRegex(prep.RebuildError, 'naming no url of /w/a.html'):
+            r.apply(call({'file_path': 'a.html'}))
+        r.apply(call({'type_url': SLIDES, 'file_path': 'b.html'}, ok=False))
+        with self.assertRaisesRegex(prep.RebuildError, 'naming no url of /w/b.html'):
+            r.apply(call({'file_path': 'b.html'}))
+
+    def test_a_url_less_publish_in_the_seeds_own_session(self):
+        """The timed turn in the seed's session: slide 2, edited and published with no url, reaches the deck only when
+        it was the last file the seed published to it; otherwise the rebuild fails loudly rather than pass B5."""
+        slides = ['project/slides/%s.html' % sid for sid in json.loads(read(os.path.join(DECK, 'project', 'deck.json')))['order']]
+        slide = self.SCRATCH + '/project/slides/sessions.html'
+        for rep, order in ((1, ['project/deck.json'] + slides), (2, ['project/deck.json'] + [s for s in slides if 'sessions' not in s] + [slides[1]])):
+            with self.subTest(last=order[-1]):
+                r = Recorder(self.SEED_MNT)
+                r.human('Make a slide deck titled "Autumn Workshops 2026" from the files in deck/.')
+                r.call('Artifact', {'type_url': SLIDES, 'title': 'Autumn Workshops 2026'})
+                for rel in order:
+                    r.call('Write', {'file_path': '%s/%s' % (self.SCRATCH, rel), 'content': read(os.path.join(DECK, rel))})
+                    r.call('Artifact', {'url': URL, 'root': self.SCRATCH, 'file_path': '%s/%s' % (self.SCRATCH, rel)})
+                r.human(B5)
+                r.call('Edit', {'file_path': slide, 'old_string': 'Grace Okafor, 14 October', 'new_string': 'Grace Okafor, 21 October'})
+                r.call('Artifact', {'root': self.SCRATCH, 'file_path': slide})
+                self.main('before', 'B5', str(rep), '--out', self.run_dir, '--surface', 'cowork')
+                session = self.cowork_session(r)
+                argv = ['after', 'B5', str(rep), '--out', self.run_dir, '--permissions-answered', '0', '--seed-transcript', session]
+                if rep == 1:
+                    with self.assertRaises(SystemExit) as stopped:
+                        prep.main(argv)
+                    self.assertIn('naming no url of %s' % slide, str(stopped.exception))
+                else:
+                    out = self.main(*argv)
+                    self.assertTrue(out['seedCheck']['pass'], out['seedCheck'])
+                    self.assertTrue(out['check']['pass'], out['check'])
+
+    def test_the_engines_url_grammar(self):
+        """Both spellings of one Artifact name it (2.1.302's `Yt`; the pairs and verdicts are the engine's own, its
+        functions run on the same inputs); a url the engine does not read as an Artifact's is equal only to itself."""
+        for short, uuid in (('CVsiKk2utAxFxm8aNrwmaA', '5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13'), ('LWvigD6DBBdof4qCcTGaKU', '9e0b4f21-6a3c-4d5e-8b7f-1c2d3e4f5a6b'),
+                            ('1111111111111111111111', '00000000-0000-0000-0000-000000000000'), ('11112FTvFtEEuCBPrANzJj', '0000000f-0000-0000-0000-000000000100'),
+                            ('YcVfxkQb6JRzqk5kF2tNLv', 'ffffffff-ffff-ffff-ffff-ffffffffffff'), ('YcVfxkQb6JRzqk5kF2tNLw', None), ('zzzzzzzzzzzzzzzzzzzzzz', None)):
+            self.assertEqual(prep.short_id_uuid(short), uuid, short)
+        deck = ('artifact', '5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13')
+        for url in (URL, URL_UUID, URL + '/', URL + '?v=2', URL_UUID + '/project/deck.json#x', 'https://claude.ai/code/artifact/CVsiKk2utAxFxm8aNrwmaA',
+                    'https://claude.ai/artifact/5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13', 'https://claude.ai/code/frame/5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13',
+                    'https://claude.ai/artifact/autumn-workshops-2026-CVsiKk2utAxFxm8aNrwmaA', 'https://claude.ai/code/artifact/my-deck-5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13',
+                    'https://claude.ai/artifact/-CVsiKk2utAxFxm8aNrwmaA', 'https://preview.claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA',
+                    'https://5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13.frame.claudeusercontent.com/'):
+            self.assertEqual(prep.artifact_id(url), deck, url)
+        # the vanity is the longest prefix ending in `-` before an id: here the id is OTHER's
+        self.assertEqual(prep.artifact_id('https://claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA-LWvigD6DBBdof4qCcTGaKU'), prep.artifact_id(OTHER))
+        self.assertNotEqual(prep.artifact_id(OTHER), deck)
+        for url in ('https://claude.ai/artifact/5d1c9a7e', 'https://claude.ai/artifact/zzzzzzzzzzzzzzzzzzzzzz', 'http://claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA',
+                    'https://claude.ai/artifact/5D1C9A7E-3B2F-4E8A-9C61-0F4D2B7A8E13', 'https://claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaAx',
+                    'https://a.b.claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA', URL + '\n', 'https://claude.ai:443/artifact/CVsiKk2utAxFxm8aNrwmaA',
+                    'https://claude.ai/code/frames/5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13', '5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13'):
+            self.assertEqual(prep.artifact_id(url), ('url', url), url)
+        # the timed turn names the seed's deck by its other spelling: the same deck, rebuilt and checked
+        seed = self.seed_slides()
+        self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork')
+        self.cowork_session(self.timed_b5(read_url=URL_UUID, url=URL_UUID))
+        out = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--seed-transcript', seed)
+        self.assertTrue(out['check']['pass'], out['check'])
+        self.assertEqual(out['deckUrl'], URL)
 
     def test_read_file_carries_the_published_text_to_the_edit(self):
         """With no seed records (the deck before is the bench's), only read_file can give the edited copy its text."""

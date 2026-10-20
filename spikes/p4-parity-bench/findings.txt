@@ -232,9 +232,14 @@ publishes it. The rebuild replays the successful calls in order and computes eac
 a publish whose `root` serves the slide anywhere but its project/ path adds a stray file rather than editing the slide,
 and fails. It follows one deck: a `type_url` publish (a create) starts it from its own files and is allowed only in the
 seed's calls; the first publish or read_file naming a url after the seed's last create names the deck's url, and every
-later one must name the same Artifact; a publish naming no url goes where its `file_path` was last published in the
-session, and is followed only when that was the deck in the same session (otherwise the engine sends it somewhere the
-records do not show, or makes a new Artifact). When the seed's records name no url (a create whose url is only in its
+later one must name the same Artifact, compared the engine's way (cli.pretty.js `Yt`: by the uuid a url names, so
+claude.ai/artifact/<22-character short id, the uuid in base58> and claude.ai/code/artifact/<uuid>, either with a
+`<name>-` vanity prefix, are one Artifact, checked against the engine's own functions; a url the engine does not read as
+an Artifact's equals only itself). A publish naming no url goes where the engine's frameUrls sends its `file_path`,
+which holds one file per Artifact, the last one published to it in the session (each publish drops the Artifact's other
+entries, and a create points its `file_path` at the new Artifact even when the call then fails), and is followed only
+when that file is the deck's in the same session (otherwise the engine sends it somewhere the records do not show, or
+makes a new Artifact). When the seed's records name no url (a create whose url is only in its
 result, or no seed records), the timed turn's first url is taken as the deck's and the manifest says so (`deckUrl`,
 `deckUrlFrom`). A `read_file` puts the published text under the published path wherever it was saved; every other
 action of the engine's list (cli.pretty.js `Qe()`, and its consolidated spellings) leaves the files as they were, save

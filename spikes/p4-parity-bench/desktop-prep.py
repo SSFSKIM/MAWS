@@ -298,18 +298,46 @@ def calls(transcript, since=None, until=None):
     return [dict(c, ok=ok.get(c['id'], False)) for c in out]
 
 
+# The engine's Artifact url grammar (2.1.302's cli.pretty.js `Yt`, `J`, `T`; `al` compares urls by the uuid it yields):
+# https://[<one label>.]claude.ai/ then artifact/, code/artifact/ or code/frame/, an optional vanity `<name>-`, and the
+# Artifact's uuid or its 22-character short id (`CW`: base58 of the uuid's 128 bits, big-endian, Bitcoin's alphabet;
+# the engine spells its own url either way, `zNr`); or https://<uuid>.frame.[staging.]claudeusercontent.com.
+UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+ARTIFACT_URL = re.compile(r'https://(?:[a-z0-9-]+\.)?claude\.ai/(?:artifact|code/(?:artifact|frame))/(?:[A-Za-z0-9_-]*-)?'
+                          r'(%s|[%s]{22})(?:[/?#]|\Z)' % (UUID, BASE58))
+FRAME_URL = re.compile(r'https://(%s)\.frame\.(?:staging\.)?claudeusercontent\.com(?:[/?#]|\Z)' % UUID)
+
+
+def short_id_uuid(s):
+    """A 22-character short id's uuid (`CW`), or None past 128 bits."""
+    n = 0
+    for c in s:
+        n = n * 58 + BASE58.index(c)
+    if n >= 1 << 128:
+        return None
+    h = '%032x' % n
+    return '%s-%s-%s-%s-%s' % (h[:8], h[8:12], h[12:16], h[16:20], h[20:])
+
+
 def artifact_id(url):
-    """An Artifact url's id (claude.ai/artifact/<id>, claude.ai/code/artifact/<uuid>, preview.claude.ai alike), so two
-    spellings of one url compare equal; any other url as given, less its query and fragment."""
-    m = re.search(r'/artifact/([^/?#]+)', url)
-    return m.group(1) if m else re.split(r'[?#]', url)[0].rstrip('/')
+    """The Artifact a url names, as the engine compares urls: its uuid, so a short-id and a uuid spelling of one
+    Artifact (with or without a vanity prefix, a path, query or fragment after the id) compare equal. A url the
+    engine does not read as an Artifact's is only ever equal to itself."""
+    m = ARTIFACT_URL.match(url)
+    uuid = (m.group(1) if len(m.group(1)) != 22 else short_id_uuid(m.group(1))) if m else None
+    if uuid is None:
+        m = FRAME_URL.match(url)
+        uuid = m.group(1) if m else None
+    return ('artifact', uuid) if uuid is not None else ('url', url)
 
 
 class Replay:
     """Local files and the published deck, as the calls leave them. The deck is one Artifact: a create (`type_url`) is
     the seed's alone, and every publish and read_file goes to the deck's url, learned from the first of them that names
-    one (after the seed's last create); a publish naming none goes where its file_path was last published in the
-    session, which must have been the deck."""
+    one (after the seed's last create); a publish naming none goes where the engine's frameUrls sends its file_path,
+    which must be the deck: the engine keeps one file_path per Artifact, the one last published to it in the session
+    (2.1.302's publish drops the Artifact's other entries), so only that file follows to the deck without a url."""
 
     def __init__(self, published=None):
         self.disk = {}
@@ -319,7 +347,7 @@ class Replay:
         self.url = None  # the deck's url, once a call names it
         self.url_from = None  # 'seed' or 'timed': whose call named it first
         self.replaced = set()  # the ids of decks a later create in the seed replaced
-        self.sent = set()  # the local files published to the deck as file_path in this session (the engine's frameUrls)
+        self.sent = set()  # the deck's entry in the engine's frameUrls: the file_path last published to it in this session
 
     def timed(self, same_session):
         """The timed turn's calls follow; another session than the seed's remembers none of its files' urls."""
@@ -360,8 +388,8 @@ class Replay:
         if url is None:
             if fp is not None and fp in self.sent:
                 return
-            raise RebuildError('Artifact %s naming no url%s: its target is not in the records (a publish goes where its file_path was '
-                               'last published in the session, else makes a new Artifact; a read_file needs a url)' % (action, ' of %s' % fp if fp else ''))
+            raise RebuildError('Artifact %s naming no url%s: its target is not in the records (a publish goes to the Artifact whose '
+                               'latest file_path in the session it is, else makes a new Artifact; a read_file needs a url)' % (action, ' of %s' % fp if fp else ''))
         if not isinstance(url, str) or not url:
             raise RebuildError('Artifact %s: a url that is not a string: %r' % (action, url))
         if self.url is None:
@@ -402,6 +430,10 @@ class Replay:
     def apply(self, call):
         name, inp = call['name'], call['input']
         if not call['ok']:
+            # A create that fails may still have made its Artifact and pointed its file_path there (2.1.302's `LR` runs
+            # before the publish's own steps), so that file no longer follows to the deck without a url.
+            if name == 'Artifact' and isinstance(inp.get('type_url'), str) and isinstance(inp.get('file_path'), str) and inp['file_path']:
+                self.sent.discard(self.path(call, inp['file_path']))
             return
         if name == 'Write':
             if not isinstance(inp.get('content'), str):
@@ -462,7 +494,7 @@ class Replay:
                 self.published.pop(pub, None)
             else:
                 self.published[pub] = self.text(call, src)
-        self.sent.add(fp)
+        self.sent = {fp}  # the engine repoints fp at the deck and forgets the deck's earlier file_path
 
     def files(self, call, files, root):
         """A publish's `files` as (published path, local source or None) pairs. The map form {published path: source |
