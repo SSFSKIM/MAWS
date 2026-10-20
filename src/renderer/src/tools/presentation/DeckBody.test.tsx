@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 async function mount(doc: Doc) {
-  const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
   const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
   const state = new DeckTabState({ artifactId: DECK, kind: 'presentation', surface: 'panel' }, { host, log: () => {}, confirmDiscard: async () => true });

@@ -11,7 +11,8 @@
 # A relaunch that takes e2e:default names, in --default-beside, every e2e group this run's `default` ran beside: its other
 # e2e jobs, as the plan made them, and the groups of its own --default-beside. The relaunch's `default` then runs the
 # specs this run's `default` ran, not also those of every group the relaunch leaves out (Decision Log 66).
-# The invocation's own names go through verbatim: the relaunch's plan normalises them exactly as this run's plan did.
+# The invocation's own names go through verbatim, its --gates (`all` included; ci-gate.sh refuses a call without one)
+# among them: the relaunch's plan normalises them exactly as this run's plan did.
 refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   local refused beside relaunch="scripts/ci-gate.sh $sha"
   refused=$(printf '%s\n' "$2" | perl -ne 'print "$1\n" if /^([^\t]+)\t[^\t]*\t\S+ ci-kit: .*rerun\s*$/' | sort -u | tr '\n' ' ')
@@ -34,7 +35,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
     { d = d " " $2 ($1 == "failure" ? "" : " (" $1 ")"); gates = gates "," $2; nd++ }
     END {
       if (plan) {
-        printf "ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: %s%s%s --label %s --evidence\n", relaunch, (asked ? " --gates " asked : ""), (beside != "" ? " --default-beside " beside : ""), label
+        printf "ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: %s --gates %s%s --label %s --evidence\n", relaunch, asked, (beside != "" ? " --default-beside " beside : ""), label
         exit
       }
       printf "ci-gate: refused by the mini (%d):%s; green (%d):%s; red (%d):%s; relaunch the refused and the red (less any red baseline, Decision Log 58(c)): %s --gates %s%s --label %s --evidence\n",

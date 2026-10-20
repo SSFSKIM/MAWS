@@ -962,6 +962,7 @@ export class EngineSession {
   // What the events mean for the host's next step
 
   private react(events: SessionEvent[]): void {
+    this.maws.observe(events); // P4-A2 (X35): every lane's, an artifact call shown as its input streams
     for (const event of events) {
       if (event.parentToolUseId !== null) continue;
       if (event.kind === 'turn.started') {

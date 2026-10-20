@@ -29,7 +29,7 @@ function designDoc() {
 }
 
 function handleOf(doc = designDoc()): DocumentHandle & { closed: boolean } {
-  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const handle = {
     doc,
     awareness: new Awareness(doc),

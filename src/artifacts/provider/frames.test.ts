@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { decodeFrame, encodeFrame, isContent, isHostOnly, MSG_ACK, MSG_AWARENESS, MSG_RESTORED, MSG_SYNC, type Frame } from './frames';
+import { decodeFrame, encodeFrame, isContent, isHostOnly, MSG_ACK, MSG_AWARENESS, MSG_PROVISIONAL, MSG_RESTORED, MSG_SYNC, type Frame } from './frames';
 
 const bytes = (...values: number[]) => new Uint8Array(values);
 const FRAMES: Frame[] = [
   { type: 'step1', sv: bytes(1, 2, 3) },
-  { type: 'step2', update: bytes(0, 0) },
-  { type: 'update', update: new Uint8Array(300).fill(7) }, // a two-byte length prefix
+  { type: 'step2', update: bytes(0, 0), revision: 0 },
+  { type: 'update', update: new Uint8Array(300).fill(7), seq: 0 }, // a two-byte length prefix
+  { type: 'step2', update: bytes(0, 0), revision: 2 ** 33 }, // P4-A2: the revision the diff reaches
+  { type: 'update', update: bytes(4, 4, 4), seq: 123_456 }, // P4-A2: the row's seq
+  { type: 'provisional', json: '{"state":"streaming","ops":[{"text":"한글 \\u0000"}]}' }, // P4-A2 (X35): JSON text as sent
   { type: 'awareness', update: bytes(1, 9, 9) },
   { type: 'ack', frames: 12, revision: 2 ** 40 }, // a revision past 32 bits
   { type: 'restored', revision: 4096, versionId: 17 },
@@ -30,6 +33,15 @@ describe('document frames', () => {
     expect(encodeFrame({ type: 'awareness', update: bytes() })[0]).toBe(MSG_AWARENESS);
     expect(encodeFrame({ type: 'ack', frames: 0, revision: 0 })[0]).toBe(MSG_ACK);
     expect(encodeFrame({ type: 'restored', revision: 0, versionId: 0 })[0]).toBe(MSG_RESTORED);
+    expect(encodeFrame({ type: 'provisional', json: '{}' })[0]).toBe(MSG_PROVISIONAL);
+  });
+
+  // P4-A2: a replica's own frames name no row (the host numbers them); they decode as seq 0, which no layer waits on
+  it('writes an absent seq or revision as 0, so a replica’s own content frames decode as unnumbered', () => {
+    expect(decodeFrame(encodeFrame({ type: 'update', update: bytes(1) }))).toEqual({ type: 'update', update: bytes(1), seq: 0 });
+    expect(decodeFrame(encodeFrame({ type: 'step2', update: bytes(1) }))).toEqual({ type: 'step2', update: bytes(1), revision: 0 });
+    expect(isHostOnly({ type: 'provisional', json: '{}' })).toBe(true);
+    expect(isContent({ type: 'provisional', json: '{}' })).toBe(false);
   });
 
   it('refuses trailing bytes after any frame', () => {
@@ -49,7 +61,7 @@ describe('document frames', () => {
   });
 
   it('refuses unknown frame types and unknown sync messages', () => {
-    for (const type of [2, 3, 99, 102, 127]) expect(() => decodeFrame(bytes(type, 0)), `type ${type}`).toThrow(/unknown frame type/);
+    for (const type of [2, 3, 99, 103, 127]) expect(() => decodeFrame(bytes(type, 0)), `type ${type}`).toThrow(/unknown frame type/);
     expect(() => decodeFrame(bytes(MSG_SYNC, 3, 0))).toThrow(/unknown sync message/);
   });
 
@@ -88,10 +100,10 @@ describe('document frames', () => {
   });
 
   it('counts step 2 and update as content (what an ack counts), nothing else', () => {
-    expect(FRAMES.filter(isContent).map((frame) => frame.type)).toEqual(['step2', 'update']);
+    expect(FRAMES.filter(isContent).map((frame) => frame.type)).toEqual(['step2', 'update', 'step2', 'update']);
   });
 
   it('marks ack and restored as the host’s alone (a replica that sends one is refused)', () => {
-    expect(FRAMES.filter(isHostOnly).map((frame) => frame.type)).toEqual(['ack', 'restored']);
+    expect(FRAMES.filter(isHostOnly).map((frame) => frame.type)).toEqual(['provisional', 'ack', 'restored']);
   });
 });

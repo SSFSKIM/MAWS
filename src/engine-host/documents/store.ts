@@ -848,8 +848,8 @@ export class ArtifactStore {
           if (actor.kind === 'session') this.linkInFrame(artifactId, actor.appSessionId, 'edited', at);
         },
         afterWrite: options?.afterWrite && ((doc) => (refused ? undefined : options.afterWrite!(doc))),
-        inFrame: (reached) => {
-          if (!refused) options?.inFrame?.(reached);
+        inFrame: (reached, write) => {
+          if (!refused) options?.inFrame?.(reached, write);
         },
       });
       if (refused) throw (refused as { error: unknown }).error;

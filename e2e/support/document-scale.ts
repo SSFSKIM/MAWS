@@ -122,8 +122,19 @@ export class PerfSeam {
   seed(artifactId: string, state: Uint8Array): Promise<{ revision: number }> {
     return this.send({ cmd: 'seed', artifactId, state: Buffer.from(state).toString('base64') });
   }
+  // P4-A2: `args.toolUseId`, when given, is the call's tool-use id (the one a `stream` used, so the call commits or
+  // drops that layer); the tool never sees it
   call<R>(session: string, tool: 'artifact_read' | 'artifact_edit' | 'artifact_reply' /* P4-B1 */, args: Record<string, unknown>, timeoutMs?: number): Promise<CallAnswer<R>> {
     return this.send({ cmd: 'call', session, tool, args }, timeoutMs);
+  }
+  // P4-A2 (X35; R12): a call's input fed to the session's provisional emitter one piece per `tickMs` (20 by default), as
+  // the engine's deltas would arrive; answered once the last tick ran, with the streaming frames the call sent
+  stream(session: string, toolUseId: string, name: 'artifact_edit' | 'artifact_publish' | 'artifact_dataset', deltas: string[], tickMs?: number): Promise<{ frames: number }> {
+    return this.send({ cmd: 'stream', session, toolUseId, name, deltas, ...(tickMs !== undefined && { tickMs }) });
+  }
+  // P4-A2: the call's layer dropped, as a call ending without a commit drops it
+  drop(session: string, toolUseId: string): Promise<unknown> {
+    return this.send({ cmd: 'drop', session, toolUseId });
   }
   heap(): Promise<{ heapUsed: number; rss: number }> {
     return this.send({ cmd: 'heap' });

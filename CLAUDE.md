@@ -9,4 +9,4 @@ Working rules:
 - Contracts X1 to X8 and decisions D-1 to D-20 are binding; a child that finds them wrong records a dated Decision Log entry in the charter rather than diverging.
 - Execution documents live under `docs/doperpowers/plans/`, brief ledgers under `docs/doperpowers/ledgers/`, spike findings under `spikes/`.
 - Light theme is the default; components use tokens only.
-- Gates: typecheck, lint, the unit suite and the probes run on GitHub Actions through `scripts/ci-gate.sh <worktree>` (class 1a; `docs/doperpowers/plans/2026-10-14-gate-offload.md` §3.5); Electron e2e groups, the macOS-guarded unit files listed there and every measured bound run on a Mac under the load rule.
+- Gates: typecheck, lint, the unit suite and the probes run on GitHub Actions through `scripts/ci-gate.sh <worktree> --gates static,unit,probes` (class 1a; `docs/doperpowers/plans/2026-10-14-gate-offload.md` §3.5; `--gates all` is the whole set, every Mac job on a macOS lane, and a call naming no gates is refused); Electron e2e groups, the macOS-guarded unit files listed there and every measured bound run on a Mac under the load rule.

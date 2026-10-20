@@ -2,6 +2,7 @@ import { applyAwarenessUpdate, Awareness, encodeAwarenessUpdate, removeAwareness
 import { describe, expect, it, vi } from 'vitest';
 import { applyV1, checkUpdate, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
+import type { ArtifactProvisional } from '@shared/artifacts/provisional';
 import { PortProvider, type PortLike, type SaveState } from './port';
 
 type Listener = (event: { data?: unknown }) => void;
@@ -112,7 +113,7 @@ describe('PortProvider', () => {
     pump(replicaEnd, hostEnd);
     expect(text(host.doc)).toBe('typed during the handshake');
     expect(host.contentFrames).toEqual(['step2']);
-    expect(provider.state).toEqual({ phase: 'live', synced: true, unsaved: 0, revision: 1 });
+    expect(provider.state).toEqual({ phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0 });
   });
 
   it('carries updates made offline in its step 2 and clears them only on the ack of that frame', () => {
@@ -751,3 +752,94 @@ describe('PortProvider', () => {
 });
 
 const MSG_GARBAGE = 99;
+
+// P4-A2 (X35; the execution document's R2 and R3): the provisional frames and the `integrated` seq a layer's withdrawal waits on.
+describe('the provisional layer’s frames (P4-A2)', () => {
+  const provisional = (over: Partial<ArtifactProvisional> = {}): ArtifactProvisional => ({
+    toolUseId: 'toolu_1' as ArtifactProvisional['toolUseId'], appSessionId: 'app-1' as ArtifactProvisional['appSessionId'], artifactId: 'a1', kind: 'document',
+    state: 'streaming', at: 1, name: 'Claude', color: '--author-3', ops: [{ op: 'replace_text', block: 'p1', old: 'x', text: 'y' }], ...over,
+  });
+  function replica() {
+    const host = new TestHost();
+    host.holdAcks = true;
+    const [replicaEnd, hostEnd] = MemoryPort.pair();
+    host.attach(hostEnd);
+    const doc = newDoc();
+    const log = vi.fn();
+    const provider = new PortProvider(doc, { log });
+    provider.connect(replicaEnd);
+    pump(replicaEnd, hostEnd);
+    const write = (at: number, value: string, seq: number) => {
+      const before = stateVector(host.doc);
+      type(host.doc, at, value);
+      hostEnd.postMessage(encodeFrame({ type: 'update', update: diffV1(host.doc, before), seq }));
+    };
+    const announce = (frame: ArtifactProvisional) => hostEnd.postMessage(encodeFrame({ type: 'provisional', json: JSON.stringify(frame) }));
+    return { host, provider, doc, log, replicaEnd, hostEnd, write, announce };
+  }
+
+  it('tracks the highest row seq it integrated from update and step 2 frames, never from an ack', () => {
+    const { provider, replicaEnd, hostEnd, write } = replica();
+    expect(provider.state.integrated).toBe(0);
+    write(0, 'a', 7);
+    pump(replicaEnd, hostEnd);
+    expect(provider.state.integrated).toBe(7);
+    hostEnd.postMessage(encodeFrame({ type: 'ack', frames: 0, revision: 40 }));
+    pump(replicaEnd, hostEnd);
+    expect(provider.state.revision).toBe(40);
+    expect(provider.state.integrated).toBe(7); // an ack says nothing about which rows this side holds
+    write(1, 'b', 9);
+    write(2, 'c', 8); // out of order on purpose: the highest seq counts
+    pump(replicaEnd, hostEnd);
+    expect(provider.state.integrated).toBe(9);
+  });
+
+  it('delivers a provisional frame to its listeners after the state listeners, and lets it pass the composition hold', () => {
+    const { provider, replicaEnd, hostEnd, write, announce, doc } = replica();
+    const order: string[] = [];
+    provider.subscribe((state) => order.push(`state:${state.integrated}`));
+    const frames: ArtifactProvisional[] = [];
+    provider.onProvisional((frame) => {
+      frames.push(frame);
+      order.push(`provisional:${frame.state}:${provider.state.integrated}`);
+    });
+    order.length = 0;
+    provider.holdRemote(true);
+    announce(provisional({ state: 'streaming' }));
+    pump(replicaEnd, hostEnd);
+    expect(frames.map((f) => f.state)).toEqual(['streaming']); // not buffered: the layer moves while the person composes
+    // the committed notice goes ahead of the row it names (the service's announceWrite), so it arrives before the
+    // held update and the layer waits on `integrated`
+    announce(provisional({ state: 'committed', commitSeq: 5 }));
+    write(0, 'the real text', 5);
+    pump(replicaEnd, hostEnd);
+    expect(frames.map((f) => f.state)).toEqual(['streaming', 'committed']);
+    expect(provider.state.integrated).toBe(0); // the row waits out the hold
+    expect(text(doc)).toBe('');
+    provider.holdRemote(false);
+    expect(text(doc)).toBe('the real text');
+    expect(provider.state.integrated).toBe(5);
+    expect(order).toEqual(['state:0', 'provisional:streaming:0', 'state:0', 'provisional:committed:0', 'state:5']);
+  });
+
+  it('drops the connection on a provisional frame the shape refuses, as on any malformed frame', () => {
+    const { provider, replicaEnd, hostEnd, log } = replica();
+    hostEnd.postMessage(encodeFrame({ type: 'provisional', json: '{"state":"streaming"}' }));
+    pump(replicaEnd, hostEnd);
+    expect(provider.state.phase).toBe('off');
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/provisional frame the shape refuses/));
+  });
+
+  it('stops delivering to a provisional listener once it unsubscribes, and forgets every listener on destroy', () => {
+    const { provider, replicaEnd, hostEnd, announce } = replica();
+    const heard: string[] = [];
+    const off = provider.onProvisional((frame) => heard.push(frame.state));
+    announce(provisional());
+    pump(replicaEnd, hostEnd);
+    off();
+    announce(provisional({ state: 'dropped' }));
+    pump(replicaEnd, hostEnd);
+    expect(heard).toEqual(['streaming']);
+    provider.destroy();
+  });
+});

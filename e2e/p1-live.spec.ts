@@ -72,6 +72,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe, journalCost, redactJournal } from '../test/live/support/live';
+import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { relayText } from '../src/renderer/src/tools/agents/model/relay';
 import { ownerPlugins } from '../test/support/claude-env';
@@ -556,6 +557,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     expect(await frame.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(`rgb(${V2.rgb.join(', ')})`);
     await shoot(l, '5', 'viewer');
     artifact = { deliverableId };
+    note(`case 1: tool time (P4-A2, X34): ${guardToolTime(rows).line}`); // the parent's launches after the turn; throws over the bound
     note(`case 1: PASS: artifact ${deliverableId} (${record.versions.length} versions); rows "Artifact P1 page · v1", "Updated artifact P1 page · v2"; the Artifacts tool lists it; the viewer opens v2 with the switch [v1, v2 · latest] and draws v2's colour`);
   });
 
@@ -655,6 +657,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       expect(turnsAfter, 'the parent ran no turn').toBe(turnsBefore);
       expect(usersAfter, 'the main conversation received nothing').toBe(usersBefore);
       await shoot(l, '6', 'side-thread-card');
+      note(`case 2: tool time (P4-A2, X34): ${guardToolTime(threadRows).line}`); // the thread's launches after its turn; throws over the bound
       passed = true;
     } finally {
       // the thread stopped through the app, then charged what it spent: its receipts, or its whole allocation when a
