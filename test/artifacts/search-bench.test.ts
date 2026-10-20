@@ -43,18 +43,19 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
       };
 
       const seeded = performance.now();
+      const space = await world.store.createSpace({ name: 'Research' }); // half the library, the 200-page document among it
       const korean = '우리는 지난주 회의에서 다음 분기의 제품 로드맵과 예산 계획을 함께 검토했고 각 팀의 일정과 위험 요소를 정리했다 ';
       const english = 'the plan ships quarterly with design review notes owners budget risks timeline metrics agents draft final ';
       for (let n = 0; n < LIBRARY; n++) {
         const body = (n % 2 === 0 ? korean : english).repeat(10 + (n % 30)) + ` item${n}`;
-        if (n % 3 === 0) await world.store.create({ kind: 'html', title: `Page ${n}`, content: { bytes: new TextEncoder().encode(`<p>${body}</p>`), name: 'index.html' } }, HUMAN);
+        if (n % 3 === 0) await world.store.create({ kind: 'html', title: `Page ${n}`, ...(n % 2 === 0 && { spaceId: space.id }), content: { bytes: new TextEncoder().encode(`<p>${body}</p>`), name: 'index.html' } }, HUMAN);
         else {
-          const created = await world.store.create({ kind: 'document', title: `Doc ${n}` }, HUMAN);
+          const created = await world.store.create({ kind: 'document', title: `Doc ${n}`, ...(n % 2 === 0 && { spaceId: space.id }) }, HUMAN);
           await world.service.writeAs(created.id, HUMAN, (doc) => (tabBody(doc, listTabs(doc)[0]!.id)!.toArray()[0] as Node).insert(0, body));
         }
       }
       const { state, stats } = seedDocument(SECTIONS);
-      const big = await world.store.create({ kind: 'document', title: '200-page plan', initial: (doc) => applyV2(doc, state) }, HUMAN);
+      const big = await world.store.create({ kind: 'document', title: '200-page plan', spaceId: space.id, initial: (doc) => applyV2(doc, state) }, HUMAN);
       const seedMs = performance.now() - seeded;
 
       // cold: nothing mirrored yet (the migration's state before the sweep)
@@ -63,6 +64,15 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
 
       // warm the whole mirror (no budget), then change the 200-page document only
       for (let k = 0; k < 100 && (await run({ query: 'item1' })).result.hint !== undefined; k++);
+      // M2's review: a Space filter must not move the FTS table off the outer loop (one term and two)
+      const inSpace: number[] = [];
+      const inSpaceTwo: number[] = [];
+      for (let k = 0; k < RUNS; k++) {
+        const one = await run({ query: '로드맵', spaceId: space.id });
+        expect(one.result.hits.length).toBeGreaterThan(0);
+        inSpace.push(one.ms);
+        inSpaceTwo.push((await run({ query: 'budget review', spaceId: space.id })).ms);
+      }
       const quiet: number[] = [];
       for (let k = 0; k < RUNS; k++) quiet.push((await run({ query: '로드맵' })).ms);
 
@@ -114,6 +124,7 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
             library: LIBRARY + 1, sections: SECTIONS, docBytesV2: stats.v2Bytes, seedMs: round(seedMs), reach,
             cold: { ms: round(cold.ms), hint: cold.result.hint, hits: cold.result.hits.length, againMs: round(coldAgain.ms), againHint: coldAgain.result.hint },
             quietMedianMs: round(median(quiet)), quietMaxMs: round(Math.max(...quiet)),
+            spaceFiltered: { oneTermMedianMs: round(median(inSpace)), oneTermMaxMs: round(Math.max(...inSpace)), twoTermsMedianMs: round(median(inSpaceTwo)), twoTermsMaxMs: round(Math.max(...inSpaceTwo)) },
             catchUpMedianMs: round(median(withCatchUp)), catchUpMaxMs: round(Math.max(...withCatchUp)),
             typedToFoundMedianMs: round(median(typed)), typedToFoundMaxMs: round(Math.max(...typed)),
             largeFifty: { docs: 55, warmingSearches: warming, medianMs: round(median(large)), maxMs: round(Math.max(...large)), chars: [...largeAnswer].length, utf8Bytes: new TextEncoder().encode(largeAnswer).length },
@@ -125,6 +136,7 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
       );
       expect(Math.max(...withCatchUp)).toBeLessThan(1_000);
       expect(Math.max(...large)).toBeLessThan(1_000);
+      expect(Math.max(...inSpace, ...inSpaceTwo)).toBeLessThan(1_000);
     } finally {
       world.close();
     }

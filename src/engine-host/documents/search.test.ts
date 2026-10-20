@@ -10,7 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { parseQuery } from '@shared/artifacts/search-query';
 import { HUMAN, openWorld, type World } from '../tool-server/artifact-world.fixture';
 import { STORE_MIGRATIONS, openStore } from './migrations';
-import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, snippetAndRead, startArtifactSearch, type SearchTimers } from './search';
+import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, searchQuery, snippetAndRead, startArtifactSearch, type SearchRequest, type SearchTimers } from './search';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore } from './store';
@@ -288,6 +288,30 @@ describe('the store’s discipline', () => {
       store.close();
       service.close();
       storage.close();
+    }
+  });
+});
+
+describe('the query plan', () => {
+  // With a MATCH term, the FTS table must be the outer loop whatever the filters: a plan that starts from `artifacts`
+  // (the Space's partial index, the session links) restarts the FTS cursor per artifact, and bm25 re-reads the term's
+  // postings each time (M2's review: 62 ms unfiltered, 2.1 s with a spaceId over the same library).
+  it('scans artifact_text first for every filter and scope when a term goes through the index', async () => {
+    const space = await w.store.createSpace({ name: 'Research' });
+    for (let n = 0; n < 40; n++) {
+      const id = (await w.store.create({ kind: 'html', title: `Page ${n}`, ...(n % 3 === 0 && { spaceId: space.id }), content: html(`launch plan ${n}`) }, HUMAN)).id;
+      if (n % 4 === 0) await w.store.link(id, 'app-self' as AppSessionId, 'viewed');
+    }
+    await find(unstarted(), 'launch');
+    w.storage.db.exec('ANALYZE');
+    const filters: Omit<SearchRequest, 'terms' | 'limit'>[] = [{}, { kind: 'html' }, { spaceId: space.id }, { linkedTo: ['app-self'] }, { kind: 'html', spaceId: space.id }, { kind: 'html', spaceId: space.id, linkedTo: ['app-self', 'app-parent'] }];
+    for (const filter of filters) {
+      for (const query of ['launch', 'launch plan', 'launch 12']) {
+        const { sql, params } = searchQuery({ ...filter, terms: parseQuery(query).terms, limit: 10 });
+        const plan = w.storage.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[];
+        const loops = plan.map((row) => row.detail).filter((detail) => /^(SCAN|SEARCH) /.test(detail));
+        expect(loops[0], `${JSON.stringify(filter)} ${query}: ${loops.join(' | ')}`).toMatch(/^SCAN artifact_text VIRTUAL TABLE/);
+      }
     }
   });
 });

@@ -293,28 +293,9 @@ export class ArtifactSearch {
     return { kind: kind as 'document' | 'dashboard', doc };
   }
 
-  // Every `MATCH` term through the trigram index, every short term through `instr`; bm25 with the title weighed ten times
-  // the body, then recency, then id; with only short terms, how many the title holds, then recency, then id. `limit + 1`
-  // rows, so the caller can tell `more`.
   private query(request: SearchRequest): QueryRow[] {
-    const { where, params } = candidates(request);
-    const match = matchExpression(request.terms);
-    const shorts = instrTerms(request.terms);
-    if (match !== null) {
-      where.push('artifact_text MATCH ?');
-      params.push(match);
-    }
-    for (const term of shorts) {
-      where.push('(instr(lower(artifact_text.title), ?) > 0 OR instr(lower(artifact_text.body), ?) > 0)');
-      params.push(term, term);
-    }
-    const order = match !== null ? 'bm25(artifact_text, 0, 10, 1), a.updatedAt DESC, a.id' : `${shorts.map(() => '(instr(lower(artifact_text.title), ?) > 0)').join(' + ')} DESC, a.updatedAt DESC, a.id`;
-    if (match === null) params.push(...shorts);
-    return this.store.storage.db
-      .prepare(
-        `SELECT a.id, a.kind, a.title, a.handle, a.spaceId, a.updatedAt, artifact_text.body AS body, r.sections AS sections FROM artifact_text JOIN artifact_text_rows r ON r.textRowid = artifact_text.rowid JOIN artifacts a ON a.id = r.artifactId WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`,
-      )
-      .all(...params, request.limit + 1) as unknown as QueryRow[];
+    const { sql, params } = searchQuery(request);
+    return this.store.storage.db.prepare(sql).all(...params) as unknown as QueryRow[];
   }
 
   // ── the refresher and the sweep ──
@@ -371,6 +352,32 @@ export class ArtifactSearch {
     }
     this.pump();
   }
+}
+
+// The search's statement: every `MATCH` term through the trigram index, every short term through `instr`; bm25 with the
+// title weighed ten times the body, then recency, then id; with only short terms, how many the title holds, then
+// recency, then id. `limit + 1` rows, so the caller can tell `more`. With a `MATCH` term the FTS table is the outer loop
+// (`CROSS JOIN` fixes the join order) whatever the filters: a plan starting from `artifacts` (a Space's index, the
+// session links) would restart the FTS cursor per artifact, bm25 re-reading the term's postings each time.
+export function searchQuery(request: SearchRequest): { sql: string; params: (string | number)[] } {
+  const { where, params } = candidates(request);
+  const match = matchExpression(request.terms);
+  const shorts = instrTerms(request.terms);
+  if (match !== null) {
+    where.push('artifact_text MATCH ?');
+    params.push(match);
+  }
+  for (const term of shorts) {
+    where.push('(instr(lower(artifact_text.title), ?) > 0 OR instr(lower(artifact_text.body), ?) > 0)');
+    params.push(term, term);
+  }
+  const order = match !== null ? 'bm25(artifact_text, 0, 10, 1), a.updatedAt DESC, a.id' : `${shorts.map(() => '(instr(lower(artifact_text.title), ?) > 0)').join(' + ')} DESC, a.updatedAt DESC, a.id`;
+  if (match === null) params.push(...shorts);
+  const join = match !== null ? 'CROSS JOIN' : 'JOIN';
+  return {
+    sql: `SELECT a.id, a.kind, a.title, a.handle, a.spaceId, a.updatedAt, artifact_text.body AS body, r.sections AS sections FROM artifact_text ${join} artifact_text_rows r ON r.textRowid = artifact_text.rowid ${join} artifacts a ON a.id = r.artifactId WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`,
+    params: [...params, request.limit + 1],
+  };
 }
 
 // The live artifacts a search may return: of a kind, in a Space, linked to the lineage (`artifact_list`'s scope).
