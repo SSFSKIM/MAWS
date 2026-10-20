@@ -1046,8 +1046,9 @@
   line-height: 1.4;
   font-weight: 400;
   color: var(--fg);
-  /* the icon tier hangs over the page's right padding when the side space is short (`--doc-margin-overlap`) */
-  margin-left: calc(-1 * var(--doc-margin-overlap, 0px));
+  /* the icon tier hangs over the page's right padding when the side space is short (`--doc-margin-overlap`): moved by
+     `left`, so its flex footprint stays the reserve (a negative margin would shrink the centred row and shift the page) */
+  left: calc(-1 * var(--doc-margin-overlap, 0px));
 }
 .doc-margin-entry {
   position: absolute;
