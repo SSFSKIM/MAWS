@@ -389,3 +389,26 @@ describe('a remote resolve', () => {
   });
 });
 
+// P4-B1 (the prior art's Z6): a tab with open threads carries a dot in the strip, named by its count; resolving a tab's
+// last open thread takes its dot away.
+describe('the tab strip’s comment dot', () => {
+  it('marks each tab with open threads by their count', async () => {
+    const { editor, handle } = await mount(content());
+    world!.host.write((d) => addTab(d, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON(doc(para('a1', 'Appendix text.'))) }));
+    await until(() => screen.queryByRole('tab', { name: 'Appendix' }) !== null, 'the second tab');
+    const dot = (title: string) => screen.getByRole('tab', { name: title }).querySelector('.doc-tab-dot');
+    expect(dot('Main')).toBeNull();
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void select(editor(), 'Owners'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void addThread(handle.doc, { threadId: 'zz000001', tabId: 'tab2', blockId: 'a1', quote: 'Appendix', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() + 1 }));
+    await until(() => dot('Appendix') !== null, 'the dots');
+    expect(dot('Main')?.getAttribute('aria-label')).toBe('2 open comments');
+    expect(dot('Appendix')?.getAttribute('aria-label')).toBe('1 open comment');
+    expect(screen.getByRole('tab', { name: 'Main' }).getAttribute('aria-description')).toBe('2 open comments');
+    act(() => void resolve(handle.doc, 'zz000001', { kind: 'human' }, Date.now() + 2));
+    await until(() => dot('Appendix') === null, 'the resolved tab’s dot to go');
+    expect(dot('Main')).not.toBeNull();
+  });
+});

@@ -116,6 +116,14 @@
 .doc-tab[aria-selected="true"] .doc-tab-close {
   visibility: visible;
 }
+/* P4-B1 (the prior art's Z6): a tab with open comment threads, in the passages' highlight colour */
+.doc-tab-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--warning);
+}
 .doc-tab-close:hover {
   color: var(--fg);
   background: var(--bg-active);
