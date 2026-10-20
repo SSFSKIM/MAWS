@@ -24,14 +24,14 @@
 // the host hands back to the tab restored at the next launch, so the tab shows the same record, pinned or a session's.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
-import { instanceOf, panelHost, usePanelHost } from '../../panel/host';
+import { panelHost, usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
+import { canShowArtifactInPanel } from '../../shell/transfer'; // P4-B3
 import { useLayout } from '../../stores/layout';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
@@ -66,22 +66,6 @@ const restoredParams = (stored: unknown): ArtifactsParams | undefined => {
 export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactId: string, at?: ArtifactOpenAt): void {
   if (!canShowArtifactInPanel(appSessionId)) return;
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params: { target: artifactId, ...(at !== undefined && { at }) }, activate: true });
-}
-
-// Whether `openArtifactInPanel` has a panel to show the artifact in, for a caller that offers it.
-export const canShowArtifactInPanel = (appSessionId: AppSessionId | null, pinned: PanelTabRef[] = useLayout.getState().panelPinned, registered = usePanelHost.getState().tools.has(ARTIFACTS_TOOL_ID)): boolean =>
-  registered && (appSessionId !== null || pinned.some((t) => t.toolId === ARTIFACTS_TOOL_ID));
-
-// P3-F wave S (F16 review): before an artifact moves in from elsewhere, the Artifacts tab `openArtifactInPanel` would
-// land it in (the scope's one, as the host finds it) lets go of another artifact it shows, through that record's guard,
-// so a guard keeping it refuses the move before its source lets go. True when the tab is free (or there is none yet).
-export function freePanelFor(appSessionId: AppSessionId | null, artifactId: string): Promise<boolean> {
-  const scope = appSessionId === null ? useLayout.getState().panelPinned : useLayout.getState().panelTabsOf(appSessionId);
-  const ref = scope.find((t) => t.toolId === ARTIFACTS_TOOL_ID);
-  const handle = ref && (instanceOf(ref.id)?.state as ArtifactsHandle | undefined);
-  const view = handle?.snapshot().view;
-  if (!handle || view?.kind !== 'record' || view.artifactId === artifactId) return Promise.resolve(true);
-  return handle.backAsked();
 }
 
 export type ArtifactsView = { kind: 'list' } | { kind: 'record'; artifactId: string };
@@ -202,6 +186,17 @@ export class ArtifactsHandle {
       if (this.state.view.kind === 'list') return resolve(true);
       this.leaveThen(LIST, () => resolve(false), () => resolve(true));
     });
+
+  // P4-B3 (its Decision Log 19): the record moves to a main tab, its editor's state staged for the target by the move
+  // (`shell/transfer.ts`) or, when main already shows the artifact, given back after the move asked its guard: Back
+  // without asking the guard here, and at once. False while the tab is closing or it shows no record.
+  handOff = (): boolean => {
+    if (this.closing || this.state.view.kind !== 'record') return false;
+    this.withdraw();
+    this.leave();
+    this.update({ view: LIST });
+    return true;
+  };
 
   setScope = (scope: ArtifactsScope) => {
     if (scope !== this.state.scope) this.update({ scope, scrollTop: 0 });

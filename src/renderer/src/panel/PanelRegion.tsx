@@ -4,7 +4,8 @@
 // shows and that session's effective panel tabs (the global pins first, D-10); its changes are split back by pin into
 // `panel.pinned` and `panel.<appSessionId>`. What a panel tab is and how it renders is C8's. P3-G (§D1): the fourth state, floating: the divider dragged past the panel's maximum, ⌥⌘B or the
 // Float button floats it (the panel stands in the main column as maximized does and hands its host `maximized`, X5 as
-// amended) and the floating card draws the shown session over the panel body.
+// amended) and the floating card draws the shown session over the panel body. P4-B3 (X38): while an artifact main tab is
+// dragged and the panel can take it, the region (header and body) is one drop target that moves it in.
 import { useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
@@ -16,6 +17,9 @@ import { Resizer } from '../app/Resizer';
 import { useSlot } from '../app/slots';
 import { FloatingCardLayer } from '../shell/FloatingCard'; // P3-G
 import { floatPanel } from '../shell/floating'; // P3-G
+import { DropOverlay } from '../shell/DropOverlay'; // P4-B3 M4
+import { moveArtifactToPanel, TAB_DRAG_TYPE, useDragAccepted } from '../shell/transfer'; // P4-B3 M4
+import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3 M4
 import { PanelHeader } from './PanelHeader'; // P3-G
 
 export const PANEL_REGION_ID = 'region-panel';
@@ -29,6 +33,7 @@ export function PanelRegion() {
   const setPanel = useLayout((s) => s.setPanel);
   const body = useRef<HTMLDivElement>(null); // P3-G: the floating card's layer starts at the host's tool body
   const shown = useShownPanel(); // P3-G: the header and the host read one selection
+  const takesTab = useDragAccepted('panel'); // P4-B3 (Z3): the panel is one target for an artifact main tab
 
   return (
     <section
@@ -64,6 +69,9 @@ export function PanelRegion() {
         </div>
       </div>
       {floating && !collapsed && <FloatingCardLayer body={body} />}
+      {takesTab && !collapsed && (
+        <DropOverlay data-testid="panel-drop-target" label={TRANSFER_COPY.moveToPanel} onDrop={(event) => void moveArtifactToPanel(event.dataTransfer.getData(TAB_DRAG_TYPE))} />
+      )}
     </section>
   );
 }
@@ -82,7 +90,7 @@ function useShownPanel(): ShownPanel {
   const own = useLayout((s) => (appSessionId ? s.panelBySession.get(appSessionId) : undefined));
   const activeNoSession = useLayout((s) => s.panelActiveNoSession);
   const tabs = own ? [...pinned, ...own.tabs] : pinned;
-  // A session's selection lives in its own key; with no session in view, the transient pin selection.
+  // A session's selection lives in its own key; with no session in view, the pin selection (P4-B3: persisted too).
   const activeTabId = appSessionId ? (own?.activeTabId ?? null) : activeNoSession;
   return { appSessionId, tabs, activeTabId };
 }

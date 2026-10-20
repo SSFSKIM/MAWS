@@ -191,10 +191,10 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await expect(panel.getByRole('button', { name: 'Mark up', exact: true })).toBeVisible(); // the stage is the tab's Mark-up surface
   await panel.getByRole('button', { name: /^Pin / }).first().click();
-  await panel.getByRole('button', { name: 'Open in tab' }).click();
+  await panel.getByRole('button', { name: 'Move to tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
   await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  // Open in tab moves the deck (P3-F wave S, F16): with no session shown, the pinned tab is picked again, back on its
+  // Move to tab moves the deck (P3-F wave S, F16): with no session shown, the pinned tab is picked again, back on its
   // list. Opened from it again, it is the panel's replica beside the main tab's (the parent's Decision Log 8).
   await panel.getByRole('tab', { name: 'Artifacts' }).click();
   await expect(inPanel).toHaveCount(0);

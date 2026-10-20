@@ -510,7 +510,7 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
 // P3-L M6b: the tab's case after its record is deleted (the restored tab showing the session's list headed by "No
 // deliverable … in this session") was the Deliverables tool's alone and is gone with it; an `artifact` tab's Gone notice
 // is M3's (ArtifactTab's units).
-test('the Artifacts tool: groups newest first, Back to the list’s scroll, the version switcher, Open in tab, the tab across a reload', async () => {
+test('the Artifacts tool: groups newest first, Back to the list’s scroll, the version switcher, Move to tab, the tab across a reload', async () => {
   await scene({ titles: ['E2: the tool'] }, async (s) => {
     const [id] = s.ids;
     const userData = s.maws.userData;
@@ -571,11 +571,12 @@ test('the Artifacts tool: groups newest first, Back to the list’s scroll, the 
     await expect.poll(() => s.page.frames().some((f) => f.url() === v2), { message: 'the v2 frame is gone' }).toBe(false);
     await shoot(s, 'versions');
 
-    // Open in tab: the same viewer as a main tab, on the record's latest version
-    await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+    // Move to tab (P4-B3: it was "Open in tab"): the same viewer as a main tab, its state carried with it (the version
+    // the switcher shows comes across; the reload below starts it afresh on the latest)
+    await s.panel.getByRole('button', { name: 'Move to tab' }).click();
     const tab = s.page.locator('[data-region="main"] [data-artifact-tab]');
     await expect(viewerOf(tab)).toHaveAttribute('data-artifact-viewer', artifact.id);
-    await expect(tab.getByRole('button', { name: 'Open in tab' })).toHaveCount(0);
+    await expect(tab.getByRole('button', { name: 'Move to tab' })).toHaveCount(0);
     await expect(tab.getByRole('button', { name: 'Back' })).toHaveCount(0);
     await shoot(s, 'tab');
 
@@ -860,7 +861,7 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
       await rowOf(list, record).click();
       await expect(panelViewer).toHaveAttribute('data-body', body);
       await sizes(panelViewer, media, natural);
-      await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+      await s.panel.getByRole('button', { name: 'Move to tab' }).click();
       await expect(tabViewer(record)).toBeVisible();
       await sizes(tabViewer(record), media, natural);
     }
@@ -1024,7 +1025,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
 
     // the same pick in the artifact's main tab opens the card inside that tab's viewer
-    await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+    await s.panel.getByRole('button', { name: 'Move to tab' }).click();
     const tabViewer = viewerOf(s.page.locator('[data-region="main"] [data-artifact-tab]'));
     await expect(tabViewer).toHaveAttribute('data-artifact-viewer', record.id);
     await s.page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
@@ -1043,7 +1044,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
 
     // an element at the bottom of its frame: the card opens above it, its bottom edge 4 px over the element's top
     await show(s, id); // P3-L M6b: the session again, its panel tools with it (an `artifact` main tab is the library's)
-    // Open in tab moved the artifact (P3-F wave S, F16): the session's Artifacts tool is back on its list
+    // Move to tab moved the artifact (P3-F wave S, F16): the session's Artifacts tool is back on its list
     await expect(listOf(s)).toBeVisible();
     await expect(viewer).toHaveCount(0);
     await rowOf(listOf(s), notes).click();

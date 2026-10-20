@@ -7,8 +7,8 @@ import type { EditorHostScope } from '../panel/editor-host';
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
 import {
-  artifactEditorFor, holdArtifactEditorState, registerArtifactEditor, releaseArtifactEditorState, resetArtifactEditors, useArtifactEditor,
-  useHeldArtifactEditorState, type ArtifactEditorHold, type ArtifactEditorProps,
+  adoptStagedArtifactEditorState, artifactEditorFor, heldArtifactEditorState, holdArtifactEditorState, registerArtifactEditor, releaseArtifactEditorState,
+  resetArtifactEditors, stageArtifactEditorState, useArtifactEditor, useHeldArtifactEditorState, type ArtifactEditorHold, type ArtifactEditorProps,
 } from './registry';
 
 const A = '0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01';
@@ -157,5 +157,118 @@ describe('the state an editor keeps per tab', () => {
     expect(main.result.current).toBe(held);
     await act(async () => useLayout.getState().closeTab(scope.tabId)); // ended with its tab
     expect(main.result.current).toBeNull();
+  });
+});
+
+// P4-B3 (its Decision Log 19): a move hands the hold over instead of disposing it. The source stages it (detached, kept
+// by artifact id) before it lets go; the target adopts it before React renders it, or a hold asked for the same artifact,
+// kind and editor takes it; whatever nobody adopted by the end of the move's task is disposed.
+describe('the hand-off of a hold between surfaces', () => {
+  const panel: EditorHostScope = { surface: 'panel', tabId: 'p1' };
+  const main: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+  const editor = () => ({ Panel, createState: vi.fn((target: { artifactId: string }) => ({ ...target })), dispose: vi.fn() });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('stages the scope’s hold without disposing it, and the target adopts the same hold', async () => {
+    const e = editor();
+    registerArtifactEditor('document', e);
+    const held = holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    expect(stageArtifactEditorState(panel)).toBe(true);
+    expect(heldArtifactEditorState(panel), 'the source holds nothing').toBeNull();
+    releaseArtifactEditorState(panel); // the source letting go afterwards ends nothing
+    expect(adoptStagedArtifactEditorState(A, main)).toBe(true);
+    expect(heldArtifactEditorState(main)).toBe(held);
+    expect(holdArtifactEditorState(main, A, 'document', artifactEditorFor('document')!), 'asked again, the same').toBe(held);
+    await tick();
+    expect(e.dispose).not.toHaveBeenCalled();
+    expect(e.createState).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells the editor the surface its state moved to (a state that keeps its surface follows it)', () => {
+    const moved = vi.fn();
+    registerArtifactEditor('document', { ...editor(), moved });
+    const held = holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    stageArtifactEditorState(panel);
+    adoptStagedArtifactEditorState(A, main);
+    expect(moved).toHaveBeenCalledExactlyOnceWith(held.state, { artifactId: A, kind: 'document', surface: 'main' });
+  });
+
+  it('stages nothing for a scope that holds nothing, and adopts nothing for an artifact not staged', () => {
+    expect(stageArtifactEditorState(panel)).toBe(false);
+    expect(adoptStagedArtifactEditorState(A, main)).toBe(false);
+    expect(heldArtifactEditorState(main)).toBeNull();
+  });
+
+  it('adopting ends what the target scope held before (another artifact)', () => {
+    const e = editor();
+    registerArtifactEditor('document', e);
+    const moved = holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    const before = holdArtifactEditorState(main, B, 'document', artifactEditorFor('document')!);
+    stageArtifactEditorState(panel);
+    adoptStagedArtifactEditorState(A, main);
+    expect(e.dispose).toHaveBeenCalledExactlyOnceWith(before.state);
+    expect(heldArtifactEditorState(main)).toBe(moved);
+  });
+
+  it('a hold asked in another scope for the same artifact, kind and editor takes a staged one (the fallback)', () => {
+    const e = editor();
+    registerArtifactEditor('document', e);
+    const held = holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    stageArtifactEditorState(panel);
+    expect(holdArtifactEditorState(main, A, 'document', artifactEditorFor('document')!)).toBe(held);
+    expect(e.createState).toHaveBeenCalledTimes(1);
+    expect(adoptStagedArtifactEditorState(A, panel), 'taken once').toBe(false);
+  });
+
+  it('a hold asked for another editor of the artifact does not take the staged one, which is disposed at the end of the task', async () => {
+    const first = editor();
+    registerArtifactEditor('document', first);
+    const held = holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    stageArtifactEditorState(panel);
+    const second = editor();
+    registerArtifactEditor('document', second);
+    expect(holdArtifactEditorState(main, A, 'document', artifactEditorFor('document')!)).not.toBe(held);
+    expect(second.createState).toHaveBeenCalledTimes(1);
+    expect(first.dispose).not.toHaveBeenCalled();
+    await tick();
+    expect(first.dispose).toHaveBeenCalledExactlyOnceWith(held.state);
+  });
+
+  it('a staged hold nobody adopts by the end of the move’s task is disposed once', async () => {
+    const e = editor();
+    registerArtifactEditor('document', e);
+    const held = holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    stageArtifactEditorState(panel);
+    expect(e.dispose).not.toHaveBeenCalled();
+    await tick();
+    expect(e.dispose).toHaveBeenCalledExactlyOnceWith(held.state);
+    expect(adoptStagedArtifactEditorState(A, main)).toBe(false);
+  });
+
+  it('a main tab closing while its hold is staged does not dispose it (the move closes its source after staging)', async () => {
+    const e = editor();
+    registerArtifactEditor('document', e);
+    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A }));
+    const held = holdArtifactEditorState(main, A, 'document', artifactEditorFor('document')!);
+    stageArtifactEditorState(main);
+    act(() => useLayout.getState().closeTab(main.tabId));
+    expect(adoptStagedArtifactEditorState(A, panel)).toBe(true);
+    await tick();
+    expect(e.dispose).not.toHaveBeenCalled();
+    expect(heldArtifactEditorState(panel)).toBe(held);
+  });
+
+  it('the source’s and the target’s readers follow the hand-off', async () => {
+    registerArtifactEditor('document', editor());
+    const held = holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    const source = renderHook(() => useHeldArtifactEditorState(panel));
+    const target = renderHook(() => useHeldArtifactEditorState(main));
+    expect(source.result.current).toBe(held);
+    await act(async () => {
+      stageArtifactEditorState(panel);
+      adoptStagedArtifactEditorState(A, main);
+    });
+    expect(source.result.current).toBeNull();
+    expect(target.result.current).toBe(held);
   });
 });

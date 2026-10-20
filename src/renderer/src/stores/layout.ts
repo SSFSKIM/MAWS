@@ -45,7 +45,9 @@ export interface LayoutState {
   // (`panelTools.params`), handed back as the restored instance's `init.params`.
   panelParams: Record<string, unknown>;
   hydrated: boolean;
-  dragging: { tabId: string; fromPane: Pane } | null;
+  // The tab being dragged (P4-B3, X38; its Decision Log 16): a main tab, or a panel tab showing an artifact's record.
+  // Transient; the drop targets decide acceptance from it (`shell/transfer.ts`).
+  dragging: { source: 'main'; tabId: string; fromPane: Pane } | { source: 'panel'; tabId: string; toolId: string; artifactId: string } | null;
   // W5: whether the floating Overview is open (transient: the app opens to the last active tab, §5.2 as amended); its
   // rect persists in `regions.overview`.
   overviewOpen: boolean;
@@ -422,12 +424,7 @@ export function createLayoutStore() {
       setFloatingCardSize(key, size) {
         regions((r) => {
           const state = get();
-          const live = new Set([
-            SUMMARY_CARD_KEY,
-            ...state.panelPinned.map((t) => t.id),
-            ...[...state.panelBySession.values()].flatMap((s) => s.tabs.map((t) => t.id)),
-            ...model.allTabs(state.main).map((t) => mainCardKey(t.id)), // P4-B3
-          ]);
+          const live = new Set([SUMMARY_CARD_KEY, ...livePanelTabIds(state.panelPinned, state.panelBySession), ...model.allTabs(state.main).map((t) => mainCardKey(t.id))]); // P4-B3: main keys
           const kept = Object.entries(r.floatingCard).filter(([k]) => k !== key && live.has(k));
           return { ...r, floatingCard: Object.fromEntries([...kept, [key, size]].slice(-FLOATING_CARD_SIZES_MAX)) };
         });

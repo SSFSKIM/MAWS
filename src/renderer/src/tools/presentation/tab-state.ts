@@ -57,7 +57,8 @@ export const openDeckTabs = (): readonly DeckTabState[] => [...open];
 
 export class DeckTabState {
   readonly artifactId: string;
-  readonly surface: ArtifactEditorTarget['surface'];
+  // The surface whose tab holds it: the one it was made for, then (P4-B3) the one a move handed it to (`moveTo`).
+  surface: ArtifactEditorTarget['surface'];
   readonly host: ArtifactHost;
   /** M8: the deck's version history on A's IPC; null without the IPC. */
   readonly history: HistoryApi | null;
@@ -173,6 +174,11 @@ export class DeckTabState {
   /** The deck's title as the body last read it (the close guard's question names it). */
   setTitle(title: string): void {
     this.title = title;
+  }
+
+  /** P4-B3: a move handed this state to a tab on another surface (the registry's `moved`). */
+  moveTo(surface: ArtifactEditorTarget['surface']): void {
+    this.surface = surface;
   }
 
   /** The content is on screen: true the first time (the surface records the owner's view then), false after. */

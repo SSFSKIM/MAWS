@@ -1,8 +1,8 @@
 // The main region's contents (§5.2, D-8, D-13; residue *Split* and *Banner placement*): one pane by default, at most two
-// side by side with a keyboard-operable divider between them, and while a tab is dragged with no split, a drop zone
-// over the region's right edge that opens the second pane with it. The region is a grid of three rows: the panes' tab
-// strips, the banner host spanning every pane, then the panes' contents; each pane places its strip and its content
-// in its own column (the pane element itself is `display: contents`).
+// side by side with a keyboard-operable divider between them, and while a tab (P4-B3 M4: or a panel record) is dragged
+// with no split, a drop zone over the region's right edge that opens the second pane with it. The region is a grid of
+// three rows: the panes' tab strips, the banner host spanning every pane, then the panes' contents; each pane places its
+// strip and its content in its own column (the pane element itself is `display: contents`).
 //
 // P4-B3 M1 (parent §4.5, its Decision Log 3 to 5): the split's columns are pixels, the stored ratio clamped to the panes'
 // floors at every width (a window resize only clamps). While the divider is dragged the columns follow the drag's live
@@ -13,6 +13,7 @@
 // (after every other child, so nothing before it moves).
 import { useLayoutEffect, useRef, useState } from 'react';
 import { SplitCardLayer } from '../shell/FloatingCard'; // P4-B3 M2
+import { useDragAccepted } from '../shell/transfer'; // P4-B3 M4
 import { useLayout } from '../stores/layout';
 import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
 import { DropEdge } from './DropEdge';
@@ -26,7 +27,7 @@ export function MainArea() {
   const floated = useLayout((s) => floatingPane(currentSet(s.main)));
   const leftSession = useLayout((s) => paneShowsSession(currentSet(s.main), 0));
   const rightSession = useLayout((s) => paneShowsSession(currentSet(s.main), 1));
-  const dragging = useLayout((s) => s.dragging !== null);
+  const edge = useDragAccepted('edge'); // P4-B3: the drop edge is offered only to a drag it takes
   const [drag, setDrag] = useState<SplitDragState | null>(null);
   const region = useRef<HTMLDivElement>(null);
   const width = useWidth(region);
@@ -45,7 +46,7 @@ export function MainArea() {
       {floated !== 0 && <Pane index={0} split={docked} column={1} collapsed={docked && drag?.armed === 'left'} />}
       {docked && <SplitDivider width={width} sessions={sessions} live={drag} onDrag={setDrag} />}
       {split && floated !== 1 && <Pane index={1} split={docked} column={docked ? 3 : 1} collapsed={docked && drag?.armed === 'right'} />}
-      {dragging && !split && <DropEdge />}
+      {edge && !split && <DropEdge />}
       {floated !== null && <SplitCardLayer />}
     </div>
   );

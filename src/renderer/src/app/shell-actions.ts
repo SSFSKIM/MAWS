@@ -15,6 +15,7 @@ import { useSettings } from '../stores/settings';
 import { expandPane, focusSplitCard, togglePanelFloat } from '../shell/floating'; // P3-G; P4-B3: expandPane, focusSplitCard
 import { startMarkup } from '../markup/session'; // P3-G
 import { openArtifacts } from '../main/artifacts'; // P3-G
+import { moveFocusedArtifactToPanel, moveShownRecordToTab } from '../shell/transfer'; // P4-B3 M4
 import { panelInMain } from './regions';
 import { registerSessionAction } from './session-actions';
 
@@ -32,6 +33,8 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     // P3-G (§D1.2): the floating state; the store's `setPanel` keeps it exclusive with maximized and collapsed.
     registerAction('panel.float', togglePanelFloat),
     registerAction('main.expandArtifactPane', () => expandPane()), // P4-B3 (its Decision Log 12)
+    registerAction('artifact.moveToPanel', moveFocusedArtifactToPanel), // P4-B3 (its Decision Log 21)
+    registerAction('artifact.moveToTab', moveShownRecordToTab),
     registerAction('markup.start', () => void startMarkup()), // P3-G (§D4.4)
     registerAction('theme.light', () => useSettings.getState().setTheme('light')),
     registerAction('theme.dark', () => useSettings.getState().setTheme('dark')),

@@ -1,7 +1,7 @@
 // The panel's Artifacts tool (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5a; Decision Log 8, 15, 21a, 23, 25b)
 // over a fake main: the session's list (its lineage's artifacts by kind) and All, "Open library", the record view
 // mounting the kind's registered `Panel` with the tab's state and X32 scope, `markViewed` once per showing, the state
-// given back on Back, on a re-target and when the instance goes, Open in tab, a kind with no editor yet, and a pinned
+// given back on Back, on a re-target and when the instance goes, Move to tab, a kind with no editor yet, and a pinned
 // tab following the shown session.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
@@ -10,10 +10,10 @@ import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
-import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
+import { heldArtifactEditorState, registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectLibrary, resetLibrary, watchLibraryRow } from '../../library/store';
 import { editorHostOf, registerEditorHost, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
-import { connectPanelHost, panelHost, registerPanelTool, resetPanelHost } from '../../panel/host';
+import { connectPanelHost, instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { persistLayout, useLayout } from '../../stores/layout';
 import { activeTab, allTabs } from '../../stores/layout-model';
@@ -524,36 +524,6 @@ describe('the record view', () => {
     expect(listed()).toHaveLength(5);
   });
 
-  // P3-F wave S (F16, obs 7a): Open in tab moves the artifact: it opens in a main tab of its own and the record here goes
-  // Back, through the editor's closeGuard as Back does, so a replica with unacknowledged edits stays until it allows
-  it('Open in tab moves the artifact to a main tab of its own: the record goes Back', async () => {
-    const editor = testEditor();
-    const { handle } = await mount({ target: NOTES.id });
-    await screen.findByText(/panel editor for/);
-    fireEvent.click(button('Open in tab')!);
-    await settle();
-    expect(allTabs(useLayout.getState().main).find((t) => t.kind === 'artifact')).toMatchObject({ artifactId: NOTES.id });
-    expect(handle.snapshot().view).toEqual({ kind: 'list' });
-    expect(editor.dispose).toHaveBeenCalledTimes(1);
-    expect(listed()).toHaveLength(5);
-  });
-
-  it('Open in tab asks the editor’s closeGuard before the record goes: false keeps it, the main tab open', async () => {
-    const editor = testEditor({ guarded: true });
-    const { handle } = await mount({ target: NOTES.id });
-    await screen.findByText(/panel editor for/);
-    fireEvent.click(button('Open in tab')!);
-    await settle();
-    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toMatchObject([{ artifactId: NOTES.id }]);
-    expect(handle.snapshot().view, 'the guard kept it').toEqual({ kind: 'record', artifactId: NOTES.id });
-    expect(editor.dispose).not.toHaveBeenCalled();
-    (editor.createState.mock.results[0]!.value as TestState).allowClose = true;
-    fireEvent.click(button('Open in tab')!);
-    await settle();
-    expect(handle.snapshot().view).toEqual({ kind: 'list' });
-    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact'), 'one tab per artifact').toHaveLength(1);
-  });
-
   it('a pinned tab keeps its record when the shown session changes; its list follows the session', async () => {
     testEditor();
     const handle = create({ target: NOTES.id });
@@ -729,6 +699,26 @@ describe('in the panel', () => {
     await act(() => panelHost.closeTab(tabId));
     expect(editor.dispose).toHaveBeenCalledTimes(2);
     expect(editorHostOf({ surface: 'panel', tabId })).toBeNull();
+  });
+
+  // P3-F wave S (F16, obs 7a): the record bar's button moves the artifact to a main tab of its own. P4-B3 (X38; its
+  // Decision Log 19, 21): "Move to tab" (it was "Open in tab"), its editor's state going with it, so its guard has nothing
+  // to ask; the move's rows are the transfer's (shell/transfer.test.ts).
+  it('Move to tab moves the artifact to a main tab with its editor’s state, asking no guard: the record goes Back', async () => {
+    const editor = testEditor({ guarded: true }); // a guard that would keep it
+    registerPanelTool(artifactsTool);
+    render(<TestHost />);
+    let tabId = '';
+    act(() => void (tabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: NOTES.id } })));
+    await screen.findByText(`panel editor for ${NOTES.id} in panel:${tabId}`);
+    expect(button('Open in tab'), 'renamed').toBeNull();
+    fireEvent.click(button('Move to tab')!);
+    await settle();
+    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toMatchObject([{ artifactId: NOTES.id }]);
+    expect((instanceOf(tabId)!.state as ArtifactsHandle).snapshot().view).toEqual({ kind: 'list' });
+    expect(heldArtifactEditorState({ surface: 'main', tabId: `artifact:${NOTES.id}` })?.state).toBe(editor.createState.mock.results[0]!.value);
+    expect(editor.createState).toHaveBeenCalledTimes(1);
+    expect(editor.dispose).not.toHaveBeenCalled();
   });
 
   // While the tab is closing (from the host marking it closing, in the tick it asks the shown editor's guard, until the
