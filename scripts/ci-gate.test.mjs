@@ -83,6 +83,15 @@ test('a call that names no gates is refused with exit 2 and the two forms, befor
   }
 });
 
+test('a --gates value of commas and spaces names no gates either, since the plan would read it as the whole set', () => {
+  for (const value of ['', ',', ' , ']) {
+    const result = gate(['--gates', value, '--class1a', 'pool', '--runner', 'macos'], { alerts: true });
+    assert.equal(result.status, 2, JSON.stringify(value));
+    assert.equal(result.stderr, 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set\n');
+    assert.deepEqual(result.refs, []);
+  }
+});
+
 test('a live call that names no gates is refused with the live form, since a live run takes its live groups alone', () => {
   const result = gate(['--runner', 'macos', '--live'], { alerts: true });
   assert.equal(result.status, 2);

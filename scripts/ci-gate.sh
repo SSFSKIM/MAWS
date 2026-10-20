@@ -83,7 +83,7 @@ label=''
 keep=false
 while (($# > 0)); do
   case $1 in
-    --gates) gates=${2:?--gates needs a list}; shift 2 ;;
+    --gates) gates=${2?--gates needs a list}; shift 2 ;;
     --runner) runner=${2:?--runner needs linux or macos}; shift 2 ;;
     --class1a) class1a=${2:?--class1a needs linux, macos or pool}; shift 2 ;;
     --default-beside) default_beside=${2:?--default-beside needs a list of e2e groups}; shift 2 ;;
@@ -101,9 +101,10 @@ case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or ma
 case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
 # The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
 case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
-# The whole set is asked for by name: left implicit, it was queued by calls that meant class 1a alone. A live run takes
-# only its live groups (Decision Log 75), so its hint names those.
-if [[ -z $gates ]]; then
+# The whole set is asked for by name: left implicit, it was queued by calls that meant class 1a alone. A value of commas
+# and spaces names nothing either: the plan reads it as the whole set. A live run takes only its live groups (Decision
+# Log 75), so its hint names those.
+if [[ -z ${gates//[[:space:],]/} ]]; then
   if [[ -n $live ]]; then
     echo "ci-gate: name the gates: a live run takes its live e2e groups alone, --live --gates e2e:<group>,… (gate.yml's LIVE_E2E)" >&2
   else
