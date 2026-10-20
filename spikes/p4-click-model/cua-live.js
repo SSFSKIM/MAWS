@@ -61,9 +61,10 @@ await press(T.empty);
 // result: a reads 한글; Q2: the first keydown keyCode 229 not composing, compositionStartText '' (mode clear).
 // The run writes /tmp/maws-ime-live/l1-hangul.json: copy it to e2e/fixtures/ime/l1-hangul.json on the branch after.
 
-// ---- cell: L2, the carried consonant: 하나.
-var T = { a: { x: 0, y: 0 }, empty: { x: 0, y: 0 } };
-await press(T.a);
+// ---- cell: L2, the carried consonant: 하나, into b, whose text is one bold run (the clear keeps it bold through the
+// stored marks ProseMirror wraps the cursor in at compositionstart: a DOM write at the composition's start; findings Q2).
+var T = { b: { x: 0, y: 0 }, empty: { x: 0, y: 0 } };
+await press(T.b);
 await wait(300);
 await keys('g k s k');
 await wait(300);
@@ -127,12 +128,16 @@ await press(T.empty);
 
 // ---- cell: L8, shortcuts while armed, from the keyboard and from the Edit menu. For this case the spec's Edit menu is a
 // probe (the same items, each noting itself, then doing what the role item does), so it can tell whether a key reached
-// the menu: facts.menu lists what fired, in order. It is the first press of the run, so it also checks the mapping: if
-// a is not selected after press(T.a) (a screenshot shows its frame), fix k and run the case again; L8 types nothing
-// natively, so a rerun keeps the page's undo stack empty.
-var T = { a: { x: 0, y: 0 }, empty: { x: 0, y: 0 } };
+// the menu: facts.menu lists what fired, in order. Its first press is the run's first, so it is a cell of its own that
+// checks the mapping: if a is not selected (no frame on a in the screenshot), fix k and run that cell again (a press
+// selects and types nothing, so nothing of the case is spent). Once the keys cell has run, a clean rerun of L8 means
+// restarting the spec with MAWS_IME_LIVE_CASES=L8,L0,L1,… (the deck and the probe's list reset only at a case's start).
+var T = { a: { x: 0, y: 0 }, aCorner: { x: 0, y: 0 }, empty: { x: 0, y: 0 } };
 await press(T.a);
 await wait(300);
+await app.getScreenshot();
+
+// ---- cell: L8's keys (after the mapping holds)
 await app.pressKey('super+c'); // left to the menu: its Copy fires and the stage copies the element (prevented)
 await app.pressKey('Right'); // a nudged to 201
 await wait(1200); // past the deck's 1 s typing pause: the next nudge is a second undo step
@@ -142,7 +147,8 @@ await app.pressKey('super+z'); // the box's own, cancelled: one step undone (201
 await app.pressKey('super+v'); // left to the menu: the element pasted, not its text into a
 await wait(500);
 await app.getAXState(); // find the menu bar's Edit item
-// Then with the mouse, by the AX indices of the state above: Edit › Undo; press(T.a); Edit › Copy; Edit › Paste;
-// Edit › Undo. Observe after each with getAXState or a screenshot.
+// Then with the mouse, by the AX indices of the state above: Edit › Undo; press(T.aCorner) (the pasted copy covers T.a,
+// and a press on the armed copy would edit it); Edit › Copy; Edit › Paste; Edit › Undo. Observe after each with
+// getAXState or a screenshot.
 // result: a keeps Hello; left 201px; facts.menu is copy, paste, undo, copy, paste, undo (no undo after the ⌘Z); both
 // Edit › Undo clicks do nothing to the deck (finding 1's gap: 5 elements, historyUndo 0).

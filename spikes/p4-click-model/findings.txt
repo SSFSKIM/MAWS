@@ -50,8 +50,13 @@ Q2. Can the content be cleared on the first keyCode-229 keydown, before the comp
   and the first input leaves ㅎ as its whole text. Chromium's macOS view forwards that keydown before the commit and
   the marked text of the same key (render_widget_host_view_cocoa.mm L1608 before L1638 and L1650), all on the widget's
   one ordered input channel, so the page's keydown handlers finish before the composition message arrives; nothing in
-  the page can be late for it. The clear writes nothing near a composition (none exists yet) and the flip to EDIT
-  writes only outside the editor (the stage's data-armed attribute, the overlay's frame, the mark bar).
+  the page can be late for it. On unmarked text the clear writes nothing near a composition (none exists yet) and the
+  flip to EDIT writes only outside the editor (the stage's data-armed attribute, the overlay's frame, the mark bar).
+  On text that is one marked run (bold all over), the clear sets those marks as stored marks so the new text keeps
+  them, and ProseMirror then redraws the cursor's mark wrapper at compositionstart (prosemirror-view 1.42.6
+  dist/index.js L3591-3597, its own path for typing a composition after ⌘B): a DOM write at the composition's start,
+  before any marked text exists. CDP shows it harmless (I2's bold "World" ends as a bold 하나 in both modes); the live
+  L2 types into the bold box to show it under the real input method.
   What is left for the real Mac: the input method keeps its own marked text in the browser process, so a cleared DOM
   does not disturb the syllable it is composing; the one way the clear could still fail is the input method asking
   the document for its text or selection between keys and seeing it stale for one round trip. L1's trace settles it.
@@ -151,7 +156,7 @@ Steps (spikes/p4-click-model/cua-live.js holds them as cells; e2e/presentations-
      facts.pressToFirstKeyMs says whether cua reached the 100 ms window. L7's verdict is the screenshot's. L8's Edit menu
      is a probe for the case (each item notes itself, then does what the role item does: webContents' undo, copy and
      paste, which the role selectors reach), so facts.menu shows whether the ⌘Z the box cancelled reached the menu.
-  4. If L1 fails in mode clear, and for the comparison either way: MAWS_IME_LIVE_MODE=select
+  4. If L1 or L2 fails in mode clear, and for the comparison either way: MAWS_IME_LIVE_MODE=select
      MAWS_IME_LIVE_CASES=L1,L2,L4.
   5. Collect /tmp/maws-ime-live/*.result.json and l1-hangul.json; select ABC again; end_task; release the hold.
   6. After the hold, without the GUI: copy l1-hangul.json to e2e/fixtures/ime/ on the branch and run the replay case.

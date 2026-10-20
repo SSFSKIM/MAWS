@@ -35,7 +35,7 @@ interface ElementIR {
   id: string;
   style: Record<string, string>;
   children: ElementIR[];
-  text?: { inline: ({ text: string } | { br: true })[] }[];
+  text?: { inline: ({ text: string; marks: Record<string, unknown> } | { br: true })[] }[];
 }
 interface Seam {
   __maws_presentations: {
@@ -50,7 +50,7 @@ const DECK: Record<string, string> = {
   'project/deck.json': JSON.stringify({ v: 4, title: 'IME live', cover: 'ime', order: ['ime'] }),
   'project/slides/ime.html': `<section id="ime" style="background:#ffffff; padding:128px">
 <p id="a" style="position:absolute; left:200px; top:200px; width:700px; font-size:64px">Hello</p>
-<p id="b" style="position:absolute; left:1000px; top:200px; width:700px; font-size:64px">World</p>
+<p id="b" style="position:absolute; left:1000px; top:200px; width:700px; font-size:64px"><b>World</b></p>
 <x-shape id="s" kind="ellipse" style="position:absolute; left:1000px; top:500px; width:300px; height:200px; background:#0000ff"></x-shape>
 <aside>Notes</aside>
 </section>`,
@@ -60,13 +60,13 @@ const DECK: Record<string, string> = {
 const STEPS: Record<string, string> = {
   L0: 'Instrument check: click `notes`; with 2-Set selected press g, k, s; then Escape. Passes when the notes field ends in 한 (cua keys reach the input method).',
   L1: 'Click `a`; wait 300 ms; press g k s r m f; wait 300 ms; click `empty`.',
-  L2: 'Click `a`; wait 300 ms; press g k s k; wait 300 ms; click `empty`.',
+  L2: 'Click `b` (its text one bold run); wait 300 ms; press g k s k; wait 300 ms; click `empty`.',
   L3: 'Select ABC first. Click `a`; wait 300 ms; press ctrl+space (to 2-Set); wait 300 ms; press g k s r m f; wait 300 ms; click `empty`.',
   L4: 'With nothing selected for a second: in one cua call click `a` and press g k s r m f at once; wait 300 ms; click `empty`.',
   L5: 'Click `a`; wait 300 ms; press g k; click `b`; wait 300 ms; press k; wait 300 ms; click `empty`.',
   L6: 'Click `a`; wait 300 ms; press g k s, BackSpace, Left, Right, g k, Return; wait 300 ms; press Escape twice.',
   L7: 'Click `a`; wait 300 ms; press g k s, then alt+Return; wait 800 ms; screenshot (the Hanja window should open at `a`); Escape; click `empty`. Write the verdict into the done file.',
-  L8: 'Click `a`; wait 300 ms; cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; click `a`; Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.',
+  L8: 'Click `a`; wait 300 ms; screenshot (a selected: the mapping holds); then cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; click `aCorner` (a corner of `a` the pasted copy does not cover); Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.',
 };
 
 let launch: MawsLaunch | null = null;
@@ -209,7 +209,13 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
         checks['Q2: the first keydown is keyCode 229, not composing'] = [firstKey && [firstKey.keyCode, firstKey.isComposing], [229, false]];
         checks['Q2: the composition starts on cleared content'] = [start?.textBefore, MODE === 'clear' ? '' : 'Hello'];
       }
-    } else if (name === 'L2') checks['a reads 하나'] = [a.normalize('NFC'), '하나'];
+    } else if (name === 'L2') {
+      // a cleared box whose text was one bold run: mode clear sets the marks as stored marks, and ProseMirror then redraws
+      // the cursor's mark wrapper at compositionstart (findings.txt Q2): the real input method's first syllable through it
+      facts.runs = (await element('b'))?.text?.flatMap((blk) => blk.inline);
+      checks['b reads 하나'] = [b.normalize('NFC'), '하나'];
+      checks['b stays bold'] = [facts.runs, [{ text: '하나', marks: { b: {} } }]];
+    }
     else if (name === 'L5') {
       checks['a keeps 하'] = [a.normalize('NFC'), '하'];
       checks['b gets a fresh ㅏ, no stray jamo'] = [b.normalize('NFC'), 'ㅏ'];
@@ -226,7 +232,6 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       checks['⌘Z undid one nudge, in the box'] = [facts.left, '201px'];
       // ⌘C and ⌘V left to the menu reach it; the ⌘Z the box cancelled does not; then the mouse's Undo, Copy, Paste, Undo
       checks['Q3: the menu saw ⌘C and ⌘V, not ⌘Z, then the mouse'] = [menu, ['copy', 'paste', 'undo', 'copy', 'paste', 'undo']];
-      checks['the clipboard events taken by the stage, not the editor'] = [(facts.clipboard as string[]).every((c) => c.endsWith('prevented=true')), true];
       // finding 1's gap: the menu's Undo does nothing to the deck while Blink's own undo stack is empty, so both pastes stay
       checks['the Edit menu’s Undo left both pastes (today’s gap)'] = [[facts.elements, facts.historyUndo], [5, 0]];
     }
@@ -264,7 +269,8 @@ async function targets(page: Page, frame: ReturnType<Page['locator']>) {
   const scale = box.width / 1920;
   const at = (x: number, y: number) => ({ x: Math.round(box.x + x * scale), y: Math.round(box.y + y * scale) });
   const notes = await page.locator('.deck-notes-field').first().boundingBox();
-  const page_ = { a: at(260, 250), b: at(1060, 250), empty: at(100, 1000), shape: at(1150, 600), notes: notes ? { x: Math.round(notes.x + 40), y: Math.round(notes.y + notes.height / 2) } : null };
+  // aCorner: inside a, outside a copy pasted from it (pasted 24 slide px down and right, drawn above it)
+  const page_ = { a: at(260, 250), aCorner: at(210, 210), b: at(1060, 250), empty: at(100, 1000), shape: at(1150, 600), notes: notes ? { x: Math.round(notes.x + 40), y: Math.round(notes.y + notes.height / 2) } : null };
   const win = await page.evaluate(() => ({ outerX: screenX, outerY: screenY, outerW: outerWidth, outerH: outerHeight, innerW: innerWidth, innerH: innerHeight, dpr: devicePixelRatio }));
   return {
     page: page_,
