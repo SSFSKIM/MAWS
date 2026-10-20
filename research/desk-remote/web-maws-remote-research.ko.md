@@ -66,13 +66,21 @@ desk 설계 문서(spec)는 MAWS `48fec4bd1`의 `docs/doperpowers/specs/2026-10-
    - 어려운 것은 다음이다. id와 store가 기계 하나를 가정한다. 모든 이벤트가 모든 창으로 간다. supervisor는
      클라이언트를 하나만 받는다. 기계 쪽 기능 상당수(세션 서비스, git, scm, 파일, 색인)가 Electron main에
      있다(porting §3, §6).
-7. **web MAWS 경로는 desk의 "SDK host가 아니라 bridge" binding을 뒤집는다. owner가 먼저 다시 정해야 한다.**
-   binding의 근거는 둘이다. 터미널이 쥘 수 있는 세션, 그리고 구독 자격 증명 위의 SDK 제품에 대한 2026년
-   2월 약관이다(spec:341-349). 여러 member가 있는 org에서는 다른 사람이 owner의 구독으로 엔진을 몰게 된다.
-   이것이 약관에 더 가까워진다는 것은 추론이다(§7 첫 행).
-8. **기계 쪽 끝점은 MAWS의 E10 supervisor를 키운 headless 데몬이 맞다고 본다.**
-   - 이 데몬이 main의 기계 쪽 서비스를 흡수하고, Electron 앱은 그 데몬의 클라이언트 중 하나가 된다. 이것은
-     `claude-ssh`와 VS Code Server가 택한 분할이다. 웹은 hub를 거쳐 같은 데몬에 붙는다.
+7. **세션을 SDK host로 소유하면 desk의 "SDK host가 아니라 bridge" binding을 뒤집는다. 엔진의 백그라운드
+   supervisor(`claude --bg`, `/background`)에 맡기면 뒤집지 않아도 된다(§3.6).**
+   - binding의 근거는 둘이다. 터미널이 쥘 수 있는 세션, 그리고 구독 자격 증명 위의 SDK 제품에 대한 2026년
+     2월 약관이다(spec:341-349). 여러 member가 있는 org에서는 다른 사람이 owner의 구독으로 엔진을 몰게
+     된다. 이것이 약관에 더 가까워진다는 것은 추론이다.
+   - `--bg` 세션은 엔진 supervisor가 소유하는 평범한 REPL이라 두 근거를 모두 지킨다. 대가는 제어 폭이다.
+     권한 모드 전환, rewind, MCP toggle, 일반 dialog는 프로그램으로 할 수 없고 웹 터미널(`claude attach`
+     중계)로 한다.
+   - 권고는 웹이 다루는 세션의 기본 경로를 `--bg`로 두는 것이다. owner가 정한다(§7 첫 행).
+8. **기계 쪽 끝점: 세션 프로세스는 엔진 supervisor가, 세션 밖의 MAWS 기계 쪽 서비스는 MAWS의 headless
+   데몬이 맡는다.**
+   - headless 데몬이 main의 기계 쪽 서비스(산출물과 Yjs, 라이브러리, git·scm, 파일, 설정)를 흡수하고,
+     Electron 앱은 그 데몬의 클라이언트 중 하나가 된다. 이것은 `claude-ssh`와 VS Code Server가 택한
+     분할이다. 웹은 hub를 거쳐 같은 데몬에 붙는다.
+   - E10 supervisor를 WAN용으로 키우는 일(§3.4)은 MAWS 앱이 소유한 SDK 세션을 웹에 내줄 때만 필요하다.
    - 데몬은 Electron에 기대지 않는 일반 Node 빌드여야 한다. headless 기계와 Linux에서도 돌아야 하기 때문이다.
    - uplink와 신뢰 경계는 sminos에 두고, MAWS 데몬은 그 뒤의 로컬 클라이언트로 붙이는 것이 기본 권고다.
      MAWS가 없는 Linux와 devcloud 기계도 닿아야 한다. 로컬 홉의 비용을 재서, 문제가 되면 크로스플랫폼
@@ -165,6 +173,10 @@ benchmark에 넣을 항목과, 선행 사례에서 온 하한이다. 숫자는 �
 
 ### 3.2 권고: supervisor를 headless 기계 데몬으로 키운다
 
+> 2026-10-19 갱신: 세션 프로세스의 소유는 §3.6의 `--bg` 경로를 기본으로 권한다. 이 절에서 그대로 남는
+> 것은 세션 밖의 기계 쪽 서비스(산출물과 Yjs, 라이브러리, git·scm, 파일, 설정)를 맡을 headless 데몬이다.
+> 세션을 소유하는 engine host의 WAN 강화(§3.4)는 MAWS 앱이 소유한 SDK 세션을 웹에 내줄 때만 필요하다.
+
 - **분할.** 기계 쪽 데몬이 프로세스와 기계 쪽 기능을 소유하고, 클라이언트는 교체할 수 있게 한다.
   Electron 앱은 로컬 클라이언트 중 하나가 되고, 웹은 hub를 거친 원격 클라이언트가 된다.
   - `claude-ssh`: 프로세스를 소유하고, 끊기면 checkpoint부터 재입양한다.
@@ -256,6 +268,88 @@ benchmark에 넣을 항목과, 선행 사례에서 온 하한이다. 숫자는 �
     넘으려면 웹 코드를 따로 통제되는 출처에서 받아야 한다.
   - **기계 쪽 암호.** member별 비대칭 서명은 기계에 암호 라이브러리가 필요하다. stdlib Python 데몬에는
     없다(rc-parity §5.2). 신뢰 경계를 어느 프로세스에 둘지(§3.3)와 엮인다.
+
+### 3.6 세션 소유의 다른 길: 엔진의 백그라운드 supervisor (`claude --bg`, `/background`)
+
+(2026-10-19 owner 제안을 검토한 것. 출처: SPEC 38 §38.1–38.14, SPEC 20 §20.15, 2.1.300 소스, mod API d.ts)
+
+- **무엇인가.**
+  - `claude --bg`, `claude agents`, `/background`가 만든 세션은 엔진 자신의 supervisor(`claude daemon run`)가
+    소유한다(SPEC38 §38.1).
+  - 세션마다 `claude --bg-pty-host` 프로세스가 PTY를 쥐고, 그 PTY 안에서 평범한 interactive REPL이
+    돈다(cli:1147604). stream-json 세션이 아니다.
+  - supervisor는 Unix socket `control.sock`(op 18개, proto 1)으로 목록, 상태, `reply`, `subscribe`,
+    `attach`, `kill`을 내준다. 같은 uid와 `~/.claude/daemon/control.key`로 인증한다(§38.11).
+  - `/background`는 프로세스를 옮기지 않는다. transcript를 flush하고, `--resume <transcript>
+    --fork-session`으로 새 job을 띄운 뒤 터미널 쪽 세션을 끝낸다(cli:810555-810604). 엔진 자신의
+    resume handoff다.
+- **엔진이 이미 해 주는 내구성.**
+  - supervisor가 재시작해도 살아 있는 PTY host를 재입양한다(§38.7.2).
+  - 바이너리가 바뀌면 supervisor가 스스로 재시작하고, job을 새 버전으로 다시 띄운다(§38.7.5).
+  - 프로세스가 죽으면 transcript로 다시 띄우고 끊긴 턴을 이어 간다(`CLAUDE_CODE_RESUME_INTERRUPTED_TURN`,
+    SPEC20 §20.15).
+  - 아무 터미널에서나 `claude attach <short>`로 붙을 수 있다. 여러 attacher가 동시에 붙는다(§38.13.3,
+    Windows 제외).
+- **desk는 이미 이 길을 쓴다.** 웹의 Spawn은 `claude --bg`, Resume은 `claude --bg --resume`이다
+  (spec:599-601). 제어는 세션 안의 bridge mod가 하고, `control.sock`은 bridge가 없을 때의 fallback이다
+  (spec:604-611). 제안은 이 길을 웹이 다루는 세션 전체의 기본 경로로 삼는 것이다.
+
+| | `--bg` + bridge mod | stdio SDK host (MAWS engine host) |
+|---|---|---|
+| 프로세스 소유 | 엔진 supervisor | 우리 데몬 |
+| 터미널이 쥘 수 있는가 | 예 (`claude attach`, `/background`) | 아니오 (멈추고 resume으로 넘길 때만) |
+| spec의 "SDK host가 아니라 bridge" binding (spec:341-349) | 지킨다 | 뒤집는다 |
+| 내구성 | 엔진이 유지한다 (재입양, 업그레이드 respawn, 끊긴 턴 재개) | 우리가 만들어야 한다 |
+| 제어 폭 | mod API + slash 명령 + TUI 키 입력 | stdio 제어 요청 96종 |
+| 화면에 그릴 데이터 | transcript 행 + `turn.step` 조각 (desk-web이 이미 그린다) | stream-json (MAWS X1 렌더러) |
+
+- **`--bg` 경로에서 프로그램으로 할 수 없는 것.** mod API(dts)에 해당 기능이 없다.
+  - 권한 모드를 마음대로 바꾸기. `/plan`과, 권한 답에 실은 `setMode`만 된다.
+  - 대화 rewind와 파일 rewind. TUI의 picker로만 된다. 파일 쪽은 세션을 멈춘 뒤 `claude --resume <id>
+    --rewind-files <message>`를 한 번 실행하는 길이 있어 보인다(cli:906312, 미검증).
+  - 다른 MCP 서버의 toggle과 reconnect. `$.mcp.connect`는 플러그인이 자기 manifest에 둔 서버만
+    다룬다(dts:2746-2785).
+  - 일반 dialog(`request_user_dialog`)와 엔진의 `ui_*` 원격 표면(MAWS D-9의 R2).
+  - `!` 셸. 확인하지 않았다.
+  - 읽기는 대부분 된다: `$.settings.read`, `$.session.model`, usage. diff, 파일, export는 데몬이
+    파일에서 답한다. MAWS의 SDK MCP 서버 `maws`(X9 도구)는 데몬이 띄우는 일반 MCP 서버로 옮길 수 있다(추론).
+- **남는 빈 곳은 웹 터미널로 메운다.** 데몬이 자기 PTY 안에서 `claude attach <short>`를 돌리고 그 바이트를
+  웹의 터미널로 중계하면, TUI가 할 수 있는 것은 전부 웹에서 된다. rewind picker, `/permissions`, `/mcp`도
+  포함된다. Arkho A6 설계가 이 방식이다(spec:205). 내부 `control.sock`의 `attach`를 직접 말하는 것보다
+  공개 CLI 동사를 쓰는 편이 엔진 버전이 바뀔 때 덜 깨진다.
+- **우리가 만든 supervisor로 엔진의 supervisor를 대체하는 것은 권하지 않는다.**
+  - CLI가 붙는 socket 경로는 설정으로 바꿀 수 없다. `/tmp/cc-daemon-<uid>/<sha256(config 디렉터리) 앞
+    8자>/control.sock`으로 계산된다(cli:876523).
+  - 대체하려면 `daemon.lock`, op 18개, rendezvous socket, PTY frame codec, roster, 재입양을 다시 만들어야
+    한다. 전부 공개되지 않은 내부 프로토콜이고 릴리스마다 바뀔 수 있다.
+  - CLI 쪽은 응답하지 않는 lock holder에 SIGTERM을 보내고(§38.14.3), 버전이 낮은 transient 데몬을
+    은퇴시킨다(§38.14.4).
+  - 대체해도 제어 폭은 늘지 않는다. 안에서 도는 것은 여전히 REPL이다.
+- **정당하게 손댈 수 있는 곳.**
+  - 생명주기: 데몬이 `claude daemon run`을 띄운다(origin `foreground`는 idle로 끝나지 않고 밀려나지
+    않는다, §38.3). 아니면 지금처럼 `claude --bg`가 필요할 때 띄우게 둔다.
+  - 세션 시작: 설정 `processWrapper`(`CLAUDE_CODE_PROCESS_WRAPPER`)는 supervisor와 그 세션들을 감싸는
+    launcher다(cli:125354). launcher는 env와 플래그를 더한 뒤 claude로 `exec`해야 하고, 설정이 깨지면
+    세션이 시작을 거부한다(SPEC01 §7.3). 모든 세션 시작에 우리 코드를 끼울 수 있는 공식 지점이지만,
+    지금 필요한 일(플러그인 로드, `SMNS_MEMBER`)은 사용자 플러그인과 데몬의 spawn으로 이미 된다.
+- **권고 (owner 결정 대상).**
+  - 웹이 다루는 세션의 기본 경로를 `--bg` + bridge mod로 둔다. 그러면 §7 첫 행의 binding은 뒤집지 않아도
+    된다.
+  - 프로그램으로 안 되는 조작은 웹 터미널에서 한다. mod API가 넓어지면 GUI로 옮긴다.
+  - stdio SDK 경로는 MAWS 앱의 로컬 세션에 남긴다. 한 세션은 한 번에 한 경로에만 있고, 경로를 옮길 때는
+    엔진의 resume handoff를 쓴다(idle까지 대기, SIGTERM, 레지스트리 파일이 사라지면 `--resume`;
+    rc-parity §3.4).
+- **이 권고가 바꾸는 것.**
+  - 세션 프로세스는 엔진 supervisor가 소유하고, 그 옆의 sminos 데몬이 bridge, uplink, 신뢰 경계, 세션별 seq와
+    링을 맡는다. §3.3의 기본 권고와 같은 모양이다.
+  - §3.2의 headless 데몬은 세션 밖의 MAWS 기계 쪽 서비스만 맡는다.
+  - E10 supervisor의 WAN 강화(§3.4)는 MAWS 앱이 소유한 SDK 세션을 웹에 내줄 때만 필요하다.
+- **확인할 것.**
+  - `$.command.run('/background')`로 웹에서 터미널 세션을 background로 넘길 수 있는가. `/background`는
+    확인 dialog를 띄운다.
+  - `--rewind-files` 일회 실행.
+  - `claude attach` 중계의 키 입력 지연.
+  - API key만 있는 기계에서 `--bg`. owner의 기계에서는 gateway 뒤에서 이미 돈다.
 
 ---
 
@@ -372,11 +466,11 @@ desk에는 이미 프로젝트 로그의 순번, 분할, jitter, 기계 링크�
 
 | 결정 | 권고 | 대안이 나아지는 조건 |
 |---|---|---|
-| SDK host 기각 binding의 재결정 (owner) | spec은 "SDK host가 아니라 bridge"를 binding으로 둔다(spec:341-349). 근거는 터미널이 쥘 수 있는 세션, 그리고 구독 자격 증명 위의 SDK 제품에 대한 2026년 2월 약관이다. web MAWS 경로는 MAWS 세션을 stream-json으로 호스팅하므로 이 binding을 뒤집는다. 여러 member org에서는 다른 사람이 owner의 구독으로 엔진을 몰게 되고, 이것이 약관에 더 가까워진다는 것은 추론이다. owner가 먼저 다시 정한다. 입력: rc-parity §7 교훈 8 | binding을 유지하면 web MAWS는 bridge 경로의 폭에 머문다. 제어 폭은 mod가 한도다(rc-parity §3.3) |
+| 세션을 누가 소유하는가: SDK host binding (owner) | spec은 "SDK host가 아니라 bridge"를 binding으로 둔다(spec:341-349). 근거는 터미널이 쥘 수 있는 세션, 그리고 구독 자격 증명 위의 SDK 제품에 대한 2026년 2월 약관이다. **권고: 웹이 다루는 세션은 엔진의 백그라운드 supervisor(`claude --bg`, `/background`)가 소유하고 bridge mod가 제어한다(§3.6).** binding을 지킨다. 프로그램으로 안 되는 조작(권한 모드 전환, rewind, MCP toggle, 일반 dialog)은 `claude attach`를 중계한 웹 터미널에서 한다. SDK 경로는 MAWS 앱의 로컬 세션에 남기고, 경로를 옮길 때는 resume handoff를 쓴다 | SDK host로 소유: 그 조작들을 웹 GUI에서 해야 할 때. binding을 뒤집고, 여러 member org에서 owner의 구독으로 다른 사람이 엔진을 모는 것이 약관상 괜찮은지(추론) 먼저 정한다. 입력: rc-parity §7 교훈 8 |
 | 신뢰 설계 (1차) | member별 principal을 기계가 검증한다(#52 21:01Z). 고빈도 스트림은 채널 단위 인증, 개별 실행 등급 동작은 요청별 봉인 + passkey step-up. `clientId`는 principal에 묶어 기계가 확인한다. 표시 스트림의 무결성을 둘지 정한다. hub가 내려주는 JS의 키는 E2E가 아님을 전제로 적는다(§3.5) | — |
 | hub 저장 (owner) | (a) 메모리 재접속 버퍼를 먼저 잰다. owner가 hub의 암호문 저장을 받아들이면 (b) 세션별 암호화 꼬리(DO SQLite, 바이트 상한)를 목표로 둔다(§4 끝) | (c) 완전한 caching proxy: hub가 읽을 수 있는 상태를 owner가 받아들이고, 열기·재접속을 기계 없이 전부 hub가 답해야 할 때 |
-| 기계 쪽 끝점 | E10 supervisor를 Electron에 기대지 않는 일반 Node 빌드의 headless 데몬으로 키우고(macOS launchd, Linux systemd), main의 기계 쪽 서비스를 옮긴다. 캡처와 export는 선택 사항이거나 headless Chromium으로 | Electron main을 창 없는 서버로 계속 띄우는 것은 옮기는 비용이 지나치게 클 때만. 이 경우 Linux와 headless 기계는 빠진다 |
-| 한 프로세스의 통제자 | MAWS가 소유한 세션은 MAWS 데몬 하나. bridge mod는 관찰하거나 위임한다 | — |
+| 기계 쪽 끝점 | 세션 프로세스는 엔진 supervisor. 세션 밖의 MAWS 기계 쪽 서비스(산출물·Yjs, 라이브러리, git·scm, 파일, 설정)는 Electron에 기대지 않는 일반 Node 빌드의 headless 데몬(macOS launchd, Linux systemd)으로 옮긴다. 캡처와 export는 선택 사항이거나 headless Chromium으로. E10 supervisor의 WAN 강화는 MAWS 앱의 SDK 세션을 웹에 내줄 때만 | Electron main을 창 없는 서버로 계속 띄우는 것은 옮기는 비용이 지나치게 클 때만. 이 경우 Linux와 headless 기계는 빠진다 |
+| 한 프로세스의 통제자 | `--bg`와 터미널 세션은 bridge mod. MAWS 앱이 소유한 SDK 세션은 MAWS 데몬 하나이고, bridge mod는 관찰하거나 위임한다 | — |
 | uplink와 신뢰 경계를 쥐는 프로세스 | 신뢰 경계 프로세스를 먼저 정한다. 기본: sminos가 uplink와 신뢰 경계(봉인 검증, nonce 원장, 읽기 전용, 권한 상한)로 남고, MAWS 기계 데몬은 그 뒤의 로컬 클라이언트. MAWS가 없는 Linux·devcloud 기계도 닿는다. 로컬 홉 비용을 잰다(§3.3) | 측정에서 로컬 홉이 문제가 될 때: Electron에 기대지 않는 크로스플랫폼 기계 데몬 하나가 두 역할을 흡수한다 |
 | 기계↔hub 전송 | 기계에서 나가는 WebSocket 하나(양방향, 채널 다중화). SSE+POST 폐기. 프레임의 응답이 DO 사이 await를 기다리지 않게 한다(§5) | — |
 | hub 객체 토폴로지 | 기계 소켓을 끝내는 객체, 브라우저가 세션 스트림을 위해 그 객체에 직접 붙는지, 활성 세션당 비용 모델을 정한다. 프레임마다 DO 왕복을 하지 않는다. 객체당 처리량(초당 약 1,000 요청, Cloudflare 문서 수치), 만들 때 정해지는 위치, 상시 트래픽에서 잃는 hibernation을 계산에 넣는다. 스파이크 3의 구간별 측정으로 정한다(§3.3) | — |
@@ -404,8 +498,9 @@ desk에는 이미 프로젝트 로그의 순번, 분할, jitter, 기계 링크�
    - 죽은 소켓 위에서 보낸 steer가 재봉인으로 한 번만 실행되는지 본다.
    - 브라우저→hub→객체→기계, 그리고 sminos 뒤 MAWS 데몬까지의 로컬 홉을 구간마다 재고, 객체당 처리량을
      잰다. 이 수치로 hub 객체 토폴로지와 uplink 프로세스(§3.3)를 정한다.
-4. **supervisor 다중 클라이언트.** Electron 앱과 시험 클라이언트 하나를 동시에 붙여, 구독별 cursor와
+4. **supervisor 다중 클라이언트** (MAWS 앱의 SDK 세션을 웹에 내줄 때만). Electron 앱과 시험 클라이언트 하나를 동시에 붙여, 구독별 cursor와
    backpressure를 확인한다.
+5. **`--bg` 경로의 빈 곳.** `claude attach`를 데몬의 PTY에서 돌려 웹 터미널로 중계하고 키 입력 지연을 잰다. `$.command.run('/background')`로 웹에서 터미널 세션을 넘길 수 있는지, 멈춘 세션에 `--rewind-files`를 한 번 실행해 파일이 되돌아가는지 본다. MAWS 렌더러의 세션 명령마다 `--bg` 경로에서 어떤 수단(mod, slash 명령, 데몬, 웹 터미널)으로 되는지 표로 만든다.
 
 ---
 
