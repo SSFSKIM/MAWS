@@ -82,11 +82,33 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
       expect(actions.openArtifact).not.toHaveBeenCalled();
     });
 
-    it('reduces the content form (maws-artifact://<id>/<revision>/<path>) and a fragment to the artifact', () => {
-      const { actions } = renderWith(`[page](maws-artifact://${ARTIFACT}/live/index.html) and [v2](maws-artifact:${ARTIFACT}#v2)`, live, SESSION);
+    it('reduces the content form (maws-artifact://<id>/<revision>/<path>) to the artifact, its page path naming no place', () => {
+      const { actions } = renderWith(`[page](maws-artifact://${ARTIFACT}/live/index.html#top)`, live, SESSION);
       fireEvent.click(screen.getByRole('button', { name: 'page' }));
-      fireEvent.click(screen.getByRole('button', { name: 'v2' }));
-      expect(vi.mocked(actions.openArtifact).mock.calls).toEqual([[SESSION, ARTIFACT], [SESSION, ARTIFACT]]);
+      expect(vi.mocked(actions.openArtifact).mock.calls).toEqual([[SESSION, ARTIFACT]]);
+    });
+
+    // P4-B4 (the link grammar): a fragment names the place the artifact opens at, a click and a ⌘-click alike; a part
+    // the grammar cannot read is dropped and the link still opens the artifact
+    it('opens the artifact at the place its fragment names, in the panel and in the main tab', () => {
+      const links: Array<[string, string, object | undefined]> = [
+        ['block', '#block=b7', { block: 'b7' }],
+        ['tab', '#tab=t2', { tab: 't2' }],
+        ['slide', '#slide=s-1_x', { slide: 's-1_x' }],
+        ['version', '#v3', { version: 3 }],
+        ['all', '#v2&tab=t1#block=b9', { version: 2, tab: 't1', block: 'b9' }],
+        ['junk', '#zoom=4&block=', undefined],
+      ];
+      const { container, actions } = renderWith(links.map(([name, fragment]) => `[${name}](maws-artifact:${ARTIFACT}${fragment})`).join(' '), live, SESSION);
+      for (const [name, , at] of links) {
+        const chip = screen.getByRole('button', { name });
+        fireEvent.click(chip);
+        fireEvent.click(chip, { metaKey: true });
+        expect(vi.mocked(actions.openArtifact).mock.calls.at(-1), name).toEqual(at ? [SESSION, ARTIFACT, undefined, at] : [SESSION, ARTIFACT]);
+        expect(vi.mocked(actions.openArtifactTab!).mock.calls.at(-1), name).toEqual(at ? [ARTIFACT, at] : [ARTIFACT]);
+      }
+      // the chip carries the place as the grammar writes it, for a surface that takes the click before it
+      expect([...container.querySelectorAll<HTMLElement>('[data-chip="artifact"]')].map((chip) => chip.dataset.artifactAt)).toEqual(['#block=b7', '#tab=t2', '#slide=s-1_x', '#v3', '#v2#tab=t1#block=b9', undefined]);
     });
 
     // P3-F wave S (F14 review 2): where nothing can open it (the desk's actions, a mount with no main tab to give), the

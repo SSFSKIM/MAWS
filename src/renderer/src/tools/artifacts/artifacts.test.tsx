@@ -20,7 +20,7 @@ import { fail, installFakeMain, ok } from '../../test-support/code';
 import { A, B, panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
 import { ArtifactsSummary } from './Summary';
-import { resetVersionRequests, useVersionRequest } from './viewers/requests';
+import { resetOpenRequests, useOpenRequest } from './viewers/requests';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = Date.now();
@@ -445,7 +445,7 @@ describe('the record view', () => {
     const { handle } = await mount({ target: NOTES.id });
     await screen.findByText(`panel editor for ${NOTES.id} in panel:${TAB}`);
     function Asked() {
-      const request = useVersionRequest(OTHER.id, 'panel');
+      const request = useOpenRequest(OTHER.id, 'panel');
       return <p data-asked="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
     }
     render(<Asked />);
@@ -572,10 +572,10 @@ describe('the record view', () => {
 // version the row names asked of the panel's viewer of it; nothing while no build registers the tool. Fix wave 2: every
 // open asks (the latest when it names none), the next open supersedes, and an open the guard refused cancels its own.
 describe('openArtifactInPanel (M6b)', () => {
-  beforeEach(() => resetVersionRequests()); // every open asks, the earlier cases' too
-  afterEach(() => resetVersionRequests());
+  beforeEach(() => resetOpenRequests()); // every open asks, the earlier cases' too
+  afterEach(() => resetOpenRequests());
   function Request() {
-    const request = useVersionRequest(NOTES.id, 'panel');
+    const request = useOpenRequest(NOTES.id, 'panel');
     return <p data-request="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
   }
   const asked = () => document.querySelector('[data-request]')!.textContent;
@@ -593,6 +593,25 @@ describe('openArtifactInPanel (M6b)', () => {
     expect(asked()).toBe('"latest"');
     act(() => openArtifactInPanel(B, NOTES.id, { revision: 7 }));
     expect(asked()).toBe('{"revision":7}');
+  });
+
+  // P4-B4: a link's place rides the same ask, to the editor of the artifact on that surface, whether the tab is opening
+  // on it or already shows it; a later plain open supersedes it
+  it('asks for the place a link names, beside the version, also of a tab already showing the artifact', () => {
+    function Place() {
+      const request = useOpenRequest(NOTES.id, 'panel');
+      return <p data-place="">{request === null ? 'none' : JSON.stringify([request.at, request.location ?? null])}</p>;
+    }
+    const place = () => document.querySelector('[data-place]')!.textContent;
+    render(<Place />);
+    registerPanelTool(artifactsTool);
+    act(() => openArtifactInPanel(B, NOTES.id, undefined, { tab: 't2', block: 'b7' }));
+    expect(place()).toBe('["latest",{"tab":"t2","block":"b7"}]');
+    act(() => openArtifactInPanel(B, NOTES.id, undefined, { version: 4 })); // the same tab, already on the artifact
+    expect(panelOf(B)!.tabs).toHaveLength(1);
+    expect(place()).toBe('["latest",{"version":4}]');
+    act(() => openArtifactInPanel(B, NOTES.id));
+    expect(place()).toBe('["latest",null]');
   });
 
   it('cancels the ask of an open the shown artifact’s guard refused', async () => {

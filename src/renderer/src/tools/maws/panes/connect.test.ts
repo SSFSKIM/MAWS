@@ -99,6 +99,23 @@ describe('the pane bridge, window side (E1)', () => {
       expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'artifacts', tabId: opened!.id, title: 'Artifacts' } } }]);
     });
 
+    // P4-B4: `at` opens it at a place: the Artifacts tool is given it as the open's location (the latest version unless
+    // the place names one); with no target there is no artifact to open at a place, and the list opens
+    it('an artifact opened at a place gives the Artifacts tool the place; no target opens the list without it', async () => {
+      const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
+      registerPanelTool(tool);
+      show(fake, { pane: 'artifact', target: DASH, at: { tab: 't2', block: 'b7' } });
+      await settle();
+      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, location: { tab: 't2', block: 'b7' } }]);
+      show(fake, { requestId: 'r2', pane: 'artifact', target: 'dash', at: { version: 3 } });
+      await settle();
+      expect(probe.opens.map((open) => open.params)).toEqual([{ target: DASH, location: { version: 3 } }]);
+      show(fake, { requestId: 'r3', pane: 'artifact', at: { slide: 's1' } });
+      await settle();
+      expect(probe.opens.map((open) => open.params).at(-1)).toEqual({});
+      expect(fake.invoked('maws.pane.answer').map((answer) => (answer as { result: { ok: boolean } }).result.ok)).toEqual([true, true, true]);
+    });
+
     it('the handle the agent named it by finds it', async () => {
       const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
       registerPanelTool(tool);
