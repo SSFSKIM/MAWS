@@ -54,18 +54,29 @@ const MODEL = process.env.MAWS_LIVE_DOCUMENT_MODEL ?? 'haiku';
 const TURN_MS = 300_000;
 const TITLE = 'Scale 200 live';
 const SECTIONS = 160; // about 200 pages (e2e/document-scale.spec.ts)
-const BLOCK = 's0first'; // the seed's first block, "Start."
+const BLOCK = 's0first'; // the seed's first block, "Start." plus whatever its seeded human typed into it (read at the run)
 const OTHER = 's0p1'; // the first section's paragraph, where the test composes
 const AGENT_NAME = 'Claude';
 const WARM = 'Start here.';
-const NEW = 'Start here: the launch moves to the following Tuesday, after the budget review, and the team meets on Monday to confirm the plan.';
+// The edit's text: long enough that the model streams it over a second or more (haiku sent a 130-character sentence in
+// three bursts inside 450 ms, the call 12 ms after the last; the sitting's edits streamed about 17 characters per 50 ms),
+// so the layer is seen growing, as the owner's edits are.
+const NEW =
+  'Start here: the launch moves to the following Tuesday, after the budget review, and the team meets on Monday to confirm the plan. ' +
+  'Design hands the final mockups to engineering on Wednesday morning, and the copy review follows in the afternoon with the whole team present. ' +
+  'Finance approves the budget by Thursday, once the vendor quotes are in and the contingency line has been checked against last quarter. ' +
+  'Marketing drafts the announcement during the week and circulates it for comments before the weekend, so nothing waits on a single reviewer. ' +
+  'The retrospective is booked for the Friday after the launch, with the notes shared the same day.';
 const STALE = 'The start was rewritten by the agent.';
 
-const PROMPTS = {
-  warm: `Call artifact_read on the document "${TITLE}" once (its first page is enough). Then make one artifact_edit call (baseRevision: the revision the read returned) with a single op: replace_text in block ${BLOCK}, old "Start." new "${WARM}". Then reply READY. Do nothing else.`,
-  edit: `Make exactly ONE artifact_edit call on the document "${TITLE}" and nothing else (do not read the document first; baseRevision is the revision your last artifact_edit returned) with a single op: replace_text in block ${BLOCK}, old "${WARM}" new "${NEW}". Reply DONE when the call succeeds.`,
-  stale: `Without reading the document again, make exactly ONE artifact_edit call on "${TITLE}" (baseRevision: the revision your last artifact_edit returned) with a single op: replace_block of block ${BLOCK} with markdown "${STALE}". If the call is refused, do not retry, do not read, make no other call: reply REFUSED followed by the refusal's reason.`,
-} as const;
+// The prompts over the document's id (the owner created it, so the test knows it; a title with spaces is not a ref, and
+// haiku once refused rather than list) and the first block's text as the seed left it (its human edits type " edited"
+// into random paragraphs, so the quote the warm-up replaces is read from the page, never assumed).
+const promptsFor = (artifactId: string, start: string) => ({
+  warm: `Call artifact_read once on the document whose artifact id is ${artifactId} (pass exactly that id as "artifact"; its first page is enough). Then make one artifact_edit call on it (baseRevision: the revision the read returned) with a single op: replace_text in block ${BLOCK}, old "${start}" new "${WARM}". Then reply READY. Do nothing else.`,
+  edit: `Make exactly ONE artifact_edit call on the document whose artifact id is ${artifactId} and nothing else (do not read the document first; baseRevision is the revision your last artifact_edit returned) with a single op: replace_text in block ${BLOCK}, old "${WARM}" new "${NEW}". Reply DONE when the call succeeds.`,
+  stale: `Without reading the document again, make exactly ONE artifact_edit call on the document whose artifact id is ${artifactId} (baseRevision: the revision your last artifact_edit returned) with a single op: replace_block of block ${BLOCK} with markdown "${STALE}". If the call is refused, do not retry, do not read, make no other call: reply REFUSED followed by the refusal's reason.`,
+});
 
 // ---- the owner file (A-15), the engine, the evidence (as e2e/document-live.spec.ts) -----------------------------------
 
@@ -181,6 +192,8 @@ interface Call {
   answeredAt: number | null; // the `control_response` row's `at`
   firstDeltaAt: number | null; // the first non-empty `input_json_delta` of the call's block
   deltas: number;
+  raw: string; // the input as streamed, the deltas concatenated
+  deltaEnds: { at: number; length: number }[]; // each non-empty delta's `at` and the input's length once it arrived
 }
 type Row = JournalRow & { frame: Record<string, unknown> };
 // The `maws` calls of the session so far, each with its stream's first delta (the tool_use block whose id the call's
@@ -195,6 +208,8 @@ function calls(s: Live): Call[] {
     const answer = rows.find((r) => r.direction === 'out' && r.frame.type === 'control_response' && (r.frame.response as { request_id?: string } | undefined)?.request_id === call.requestId);
     let firstDelta: JournalRow | undefined;
     let deltas = 0;
+    let raw = '';
+    const deltaEnds: { at: number; length: number }[] = [];
     if (toolUseId) {
       const start = rows.find((r) => r.direction === 'in' && r.frame.type === 'stream_event' && (r.frame.event as { type?: string; content_block?: { id?: string } }).type === 'content_block_start' && (r.frame.event as { content_block?: { id?: string } }).content_block?.id === toolUseId);
       const index = (start?.frame.event as { index?: number } | undefined)?.index;
@@ -207,12 +222,20 @@ function calls(s: Live): Call[] {
           if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && (event.delta.partial_json ?? '') !== '') {
             deltas += 1;
             firstDelta ??= r;
+            raw += event.delta.partial_json;
+            deltaEnds.push({ at: Date.parse(r.at), length: raw.length });
           }
         }
       }
     }
-    return { name: call.name, args: call.args, toolUseId, result: mcpResultOf(rows, call.requestId), requestedAt: at(request), answeredAt: at(answer), firstDeltaAt: at(firstDelta), deltas };
+    return { name: call.name, args: call.args, toolUseId, result: mcpResultOf(rows, call.requestId), requestedAt: at(request), answeredAt: at(answer), firstDeltaAt: at(firstDelta), deltas, raw, deltaEnds };
   });
+}
+// The `at` of the delta that completed `needle` in the call's streamed input (the first the input holds it whole after), or null.
+function deltaCompleting(call: Call, needle: string): number | null {
+  const end = call.raw.indexOf(needle);
+  if (end < 0) return null;
+  return call.deltaEnds.find((delta) => delta.length >= end + needle.length)?.at ?? null;
 }
 const json = (result: McpResult) => JSON.parse(resultText(result)) as Record<string, unknown>;
 
@@ -269,10 +292,16 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
   const sc = scratch();
   note(`P4-A2 document provisional live run (§5 A2's acceptance), ${new Date().toISOString()}`);
   note(`engine: ${engine.bin.replace(homedir(), '~')} (${engine.version}), unmodified, through the relay ${RELAY_URL}; model ${MODEL}; default permission mode; cap US$${CAP_USD}`);
-  note(`app: the product build (MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config}; the host's perf seam (MAWS_DOCUMENT_PERF=1) for the seed only`);
+  note(`app: the product build (MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config}; the host's perf seam (MAWS_DOCUMENT_PERF=1) for the seed only; CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1 as the owner's shell exports it`);
   note(`A-15 before the launch: ${before.keys.length} keys, sha1 ${before.digest}`);
 
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_DOCUMENT_PERF: '1' } });
+  // The owner's shell exports CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1, which MAWS passes to the engine (the
+  // `CLAUDE_` prefix of launch.ts's allowlist) and which Claude Desktop sets itself (research/p4-edit-speed-grounding.md
+  // §1.4): the API then streams a tool input's text as it is written. Without it the API emits a string value only once
+  // it closes, so a 790-character edit arrived in one 5 ms burst 7 ms before the `tools/call` (this spec's run of
+  // 2026-10-20 00:59Z, journal kept under /tmp): nothing to see as it is written. The scratch shell home exports
+  // nothing, so the run sets it as the owner's shell does (P1 §15: the live run stands for what the owner runs).
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_DOCUMENT_PERF: '1', CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING: '1' } });
   let live: Live | null = null;
   let completed = false;
   try {
@@ -308,7 +337,10 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
     const editor = record.locator('.ds-doc .ProseMirror[data-editor="live"]');
     await expect(editor).toBeVisible({ timeout: 30_000 });
-    await expect(editor.locator(`[data-id="${BLOCK}"]`)).toHaveText('Start.', { timeout: 30_000 });
+    await expect(editor.locator(`[data-id="${BLOCK}"]`)).toContainText('Start.', { timeout: 30_000 });
+    const start = ((await editor.locator(`[data-id="${BLOCK}"]`).textContent()) ?? '').trim(); // no cursor label yet: no agent has joined
+    const PROMPTS = promptsFor(artifact.id, start);
+    note(`the first block ${BLOCK} reads ${JSON.stringify(start)} as seeded`);
     const seen = await recordDrawing(page, `[data-region="panel"] [data-artifact-record="${artifact.id}"] .ds-doc .ProseMirror[data-editor="live"]`);
 
     const spec = { ...launchDefaults(id as AppSessionId, sc.repo), model: MODEL, permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
@@ -367,12 +399,16 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     const firstPresence = samples.find((smp) => smp.outlines.includes(AGENT_NAME));
     const firstLayer = samples.find((smp) => smp.provisional.some((p) => p.id === call.toolUseId));
     const texts = [...new Set(samples.flatMap((smp) => smp.provisional.filter((p) => p.id === call.toolUseId && p.op === 'replace_text').map((p) => p.text)))];
+    const targetNamedAt = deltaCompleting(call, `"${BLOCK}"`); // the delta that named the target block
     const timeline = {
-      toolUseId: call.toolUseId, deltas: call.deltas,
+      toolUseId: call.toolUseId, deltas: call.deltas, streamedChars: call.raw.length,
       firstDeltaAt: call.firstDeltaAt, requestedAt: call.requestedAt, answeredAt: call.answeredAt,
+      targetNamedAt,
       presenceAfterFirstDeltaMs: firstPresence && call.firstDeltaAt !== null ? firstPresence.at - call.firstDeltaAt : null,
+      presenceAfterTargetNamedMs: firstPresence && targetNamedAt !== null ? firstPresence.at - targetNamedAt : null,
       layerAfterFirstDeltaMs: firstLayer && call.firstDeltaAt !== null ? firstLayer.at - call.firstDeltaAt : null,
       layerBeforeCallMs: firstLayer && call.requestedAt !== null ? call.requestedAt - firstLayer.at : null,
+      layerBeforeAnswerMs: firstLayer && call.answeredAt !== null ? call.answeredAt - firstLayer.at : null,
       textsDrawn: texts.length, lastText: texts.at(-1) ?? null,
     };
     note(`turn 2: the call ${JSON.stringify({ args: call.args, toolUseId: call.toolUseId })} answered → revision ${edited.revision}; reply ${JSON.stringify(reply2)}; composed ${words} words: ${JSON.stringify(typed)}`);
@@ -380,14 +416,20 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     test.info().annotations.push({ type: 'provisional live timeline', description: JSON.stringify(timeline) });
     expect(call.firstDeltaAt, 'the call streamed deltas').not.toBeNull();
     expect(call.deltas, 'several deltas').toBeGreaterThan(1);
-    await test.step('G1: presence within one delta of the call’s start, before the call reached MAWS', () => {
+    // Presence is published on the host from the tick in which the call's `artifact` parses, but the editor draws it as
+    // the outline of the blocks it names (D11), so the first visible presence follows the delta that named the target:
+    // within a second of it (the next delta came about 50 ms later at the sitting; the tick, the awareness relay and the
+    // page's walk of 1,455 blocks add the rest), and before the call completes.
+    await test.step('G1: presence within one delta of the call’s start, before the call completes', () => {
       expect(firstPresence, `the agent's outline was drawn; the turn's first samples ${JSON.stringify(samples.slice(0, 4))}`).toBeDefined();
-      expect(firstPresence!.at - call.firstDeltaAt!, 'presence within 1 s of the first delta (the next delta came about 50 ms later at the sitting; the relay and the page add the rest)').toBeLessThanOrEqual(1_000);
-      expect(firstPresence!.at, 'presence before the tools/call reached MAWS').toBeLessThanOrEqual(call.requestedAt!);
+      expect(targetNamedAt, 'the stream named the target block').not.toBeNull();
+      expect(firstPresence!.at - targetNamedAt!, 'presence within 1 s of the delta that named the target').toBeLessThanOrEqual(1_000);
+      expect(firstPresence!.at, 'presence before the call completed').toBeLessThanOrEqual(call.answeredAt!);
     });
-    await test.step('G2: the provisional text at the target block before the call ran, growing as it streamed', () => {
+    await test.step('G2: the provisional text at the target block before the call completes, growing as it streamed', () => {
       expect(firstLayer, 'the layer was drawn').toBeDefined();
-      expect(firstLayer!.at, 'the layer before the tools/call reached MAWS').toBeLessThanOrEqual(call.requestedAt!);
+      expect(firstLayer!.at, 'the layer before the call completed').toBeLessThanOrEqual(call.answeredAt!);
+      expect(firstLayer!.at, 'the layer before the tools/call reached MAWS (the text streams for a second or more)').toBeLessThanOrEqual(call.requestedAt!);
       expect(firstLayer!.provisional.find((p) => p.id === call.toolUseId)!.inBlock).toBe(BLOCK);
       expect(texts.length, `several lengths of the text were drawn: ${JSON.stringify(texts)}`).toBeGreaterThan(1);
       expect(texts.every((t) => NEW.startsWith(t))).toBe(true);
