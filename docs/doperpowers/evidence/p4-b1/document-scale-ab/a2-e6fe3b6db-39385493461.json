@@ -1,0 +1,639 @@
+{
+  "run": "2026-10-20T07:26:51.065Z",
+  "seed": {
+    "large": {
+      "sections": 160,
+      "topBlocks": 1455,
+      "paragraphs": 2184,
+      "words": 102944,
+      "typed": 42000,
+      "deleted": 404,
+      "formatted": 276,
+      "v2Bytes": 1067306,
+      "ms": 700
+    },
+    "small": {
+      "sections": 16,
+      "topBlocks": 145,
+      "paragraphs": 214,
+      "words": 10271,
+      "typed": 4200,
+      "deleted": 42,
+      "formatted": 28,
+      "v2Bytes": 105994,
+      "ms": 38
+    }
+  },
+  "heap": {
+    "idle0": 21.9,
+    "idleWarmAfterUnload": 24.3
+  },
+  "rows": [
+    {
+      "row": "6 20p cold",
+      "measure": "first sync to interactive, 20 pages, cold (press → frame after the blocks are drawn)",
+      "bound": "≤ 200 ms",
+      "limit": 200,
+      "value": 173.5,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.08,
+      "note": "145 blocks; to the frame 157.8 ms"
+    },
+    {
+      "row": "6 20p warm",
+      "measure": "first sync to interactive, 20 pages, warm",
+      "bound": "≤ 200 ms",
+      "limit": 200,
+      "value": 77.4,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.08,
+      "note": "to the frame 75.5 ms"
+    },
+    {
+      "row": "6 200p cold",
+      "measure": "first sync to interactive, 200 pages, cold",
+      "bound": "≤ 1,000 ms",
+      "limit": 1000,
+      "value": 421.5,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.08,
+      "note": "1455 blocks; to the frame 401.0 ms"
+    },
+    {
+      "row": "6 200p warm",
+      "measure": "first sync to interactive, 200 pages, warm",
+      "bound": "≤ 1,000 ms",
+      "limit": 1000,
+      "value": 365.8,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.08,
+      "note": "to the frame 363.6 ms"
+    },
+    {
+      "row": "6 200p window B",
+      "measure": "first sync to interactive, 200 pages, a second window (host warm)",
+      "bound": "≤ 1,000 ms",
+      "limit": 1000,
+      "value": 263.7,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.08
+    },
+    {
+      "row": "read idle 1",
+      "measure": "the 200-block read, perf-agent-1's first (its replica made), host loop max over the call",
+      "bound": "recorded (36–44 ms headless, Decision Log 34)",
+      "limit": null,
+      "value": 106.95,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.15,
+      "note": "wall 102.9 ms"
+    },
+    {
+      "row": "5 first after read 1",
+      "measure": "the first batch after a read: perf-agent-1's five ops right after its 200-block read, on the replica that read made (sections 0 to 20), host loop max over the call",
+      "bound": "≤ 50 ms (Decision Log 20, 37)",
+      "limit": 50,
+      "value": 50.63,
+      "unit": "ms",
+      "pass": false,
+      "verdict": "failed",
+      "load": 2.15,
+      "note": "wall 60.0 ms; ops replace_text, replace_block, insert, set_cell, replace_text"
+    },
+    {
+      "row": "read idle 2",
+      "measure": "the 200-block read, perf-agent-2's first (its replica made), host loop max over the call",
+      "bound": "recorded (36–44 ms headless, Decision Log 34)",
+      "limit": null,
+      "value": 74.84,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.15,
+      "note": "wall 70.8 ms"
+    },
+    {
+      "row": "5 first after read 2",
+      "measure": "the first batch after a read: perf-agent-2's five ops right after its 200-block read, on the replica that read made (sections 0 to 20), host loop max over the call",
+      "bound": "≤ 50 ms (Decision Log 20, 37)",
+      "limit": 50,
+      "value": 39.84,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.15,
+      "note": "wall 49.0 ms; ops replace_text, replace_block, insert, set_cell, replace_text"
+    },
+    {
+      "row": "1 p95",
+      "measure": "keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)",
+      "bound": "p95 ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16)",
+      "limit": 20,
+      "value": 22.9,
+      "unit": "ms",
+      "pass": false,
+      "verdict": "failed",
+      "load": 2.07,
+      "note": "300 keystrokes (0 without a transaction); agents: perf-agent-1 31 batches, 0 refused; perf-agent-2 34 batches, 0 refused"
+    },
+    {
+      "row": "1 max",
+      "measure": "keystroke → frame in A, max",
+      "bound": "max ≤ 50 ms",
+      "limit": 50,
+      "value": 36.5,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07,
+      "note": "p50 14.4"
+    },
+    {
+      "row": "2 p95",
+      "measure": "keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)",
+      "bound": "p95 ≤ 50 ms",
+      "limit": 50,
+      "value": 56,
+      "unit": "ms",
+      "pass": false,
+      "verdict": "failed",
+      "load": 2.07,
+      "note": "300 keydowns reported at ≥ 16 ms; max 72"
+    },
+    {
+      "row": "3 p95",
+      "measure": "keystroke → durable ack, p95 (every keystroke counted)",
+      "bound": "p95 ≤ 100 ms",
+      "limit": 100,
+      "value": 32.1,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07,
+      "note": "300 of 300 acked; drained 1576 ms; p50 17.8, max 56.5"
+    },
+    {
+      "row": "4 p95",
+      "measure": "keystroke painted in window B, p95 (every keystroke counted)",
+      "bound": "p95 ≤ 100 ms",
+      "limit": 100,
+      "value": 42.5,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07,
+      "note": "300 of 300 painted; p50 23.8, max 65.1"
+    },
+    {
+      "row": "5 p99",
+      "measure": "host event-loop delay over the run (A’s testLoopDelay: the whole gaps of its own 10 ms timer), p99, documents live with the writer’s batches",
+      "bound": "p99 ≤ 50 ms",
+      "limit": 50,
+      "value": 18.81,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07
+    },
+    {
+      "row": "5 max",
+      "measure": "host event-loop delay over the run, max",
+      "bound": "max ≤ 100 ms",
+      "limit": 100,
+      "value": 66.85,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07
+    },
+    {
+      "row": "5 batch max",
+      "measure": "an agent batch of five ops in the steady state (replicas fully read, typing and the other agent running): the host loop’s max over each batch",
+      "bound": "≤ 50 ms (Decision Log 37)",
+      "limit": 50,
+      "value": 22.71,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07,
+      "note": "63 batches; loop max p95 19.5; call wall p95 29.9 ms"
+    },
+    {
+      "row": "5 max (gaps)",
+      "measure": "host loop over the run measured by the seam’s 1 ms tick gaps (beside A’s 10 ms testLoopDelay), max",
+      "bound": "max ≤ 100 ms",
+      "limit": 100,
+      "value": 63.98,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07,
+      "note": "p99 5.9 ms"
+    },
+    {
+      "row": "read load 1",
+      "measure": "the 200-block read under load (perf-agent-1, typing and the other agent running), host loop max over the call",
+      "bound": "held to row 5’s max ≤ 100 ms",
+      "limit": 100,
+      "value": 28.26,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07,
+      "note": "wall 25.5 ms"
+    },
+    {
+      "row": "read load 2",
+      "measure": "the 200-block read under load (perf-agent-2, typing and the other agent running), host loop max over the call",
+      "bound": "held to row 5’s max ≤ 100 ms",
+      "limit": 100,
+      "value": 19.71,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.07,
+      "note": "wall 25.5 ms"
+    },
+    {
+      "row": "10 exact",
+      "measure": "IME under load: the composed Korean exact in the block the agent edits (reps exact of 3)",
+      "bound": "exact 3 of 3",
+      "limit": null,
+      "value": 3,
+      "unit": "of 3",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.12,
+      "note": "agent edits into the block 38; agents: perf-agent-1 69 batches, 0 refused; perf-agent-2 72 batches, 0 refused"
+    },
+    {
+      "row": "10 input p95",
+      "measure": "IME under load: composition input → frame, p95",
+      "bound": "p95 ≤ 16 ms",
+      "limit": 16,
+      "value": 15.8,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.12,
+      "note": "n 156, max 44"
+    },
+    {
+      "row": "10 flush",
+      "measure": "IME under load: the hold’s flush, longest (merged into one update per run)",
+      "bound": "≤ 50 ms (no long task)",
+      "limit": 50,
+      "value": 31.2,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.12,
+      "note": "24 holds, 24 flushed a buffer (frames 2, 1, 2, 2, 3, 1, 2, 3, 4, 5, 2, 1, 5, 3, 2, 2, 7, 1, 2, 2, 4, 3, 3, 9; doc updates applied per flush 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)"
+    },
+    {
+      "row": "10 cap",
+      "measure": "IME under load: the 5 s cap fired",
+      "bound": "never (0)",
+      "limit": 0,
+      "value": 0,
+      "unit": "holds",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.12,
+      "note": "no provider log line"
+    },
+    {
+      "row": "7 enter 1",
+      "measure": "history preview enter (press → the preview editor bound and drawn and the bar’s change count drawn, the extra render included → frame after), preview 1",
+      "bound": "≤ 1,200 ms per preview (mini 890.8 to 1,126.8; MacBook target 1,000)",
+      "limit": 1200,
+      "value": 920.6,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.12
+    },
+    {
+      "row": "7 leave 1",
+      "measure": "history preview leave, preview 1",
+      "bound": "≤ 500 ms",
+      "limit": 500,
+      "value": 115.9,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.12
+    },
+    {
+      "row": "7 enter 2",
+      "measure": "history preview enter (press → the preview editor bound and drawn and the bar’s change count drawn, the extra render included → frame after), preview 2",
+      "bound": "≤ 1,200 ms per preview (mini 890.8 to 1,126.8; MacBook target 1,000)",
+      "limit": 1200,
+      "value": 971.6,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.11
+    },
+    {
+      "row": "7 leave 2",
+      "measure": "history preview leave, preview 2",
+      "bound": "≤ 500 ms",
+      "limit": 500,
+      "value": 112.4,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.11
+    },
+    {
+      "row": "7 enter 3",
+      "measure": "history preview enter (press → the preview editor bound and drawn and the bar’s change count drawn, the extra render included → frame after), preview 3",
+      "bound": "≤ 1,200 ms per preview (mini 890.8 to 1,126.8; MacBook target 1,000)",
+      "limit": 1200,
+      "value": 931,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.11
+    },
+    {
+      "row": "7 leave 3",
+      "measure": "history preview leave, preview 3",
+      "bound": "≤ 500 ms",
+      "limit": 500,
+      "value": 111.9,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.11
+    },
+    {
+      "row": "8 renderer 2",
+      "measure": "renderer working set just after three previews, before a forced collection (window 2)",
+      "bound": "recorded; the ≤ 600 MB bound (Decision Log 109) reads after a forced collection (Decision Log 44)",
+      "limit": null,
+      "value": 703.6,
+      "unit": "MB",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.11,
+      "note": "476.8 MB right after the forced collection"
+    },
+    {
+      "row": "8 renderer 1",
+      "measure": "renderer working set just after three previews, before a forced collection (window 1)",
+      "bound": "recorded; the ≤ 600 MB bound (Decision Log 109) reads after a forced collection (Decision Log 44)",
+      "limit": null,
+      "value": 1141.3,
+      "unit": "MB",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.11,
+      "note": "527.5 MB right after the forced collection"
+    },
+    {
+      "row": "8 host loaded",
+      "measure": "host heap delta with the 200-page document open in two windows and two agent replicas (from the warm idle)",
+      "bound": "≤ +100 MB",
+      "limit": 100,
+      "value": 67.3,
+      "unit": "MB",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.11,
+      "note": "idle 24.3 → 91.6 MB; host working set network.mojom.NetworkService 47.3, node.mojom.NodeService 383.4, node.mojom.NodeService 92.2 MB"
+    },
+    {
+      "row": "8 renderer collected 2",
+      "measure": "renderer working set once the previews' garbage is collected (window 2; a forced collection)",
+      "bound": "≤ 600 MB (mini 480.5 and 519.7, about 8% run variance; MacBook 412 to 469, target 500)",
+      "limit": 600,
+      "value": 476.8,
+      "unit": "MB",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.11
+    },
+    {
+      "row": "8 renderer collected 1",
+      "measure": "renderer working set once the previews' garbage is collected (window 1; a forced collection)",
+      "bound": "≤ 600 MB (mini 480.5 and 519.7, about 8% run variance; MacBook 412 to 469, target 500)",
+      "limit": 600,
+      "value": 527.5,
+      "unit": "MB",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.11
+    },
+    {
+      "row": "8 host after close",
+      "measure": "host heap after close and unload, from the warm idle (its modules loaded by one read, the documents unloaded)",
+      "bound": "within 5 MB of idle",
+      "limit": 5,
+      "value": 3.3,
+      "unit": "MB",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.39,
+      "note": "idle 24.3 (at launch 21.9) → 27.6 MB"
+    },
+    {
+      "row": "11 acked lost",
+      "measure": "host SIGKILL under load: acknowledged edits lost (keystrokes acked before the kill; agent batches acked before it)",
+      "bound": "0",
+      "limit": 0,
+      "value": 0,
+      "unit": "edits",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.83,
+      "note": "43 keystrokes acked of 44 typed before the kill, 104 typed in all, all in the host after; 7 acked agent inserts before the kill (3 deleted by the agent's own later batches), 0 missing"
+    },
+    {
+      "row": "11 fork → live",
+      "measure": "host SIGKILL: re-fork → every replica live: both windows’ (live and synced) and both agents’ (their first read after the re-fork answered)",
+      "bound": "≤ 1,000 ms",
+      "limit": 1000,
+      "value": 611,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.83,
+      "note": "kill → re-fork 567 ms (the supervisor’s restart delay); kill → all live 1178 ms; from the re-fork: windows 611, 589 ms, agents 422, 595 ms"
+    }
+  ],
+  "windows": {
+    "A": {
+      "state": "visible",
+      "fps": 61
+    },
+    "B": {
+      "state": "visible",
+      "fps": 55
+    }
+  },
+  "steady": {
+    "loads": {
+      "launched": 2.98,
+      "steadyStart": 2.15,
+      "steadyEnd": 2.07
+    },
+    "typing": {
+      "keystrokes": 300,
+      "noTransaction": 0,
+      "frame": {
+        "n": 300,
+        "p50": 14.4,
+        "p95": 22.9,
+        "p99": 27.7,
+        "max": 36.5
+      },
+      "postPaint": {
+        "n": 300,
+        "p50": 16,
+        "p95": 27.1,
+        "p99": 37.1,
+        "max": 50.3
+      },
+      "presented": {
+        "n": 300,
+        "p50": 40,
+        "p95": 56,
+        "p99": 64,
+        "max": 72
+      },
+      "presentedReported": 300,
+      "ack": {
+        "n": 300,
+        "p50": 17.8,
+        "p95": 32.1,
+        "p99": 52.4,
+        "max": 56.5
+      },
+      "acked": 300,
+      "longTasks": {
+        "n": 0,
+        "max": 0
+      }
+    },
+    "painted": {
+      "n": 300,
+      "p50": 23.8,
+      "p95": 42.5,
+      "p99": 58.6,
+      "max": 65.1
+    },
+    "paintedKeys": 300,
+    "drain": {
+      "end": 116754.59999999963,
+      "waitedMs": 1576
+    },
+    "loop": {
+      "p50": 10.280959,
+      "p99": 18.808831,
+      "max": 66.846719,
+      "mean": 10.559090859315589
+    },
+    "agents": [
+      {
+        "session": "perf-agent-1",
+        "applied": 31,
+        "refused": []
+      },
+      {
+        "session": "perf-agent-2",
+        "applied": 34,
+        "refused": []
+      }
+    ]
+  },
+  "memoryAfterPreviews": {
+    "renderers": [
+      {
+        "windowId": 2,
+        "pid": 36748,
+        "workingSetMB": 703.6
+      },
+      {
+        "windowId": 1,
+        "pid": 35465,
+        "workingSetMB": 1141.3
+      }
+    ],
+    "utility": [
+      {
+        "pid": 35434,
+        "name": "network.mojom.NetworkService",
+        "workingSetMB": 47.3
+      },
+      {
+        "pid": 35489,
+        "name": "node.mojom.NodeService",
+        "workingSetMB": 383.4
+      },
+      {
+        "pid": 35490,
+        "name": "node.mojom.NodeService",
+        "workingSetMB": 92.2
+      }
+    ],
+    "jsHeapA": 157.8,
+    "jsHeapB": 82.9,
+    "afterCollection": {
+      "renderers": [
+        {
+          "windowId": 2,
+          "pid": 36748,
+          "workingSetMB": 476.8
+        },
+        {
+          "windowId": 1,
+          "pid": 35465,
+          "workingSetMB": 527.5
+        }
+      ],
+      "utility": [
+        {
+          "pid": 35434,
+          "name": "network.mojom.NetworkService",
+          "workingSetMB": 47.3
+        },
+        {
+          "pid": 35489,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 383.4
+        },
+        {
+          "pid": 35490,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 92.2
+        }
+      ],
+      "jsHeapA": 71.7,
+      "jsHeapB": 54
+    }
+  },
+  "loads": {
+    "launched": 2.98,
+    "steadyStart": 2.15,
+    "steadyEnd": 2.07
+  },
+  "marginal": [],
+  "sigkill": {
+    "load": 1.83
+  },
+  "marginalSigkill": []
+}

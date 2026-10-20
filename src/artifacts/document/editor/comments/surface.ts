@@ -42,6 +42,10 @@ export interface CommentOverlayProps {
   discard(threadId: string): void;
   /** Gives the editor the focus back (after the card went). */
   focus(): void;
+  /** P4-B1: the thread the surface's card is on, as it changes (null when none): the margin hosts the card in that thread's entry. */
+  hosting?(threadId: string | null): void;
+  /** P4-B1: `margin` when the overlay is drawn inside the margin's stack (in flow, the column's width); absent over the frame. */
+  placement?: 'margin';
 }
 
 export interface DocumentComments {
@@ -49,6 +53,10 @@ export interface DocumentComments {
   opened(passage: CommentedPassage): void;
   /** What to draw over the page's scroll box, filling it (P2's card host); called on each of the overlay's renders. */
   overlay(props: CommentOverlayProps): ReactNode;
+  /** P4-B1 (C7, X36's one draft per artifact): the thread whose card holds an unsent draft, or null. */
+  draft?(): string | null;
+  /** P4-B1: puts the keyboard in that draft's field. */
+  focusDraft?(): void;
 }
 
 /** Who writes the editor's thread changes, and when. */

@@ -1,7 +1,7 @@
 // The comment form's logic, shared by its two presentations (P2-E1 document, D5): E3's sheet and P2-E1's card call this
 // one hook, so their phases and sends cannot drift. The form takes a comment, a destination (Side thread by default;
-// Send to main while the parent is ready or, P2-A, the Send can start it) and a producer's screenshot the person may remove; Enter sends,
-// Shift+Enter breaks a line, an input method's composition keeps its Enter. While a side thread starts the form is
+// Send to main while the parent is ready or, P2-A, the Send can start it) and a producer's screenshot the person may remove; Enter sends
+// (P4-B1: ⌘Enter too), Shift+Enter breaks a line, an input method's composition keeps its Enter. While a side thread starts the form is
 // disabled; a refusal stays in the form with Retry and, while Send to main is offered, Send to main instead; a refusal arriving
 // after the presentation went (closed or replaced: `gone`) is a toast, so the comment is never lost unseen.
 import { useState, type KeyboardEvent } from 'react';
@@ -34,11 +34,12 @@ export interface CommentFormInput {
   // whether the send went, whether or not the presentation is still there (a document keeps the thread the comment names)
   onSending?: (sending: { text: string; destination: CommentDestination }) => (went: boolean) => void;
   destination?: CommentDestination; // P3-F1: the one the form starts on (CommentContext's), Side thread when absent
+  text?: string; // P4-B1: the text the form starts with (a remounted card's kept draft), empty when absent
 }
 
-export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending, destination: initial }: CommentFormInput) { // P3-F1: initial
+export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending, destination: initial, text: initialText }: CommentFormInput) { // P3-F1: initial; P4-B1: initialText
   const status = useSessions((s) => s.engine.get(parent) ?? null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText ?? ''); // P4-B1: initialText
   const [destination, setDestination] = useState<CommentDestination>(initial ?? 'thread'); // P3-F1: initial
   const [screenshot, setScreenshot] = useState<AnchorScreenshot | null>(anchor.screenshot ?? null);
   const [phase, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
@@ -91,7 +92,8 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    // P4-B1 (C3): ⌘Enter (Ctrl+Enter) posts beside Enter, a Shift held with it or not
+    if (event.key !== 'Enter' || (event.shiftKey && !event.metaKey && !event.ctrlKey) || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void send(destination);
   };

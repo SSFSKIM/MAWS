@@ -84,6 +84,13 @@ export const ACTIONS = {
   // P2-C end
   // P3-G (§D4.4): Mark up over the selected panel tab's surface, as the panel header's button does; unbound by default
   'markup.start':            { title: 'Mark up',                  chord: null,           sink: 'renderer', menu: null, scope: 'app' },
+  // P4-B1 start (2026-10-20; the P4 spec §4.3, Docs' View › Comments): every document's comment view, per user
+  // (settings.artifacts.commentsView): Expand draws the cards in the margin, Minimize the icons at the anchors, Hide an
+  // empty margin. Three flat items (the table has no submenu or checked state); unbound by default
+  'comments.expand':         { title: 'Expand comments',          chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  'comments.minimize':       { title: 'Minimize comments',        chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  'comments.hide':           { title: 'Hide comments',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  // P4-B1 end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;

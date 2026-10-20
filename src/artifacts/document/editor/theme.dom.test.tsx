@@ -10,6 +10,7 @@ import { AUTHOR_COLORS } from '@shared/artifacts/actor';
 import { schemaFor } from '../schema';
 import tokensCss from '../../../renderer/src/styles/tokens.css?raw';
 import chromeCss from './chrome.css?raw';
+import commentsCss from '../../comments/comments.css?raw'; // P4-B1: X36's card, drawn in the panel
 import { DocumentEditor } from './DocumentEditor';
 import themeCss from './theme.css?raw';
 import type { DocumentHandle } from './host-types';
@@ -63,6 +64,7 @@ describe('the stylesheets', () => {
     for (const [name, css] of [
       ['theme.css', themeCss],
       ['chrome.css', chromeCss],
+      ['comments.css', commentsCss], // P4-B1
     ]) {
       for (const d of declarations(css)) expect(d.value, `${name} ${d.selector} { ${d.property}: ${d.value} }`).not.toMatch(LITERAL);
     }

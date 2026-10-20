@@ -309,3 +309,61 @@ describe('the docked strip', () => {
     expect(strip().className).not.toContain('overflow-hidden');
   });
 });
+
+// P4-B1 (D7 of docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md): in a document's margin the host is a block in
+// the stack's entry, not an overlay: the card in flow at the column's width, its height capped by the page's scroll box
+// (`marginCard`), never pinned, no caret, and nothing located (the margin places the entry).
+describe('the margin layout', () => {
+  const SCROLL_HEIGHT = 1000;
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains('ds-doc') ? SCROLL_HEIGHT : HOST_BOX.height;
+      },
+    });
+  });
+  afterEach(() => Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => HOST_BOX.height }));
+
+  function Entry({ locate }: { locate: CardFrame['locate'] }) {
+    return (
+      <div className="ds-doc">
+        <div data-margin-entry="t1">
+          <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="margin" accepts={() => true} frame={frameOf('k1', locate)} visible />
+        </div>
+      </div>
+    );
+  }
+  const host = () => document.querySelector<HTMLElement>('[data-card-host]')!;
+
+  it('draws the card in flow at the host’s width, capped at 60 % of the scroll box, unpinned and unlocated', async () => {
+    HOST_BOX.width = 280;
+    const locate = vi.fn(async () => HERO);
+    render(<Entry locate={locate} />);
+    expect(host().hasAttribute('data-card-margin')).toBe(true);
+    expect(host().className).toContain('relative');
+    expect(host().className).not.toContain('absolute');
+    pick();
+    await settle();
+    expect(locate).not.toHaveBeenCalled();
+    expect(card()!.dataset.placement).toBe('margin');
+    expect(card()!.className).toContain('relative');
+    expect(card()!.className).not.toMatch(/\babsolute\b/);
+    expect(card()!.className).toContain('shadow-float');
+    expect(card()!.className).not.toContain('rounded-tl-none');
+    expect(card()!.style).toMatchObject({ width: '280px', maxHeight: '600px' });
+    expect(card()!.style.left).toBe('');
+    expect(card()!.style.top).toBe('');
+    expect(document.querySelector('[data-card-caret]')).toBeNull();
+  });
+
+  it('follows the column’s width as it resizes', async () => {
+    HOST_BOX.width = 280;
+    render(<Entry locate={async () => null} />);
+    pick();
+    await settle();
+    HOST_BOX.width = 220;
+    act(() => resized?.());
+    expect(card()!.style.width).toBe('220px');
+  });
+});

@@ -17,7 +17,7 @@ import { newDoc, type Doc } from '@artifacts/yjs';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V15 } from '@shared/settings/defaults';
 import { connectLibrary, resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -92,7 +92,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
-  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V14, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V15, resolvedTheme: 'light' } });
   librarySystems = [HARBOR, HOUSE, OWNERS];
   // main's library, which the binding reads for the live systems; read again at each `library.changed`
   main = installFakeMain((name: CommandName) => (name === 'library.list' ? ok({ rows: librarySystems.map(row), counts }) : ok(null)));
@@ -160,8 +160,8 @@ function pageAccent(): string | null {
   return (sheet && /--ds-color-accent: ([^;]+);/.exec(sheet)?.[1]) ?? null;
 }
 const drawn = (accent: string, what: string) => until(() => page() !== null && pageAccent() === accent, what);
-const setDefaults = (artifacts: { defaultDesignSystem: string | null; spaceDesignSystems: Record<string, string> }) =>
-  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V14, artifacts }, resolvedTheme: 'light' } }));
+const setDefaults = (artifacts: { defaultDesignSystem: string | null; spaceDesignSystems: Record<string, string>; commentsView: 'expand' | 'minimize' | 'hide' /* P4-B1 */ }) =>
+  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V15, artifacts }, resolvedTheme: 'light' } }));
 
 describe('B’s document page under D’s scope', () => {
   it('draws the page in its own system’s tokens, the page element inside D’s scope', async () => {
@@ -174,15 +174,15 @@ describe('B’s document page under D’s scope', () => {
     const house = houseSource(HOUSE);
     mount({ spaceId: SPACE }, house);
     await drawn(ACCENT[HOUSE], 'the house system, with no default');
-    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: {} });
+    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ });
     await drawn(ACCENT[OWNERS], 'the owner’s default');
-    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: { [SPACE]: HARBOR } });
+    setDefaults({ defaultDesignSystem: OWNERS, spaceDesignSystems: { [SPACE]: HARBOR }, commentsView: 'expand' /* P4-B1 */ });
     await drawn(ACCENT[HARBOR], 'the Space’s default, before the owner’s');
     // the Space's system deleted: the library no longer lists it, and the chain skips it to the owner's default
     librarySystems = [HOUSE, OWNERS];
     act(() => main.emit('library.changed', { revision: 2 }));
     await drawn(ACCENT[OWNERS], 'the owner’s default once the Space’s system is gone');
-    setDefaults({ defaultDesignSystem: null, spaceDesignSystems: { [SPACE]: HARBOR } });
+    setDefaults({ defaultDesignSystem: null, spaceDesignSystems: { [SPACE]: HARBOR }, commentsView: 'expand' /* P4-B1 */ });
     await drawn(ACCENT[HOUSE], 'the house system once no default is live');
     // the house system deleted with none to follow it: the bundled floor
     act(() => house.set(null));
