@@ -34,6 +34,7 @@ import { RELAY_URL } from '../src/engine-host/launch';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { relaySkipReason } from '../test/support/relay-health';
 import { assertConfigHomeSafe } from '../test/live/support/live';
+import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { a15DeltaText, compareA15 } from '../test/support/owner-file';
 import { journal, processCost } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
@@ -630,6 +631,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     const markdown2 = json(read2!.result!).markdown as string;
     for (const newId of newIds) expect(markdown2, `the next read shows ^${newId}`).toContain(`^${newId}`);
     note(`G7: the next read (revision ${String(json(read2!.result!).revision)}) shows the batch's ids ${JSON.stringify(newIds)}; its markdown:\n${markdown2}`);
+    note(`tool time (P4-A2, X34): ${guardToolTime(s.journalPath).line}`); // after the last turn; throws over the bound
     completed = true;
   } finally {
     if (live) {

@@ -36,6 +36,7 @@ import type { ArtifactCreateResult, ArtifactExportResult, ArtifactPublishResult 
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../test/live/support/live';
+import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
@@ -369,6 +370,7 @@ test('the agent creates a four-board design from a brief; its stale publish is r
     const errors = maws.consoleErrors();
     note(`the window's console errors: ${JSON.stringify(errors)}`);
     expect.soft(errors).toEqual([]);
+    note(`tool time (P4-A2, X34): ${guardToolTime(journalPath).line}`); // after the last turn; throws over the bound
     note('PASS: created from a brief in one create with four boards; the stale publish refused naming the board file, the element and the property, nothing landed; re-read and published whole at one revision with the owner’s other edits kept; the phone and the fitted poster exported as PNGs after the poster’s refusal, every board as a native-page PDF');
   } catch (error) {
     failure = error;

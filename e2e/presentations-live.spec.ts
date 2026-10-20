@@ -37,6 +37,7 @@ import type { ArtifactCreateResult, ArtifactExportResult, ArtifactPublishResult 
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../test/live/support/live';
+import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
@@ -372,6 +373,7 @@ test('the agent builds a deck from a brief; its stale deck-wide publish is refus
     const errors = maws.consoleErrors();
     note(`the window's console errors: ${JSON.stringify(errors)}`);
     expect.soft(errors).toEqual([]);
+    note(`tool time (P4-A2, X34): ${guardToolTime(journalPath).line}`); // after the last turn; throws over the bound
     note('PASS: built from a brief in one create; the stale deck-wide publish refused naming the slide file, the element and the property, nothing landed; re-read and published whole at one revision with the owner’s edits kept; exported as PPTX with shapes named by element ids');
   } catch (error) {
     failure = error;
