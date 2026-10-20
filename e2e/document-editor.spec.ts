@@ -304,7 +304,7 @@ test.describe('the document editor', () => {
 
     await toolbar(page, 'b').getByRole('button', { name: /^Comments/ }).click();
     const resolved = replica(page, 'b').getByRole('region', { name: 'Resolved (1)' });
-    await expect(resolved.getByRole('article')).toHaveAttribute('data-thread', threadId);
+    await expect(resolved.getByRole('group')).toHaveAttribute('data-thread', threadId); // P4-B1: X36's card is a group
     await resolved.getByRole('button', { name: 'Reopen' }).click();
     await expect(content(page, 'a').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);

@@ -15,7 +15,7 @@ import { DocumentEditor, type DocumentRail } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
-import { resetScene, resized, scene, shiftOf, stubGeometry, topOf } from './margin-test-support';
+import { resetScene, resized, scene, shiftOf, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
 import { activeThread, commentSelection } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { agentActor, findPos, now, owner as ownerActor, select } from './test-support';
@@ -30,6 +30,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  unstubGeometry();
   for (const handle of handles) handle.close();
   handles = [];
   world?.destroy();
@@ -71,8 +72,26 @@ async function mount(content: JSONContent, initial: { rail?: DocumentRail; comme
   };
   const rails: DocumentRail[] = [];
   let props = { rail: initial.rail ?? null, commentsView: initial.commentsView ?? 'expand' };
-  const element = () => <DocumentEditor artifactId="doc1" handle={handle} host={owner} onEditor={(e) => (current = e)} {...(initial.surface !== false && { comments })} rail={props.rail} onRailChange={(rail) => rails.push(rail)} commentsView={props.commentsView} onCommentsViewChange={() => {}} />;
-  const view = render(element());
+  // the host holds the rail (the tab's state): the editor's report becomes the prop, as DocumentPanel does
+  let view: ReturnType<typeof render> | null = null;
+  const element = (): JSX.Element => (
+    <DocumentEditor
+      artifactId="doc1"
+      handle={handle}
+      host={owner}
+      onEditor={(e) => (current = e)}
+      {...(initial.surface !== false && { comments })}
+      rail={props.rail}
+      onRailChange={(rail) => {
+        rails.push(rail);
+        props = { ...props, rail };
+        view?.rerender(element());
+      }}
+      commentsView={props.commentsView}
+      onCommentsViewChange={() => {}}
+    />
+  );
+  view = render(element());
   await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
   return {
     editor: () => current!,
@@ -85,7 +104,7 @@ async function mount(content: JSONContent, initial: { rail?: DocumentRail; comme
     },
     rerender: (next) => {
       props = { ...props, ...next };
-      view.rerender(element());
+      view!.rerender(element());
     },
     rails,
   };
@@ -97,6 +116,7 @@ function comment(m: Mounted, id: string, needle: string, top: number, body = `Ab
   act(() => {
     select(m.editor(), needle);
     commentSelection(m.editor(), m.handle.doc, { threadId: id, tabId: TAB, by: ownerActor, at: now(), body });
+    m.editor().commands.setActiveThread(id); // as the editor's Comment command draws the new thread
   });
 }
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80))); // use-threads' quiet moment
@@ -128,19 +148,26 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
 
   it('stacks colliding cards by the gap, the active one pinned at its anchor and shifted left, its neighbour pushed (L2, L3)', async () => {
     const m = await mount(content());
-    comment(m, 't1', 'ships quarterly', 140);
-    comment(m, 't2', 'track the budget', 150); // 10 px under t1's line: no room for t1's 60 px card
+    comment(m, 't1', 'ships quarterly', 200);
+    comment(m, 't2', 'track the budget', 210); // 10 px under t1's line: no room for t1's 60 px card between them
     await settle();
     expect(activeThread(m.editor().state)).toBe('t2'); // the last comment written is active (the editor's rule)
-    expect(topOf(entry('t2'))).toBe(50);
+    expect(topOf(entry('t2'))).toBe(110);
     expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
-    expect(topOf(entry('t1'))).toBe(50 - MARGIN_GAP_PX - scene.entryHeight); // pushed up above the active one
+    expect(topOf(entry('t1'))).toBe(110 - MARGIN_GAP_PX - scene.entryHeight); // pushed up above the active one
     act(() => void m.editor().commands.setActiveThread('t1'));
-    expect(topOf(entry('t1'))).toBe(40);
+    expect(topOf(entry('t1'))).toBe(100);
     expect(shiftOf(entry('t1'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
-    expect(topOf(entry('t2'))).toBe(40 + scene.entryHeight + MARGIN_GAP_PX); // pushed down below it
+    expect(topOf(entry('t2'))).toBe(100 + scene.entryHeight + MARGIN_GAP_PX); // pushed down below it
     expect(shiftOf(entry('t2'))).toBe(0);
     expect(margin()!.hasAttribute('data-animate')).toBe(true); // an activation animates
+    // L5: with the active one too close to the top for the card above, the card above takes the top and the active
+    // one leaves its anchor by the overshoot alone
+    scene.lines.set('t1', { top: 140, height: 20 });
+    scene.lines.set('t2', { top: 150, height: 20 });
+    act(() => void m.editor().commands.setActiveThread('t2'));
+    expect(topOf(entry('t1'))).toBe(0);
+    expect(topOf(entry('t2'))).toBe(scene.entryHeight + MARGIN_GAP_PX);
   });
 
   it('skips a zero-width first rect at a soft wrap (P6) and anchors a block thread at its block', async () => {
@@ -342,7 +369,7 @@ describe('the activation table and the keys', () => {
 
   it('the Add comment button sits at the selection head’s line while text is selected and the editor focused (C1)', async () => {
     const m = await mount(content());
-    act(() => m.editor().commands.focus());
+    act(() => m.editor().view.dom.focus());
     expect(screen.queryByRole('button', { name: 'Add comment' })).toBeNull();
     vi.spyOn(m.editor().view, 'coordsAtPos').mockReturnValue({ top: 250, bottom: 270, left: 100, right: 100 });
     act(() => void select(m.editor(), 'track the budget'));

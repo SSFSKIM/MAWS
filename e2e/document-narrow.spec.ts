@@ -267,7 +267,7 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     expect(await takesClicks(toolbar.getByRole('button', { name: /^Comments/ })), 'the rail’s toggle uncovered').toBe(true);
 
     // the thread in the drawer takes its clicks: reopened from it
-    const thread = rail.locator('article.doc-thread').first();
+    const thread = rail.locator('article[data-thread]').first(); // P4-B1: X36's card
     await expect(thread).toHaveAttribute('data-status', 'resolved');
     const reopen = thread.getByRole('button', { name: 'Reopen' });
     expect(await takesClicks(reopen)).toBe(true);

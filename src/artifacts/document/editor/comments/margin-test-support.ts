@@ -101,9 +101,28 @@ export function stubGeometry(): void {
     if (element.classList.contains('ds-doc-page')) return scene.pageWidth;
     return 0;
   };
-  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
-    return widthOf(this);
-  });
+  // happy-dom answers 0 for clientWidth: the getter is defined on both prototypes for the suite (whichever the element
+  // reads first), restored by `unstubGeometry`
+  for (const proto of PROTOS) {
+    saved.set(proto, Object.getOwnPropertyDescriptor(proto, 'clientWidth') ?? null);
+    Object.defineProperty(proto, 'clientWidth', {
+      configurable: true,
+      get(this: Element) {
+        return widthOf(this);
+      },
+    });
+  }
+}
+
+const PROTOS = [HTMLElement.prototype, Element.prototype] as unknown as Array<Record<string, unknown>>;
+const saved = new Map<Record<string, unknown>, PropertyDescriptor | null>();
+export function unstubGeometry(): void {
+  for (const proto of PROTOS) {
+    const was = saved.get(proto);
+    if (was) Object.defineProperty(proto, 'clientWidth', was);
+    else delete proto.clientWidth;
+  }
+  saved.clear();
 }
 
 /** The transform's translateY of an entry, as the layout wrote it; null when none. */

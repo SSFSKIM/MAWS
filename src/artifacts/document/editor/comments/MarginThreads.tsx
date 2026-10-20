@@ -185,6 +185,16 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
   const activeRef = useRef(active);
   entriesRef.current = entries;
   activeRef.current = active;
+  // a mounted entry's first height re-lays the stack once the commit's refs have all run (one pass for the lot)
+  const replaceQueued = useRef(false);
+  const relayoutSoon = useCallback(() => {
+    if (replaceQueued.current) return;
+    replaceQueued.current = true;
+    queueMicrotask(() => {
+      replaceQueued.current = false;
+      if (column.current) place(entriesRef.current, activeRef.current);
+    });
+  }, [place]);
   const attach = useCallback(
     (id: string) => (node: HTMLElement | null) => {
       const was = nodes.current.get(id);
@@ -194,13 +204,17 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
       }
       if (node) {
         nodes.current.set(id, node);
-        heights.current.set(id, Math.round(node.getBoundingClientRect().height));
+        const height = Math.round(node.getBoundingClientRect().height);
+        if (heights.current.get(id) !== height) {
+          heights.current.set(id, height);
+          relayoutSoon();
+        }
         const top = tops.current.get(id);
         if (top !== undefined) node.style.transform = `translateY(${top}px)`;
         resizes?.observe(node);
       }
     },
-    [resizes],
+    [resizes, relayoutSoon],
   );
 
   // a font loading re-wraps the text: every anchor moves
@@ -229,7 +243,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
   };
   const exit = () => {
     if (tier.kind === 'icons') activate(null); // the overlaid card closes; its draft is kept below
-    if (!editor.isDestroyed) editor.commands.focus(undefined, { scrollIntoView: false });
+    if (!editor.isDestroyed) editor.view.dom.focus({ preventScroll: true }); // at once (the focus command waits a frame)
   };
   // the chord's enter: the active card takes the keyboard (its reply field through R once there)
   useEffect(() => {
@@ -290,7 +304,9 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
     };
   }, [editor, onComment, hosting, layoutKey]);
 
-  if (tier.kind === 'off') return null;
+  // off (a narrow body): the column stays in the row, 0 wide and empty, so its measurements go on (the tier returns
+  // when the body widens); it is no region then
+  if (tier.kind === 'off') return <div ref={column} className="doc-margin" data-margin-tier="off" style={{ '--doc-margin-reserve': '0px' } as CSSProperties} />;
   const reserved = entries.length > 0 || hosting !== null;
   const style = {
     '--doc-margin-reserve': `${reserved ? tier.reserve : 0}px`,
@@ -329,6 +345,12 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
           </div>
         ))}
       {tier.kind === 'icons' && <IconRail entries={entries} active={active} hosting={hosting} overlay={overlay} attach={attach} card={card} onActivate={activate} editor={editor} />}
+      {/* the surface's card host stays mounted while no card is up (it claims a card as it opens and then names its thread) */}
+      {overlay && (hosting === null || !entries.some((entry) => entry.id === hosting)) && (
+        <div className="doc-margin-slot" data-margin-slot>
+          {overlay()}
+        </div>
+      )}
       {addAt !== null && onComment && (
         <button type="button" className="doc-margin-add" aria-label="Add comment" title="Add comment (⌘⌥M)" style={{ transform: `translateY(${addAt}px)` }} onMouseDown={(event) => event.preventDefault()} onClick={() => onComment()}>
           +
