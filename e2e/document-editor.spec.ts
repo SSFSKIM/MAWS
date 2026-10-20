@@ -13,9 +13,12 @@ import type { DocumentHarnessApi, Replica } from '../src/renderer/src/harness/do
 import { keystrokes, type Step } from './support/hangul';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
-// P4-B1 (LC-1 item 1): a margin card's top sits 4 px below its passage's first line box top (MARGIN_CARD_INSET_PX in
-// src/artifacts/comments/margin-layout.ts); the icon tier's dot and overlay sit on the line
+// P4-B1 (LC-1 item 1; docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): a margin entry's top sits 4 px below its
+// passage's first line box top in both tiers (MARGIN_CARD_INSET_PX in src/artifacts/comments/margin-layout.ts; Docs'
+// Minimize puts its icons at the line's top + 4.5 too), and a card sits 26 px from the page (LC-1 item 6: Docs' page
+// gutter, `--doc-margin-page-gutter`)
 const CARD_INSET_PX = 4;
+const PAGE_GUTTER_PX = 26;
 
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
 
@@ -287,7 +290,7 @@ test.describe('the document editor', () => {
     const threadId = threads[0]!.id;
 
     // P4-B1: the card is hosted in the margin's stack at the passage's first line (the two replicas side by side leave
-    // no side space, so the margin is the icon rail and the compose card sits in its overlay beside the dot); before
+    // no side space, so the margin is the icon rail and the compose card sits in its overlay over the icon); before
     // P4-B1 it was anchored 4 px under the passage over the frame
     const mark = content(page, 'a').locator(`[data-thread="${threadId}"]`).first();
     await expect(mark).toHaveText(QUOTE);
@@ -298,8 +301,8 @@ test.describe('the document editor', () => {
       const r = el.getClientRects()[0]!;
       return { left: r.left, top: r.top };
     });
-    // the stack's moves animate (200 ms), so the card is read once it has settled at the line
-    await expect.poll(async () => Math.abs((await card.boundingBox())!.y - line.top), { message: 'the compose card at the passage’s first line' }).toBeLessThanOrEqual(2);
+    // the stack's moves animate (350 ms), so the card is read once it has settled at the line
+    await expect.poll(async () => Math.abs((await card.boundingBox())!.y - line.top - CARD_INSET_PX), { message: 'the compose card at the passage’s first line' }).toBeLessThanOrEqual(2);
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
 
     await card.getByRole('button', { name: 'Resolve' }).click();
@@ -319,7 +322,7 @@ test.describe('the document editor', () => {
 
   // M4's fix wave, re-read for P4-B1's margin: in replica B a click on the passage A commented draws its thread active
   // in B's margin (the two replicas side by side leave no side space beside the page, so the margin is the icon rail
-  // and the active thread's card is overlaid beside its dot); a reply typed there lands in the thread (the host's and
+  // and the active thread's card is overlaid over its icon); a reply typed there lands in the thread (the host's and
   // A's panel); a click on plain text draws none and the overlaid card goes.
   test('a click on a highlighted passage draws its thread active in the margin, whose card takes a reply', async () => {
     const { page } = maws;
@@ -403,7 +406,14 @@ test.describe('the document editor', () => {
     const entry = (id: string) => margin.locator(`[data-margin-entry="${id}"]`);
     await expect(entry(t1)).toBeVisible();
     await expect(entry(t2)).toBeVisible();
-    expect((await pageBox()).x, 'the page moved left for the margin (N6)').toBeLessThan(centredLeft - 40);
+    // N6 as Docs (LC-1 item 6): the page and the column's reserve centre as one unit, so the page moved left by half the
+    // reserve; each card sits the page gutter from the page
+    const reserve = await margin.evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue('--doc-margin-reserve')));
+    expect(reserve, 'the margin reserved').toBeGreaterThan(0);
+    const moved = await pageBox();
+    expect(Math.abs(centredLeft - moved.x - reserve / 2), 'the page moved left by half the reserve (N6)').toBeLessThanOrEqual(1);
+    const entryLeft = async (id: string) => (await entry(id).boundingBox())!.x;
+    expect(Math.abs((await entryLeft(t1)) - (moved.x + moved.width) - PAGE_GUTTER_PX), 'the card at the page gutter').toBeLessThanOrEqual(1);
 
     // P1: each card's top at its passage's first line
     const lineTop = (id: string) => content(page, 'a').locator(`[data-thread="${id}"]`).first().evaluate((el) => el.getClientRects()[0]!.top);
@@ -414,6 +424,10 @@ test.describe('the document editor', () => {
     // the first thread active by its passage; the agent's long reply grows its card and pushes the second down (R2, R3)
     await content(page, 'a').locator(`.comment-${t1}`).click();
     await expect(entry(t1)).toHaveAttribute('data-active', '');
+    // LC-1 item 2: the active card is not shifted sideways; it is raised (the floating shadow), the inactive one flat
+    expect(Math.abs((await entryLeft(t1)) - (await entryLeft(t2))), 'the active card in the column').toBeLessThanOrEqual(1);
+    await expect(entry(t1).locator(`[data-thread="${t1}"]`)).not.toHaveCSS('box-shadow', 'none');
+    await expect(entry(t2).locator(`[data-thread="${t2}"]`)).toHaveCSS('box-shadow', 'none');
     const t2Before = await entryTop(t2);
     const h1Before = (await entry(t1).boundingBox())!.height;
     await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.agentReply(id, text), [t1, 'A reply long enough to grow the card by several lines, so the next card in the stack is pushed down while the owner keeps the first thread active.'] as const);
