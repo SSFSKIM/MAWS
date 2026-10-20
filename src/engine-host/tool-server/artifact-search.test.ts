@@ -142,6 +142,12 @@ describe('artifact_search: the snippet (acceptance 6)', () => {
 });
 
 describe('artifact_search: read (acceptance 7)', () => {
+  it('gives a document hit the snippet of the block read opens, not its neighbours’ text (Decision Log 20)', async () => {
+    await document('회의록', '지난주 목요일 회의에서 하반기 제품 로드맵을 검토했다. ^p1\n\n모바일 앱 개편은 11월로 미뤘다. ^p2\n\n검색 기능 출시일은 12월 9일로 확정했다. ^p3');
+    const [hit] = (await search({ query: '하반기 로드맵' })).hits;
+    expect(hit).toMatchObject({ snippet: '지난주 목요일 회의에서 하반기 제품 로드맵을 검토했다.', read: { from: 'p1' } });
+  });
+
   it('names a document hit’s tab and block, which artifact_read opens at the match', async () => {
     const id = await document('Plan', '# Plan ^h1\n\nFirst paragraph. ^p1\n\nSecond paragraph. ^p2');
     const schema = schemaFor();

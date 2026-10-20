@@ -345,10 +345,43 @@ describe('the snippet and read', () => {
     };
     const both = snippetAndRead(text, terms('plan budget'));
     expect(both.read).toEqual({ tab: 't', from: 'b3' });
-    expect(both.snippet).toBe('Tab the plan for later a budget line the budget plan, at last'); // short: the whole body
+    expect(both.snippet).toBe('the budget plan, at last'); // that section's text alone (Decision Log 20)
     // no section holds both: the longest term's first occurrence in the body
     expect(snippetAndRead(text, terms('later budget')).read).toEqual({ tab: 't', from: 'b2' });
     expect(snippetAndRead(text, terms('LATER plan')).read).toEqual({ tab: 't', from: 'b1' });
+  });
+
+  // Decision Log 20: a document's (a file model's) snippet is the passage `read` opens, never its neighbours' text
+  const blocks = (...lines: string[]) => {
+    const sections: [number, { tab: string; from?: string }][] = [];
+    let offset = 0;
+    lines.forEach((line, n) => {
+      sections.push([offset, n === 0 ? { tab: 't' } : { tab: 't', from: `b${n}` }]);
+      offset += line.length + 1;
+    });
+    return { body: lines.join('\n'), sections };
+  };
+
+  it('keeps the snippet inside the anchor’s section: a short block alone, with no ellipsis', () => {
+    const text = blocks('Plan', 'lorem ipsum dolor sit amet '.repeat(6).trim(), 'The 결론 is short.', 'consectetur adipiscing elit sed do '.repeat(6).trim());
+    expect(snippetAndRead(text, terms('결론'))).toEqual({ snippet: 'The 결론 is short.', read: { tab: 't', from: 'b2' } });
+  });
+
+  it('shows only the anchor block’s text when the next block holds the answer (the live run’s shape)', () => {
+    const text = blocks('회의록', '지난주 목요일 회의에서 하반기 제품 로드맵을 팀장들과 함께 검토했다.', '모바일 앱 개편은 11월 첫째 주로 미루기로 했다.', '검색 기능 출시일은 12월 9일로 확정했다.');
+    const hit = snippetAndRead(text, terms('하반기 로드맵'));
+    expect(hit).toEqual({ snippet: '지난주 목요일 회의에서 하반기 제품 로드맵을 팀장들과 함께 검토했다.', read: { tab: 't', from: 'b1' } });
+  });
+
+  it('cuts inside a long section with an ellipsis only where it cut, and gives a title-only hit its first section', () => {
+    const long = `${'word '.repeat(40)}target ${'tail '.repeat(60)}`.trim();
+    const text = blocks('Tab title', 'before block', long, 'after block');
+    const { snippet } = snippetAndRead(text, terms('target'));
+    expect(snippet!.startsWith('…word') && snippet!.endsWith('tail…')).toBe(true);
+    expect(snippet).not.toMatch(/before|after/);
+    const atStart = blocks('Tab', `target ${'tail '.repeat(60)}`.trim(), 'after block');
+    expect(snippetAndRead(atStart, terms('target')).snippet!.startsWith('target')).toBe(true); // the section's start: no ellipsis
+    expect(snippetAndRead(text, terms('absent'))).toEqual({ snippet: 'Tab title' });
   });
 
   it('names the place of the section holding the anchor, and none for a title-only hit or an empty body', () => {

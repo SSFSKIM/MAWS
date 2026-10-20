@@ -473,11 +473,12 @@ function sectionHoldingAll(text: SectionedText, patterns: RegExp[], at: (pattern
   }
 }
 
-// `body.slice(start, end)` cleaned (whitespace collapsed, control characters removed), with "…" at an end that cuts.
-function excerpt(body: string, start: number, end: number): string {
-  let from = start;
-  let to = end;
-  if (from > 0 && !isSpace(body[from - 1])) {
+// `body.slice(start, end)` cleaned (whitespace collapsed, control characters removed), within the section [low, high):
+// each end clamped to it and snapped to whitespace, "…" at an end that cuts inside the section.
+function excerpt(body: string, start: number, end: number, low: number, high: number): string {
+  let from = Math.max(start, low);
+  let to = Math.min(end, high);
+  if (from > low && !isSpace(body[from - 1])) {
     for (let at = from, seen = 0; seen < SNIPPET_SNAP && at < to; seen++, at = forward(body, at, 1)) {
       if (isSpace(body[at])) {
         from = at + 1;
@@ -485,7 +486,7 @@ function excerpt(body: string, start: number, end: number): string {
       }
     }
   }
-  if (to < body.length && !isSpace(body[to])) {
+  if (to < high && !isSpace(body[to])) {
     for (let at = back(body, to, 1), seen = 0; seen < SNIPPET_SNAP && at > from; seen++, at = back(body, at, 1)) {
       if (isSpace(body[at])) {
         to = at;
@@ -495,16 +496,34 @@ function excerpt(body: string, start: number, end: number): string {
   }
   // eslint-disable-next-line no-control-regex -- the control characters are what is removed
   const text = body.slice(from, to).replace(/\s+/gu, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim();
-  return `${from > 0 ? '…' : ''}${text}${to < body.length ? '…' : ''}`;
+  return `${from > low ? '…' : ''}${text}${to < high ? '…' : ''}`;
 }
 
-// A hit's snippet and `read`: around the anchor, and the place of the section holding it; a title-only hit's snippet is
-// the body's start and it has no `read`; an empty body has neither.
+// The section holding `offset`, as the body's range [start, end) without the line break that ends it.
+function sectionAround({ body, sections }: SectionedText, offset: number): { start: number; end: number } {
+  let low = 0;
+  let high = sections.length - 1;
+  while (low < high) {
+    const mid = (low + high + 1) >> 1;
+    if (sections[mid]![0] <= offset) low = mid;
+    else high = mid - 1;
+  }
+  const next = sections[low + 1]?.[0];
+  return { start: sections[low]?.[0] ?? 0, end: next === undefined ? body.length : next - 1 };
+}
+
+// A hit's snippet and `read` (Decision Log 20): the snippet is the passage `read` opens, around the anchor inside its
+// section (a document's block, a file model's file; one section, the whole body, for the other kinds); a title-only
+// hit's snippet is the first section's start and it has no `read`; an empty body has neither.
 export function snippetAndRead(text: SectionedText, terms: readonly QueryTerm[]): { snippet?: string; read?: ArtifactSearchRead } {
   if (text.body === '') return {};
   const anchor = anchorOf(text, terms);
-  if (!anchor) return { snippet: excerpt(text.body, 0, forward(text.body, 0, SNIPPET_LEAD)) };
-  const snippet = excerpt(text.body, back(text.body, anchor.index, SNIPPET_BEFORE), forward(text.body, anchor.end, SNIPPET_AFTER));
+  if (!anchor) {
+    const first = sectionAround(text, 0);
+    return { snippet: excerpt(text.body, first.start, forward(text.body, first.start, SNIPPET_LEAD), first.start, first.end) };
+  }
+  const section = sectionAround(text, anchor.index);
+  const snippet = excerpt(text.body, back(text.body, anchor.index, SNIPPET_BEFORE), forward(text.body, anchor.end, SNIPPET_AFTER), section.start, section.end);
   const place = placeAt(text, anchor.index);
   return { snippet, ...(place && { read: 'paths' in place ? { paths: place.paths } : { tab: place.tab, ...(place.from !== undefined && { from: place.from }) } }) };
 }
