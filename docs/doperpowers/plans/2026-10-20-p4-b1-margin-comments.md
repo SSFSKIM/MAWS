@@ -18,6 +18,7 @@ A document's comment threads sit beside the passages they anchor, as in Google D
 
 - 2026-10-20 (M4, a sub-worker on opus in an isolated worktree off this branch; merged d99aa78d5): `CommentCardHost layout="margin"` (in flow; `marginCard`), the document host's `hosting` and the in-flow notice, `openComment`'s routing of the `margin` placement to the card store, the draft register `tools/document/comment-drafts.ts` with `draft()` and `focusDraft()`, the draft rule (Escape kept through `onEscapeKept`, blur-when-empty through `onDiscard`, `draftOf` for a remount, the body click, ⌘Enter and ⌘⇧Enter), the close guard. 654 renderer tests. The "bootstrap gap" its report names (no card host mounted while the margin hosts nothing) was closed on this branch at 4b775b167 by the margin's slot. Decisions folded below (Decision Log 9).
 
+- 2026-10-20 (M3's second and third re-reviews; fd17eeee3, f83cb5431): the memoized cards' round left a 400 ms quiet window that lost an undo inside it (the miss cache) and held an agent's reply until the owner paused; the third fix removes the window, the DOM query and the miss cache (the list from the threads map through `useOpenThreads`, what is drawn from the display's decorations through `drawnThreads`, each anchored by `coordsAtPos(from, 1)`; Decision Log 11). LC-1's first, partial record arrived (the table under LC-1): the gap and the card's width re-based in one commit, the rest marked pending.
 - 2026-10-20 (the fix waves landed; ed7097f77): M2's fix (R on a compacted card; the reply drafts one map in `DocumentEditor`), M4's fix (the draft rule the document's opt-in; the blur and remount-focus rules), M3's fix wave (Decision Log 10); on the merged tree the three typechecks, lint and the touched suites are green locally (385 files, 5,216 tests). Two class 1a runs on the pool before it were red on the branch's own omissions (`src/main`'s constant rename left out of a commit; the default set's pin at 77 with the new app spec; a patch expectation carrying the view), each fixed; the third run and the two document e2e groups on the mini are in flight.
 
 ## Scope and what the code says (M0 grounding)
@@ -99,6 +100,20 @@ Setup: one Google Doc in the "MAWS UX check" folder, a 1920 × 1080 window at @2
 9. **Orphan and undo** (confirms Z3). State: a commented passage deleted whole; then undo. Record the card's wording and whether it returns on undo.
 
 Each measured value replaces its constant in `src/artifacts/comments/margin-layout.ts`, `margin-tiers.ts` or `MarginThreads.tsx` by one commit naming LC-1's record; a behaviour finding (3, 5, 7, 8) that contradicts a D-rule above is a dated Decision Log line here, or a `[parent-impact]` where the spec's binding text is touched.
+
+### LC-1's first record (2026-10-20, partial: about 12 usable minutes before the MacBook's screen locked; `/tmp/maws-review/lc1/lc1-docs-margin.md` with screenshots and JSON beside it)
+
+Conditions: the owner's window, 1512 × 723 CSS px at @2x, an A4 page 794 px wide, View › Comments at Expand, the document-tabs sidebar open; not the 1920 × 1080 emulation and no width sweep.
+
+| Item | Measured | Re-based here |
+|---|---|---|
+| 1, card top against the anchor | the card's top 4 px (3.6 to 4.5) below the passage's first line box top, the same for a one-line passage, a three-line wrap, a passage across two paragraphs, a Heading 1, a list item, a table's right cell and a passage starting at a soft wrap (which aligns to the line holding its first character); the image state not measured | `passageRect`'s first-line rule and P6 confirmed; the constant +4 is not adopted (the card's top edge at the line box top; Docs' +4 is its card's own inset, an owner-taste call the hand-back names; adopting it is one constant in the cards tier plus the e2e tolerances, which read 2 px) |
+| 2, gap | 10 px (cards 103 px tall stacked 113 apart), read on the upward walk | `MARGIN_GAP_PX` 8 → 10 (f83cb5431); the downward walk's gap, `MARGIN_ACTIVE_SHIFT_PX`, the 200 ms and its easing, and edit-caused moves pending |
+| 6, one width only | the card 350 px wide, 26 px from the page and 25 px from the scroll box's edge (a 401 px column); the first comment moved the page 39 px left, just what the column needed | `CARD_MAX_PX` 300 → 350 (f83cb5431). The gutter is a quantity of its own in Docs (26) where this design uses the gap (10) each side of the column: splitting it is the architect's call (it moves the cards tier's threshold by 32 px). Whether page and column centre as one unit (D1, N6) or the page moves only as far as needed is unsettled at this width (the open sidebar may be limiting it): D1 kept |
+| 8, one sample | on a one-line selection Docs draws a floating pill (Add comment, a reaction) in the text column under the selected line at the selection's end, not in the margin | C4 to C7 and the multi-line rule pending; the Add comment button stays in the margin at the selection's first line (D7; Decision Log 10's icon-tier placement) |
+| 3, incidental | after three comments made in turn the stack stayed where the last pin left it with no card active (Overleaf's sticky pin) | D2's relax kept until item 3 is measured in its own state |
+| 5, incidental | the caret moved into a passage by keyboard activated its card for 10 of 12; the two misses had the caret on the passage's very first character mid-paragraph | supports D5; the boundary rule (a caret at a passage's start is outside it except at a paragraph start) waits for the arrow-key state |
+| 4, 7, 9 and the sweep | not measured | pending the resumed run (the owner's Mac awake for 45 to 60 minutes) |
 
 ## Interface proposals (for the architect's ledger)
 
