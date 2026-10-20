@@ -316,11 +316,20 @@ export function createLayoutStore() {
         const replayed = early.splice(0);
         // W12: a session whose project changed while the app was closed has its tabs moved to that project's set.
         const stored = persistedMain.version === 1 ? model.fromV1(persistedMain, setOfTab) : persistedMain;
-        const repairedMain = replayed.reduce((m, change) => change(m), model.refile(model.repairMain(stored, known), setOfTab));
-        const replayedRegions = earlyRegions.splice(0).reduce((r, change) => change(r), persistedRegions);
+        // P4-B3x: the fold rule sees only where the early changes end, so a panel open at any state on the way (as read, or
+        // Maximize then its toggle before the read lands) drops the fold here, as it would have live. It is dropped from
+        // the value read, so a float the reader then drops opens nothing either.
+        let opened = !persistedRegions.panel.collapsed;
+        const replayedRegions = earlyRegions.splice(0).reduce((r, change) => {
+          const next = change(r);
+          opened ||= !next.panel.collapsed;
+          return next;
+        }, persistedRegions);
+        const restored = opened ? model.unfold(stored) : stored;
+        const repairedMain = replayed.reduce((m, change) => change(m), model.refile(model.repairMain(restored, known), setOfTab));
         // P4-B3x: a fold restored with its float stands; one whose float the reader dropped opens the panel it folded,
         // and one stored beside an open panel is dropped (both written back below).
-        const { main: hydratedMain, regions } = reconcileFold(stored, { main: repairedMain, regions: replayedRegions });
+        const { main: hydratedMain, regions } = reconcileFold(restored, { main: repairedMain, regions: replayedRegions });
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
         // no-session selection is read back if it still names a pin.
         const live = livePanelTabIds(panelPinned, panelBySession);
@@ -336,7 +345,10 @@ export function createLayoutStore() {
         // read after a downgrade is gone from layout.json for good.
         const unsaved = new Set(absent);
         const rewritten = readAs.has('main.tabs') && !sameJson(readAs.get('main.tabs'), persistedMain);
-        if (persistedMain.version === 1 || rewritten || hydratedMain !== repairedMain || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
+        // P4-B3x: so is one whose fold hydration dropped, or the next launch would read the stale mark again (a float the
+        // reader drops would reopen a panel the owner has since closed).
+        const unfolded = model.foldOf(stored) !== null && model.foldOf(hydratedMain) === null;
+        if (persistedMain.version === 1 || rewritten || unfolded || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
         if (regions !== persistedRegions) unsaved.add('regions');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
         for (const key of unsaved) {

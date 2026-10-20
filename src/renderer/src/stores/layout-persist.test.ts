@@ -146,6 +146,8 @@ describe('layout persistence', () => {
     const S = `session:${A}`;
     const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
     const last = (sets: { key: string; value: unknown }[], key: string) => sets.filter((s) => s.key === key).at(-1)?.value;
+    // layout.json after a launch: what it held, then each write in order.
+    const after = (held: Record<string, unknown>, sets: { key: string; value: unknown }[]) => clone({ ...held, ...Object.fromEntries(sets.map((s) => [s.key, s.value])) });
     const expanded = async () => {
       const { store, hydrate, sets } = setup();
       await hydrate();
@@ -171,13 +173,43 @@ describe('layout persistence', () => {
       expect(currentSet(last(again.sets(), 'main.tabs') as LayoutMain).floating).toBeUndefined();
     });
 
-    it('a stored fold whose float the reader drops (its session gone) opens the panel, written back', async () => {
+    it('a stored fold whose float the reader drops (its session gone) opens the panel, both written back', async () => {
       const { main, regions } = await expanded();
-      const again = setup({ 'main.tabs': clone(main), regions: clone(regions) });
+      const held = { 'main.tabs': clone(main), regions: clone(regions) };
+      const again = setup(held);
       await again.hydrate(() => false);
       expect(currentSet(again.store.getState().main).floating).toBeUndefined();
       expect(again.store.getState().regions.panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
       expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(again.store.getState().main);
+      // the owner closes the panel and quits with no tab change: the launch after keeps it closed
+      const written = after(held, again.sets());
+      const third = setup(written);
+      await third.hydrate(() => false);
+      third.store.getState().setPanel({ collapsed: true });
+      vi.advanceTimersByTime(1000);
+      const fourth = setup(after(written, third.sets()));
+      await fourth.hydrate(() => false);
+      expect(fourth.store.getState().regions.panel.collapsed).toBe(true);
+    });
+
+    it('a panel opened and closed again before hydration lands drops the stored fold, so leaving Expand leaves it closed', async () => {
+      const { main, regions } = await expanded();
+      const held = { 'main.tabs': clone(main), regions: clone(regions) };
+      const again = setup(held);
+      again.store.getState().setPanel({ maximized: true }); // Maximize, then the toggle, racing the first layout.get
+      again.store.getState().setPanel({ collapsed: true });
+      await again.hydrate();
+      expect(currentSet(again.store.getState().main).floating).toEqual({ sessionTabId: S });
+      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(again.store.getState().main);
+      again.store.getState().dockSplit();
+      expect(again.store.getState().regions.panel.collapsed).toBe(true);
+      // with its session gone the reader drops the float too, and the panel stays as the owner left it
+      const gone = setup(held);
+      gone.store.getState().setPanel({ maximized: true });
+      gone.store.getState().setPanel({ collapsed: true });
+      await gone.hydrate(() => false);
+      expect(gone.store.getState().regions.panel.collapsed).toBe(true);
     });
 
     it('a stored fold beside an open panel is dropped, the float kept, and main.tabs written back', async () => {
