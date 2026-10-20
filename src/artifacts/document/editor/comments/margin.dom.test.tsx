@@ -291,7 +291,7 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(entry('t1')).toBeNull();
     expect(m.editor().view.dom.querySelector('[data-thread="t1"]')).not.toBeNull();
     expect(reserve()).toBe('0px');
-    expect(screen.getByRole('status').textContent).toContain('Comment resolved'); // K4
+    expect(document.querySelector('[data-margin-live]')?.textContent).toContain('Comment resolved'); // K4
     act(() => reopen(m.handle.doc, 't1', ownerActor, now(), 'test'));
     await settle();
     expect(entry('t1')).not.toBeNull();

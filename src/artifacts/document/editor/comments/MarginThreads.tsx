@@ -356,7 +356,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
           +
         </button>
       )}
-      <div className="doc-margin-live" role="status" aria-live="polite">
+      <div className="doc-margin-live" aria-live="polite" data-margin-live>
         {announced}
       </div>
     </div>

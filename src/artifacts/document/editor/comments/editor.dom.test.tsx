@@ -330,7 +330,10 @@ describe('a click on a passage', () => {
   const active = (editor: Editor) => [...editor.view.dom.querySelectorAll('.comment-active')].map((span) => span.textContent).join('') || null;
   const selectedInRail = () => within(rail()).queryAllByRole('group').filter((item) => item.getAttribute('aria-current') === 'true').map((item) => item.dataset.thread);
 
-  it('draws the clicked passage’s thread active and opens the rail on it, selected; plain text draws none', async () => {
+  // P4-B1: with the margin drawing (here the icon rail: happy-dom lays out no side space), a passage click activates
+  // its thread in the margin, whose overlaid card is current, and opens no list; the list (the panel) shows the active
+  // thread selected once opened from the toolbar. Plain text draws none.
+  it('draws the clicked passage’s thread active in the margin, and selected in the panel once opened; plain text draws none', async () => {
     const { editor, opened } = await mount(content());
     act(() => void select(editor(), 'ships quarterly'));
     act(() => fireEvent.click(commentButton()));
@@ -344,15 +347,21 @@ describe('a click on a passage', () => {
     expect(clickOn(editor(), 'quarterly'), 'the click still places the caret').toBe(false);
     expect(active(editor())).toBe('ships quarterly');
     await quiet();
-    expect(selectedInRail()).toEqual([first]);
+    expect(screen.queryByRole('complementary', { name: 'Comments' }), 'the margin takes the activation: no list opens').toBeNull();
+    const margin = screen.getByRole('region', { name: 'Comments' });
+    expect(margin.getAttribute('data-margin-tier')).toBe('icons');
+    expect(margin.querySelector(`[data-margin-entry="${first}"]`)?.hasAttribute('data-active')).toBe(true);
 
     clickOn(editor(), 'Owners');
     expect(active(editor())).toBe('Owners');
+    expect(margin.querySelector(`[data-margin-entry="${second}"]`)?.hasAttribute('data-active')).toBe(true);
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     expect(selectedInRail()).toEqual([second]);
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
 
     clickOn(editor(), 'budget');
     expect(active(editor())).toBeNull();
-    expect(selectedInRail()).toEqual([]);
+    expect(screen.getByRole('region', { name: 'Comments' }).querySelector('[data-active]')).toBeNull();
   });
 
   it('takes the innermost of overlapping passages, and a resolved thread’s passage is no passage', async () => {
