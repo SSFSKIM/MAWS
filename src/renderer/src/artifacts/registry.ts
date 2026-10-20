@@ -15,7 +15,7 @@
 // `holdArtifactEditorState` and gives it back through `releaseArtifactEditorState`; a main tab's is given back here
 // when the tab leaves the main area by any path, as the editor host clears the tab's header registration. P4-B3: a move
 // between the panel and a main tab hands the state over instead (stage, then adopt; below), so nothing is disposed.
-import { useSyncExternalStore, type ComponentType } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore, type ComponentType } from 'react';
 import { create } from 'zustand';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { EditorHostScope } from '../panel/editor-host';
@@ -113,6 +113,7 @@ function end(key: string): void {
   const hold = holds.get(key);
   if (!hold) return;
   holds.delete(key);
+  carried.delete(key); // P4-B3 M5: a view carried to a showing that ended
   published();
   disposeHold(hold, key);
 }
@@ -152,6 +153,7 @@ export function holdArtifactEditorState<S>(scope: EditorHostScope, artifactId: s
 // editor in another scope takes a staged one as a fallback. Anything staged and not adopted by the end of the move's task
 // is disposed, so a move that stopped half-way leaks nothing.
 const staged = new Map<string, ArtifactEditorHold>();
+const stagedViews = new Map<string, unknown>(); // P4-B3 M5: the source's view, captured as it staged (by artifact id)
 let sweeping = false;
 
 function sweepStaged(): void {
@@ -161,6 +163,7 @@ function sweepStaged(): void {
     sweeping = false;
     const left = [...staged.values()];
     staged.clear();
+    stagedViews.clear();
     for (const hold of left) disposeHold(hold, `staged:${hold.artifactId}`);
   }, 0);
 }
@@ -171,10 +174,14 @@ export function stageArtifactEditorState(scope: EditorHostScope): boolean {
   const hold = holds.get(key);
   if (!hold) return false;
   holds.delete(key);
+  carried.delete(key);
   published();
   const before = staged.get(hold.artifactId);
   if (before) disposeHold(before, `staged:${hold.artifactId}`);
   staged.set(hold.artifactId, hold);
+  const view = captureView(key, hold);
+  if (view === undefined) stagedViews.delete(hold.artifactId);
+  else stagedViews.set(hold.artifactId, view);
   sweepStaged();
   return true;
 }
@@ -184,9 +191,12 @@ export function adoptStagedArtifactEditorState(artifactId: string, scope: Editor
   const hold = staged.get(artifactId);
   if (!hold) return false;
   staged.delete(artifactId);
+  const view = stagedViews.get(artifactId);
+  stagedViews.delete(artifactId);
   const key = keyOf(scope);
   end(key);
   holds.set(key, hold);
+  if (view !== undefined) carried.set(key, view);
   published();
   try {
     hold.editor.moved?.(hold.state, { artifactId, kind: hold.kind, surface: scope.surface });
@@ -194,6 +204,50 @@ export function adoptStagedArtifactEditorState(artifactId: string, scope: Editor
     console.error(`[artifacts] moving the ${hold.kind} editor's state to ${key} failed`, error);
   }
   return true;
+}
+
+// P4-B3 M5 (its Decision Log 25): the view carry. A hold carries the editor's state, not what its mounted body shows
+// (a document's scroll and selection live only in the editor's view), so a body registers `captureView` under its
+// scope while it is mounted, beside its X32 registration; a move captures it as the source stages its hold (the body
+// still mounted), the memento travels with the hold, and the target's first mount takes it once (`takeCarriedView`),
+// restoring after its content is drawn. A capture that throws carries nothing; the move goes on.
+const captures = new Map<string, () => unknown>();
+const carried = new Map<string, unknown>();
+
+function captureView(key: string, hold: ArtifactEditorHold): unknown {
+  try {
+    return captures.get(key)?.();
+  } catch (error) {
+    console.error(`[artifacts] capturing the ${hold.kind} editor's view for ${key} failed`, error);
+    return undefined;
+  }
+}
+
+// Registers what the body in `scope` would need to come back to the same place; returns the removal (a stale removal,
+// after another registration replaced it, leaves the newer one).
+export function registerArtifactViewCapture(scope: EditorHostScope, capture: () => unknown): () => void {
+  const key = keyOf(scope);
+  captures.set(key, capture);
+  return () => {
+    if (captures.get(key) === capture) captures.delete(key);
+  };
+}
+
+// The same, for a body: registered while it is mounted, calling the latest render's capture.
+export function useArtifactViewCapture({ surface, tabId }: EditorHostScope, capture: () => unknown): void {
+  const latest = useRef(capture);
+  useLayoutEffect(() => {
+    latest.current = capture;
+  });
+  useLayoutEffect(() => registerArtifactViewCapture({ surface, tabId }, () => latest.current()), [surface, tabId]);
+}
+
+// The view a move carried to `scope`, once (undefined when none): the target body's first mount restores it.
+export function takeCarriedView(scope: EditorHostScope): unknown {
+  const key = keyOf(scope);
+  const view = carried.get(key);
+  carried.delete(key);
+  return view;
 }
 
 // What the scope holds now, if anything: a surface that cannot confirm the artifact for a moment (its host unreachable)
@@ -224,6 +278,9 @@ useLayout.subscribe((state, before) => {
 export function resetArtifactEditors(): void {
   holds.clear();
   staged.clear();
+  stagedViews.clear();
+  captures.clear();
+  carried.clear();
   published();
   useEditors.setState({ editors: {} });
 }

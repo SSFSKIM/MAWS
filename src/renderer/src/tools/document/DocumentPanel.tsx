@@ -12,7 +12,7 @@ import type { Doc } from '@artifacts/yjs'; // P3-E
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import type { ViewEnvironment } from '@artifacts/document/editor/nodes/views'; // P3-E
 import type { EditorHostAction } from '../../panel/editor-host'; // P3-E
-import type { ArtifactEditorProps } from '../../artifacts/registry';
+import { takeCarriedView, useArtifactViewCapture, type ArtifactEditorProps } from '../../artifacts/registry'; // P4-B3 M5: the view carry
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
 import { useArtifactCommentTarget } from './comment-session'; // P3-F1
@@ -21,6 +21,7 @@ import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverri
 import { documentHeader, type DocumentHeaderCommands } from './header';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
 import type { DocumentTabState } from './tab-state';
+import { captureDocumentView, keepUndoManager, liveBody, restoreDocumentViewWhenDrawn, type DocumentView } from './view-carry'; // P4-B3 M5
 
 export type DocumentEditorProps = ArtifactEditorProps<DocumentTabState>;
 
@@ -82,8 +83,8 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   // The owner's view (L's `onShown`, then `markViewed`): once per showing (the tab's state remembers it), only once the
   // synced document is drawn (an editor bound to its tab, a frame later) while the body is visible; a body that goes or
   // hides first cancels the frame.
-  const [drawn, setDrawn] = useState(false);
-  const onEditor = useCallback((editor: Editor | null) => setDrawn(editor !== null), []);
+  const [editor, setEditor] = useState<Editor | null>(null); // P4-B3 M5: the live editor (was only whether there is one)
+  const drawn = editor !== null;
   useEffect(() => {
     if (!visible || !drawn || state.shown()) return;
     const frame = requestAnimationFrame(() => {
@@ -103,6 +104,24 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
       returnedTo(state.history);
     }
   }, [visible, drawn, state]);
+  // P4-B3 M5 (view-carry.ts): the tab's undo history in every editor this body mounts, so ⌘Z after a remount (a tab
+  // switch, a move) undoes what was typed before it; and where the owner was, captured for a move and restored once by
+  // the first mount it moved to.
+  useEffect(() => {
+    const body = editor && liveBody(editor);
+    const manager = body && state.undoManagerFor(body);
+    return editor && manager ? keepUndoManager(editor, manager) : undefined;
+  }, [editor, state]);
+  useArtifactViewCapture(scope, () => (editor ? (captureDocumentView(editor, page.current) ?? undefined) : undefined));
+  const carried = useRef<DocumentView | null | undefined>(undefined); // undefined: not taken yet
+  useEffect(() => {
+    if (carried.current === undefined) carried.current = (takeCarriedView(scope) as DocumentView | undefined) ?? null;
+  }, [scope]);
+  useEffect(() => {
+    const view = carried.current;
+    if (!editor || !view) return;
+    return restoreDocumentViewWhenDrawn(editor, () => page.current, view, () => (carried.current = null));
+  }, [editor]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
   const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
 
@@ -124,7 +143,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         pageScope={SystemPage}
         onPage={onPage}
         onPreviewChange={onPreviewChange}
-        onEditor={onEditor}
+        onEditor={setEditor}
         mentions={state.mentions}
         renderChart={renderChart} /* P3-E */
         onDisplayedDocument={onDisplayedDocument}

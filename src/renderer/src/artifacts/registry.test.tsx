@@ -7,8 +7,9 @@ import type { EditorHostScope } from '../panel/editor-host';
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
 import {
-  adoptStagedArtifactEditorState, artifactEditorFor, heldArtifactEditorState, holdArtifactEditorState, registerArtifactEditor, releaseArtifactEditorState,
-  resetArtifactEditors, stageArtifactEditorState, useArtifactEditor, useHeldArtifactEditorState, type ArtifactEditorHold, type ArtifactEditorProps,
+  adoptStagedArtifactEditorState, artifactEditorFor, heldArtifactEditorState, holdArtifactEditorState, registerArtifactEditor, registerArtifactViewCapture,
+  releaseArtifactEditorState, resetArtifactEditors, stageArtifactEditorState, takeCarriedView, useArtifactEditor, useArtifactViewCapture, useHeldArtifactEditorState,
+  type ArtifactEditorHold, type ArtifactEditorProps,
 } from './registry';
 
 const A = '0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01';
@@ -270,5 +271,100 @@ describe('the hand-off of a hold between surfaces', () => {
     });
     expect(source.result.current).toBeNull();
     expect(target.result.current).toBe(held);
+  });
+});
+
+// P4-B3 M5 (its Decision Log 25): the view carry. A body registers what it would need to come back to the same place
+// (`captureView`) under its scope; a move captures it as the source stages its hold, and the target's first mount takes
+// it once (`takeCarriedView`).
+describe('the view carried with a hold', () => {
+  const panel: EditorHostScope = { surface: 'panel', tabId: 'p1' };
+  const main: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+  const editor = () => ({ Panel, createState: vi.fn((target: { artifactId: string }) => ({ ...target })), dispose: vi.fn() });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const held = () => {
+    registerArtifactEditor('document', editor());
+    return holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+  };
+
+  it('is captured as the source stages, handed to the target at adoption and taken there once', () => {
+    held();
+    const capture = vi.fn(() => ({ scroll: 120 }));
+    registerArtifactViewCapture(panel, capture);
+    expect(takeCarriedView(main), 'nothing before a move').toBeUndefined();
+    stageArtifactEditorState(panel);
+    expect(capture).toHaveBeenCalledOnce();
+    expect(takeCarriedView(main), 'not before the adoption').toBeUndefined();
+    adoptStagedArtifactEditorState(A, main);
+    expect(takeCarriedView(panel), 'never the source’s').toBeUndefined();
+    expect(takeCarriedView(main)).toEqual({ scroll: 120 });
+    expect(takeCarriedView(main), 'once').toBeUndefined();
+  });
+
+  it('travels through the fallback adoption too (a hold asked in another scope)', () => {
+    held();
+    registerArtifactViewCapture(panel, () => 'here');
+    stageArtifactEditorState(panel);
+    holdArtifactEditorState(main, A, 'document', artifactEditorFor('document')!);
+    expect(takeCarriedView(main)).toBe('here');
+  });
+
+  it('carries nothing for a body not mounted (no capture), or one whose capture throws; the move goes on', () => {
+    const state = held();
+    stageArtifactEditorState(panel);
+    adoptStagedArtifactEditorState(A, main);
+    expect(takeCarriedView(main)).toBeUndefined();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registerArtifactViewCapture(main, () => {
+      throw new Error('no view');
+    });
+    expect(stageArtifactEditorState(main)).toBe(true);
+    expect(adoptStagedArtifactEditorState(A, panel)).toBe(true);
+    expect(heldArtifactEditorState(panel)).toBe(state);
+    expect(takeCarriedView(panel)).toBeUndefined();
+    expect(error).toHaveBeenCalledOnce();
+    error.mockRestore();
+  });
+
+  it('a view staged and never adopted goes with the sweep; one adopted goes when its scope’s hold ends', async () => {
+    held();
+    registerArtifactViewCapture(panel, () => 'staged');
+    stageArtifactEditorState(panel);
+    await tick();
+    holdArtifactEditorState(main, A, 'document', artifactEditorFor('document')!);
+    expect(takeCarriedView(main), 'swept with its hold').toBeUndefined();
+
+    registerArtifactViewCapture(main, () => 'adopted');
+    stageArtifactEditorState(main);
+    adoptStagedArtifactEditorState(A, panel);
+    releaseArtifactEditorState(panel);
+    expect(takeCarriedView(panel), 'ended with its hold').toBeUndefined();
+  });
+
+  it('a capture belongs to its scope while registered: a later registration replaces it, a stale removal leaves the newer', () => {
+    held();
+    const stale = registerArtifactViewCapture(panel, () => 'first');
+    registerArtifactViewCapture(panel, () => 'second');
+    stale();
+    stageArtifactEditorState(panel);
+    adoptStagedArtifactEditorState(A, main);
+    expect(takeCarriedView(main)).toBe('second');
+  });
+
+  it('a body registers its capture while mounted (useArtifactViewCapture), the latest render’s', () => {
+    held();
+    let value = 'first';
+    const { rerender, unmount } = renderHook(() => useArtifactViewCapture(panel, () => value));
+    value = 'latest';
+    rerender();
+    stageArtifactEditorState(panel);
+    adoptStagedArtifactEditorState(A, main);
+    expect(takeCarriedView(main)).toBe('latest');
+    unmount();
+    registerArtifactEditor('document', editor());
+    holdArtifactEditorState(panel, A, 'document', artifactEditorFor('document')!);
+    stageArtifactEditorState(panel);
+    adoptStagedArtifactEditorState(A, main);
+    expect(takeCarriedView(main), 'unmounted, nothing').toBeUndefined();
   });
 });

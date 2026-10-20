@@ -413,7 +413,10 @@ describe('the round trip with the real transcript and composer', () => {
     await waitFor(() => expect(rows().length).toBeGreaterThan(0));
   }
 
-  it('float, then dock: a pinned reader stays pinned; the row a reader scrolled to and the draft come back each way', async () => {
+  // P4-B3 M5: its own budget. It mounts the real transcript and the real composer (a Tiptap editor) four times over,
+  // about 1 s alone, and passed 5 s under a full run's load (5.4 to 5.9 s seen); every step waits on a condition, so a
+  // real hang still fails, at 20 s.
+  it('float, then dock: a pinned reader stays pinned; the row a reader scrolled to and the draft come back each way', { timeout: 20_000 }, async () => {
     shell();
     await live();
     // A reader at the end: pinned in the card, and pinned again in the pane after the dock (one commit: card out, pane in)

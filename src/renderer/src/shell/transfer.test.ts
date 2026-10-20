@@ -19,6 +19,7 @@ import { A, B, panelOf, resetPanelStores, sessionTab } from '../test-support/pan
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { requestArtifactVersion, resetVersionRequests, useVersionRequest } from '../tools/artifacts/viewers/requests';
+import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5
 import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal } from './transfer';
 
 const DOC = 'doc-1';
@@ -475,5 +476,41 @@ describe('round trips', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(editor.dispose).not.toHaveBeenCalled();
     expect(editor.createState).toHaveBeenCalledTimes(1);
+  });
+});
+
+// P4-B3 M5 (S6): a session tab moved between panes is the same session (its process untouched: nothing but the layout
+// changes) and remounts its transcript in the other pane, so the transcript comes back where the reader was, as a card's
+// float or dock does (Decision Log 14's carry); the draft is the session's (main's drafts table) and comes back by itself.
+describe('a session tab moved between panes (S6)', () => {
+  const place = { following: false, offset: 410, signature: '3:m2', anchor: 'm1' };
+  const other = artifactTab(OTHER);
+
+  it('carries its transcript’s place to the pane it lands in, by a drag or ⌘\\', () => {
+    useLayout.setState({ main: panes([other, sessionTab(A)], [artifactTab(DOC)]) });
+    recordTranscriptScroll(A, place);
+    act(() => useLayout.getState().moveTab(sessionTab(A).id, 1, 0));
+    expect(takeTranscriptCarry(A)).toEqual(place);
+
+    recordTranscriptScroll(A, place);
+    act(() => useLayout.getState().focusPane(1));
+    act(() => useLayout.getState().splitWithActive());
+    expect(currentSet(useLayout.getState().main).panes[0]!.activeTabId).toBe(sessionTab(A).id);
+    expect(takeTranscriptCarry(A)).toEqual(place);
+  });
+
+  it('a tab switch, a session tab moved while not shown, or one reordered in its pane carries nothing', () => {
+    useLayout.setState({ main: panes([sessionTab(A), other], [artifactTab(DOC)]) });
+    recordTranscriptScroll(A, place);
+    act(() => useLayout.getState().activateTab(sessionTab(A).id)); // shown in pane 0
+    act(() => useLayout.getState().activateTab(other.id));
+    act(() => useLayout.getState().activateTab(sessionTab(A).id));
+    expect(takeTranscriptCarry(A), 'a tab switch').toBeNull();
+    act(() => useLayout.getState().moveTab(sessionTab(A).id, 0, 1));
+    expect(takeTranscriptCarry(A), 'a reorder').toBeNull();
+    act(() => useLayout.getState().activateTab(other.id));
+    act(() => useLayout.getState().moveTab(sessionTab(A).id, 1, 0));
+    expect(currentSet(useLayout.getState().main).panes[1]!.activeTabId).toBe(sessionTab(A).id);
+    expect(takeTranscriptCarry(A), 'not shown before the move').toBeNull();
   });
 });

@@ -13,11 +13,18 @@
 // chooses, as the deck's Export saves it (`artifacts.export`, then `library.saveAs`'s dialog at Downloads), the saved
 // path said in a toast and a cancelled dialog saying nothing.
 //
+// P4-B3 M5 (its Decision Log 25; tracker row 126's undo half): the tab also keeps the undo history, one UndoManager per
+// tab body of the document, which the body swaps into every editor it mounts (`view-carry.ts`): an editor's own manager
+// dies with it, so a remount (the tab switched away and back, a move between the panel and a main tab) would start
+// with nothing to undo. A restore this replica did not make clears it, as the binding clears its own (an undo across
+// the restore would revert it); the tab's disposal ends it.
+//
 // A replica never initialises its document: the host writes a new document's first tab in the create's own commit (the
 // document adapter's `initial`, A's seed hook), and the editor shows "Loading…" until that tab has arrived, then binds it.
 import { listTabs } from '@artifacts/document/tabs';
 import { listThreads, observeThreads } from '@artifacts/document/threads';
-import { onUpdate } from '@artifacts/yjs';
+import { onUpdate, type Node as YType } from '@artifacts/yjs';
+import { UndoManager } from '@artifacts/yjs/document'; // P4-B3 M5
 import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { MentionSource } from '@artifacts/document/editor/MentionPicker';
@@ -97,6 +104,7 @@ export class DocumentTabState {
   private rowRead = false;
   private viewedBefore: number | null = null;
   private holders = 0; // what still writes into the replica (`hold`)
+  private readonly undo = new Map<YType, UndoManager>(); // P4-B3 M5: by tab body
   private disposed = false;
   private handleClosed = false;
   private closing = false; // disposed, waiting for the host to acknowledge what the replica holds
@@ -188,6 +196,7 @@ export class DocumentTabState {
       handle.subscribe((document) => this.follow(handle, document)),
       () => this.stopSavingTimer(),
       observeThreads(handle.doc, () => this.set({ unresolved: openThreads() })),
+      handle.onRestored(() => this.undo.forEach((manager) => manager.clear())), // P4-B3 M5
       this.awaitFirstTab(handle),
     );
     this.set({ handle, document: handle.state(), unresolved: openThreads(), ready: true });
@@ -313,6 +322,23 @@ export class DocumentTabState {
   };
 
   /**
+   * P4-B3 M5: the undo history of one of the document's tab bodies, made at its first editor and kept until the tab is
+   * disposed (null once it is: nothing is kept for a body still unmounting). Like the binding's own, it tracks only this
+   * replica's editors (the undo plugin adds each editor's sync plugin as it binds).
+   */
+  undoManagerFor(body: YType): UndoManager | null {
+    if (this.disposed) return null;
+    let manager = this.undo.get(body);
+    if (!manager) {
+      manager = new UndoManager(body, { trackedOrigins: new Set() });
+      this.undo.set(body, manager);
+    }
+    return manager;
+  }
+  /** The undo histories kept, one per tab body shown so far. */
+  undoManagers = (): UndoManager[] => [...this.undo.values()];
+
+  /**
    * Something will still write into the replica (the comment overlay while mounted and through its draft's withdrawal,
    * a send in flight): it stays open until the returned release (once), and then until the host acknowledged.
    */
@@ -339,6 +365,8 @@ export class DocumentTabState {
     this.rowTimer = null;
     for (const stop of this.stops.splice(0)) stop();
     this.listeners.clear();
+    for (const manager of this.undo.values()) manager.destroy(); // P4-B3 M5
+    this.undo.clear();
     if (this.holders === 0) this.closeHandle();
   }
 

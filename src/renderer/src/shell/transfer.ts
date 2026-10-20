@@ -25,6 +25,7 @@ import { toast } from '../stores/notices';
 import { activeTab, allTabs, closeTab, currentSet, locateTab, sessionOfTab } from '../stores/layout-model';
 import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
+import { markTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5 (S6)
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab'; // a main tab's id
 export const PANEL_TAB_DRAG_TYPE = 'application/x-maws-panel-tab'; // a panel tab's `{toolId, tabId}`, as JSON
@@ -210,6 +211,22 @@ export function moveMainTab(id: string, pane: Pane, index: number, counted: bool
   const from = currentSet(layout().main).panes[pane]?.tabs.findIndex((t) => t.id === id) ?? -1;
   layout().moveTab(id, pane, counted && from !== -1 && from < index ? index - 1 : index);
 }
+
+// P4-B3 M5 (S6; X38's carry for a session tab): a session tab moved between panes (a drag, ⌘\, the right edge) is the
+// same session, its process untouched, but its transcript remounts in the other pane, so the move marks the transcript's
+// next mount to come back where the reader was (Decision Log 14's carry, which only the cards' transitions mark
+// otherwise); the draft is the session's and comes back by itself. Only a tab shown before and after: one that was not
+// shown left no place of its own, and a tab switch keeps opening at the end.
+useLayout.subscribe((state, before) => {
+  if (state.main === before.main || state.main.current !== before.main.current) return;
+  const was = currentSet(before.main).panes;
+  currentSet(state.main).panes.forEach((pane, index) => {
+    const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
+    if (tab?.kind !== 'session') return;
+    const from = was.findIndex((p) => p.activeTabId === tab.id);
+    if (from !== -1 && from !== index) markTranscriptCarry(tab.appSessionId);
+  });
+});
 
 // The keymap actions (M4; no default chords): the focused main tab into the panel, and the shown panel's Artifacts record
 // into a main tab (its selected tab when that is one, else the first the panel lists). A refusal says why in a toast.
