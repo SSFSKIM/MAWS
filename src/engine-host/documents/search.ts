@@ -8,9 +8,12 @@
 // not the artifact's live revision (every write records one), or when its title is not the artifact's. A search first
 // brings the stale rows among the artifacts it may return up to date, newest first, within SEARCH_CATCHUP_MS, and names
 // what that budget left in its hint; beside it, a refresher re-extracts a changed artifact once its changes settle
-// (MIRROR_SETTLE_MS, one artifact per macrotask; one the document service holds loaded waits for its unload, so no
-// extraction runs on the loop beside the owner's typing, Decision Log 18) and a sweep after the store opens (MIRROR_SWEEP_DELAY_MS) fills the rows
-// the migration left empty and drops those of deleted artifacts. The query joins the live `artifacts`, so a deleted
+// (MIRROR_SETTLE_MS, one artifact per macrotask; one the document service holds loaded waits for its unload, then
+// settles like a change, so no extraction runs on the loop beside the owner's typing, Decision Log 18) and a sweep after
+// the store opens (MIRROR_SWEEP_DELAY_MS) fills the rows the migration left empty and drops those of deleted artifacts.
+// All that background extraction waits for the host to be quiet (Decision Log 24): no artifact commit for
+// MIRROR_QUIET_MS and no batch open, checked again before each artifact, so it never lands in an agent's batch or the
+// owner's burst of edits. The query joins the live `artifacts`, so a deleted
 // artifact is never returned meanwhile. So a write committed in the host is found by the next search.
 //
 // Writes follow the store's discipline: each artifact's row is written inside its own savepoint of the document
@@ -32,6 +35,7 @@ import type { ArtifactStore, EntityRow } from './store';
 export const SEARCH_CATCHUP_MS = 400; // a search's budget for bringing stale rows up to date before it queries
 export const MIRROR_SETTLE_MS = 2_000; // the refresher re-extracts a changed artifact this long after its last change
 export const MIRROR_SWEEP_DELAY_MS = 5_000; // the sweep starts this long after the store opens
+export const MIRROR_QUIET_MS = 2_000; // background extraction waits until no artifact has committed for this long
 // The catch-up yields to the host's loop after this much synchronous extraction (its rows commit in that batch), so a
 // search that has many rows to bring up to date shares the loop with the typing and the agents' batches.
 export const CATCHUP_SLICE_MS = 50;
@@ -57,6 +61,7 @@ export interface ArtifactSearchOptions {
   catchUpMs?: number;
   settleMs?: number;
   sweepDelayMs?: number;
+  quietMs?: number;
 }
 
 export interface SearchRequest {
@@ -112,11 +117,14 @@ export class ArtifactSearch {
   private readonly catchUpMs: number;
   private readonly settleMs: number;
   private readonly sweepDelayMs: number;
+  private readonly quietMs: number;
   private readonly settling = new Map<string, unknown>(); // artifact → its settle timer
   private readonly queue = new Set<string>(); // the refresher's and the sweep's artifacts, in order
   private readonly untilUnloaded = new Set<string>(); // queued while the document service held them loaded
   private pumpTimer: unknown = null;
   private sweepTimer: unknown = null;
+  private quietTimer: unknown = null; // running while the host is not yet quiet (Decision Log 24)
+  private sweepDue = false; // the sweep's time came while the host was busy
   private stepping = false;
   private offs: (() => void)[] = [];
   private closed = false;
@@ -131,6 +139,7 @@ export class ArtifactSearch {
     this.catchUpMs = options.catchUpMs ?? SEARCH_CATCHUP_MS;
     this.settleMs = options.settleMs ?? MIRROR_SETTLE_MS;
     this.sweepDelayMs = options.sweepDelayMs ?? MIRROR_SWEEP_DELAY_MS;
+    this.quietMs = options.quietMs ?? MIRROR_QUIET_MS;
   }
 
   private get writable(): boolean {
@@ -138,15 +147,18 @@ export class ArtifactSearch {
   }
 
   // The refresher on the store's change feed (and the document service's unloads) and the sweep after
-  // MIRROR_SWEEP_DELAY_MS; neither on a read-only store.
+  // MIRROR_SWEEP_DELAY_MS, both held back while the host is busy (every commit restarts the quiet window); neither on a
+  // read-only store.
   start(): void {
     if (this.offs.length > 0 || !this.writable) return;
     this.offs = [
       this.store.onChange(({ artifactId, change }) => {
+        this.busy();
         if (change !== 'linked') this.settle(artifactId);
       }),
+      this.store.service.onCommitted(() => this.busy()), // a document's every commit, before the feed coalesces them
       this.store.service.onUnload((artifactId) => {
-        if (this.untilUnloaded.delete(artifactId)) this.enqueue([artifactId]);
+        if (this.untilUnloaded.delete(artifactId)) this.settle(artifactId);
       }),
     ];
     this.sweepTimer = this.timers.setTimeout(() => this.sweep(), this.sweepDelayMs);
@@ -163,7 +175,8 @@ export class ArtifactSearch {
     this.queue.clear();
     if (this.pumpTimer !== null) this.timers.clearTimeout(this.pumpTimer);
     if (this.sweepTimer !== null) this.timers.clearTimeout(this.sweepTimer);
-    this.pumpTimer = this.sweepTimer = null;
+    if (this.quietTimer !== null) this.timers.clearTimeout(this.quietTimer);
+    this.pumpTimer = this.sweepTimer = this.quietTimer = null;
   }
 
   // ── the search ──
@@ -300,6 +313,24 @@ export class ArtifactSearch {
 
   // ── the refresher and the sweep ──
 
+  // An artifact committed: the quiet window starts again, and at its end the deferred sweep and the queue go on.
+  private busy(): void {
+    if (this.closed) return;
+    if (this.quietTimer !== null) this.timers.clearTimeout(this.quietTimer);
+    this.quietTimer = this.timers.setTimeout(() => {
+      this.quietTimer = null;
+      if (this.sweepDue) this.sweep();
+      this.pump();
+    }, this.quietMs);
+  }
+
+  // No artifact commit for MIRROR_QUIET_MS and no batch open now. A batch open (rows on their way to a commit) counts as
+  // a commit, so the window starts again.
+  private quiet(): boolean {
+    if (this.store.storage.batchOpen) this.busy();
+    return this.quietTimer === null;
+  }
+
   private settle(artifactId: string): void {
     if (this.closed) return;
     const pending = this.settling.get(artifactId);
@@ -317,6 +348,11 @@ export class ArtifactSearch {
   private sweep(): void {
     this.sweepTimer = null;
     if (!this.writable) return;
+    if (!this.quiet()) {
+      this.sweepDue = true;
+      return;
+    }
+    this.sweepDue = false;
     const orphans = this.store.storage.db.prepare('SELECT r.artifactId AS id FROM artifact_text_rows r LEFT JOIN artifacts a ON a.id = r.artifactId WHERE a.id IS NULL OR a.deletedAt IS NOT NULL').all() as { id: string }[];
     this.enqueue([...this.stale({}), ...orphans.map((row) => row.id)]);
   }
@@ -328,7 +364,7 @@ export class ArtifactSearch {
 
   // One artifact per macrotask, the next once its row's batch has committed; one held loaded is set aside until it unloads.
   private pump(): void {
-    if (!this.writable || this.stepping || this.pumpTimer !== null || this.queue.size === 0) return;
+    if (!this.writable || this.stepping || this.pumpTimer !== null || this.queue.size === 0 || !this.quiet()) return;
     this.pumpTimer = this.timers.setTimeout(() => {
       this.pumpTimer = null;
       void this.step();
@@ -337,7 +373,7 @@ export class ArtifactSearch {
 
   private async step(): Promise<void> {
     const artifactId = this.queue.values().next().value;
-    if (artifactId === undefined || !this.writable) return;
+    if (artifactId === undefined || !this.writable || !this.quiet()) return; // the quiet window's end pumps again
     this.queue.delete(artifactId);
     if (this.store.service.loaded(artifactId)) {
       // Decision Log 18: held open (an editor, an agent's replica), so it waits for its unload; a search catches it up

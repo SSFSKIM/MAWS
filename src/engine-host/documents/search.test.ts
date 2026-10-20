@@ -11,7 +11,7 @@ import { parseQuery } from '@shared/artifacts/search-query';
 import type { Section } from '@artifacts/library/sections';
 import { HUMAN, openWorld, type World } from '../tool-server/artifact-world.fixture';
 import { STORE_MIGRATIONS, openStore } from './migrations';
-import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, searchQuery, snippetAndRead, startArtifactSearch, type SearchRequest, type SearchTimers } from './search';
+import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_QUIET_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, searchQuery, snippetAndRead, startArtifactSearch, type SearchRequest, type SearchTimers } from './search';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore } from './store';
@@ -212,7 +212,9 @@ describe('the refresher and the sweep', () => {
       service.closeSession('app-holder' as AppSessionId);
       for (let i = 0; i < 200 && service.loaded(id) !== null; i++) await new Promise((resolve) => setTimeout(resolve, 10));
       expect(service.loaded(id)).toBeNull();
-      await timers.advance(0); // the unload queued it
+      await timers.advance(0); // Decision Log 24: an unload goes through the settle, so nothing is extracted at once
+      expect(textRows()).toEqual([]);
+      await timers.advance(MIRROR_SETTLE_MS);
       expect(textRows()).toEqual([{ artifactId: id }]);
       expect(await foundIdsIn(store, 'beta')).toEqual([id]);
     } finally {
@@ -220,6 +222,55 @@ describe('the refresher and the sweep', () => {
       service.close();
       storage.close();
     }
+  });
+
+  it('waits for the host to be quiet: a commit inside MIRROR_QUIET_MS of the settle defers the extraction (Decision Log 24)', async () => {
+    const id = await page('Live', 'before');
+    const other = await page('Other', 'other text');
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS);
+    expect(current(id) && current(other)).toBe(true);
+    await w.store.writeContent(id, html('after'), HUMAN);
+    await turns();
+    await timers.advance(MIRROR_SETTLE_MS - 500);
+    await w.store.writeContent(other, html('busy'), HUMAN); // another artifact's commit: the host is not quiet
+    await turns();
+    await timers.advance(500); // the first change has settled, but the quiet window runs another 1,500 ms
+    expect(current(id)).toBe(false);
+    await timers.advance(MIRROR_QUIET_MS - 501);
+    expect(current(id)).toBe(false);
+    await timers.advance(1);
+    expect(current(id)).toBe(true);
+  });
+
+  it('defers the sweep while the host is busy, and runs it once the host is quiet', async () => {
+    const ids = [await page('A', 'one'), await page('B', 'two')];
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS - 1_000);
+    const busy = await page('C', 'three'); // a commit 1 s before the sweep is due
+    await turns();
+    await timers.advance(1_000);
+    expect(rows()).toEqual([]);
+    await timers.advance(MIRROR_QUIET_MS - 1_000);
+    expect(rows().map((row) => row.artifactId).sort()).toEqual([...ids, busy].sort());
+  });
+
+  it('extracts nothing while a batch is open, and goes on once it commits', async () => {
+    const id = await page('Live', 'before');
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS - 1);
+    timers.pass(1);
+    void w.store.service.inBatch(() => {}); // a batch opened by someone else, not yet committed
+    expect(w.storage.batchOpen).toBe(true);
+    await timers.runNext(); // the sweep, deferred: the batch is open
+    expect(w.storage.batchOpen).toBe(false); // it committed meanwhile
+    await timers.advance(0);
+    expect(mirrored(id)).toBeNull(); // a quiet window first
+    await timers.advance(MIRROR_QUIET_MS);
+    expect(current(id)).toBe(true);
   });
 
   it('stops every timer and listener at close', async () => {
