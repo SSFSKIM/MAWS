@@ -391,16 +391,10 @@ const meta4=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===e
 const mainRequests4=rows=>meta4(rows,'stub_requests')[0].requests.filter(q=>q.main);
 // The engine's context message (role system inside `messages`) of a request, as the stub recorded it.
 const contextText4=q=>q.messages.filter(m=>m.role==='system').flatMap(m=>m.blocks).map(b=>b.text??'').join('\n');
-for(const name of B4)test('p4/'+name+' is ordered NDJSON with correlated replies, P4-B4 provenance, the owner file unchanged and nothing spent',()=>{
- const rows=load4(name);let seq=0;const pending=new Set();const answered=new Set();
- for(const row of rows){assert.equal(row.seq,++seq);const f=row.frame;
-  if(f.type==='control_request')pending.add(row.direction+':'+f.request_id);
-  // 2.1.304 echoes the probe's answers to its handshake mcp_message requests back on stdout (Surprise 4 of the B4 document)
-  if(f.type==='control_response'&&row.direction==='in'&&answered.has(f.response.request_id))continue;
-  if(f.type==='control_response'&&row.direction==='out')answered.add(f.response.request_id);
-  if(f.type==='control_response')assert.ok(pending.delete((row.direction==='in'?'out':'in')+':'+f.response.request_id));
-  assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
- assert.equal(pending.size,0);
+for(const name of B4)test('p4/'+name+' is ordered NDJSON with correlated replies, P4-B4 provenance, the owner file unchanged, no secret and nothing spent',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0); // pass 3's integrity rule, the engine's byte-for-byte echo of every host answer included
  const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-B4');assert.equal(prov.served,'p4-maws-tools.json');assert.match(prov.pin,/^[0-9a-f]{40}$/);
  const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
  assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
@@ -430,7 +424,8 @@ test('p4 deferral (for P4-A3): under tool search the maws tools are deferred and
  const names=first.tools.map(t=>t.name);assert.ok(names.includes('ToolSearch'));
  assert.ok(names.includes('mcp__maws__show_pane')); // listed with _meta["anthropic/alwaysLoad"]: true
  for(const tool of served4.tools.filter(t=>t.name!=='show_pane'))assert.ok(!names.includes('mcp__maws__'+tool.name),tool.name);
- const context=contextText4(first);const listing=context.slice(context.indexOf('The following deferred tools are now available via ToolSearch'));
+ const context=contextText4(first);const from=context.indexOf('The following deferred tools are now available via ToolSearch');
+ const listing=context.slice(from,context.indexOf('\n\n',from)).split('\n').slice(1); // the list alone, one name per line
  assert.ok(listing.includes('mcp__maws__artifact_search'));
  const calls=meta4(rows,'server_calls')[0].calls;assert.deepEqual(calls,[{name:'artifact_search',arguments:{query:'로드맵'}}]);
  const result=second.messages.flatMap(m=>m.blocks).find(b=>b.type==='tool_result'&&b.tool_use_id==='toolu_stub_search');
