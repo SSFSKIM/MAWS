@@ -164,4 +164,31 @@ Conditions: the owner's window, 1512 × 723 CSS px at @2x, an A4 page 794 px wid
 
 ## Outcomes & Retrospective
 
-- (at hand-back)
+Evidence per acceptance clause (the tree at 0a9f02813, master e6fe3b6db merged in):
+
+1. `src/artifacts/comments/margin-layout.test.ts` (L1 to L7 against Liveblocks' and Overleaf's loops, 1,558 comparisons), `margin-tiers.test.ts`; in the unit gate of every class 1a run below.
+2. `src/artifacts/document/editor/comments/margin.dom.test.tsx` (P1 to P6, R1 to R6, N1 to N6, Z1 to Z5, D4, D5, D13's frame count, the keys, the hosted compose entry in both tiers, C1), `activation.dom.test.tsx` (the activation table, the chords), `ThreadCard.test.tsx` (X36, K1 to K4), the renderer's `comments*.test.tsx` and `CardHost.test.tsx` (C4 to C8, the draft rule), `editor.dom.test.tsx` and `DocumentEditor.dom.test.tsx` re-read for the margin: class 1a green at 1bb9f73c3 (run 39373291478; earlier at 789a9b674, run 39371071764, and 11ff4c840, run 39369241206); locally 77 files, 1,383 tests on the fix wave's tree.
+3. `e2e:document` green on the mini at 1bb9f73c3 (run 39373297873: 18 cases, the harness compose card in the icon tier's overlay at its line, the stacked margin case with the agent's reply, the view states); `e2e:document-app` (the app margin case: two cards at their lines with the inset, the page moved left, the reply's growth pushing the second while the owner types above, the view states, the panel's round trip) — [pending: the run at 0a9f02813].
+4. The measured set — [pending: the interleaved A/B the architect runs, A = e6fe3b6db, B = 0a9f02813, in the order A, B, A, B; rows read as B minus A, relayouts as an absolute, rows 1 and 2 as A and B values].
+5. The LC-1 list above was in this document at e57a0fb91 before any constant was set; the first record's re-bases (`MARGIN_GAP_PX` 10, `CARD_MAX_PX` 350, `MARGIN_CARD_INSET_PX` 4) landed in f83cb5431 and 260144f1f; every other constant is marked for the remainder.
+6. The ledger names under Interface proposals; the D9 line drafted above; the Review record closed (M1 to M4, M3's three rounds, the whole branch on fable, the master merge).
+
+Residue rows proposed for the tracker (Logged, Owner, Item, Evidence, Closes when), none blocking:
+
+| Logged | Owner | Item | Evidence | Closes when |
+|---|---|---|---|---|
+| 2026-10-20 | P4-B2 or a later child | The browser's and the code viewer's comment hosts do not adopt the draft rule (Escape keeps, blur-when-empty discards, one draft per artifact): the document binding opts in alone | `useDocumentComments({draftRule: true})`, Decision Log 9 | the other hosts opt in with their own close guards |
+| 2026-10-20 | P4 | The All comments panel has no "For you" filter (Z4 ships Status and Scope and a search) | `CommentsPanel.tsx` | a mentions model names what "for you" means |
+| 2026-10-20 | P4 | A compose card kept by Escape has no inactive styling of its own | `CommentCard.tsx`, Decision Log 9 | a design token for the kept state |
+| 2026-10-20 | P4 | `draft()` is scoped to the host: a draft on another host of the same artifact is not refocused by Comment | `comment-drafts.ts` | the register keys by artifact |
+| 2026-10-20 | P4 | A compose card remounted with a kept draft focuses its field at the start, not `focusAtEnd` | M4's fix report | the composer takes a caret position |
+| 2026-10-20 | P4 | The harness does not opt into the draft rule, so C4 to C8 are covered by unit tests alone | `harness/document` | the harness binds `draftRule` |
+| 2026-10-20 | P4 | The View menu's three items carry no checked state for the current view | `Toolbar.tsx` | the menu reads `commentsView` |
+| 2026-10-20 | P4 | The margin column inherits the page's `color-scheme: light`; a dark app theme draws light cards beside a light page by design, to be revisited with a dark page ground | `theme.css` | the page ground takes the dark scheme |
+| 2026-10-20 | P4 | A thread with no message yet shows an empty compact card (Resolve alone) in the margin once its compose card has closed | the app case's `document-margin-cards.png` at run 39369247914 | X36 shows the quote on a thread with no message |
+| 2026-10-20 | P4 | A click on a passage of an unfocused page can leave the caret where it was (ProseMirror's 20 ms focus re-sync against the activation's render); the thread activates | Surprise 7, run 39374012042 | the activation's render is deferred a frame, or the click's caret is re-applied after it |
+| 2026-10-20 | P4 | The relayouts row counts a card's resize and an activation among the passes it reads against the frame callbacks, so a reply mid-step lifts the ratio a little above one | Decision Log 12 | the row reads a frame-only counter |
+| 2026-10-20 | P4 | A2's `document-provisional-live.spec.ts` (58 to 61) says a click on a commented passage opens the rail's drawer; true at its narrow page, stale wherever the margin draws | the merge worker's report | the spec's comment names the margin |
+| 2026-10-20 | the architect | The P4 spec's §10 names this plan `2026-10-19-…` where the brief and this document use `2026-10-20-…` | the spec | the spec's path corrected |
+
+Retrospective: [at hand-back]
