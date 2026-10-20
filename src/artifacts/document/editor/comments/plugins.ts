@@ -18,7 +18,11 @@
 //   it by the keyboard keeps the thread (Overleaf's sticky pin, for the caret alone; LC-1 item 5 re-bases); a remote
 //   edit maps the decorations and keeps `active`, a threads-map change rebuilds with the old `active`, awareness never
 //   reaches this plugin. ⌃⌘ then N, P or E then C (Docs' chords) go to the next or previous passage after the caret, or
-//   enter the current one (the editor's surface focuses its card).
+//   enter the current one (the editor's surface focuses its card). The pin (Docs' sticky stack, LC-1 item 3 in
+//   docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): the last thread the human activated, which the margin's
+//   stack is walked from; kept when the active thread clears, dropped when that thread is no longer open. A click on a
+//   passage also puts the caret at the click (Surprise 7: the activation's redraw would otherwise write ProseMirror's
+//   stale state selection back over the native caret when the click's `selectionchange` has not been read yet).
 // - The paste dedupe (Outline's rule): a pasted comment mark is kept only when its thread is in this document and no
 //   live text carries it, so a cut followed by a paste moves the comment, a copy pastes plain text, and another
 //   document's mark, or an external `span[data-thread]`, never comes in. A drag-move counts the dragged range as gone,
@@ -136,6 +140,8 @@ interface DisplayState {
   active: string | null;
   /** P4-B1: what drew `active` (null for none, or for a rebuild that kept it). */
   cause: ActivationCause | null;
+  /** P4-B1: the last thread the human activated while it stays open (the margin's stack is walked from it). */
+  pinned: string | null;
   decorations: DecorationSet;
   /** P3-E: the open block threads by block id, read with the threads map (empty: a keystroke draws no block). */
   blocks: ReadonlyMap<string, string[]>;
@@ -164,12 +170,13 @@ function decorate(doc: PMNode, from: number, to: number, ydoc: Doc, active: stri
   });
 }
 
-function rebuild(doc: PMNode, ydoc: Doc, active: string | null, cause: ActivationCause | null = null): DisplayState {
+function rebuild(doc: PMNode, ydoc: Doc, active: string | null, cause: ActivationCause | null, pinned: string | null): DisplayState {
   const out: Decoration[] = [];
   decorate(doc, 0, doc.content.size, ydoc, active, out);
   const blocks = openBlockThreads(ydoc); // P3-E
   out.push(...decorateBlocks(doc, blocks, active)); // P3-E
-  return { active, cause, decorations: DecorationSet.create(doc, out), blocks };
+  // P4-B1: a resolve reaches the display as a rebuild (the threads map's redraw), which drops a pin no longer open
+  return { active, cause, decorations: DecorationSet.create(doc, out), blocks, pinned: pinned !== null && threadStatus(ydoc, pinned) === 'open' ? pinned : null };
 }
 
 // The textblocks a transaction changed, in its resulting doc (`touchedRanges`), or null when the transaction has too
@@ -233,13 +240,16 @@ function display(ydoc: Doc, onActivate: ((threadId: string, cause: ActivationCau
       return newState.tr.setMeta(commentDisplayKey, { active: threadId, cause: 'caret' } satisfies DisplayMeta).setMeta('addToHistory', false);
     },
     state: {
-      init: (_config, state) => rebuild(state.doc, ydoc, null),
+      init: (_config, state) => rebuild(state.doc, ydoc, null, null, null),
       apply(tr, old, _oldState, state) {
         const meta = tr.getMeta(commentDisplayKey) as DisplayMeta | undefined;
-        if (meta) return rebuild(state.doc, ydoc, 'active' in meta ? meta.active : old.active, 'active' in meta ? (meta.cause ?? null) : old.cause); // P4-B1: cause
+        // P4-B1: cause and pin; every `active` meta naming a thread is the human's (a click, the caret, a chord, the
+        // margin's card, J and K, the panel), and one naming none (plain text, Escape) keeps the pin
+        if (meta && 'active' in meta) return rebuild(state.doc, ydoc, meta.active, meta.cause ?? null, meta.active ?? old.pinned);
+        if (meta) return rebuild(state.doc, ydoc, old.active, old.cause, old.pinned);
         if (!tr.docChanged) return old;
         const blocks = touchedBlocks(tr);
-        if (blocks === null) return rebuild(tr.doc, ydoc, old.active);
+        if (blocks === null) return rebuild(tr.doc, ydoc, old.active, old.cause, old.pinned);
         let decorations = old.decorations.map(tr.mapping, tr.doc);
         for (const [from, to] of blocks) {
           const fresh: Decoration[] = [];
@@ -251,7 +261,7 @@ function display(ydoc: Doc, onActivate: ((threadId: string, cause: ActivationCau
           const drawn = decorations.find(undefined, undefined, (spec: { blockComment?: boolean }) => spec.blockComment === true);
           decorations = decorations.remove(drawn).add(tr.doc, decorateBlocks(tr.doc, old.blocks, old.active));
         }
-        return { active: old.active, cause: old.cause, decorations, blocks: old.blocks };
+        return { active: old.active, cause: old.cause, decorations, blocks: old.blocks, pinned: old.pinned };
       },
     },
     props: {
@@ -259,7 +269,13 @@ function display(ydoc: Doc, onActivate: ((threadId: string, cause: ActivationCau
       handleClick: (view, pos, event) => {
         const ids = threadsClicked(event.target, view.dom);
         const threadId = ids.length === 0 ? null : innermost(view.state.doc, pos, ids, ydoc);
-        if (threadId !== activeThread(view.state)) view.dispatch(view.state.tr.setMeta(commentDisplayKey, { active: threadId, cause: 'click' } satisfies DisplayMeta).setMeta('addToHistory', false));
+        // P4-B1 (Surprise 7): the caret goes to the click in the activation's own transaction, the thread already
+        // active or not; a shift-click's extension is the native selection's
+        const caret = threadId !== null && !event.shiftKey;
+        if (threadId !== activeThread(view.state) || caret) {
+          const tr = view.state.tr.setMeta(commentDisplayKey, { active: threadId, cause: 'click' } satisfies DisplayMeta).setMeta('addToHistory', false);
+          view.dispatch(caret ? tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))) : tr);
+        }
         if (threadId !== null) onActivate?.(threadId, 'click');
         return false;
       },
@@ -309,6 +325,9 @@ export function drawnThreads(state: EditorState): Map<string, number> {
 
 /** The thread the editor shows as active (its card or its row in the rail), or null. */
 export const activeThread = (state: EditorState): string | null => commentDisplayKey.getState(state)?.active ?? null;
+
+/** P4-B1: the last thread the human activated, while it is open (the margin walks its stack from it), or null. */
+export const pinnedThread = (state: EditorState): string | null => commentDisplayKey.getState(state)?.pinned ?? null;
 
 // ── the paste dedupe ──
 /** The fragment with every comment mark `keep` refuses removed, at every depth. */

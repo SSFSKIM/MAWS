@@ -2,14 +2,16 @@
 // R3): the local caret moving into a passage draws its thread active with the cause `caret`, leaving it by the keyboard
 // keeps it (LC-1 item 5 re-bases), a click on plain text clears it (the editor's click, as before); a remote edit, a
 // remote reply or a remote resolve never changes this editor's active thread; Docs' chords (⌃⌘ N then C, P then C, E
-// then C) go to the next and previous passage after the caret and enter the current one.
+// then C) go to the next and previous passage after the caret and enter the current one. The pin (Docs' sticky stack,
+// LC-1 item 3 in docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): the last thread the human activated, kept when
+// the active thread clears, cleared when that thread resolves; a click on a passage puts the caret at the click.
 import type { Editor } from '@tiptap/core';
 import { Selection } from '@tiptap/pm/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { reply, resolve } from '../../threads';
 import { TAB, World, ticks } from '../test-world';
 import type { DocumentHandle } from '../host-types';
-import { activeThread, Comments, commentSelection, type ActivationCause } from './plugins';
+import { activeThread, Comments, commentSelection, pinnedThread, type ActivationCause } from './plugins';
 import { agentActor, findPos, now, owner, seedJSON, select } from './test-support';
 
 let world: World | null = null;
@@ -48,6 +50,16 @@ async function build(): Promise<Built> {
   return { A, B, agent, activated, entered };
 }
 
+// A click as ProseMirror hands it to its plugins (editor.dom.test.tsx's): at a text position, its target the element
+// drawn there (happy-dom has no layout, so ProseMirror's own mouse handling cannot place it).
+function clickAt(editor: Editor, pos: number, init: MouseEventInit = {}): void {
+  const { node } = editor.view.domAtPos(pos);
+  const target = node.nodeType === Node.TEXT_NODE ? node.parentElement! : (node as Element);
+  let event: MouseEvent | null = null;
+  target.addEventListener('click', (e) => void (event = e as MouseEvent), { once: true });
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true, ...init }));
+  editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event!));
+}
 const caretTo = (editor: Editor, pos: number) => editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(pos))));
 // A chord as the keyboard sends it (Tiptap's `keyboardShortcut` command captures the handler's transaction and replays
 // its steps alone, dropping a selection and a meta, so it cannot drive a chord that sets the active thread); `Mod` is
@@ -143,5 +155,84 @@ describe('the chords', () => {
       vi.useRealTimers();
     }
     expect(activeThread(A.editor.state)).toBe('t1');
+  });
+});
+
+describe('a click on a passage', () => {
+  // Surprise 7: ProseMirror calls handleClick from its mouseup, and the activation's redraw of the passage could write
+  // the stale state selection back over the native caret; the activation itself puts the caret at the click
+  it('puts the caret at the click and activates the passage, even when its thread is already active; a shift-click leaves the selection alone', async () => {
+    const { A, activated } = await build();
+    caretTo(A.editor, findPos(A.editor, 'The plan'));
+    const at = findPos(A.editor, 'quarterly') + 3;
+    clickAt(A.editor, at);
+    expect(activeThread(A.editor.state)).toBe('t1');
+    expect(A.editor.state.selection.empty).toBe(true);
+    expect(A.editor.state.selection.from).toBe(at);
+    expect(activated).toEqual([['t1', 'click']]);
+    // the thread already active: the caret still moves
+    const again = findPos(A.editor, 'design review') + 2;
+    clickAt(A.editor, again);
+    expect(A.editor.state.selection.from).toBe(again);
+    // a shift-click extends the native selection: the state selection is not set
+    caretTo(A.editor, findPos(A.editor, 'Owners'));
+    const before = A.editor.state.selection;
+    clickAt(A.editor, findPos(A.editor, 'going') + 2, { shiftKey: true });
+    expect(activeThread(A.editor.state)).toBe('t3');
+    expect(A.editor.state.selection.eq(before)).toBe(true);
+  });
+});
+
+describe('the pin (D2 as Docs: the stack stays where the last activation left it)', () => {
+  it('a click activates and pins; a click on plain text clears the active thread and keeps the pin', async () => {
+    const { A } = await build();
+    expect(pinnedThread(A.editor.state)).toBeNull();
+    clickAt(A.editor, findPos(A.editor, 'quarterly') + 2);
+    expect(activeThread(A.editor.state)).toBe('t1');
+    expect(pinnedThread(A.editor.state)).toBe('t1');
+    clickAt(A.editor, findPos(A.editor, 'Third') + 2);
+    expect(activeThread(A.editor.state)).toBeNull();
+    expect(pinnedThread(A.editor.state)).toBe('t1');
+  });
+
+  it('every human activation moves the pin (the caret, a chord, the margin’s own), and clearing the active thread keeps it', async () => {
+    const { A } = await build();
+    caretTo(A.editor, findPos(A.editor, 'going') + 1);
+    expect(pinnedThread(A.editor.state)).toBe('t3');
+    chord(A.editor, 'p'); // the previous passage before the active one
+    chord(A.editor, 'c');
+    expect(pinnedThread(A.editor.state)).toBe('t1');
+    A.editor.commands.setActiveThread('t3'); // a card's click, J or K, the panel's item
+    expect(pinnedThread(A.editor.state)).toBe('t3');
+    A.editor.commands.setActiveThread(null); // Escape on a card
+    expect(activeThread(A.editor.state)).toBeNull();
+    expect(pinnedThread(A.editor.state)).toBe('t3');
+  });
+
+  it('a resolve of the pinned thread clears the pin; a resolve of another thread keeps it', async () => {
+    const { A, agent } = await build();
+    clickAt(A.editor, findPos(A.editor, 'quarterly') + 2);
+    clickAt(A.editor, findPos(A.editor, 'Third') + 2);
+    resolve(agent.doc, 't3', agentActor, now(), 'agent');
+    await ticks(10);
+    expect(pinnedThread(A.editor.state)).toBe('t1');
+    resolve(A.handle.doc, 't1', owner, now(), 'test');
+    await ticks(10);
+    expect(pinnedThread(A.editor.state)).toBeNull();
+  });
+
+  it('only the human pins: another replica’s activation, an agent’s reply and a remote edit leave this editor’s pin', async () => {
+    const { A, B, agent } = await build();
+    clickAt(A.editor, findPos(A.editor, 'quarterly') + 2);
+    caretTo(B.editor, findPos(B.editor, 'going') + 1);
+    await ticks(5);
+    expect(pinnedThread(B.editor.state)).toBe('t3');
+    reply(agent.doc, 't3', { id: 't3:m1', by: agentActor, at: now(), body: 'Sharper.' }, 'agent');
+    B.editor.commands.setTextSelection(findPos(B.editor, 'going'));
+    B.editor.view.dispatch(B.editor.state.tr.insertText('still '));
+    await ticks(10);
+    expect(A.editor.getText()).toContain('still going');
+    expect(activeThread(A.editor.state)).toBe('t1');
+    expect(pinnedThread(A.editor.state)).toBe('t1');
   });
 });
