@@ -20,6 +20,9 @@ import { useDocumentComments } from './comments';
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
+import { setCommentsView } from './comments-view'; // P4-B1
+import { useSettings } from '../../stores/settings'; // P4-B1
+import type { CommentsView } from '@artifacts/comments/view'; // P4-B1
 import type { DocumentTabState } from './tab-state';
 
 export type DocumentEditorProps = ArtifactEditorProps<DocumentTabState>;
@@ -104,6 +107,10 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     }
   }, [visible, drawn, state]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
+  // P4-B1 (the P4 spec §4.3; settings version 15): View › Comments, per user, read from the settings and written through
+  // them (the editor is portable and takes the value and the setter)
+  const commentsView = useSettings((s) => s.state?.settings.artifacts.commentsView ?? 'expand');
+  const onCommentsViewChange = useCallback((view: CommentsView) => void setCommentsView(view), []);
   const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
@@ -120,6 +127,8 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         suggestions={state.host}
         rail={snapshot.rail}
         onRailChange={onRailChange}
+        commentsView={commentsView} /* P4-B1 */
+        onCommentsViewChange={onCommentsViewChange} /* P4-B1 */
         saveVersionRequest={snapshot.saveVersionRequest}
         pageScope={SystemPage}
         onPage={onPage}

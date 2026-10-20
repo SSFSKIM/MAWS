@@ -113,12 +113,15 @@ export type ModsSettings = z.infer<typeof ModsSettingsSchema>;
 export const ArtifactsSettingsSchema = z.strictObject({
   defaultDesignSystem: z.uuid().nullable(),
   spaceDesignSystems: z.record(z.uuid(), z.uuid()), // Space id → design system id
+  // P4-B1 (X36; the P4 interface ledger's §6 slot): version 15, View › Comments for every document: Expand (cards in the
+  // margin), Minimize (icons at the anchors), Hide (an empty margin); per user, so it lives here and not on the artifact
+  commentsView: z.enum(['expand', 'minimize', 'hide']),
 });
 export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
 // P3-D end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(14), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts)
+  version: z.literal(15), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

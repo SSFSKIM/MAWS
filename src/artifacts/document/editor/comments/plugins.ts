@@ -13,16 +13,22 @@
 //   in a long document costs one block; a change of the threads map or of the active thread rebuilds them all. A click
 //   on an open thread's passage draws that thread active (where passages overlap, the innermost: the shortest at the
 //   click, the newest on a tie), and a click on text no open thread covers draws none; the click still places the caret.
+//   P4-B1 (the P4 spec §4.3 [binding]: only the human activates a thread): the local caret moving into a passage (a
+//   selection-only transaction of this editor, never a binding transaction) draws its thread active too, and leaving
+//   it by the keyboard keeps the thread (Overleaf's sticky pin, for the caret alone; LC-1 item 5 re-bases); a remote
+//   edit maps the decorations and keeps `active`, a threads-map change rebuilds with the old `active`, awareness never
+//   reaches this plugin. ⌃⌘ then N, P or E then C (Docs' chords) go to the next or previous passage after the caret, or
+//   enter the current one (the editor's surface focuses its card).
 // - The paste dedupe (Outline's rule): a pasted comment mark is kept only when its thread is in this document and no
 //   live text carries it, so a cut followed by a paste moves the comment, a copy pastes plain text, and another
 //   document's mark, or an external `span[data-thread]`, never comes in. A drag-move counts the dragged range as gone,
 //   since ProseMirror transforms the dragged slice before it deletes the source.
 import { Extension, type Editor } from '@tiptap/core';
 import { Fragment, Slice, type Mark, type Node as PMNode } from '@tiptap/pm/model';
-import { NodeSelection /* P3-E */, Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { NodeSelection /* P3-E */, Plugin, PluginKey, TextSelection /* P4-B1 */, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type { Actor } from '@shared/artifacts/actor';
-import type { Doc, Node as YType } from '../../../yjs'; // P3-E: Node
+import { isBindingTransaction /* P4-B1 */, type Doc, type Node as YType } from '../../../yjs'; // P3-E: Node
 import { YNode, relativePositionToJSON } from '../../../yjs/document'; // P3-E: YNode
 import { resolvedPositionsToRelativePositions } from '../../../yjs/prosemirror';
 import { listTabs, tabBody } from '../../tabs';
@@ -128,11 +134,15 @@ export const commentDisplayKey = new PluginKey<DisplayState>('commentDisplay');
 
 interface DisplayState {
   active: string | null;
+  /** P4-B1: what drew `active` (null for none, or for a rebuild that kept it). */
+  cause: ActivationCause | null;
   decorations: DecorationSet;
   /** P3-E: the open block threads by block id, read with the threads map (empty: a keystroke draws no block). */
   blocks: ReadonlyMap<string, string[]>;
 }
-type DisplayMeta = { active: string | null } | { threads: true };
+/** P4-B1: what drew a thread active (the editor's surface opens the rail on a click in a narrow body, never on the caret). */
+export type ActivationCause = 'click' | 'caret' | 'key';
+type DisplayMeta = { active: string | null; cause?: ActivationCause } | { threads: true };
 
 const CLASS_SAFE = /^[\w-]+$/;
 
@@ -146,12 +156,12 @@ function decorate(doc: PMNode, from: number, to: number, ydoc: Doc, active: stri
   });
 }
 
-function rebuild(doc: PMNode, ydoc: Doc, active: string | null): DisplayState {
+function rebuild(doc: PMNode, ydoc: Doc, active: string | null, cause: ActivationCause | null = null): DisplayState {
   const out: Decoration[] = [];
   decorate(doc, 0, doc.content.size, ydoc, active, out);
   const blocks = openBlockThreads(ydoc); // P3-E
   out.push(...decorateBlocks(doc, blocks, active)); // P3-E
-  return { active, decorations: DecorationSet.create(doc, out), blocks };
+  return { active, cause, decorations: DecorationSet.create(doc, out), blocks };
 }
 
 // The textblocks a transaction changed, in its resulting doc (`touchedRanges`), or null when the transaction has too
@@ -189,14 +199,36 @@ function innermost(doc: PMNode, pos: number, ids: string[], ydoc: Doc): string |
   return [...ids].sort((a, b) => extent(a) - extent(b) || created(b) - created(a) || (a < b ? -1 : 1))[0] ?? null;
 }
 
-function display(ydoc: Doc, onActivate: ((threadId: string) => void) | null): Plugin<DisplayState> {
+// P4-B1: the open threads whose mark the caret sits in (the position's marks: at a boundary, the side `inclusive` names).
+function threadsAtCaret(state: EditorState, ydoc: Doc): string[] {
+  const { selection } = state;
+  if (!selection.empty || !(selection instanceof TextSelection)) return [];
+  return selection.$from
+    .marks()
+    .map(threadOf)
+    .filter((id): id is string => id !== null && CLASS_SAFE.test(id) && threadStatus(ydoc, id) === 'open');
+}
+
+function display(ydoc: Doc, onActivate: ((threadId: string, cause: ActivationCause) => void) | null): Plugin<DisplayState> {
   return new Plugin<DisplayState>({
     key: commentDisplayKey,
+    // P4-B1: the local caret entering a passage draws its thread active (a selection-only transaction of this editor:
+    // arrows, a click's own selection, Home and End; never the binding's remote update, never a document change); the
+    // surface is told from the view's update, where the state is settled
+    appendTransaction(transactions, oldState, newState) {
+      if (oldState.selection.eq(newState.selection)) return null;
+      if (!transactions.some((tr) => tr.selectionSet) || transactions.some((tr) => tr.docChanged || isBindingTransaction(tr) || tr.getMeta(commentDisplayKey))) return null;
+      const ids = threadsAtCaret(newState, ydoc);
+      if (ids.length === 0) return null;
+      const threadId = ids.length === 1 ? ids[0]! : innermost(newState.doc, newState.selection.from, ids, ydoc);
+      if (threadId === null || threadId === activeThread(newState)) return null;
+      return newState.tr.setMeta(commentDisplayKey, { active: threadId, cause: 'caret' } satisfies DisplayMeta).setMeta('addToHistory', false);
+    },
     state: {
       init: (_config, state) => rebuild(state.doc, ydoc, null),
       apply(tr, old, _oldState, state) {
         const meta = tr.getMeta(commentDisplayKey) as DisplayMeta | undefined;
-        if (meta) return rebuild(state.doc, ydoc, 'active' in meta ? meta.active : old.active);
+        if (meta) return rebuild(state.doc, ydoc, 'active' in meta ? meta.active : old.active, 'active' in meta ? (meta.cause ?? null) : old.cause); // P4-B1: cause
         if (!tr.docChanged) return old;
         const blocks = touchedBlocks(tr);
         if (blocks === null) return rebuild(tr.doc, ydoc, old.active);
@@ -211,7 +243,7 @@ function display(ydoc: Doc, onActivate: ((threadId: string) => void) | null): Pl
           const drawn = decorations.find(undefined, undefined, (spec: { blockComment?: boolean }) => spec.blockComment === true);
           decorations = decorations.remove(drawn).add(tr.doc, decorateBlocks(tr.doc, old.blocks, old.active));
         }
-        return { active: old.active, decorations, blocks: old.blocks };
+        return { active: old.active, cause: old.cause, decorations, blocks: old.blocks };
       },
     },
     props: {
@@ -219,8 +251,8 @@ function display(ydoc: Doc, onActivate: ((threadId: string) => void) | null): Pl
       handleClick: (view, pos, event) => {
         const ids = threadsClicked(event.target, view.dom);
         const threadId = ids.length === 0 ? null : innermost(view.state.doc, pos, ids, ydoc);
-        if (threadId !== activeThread(view.state)) view.dispatch(view.state.tr.setMeta(commentDisplayKey, { active: threadId } satisfies DisplayMeta).setMeta('addToHistory', false));
-        if (threadId !== null) onActivate?.(threadId);
+        if (threadId !== activeThread(view.state)) view.dispatch(view.state.tr.setMeta(commentDisplayKey, { active: threadId, cause: 'click' } satisfies DisplayMeta).setMeta('addToHistory', false));
+        if (threadId !== null) onActivate?.(threadId, 'click');
         return false;
       },
     },
@@ -235,7 +267,16 @@ function display(ydoc: Doc, onActivate: ((threadId: string) => void) | null): Pl
           if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(commentDisplayKey, { threads: true } satisfies DisplayMeta).setMeta('addToHistory', false));
         });
       });
-      return { destroy: stop };
+      return {
+        // P4-B1: a thread the caret or a chord drew active is told to the surface once the state holds it (a click is
+        // told by handleClick itself)
+        update: (current, prev) => {
+          const now = commentDisplayKey.getState(current.state);
+          if (!now || now.active === null || now.active === activeThread(prev) || now.cause === null || now.cause === 'click') return;
+          onActivate?.(now.active, now.cause);
+        },
+        destroy: stop,
+      };
     },
   });
 }
@@ -441,8 +482,10 @@ export interface CommentsOptions {
   paste: boolean;
   /** Mod-Alt-M: comment the selection (the editor's surface decides what that opens). */
   onComment: (() => boolean) | null;
-  /** A click on a passage drew its thread active (the editor shows it in the rail). */
-  onActivate: ((threadId: string) => void) | null;
+  /** A click, the local caret or a chord drew a passage's thread active (P4-B1: with its cause; the editor's surface decides what follows). */
+  onActivate: ((threadId: string, cause: ActivationCause) => void) | null;
+  /** P4-B1: ⌃⌘ E then C entered the current comment (the surface focuses its card). */
+  onEnter: ((threadId: string) => void) | null;
 }
 
 declare module '@tiptap/core' {
@@ -456,7 +499,9 @@ declare module '@tiptap/core' {
 
 export const Comments = Extension.create<CommentsOptions>({
   name: 'comments',
-  addOptions: () => ({ doc: null, tabId: null, paste: true, onComment: null, onActivate: null }),
+  addOptions: () => ({ doc: null, tabId: null, paste: true, onComment: null, onActivate: null, onEnter: null }),
+  // P4-B1: the two-step chords' first key, kept until the second or the window's end
+  addStorage: () => ({ chord: null as { key: 'n' | 'p' | 'e'; at: number } | null }),
   addCommands() {
     return {
       setActiveThread:
@@ -468,7 +513,26 @@ export const Comments = Extension.create<CommentsOptions>({
     };
   },
   addKeyboardShortcuts() {
-    return { 'Mod-Alt-m': () => this.options.onComment?.() ?? false };
+    // P4-B1: Docs' chords: hold ⌃⌘, N then C (next comment after the caret), P then C (previous), E then C (enter the
+    // current one). The first key arms for CHORD_WINDOW_MS; without a comment plugin (no doc) nothing is armed.
+    const arm = (key: 'n' | 'p' | 'e') => () => {
+      if (!this.options.doc) return false;
+      this.storage.chord = { key, at: Date.now() };
+      return true;
+    };
+    const complete = () => {
+      const armed = this.storage.chord;
+      this.storage.chord = null;
+      if (!armed || !this.options.doc || Date.now() - armed.at > CHORD_WINDOW_MS) return false;
+      const { editor } = this;
+      if (armed.key === 'e') {
+        const active = activeThread(editor.state);
+        if (active !== null) this.options.onEnter?.(active);
+        return active !== null;
+      }
+      return goToThread(editor, this.options.doc, armed.key === 'n' ? 'next' : 'previous');
+    };
+    return { 'Mod-Alt-m': () => this.options.onComment?.() ?? false, 'Ctrl-Mod-n': arm('n'), 'Ctrl-Mod-p': arm('p'), 'Ctrl-Mod-e': arm('e'), 'Ctrl-Mod-c': complete };
   },
   addProseMirrorPlugins() {
     const { doc, tabId } = this.options;
@@ -476,3 +540,32 @@ export const Comments = Extension.create<CommentsOptions>({
     return [display(doc, this.options.onActivate), ...(this.options.paste ? [paste(doc, tabId)] : []), ...(this.options.artifactId ? [blockCarry(doc, this.options.artifactId)] : []) /* P3-E */];
   },
 });
+
+// P4-B1 start: the chords' navigation (the stack's J and K are the surface's, in stack order; these read the document)
+const CHORD_WINDOW_MS = 1_500;
+
+/** The open threads of this editor's doc in document order: `[threadId, start]`, each at its earliest live range. */
+export function threadOrder(doc: PMNode, ydoc: Doc): Array<[string, number]> {
+  const starts: Array<[string, number]> = [];
+  for (const [id, ranges] of liveRanges(doc)) {
+    if (threadStatus(ydoc, id) !== 'open') continue;
+    const first = ranges.reduce((min, range) => Math.min(min, range.from), Infinity);
+    if (Number.isFinite(first)) starts.push([id, first]);
+  }
+  const created = (id: string) => getThread(ydoc, id)?.createdAt ?? 0;
+  return starts.sort((a, b) => a[1] - b[1] || created(a[0]) - created(b[0]) || (a[0] < b[0] ? -1 : 1));
+}
+
+/** The next or previous open thread after the caret (after the active thread's start when one is active); false with none. */
+export function goToThread(editor: Editor, ydoc: Doc, direction: 'next' | 'previous'): boolean {
+  const { state } = editor;
+  const order = threadOrder(state.doc, ydoc);
+  const active = activeThread(state);
+  const from = active !== null ? (order.find(([id]) => id === active)?.[1] ?? state.selection.from) : state.selection.from;
+  const target = direction === 'next' ? order.find(([id, start]) => start > from || (start === from && id !== active && active === null)) : [...order].reverse().find(([, start]) => start < from);
+  if (!target) return false;
+  const [threadId, start] = target;
+  editor.view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, start)).setMeta(commentDisplayKey, { active: threadId, cause: 'key' } satisfies DisplayMeta).setMeta('addToHistory', false).scrollIntoView());
+  return true;
+}
+// P4-B1 end
