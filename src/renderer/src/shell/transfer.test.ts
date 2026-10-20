@@ -321,6 +321,32 @@ describe('the version a moved viewer shows', () => {
     expect(asked.result.current).toBeNull();
   });
 
+  // P4-B4 (the B3 merge's review): a link's open of a main tab left before its editor took it is stale for the main
+  // viewer a move lands in, on both paths (the carried state adopted by a new tab, an existing tab activated)
+  it('panel → main into a new main tab withdraws an ask left for that artifact’s main viewer', async () => {
+    useLayout.setState({ main: panes([sessionTab(A)]) });
+    const src = addArtifacts(A, DOC);
+    mounted(panelScope(src));
+    requestArtifactOpen(DOC, 'latest', 'main', { version: 2 }); // a link's ask whose main tab was closed first
+    const asked = renderHook(() => useOpenRequest(DOC, 'main'));
+    expect(asked.result.current).not.toBeNull();
+    expect(await move(() => moveArtifactToTab(src))).toBe(true);
+    expect(asked.result.current, 'the carried state adopted by a new main tab').toBeNull();
+  });
+
+  it('panel → main onto a main tab already showing it withdraws the ask left for that tab’s viewer', async () => {
+    useLayout.setState({ main: panes([DOC_TAB, sessionTab(A)]) });
+    const again = addArtifacts(A, DOC);
+    mounted(panelScope(again));
+    mounted(mainScope());
+    guard(panelScope(again), () => true);
+    requestArtifactOpen(DOC, 'latest', 'main', { block: 'b7' });
+    const left = renderHook(() => useOpenRequest(DOC, 'main'));
+    expect(left.result.current).not.toBeNull();
+    expect(await move(() => moveArtifactToTab(again))).toBe(true);
+    expect(left.result.current, 'an existing main tab activated').toBeNull();
+  });
+
   it('an ordinary open in the panel still asks for its version', () => {
     const id = addArtifacts(A);
     const asked = renderHook(() => useOpenRequest(DOC, 'panel'));

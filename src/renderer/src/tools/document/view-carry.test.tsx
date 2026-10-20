@@ -22,6 +22,7 @@ import { resetShellStores } from '../../test-support/shell-stores';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 import { liveBody, SCROLL_SETTLE_MS } from './view-carry';
+import { requestArtifactOpen, resetOpenRequests } from '../artifacts/viewers/requests'; // P4-B4
 import { activeThread, pinnedThread } from '@artifacts/document/editor/comments/plugins';
 import { installResizeObserver } from '../../test-support/resize';
 
@@ -61,6 +62,7 @@ afterEach(() => {
   cleanup();
   releaseArtifactEditorState(panel);
   releaseArtifactEditorState(main);
+  resetOpenRequests();
   off();
   memory.destroy();
   vi.restoreAllMocks();
@@ -326,6 +328,33 @@ describe('a document moved between the panel and a main tab comes back where the
     const back = await ready();
     await settle();
     expect([activeThread(back.state), pinnedThread(back.state)], 'main → panel').toEqual([null, 't-pinned']);
+  });
+
+  // P4-B4 (the B3 merge's review): a link or show_pane asking for a place after the move's hand-off, before the target's
+  // first restored frame, supersedes the carried view: its caret and its scroll, the scroll hold while the page settles too
+  it('a place asked after the hand-off supersedes the carried view: the asked block’s caret, no carried scroll', async () => {
+    const source = mountIn(panel);
+    const editor = await ready();
+    edit(editor, source.state);
+    let asked = '';
+    editor.state.doc.descendants((node) => {
+      if (!asked && node.isTextblock && node.textContent === 'Paragraph 3') asked = node.attrs.id as string;
+      return !asked;
+    });
+    act(() => {
+      pageEl().scrollTop = 12 * 100 + 50;
+      editor.view.focus();
+      const at = positionOf(editor, 'Paragraph 14');
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, at, at + 9)));
+    });
+    const target = move(panel, main, source, 40);
+    act(() => void requestArtifactOpen(A, 'latest', 'main', { block: asked }));
+    const moved = await ready();
+    await settle();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+    expect(target.state).toBe(source.state);
+    expect(moved.state.selection.head, 'the asked block’s start').toBe(positionOf(moved, 'Paragraph 3'));
+    expect(pageEl().scrollTop, 'not the carried place').not.toBe(12 * 40 + 20);
   });
 
   it('only the first mount restores: a later remount of the target opens as an ordinary remount does', async () => {

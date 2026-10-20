@@ -123,13 +123,19 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     return captureDocumentView(editor, page.current) ?? undefined;
   });
   const carried = useRef<DocumentView | null | undefined>(undefined); // undefined: not taken yet
+  const restoring = useRef<(() => void) | null>(null); // the carried restore's cancel, until it has settled or gone
   useEffect(() => {
     if (carried.current === undefined) carried.current = (takeCarriedView(scope) as DocumentView | undefined) ?? null;
   }, [scope]);
   useEffect(() => {
     const view = carried.current;
     if (!editor || !view) return;
-    return restoreDocumentViewWhenDrawn(editor, () => page.current, view, () => (carried.current = null));
+    const cancel = restoreDocumentViewWhenDrawn(editor, () => page.current, view, () => (carried.current = null));
+    restoring.current = cancel;
+    return () => {
+      cancel();
+      restoring.current = null;
+    };
   }, [editor]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
   // P4-B1 (the P4 spec §4.3; settings version 15): View › Comments, per user, read from the settings and written through
@@ -138,6 +144,15 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   const onCommentsViewChange = useCallback((view: CommentsView) => void setCommentsView(view), []);
   const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
   const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4
+  // P4-B4 (the B3 merge's review): a place asked after a move's hand-off (a link, show_pane's at) is newer than the view
+  // the move carried: the carried restore (its scheduled frame, its scroll held while the page settles) gives way to it
+  const placed = reveal?.location !== undefined;
+  useEffect(() => {
+    if (!placed) return;
+    carried.current = null;
+    restoring.current?.();
+    restoring.current = null;
+  }, [placed, reveal]);
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.ready || !snapshot.handle) return <Notice>Opening the document…</Notice>;

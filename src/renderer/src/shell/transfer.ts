@@ -29,6 +29,7 @@ import { toast } from '../stores/notices';
 import { activeTab, allTabs, closeTab, currentSet, locateTab, sessionOfTab } from '../stores/layout-model';
 import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
+import { withdrawVersionRequest } from '../tools/artifacts/viewers/requests'; // P4-B4: a stale main ask goes with a move
 import { holdCover } from '../tools/browser/covering'; // Decision Log 39
 import { markTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5 (S6)
 
@@ -207,7 +208,10 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
 
 // Shows the artifact's main tab at `at`, opening it if main has none (the main area brought back if a maximized or
 // floating panel stood in it). With no pane, an open tab is activated where it is; a new one appends to the focused pane.
+// P4-B4 (the B3 merge's review): the move carries the viewer's state, so an ask left for that artifact's main viewer (a
+// link's open whose tab went before its editor took it) goes, as the carried panel open withdraws the panel's.
 function placeInMain(artifactId: string, at: TabPlace): void {
+  withdrawVersionRequest(artifactId, 'main');
   const id = mainTabIdOf({ kind: 'artifact', artifactId });
   const before = currentSet(layout().main).panes.findIndex((p) => p.tabs.some((t) => t.id === id));
   layout().revealMain();
