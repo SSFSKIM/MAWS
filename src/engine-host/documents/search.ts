@@ -39,7 +39,7 @@ export const MIRROR_SWEEP_DELAY_MS = 5_000; // the sweep starts this long after 
 export const MIRROR_QUIET_MS = 2_000; // background extraction waits until no artifact has committed for this long
 // Background work never takes an artifact stored this large (Decision Log 25): a quiet window cannot rule out an agent's
 // batch starting during its extraction, so a large one is left stale for the search-time catch-up.
-export const MIRROR_BACKGROUND_MAX_BYTES = 256 * 1024;
+export const MIRROR_BACKGROUND_MAX_BYTES = 16 * 1024; // Decision Log 25 as revised: a few pages; larger waits for a search
 // The catch-up yields to the host's loop after this much synchronous extraction (its rows commit in that batch), so a
 // search that has many rows to bring up to date shares the loop with the typing and the agents' batches.
 export const CATCHUP_SLICE_MS = 50;

@@ -225,7 +225,7 @@ describe('the refresher and the sweep', () => {
   });
 
   it('never extracts a large artifact in the background (the sweep, a settle, an unload); a search still catches it up (Decision Log 25)', async () => {
-    expect(MIRROR_BACKGROUND_MAX_BYTES).toBe(256 * 1024);
+    expect(MIRROR_BACKGROUND_MAX_BYTES).toBe(16 * 1024);
     const storage = SqliteDocumentStorage.open(join(w.userData, 'large', 'store.sqlite'), { log: () => {} });
     const service = new DocumentService(storage, { kindOf: (artifactId) => storage.kindOf(artifactId), log: () => {}, idleUnloadMs: 30 });
     const store = new ArtifactStore(service, storage, { root: join(w.userData, 'large'), log: () => {} });
