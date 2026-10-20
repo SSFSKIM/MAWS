@@ -122,7 +122,7 @@ export class PerfSeam {
   seed(artifactId: string, state: Uint8Array): Promise<{ revision: number }> {
     return this.send({ cmd: 'seed', artifactId, state: Buffer.from(state).toString('base64') });
   }
-  call<R>(session: string, tool: 'artifact_read' | 'artifact_edit', args: Record<string, unknown>, timeoutMs?: number): Promise<CallAnswer<R>> {
+  call<R>(session: string, tool: 'artifact_read' | 'artifact_edit' | 'artifact_reply' /* P4-B1 */, args: Record<string, unknown>, timeoutMs?: number): Promise<CallAnswer<R>> {
     return this.send({ cmd: 'call', session, tool, args }, timeoutMs);
   }
   heap(): Promise<{ heapUsed: number; rss: number }> {

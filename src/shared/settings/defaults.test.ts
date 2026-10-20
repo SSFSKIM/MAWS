@@ -428,11 +428,11 @@ describe('settings v13 → v14 adds the design-system defaults', () => {
   });
 
   it('patches the owner’s default alone, and replaces the Spaces’ record whole', () => {
-    const state: Settings = { ...SETTINGS_DEFAULTS_V15, artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B } } };
+    const state: Settings = { ...SETTINGS_DEFAULTS_V15, artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'expand' /* P4-B1 */ } };
     const owner = applySettingsPatch(state, SettingsPatchSchema.parse({ artifacts: { defaultDesignSystem: null } }));
-    expect(owner).toEqual({ ...state, artifacts: { defaultDesignSystem: null, spaceDesignSystems: { [SPACE]: DS_B } } });
+    expect(owner).toEqual({ ...state, artifacts: { defaultDesignSystem: null, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'expand' } });
     const spaces = applySettingsPatch(state, SettingsPatchSchema.parse({ artifacts: { spaceDesignSystems: {} } }));
-    expect(spaces.artifacts).toEqual({ defaultDesignSystem: DS_A, spaceDesignSystems: {} });
+    expect(spaces.artifacts).toEqual({ defaultDesignSystem: DS_A, spaceDesignSystems: {}, commentsView: 'expand' }); // P4-B1
     expect(applySettingsPatch(state, { artifacts: {} })).toEqual(state);
     expect(SettingsPatchSchema.safeParse({ artifacts: { defaultDesignSystem: 'maws' } }).success).toBe(false);
   });

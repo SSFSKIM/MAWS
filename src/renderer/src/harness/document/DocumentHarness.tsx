@@ -21,7 +21,8 @@ import type { Actor } from '@shared/artifacts/actor';
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
-import { listThreads } from '@artifacts/document/threads';
+import { listThreads, reply } from '@artifacts/document/threads'; // P4-B1: reply
+import { nanoid8 } from '@artifacts/document/schema'; // P4-B1
 import type { AppSessionId } from '@shared/graph/ids';
 import { openComment } from '../../side/register';
 import { registerCommentComposer } from '../../tools/code/anchor/anchor';
@@ -194,6 +195,11 @@ export function DocumentHarness({ stacked = false }: { stacked?: boolean } = {})
           if (!block) throw new Error(`no block ${id}`);
           block.insert(block.toArray().reduce<number>((n, part) => n + (typeof part === 'string' ? part.length : 1), 0), text);
         }, AGENT);
+      },
+      // P4-B1: the agent's reply into a thread, as `artifact_reply` writes it on the host
+      agentReply: (threadId, text) => {
+        if (!world) throw new Error('no document');
+        world.host.write((doc) => reply(doc, threadId, { id: `${threadId}:${nanoid8()}`, by: AGENT, at: Date.now(), body: text }), AGENT);
       },
       version: (kind, by, fields = {}) => {
         if (!world) throw new Error('no document');

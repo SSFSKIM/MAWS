@@ -26,7 +26,7 @@ import { TABS } from '@artifacts/document/tabs';
 import { applyV2 } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
-import { artifactEditTool, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
+import { artifactEditTool, artifactReplyTool /* P4-B1 */, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
 import type { McpToolDefinition } from '../../tool-server/server';
 import type { ArtifactStore } from '../store';
 
@@ -76,7 +76,7 @@ export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/
 
 export type PerfCommand =
   | { cmd: 'seed'; artifactId: string; state: string }
-  | { cmd: 'call'; session: string; tool: 'artifact_read' | 'artifact_edit'; args: Record<string, unknown> }
+  | { cmd: 'call'; session: string; tool: PerfTool; args: Record<string, unknown> }
   | { cmd: 'heap' }
   | { cmd: 'release'; session: string }
   | { cmd: 'loop'; reset?: boolean };
@@ -107,8 +107,11 @@ export type PerfAnswer =
 
 export const documentPerfSeamRequested = (env: Record<string, string | undefined>): boolean => env.MAWS_E2E === '1' && env.MAWS_DOCUMENT_PERF === '1';
 
+/** P4-B1: the tools the seam runs as a session; `artifact_reply` for the margin's e2e (an agent's reply growing a card). */
+export type PerfTool = 'artifact_read' | 'artifact_edit' | 'artifact_reply';
+
 interface PerfSession {
-  tools: Record<'artifact_read' | 'artifact_edit', McpToolDefinition>;
+  tools: Record<PerfTool, McpToolDefinition>;
   calls: number;
   lastRevision: number;
 }
@@ -171,13 +174,13 @@ export class DocumentPerfSeam {
     let session = this.sessions.get(name);
     if (!session) {
       const deps = { artifacts: () => this.store, session: new DocumentToolSession() };
-      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps) }, calls: 0, lastRevision: 0 };
+      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps), artifact_reply: artifactReplyTool(deps) /* P4-B1 */ }, calls: 0, lastRevision: 0 };
       this.sessions.set(name, session);
     }
     return session;
   }
 
-  private async call(name: string, tool: 'artifact_read' | 'artifact_edit', args: Record<string, unknown>): Promise<PerfAnswer> {
+  private async call(name: string, tool: PerfTool, args: Record<string, unknown>): Promise<PerfAnswer> {
     const session = this.session(name);
     const definition = session.tools[tool];
     if (!definition) return { ok: false, error: `no tool ${JSON.stringify(tool)}` };
