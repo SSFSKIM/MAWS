@@ -52,7 +52,8 @@ export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): vo
   guardPermissions(session.fromPartition(CAPTURE_PARTITION), 'all'); // the partition holds captures alone
 }
 
-export function startArtifacts({ hosts, register, emit, settings, onSettingsChanged, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry } {
+// P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
+export function startArtifacts({ hosts, register, emit, settings, onSettingsChanged, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
   register('artifacts.open', ({ artifactId, doc }, { sender }) => openDocument(deps, artifactId, sender, doc));
   // P3-A M7: the scheme and the export service
@@ -110,6 +111,7 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
   }
   return {
     exporters,
+    exports, // P4-B5
     stop: () => {
       stopDefaults();
       stopResync();

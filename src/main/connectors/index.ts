@@ -43,6 +43,7 @@ import type { DirectRoute, DirectRouteDeps } from './direct-route';
 import { createEngineRoute, type EngineRouteDeps } from './engine-route';
 import type { ConnectorOAuthProvider, ConnectorOAuthProviderDeps } from './oauth-provider'; // P3-HD M3c2
 import { createConnectorOwner } from './owner'; // P3-HD M3c2
+import { createOwnerDelivery, type OwnerDelivery } from './owner-delivery'; // P4-B5
 import type { ConnectorGrantAuthority, ConnectorRoute } from './route';
 
 export type ConnectorSender = Pick<WebContents, 'id' | 'isDestroyed' | 'send' | 'on' | 'once'>;
@@ -79,7 +80,8 @@ const canonical = (path: string): string | null => {
   }
 };
 
-export function startConnectors({ hosts, register, index, realpath = canonical, windowOf, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect, oauth: createOAuth }: ConnectorsDeps): { stop(): void } {
+// P4-B5: `delivery`, the owner's delivery through route D (./owner-delivery.ts), where route D exists; null otherwise.
+export function startConnectors({ hosts, register, index, realpath = canonical, windowOf, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect, oauth: createOAuth }: ConnectorsDeps): { stop(): void; delivery: OwnerDelivery | null } {
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const host = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await call(name, input);
@@ -189,6 +191,10 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     register('connectors.disconnect', ({ connectionId }) => owner.disconnect(connectionId));
   }
 
+  // P4-B5: the owner's delivery (Send to) over route D and MAWS's own OAuth; its operations are route D's own, so the
+  // lifecycle below (host loss, reconciliation, stop) covers them
+  const delivery = direct ? createOwnerDelivery({ call, direct, oauth, log }) : null;
+
   const stopEnded = hosts.onEvent('connectors.operation', ({ operationId }) => engine.operationEnded(operationId));
   // E3: an agent's dataset refresh, read, run and answered; a request read as gone (answered, ended) is left alone
   const refresh = async (requestId: string): Promise<void> => {
@@ -227,6 +233,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     owner?.hostStreaming(); // P3-F F-connectors 9: the owner's rows, read during an outage, are read again
   });
   return {
+    delivery, // P4-B5
     stop: () => {
       stopEnded();
       stopRefreshes(); // E3

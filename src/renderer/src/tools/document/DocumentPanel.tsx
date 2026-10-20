@@ -16,6 +16,7 @@ import type { EditorHostAction } from '../../panel/editor-host'; // P3-E
 import { takeCarriedView, useArtifactViewCapture, type ArtifactEditorProps } from '../../artifacts/registry'; // P4-B3 M5: the view carry
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
+import { useSendToAction } from '../../delivery/header'; // P4-B5
 import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from './comment-session'; // P3-F1
 import { forgetCardActivation, useDocumentComments } from './comments'; // P4-B3: forgetCardActivation
@@ -68,7 +69,10 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting, shown: snapshot.shown /* P3-F (F7) */ },
     commands,
   );
-  useEditorHost(scope, additionalActions?.length ? { ...header, actions: [...(header.actions ?? []), ...additionalActions] } : header); // P3-E: a dashboard's actions after B's
+  // P4-B5: Send to, the shown version's when one is previewed (none while two are compared, as Export)
+  const sendTo = useSendToAction(snapshot.title && snapshot.shown !== 'compare' ? { artifactId, kind: artifactKind ?? 'document', title: snapshot.title, ...(snapshot.shown && { versionId: snapshot.shown.versionId }) } : null);
+  const actions = [...(header.actions ?? []), ...(additionalActions ?? []), ...(sendTo ? [sendTo] : [])]; // P3-E: a dashboard's actions after B's; P4-B5: Send to last
+  useEditorHost(scope, { ...header, actions });
 
   // Comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown, to
   // the artifact's own context (its session, a session its directory starts on Comment, or a card saying why not);

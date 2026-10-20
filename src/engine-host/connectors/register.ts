@@ -30,6 +30,8 @@ export const CONNECTORS_DEADLINE_SHAPES: Record<HostConnectorCommand, DeadlineSh
   // P3-HD M2: route D's, each answered from the operation table at once (a lookup or connection is an operation's)
   'connectors.directResolve': 'immediate', 'connectors.directStart': 'immediate', 'connectors.directDiscover': 'immediate',
   'connectors.directTake': 'immediate', 'connectors.directCancel': 'immediate', 'connectors.directClose': 'immediate',
+  // P4-B5: the owner's delivery (operations, as route D's), and route E's observation (a status read, as `resolve`)
+  'connectors.directLocate': 'immediate', 'connectors.directSend': 'immediate', 'connectors.observe': 'bounded',
 };
 
 export interface ConnectorsSurfaceDeps {
@@ -102,6 +104,10 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   serve('connectors.directCancel', ({ operationId }) => ({ cancelled: direct.cancel(operationId) }));
   serve('connectors.directClose', ({ connectionId, credentialEpoch }) => ({ cancelled: direct.withdraw(connectionId, credentialEpoch) }));
   // P3-HD M2 end
+  // P4-B5: the owner's delivery through route D, and route E's observation of one live session for it
+  serve('connectors.directLocate', (input) => direct.locate(input));
+  serve('connectors.directSend', (input) => direct.send(input));
+  serve('connectors.observe', (input) => calls.observe(input));
 
   const stopFeed = store?.onConnectorGrantChange((change) => void emit('connectors.grantChanged', change));
   // P3-HD panel correction: every row's current launch, told to the observation cache as the rows change

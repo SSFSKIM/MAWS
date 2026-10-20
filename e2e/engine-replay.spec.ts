@@ -37,7 +37,7 @@ const logOf = (page: Page) => page.evaluate(() => (window as unknown as { __c3: 
 const eventsOf = async (page: Page, id: string) => (await logOf(page)).batches.filter((b) => b.appSessionId === id).flatMap((b) => b.events);
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
-  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<CommandResult<N>>;
+  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
 }
 
 // Timed in the page, so the measure is the bridge's round trip and not Playwright's.
@@ -46,7 +46,7 @@ function timedInvoke<N extends CommandName>(page: Page, name: N, input: CommandI
     const start = performance.now();
     const result = await window.maws.invoke(n as never, i as never);
     return { result, ms: performance.now() - start };
-  }, [name, input] as const) as Promise<{ result: CommandResult<N>; ms: number }>;
+  }, [name as string, input as unknown] as const) as Promise<{ result: CommandResult<N>; ms: number }>;
 }
 
 function value<N extends CommandName>(result: CommandResult<N>) {

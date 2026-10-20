@@ -64,9 +64,10 @@ import * as library from './schema/library'; // P3-L M1
 import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
 import * as presentations from './schema/presentations'; // P3-C M6
 import * as connectors from './schema/connectors'; // P3-H H3b
+import * as delivery from './schema/delivery'; // P4-B5
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -602,7 +603,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });

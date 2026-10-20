@@ -1451,6 +1451,24 @@ export class ArtifactStore {
     return grant.mode === 'read' ? 'held' : 'wrongMode';
   }
 
+  // P4-B5 start: an owner's delivery's fence (route D's direct send, which no grant authorizes): only the artifact's
+  // deletion asked for breaks it, at once and synchronously, as it breaks a call's; no tool's revoke or grant touches it
+  // (its key names no tool). Released with `releaseConnectorFence`; `deliveryFenceHolds` is the send's check at its write.
+  deliveryFence(artifactId: string, onBreak?: () => void): ConnectorFence {
+    const fence: ConnectorFence = { artifactId, key: DELIVERY_FENCE_KEY, fingerprint: '', mode: 'once', broken: false, onBreak };
+    let held = this.fences.get(artifactId);
+    if (!held) this.fences.set(artifactId, (held = new Set()));
+    held.add(fence);
+    return fence;
+  }
+
+  deliveryFenceHolds(fence: ConnectorFence): boolean {
+    if (fence.broken || fence.key !== DELIVERY_FENCE_KEY || !this.fences.get(fence.artifactId)?.has(fence)) return false;
+    const row = this.closed ? undefined : this.entity(fence.artifactId);
+    return row !== undefined && row.deletedAt === null;
+  }
+  // P4-B5 end
+
   // A revoke of `tool` (null: a delete of the artifact), or a grant replacing it, asked for: every fence held of it
   // breaks now, but those the replacing grant still `admits`.
   private breakFences(artifactId: string, tool: ConnectorToolRef | null, admits?: (fence: ConnectorFence) => boolean): void {
@@ -1709,6 +1727,9 @@ function toSpace(row: { id: string; name: string; linkedDir: string | null; crea
 const GRANT_INPUT = z.object(ConnectorGrantRequestSchema.shape);
 const TOOL_INPUT = z.object(ConnectorToolRefSchema.shape);
 const CALL_INPUT = z.object(ConnectorCallRefSchema.shape);
+
+// P4-B5: a delivery fence's key, which no tool's key (`connectorToolKey`, never empty) equals.
+const DELIVERY_FENCE_KEY = '';
 
 // H3b: a connector call's dispatch fence (`connectorFence`): its tool and authority, and whether a revoke, a replacing
 // grant or a delete broke it.

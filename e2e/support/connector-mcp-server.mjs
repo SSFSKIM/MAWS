@@ -13,6 +13,9 @@
 //   {"reply": "isError"}                       a tool error
 // each with an optional "delayMs" before the answer, during which other requests are answered. No control file: the
 // built-in DEFAULT_ROWS. A control file naming no such reply answers an error, never rows.
+//
+// P4-B5: `--mode notion` answers a tool call as Notion's `notion-create-pages` does, a page made: text JSON
+// `{pages: [{id, url, properties: {title}}]}`, the id fresh per call and the title the call's first page's.
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -39,7 +42,7 @@ let releasing = null;
 
 // E3 start: the rows mode
 const mode = process.argv.includes('--mode') ? arg('mode') : null;
-if (mode !== null && mode !== 'rows') throw new Error(`connector-mcp-server: unknown --mode ${mode}`);
+if (mode !== null && mode !== 'rows' && mode !== 'notion') throw new Error(`connector-mcp-server: unknown --mode ${mode}`); // P4-B5: notion
 const control = mode === 'rows' ? arg('control') : null;
 const DEFAULT_ROWS = [
   { day: '2026-10-01', signups: 12 },
@@ -85,6 +88,12 @@ function answer(method, params) {
       if (!tools.includes(params?.name)) return { error: { code: -32602, message: `unknown tool ${String(params?.name)}` } };
       calls += 1;
       if (mode === 'rows') return rowsCall(); // E3
+      if (mode === 'notion') {
+        // P4-B5: a page made, as Notion's hosted server answers
+        const pageId = `${process.pid.toString(16).padStart(8, '0')}${calls.toString(16).padStart(24, '0')}`;
+        const title = params.arguments?.pages?.[0]?.properties?.title ?? 'Untitled';
+        return { content: [{ type: 'text', text: JSON.stringify({ pages: [{ id: pageId, url: `https://www.notion.so/Fixture-${pageId}`, properties: { title } }] }) }] };
+      }
       const structuredContent = { server: id, tool: params.name, arguments: params.arguments ?? {}, n: calls };
       return { content: [{ type: 'text', text: JSON.stringify(structuredContent) }], structuredContent };
     }

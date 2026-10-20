@@ -76,7 +76,11 @@ export interface ExportRequest {
   // P3-E (E1 M5; Decision Log 33) and P3-H (Decision Log 91): a file of its own (a design's export, or `ownFile`), minted
   // by the service as it takes the request, its id in `path`'s name
   exportId?: string;
+  // P4-B5: the format's dialect for a connector (main's delivery only, never the agent's or the library's IPC): `notion`,
+  // a document's Markdown as Notion's enhanced Markdown takes it. Always a file of its own.
+  dialect?: ExportDialect;
 }
+export type ExportDialect = 'notion'; // P4-B5
 
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
 export interface ExportContext {
@@ -278,7 +282,8 @@ const refusal = (reason: ArtifactRefusal['reason'], message: string, data: Recor
 
 // Main's side of the export bridge and the library's command over one queue. Answers the library's export and `stop`.
 export function startExportService({ registry, root, call, onEvent, answer, print = printHtmlToPdf, hostGeneration }: ExportServiceDeps): {
-  exportForLibrary(input: CommandInput<'artifacts.export'>): Promise<CommandOutput<'artifacts.export'>>;
+  // P4-B5: `options.dialect`, main's delivery's (the request then always a file of its own)
+  exportForLibrary(input: CommandInput<'artifacts.export'>, options?: { dialect?: ExportDialect }): Promise<CommandOutput<'artifacts.export'>>;
   stop(): void;
 } {
   const slot = slots(EXPORT_CONCURRENCY, EXPORT_QUEUE_MS);
@@ -409,7 +414,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   });
 
   return {
-    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */, ownFile /* P3-H */ }) {
+    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */, ownFile /* P3-H */ }, options = {}) {
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
@@ -437,8 +442,8 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         revision = version.seq;
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
-      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */ };
-      const result = await queued(request, time, ownFile === true); // P3-H: ownFile
+      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */, ...(options.dialect !== undefined && { dialect: options.dialect }) /* P4-B5 */ };
+      const result = await queued(request, time, ownFile === true || options.dialect !== undefined); // P3-H: ownFile; P4-B5: a dialect's file is its own, never the format's cache
       if (!result.ok && result.refusal) throw new CommandFailure(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
       return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E, P3-H */ };

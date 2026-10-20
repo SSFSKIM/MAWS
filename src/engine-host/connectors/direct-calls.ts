@@ -36,7 +36,7 @@ import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode } from '@shared/artifacts/connectors';
 import type { CommandInput } from '@shared/ipc/schema';
-import type { ConnectorDatasetTake, DirectCallOutcome, DirectDiscoverAnswer, DirectOperationOutcome, DirectReason, DirectResolveAnswer, DirectSource } from '@shared/ipc/schema/connectors';
+import { DIRECT_LOCATE_MAX, type ConnectorDatasetTake, type DirectCallOutcome, type DirectDiscoverAnswer, type DirectLocateAnswer, type DirectOperationOutcome, type DirectReason, type DirectResolveAnswer, type DirectSource } from '@shared/ipc/schema/connectors'; // P4-B5: locate
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import type { DirectConnectionPool, DirectFailure, DirectLease, DirectTool } from './direct-client';
@@ -53,6 +53,10 @@ export const DIRECT_OPERATIONS_MAX = 256; // running and untaken together
 export type DirectResolveInput = CommandInput<'connectors.directResolve'>;
 export type DirectStartInput = CommandInput<'connectors.directStart'>;
 export type DirectDiscoverInput = CommandInput<'connectors.directDiscover'>;
+export type DirectLocateInput = CommandInput<'connectors.directLocate'>; // P4-B5
+export type DirectSendInput = CommandInput<'connectors.directSend'>; // P4-B5
+// P4-B5: the candidates one location verifies at most (each a config file read), whatever the cache holds
+export const DIRECT_LOCATE_VERIFY_MAX = 32;
 type Credential = NonNullable<DirectStartInput['credential']>;
 
 // The store's grant authority as a direct call uses it (an ArtifactStore is one): route E's (./calls.ts) and the
@@ -63,12 +67,15 @@ export interface DirectGrantStore {
   connectorFenceHolds(fence: DirectFence, call: ConnectorCallRef, mode: ConnectorGrantMode): 'held' | 'revoked' | 'fingerprintChanged' | 'wrongMode';
   checkConnectorCall(artifactId: string, call: ConnectorCallRef): Promise<ConnectorAuthorization>;
   authorizeConnectorCall(artifactId: string, call: ConnectorCallRef, expected?: ConnectorGrantMode): Promise<ConnectorAuthorization>;
+  // P4-B5: the owner's delivery's fence, broken by the artifact's deletion alone
+  deliveryFence(artifactId: string, onBreak?: () => void): DirectFence;
+  deliveryFenceHolds(fence: DirectFence): boolean;
 }
 type DirectFence = object; // the store's own (documents/store.ts ConnectorFence), opaque here
 
 export interface DirectCallsOptions {
   datasets?: ConnectorDatasetSink; // E3c: the shared host-only refresh sink
-  cache: Pick<ConnectorStatusCache, 'resolve' | 'resolveSource' | 'readEntryForWrite'>;
+  cache: Pick<ConnectorStatusCache, 'resolve' | 'resolveSource' | 'readEntryForWrite'> & Partial<Pick<ConnectorStatusCache, 'candidates'>>; // P4-B5: candidates
   pool: Pick<DirectConnectionPool, 'acquire' | 'invalidate' | 'close'>;
   store(): DirectGrantStore | null;
   completed(operationId: string): void; // `connectors.directOperation`, the id alone
@@ -190,6 +197,22 @@ export class DirectCalls {
     this.run(operation, () => this.discovered(operation, input), failed('transport'));
     return { operationId: operation.id };
   }
+
+  // P4-B5 start: the owner's delivery (the schema's P4-B5 block). `locate` answers the verified sources that can take
+  // `tool`, bounded like a resolution; `send` runs the tool once for the owner's gesture with no grant, as a call's
+  // operation (its outcome a call's), its write admitted by its own synchronous check (`sent`).
+  locate(input: DirectLocateInput): { operationId: string } {
+    const operation = this.admit(input.operationId, 'locate', this.resolveBoundMs, { sources: [] } satisfies DirectLocateAnswer);
+    this.run(operation, () => this.located(operation, input), { sources: [] } satisfies DirectLocateAnswer);
+    return { operationId: operation.id };
+  }
+
+  send(input: DirectSendInput): { operationId: string } {
+    const operation = this.admit(input.operationId, 'call', this.callDeadlineMs, unavailable('timeout'), input.credential);
+    this.run(operation, () => this.sent(operation, input), failed('transport'));
+    return { operationId: operation.id };
+  }
+  // P4-B5 end
 
   // The ended operation's outcome, once; null for one unknown, still running, already taken, cancelled or expired.
   take(operationId: string): DirectOperationOutcome | null {
@@ -342,6 +365,7 @@ export class DirectCalls {
   private outcomeOf(kind: Kind, answer: unknown): DirectOperationOutcome {
     if (kind === 'resolve') return { kind, answer: answer as DirectResolveAnswer };
     if (kind === 'discover') return { kind, answer: answer as DirectDiscoverAnswer };
+    if (kind === 'locate') return { kind, answer: answer as DirectLocateAnswer }; // P4-B5
     return { kind, outcome: answer as DirectCallOutcome };
   }
 
@@ -597,6 +621,101 @@ export class DirectCalls {
     }
   }
 
+  // P4-B5 start
+  // Every candidate the cache names for the tool (a report lists it, or an HTTP server whose verified resource is on one
+  // of the hosts), each verified now, at most DIRECT_LOCATE_VERIFY_MAX lookups; one the live listing said requires task
+  // execution is left out. Nothing is connected.
+  private async located(operation: Operation, input: DirectLocateInput): Promise<DirectLocateAnswer> {
+    const { cache } = this.options;
+    const hosts = new Set(input.urlHosts);
+    const sources: DirectSource[] = [];
+    let lookups = 0;
+    for (const candidate of cache.candidates?.(input.tool) ?? []) {
+      if (sources.length >= DIRECT_LOCATE_MAX || lookups >= DIRECT_LOCATE_VERIFY_MAX) break;
+      if (!candidate.listed && !(candidate.http && hosts.size > 0)) continue;
+      lookups += 1;
+      const answer = await cache.resolveSource(candidate.cwd, candidate.server);
+      if (!this.registered(operation)) return { sources: [] };
+      if (!answer.ok || this.hints.taskRequired(answer.source, input.tool)) continue;
+      if (candidate.listed || hosts.has(hostOf(answer.source.url))) sources.push(publicSource(answer.source));
+    }
+    return { sources };
+  }
+
+  // The owner's delivery, in order: the source re-resolved and exact-matched, its entry re-read (`stillValid`), the
+  // delivered artifact's fence taken, the connection acquired, a live tools/list showing the tool (no read-only rule: a
+  // delivery writes, and the owner's gesture in a trusted sheet is what authorizes it; never a task-required tool), then
+  // the call, its `admit` checking synchronously at the actual stdin write or fetch: still registered (not withdrawn,
+  // not past its deadline, main's attachment), the artifact not deleted, the source still valid, the credential's epoch
+  // not withdrawn. Every async step is followed by the same check. Once written, the answer is the receipt of a remote
+  // effect already made, so it is answered as it came (bounded) even if one of those changed while it was on its way,
+  // unlike a page's call, whose answer would be published into an artifact: withholding it would hide a delivery that
+  // happened. Nothing is retried.
+  private async sent(operation: Operation, input: DirectSendInput): Promise<DirectCallOutcome> {
+    const { cache, pool } = this.options;
+    const { signal } = operation.controller;
+    const attachment = this.attachment;
+    const store = this.options.store();
+    if (!store) return failed('store');
+    if (!this.credentialValid(input.credential)) return unavailable('credential');
+    const resolved = await cache.resolveSource(input.directory, input.server);
+    if (!this.registered(operation)) return this.stopped(operation);
+    if (!resolved.ok) return unavailable('source', resolved.why);
+    if (!sameSource(resolved.source, input)) return unavailable('source', 'changed');
+    const read = await cache.readEntryForWrite(resolved.source);
+    if (!this.registered(operation)) return this.stopped(operation);
+    if (!read.ok) return unavailable('source', read.why);
+    // taken in the same synchronous step that found the operation registered, so its `drop` lets go of it; a deletion
+    // before the write stops the send there, one after it changes nothing (the remote effect is made)
+    let written = false;
+    const fence = store.deliveryFence(input.artifactId, () => {
+      if (written) return;
+      operation.revoked = true;
+      operation.controller.abort();
+    });
+    operation.release = () => store.releaseConnectorFence(fence);
+    const connection = this.connectionCheck(read.stillValid, input.credential, attachment);
+    const check = (): Failure | null => {
+      if (!this.registered(operation)) return this.stopped(operation);
+      return store.deliveryFenceHolds(fence) ? connection() : REVOKED;
+    };
+    const ready = check();
+    if (ready) return ready;
+    const acquired = await pool.acquire({ source: read.source, entry: read.entry, ...(input.credential && { credential: credentialOf(input.credential) }), fence: () => connection() === null }, signal);
+    if (!acquired.ok) return check() ?? fromTransport(acquired, 'connection');
+    const { lease } = acquired;
+    try {
+      const connected = check();
+      if (connected) return connected;
+      const listed = await lease.listTools(signal);
+      const afterList = check();
+      if (afterList) return afterList;
+      if (!listed.ok) return fromTransport(listed, 'connection');
+      this.publish(operation, read.source, listed.tools); // in the same synchronous step as the check above
+      const tool = listed.tools.find((entry) => entry.name === input.tool);
+      if (!tool) return unavailable('toolMissing');
+      if (tool.taskRequired) return unavailable('taskRequired');
+      let refusedAtWrite: Failure | null = null;
+      const answer = await lease.callTool(
+        { name: input.tool, arguments: input.arguments },
+        { admit: () => (written = (refusedAtWrite = check()) === null), signal, timeoutMs: Math.max(1, operation.deadlineAt - this.clock.now()) },
+      );
+      // a refusal before the write is ours (the connection's own fence included); after it, the transport's, and a
+      // connection lost once the request went out is the exchange broken (`transport`), never a send that did not happen
+      if (!answer.ok) {
+        if (refusedAtWrite) return refusedAtWrite;
+        if (!written) return check() ?? fromTransport(answer, 'transport');
+        return answer.failure === 'unavailable' ? failed('transport') : fromTransport(answer, 'transport');
+      }
+      const bytes = jsonBytes(answer.result);
+      if (bytes === null) return failed('notJson');
+      return bytes <= this.maxResultBytes ? { ok: true, result: answer.result as never } : { ok: false, failure: 'tooLarge', reason: 'tooLarge' };
+    } finally {
+      lease.release();
+    }
+  }
+  // P4-B5 end
+
   // P3-HD M3b: a live listing's hint, published only by the caller's synchronous post-list validity step (the operation
   // registered, its source still valid, its credential not withdrawn, the same attachment).
   private publish(operation: Operation, source: VerifiedConnectorSource, tools: readonly DirectTool[]): void {
@@ -636,6 +755,16 @@ function publicSource(source: VerifiedConnectorSource): DirectSource {
 
 // P3-HD M3b: an engine report's and a live listing's readOnly together, conservatively: either saying it may write wins.
 const combined = (reported: boolean | null, hinted: boolean | null): boolean | null => (reported === null ? hinted : hinted === null ? reported : reported && hinted);
+
+// P4-B5: a verified HTTP resource's host ('' for none or a URL that does not parse)
+function hostOf(url: string | undefined): string {
+  if (url === undefined) return '';
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
 
 const sameSource = (source: VerifiedConnectorSource, input: { directory: string; sourceId: string; generation: number; server: string }) =>
   source.cwd === input.directory && source.sourceId === input.sourceId && source.generation === input.generation && source.server === input.server;

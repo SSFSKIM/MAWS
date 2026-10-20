@@ -193,7 +193,7 @@ describe('a live dashboard in L’s surfaces (E3 M3)', () => {
     await until(() => within(block).queryByText(NO_SESSION_CONTEXT) !== null, 'the refusal in H’s words');
     expect(client.invoked('library.get')).toContainEqual({ artifactId: A }); // the artifact's context read at the press
     expect(starts()).toEqual([]); // no context: nothing started
-    expect(editorHostOf(scope)?.actions?.at(-1)?.id).toBe('datasets');
+    expect(editorHostOf(scope)?.actions?.at(-2)?.id).toBe('datasets'); // P4-B5: Send to, pinned, last
   });
 
   // E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16): the ruled failure line

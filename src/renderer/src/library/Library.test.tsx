@@ -17,6 +17,7 @@ import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
+import { resetDelivery, useDelivery } from '../delivery/store'; // P4-B5
 import { useLibraryDialog } from './dialogs';
 import { resetExportFormats } from './export';
 import { Library } from './Library';
@@ -428,20 +429,23 @@ describe('the row actions', () => {
   });
 
   // P3-H (Decision Log 87): Send to Google Drive and Notion, inside Export only, for a kind with a format to send
-  it('Export › Send to Google Drive… and Send to Notion… follow the formats and open the confirmation; a kind with no format has neither', async () => {
+  // P4-B5: the items open the app's direct Send to sheet (../delivery/, drawn by the App's host), Notion only for a kind
+  // whose Markdown makes a page
+  it('Export › Send to Google Drive… (and Send to Notion… for a kind with Markdown) follow the formats and open the direct sheet; a kind with no format has neither', async () => {
     answers['library.exportFormats'] = (input) => ok({ formats: input.kind === 'html' ? ['pdf', 'png'] : [] });
+    answers['delivery.status'] = () => ok({ target: 'drive', state: 'absent' });
     const user = userEvent.setup();
     render(<Library />);
     await user.click(within(await openMenu(user, 'Pricing page')).getByRole('menuitem', { name: 'Export' }));
     await screen.findByRole('menuitem', { name: 'PDF' });
     const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
-    expect(items.slice(items.indexOf('PDF'))).toEqual(['PDF', 'PNG', 'Send to Google Drive…', 'Send to Notion…']);
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Send to Notion…' }));
-    const sheet = await screen.findByRole('dialog', { name: 'Send to Notion' });
-    await waitFor(() => expect((within(sheet).getByRole('combobox', { name: 'Format' }) as HTMLSelectElement).value).toBe('pdf'));
+    expect(items.slice(items.indexOf('PDF'))).toEqual(['PDF', 'PNG', 'Send to Google Drive…']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send to Google Drive…' }));
+    await waitFor(() => expect(useDelivery.getState().sheet?.subject).toEqual({ artifactId: id(2), kind: 'html', title: 'Pricing page' }));
+    expect(useDelivery.getState().sheet?.run.state.getState().target).toBe('drive');
     expect(main.callsOf('artifacts.export')).toEqual([]); // nothing runs before the owner's Send
-    await user.click(within(sheet).getByRole('button', { name: 'Cancel' }));
-    expect(useLibraryDialog.getState().open).toBeNull();
+    act(() => useDelivery.getState().sheet?.run.close());
+    resetDelivery();
 
     await user.click(within(await openMenu(user, 'export.csv')).getByRole('menuitem', { name: 'Export' }));
     await screen.findByRole('menuitem', { name: 'Save a copy…' });

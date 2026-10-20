@@ -81,6 +81,7 @@ export interface ConnectorCallsOptions {
 // main's input, as the IPC validated it
 export type ConnectorStart = CommandInput<'connectors.start'>;
 export type ConnectorSessionTool = CommandInput<'connectors.resolve'>;
+type ConnectorSessionRef = Pick<ConnectorSessionTool, 'appSessionId' | 'launchId' | 'cwd'>; // P4-B5: a live launch, no tool
 
 // An untaken outcome is dropped this long after its operation ended; main takes it as soon as it hears the end.
 export const CONNECTOR_RESULT_TTL_MS = 60_000;
@@ -148,6 +149,33 @@ export class ConnectorCalls {
       if (state === null) return { ready: false, why: 'unknown' };
       if (!this.live(input)) return { ready: false, why: 'notLive' };
       return state.ready ? { ready: true, fingerprint: state.fingerprint, readOnly: state.readOnly } : { ready: false, why: state.why };
+    } finally {
+      clearTimeout(timer);
+      this.resolving.delete(bound);
+    }
+  }
+
+  // P4-B5 (the owner's delivery sheet): route D's observation alone, of one live session: its mcp_status read now and
+  // observed as `resolve`'s is, under the same bound, so the cache knows what that engine reports. No probe, no tool,
+  // nothing acquired or marked used. `observed`: an answer was read and handed to the cache (which may still refuse it).
+  async observe(input: ConnectorSessionRef): Promise<{ observed: boolean }> {
+    const live = this.live(input);
+    if (!live || !this.options.statusCache) return { observed: false };
+    const attachment = this.attachment;
+    const ticket = this.observing(live.client, input);
+    if (!ticket) return { observed: false };
+    const bound = new AbortController();
+    this.resolving.add(bound);
+    const timer = setTimeout(() => bound.abort(), CONNECTOR_RESOLVE_BOUND_MS);
+    try {
+      const answer = await mcpStatus(live.client, {}, { signal: bound.signal });
+      if (!this.stillObserving(live.client, input, ticket.context, attachment)) return { observed: false };
+      this.options.statusCache.observe(ticket, answer);
+      return { observed: true };
+    } catch (error) {
+      if (error instanceof ControlError && error.code === 'invalid_response' && this.stillObserving(live.client, input, ticket.context, attachment)) this.options.statusCache.reject(ticket);
+      if (error instanceof ControlError) return { observed: false };
+      throw error;
     } finally {
       clearTimeout(timer);
       this.resolving.delete(bound);
@@ -428,19 +456,19 @@ export class ConnectorCalls {
   // (a set_cwd since then makes its report another directory's), its place in that launch's order taken before the
   // request is written; and (panel correction) its answer lands only if that still holds once it arrives, so a
   // set_cwd or a relaunch while the request was pending discards it. P3-F: so does main's going (`close`) meanwhile.
-  private observing(client: ControlClient, input: ConnectorSessionTool) {
+  private observing(client: ControlClient, input: ConnectorSessionRef) {
     const cache = this.options.statusCache;
     const context = this.observedContext(client, input);
     return cache && context ? cache.begin(context) : null;
   }
 
-  private stillObserving(client: ControlClient, input: ConnectorSessionTool, begun: ConnectorLaunchContext, attachment: number): boolean {
+  private stillObserving(client: ControlClient, input: ConnectorSessionRef, begun: ConnectorLaunchContext, attachment: number): boolean {
     if (attachment !== this.attachment) return false; // P3-F
     const context = this.observedContext(client, input);
     return context !== null && context.appSessionId === begun.appSessionId && context.launchId === begun.launchId && context.cwd === begun.cwd;
   }
 
-  private observedContext(client: ControlClient, input: ConnectorSessionTool): ConnectorLaunchContext | null {
+  private observedContext(client: ControlClient, input: ConnectorSessionRef): ConnectorLaunchContext | null {
     const session = this.options.session(input.appSessionId);
     const context = session?.connectorLaunchContext?.();
     if (!session || !context || session.control !== client) return null;
@@ -461,7 +489,7 @@ export class ConnectorCalls {
     return known;
   }
 
-  private live(input: ConnectorSessionTool): { client: ControlClient } | null {
+  private live(input: ConnectorSessionRef): { client: ControlClient } | null {
     const session = this.options.session(input.appSessionId);
     if (!session || session.lifecycle !== 'ready' || !session.control) return null;
     const status = session.status();
