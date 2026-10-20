@@ -93,6 +93,7 @@ export interface DocumentTabSnapshot {
 
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+let commentHosts = 0; // P4-B3 M6
 
 export class DocumentTabState {
   readonly artifactId: string;
@@ -106,6 +107,8 @@ export class DocumentTabState {
   private viewedBefore: number | null = null;
   private holders = 0; // what still writes into the replica (`hold`)
   private readonly undo = new Map<YType, UndoManager>(); // P4-B3 M5: by tab body
+  /** P4-B3 M6: the comment card host's id, the same for every body over this state, so a move keeps its draft. */
+  readonly commentHostId = `document:tab-${++commentHosts}`;
   private disposed = false;
   private handleClosed = false;
   private closing = false; // disposed, waiting for the host to acknowledge what the replica holds

@@ -72,7 +72,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   // the artifact's own context (its session, a session its directory starts on Comment, or a card saying why not);
   // not offered only while that is unread.
   const target = useArtifactCommentTarget(artifactId);
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */, draftRule: true /* P4-B1: X36's draft rule, the document's (its Comment asks draft(), its tab's close guard reads it) */ });
+  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */, draftRule: true /* P4-B1: X36's draft rule, the document's (its Comment asks draft(), its tab's close guard reads it) */, hostId: state.commentHostId /* P4-B3 M6: a move keeps the composing card */ });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);

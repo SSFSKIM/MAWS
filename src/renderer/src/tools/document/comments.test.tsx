@@ -275,6 +275,35 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(setActive).toHaveBeenLastCalledWith(null); // the card closing still clears what it drew
   });
 
+  // P4-B3 M6 (the transfer e2e): a document moved between the panel and a main tab is a new body over the tab state that
+  // travels; with a host id of its own each body was a new host, so the old one going withdrew the draft's thread and
+  // dropped its text. The tab state's host id makes the new body the same host, as a remount is.
+  it('a host id the caller keeps (the tab state’s) carries the composing card and its draft to another body', async () => {
+    const doc = newDoc();
+    addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), placement: 'margin' };
+    let surface: DocumentComments | null = null;
+    function Body({ hostId }: { hostId?: string }) {
+      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', draftRule: true, ...(hostId !== undefined && { hostId }) });
+      surface = comments;
+      return (
+        <div className="ds-doc">
+          <div data-margin-entry={passage.threadId}>{comments.overlay(reach)}</div>
+        </div>
+      );
+    }
+    const view = render(<Body key="panel" hostId="document:tab-state-1" />);
+    act(() => surface!.opened(passage));
+    await act(async () => {});
+    await userEvent.type(field(), 'Monthly?');
+    view.rerender(<Body key="main" hostId="document:tab-state-1" />); // the move: another body, one commit
+    await act(async () => {});
+    expect(field().value).toBe('Monthly?');
+    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(reach.discard).not.toHaveBeenCalled();
+    expect(surface!.draft!()).toBe(passage.threadId);
+  });
+
   it('records the typed draft as the artifact’s, which draft() names; an emptied field or the card closing clears it', async () => {
     const m = mountMargin();
     await opened(m);

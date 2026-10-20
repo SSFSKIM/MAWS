@@ -72,6 +72,12 @@ interface Options {
    * and whose tab guards its close opts in (the document's); without it Escape discards as before.
    */
   draftRule?: true;
+  /**
+   * P4-B3 M6: the card host's id, when the caller keeps one across bodies (the document tab state's, which a move
+   * between the panel and a main tab carries), so a body that replaces another over the same state is the same host,
+   * as a remount is: its composing card and draft stay. Else the hook's own.
+   */
+  hostId?: string;
 }
 
 interface Binding {
@@ -156,8 +162,9 @@ function draftsOf(hostId: string): Drafts {
 }
 
 /** The surface DocumentEditor takes (`comments`), stable while the artifact and the session stay. */
-export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind, draftRule /* P4-B1 */ }: Options): DocumentComments { // P3-F1: context
-  const hostId = `document:${useId()}`;
+export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind, draftRule /* P4-B1 */, hostId: kept /* P4-B3 */ }: Options): DocumentComments { // P3-F1: context
+  const own = `document:${useId()}`;
+  const hostId = kept ?? own;
   const titleRef = useRef(title);
   useLayoutEffect(() => {
     titleRef.current = title;
