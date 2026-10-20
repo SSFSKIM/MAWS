@@ -364,6 +364,26 @@ const marginOf = (scope: Locator): Promise<MarginReading> =>
       threads: new Set(Array.from(root.querySelectorAll<HTMLElement>('[data-thread]')).map((el) => el.dataset.thread)).size,
     };
   });
+// A reading taken once it holds still: two consecutive polls (expect.poll's intervals, 100 ms and up) that agree. The tier
+// follows the widths through a ResizeObserver and a React commit, so a single read can land between them, the scroll box
+// already at its new width and the tier still the old layout's (measured: two frames at 1211 px drawn 'off' after ⌥⌘B).
+async function settled<T>(read: () => Promise<T>, message: string): Promise<T> {
+  let last: string | undefined;
+  let value: T | undefined;
+  await expect
+    .poll(
+      async () => {
+        value = await read();
+        const now = JSON.stringify(value);
+        const same = now === last;
+        last = now;
+        return same;
+      },
+      { message, timeout: 10_000 },
+    )
+    .toBe(true);
+  return value!;
+}
 
 test('the document margin’s tier at 1512 × 900: in the floated panel, alone in main, with the panel closed, and after Expand pane', async () => {
   test.setTimeout(120_000);
@@ -391,8 +411,8 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   await menu('panel.float');
   const card = panelRegion(page).getByRole('region', { name: 'Session card' });
   await expect(card).toBeVisible();
-  const floated = await marginOf(inPanel(page, id));
-  const covered = await page.evaluate(() => {
+  await expect.poll(async () => (await widths()).main, 'the floated panel takes main’s place').toBeLessThanOrEqual(0);
+  const coverage = () => page.evaluate(() => {
     const card = document.querySelector('[data-region="panel"] [aria-label="Session card"]')!.getBoundingClientRect();
     const meets = (r: DOMRect) => r.width > 0 && r.height > 0 && r.left < card.right && r.right > card.left && r.top < card.bottom && r.bottom > card.top;
     const margin = document.querySelector('[data-region="panel"] .doc-margin');
@@ -401,22 +421,23 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
       entries: Array.from(document.querySelectorAll('[data-region="panel"] .doc-margin [data-margin-entry]')).filter((entry) => meets(entry.getBoundingClientRect())).length,
     };
   });
-  readings.c = { ...(await widths()), ...floated, cardCovers: covered };
+  const { cardCovers, ...floated } = await settled(async () => ({ ...(await widths()), ...(await marginOf(inPanel(page, id))), cardCovers: await coverage() }), '(c) settled');
+  readings.c = { ...floated, cardCovers };
   await menu('panel.float');
   await expect(card).toHaveCount(0);
 
   // (a) alone in main, the panel docked: the record's grip onto main's pane
   await drag(page, inPanel(page, id).getByTitle('Drag to move to a tab'), mainRegion(page).locator('[data-pane="0"] > [role="tabpanel"]'), mainRegion(page).getByText('Move to tab', { exact: true }));
   await expect(inMain(page, id)).toBeVisible();
-  const alone = await marginOf(inMain(page, id));
-  readings.a = { ...(await widths()), ...alone };
+  const alone = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(a) settled');
+  readings.a = alone;
 
   // (d) the panel closed
   await menu('panel.toggle');
   await expect.poll(async () => (await widths()).panel).toBeLessThanOrEqual(0);
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
-  const closed = await marginOf(inMain(page, id));
-  readings.d = { ...(await widths()), ...closed };
+  const closed = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(d) settled');
+  readings.d = closed;
   await menu('panel.toggle');
   await expect.poll(async () => (await widths()).panel).toBeGreaterThan(0);
 
@@ -424,12 +445,13 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   await menu('pane.split');
   await page.getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click();
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
-  const split = await marginOf(inMain(page, id));
+  await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox, 'the document in its half of the split').toBeLessThan(alone.scrollBox);
+  const split = await settled(() => marginOf(inMain(page, id)), '(b) split settled');
   await header.getByRole('button', { name: 'Expand pane' }).click();
   await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toBeVisible();
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(split.scrollBox);
-  const expanded = await marginOf(inMain(page, id));
-  readings.b = { ...(await widths()), split, ...expanded };
+  const expanded = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) expanded settled');
+  readings.b = { ...expanded, split };
   test.info().annotations.push({ type: 'margin readings', description: JSON.stringify(readings) });
 
   // What holds (margin-tiers.ts): off under a 720 px body (rail-width.ts RAIL_BESIDE_FROM_PX); cards while the side
