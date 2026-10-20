@@ -16,9 +16,24 @@ import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
 import { resetScene, resized, scene, shiftOf, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
+import { MARGIN_LIST_QUIET_MS } from './MarginThreads';
 import { activeThread, commentSelection } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { agentActor, findPos, now, owner as ownerActor, select } from './test-support';
+
+// P4-B1: the shared card counted as it renders (passed through), so a case can show a list re-read leaves an unchanged
+// card alone
+const cardRenders = vi.hoisted(() => new Map<string, number>());
+vi.mock('../../../comments/ThreadCard', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../comments/ThreadCard')>();
+  return {
+    ...original,
+    ThreadCard: (props: Parameters<typeof original.ThreadCard>[0]) => {
+      cardRenders.set(props.thread.id, (cardRenders.get(props.thread.id) ?? 0) + 1);
+      return original.ThreadCard(props);
+    },
+  };
+});
 
 let world: World | null = null;
 let handles: DocumentHandle[] = [];
@@ -119,7 +134,7 @@ function comment(m: Mounted, id: string, needle: string, top: number, body = `Ab
     m.editor().commands.setActiveThread(id); // as the editor's Comment command draws the new thread
   });
 }
-const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80))); // use-threads' quiet moment
+const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, MARGIN_LIST_QUIET_MS + 50))); // P4-B1: the margin's list quiet moment
 const margin = () => screen.queryByRole('region', { name: 'Comments' });
 const entry = (id: string) => document.querySelector<HTMLElement>(`[data-margin-entry="${id}"]`);
 const relayouts = () => Number(margin()?.getAttribute('data-relayouts') ?? 0);
@@ -278,6 +293,21 @@ describe('re-layout (R1 to R6)', () => {
     expect(activeThread(m.editor().state)).toBe('t2'); // R3: the agent changed nothing here
     expect(topOf(entry('t2'))).toBe(130); // the active card stays at its anchor
     expect(topOf(entry('t1'))).toBe(130 - MARGIN_GAP_PX - 120); // t1 pushed up to make room
+  });
+
+  // P4-B1: the list is re-read after a quiet moment; an unchanged thread keeps its object and its card is not drawn again
+  it('a list re-read (an agent’s reply in another thread) re-renders only the changed thread’s card', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'track the budget', 300);
+    await settle();
+    const before = { t1: cardRenders.get('t1') ?? 0, t2: cardRenders.get('t2') ?? 0 };
+    expect(before.t2).toBeGreaterThan(0);
+    act(() => reply(m.agent.doc, 't1', { id: 't1:m1', by: agentActor, at: now(), body: 'The agent answers here.' }, 'agent'));
+    await settle();
+    expect(within(entry('t1')!).getByText('The agent answers here.')).toBeDefined();
+    expect(cardRenders.get('t1')).toBeGreaterThan(before.t1);
+    expect(cardRenders.get('t2')).toBe(before.t2);
   });
 
   it('a tab switch shows only that tab’s open threads (R5)', async () => {
