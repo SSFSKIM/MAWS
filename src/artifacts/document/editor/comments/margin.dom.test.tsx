@@ -16,6 +16,7 @@ import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
 import { resetScene, resized, scene, shiftOf, stubCoords, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
+import { MarginThreads } from './MarginThreads';
 import { activeThread, commentDisplayKey, commentSelection } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { agentActor, findPos, now, owner as ownerActor, select } from './test-support';
@@ -142,7 +143,14 @@ const type = (m: Mounted, text: string, at: string) => act(() => m.editor().view
 const margin = () => screen.queryByRole('region', { name: 'Comments' });
 const entry = (id: string) => document.querySelector<HTMLElement>(`[data-margin-entry="${id}"]`);
 const relayouts = () => Number(margin()?.getAttribute('data-relayouts') ?? 0);
+const frames = () => Number(document.querySelector('.ds-doc')?.getAttribute('data-frames') ?? 0); // the page frame's callbacks run
 const reserve = () => margin()?.style.getPropertyValue('--doc-margin-reserve') ?? null;
+// ⌃⌘ and a key, as the keyboard sends it (activation.dom.test.tsx's: Ctrl off a Mac, one ctrlKey here)
+const chord = (editor: Editor, key: string): boolean => {
+  const event = new KeyboardEvent('keydown', { key, code: `Key${key.toUpperCase()}`, ctrlKey: true, metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true });
+  editor.view.dom.dispatchEvent(event);
+  return event.defaultPrevented;
+};
 const plainClick = (m: Mounted, needle: string) => {
   const pos = findPos(m.editor(), needle);
   act(() => {
@@ -219,6 +227,26 @@ describe('re-layout (R1 to R6)', () => {
     fireEvent.scroll(scroller);
     await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
     expect(relayouts()).toBe(after);
+  });
+
+  // P4-B1 (review finding 1): the page counts the frame callbacks that ran (an edit's, an agent's, the layer's growth),
+  // so the scale gate reads the margin's passes per frame, not per keystroke; edits within one frame are one callback
+  it('counts the frame callbacks on the page, the margin never running more than one pass per frame (D13)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'track the budget', 300);
+    await settle();
+    const [frames0, passes0] = [frames(), relayouts()];
+    for (const text of ['a', 'b', 'c']) {
+      type(m, text, 'The plan');
+      await frame();
+    }
+    expect(frames() - frames0).toBe(3);
+    expect(relayouts() - passes0).toBe(3);
+    type(m, 'x', 'The plan');
+    type(m, 'y', 'The plan'); // the same frame
+    await frame();
+    expect(frames() - frames0).toBe(4);
+    expect(relayouts() - passes0).toBe(4);
   });
 
   // P4-B1: the layout pass runs in the frame's callback, so the card moves in the frame its text moved in, and no
@@ -317,6 +345,58 @@ describe('re-layout (R1 to R6)', () => {
     });
     expect(moves.length).toBeGreaterThan(0);
     expect(moves.every(Boolean)).toBe(true); // the close-up written while the margin animates
+  });
+
+  // P4-B1 (review finding 7): at a Comment the host names the compose card's thread before the display draws its
+  // passage (a microtask later), so the first pass puts the entry at the column's top (the rule for another tab's
+  // thread); the pass that then finds the passage writes the entry at its line with no transition, so the card appears
+  // there rather than flying in, while the neighbour it pushes in that pass moves animated
+  it('a compose card hosted before its passage is drawn appears at its line, its neighbour’s push animated (D4)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 240);
+    await settle();
+    act(() => void m.editor().commands.setActiveThread(null));
+    const root = margin()!;
+    const seen: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => seen.push(...batch));
+    observer.observe(root, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-animate', 'style'] });
+    scene.lines.set('t2', { top: 250, height: 20 }); // 10 px under t1's line: t2, active, pushes t1 up
+    act(() => m.overlay()!.hosting?.('t2')); // the host's card opened on it, its passage not drawn yet
+    await act(() => Promise.resolve());
+    act(() => {
+      select(m.editor(), 'track the budget');
+      commentSelection(m.editor(), m.handle.doc, { threadId: 't2', tabId: TAB, by: ownerActor, at: now(), body: '' });
+      m.overlay()!.setActive('t2');
+    });
+    await settle();
+    const anchor = 250 - scene.columnTop + MARGIN_CARD_INSET_PX;
+    const pushed = anchor - MARGIN_GAP_PX - scene.entryHeight;
+    expect(topOf(entry('t2'))).toBe(anchor);
+    expect(topOf(entry('t1'))).toBe(pushed);
+    expect(entry('t2')!.style.transition).toBe(''); // the jump's override cleared
+    const records = [...seen, ...observer.takeRecords()].filter((record) => record.target === root ? record.attributeName === 'data-animate' : record.attributeName === 'style');
+    observer.disconnect();
+    const written = records.map((record, i) => records.slice(i + 1).find((later) => later.target === record.target && later.attributeName === record.attributeName)?.oldValue ?? (record.target as Element).getAttribute(record.attributeName!));
+    const styled = (style: string) => {
+      const element = document.createElement('div');
+      element.setAttribute('style', style);
+      return element;
+    };
+    let animated = false;
+    const writes: Array<{ id: string; top: number | null; transition: string; animated: boolean }> = [];
+    records.forEach((record, i) => {
+      if (record.target === root) animated = written[i] !== null;
+      else {
+        const id = (record.target as HTMLElement).dataset.marginEntry;
+        const style = styled(written[i] ?? '');
+        if (id !== undefined) writes.push({ id, top: topOf(style), transition: style.style.transition, animated });
+      }
+    });
+    const t2 = writes.filter((w) => w.id === 't2');
+    expect(t2.some((w) => w.top !== anchor)).toBe(true); // the first pass's top, unlocated
+    expect(t2.find((w) => w.top === anchor)?.transition).toBe('none'); // written at its line unanimated (then the override cleared)
+    const t1 = writes.filter((w) => w.id === 't1' && w.top === pushed);
+    expect(t1).toEqual([{ id: 't1', top: pushed, transition: '', animated: true }]); // the push in the same pass, animated
   });
 
   // P4-B1 (Z3): what is drawn is the display's decorations, which an undo brings back with the mark in one transaction,
@@ -540,6 +620,62 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(m.rails.slice(-2)).toEqual([null, 'margin']);
   });
 
+  // P4-B1 (review finding 2): an orphan has no passage for the margin to draw it beside, so choosing it keeps the panel
+  it('choosing an orphan in the panel keeps the panel open, its card the only place it shows (Z3, D5)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    await settle();
+    const from = findPos(m.editor(), 'ships quarterly');
+    act(() => m.editor().view.dispatch(m.editor().state.tr.delete(from, from + 'ships quarterly'.length)));
+    await settle();
+    m.rerender({ rail: 'comments' });
+    await settle();
+    const panel = screen.getByRole('complementary', { name: 'Comments' });
+    const told = m.rails.length;
+    act(() => fireEvent.click(within(panel.querySelector<HTMLElement>('[data-thread="t1"]')!).getByRole('button', { name: /^Show/ })));
+    await settle();
+    expect(screen.getByRole('complementary', { name: 'Comments' })).toBe(panel);
+    expect(m.rails.slice(told)).toEqual([]); // the panel not closed
+  });
+
+  // P4-B1 (review finding 2, with finding 3): the panel decides from its own layout whether the margin would host (the
+  // margin is not drawn while the panel is), so a body narrowed under the panel keeps it open on a choice, as the drawer
+  it('choosing an item in a panel narrowed to the drawer keeps it open (D5, N3)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    await settle();
+    m.rerender({ rail: 'comments' });
+    await settle();
+    scene.bodyWidth = 600;
+    m.rerender({}); // the rail's layout re-reads the body after the editor draws
+    const panel = screen.getByRole('complementary', { name: 'Comments' });
+    act(() => fireEvent.click(within(panel.querySelector<HTMLElement>('[data-thread="t1"]')!).getByRole('button', { name: /^Show/ })));
+    await settle();
+    expect(screen.getByRole('complementary', { name: 'Comments' })).toBe(panel);
+  });
+
+  // P4-B1 (review finding 3): the margin tells its tier while it draws and off when it goes (the panel opening, Hide),
+  // never off between two renders of a drawn margin
+  it('reports its tier while drawn and off once it goes, not between renders', async () => {
+    const m = await mount(content(), { commentsView: 'hide' }); // the editor's own margin not drawn
+    const seen: string[] = [];
+    const Margin = ({ onTier }: { onTier(tier: { kind: string }): void }) => (
+      <div className="doc-editor-body">
+        <div className="ds-doc">
+          <div className="ds-doc-page" />
+          <MarginThreads editor={m.editor()} doc={m.handle.doc} tabId={TAB} author={{ actor: ownerActor, now }} readOnly={false} view="expand" hosting={null} overlay={null} onComment={null} onTier={onTier} drafts={new Map()} onDraftChange={() => {}} />
+        </div>
+      </div>
+    );
+    const view = render(<Margin onTier={(tier) => void seen.push(tier.kind)} />);
+    expect(seen[seen.length - 1]).toBe('cards');
+    seen.length = 0;
+    view.rerender(<Margin onTier={(tier) => void seen.push(`again:${tier.kind}`)} />); // a new callback, the same tier
+    expect(seen).toEqual([]);
+    view.unmount();
+    expect(seen).toEqual(['again:off']);
+  });
+
   // P4-B1 (X36's draft rule: a hidden card keeps its draft, one draft per thread): the reply drafts are the editor's,
   // so the margin and the panel draw the same draft and neither unmounting loses it
   it('keeps a reply typed in a margin card across the panel’s round trip, the panel showing the same draft (Z5, X36)', async () => {
@@ -558,6 +694,25 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
 });
 
 describe('the activation table and the keys', () => {
+  // P4-B1 (review finding 4): with no margin to host it (Hide, a narrow body), a chord's activation opens the panel as a
+  // click's does; the caret's never (D5)
+  it('a chord activating a passage with the margin hidden opens the panel; the caret does not', async () => {
+    const m = await mount(content(), { commentsView: 'hide' });
+    comment(m, 't1', 'ships quarterly', 140);
+    act(() => void m.editor().commands.setActiveThread(null));
+    await settle();
+    m.rails.length = 0;
+    act(() => m.editor().commands.setTextSelection(findPos(m.editor(), 'ships quarterly') + 2)); // the caret into the passage
+    expect(activeThread(m.editor().state)).toBe('t1');
+    expect(m.rails).not.toContain('comments');
+    act(() => m.editor().commands.setTextSelection(findPos(m.editor(), 'The plan')));
+    act(() => void m.editor().commands.setActiveThread(null));
+    act(() => void chord(m.editor(), 'n'));
+    act(() => void chord(m.editor(), 'c'));
+    expect(activeThread(m.editor().state)).toBe('t1');
+    expect(m.rails[m.rails.length - 1]).toBe('comments');
+  });
+
   it('a click on a card activates it; a click on plain text clears it; J and K move; U returns to the text (K1, K3)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
