@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
-#   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,unit:darwin,probes,e2e:<group>,…] [--runner linux|macos]
+#   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
 #                      [--class1a linux|macos|pool] [--default-beside <groups>] [--evidence] [--live] [--label <name>]
 #                      [--keep]
+#
+#   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
+#   scripts/ci-gate.sh <worktree> --gates all                    the whole set (on a macOS e2e lane, every Mac job)
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
@@ -18,9 +21,12 @@
 # naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
-#   --gates            narrow to static, unit, unit:darwin, packaged (macOS), probes or e2e:<group>; default: class 1a
-#                      (static, unit, probes), plus unit:darwin and every class-1 e2e group when the e2e lane is macOS.
-#                      e2e:default is the bare `pnpm e2e` less the specs the run's other e2e groups collect
+#   --gates            required: a comma list over static, unit, unit:darwin, packaged (macOS), probes and e2e:<group>, or
+#                      `all`, the whole set: class 1a (static, unit, probes), plus unit:darwin and every class-1 e2e group
+#                      when the e2e lane is macOS (about 35 jobs and 70 minutes on the one Mac). A call without --gates is
+#                      refused (exit 2) before anything is pushed: it used to mean `all`, and sessions meaning class 1a
+#                      queued the whole Mac set by leaving it out. e2e:default is the bare `pnpm e2e` less the specs the
+#                      run's other e2e groups collect
 #   --runner           the e2e lane, linux or macos (default: $MAWS_GATE_RUNNER, else the repository's variables)
 #   --class1a          class 1a's runner (static, unit, probes): linux, macos or pool, ci-kit's pool (default: the
 #                      repository's variable GATE_RUNNER, else linux). With pool, the POOL_E2E groups (desk-web)
@@ -38,11 +44,11 @@
 #   --keep             leave the ci/ ref in place
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
-# triggers a run of its own and the run found is this one's) and, when given, the `Gates:`, `Runner:`, `Class1a:`,
-# `DefaultBeside:`, `Evidence:` and `Live:` trailers. The pushed tree is always the tested tree plus that one commit. A
-# Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest. The pool takes class 1a and the
-# POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the repository, so the script runs
-# from any directory.
+# triggers a run of its own and the run found is this one's) and, when given, the `Gates:` (none for `all`, the plan's
+# default set), `Runner:`, `Class1a:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers. The pushed tree is always the
+# tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
+# The pool takes class 1a and the POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the
+# repository, so the script runs from any directory.
 #
 # Before the push, a run that puts jobs on a Mac (resolved from the flags and the repository variables as the plan does)
 # reads ci-kit's open alerts (SSFSKIM/ci-kit-sandbox, label ci-kit-alert: a system dialog holds a Mac's front) and MAWS's
@@ -95,6 +101,19 @@ case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or ma
 case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
 # The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
 case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
+# The whole set is asked for by name: left implicit, it was queued by calls that meant class 1a alone. A live run takes
+# only its live groups (Decision Log 75), so its hint names those.
+if [[ -z $gates ]]; then
+  if [[ -n $live ]]; then
+    echo "ci-gate: name the gates: a live run takes its live e2e groups alone, --live --gates e2e:<group>,… (gate.yml's LIVE_E2E)" >&2
+  else
+    echo 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set' >&2
+  fi
+  exit 2
+fi
+# `all` is the plan's default set, which a run without a `Gates:` trailer takes.
+gates_trailer=$gates
+[[ $gates == all ]] && gates_trailer=''
 
 # The repository the git commands run in: the worktree given, or this script's own checkout for a bare sha.
 if [[ -d $target ]]; then
@@ -112,7 +131,7 @@ fi
 if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
   alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
 else
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates" --runner "$runner" --class1a "$class1a")
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a")
   case $? in
     0) ;;
     2)
@@ -134,7 +153,7 @@ exec > >(tee "$log") 2>&1
 
 # One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
 trailers="Nonce: $(date +%s)-$$"
-[[ -n $gates ]] && trailers+=$'\n'"Gates: $gates"
+[[ -n $gates_trailer ]] && trailers+=$'\n'"Gates: $gates_trailer"
 [[ -n $runner ]] && trailers+=$'\n'"Runner: $runner"
 [[ -n $class1a ]] && trailers+=$'\n'"Class1a: $class1a"
 [[ -n $default_beside ]] && trailers+=$'\n'"DefaultBeside: $default_beside"

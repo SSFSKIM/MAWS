@@ -5,8 +5,8 @@
 // pushed while no online Mac runner is free of such an alert: its Mac jobs would only be refused. A run whose jobs all go
 // to Linux or the pool is not checked. Every failed read warns and goes ahead, since the runner's own check still refuses.
 // Usage: node scripts/ci-gate-alerts.mjs --gates <list> --runner <lane> --class1a <runner>, ci-gate.sh's own values (empty
-// when not given). Prints its lines on stdout and exits 2 when the run is not to be pushed, else 0. The parsing and the
-// decision are exported for scripts/ci-gate-alerts.test.mjs.
+// when not given; its `--gates all` comes as empty, the default set). Prints its lines on stdout and exits 2 when the run
+// is not to be pushed, else 0. The parsing and the decision are exported for scripts/ci-gate-alerts.test.mjs.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import process from 'node:process';
