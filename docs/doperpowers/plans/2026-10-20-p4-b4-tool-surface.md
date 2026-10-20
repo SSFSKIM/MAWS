@@ -14,7 +14,7 @@ What it is for: the owner says "the roadmap we discussed last week" in a fresh s
 
 - [x] 2026-10-20 04:40Z M0 — the probes (R-2 and the deferral probe), zero spend: `spikes/protocol-probe/fixtures/p4/p4-b4-*.jsonl`, route (b) chosen (Decision Log 1).
 - [x] 2026-10-20 05:35Z M1 — the shared contract (457dd1ee3; reviewer-medium on opus: correct, one P3 finding taken into M4)
-- [ ] M2 — the host mirror and the tool (b183b9e7c; a fix wave for Decision Logs 16 to 18, then review)
+- [x] 2026-10-20 09:10Z M2 — the host mirror and the tool (b183b9e7c; three fix waves 1dabf5ed7, e2f0bf535 to 8e4aa5fd5, 34b57e28d; reviewer-medium on opus: a P1 (a Space filter's query plan) and two P2s (the snippet across blocks, the anchor on a tab title) fixed, re-review correct; one P3 carried to the final fix wave: a document found only by its first tab's title gets the title-only lead)
 - [ ] M3 — the instruction on the wire and the final fixtures (executed by the controller; in review)
 - [x] 2026-10-20 08:40Z M4 — fragments in the renderer and on `show_pane` (p4-b4-m4, merged 2b6c7d557 and 3457d1d6f; reviewer-medium on opus: a P1 (the reveal never scrolled an unfocused editor) and a P2 (the comment card dropped a link's place), both fixed in 76eb369ed, re-review correct)
 - [ ] M5 — the live run and R-3
