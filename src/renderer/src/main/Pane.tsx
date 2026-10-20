@@ -119,6 +119,7 @@ function TabHeader({ scope, paneIndex }: { scope: EditorHostScope; paneIndex: Pa
 // P4-B3 (X32 amendment; its Decision Log 12): the pane header's Expand, drawn by the main surface for every editor that
 // registers (no editor registers it). Shown while the other pane shows a session ("Expand pane": the session floats into
 // the split's card and this pane takes the area), or pressed while the other pane floats ("Restore split"); else absent.
+// P4-B3x: Expand also folds the right panel, and Restore split opens it again (`expandPane`).
 type Expand = 'expand' | 'restore';
 function expandOf(set: TabSet, pane: PaneIndex): Expand | null {
   if (set.panes.length !== 2) return null;

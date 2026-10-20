@@ -11,7 +11,7 @@ import { persistLayout, useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices'; // P3-F wave S (F6)
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
-import { cardHost, cardSession, cardSizeKey, closeCard, dockPanel, dockSplit, EXPAND_COPY, FLOAT_COPY, floatPanel, floatSplit, openCard, placeCard, useFloatingCard } from './floating';
+import { cardHost, cardSession, cardSizeKey, closeCard, dockPanel, dockSplit, EXPAND_COPY, FLOAT_COPY, floatPanel, floatSplit, openCard, placeCard, splitFloat, useFloatingCard } from './floating';
 import type { ProjectId } from '@shared/graph/ids'; // P4-B3 M2
 import { item as attention, T0 } from '../../../../test/support/builders'; // P4-B3 M2
 import { useAttention } from '../stores/attention'; // P4-B3 M2
@@ -435,6 +435,139 @@ describe('the split’s card', () => {
     useLayout.setState({ main: mainShowing(A) });
     runAction('main.expandArtifactPane');
     expect(notices()).toEqual([EXPAND_COPY.noSession]);
+  });
+
+  // P4-B3x (P4 Decision Log 40): Expand also folds the right panel, so an expanded document has the width its margin's
+  // cards need; leaving Expand brings back what Expand changed and nothing the owner changed meanwhile.
+  describe('Expand folds the right panel', () => {
+    const panel = () => layout().regions.panel;
+    const OPEN = { width: 444, collapsed: false, maximized: false, floating: false };
+    const expand = () => runAction('main.expandArtifactPane'); // Diagnostics is focused, the session beside it
+    beforeEach(() => useLayout.setState({ regions: { ...LAYOUT_DEFAULTS.regions, panel: OPEN } }));
+
+    it('Expand folds an open panel with its float, the fold marked on it; Restore split opens the panel as it was', () => {
+      expand();
+      expect(set().floating).toEqual({ sessionTabId: S.id, foldedPanel: true });
+      expect(panel()).toEqual({ ...OPEN, collapsed: true });
+      expand(); // Restore split
+      expect(set().floating).toBeUndefined();
+      expect(panel(), 'the same panel, its width kept').toEqual(OPEN);
+    });
+
+    it('the card’s Dock and ⌥⌘B docking the split card leave Expand too, the panel opening; a second ⌥⌘B floats it', () => {
+      expand();
+      expect(panel().collapsed).toBe(true);
+      dockSplit();
+      expect(panel()).toEqual(OPEN);
+      useLayout.getState().focusPane(1);
+      expand();
+      expect(panel().collapsed).toBe(true);
+      runAction('panel.float');
+      expect([set().floating, panel()]).toEqual([undefined, OPEN]);
+      runAction('panel.float');
+      expect(panel()).toEqual({ ...OPEN, floating: true });
+    });
+
+    it('a float the divider makes folds nothing', () => {
+      floatSplit(S.id);
+      expect(set().floating).toEqual({ sessionTabId: S.id });
+      expect(panel()).toEqual(OPEN);
+    });
+
+    it('a fold asked with a float the model docks instead (the other pane’s session while one floats) folds nothing', () => {
+      useLayout.setState({ main: splitOf(S, sessionTab(B)) });
+      layout().floatSplit(S.id);
+      layout().floatSplit(sessionTab(B).id, { foldPanel: true }); // its Decision Log 28: a float never changes pane
+      expect(set().floating).toBeUndefined();
+      expect(panel()).toEqual(OPEN);
+    });
+
+    it('over a hidden panel Expand folds nothing, and leaving it leaves the panel hidden', () => {
+      useLayout.getState().setPanel({ collapsed: true });
+      expand();
+      expect(set().floating).toEqual({ sessionTabId: S.id });
+      expand();
+      expect(panel()).toEqual({ ...OPEN, collapsed: true });
+    });
+
+    it('over a maximized or floating panel Expand folds it too; leaving Expand opens it docked beside the split', () => {
+      for (const patch of [{ maximized: true }, { floating: true }]) {
+        useLayout.setState({ main: splitOf(), regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...OPEN, ...patch } } });
+        expand();
+        expect([cardHost(layout()), set().floating, panel()]).toEqual(['split', { sessionTabId: S.id, foldedPanel: true }, { ...OPEN, collapsed: true }]);
+        expand();
+        expect(panel()).toEqual(OPEN);
+      }
+    });
+
+    it('the owner reopening the panel while expanded drops the fold: Restore split leaves the panel open', () => {
+      expand();
+      runAction('panel.toggle');
+      expect(set().floating, 'the float stands, the fold gone').toEqual({ sessionTabId: S.id });
+      expect(panel()).toEqual(OPEN);
+      expand();
+      expect(panel()).toEqual(OPEN);
+    });
+
+    it('the owner reopening and closing the panel again while expanded: Restore split leaves it closed', () => {
+      expand();
+      runAction('panel.toggle');
+      runAction('panel.toggle');
+      expect(set().floating).toEqual({ sessionTabId: S.id });
+      expand();
+      expect(panel()).toEqual({ ...OPEN, collapsed: true });
+    });
+
+    it('the owner maximizing the panel while expanded: leaving Expand leaves it maximized', () => {
+      expand();
+      runAction('panel.maximize');
+      expect(set().floating).toEqual({ sessionTabId: S.id });
+      dockSplit();
+      expect(panel()).toEqual({ ...OPEN, maximized: true });
+    });
+
+    it('the owner opening and floating the panel while expanded: it floats and stays floating', () => {
+      expand();
+      runAction('panel.toggle');
+      floatPanel(); // the panel's divider past its maximum: docks the split first (one card at a time)
+      expect(set().floating).toBeUndefined();
+      expect(panel()).toEqual({ ...OPEN, floating: true });
+    });
+
+    it('a tool revealing the panel while expanded counts as opening it: Restore split leaves it open', () => {
+      expand();
+      useLayout.getState().setPanel({ collapsed: false }); // what `panel/host.ts`'s reveal and C10's attach write
+      expand();
+      expect(panel()).toEqual(OPEN);
+    });
+
+    it('the fold rides its float through A’s own changes and a tab set’s switch, and ends with the float', () => {
+      expand();
+      useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 1 });
+      expect(set().floating, 'a tab opened beside the card').toEqual({ sessionTabId: S.id, foldedPanel: true });
+      useLayout.getState().setCurrentProject('elsewhere' as ProjectId);
+      expect(panel(), 'another set: the panel stays folded').toEqual({ ...OPEN, collapsed: true });
+      useLayout.getState().setCurrentProject(null);
+      expect(set().floating).toEqual({ sessionTabId: S.id, foldedPanel: true });
+      expand();
+      expect(panel()).toEqual(OPEN);
+    });
+
+    it('the float ending any other way opens the panel it folded: A’s last tab closing, S’s tab closing, the session removed', () => {
+      const ends: [string, () => void][] = [
+        ['A’s last tab closes', () => useLayout.getState().closeTab(DIAGNOSTICS.id)],
+        ['S’s tab closes', () => useLayout.getState().closeTab(S.id)],
+        ['S’s session is removed', () => useLayout.getState().dropSession(A)],
+        ['S’s tab moves to the other pane', () => useLayout.getState().moveTab(S.id, 1, 0)],
+      ];
+      for (const [name, end] of ends) {
+        useLayout.setState({ main: splitOf(), regions: { ...LAYOUT_DEFAULTS.regions, panel: OPEN } });
+        expand();
+        expect([name, panel().collapsed]).toEqual([name, true]);
+        end();
+        expect([name, splitFloat(layout().main), panel()]).toEqual([name, null, OPEN]);
+      }
+    });
   });
 
   it('the split card’s size key is the tab of the pane it sits over', () => {

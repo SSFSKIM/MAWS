@@ -293,14 +293,16 @@ export function dockPanel(): void {
 // ratio untouched (Dock returns it). The card stands for S: S's pane is focused (the panel shows S's session, ⌘W closes
 // it) and its composer takes the keyboard. A panel standing in main docks first, so the card is seen. False, and nothing
 // changed, when that tab is not the active session of a pane in a two-pane set (or floating it would move the float to
-// the other pane, which docks: its Decision Log 28).
-export function floatSplit(sessionTabId: string): boolean {
+// the other pane, which docks: its Decision Log 28). P4-B3x: `foldPanel` (Expand's) also folds an open right panel, so
+// the widened pane has the width a document's margin cards need; the float's end opens it again (the store's
+// `reconcileFold`).
+export function floatSplit(sessionTabId: string, opts: { foldPanel?: boolean } = {}): boolean {
   const split = splitFloat(floatedMain(layout().main, sessionTabId));
   if (split === null) return false;
   if (panelInMain(layout().regions)) layout().revealMain();
   markFocusOnMount(split.appSessionId);
   markTranscriptCarry(split.appSessionId);
-  layout().floatSplit(sessionTabId);
+  layout().floatSplit(sessionTabId, opts);
   layout().focusPane(split.pane);
   return true;
 }
@@ -351,14 +353,16 @@ export function togglePanelFloat(): void {
 
 // P4-B3 (X32 amendment; its Decision Log 12): `main.expandArtifactPane` and the pane header's Expand. On a pane beside a
 // session, floats that session (its pane yields into the card); on a floating split, docks it ("Restore split"); else
-// says why, as the panel's Float does.
+// says why, as the panel's Float does. P4-B3x (P4 Decision Log 40): Expand also folds an open right panel, which
+// Restore split (or any end of the float) opens again unless the owner opened it meanwhile. The divider's drag to
+// float folds nothing: it moves the split's own edge, not the panel's.
 export const EXPAND_COPY = { noSession: 'Open a session in the other pane to expand this one' };
 export function expandPane(pane: 0 | 1 = currentSet(layout().main).focusedPane): void {
   if (splitFloat(layout().main) !== null) return dockSplit();
   const set = currentSet(layout().main);
   const other = otherPane(pane);
   const beside = set.panes.length === 2 && paneShowsSession(set, other) ? set.panes[other]?.activeTabId : null;
-  if (beside && floatSplit(beside)) return;
+  if (beside && floatSplit(beside, { foldPanel: true })) return;
   toast({ id: 'expand-pane-refused', level: 'info', text: EXPAND_COPY.noSession, actions: [], dismissible: true });
 }
 
