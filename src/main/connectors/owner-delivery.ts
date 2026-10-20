@@ -40,8 +40,8 @@ export type DeliveryConnectResult = { ok: true } | { ok: false; why: ConnectorOA
 
 export interface OwnerDelivery {
   // The verified sources that can take `tool` (a report lists it, or an HTTP server on one of `urlHosts`), each with its
-  // connection; null when the host could not be asked.
-  find(request: { tool: string; urlHosts: readonly string[]; artifactId?: string }, signal: AbortSignal): Promise<DeliverySource[] | null>;
+  // connection, the usable first, and how many live sessions there were to read; null when the host could not be asked.
+  find(request: { tool: string; urlHosts: readonly string[]; artifactId?: string }, signal: AbortSignal): Promise<{ sources: DeliverySource[]; live: number } | null>;
   connect(source: DirectSource, signal: AbortSignal): Promise<DeliveryConnectResult>;
   send(source: DirectSource, request: { artifactId: string; tool: string; arguments: Record<string, unknown> }, signal: AbortSignal): Promise<DirectSendAnswer>;
 }
@@ -68,13 +68,14 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
     return result.value;
   }
 
-  // Every live session's report read now (the artifact's own first), so the cache holds what each engine reports.
-  async function observe(artifactId: string | undefined, signal: AbortSignal): Promise<void> {
+  // Every live session's report read now (the artifact's own first), so the cache holds what each engine reports; the
+  // number of live sessions there were (null: the host did not list them).
+  async function observe(artifactId: string | undefined, signal: AbortSignal): Promise<number | null> {
     let live: readonly { appSessionId: string; launchId: string; cwd: string; process: string }[];
     try {
       live = (await host('engine.sessions', undefined)).filter((session) => session.process === 'ready');
     } catch {
-      return; // nothing read: the cache answers what it already holds
+      return null; // nothing read: the cache answers what it already holds
     }
     let own = new Set<string>();
     if (artifactId !== undefined) {
@@ -93,6 +94,7 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
       }
     };
     await Promise.all(Array.from({ length: Math.min(OBSERVE_CONCURRENCY, order.length) }, worker));
+    return live.length;
   }
 
   async function connectionOf(source: DirectSource, signal: AbortSignal): Promise<DeliveryConnection> {
@@ -126,7 +128,7 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
 
   return {
     async find({ tool, urlHosts, artifactId }, signal) {
-      await observe(artifactId, signal);
+      const live = await observe(artifactId, signal);
       if (signal.aborted) return null;
       const sources = await deps.direct.locate(tool, urlHosts, signal);
       if (sources === null) return null;
@@ -138,7 +140,7 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
         return true;
       });
       const found = await Promise.all(unique.map(async (source) => ({ source, connection: await connectionOf(source, signal) })));
-      return found.sort((a, b) => RANK[a.connection] - RANK[b.connection]);
+      return { sources: found.sort((a, b) => RANK[a.connection] - RANK[b.connection]), live: live ?? 0 };
     },
     async connect(source, signal) {
       if (source.transport !== 'http') return { ok: true };

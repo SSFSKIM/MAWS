@@ -32,7 +32,7 @@ import { LayoutFileStore } from './layout/store';
 import { registerChatPanels } from './sessions/panel-lifetime';
 import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
-import { registerOpenExternal } from './open-external';
+import { openExternalUrl, registerOpenExternal } from './open-external'; // P4-B5: openExternalUrl
 import { startSessions } from './sessions';
 import { registerObservedFacts } from './sessions/observed'; // P2-A
 import { startYield } from './sessions/yield'; // W7
@@ -142,6 +142,7 @@ import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 import { startConnectors } from './connectors'; // P3-H H3b
 import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
 import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
+import { startDelivery } from './delivery'; // P4-B5: the owner's Send to
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -612,6 +613,19 @@ void startWithProfileLock(app, () => {
   // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
   const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
   shutdown.add('connectors', connectors.stop);
+  // P4-B5: the owner's Send to, no Claude turn: Notion through route D (MAWS's own connection), Drive through the gws CLI
+  // the owner installed, run with the login shell's environment (the CLI keeps its sign-in; MAWS holds no Google
+  // credential); the export is X31's, as the library's
+  const delivery = startDelivery({
+    register: registerMainHandler,
+    emit: (name, payload) => emit(name, payload),
+    exportArtifact: (input, options) => artifacts.exports.exportForLibrary(input, options),
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    connectors: connectors.delivery ?? null,
+    shellEnv: () => engineEnv,
+    openExternal: (url) => openExternalUrl(url),
+  });
+  shutdown.add('delivery', delivery.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)

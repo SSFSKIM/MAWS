@@ -49,12 +49,13 @@ describe('the owner’s delivery over route D (main)', () => {
     expect(observed).toHaveLength(OBSERVE_LIMIT);
     expect(observed).not.toContain('app-1'); // not ready
     expect(deps.direct.locate).toHaveBeenCalledWith('notion-create-pages', ['mcp.notion.com'], expect.anything());
+    expect((await find(delivery))?.live).toBe(OBSERVE_LIMIT + 3); // the ready ones
   });
 
   it('gives each source MAWS’s own connection, one HTTP source per saved identity, the usable first', async () => {
     const stdio = source({ transport: 'stdio', resourceUrl: undefined, sourceId: '33333333-3333-4333-8333-333333333333', server: 'local' });
     const { delivery } = scene({ located: [source(), source({ directory: '/other' }), stdio] });
-    const found = await find(delivery);
+    const found = (await find(delivery))?.sources;
     expect(found?.map((entry) => [entry.source.server, entry.source.directory, entry.connection])).toEqual([
       ['notion', '/repo', 'connected'],
       ['local', '/repo', 'local'],
@@ -63,16 +64,16 @@ describe('the owner’s delivery over route D (main)', () => {
 
   it('with no MAWS sign-in saved, a credential-less listing decides: open, or sign-in on the server’s refusal', async () => {
     const open = scene({ state: { state: 'disconnected' }, discover: [{ ok: true, tools: [] }] });
-    expect((await find(open.delivery))?.[0]?.connection).toBe('open');
+    expect((await find(open.delivery))?.sources[0]?.connection).toBe('open');
     const refused = scene({ state: { state: 'disconnected' }, discover: [{ ok: false, failure: 'unavailable', reason: 'unauthorized' }] });
-    expect((await find(refused.delivery))?.[0]?.connection).toBe('signIn');
+    expect((await find(refused.delivery))?.sources[0]?.connection).toBe('signIn');
     expect(refused.deps.oauth!.connect).not.toHaveBeenCalled();
   });
 
   it('names a saved sign-in that needs replacing, one under way, and a forgotten one', async () => {
-    expect((await find(scene({ state: { state: 'needsReconnect', connectionId: 'c' } }).delivery))?.[0]?.connection).toBe('reconnect');
-    expect((await find(scene({ state: { state: 'connecting', connectionId: 'c' } }).delivery))?.[0]?.connection).toBe('busy');
-    expect((await find(scene({ state: { state: 'withdrawn' } }).delivery))?.[0]?.connection).toBe('signIn');
+    expect((await find(scene({ state: { state: 'needsReconnect', connectionId: 'c' } }).delivery))?.sources[0]?.connection).toBe('reconnect');
+    expect((await find(scene({ state: { state: 'connecting', connectionId: 'c' } }).delivery))?.sources[0]?.connection).toBe('busy');
+    expect((await find(scene({ state: { state: 'withdrawn' } }).delivery))?.sources[0]?.connection).toBe('signIn');
   });
 
   it('answers null when the host could not locate', async () => {
