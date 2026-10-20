@@ -11,7 +11,7 @@ import { parseQuery } from '@shared/artifacts/search-query';
 import type { Section } from '@artifacts/library/sections';
 import { HUMAN, openWorld, type World } from '../tool-server/artifact-world.fixture';
 import { STORE_MIGRATIONS, openStore } from './migrations';
-import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_QUIET_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, searchQuery, snippetAndRead, startArtifactSearch, type SearchRequest, type SearchTimers } from './search';
+import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_BACKGROUND_MAX_BYTES, MIRROR_QUIET_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, searchQuery, snippetAndRead, startArtifactSearch, type SearchRequest, type SearchTimers } from './search';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore } from './store';
@@ -217,6 +217,46 @@ describe('the refresher and the sweep', () => {
       await timers.advance(MIRROR_SETTLE_MS);
       expect(textRows()).toEqual([{ artifactId: id }]);
       expect(await foundIdsIn(store, 'beta')).toEqual([id]);
+    } finally {
+      store.close();
+      service.close();
+      storage.close();
+    }
+  });
+
+  it('never extracts a large artifact in the background (the sweep, a settle, an unload); a search still catches it up (Decision Log 25)', async () => {
+    expect(MIRROR_BACKGROUND_MAX_BYTES).toBe(256 * 1024);
+    const storage = SqliteDocumentStorage.open(join(w.userData, 'large', 'store.sqlite'), { log: () => {} });
+    const service = new DocumentService(storage, { kindOf: (artifactId) => storage.kindOf(artifactId), log: () => {}, idleUnloadMs: 30 });
+    const store = new ArtifactStore(service, storage, { root: join(w.userData, 'large'), log: () => {} });
+    try {
+      const bulk = (word: string) => Array.from({ length: 40_000 }, (_, n) => `${word}${n}`).join(' '); // about 400 KB stored
+      const bigDoc = (await store.create({ kind: 'dashboard', title: 'Big board', initial: (doc) => doc.get('charts').insert(0, `bigdoc ${bulk('w')}`) }, HUMAN)).id;
+      const bigPage = (await store.create({ kind: 'html', title: 'Big page', content: html(`bigpage ${bulk('p')}`) }, HUMAN)).id;
+      const small = (await store.create({ kind: 'html', title: 'Small page', content: html('smallpage') }, HUMAN)).id;
+      const smallDoc = (await store.create({ kind: 'dashboard', title: 'Small board', initial: (doc) => doc.get('charts').insert(0, 'smalldoc') }, HUMAN)).id;
+      const rowOf = (artifactId: string) => storage.db.prepare('SELECT revision FROM artifact_text_rows WHERE artifactId = ?').get(artifactId) as { revision: number } | undefined;
+      const replica = service.replica('app-holder' as AppSessionId, bigDoc); // held, so the sweep sets it aside
+      await replica.whenSynced();
+      for (let i = 0; i < 200 && service.loaded(smallDoc) !== null; i++) await new Promise((resolve) => setTimeout(resolve, 10)); // the small one unloaded
+      const timers = manualTimers();
+      started(timers, store);
+      await timers.advance(MIRROR_SWEEP_DELAY_MS + MIRROR_QUIET_MS);
+      expect(rowOf(small)).toBeDefined();
+      expect(rowOf(smallDoc)).toBeDefined();
+      expect(rowOf(bigPage)).toBeUndefined(); // the sweep passed it over
+      await store.writeContent(bigPage, html(`bigpage again ${bulk('q')}`), HUMAN); // a settled change passes it over
+      await turns();
+      await timers.advance(MIRROR_SETTLE_MS + MIRROR_QUIET_MS);
+      expect(rowOf(bigPage)).toBeUndefined();
+      service.closeSession('app-holder' as AppSessionId); // an unload's re-queue passes it over
+      for (let i = 0; i < 200 && service.loaded(bigDoc) !== null; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(service.loaded(bigDoc)).toBeNull();
+      await timers.advance(MIRROR_SETTLE_MS + MIRROR_QUIET_MS);
+      expect(rowOf(bigDoc)).toBeUndefined();
+      // the search-time catch-up still brings both up to date
+      expect(await new ArtifactSearch(store).search({ terms: parseQuery('bigdoc').terms, limit: 10 })).toMatchObject({ hits: [{ id: bigDoc }], searchedAsBefore: 0 });
+      expect((await new ArtifactSearch(store).search({ terms: parseQuery('again').terms, limit: 10 })).hits.map((hit) => hit.id)).toEqual([bigPage]);
     } finally {
       store.close();
       service.close();

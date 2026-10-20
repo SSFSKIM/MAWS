@@ -13,7 +13,8 @@
 // the store opens (MIRROR_SWEEP_DELAY_MS) fills the rows the migration left empty and drops those of deleted artifacts.
 // All that background extraction waits for the host to be quiet (Decision Log 24): no artifact commit for
 // MIRROR_QUIET_MS and no batch open, checked again before each artifact, so it never lands in an agent's batch or the
-// owner's burst of edits. The query joins the live `artifacts`, so a deleted
+// owner's burst of edits. And it never takes a large artifact (MIRROR_BACKGROUND_MAX_BYTES as stored, Decision Log
+// 25): one is left stale for the search's catch-up, which still brings it up to date within its budget. The query joins the live `artifacts`, so a deleted
 // artifact is never returned meanwhile. So a write committed in the host is found by the next search.
 //
 // Writes follow the store's discipline: each artifact's row is written inside its own savepoint of the document
@@ -36,6 +37,9 @@ export const SEARCH_CATCHUP_MS = 400; // a search's budget for bringing stale ro
 export const MIRROR_SETTLE_MS = 2_000; // the refresher re-extracts a changed artifact this long after its last change
 export const MIRROR_SWEEP_DELAY_MS = 5_000; // the sweep starts this long after the store opens
 export const MIRROR_QUIET_MS = 2_000; // background extraction waits until no artifact has committed for this long
+// Background work never takes an artifact stored this large (Decision Log 25): a quiet window cannot rule out an agent's
+// batch starting during its extraction, so a large one is left stale for the search-time catch-up.
+export const MIRROR_BACKGROUND_MAX_BYTES = 256 * 1024;
 // The catch-up yields to the host's loop after this much synchronous extraction (its rows commit in that batch), so a
 // search that has many rows to bring up to date shares the loop with the typing and the agents' batches.
 export const CATCHUP_SLICE_MS = 50;
@@ -318,6 +322,10 @@ export class ArtifactSearch {
 
   // ── the refresher and the sweep ──
 
+  private storedBytes(artifactId: string): number {
+    return storedBytesOf(this.store, artifactId);
+  }
+
   // An artifact committed: the quiet window starts again, and at its end the deferred sweep and the queue go on.
   private busy(): void {
     if (this.closed) return;
@@ -385,6 +393,7 @@ export class ArtifactSearch {
       this.untilUnloaded.add(artifactId);
       return this.pump();
     }
+    if (this.storedBytes(artifactId) >= MIRROR_BACKGROUND_MAX_BYTES) return this.pump(); // Decision Log 25: the search's
     this.stepping = true;
     try {
       await this.refresh(artifactId);
@@ -393,6 +402,25 @@ export class ArtifactSearch {
     }
     this.pump();
   }
+}
+
+// The artifact's size as the store holds it, read without decoding anything: a Y kind's compressed head and the update
+// rows after it, a byte kind's content as its latest write recorded it (0 for a deleted or unknown artifact, whose row
+// the refresh drops).
+function storedBytesOf(store: ArtifactStore, artifactId: string): number {
+  const row = store.entity(artifactId);
+  if (!row || row.deletedAt !== null) return 0;
+  const db = store.storage.db;
+  if (isDocKind(row.kind)) {
+    const { bytes } = db
+      .prepare(
+        'SELECT COALESCE((SELECT length(state) FROM artifact_head WHERE artifactId = ?1), 0) + COALESCE((SELECT SUM(length(bytes)) FROM artifact_updates WHERE artifactId = ?1 AND bytes IS NOT NULL AND seq > COALESCE((SELECT seq FROM artifact_head WHERE artifactId = ?1), 0)), 0) AS bytes',
+      )
+      .get(artifactId) as { bytes: number };
+    return bytes;
+  }
+  const latest = db.prepare('SELECT content FROM artifact_updates WHERE artifactId = ? AND content IS NOT NULL ORDER BY seq DESC LIMIT 1').get(artifactId) as { content: string } | undefined;
+  return latest ? Number((JSON.parse(latest.content) as { size?: number }).size ?? 0) : 0;
 }
 
 // The search's statement: every `MATCH` term through the trigram index, every short term through `instr`; bm25 with the
