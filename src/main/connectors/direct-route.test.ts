@@ -18,7 +18,7 @@ const ROWS = { server: 'fixture', tool: 'rows' };
 const SECRET = 'sentinel-7f3a /Users/owner/.config Bearer abc';
 
 // the only engine-host commands route D may send: reads of what is there, and the direct operation family
-const ALLOWED = new Set(['library.entry', 'spaces.list', 'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directTake', 'connectors.directCancel', 'connectors.directClose']);
+const ALLOWED = new Set(['library.entry', 'spaces.list', 'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directTake', 'connectors.directCancel', 'connectors.directClose', 'connectors.directLocate', 'connectors.directSend' /* P4-B5 */]);
 
 const source = (patch: object = {}) => ({ directory: '/repo', sourceId: SOURCE_ID, generation: 3, server: 'fixture', scope: 'user' as const, transport: 'stdio' as const, path: `${SECRET}/.claude.json`, entryPath: ['mcpServers', 'fixture'], observedAt: '2026-10-17T00:00:00.000Z', ...patch });
 const ready = (patch: { readOnly?: boolean; tool?: false } = {}): DirectOperationOutcome => ({
@@ -65,6 +65,8 @@ class FakeHost {
       case 'connectors.directResolve':
       case 'connectors.directStart':
       case 'connectors.directDiscover':
+      case 'connectors.directLocate': // P4-B5
+      case 'connectors.directSend': // P4-B5
         return { operationId: input.operationId };
       case 'connectors.directTake': {
         const id = input.operationId as string;
@@ -610,5 +612,47 @@ describe('through the broker', () => {
     expect(answered).toEqual({ ok: true, result: { rows: 1 }, fetchedAt: Date.now(), via: { route: 'direct' } });
     expect(host.dispatched.map((entry) => entry.name).filter((name) => name.startsWith('connectors.direct') && name !== 'connectors.directTake')).toEqual(['connectors.directResolve', 'connectors.directStart']);
     broker.stop();
+  });
+});
+
+// P4-B5: the owner's delivery (route D's `locate` and `send`): operations like a call's, no grant, no resolution of the
+// artifact's directories, never an engine
+describe('P4-B5: locate and send for the owner’s delivery', () => {
+  it('locates through the host’s operation, answering the sources its take carries', async () => {
+    const pending = route.locate('notion-create-pages', ['mcp.notion.com'], signalOf().signal);
+    await settle();
+    const sent = host.last('connectors.directLocate').input;
+    expect(sent).toMatchObject({ tool: 'notion-create-pages', urlHosts: ['mcp.notion.com'] });
+    host.finish(sent.operationId as string, { kind: 'locate', answer: { sources: [source()] } });
+    expect(await pending).toEqual([source()]);
+    expect(host.dispatched.map((entry) => entry.name)).toEqual(['connectors.directLocate', 'connectors.directTake']);
+  });
+
+  it('answers null when the location outlives its deadline', async () => {
+    const pending = route.locate('notion-create-pages', [], signalOf().signal);
+    await settle();
+    await vi.advanceTimersByTimeAsync(DIRECT_RESOLVE_DEADLINE_MS);
+    expect(await pending).toBeNull();
+  });
+
+  it('sends one directSend on the source with the arguments as given, and answers the host’s typed outcome', async () => {
+    const pending = route.send(source(), { artifactId: ART, tool: 'notion-create-pages', arguments: { pages: [{ content: 'x' }] } }, signalOf().signal);
+    await settle();
+    const sent = host.last('connectors.directSend').input;
+    expect(sent).toMatchObject({ artifactId: ART, directory: '/repo', sourceId: SOURCE_ID, generation: 3, server: 'fixture', tool: 'notion-create-pages', arguments: { pages: [{ content: 'x' }] } });
+    expect(sent).not.toHaveProperty('credential'); // a stdio source has none
+    host.finish(sent.operationId as string, called({ ok: true, result: { content: [] } }));
+    expect(await pending).toEqual({ ok: true, result: { content: [] } });
+    expect(host.of('connectors.directStart')).toHaveLength(0);
+    expect(host.of('library.entry')).toHaveLength(0);
+  });
+
+  it('a send withdrawn by its signal before the host answers is cancelled there, and answers lost', async () => {
+    const controller = signalOf();
+    const pending = route.send(source(), { artifactId: ART, tool: 't', arguments: {} }, controller.signal);
+    await settle();
+    controller.abort();
+    expect(await pending).toMatchObject({ ok: false, reason: 'lost' });
+    expect(host.of('connectors.directCancel')).toHaveLength(1);
   });
 });

@@ -16,4 +16,6 @@ export const mainOnlyCommands = [
   'connectors.resolve', 'connectors.start', 'connectors.take', 'connectors.cancel',
   // P3-HD: route D's host half, main's alone like route E's (a credential rides directStart and directDiscover)
   'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directTake', 'connectors.directCancel', 'connectors.directClose',
+  // P4-B5: the owner's delivery through route D, and route E's observation of one live session
+  'connectors.directLocate', 'connectors.directSend', 'connectors.observe',
 ] as const;

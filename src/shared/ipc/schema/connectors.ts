@@ -203,10 +203,32 @@ export const DirectDiscoverAnswerSchema = z.union([
   z.strictObject({ ok: z.literal(true), tools: z.array(z.strictObject({ name: ConnectorToolRefSchema.shape.tool, readOnly: z.boolean() })).max(1_024) }),
   z.strictObject({ ok: z.literal(false), failure: z.enum(['unavailable', 'failed']), reason: Reason, sourceRefusal: z.enum(DIRECT_SOURCE_REFUSALS).optional() }),
 ]);
+// P4-B5 start (docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.7, the direct send): the owner's delivery through
+// MAWS's own connection, with no session, no model turn and no artifact grant. `directLocate` finds the verified sources
+// that can take one tool: every observed server whose agreeing reports list `tool`, or (a server needing sign-in reports
+// no tools) whose verified HTTP resource is on one of `urlHosts`; nothing is connected. `directSend` runs that tool once
+// on a located source for the owner's gesture in a trusted sheet: no grant is checked or consumed; what admits its
+// actual write (synchronously, as a call's) is the operation still registered (not cancelled, not past its deadline),
+// the source still verified, the credential's epoch not withdrawn, main's attachment, and the artifact it delivers not
+// deleted. Never retried. The live tools/list must show the tool and not require task execution.
+const Hostname = z.string().min(1).max(253).regex(/^[a-z0-9.-]+$/);
+export const DirectLocateSchema = z.strictObject({ operationId: OperationId, tool: ConnectorToolRefSchema.shape.tool, urlHosts: z.array(Hostname).max(8) });
+export const DIRECT_LOCATE_MAX = 16;
+export const DirectLocateAnswerSchema = z.strictObject({ sources: z.array(DirectSourceSchema).max(DIRECT_LOCATE_MAX) });
+export const DirectSendSchema = z.strictObject({
+  operationId: OperationId,
+  artifactId: ArtifactId, // the artifact delivered: its deletion stops the send at the write
+  ...DirectSourceRef,
+  tool: ConnectorToolRefSchema.shape.tool,
+  arguments: z.record(z.string(), z.unknown()),
+  credential: DirectCredentialSchema.optional(),
+});
+// P4-B5 end
 export const DirectOperationOutcomeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('resolve'), answer: DirectResolveAnswerSchema }),
   z.strictObject({ kind: z.literal('call'), outcome: DirectCallOutcomeSchema }),
   z.strictObject({ kind: z.literal('discover'), answer: DirectDiscoverAnswerSchema }),
+  z.strictObject({ kind: z.literal('locate'), answer: DirectLocateAnswerSchema }), // P4-B5
 ]);
 export type DirectSource = z.infer<typeof DirectSourceSchema>;
 export type DirectResolveAnswer = z.infer<typeof DirectResolveAnswerSchema>;
@@ -216,6 +238,7 @@ export type DirectOperationOutcome = z.infer<typeof DirectOperationOutcomeSchema
 export type DirectReason = (typeof DIRECT_REASONS)[number];
 export type DirectToolMetadata = z.infer<typeof DirectToolMetadataSchema>; // P3-HD M3b
 export type DirectCredential = z.infer<typeof DirectCredentialSchema>; // P3-HD M3b
+export type DirectLocateAnswer = z.infer<typeof DirectLocateAnswerSchema>; // P4-B5
 const Started = z.strictObject({ operationId: OperationId });
 // P3-HD end
 
@@ -356,6 +379,13 @@ export const commands = {
   // admit no further write before this answers, and a later start at a withdrawn epoch is refused. `cancelled`: ended.
   'connectors.directClose': host(z.strictObject({ connectionId: z.uuid().optional(), credentialEpoch: CredentialEpoch.optional() }), z.strictObject({ cancelled: z.number().int().nonnegative() })),
   // P3-HD end
+  // P4-B5 start: the owner's delivery (above), each an operation answered at once like route D's; and route E's
+  // observation alone: one live session's mcp_status read now, so route D's cache knows what that engine reports (no
+  // tool, no probe, nothing acquired). `observed`: the report landed in the cache.
+  'connectors.directLocate': host(DirectLocateSchema, Started),
+  'connectors.directSend': host(DirectSendSchema, Started),
+  'connectors.observe': host(ConnectorSessionToolSchema.pick({ appSessionId: true, launchId: true, cwd: true }), z.strictObject({ observed: z.boolean() })),
+  // P4-B5 end
 } as const satisfies Record<`connectors.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
