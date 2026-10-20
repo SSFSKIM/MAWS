@@ -90,8 +90,11 @@ export interface DirectRoute extends ConnectorRoute {
   // P4-B5 end
 }
 
-// P4-B5: a delivery's answer, the host's typed outcome, or `lost` (main's own words: it ended with no typed answer)
-export type DirectSendAnswer = DirectCallOutcome | { ok: false; failure: 'unavailable' | 'failed'; reason: 'lost'; message: string };
+// P4-B5: a delivery's answer, the host's typed outcome, or `lost` (main's own words: it ended with no typed answer).
+// `sent`: its command reached the host's dispatch (false: ended before, so nothing was written); `credential: false`:
+// its HTTP credential could not be prepared (no usable MAWS sign-in).
+export type DirectSendAnswer = DirectCallOutcome | { ok: false; failure: 'unavailable' | 'failed'; reason: 'lost'; message: string; sent: boolean; credential?: false };
+const NO_CREDENTIAL = 'no credential could be prepared'; // P4-B5: the lost word a send's answer names as `credential: false`
 
 // The host's own bounds are 8 s to resolve and 180 s for a call or discovery from its start; main takes or withdraws at
 // these, so no lost event leaves a caller waiting.
@@ -251,9 +254,9 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     signal: AbortSignal,
     prepare?: (signal: AbortSignal) => Promise<DirectCredentialPrepared>,
     context?: ConnectorRouteCallContext, // E3c
-  ): Promise<{ result: OutcomeOf<K> | Lost; credential: DirectCredential | null }> {
+  ): Promise<{ result: OutcomeOf<K> | Lost; credential: DirectCredential | null; sent: boolean }> {
     const refused = refusal(signal);
-    if (refused) return Promise.resolve({ result: refused, credential: null });
+    if (refused) return Promise.resolve({ result: refused, credential: null, sent: false });
     const operationId = randomUUID();
     let credential: DirectCredential | null = null;
     return new Promise((resolve) => {
@@ -271,7 +274,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
           clearTimeout(operation.retry); // P3-F F-connectors 5
           signal.removeEventListener('abort', cancel);
           preparation.abort(); // P3-HD M3b: a preparation still running is told; its answer is dropped
-          resolve({ result: result as OutcomeOf<K> | Lost, credential });
+          resolve({ result: result as OutcomeOf<K> | Lost, credential, sent: operation.sent }); // P4-B5: sent
         },
       };
       pending.set(operationId, operation);
@@ -285,7 +288,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
             prepared = { ok: false };
           }
           if (pending.get(operationId) !== operation) return; // it ended meanwhile: nothing is sent
-          if (!prepared.ok) return withdraw(operationId, lost('no credential could be prepared'));
+          if (!prepared.ok) return withdraw(operationId, lost(NO_CREDENTIAL));
           if (!deps.streaming()) return withdraw(operationId, lost('the engine host is not streaming its events yet'));
           credential = prepared.credential;
         }
@@ -395,8 +398,8 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     async send(source, { artifactId, tool, arguments: args }, signal) {
       const { directory, sourceId, generation, server } = source;
       const prepare = preparationOf(source, 'call');
-      const { result, credential } = await run('call', (operationId, prepared) => deps.call('connectors.directSend', { operationId, artifactId, directory, sourceId, generation, server, tool, arguments: args, ...(prepared && { credential: prepared }) }), DIRECT_OPERATION_DEADLINE_MS, signal, prepare);
-      if ('lost' in result) return { ok: false, failure: result.failure, reason: 'lost', message: result.lost };
+      const { result, credential, sent } = await run('call', (operationId, prepared) => deps.call('connectors.directSend', { operationId, artifactId, directory, sourceId, generation, server, tool, arguments: args, ...(prepared && { credential: prepared }) }), DIRECT_OPERATION_DEADLINE_MS, signal, prepare);
+      if ('lost' in result) return { ok: false, failure: result.failure, reason: 'lost', message: result.lost, sent, ...(result.lost === NO_CREDENTIAL && { credential: false as const }) };
       if (prepare && !result.outcome.ok && result.outcome.reason === 'unauthorized') unauthorized(source, 'call', credential);
       return result.outcome;
     },

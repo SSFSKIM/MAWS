@@ -72,7 +72,8 @@ const words = (error: unknown) => (error instanceof Error ? error.message : Stri
 
 // Route D's closed reasons as the sheet words them; after the write (or past it, unknown), `maybeSent`.
 function notionFailure(answer: Extract<DirectSendAnswer, { ok: false }>): DeliverySendAnswer {
-  if (answer.reason === 'lost') return failure('failed', { maybeSent: true });
+  // P4-B5 review: ended with no typed answer; it may have reached Notion only if its command went out
+  if (answer.reason === 'lost') return answer.credential === false ? failure('unauthorized') : answer.sent ? failure('failed', { maybeSent: true }) : failure('unavailable');
   if (answer.failure === 'refused') return failure('deleted');
   switch (answer.reason) {
     case 'unauthorized':

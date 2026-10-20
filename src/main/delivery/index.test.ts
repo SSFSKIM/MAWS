@@ -128,6 +128,13 @@ describe('the Notion target', () => {
     expect(await sendNotion()).toEqual({ ok: false, why: 'timeout', maybeSent: true });
     connectors.send.mockResolvedValueOnce({ ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' });
     expect(await sendNotion()).toEqual({ ok: false, why: 'deleted' });
+    // P4-B5 review: an end with no typed answer may have reached Notion only if its command went out
+    connectors.send.mockResolvedValueOnce({ ok: false, failure: 'unavailable', reason: 'lost', message: 'the engine host is not streaming its events yet', sent: false });
+    expect(await sendNotion()).toEqual({ ok: false, why: 'unavailable' });
+    connectors.send.mockResolvedValueOnce({ ok: false, failure: 'unavailable', reason: 'lost', message: 'no credential could be prepared', sent: false, credential: false });
+    expect(await sendNotion()).toEqual({ ok: false, why: 'unauthorized' });
+    connectors.send.mockResolvedValueOnce({ ok: false, failure: 'failed', reason: 'lost', message: 'directTake failed', sent: true });
+    expect(await sendNotion()).toEqual({ ok: false, why: 'failed', maybeSent: true });
     expect(emitted).toEqual([]);
   });
 

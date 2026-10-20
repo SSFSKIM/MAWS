@@ -19,6 +19,9 @@
 // rather than reaching the well-known file: an upload goes as the CLI's own sign-in or not at all, even when that
 // sign-in vanishes between the state's read and the upload. It names no credential. A saved sign-in the CLI cannot
 // decrypt (`encryption_valid` false) is `expired`: its next API call would delete it and fall through the same way.
+// P4-B5 review: the chain's first file step, GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE (a plaintext file, a service account
+// allowed), outranks the CLI's own sign-in and `auth status` never names its identity, so every run here is given the
+// environment without it (`ownSignIn`): the state read, the login and the upload all speak of the CLI's own sign-in.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
@@ -278,7 +281,12 @@ class Capture {
   }
 }
 
-function runGws(bin: string, args: readonly string[], env: Readonly<Record<string, string>>, opts: RunOptions): Promise<Run> {
+// P4-B5 review: the environment without the credentials-file override (the header above).
+export const CREDENTIALS_FILE_VARIABLE = 'GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE';
+const ownSignIn = (env: Readonly<Record<string, string>>): Record<string, string> => Object.fromEntries(Object.entries(env).filter(([key]) => key !== CREDENTIALS_FILE_VARIABLE));
+
+function runGws(bin: string, args: readonly string[], given: Readonly<Record<string, string>>, opts: RunOptions): Promise<Run> {
+  const env = ownSignIn(given);
   return new Promise((resolve) => {
     const out = new Capture();
     const err = new Capture();

@@ -434,6 +434,20 @@ describe('the gws driver against the fake CLI', { timeout: 60_000 }, () => {
       expect(JSON.parse(ran.stdout)).toMatchObject({ owner: 'adc' });
     });
 
+    // P4-B5 review: GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE outranks the CLI's own sign-in and its identity is never named
+    // by the status; every run is handed the environment without it, so the state and the upload are the sign-in's
+    it('a credentials-file override in the owner’s environment never steers the state or the upload', async () => {
+      const file = join(root, 'service-account.json');
+      writeFileSync(file, JSON.stringify({ type: 'service_account', client_email: 'robot@example.iam.gserviceaccount.com' }));
+      const overridden = { ...env, GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: file };
+      fakeState({ signedIn: false });
+      expect(await readGwsState(bin, overridden)).toEqual({ state: 'signedOut' });
+      expect(await gwsUpload(bin, overridden, { file: join(exportDir, 'Report Q3.pdf'), name: 'x.pdf', mime: 'application/pdf', signal: new AbortController().signal })).toMatchObject({ ok: false, why: 'auth' });
+      expect(runs().every((run) => !run.envKeys.includes('GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE'))).toBe(true);
+      const ran = spawnSync(bin, ['drive', 'files', 'create', '--json', '{"name":"x.pdf"}', '--upload', 'Report Q3.pdf', '--params', '{}'], { cwd: exportDir, env: overridden, encoding: 'utf8' });
+      expect(JSON.parse(ran.stdout)).toMatchObject({ owner: 'credentials-file' }); // the fake's chain does take it, unguarded
+    });
+
     it('a cancelled upload stops the CLI before it answers', async () => {
       fakeState({ signedIn: true, uploadDelayMs: 30_000 });
       const controller = new AbortController();

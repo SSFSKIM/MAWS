@@ -652,7 +652,17 @@ describe('P4-B5: locate and send for the owner’s delivery', () => {
     const pending = route.send(source(), { artifactId: ART, tool: 't', arguments: {} }, controller.signal);
     await settle();
     controller.abort();
-    expect(await pending).toMatchObject({ ok: false, reason: 'lost' });
+    expect(await pending).toMatchObject({ ok: false, reason: 'lost', sent: true }); // its command had gone out
     expect(host.of('connectors.directCancel')).toHaveLength(1);
+  });
+
+  it('a send that never reached the host says so, and names a credential that could not be prepared', async () => {
+    host.streams = false;
+    expect(await route.send(source(), { artifactId: ART, tool: 't', arguments: {} }, signalOf().signal)).toMatchObject({ ok: false, reason: 'lost', sent: false });
+    host.streams = true;
+    const refusing = createDirectRoute({ call: host.call, sessions: { get: () => null }, projects: { list: () => [] }, realpath: (path) => path, streaming: () => true, log, credentials: { prepare: async () => ({ ok: false }), unauthorized: () => {} } });
+    expect(await refusing.send(source({ transport: 'http', resourceUrl: 'https://mcp.example.com/mcp' }), { artifactId: ART, tool: 't', arguments: {} }, signalOf().signal)).toEqual({ ok: false, failure: 'unavailable', reason: 'lost', message: 'no credential could be prepared', sent: false, credential: false });
+    expect(host.of('connectors.directSend')).toHaveLength(0);
+    refusing.stop();
   });
 });

@@ -700,8 +700,13 @@ export class DirectCalls {
         { name: input.tool, arguments: input.arguments },
         { admit: () => (written = (refusedAtWrite = check()) === null), signal, timeoutMs: Math.max(1, operation.deadlineAt - this.clock.now()) },
       );
-      // a refusal before the write is ours (the connection's own fence included); after it, the transport's
-      if (!answer.ok) return refusedAtWrite ?? (written ? null : check()) ?? fromTransport(answer, 'transport');
+      // a refusal before the write is ours (the connection's own fence included); after it, the transport's, and a
+      // connection lost once the request went out is the exchange broken (`transport`), never a send that did not happen
+      if (!answer.ok) {
+        if (refusedAtWrite) return refusedAtWrite;
+        if (!written) return check() ?? fromTransport(answer, 'transport');
+        return answer.failure === 'unavailable' ? failed('transport') : fromTransport(answer, 'transport');
+      }
       const bytes = jsonBytes(answer.result);
       if (bytes === null) return failed('notJson');
       return bytes <= this.maxResultBytes ? { ok: true, result: answer.result as never } : { ok: false, failure: 'tooLarge', reason: 'tooLarge' };

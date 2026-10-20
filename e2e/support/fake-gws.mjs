@@ -100,6 +100,11 @@ function writeState(state) {
 }
 
 const tokenEnv = () => (process.env.GOOGLE_WORKSPACE_CLI_TOKEN ?? '') !== '';
+// P4-B5 review: the chain's credentials-file step (auth.rs 1), which `plain_credentials_path` also reads for the status
+const credsFile = () => {
+  const file = process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE;
+  return file && existsSync(file) ? file : null;
+};
 const clientEnv = () => process.env.GOOGLE_WORKSPACE_CLI_CLIENT_ID !== undefined && process.env.GOOGLE_WORKSPACE_CLI_CLIENT_SECRET !== undefined;
 const configDir = () => process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR || join(process.env.HOME ?? '', '.config', 'gws');
 
@@ -123,14 +128,15 @@ async function status() {
   if (state.statusDelayMs) await sleep(state.statusDelayMs);
   const config = configDir();
   const signedIn = state.signedIn === true;
+  const plain = credsFile(); // P4-B5 review
   const out = {
-    auth_method: signedIn ? 'oauth2' : 'none',
-    storage: signedIn ? 'encrypted' : 'none',
+    auth_method: signedIn || plain ? 'oauth2' : 'none',
+    storage: signedIn ? 'encrypted' : plain ? 'plaintext' : 'none',
     keyring_backend: 'keyring',
     encrypted_credentials: join(config, 'credentials.enc'),
     encrypted_credentials_exists: signedIn,
-    plain_credentials: join(config, 'credentials.json'),
-    plain_credentials_exists: false,
+    plain_credentials: plain ?? join(config, 'credentials.json'),
+    plain_credentials_exists: plain !== null,
     token_cache_exists: signedIn,
     client_config: join(config, 'client_secret.json'),
     client_config_exists: state.client === true,
@@ -285,6 +291,12 @@ async function create(args) {
   const adcEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   if (!authed && adcEnv !== undefined && !existsSync(adcEnv)) {
     return fail('auth', `Authentication failed: GOOGLE_APPLICATION_CREDENTIALS points to ${adcEnv}, but file does not exist`);
+  }
+  if (!tokenEnv() && state.signedIn !== true && credsFile()) {
+    // P4-B5 review: the credentials file's identity, which outranks the CLI's own sign-in
+    const id = `1${randomBytes(16).toString('hex')}`;
+    print({ id, name: body.value?.name ?? 'Untitled', webViewLink: `https://drive.google.com/file/d/${id}/view`, owner: 'credentials-file' });
+    return;
   }
   if (!authed && state.adc === true) {
     const id = `1${randomBytes(16).toString('hex')}`;

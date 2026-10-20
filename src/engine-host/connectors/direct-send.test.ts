@@ -266,6 +266,16 @@ describe('DirectCalls.send: the owner’s delivery with no grant', () => {
     expect(pool.acquires).toEqual([]);
   });
 
+  // P4-B5 review: a connection lost once the request went out (a reset fetch, a server that died handling it) may have
+  // made the page: the exchange broken, never "not reached"
+  it('a connection lost after the write is the transport’s, so main says it may have been made', async () => {
+    const input = await sendInput();
+    pool.callFailure = { ok: false, failure: 'unavailable', admitted: true, message: 'x' };
+    calls.send(input);
+    expect(await sendOutcome(input.operationId)).toMatchObject({ ok: false, failure: 'failed', reason: 'transport' });
+    expect(toolCalls()).toHaveLength(1);
+  });
+
   it('a failure after the write is the transport’s, never resent', async () => {
     const input = await sendInput();
     pool.callFailure = { ok: false, failure: 'failed', admitted: true, message: 'x' };
