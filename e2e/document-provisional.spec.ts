@@ -246,9 +246,10 @@ test('a layer aimed at the block the owner is composing in stays out of that blo
   } finally {
     await cdp.detach();
   }
-  // the composition over: the layer appears inside the block, after the owner's syllable
+  // the composition over: the layer appears inside the block (after the quote it replaces), the owner's syllable intact
+  // at the block's end (the recorder reads the block's own words apart from the layer's widget)
   await expect(editor.locator(`[data-id="${budget}"] [data-provisional="${toolUseId}"]`)).toHaveText(NEW, { timeout: 10_000 });
-  await expect(editor.locator(`[data-id="${budget}"]`)).toContainText('on Friday.한');
+  await expect.poll(async () => (await seen()).at(-1)?.blocks[budget]).toBe('The budget review is on Friday.한');
   const answer = await seam.call<{ revision: number }>(AGENT, 'artifact_edit', { artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', block: budget, old: 'on Friday', new: NEW }], toolUseId });
   expect(answer.isError, answer.text).toBe(false);
   await expect(editor.locator(`[data-id="${budget}"]`)).toHaveText(`The budget review is ${NEW}.한`, { timeout: 10_000 });
