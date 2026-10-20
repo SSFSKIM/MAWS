@@ -50,6 +50,8 @@ export function resetShellStores(): void {
     panelPinned: [],
     panelBySession: new Map(),
     panelActiveNoSession: null,
+    panelParams: {}, // P4-B3
+    dragging: null, // P4-B3
     hydrated: true,
     overviewOpen: false,
     projectOf: NO_PROJECT_OF,

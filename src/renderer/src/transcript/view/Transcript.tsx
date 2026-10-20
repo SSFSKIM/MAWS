@@ -20,6 +20,7 @@ import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
 import { listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
+import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
 import { useBrowserActivityAttachment } from './rows/BrowserActivity'; // E13
 import { listBrowserActivity } from '../../tools/browser/agent/activity'; // E13
@@ -65,11 +66,16 @@ export interface TranscriptListProps {
   handle?: Ref<TranscriptListHandle>;
   className?: string;
   id?: string; // the scroll container's element id
+  // P4-B3 (its Decision Log 14): where a card's float or dock left the reader, taken (once) as the list mounts; and
+  // where this list leaves them as it unmounts
+  takeCarried?: () => TranscriptScroll | null;
+  onLeave?: (scroll: TranscriptScroll) => void;
 }
 
-export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id }: TranscriptListProps) {
+export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id, takeCarried, onLeave }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
+  const restoreAt = useRef<TranscriptScroll | null>(null); // P4-B3: the carried place, until the mount applies it
   // P2-C start (2026-10-09): the scroller's offset and viewport height as the follow rule last knew them (below)
   const known = useRef({ offset: 0, height: 0 });
   const remember = useCallback(() => {
@@ -153,11 +159,52 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
 
   // A transcript opens at its end, and a following reader stays there through every structural change. The
   // virtualiser's own followOnAppend covers a new last row only; a row inserted above the last one (the live answer
-  // above its turn's receipt) would otherwise be anchored from the top and push the end away.
+  // above its turn's receipt) would otherwise be anchored from the top and push the end away. P4-B3: a carried place
+  // opens with its first visible row at the top instead, out of follow mode. A row, not an offset: a mount knows no row's
+  // size until it measures it, and the virtualiser keeps re-aiming a scroll to a row as the rows measure, where an
+  // offset would stay fixed on estimates (the width differs between a pane and a card too).
+  // P4-B3: the carry is taken here, as the list mounts, not while it renders: a dock renders the pane's transcript in
+  // the same commit that removes the card's, and the card's record is made by its unmount's layout cleanup, which runs
+  // in that commit before any layout effect mounts (and after every render of it). A carried place restores only a
+  // reader who had scrolled away from the end, over the same content (Claude's rule); a follower, or content that
+  // changed, opens at the end as every mount does.
   useLayoutEffect(() => {
+    const carried = takeCarried?.() ?? null;
+    if (carried === null || carried.following || carried.signature !== scrollSignature(rows)) return;
+    restoreAt.current = carried;
+    followingRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, as the list mounts, over the rows it mounts with
+  }, []);
+  useLayoutEffect(() => {
+    const at = restoreAt.current;
+    restoreAt.current = null;
+    if (at !== null) {
+      const index = at.anchor === null ? -1 : rows.findIndex((row) => row.id === at.anchor);
+      if (index === -1) virtualizer.scrollToOffset(at.offset, { behavior: 'instant' });
+      else virtualizer.scrollToIndex(index, { align: 'start', behavior: 'instant' });
+      onFollowChange?.(false);
+      return;
+    }
     if (followingRef.current) virtualizer.scrollToEnd({ behavior: 'instant' });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per row list, reading the follow mode of the moment
   }, [rows]);
+
+  // P4-B3: where the reader is as the list goes (a card's float or dock remounts it elsewhere): whether they followed,
+  // the offset, the content and the first visible row. Read before the scroller is removed.
+  const rowsRef = useRef(rows);
+  useLayoutEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    return () => {
+      if (!onLeave || !element) return;
+      const offset = element.scrollTop;
+      const item = virtualizer.getVirtualItemForOffset(offset);
+      const row = item === undefined ? undefined : rowsRef.current[item.index];
+      onLeave({ following: followingRef.current, offset, signature: scrollSignature(rowsRef.current), anchor: row?.id ?? null });
+    };
+  }, [onLeave, virtualizer]);
 
   // E11 (W-C): the viewport changing height with no scroll and no row change (the composer below growing with an
   // attention notice) moves the end out of view; a following reader is kept at the end. Only a change of height acts:
@@ -312,6 +359,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const disclosures = useDisclosures();
   const [motion] = useState(() => new WorkMotion());
   const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  // P4-B3 (its Decision Log 14): the place a card's float or dock carries to this mount (once), and where it leaves
+  const takeCarried = useCallback(() => takeTranscriptCarry(storeKey), [storeKey]);
+  const leave = useCallback((scroll: TranscriptScroll) => recordTranscriptScroll(storeKey, scroll), [storeKey]);
 
   useEffect(() => {
     const store = useTranscriptStore.getState();
@@ -382,7 +432,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   return (
     <TranscriptProvider value={context}>
       <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
-        <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" />
+        <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
         {failed !== null && (
           <div className="transcript-failed" role="alert">
             <span>{HYDRATION.failed(failed)}</span>

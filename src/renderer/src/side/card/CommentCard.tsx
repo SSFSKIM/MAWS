@@ -201,7 +201,7 @@ function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; fram
       lastUnmount = { serial, focused: element?.closest('[data-comment-card]')?.contains(document.activeElement) ?? false };
     };
   }, [serial]);
-  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }), ...(initial && { destination: initial }) /* P3-F1 */, text /* P4-B1 */ });
+  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }), ...(initial && { destination: initial }) /* P3-F1 */, text /* P4-B1 */, sendKey: `card:${serial}` /* P4-B3: a remount of the card (a moved document) keeps its send */ });
   // P4-B1: the field's text, told to the card and the frame as the person changes it
   const setText = (value: string) => {
     form.setText(value);

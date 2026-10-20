@@ -8,7 +8,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { connectVisibility } from './visibility';
 import { hideSideChild, showSideChild, useSidePane } from '../side/store'; // E3
 import { hideCardThread, showCardThread, useCommentCard } from '../side/card/store'; // P2-E1
-import { closeCard, openCard, useFloatingCard } from '../shell/floating'; // P3-G
+import { closeCard, dockSplit, floatSplit, openCard, useFloatingCard } from '../shell/floating'; // P3-G; P4-B3: the split's
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -107,6 +107,26 @@ describe('session visibility', () => {
     expect(sent().slice(4)).toEqual([{ appSessionId: B, visible: true }]);
     useLayout.getState().setPanel({ collapsed: true }); // floating ends; both panes show again
     expect(sent().slice(5)).toEqual([{ appSessionId: A, visible: true }]);
+  });
+
+  // P4-B3 (its Decision Log 11): a pane that yielded into the split's card keeps its tab active but is not on screen; its
+  // card is while open, not as a pill. The session beside it in the other pane stays on screen throughout.
+  it('counts the split card’s session while the card is open, not its hidden pane’s tab, and the pane again once docked', () => {
+    useLayout.getState().openSession(A);
+    useLayout.getState().openSession(B, { split: true });
+    expect(sent()).toHaveLength(2);
+    floatSplit(`session:${A}`);
+    expect(sent().slice(2)).toEqual([]); // A moved from its pane into the open card: on screen throughout
+    closeCard();
+    expect(sent().slice(2)).toEqual([{ appSessionId: A, visible: false }]);
+    openCard();
+    expect(sent().slice(3)).toEqual([{ appSessionId: A, visible: true }]);
+    closeCard();
+    dockSplit();
+    expect(sent().slice(4)).toEqual([
+      { appSessionId: A, visible: false },
+      { appSessionId: A, visible: true },
+    ]);
   });
 
   it('reports an unstarted session only once its record arrives', () => {

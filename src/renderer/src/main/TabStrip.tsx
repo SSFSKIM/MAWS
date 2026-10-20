@@ -2,15 +2,18 @@
 // One tab stop (the active tab); ArrowLeft and ArrowRight move focus along the strip, wrapping, Enter activates the
 // focused tab and Delete closes it. Overflow scrolls horizontally with the active tab kept in view. Drops: a tab
 // (`application/x-maws-tab`) moves to the pointer's position, computed against the tabs' midpoints, and a sidebar row
-// (`application/x-maws-session`) opens its session there. Under a split the focused pane's strip carries an accent
-// inset. W12 (I3): the strips show the current project's tab set; P3-F wave S (F17, the owner's obs 8): its name is the
-// title bar's project chip (app/Toolbar.tsx), so the crowded strip carries tabs only.
+// (`application/x-maws-session`) opens its session there; P4-B3 (X38): a panel record (`application/x-maws-panel-tab`)
+// moves there as a main tab, its insertion line labelled "Move to tab". Under a split the focused pane's strip carries an
+// accent inset. W12 (I3): the strips show the current project's tab set; P3-F wave S (F17, the owner's obs 8): its name
+// is the title bar's project chip (app/Toolbar.tsx), so the crowded strip carries tabs only.
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { createSession, focusedProject, NEW_CHAT, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
+import { dragAccepted, dropPanelRecord, endDrag, moveMainTab, PANEL_TAB_DRAG_TYPE } from '../shell/transfer'; // P4-B3
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
+import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
 import { Tab, TAB_DRAG_TYPE } from './Tab';
 
 export { TAB_DRAG_TYPE };
@@ -30,21 +33,21 @@ function dropPoint(strip: HTMLElement, clientX: number): { index: number; left: 
   return { index: tabs.length, left: last ? last.offsetLeft + last.offsetWidth : 0 };
 }
 
-const accepts = (event: DragEvent) => event.dataTransfer.types.includes(TAB_DRAG_TYPE) || event.dataTransfer.types.includes(SESSION_DRAG_TYPE);
+// A panel tab is taken only while the drag under way is a record the transfer allows (P4-B3; a refused one never
+// prevents the event, so the cursor says no-drop).
+const panelRecord = (event: DragEvent) => event.dataTransfer.types.includes(PANEL_TAB_DRAG_TYPE) && dragAccepted('main');
+const accepts = (event: DragEvent) => event.dataTransfer.types.includes(TAB_DRAG_TYPE) || event.dataTransfer.types.includes(SESSION_DRAG_TYPE) || panelRecord(event);
 
 // Moves a tab (open anywhere) to `index` of `pane`, counting the index in the strip as it was seen, with the tab
 // still in it.
-function dropTab(id: string, pane: Pane, index: number) {
-  const layout = useLayout.getState();
-  const from = currentSet(layout.main).panes[pane]?.tabs.findIndex((t) => t.id === id) ?? -1;
-  layout.moveTab(id, pane, from !== -1 && from < index ? index - 1 : index);
-}
+const dropTab = (id: string, pane: Pane, index: number) => moveMainTab(id, pane, index, true);
 
 export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean; idPrefix: string }) {
   const state = useLayout((s) => currentSet(s.main).panes[pane]);
   const focused = useLayout((s) => currentSet(s.main).focusedPane === pane);
   const strip = useRef<HTMLDivElement>(null);
-  const [marker, setMarker] = useState<number | null>(null); // the insertion line's x while a drag hovers
+  // The insertion line's x while a drag hovers, and the outcome's label for a panel record (P4-B3, Z7).
+  const [marker, setMarker] = useState<{ left: number; label: string | null; labelLeft: number } | null>(null);
   const activeTabId = state?.activeTabId;
 
   // Keep the active tab in view.
@@ -83,8 +86,10 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!accepts(event)) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = event.dataTransfer.types.includes(TAB_DRAG_TYPE) ? 'move' : 'copy';
-    setMarker(dropPoint(event.currentTarget, event.clientX).left);
+    const record = panelRecord(event);
+    event.dataTransfer.dropEffect = record || event.dataTransfer.types.includes(TAB_DRAG_TYPE) ? 'move' : 'copy';
+    const { left } = dropPoint(event.currentTarget, event.clientX);
+    setMarker({ left, label: record ? TRANSFER_COPY.moveToTab : null, labelLeft: left - event.currentTarget.scrollLeft });
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -92,11 +97,16 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
     event.preventDefault();
     const { index } = dropPoint(event.currentTarget, event.clientX);
     setMarker(null);
+    if (event.dataTransfer.types.includes(PANEL_TAB_DRAG_TYPE)) {
+      endDrag();
+      dropPanelRecord(event, { pane, index });
+      return;
+    }
     const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE);
     const layout = useLayout.getState();
     if (tabId) {
       dropTab(tabId, pane, index);
-      layout.setDragging(null);
+      endDrag();
       return;
     }
     const appSessionId = event.dataTransfer.getData(SESSION_DRAG_TYPE) as AppSessionId;
@@ -144,9 +154,15 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
           />
         ))}
         {marker !== null && (
-          <span aria-hidden className="pointer-events-none absolute inset-y-1 w-0.5 -translate-x-1/2 bg-accent" style={{ left: marker }} />
+          <span aria-hidden className="pointer-events-none absolute inset-y-1 w-0.5 -translate-x-1/2 bg-accent" style={{ left: marker.left }} />
         )}
       </div>
+      {/* P4-B3 (Z7): the outcome, beside the line; outside the scrolling list, so it never clips or scrolls it. */}
+      {marker?.label && (
+        <span className="pointer-events-none absolute top-1/2 z-20 ml-1.5 -translate-y-1/2 rounded-sm border border-border-strong bg-bg-overlay px-1.5 py-0.5 text-ui-sm whitespace-nowrap text-fg shadow-float" style={{ left: marker.labelLeft }}>
+          {marker.label}
+        </span>
+      )}
       <NewSessionButton pane={pane} />
       {/* The focused pane's mark under a split, drawn over the tabs rather than under their backgrounds. */}
       {split && focused && <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-accent" />}

@@ -1,9 +1,10 @@
 // P3-F wave S (F16, obs 7a): an artifact main tab's context menu moves the artifact into the panel ("Show in panel"),
-// the mirror of the panel record's "Open in tab": the tab closes through its close guard, then the Artifacts tool shows
-// the artifact in the panel the person sees once the tab is gone (the session the focused pane then shows, else the
-// pinned Artifacts tab every panel lists). With neither, the item is disabled and says why.
+// the mirror of the panel record's "Move to tab": the tab closes, then the Artifacts tool shows the artifact in the panel
+// the person sees once the tab is gone (the session the focused pane then shows, else the pinned Artifacts tab every
+// panel lists). With neither, the item is disabled and says why. P4-B3: through the transfer's move (shell/transfer.ts),
+// which carries the editor's state, so the tab's own guard is not asked.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import { resetSlots } from '../app/slots';
 import { registerEditorHost } from '../panel/editor-host';
@@ -80,14 +81,17 @@ describe('Show in panel on an artifact tab', () => {
     expect(useLayout.getState().panelBySession.size).toBe(0);
   });
 
-  it('a tab its editor’s closeGuard keeps stays, and nothing opens in the panel', async () => {
+  // P4-B3 (its Decision Log 19): the editor's state goes with the artifact (the transfer's hand-off), so nothing can be
+  // lost and the tab's own guard is not asked.
+  it('moves without asking the tab’s own guard', async () => {
     useLayout.setState({ main: showing(sessionTab(A), ARTIFACT) });
-    act(() => void registerEditorHost({ surface: 'main', tabId: ARTIFACT.id }, { title: 'Deck', closeGuard: async () => false }));
+    const closeGuard = vi.fn(async () => false);
+    act(() => void registerEditorHost({ surface: 'main', tabId: ARTIFACT.id }, { title: 'Deck', closeGuard }));
     render(<MainArea />);
     fireEvent.click(await menuItem());
-    await act(async () => {});
-    expect(artifactTabOpen()).toBe(true);
-    expect(panelOf(A)).toBeUndefined();
+    await waitFor(() => expect(artifactTabOpen()).toBe(false));
+    expect(closeGuard).not.toHaveBeenCalled();
+    expect(viewOf(panelOf(A)?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK });
   });
 
   // P3-F wave S (F16 review): the Artifacts tab the artifact lands in may show another one, whose guard can keep it. That
@@ -125,21 +129,6 @@ describe('Show in panel on an artifact tab', () => {
       expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: DECK });
       expect(asks).toBe(1);
     });
-  });
-
-  it('a panel gone while the tab’s guard answered brings the artifact back in a main tab', async () => {
-    let pinned = '';
-    act(() => void (pinned = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: null, pin: true })));
-    useLayout.setState({ main: showing(ARTIFACT) });
-    let answer!: (allowed: boolean) => void;
-    act(() => void registerEditorHost({ surface: 'main', tabId: ARTIFACT.id }, { title: 'Deck', closeGuard: () => new Promise<boolean>((resolve) => (answer = resolve)) }));
-    render(<MainArea />);
-    fireEvent.click(await menuItem());
-    await waitFor(() => expect(answer).toBeTypeOf('function'));
-    await act(async () => void (await panelHost.closeTab(pinned)));
-    await act(async () => answer(true));
-    await act(async () => {});
-    expect(artifactTabOpen(), 'back in a main tab').toBe(true);
   });
 
   it('is offered on artifact tabs only', async () => {

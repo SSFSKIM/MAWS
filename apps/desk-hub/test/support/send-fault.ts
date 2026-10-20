@@ -2,7 +2,7 @@
 /** Where the suites' `Machine` takes an armed send fault. */
 export const SEND_FAULT_PATH = '/__test/send-fault';
 /** Where the suites' `Machine` takes a shortened heartbeat and lease (`?heartbeatMs=&leaseMs=`, and optionally
- * `&graceMs=&probeMs=`), before its stream opens. */
+ * `&graceMs=&probeMs=&writeTimeoutMs=`), before its stream opens. */
 export const TIMING_PATH = '/__test/timing';
 /** Where the suites' `Machine` is armed to find itself replaced at its next probe, as an instance Cloudflare replaced
  * under its stream would. */
@@ -34,11 +34,16 @@ export const PROJECT_CALLS_PATH = '/__test/calls';
 export const ORG_ROW_PATH = '/__test/org-row';
 /** Where the suites' `Machine` holds its next send of one frame kind (`?kind=`) until it is released. */
 export const SEND_HOLD_PATH = '/__test/send-hold';
+/** Where the suites' `Machine` stalls its next write of one frame kind (`?kind=`): the stream never takes it, as one whose
+ * client stopped reading would not, so the write bound ends the stream. */
+export const WRITE_STALL_PATH = '/__test/write-stall';
+/** Where the suites' `Project` lists its `machines` rows (`[{name, generation}]`): the streams it fans out to. */
+export const PROJECT_MACHINES_PATH = '/__test/machines';
 /** Where the suites' `Machine` releases a held send: answers `released`, or `none` while no send is held. */
 export const SEND_RELEASE_PATH = '/__test/send-release';
 /** Where the suites' `Project` holds, or releases, its lookups of the archive machine (`{hold: boolean}`). */
 export const PROJECT_ARCHIVE_HOLD_PATH = '/__test/archive-hold';
-/** Where the suites' `Project` lists its send queues (`<machine>#<generation>`). */
+/** Where the suites' `Project` lists its send queues (`<machine>#<generation>#<lane>`). */
 export const PROJECT_QUEUES_PATH = '/__test/queues';
 /** Where the suites' `Project` queues a frame for a machine's stream of any generation (`{machine, generation, frame}`),
  * as a reply on a retired stream would be queued. */

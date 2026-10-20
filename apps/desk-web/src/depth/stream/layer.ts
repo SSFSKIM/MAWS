@@ -8,7 +8,10 @@
 // A request is `(turnId, agentId, step)`; a block is its content block `index`. A chunk at or below the request's
 // watermark (the last chunk its text includes: the snapshot's `upTo`, then each chunk applied) is already in the text;
 // a chunk for a block whose `block-row` has arrived is ignored, since its row holds the block whole. A request's
-// `step-end` drops its blocks no `block-row` named, so no partial text outlives its request.
+// `step-end` drops its blocks no `block-row` named, so no partial text outlives its request. A snapshot carries a block
+// named before it with that row's `uuid` (the desk open-fast spec, section 9: the producer keeps a named block's text
+// until its step ends, since its row reaches the transcript only then): the layer draws it named, as if its `block-row`
+// had come, and draws it on through a reconnect whose fresh snapshot carries it.
 import type { BlockRow, JsonObject, SessionBodies, Streaming } from 'desk-hub/protocol';
 import type { StepEnd } from 'desk-hub/protocol';
 
@@ -52,44 +55,66 @@ function kindOf(name: unknown): BlockKind {
 
 /**
  * One snapshot `streaming` entry read, in the one place its shape is read (DX4 as aligned at composite 8f7e09d3:
- * `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text, upTo, id?, name?}]}`). `chunkIndex` counts across
- * the whole request, so the entry's `upTo` is the watermark; a block's own `upTo` is informational. A tool call's block
- * carries `id` and `name`, its `text` the arguments' JSON as far as it has streamed, never parsed here. An entry with no
- * blocks gives nothing to draw.
+ * `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text, upTo, id?, name?, uuid?, namedAt?, truncated?}]}`).
+ * `chunkIndex` counts across the whole request, so the entry's `upTo` is the watermark; a block's own `upTo` is
+ * informational. A tool call's block carries `id` and `name`, its `text` the arguments' JSON as far as it has streamed,
+ * never parsed here. A block named before the snapshot carries its row's `uuid` (`settledBy` here; a uuid that is not a
+ * string is none); `namedAt` and `truncated` (the text cut to its tail) are passed over. An entry with no blocks gives
+ * nothing to draw.
  */
-function snapshotEntry(entry: Streaming): { upTo: number; blocks: Array<Pick<StreamBlock, 'index' | 'kind' | 'text' | 'toolName'>> } {
+function snapshotEntry(entry: Streaming): { upTo: number; blocks: Array<Pick<StreamBlock, 'index' | 'kind' | 'text' | 'toolName' | 'settledBy'>> } {
   const raw: JsonObject[] = Array.isArray(entry.blocks) ? (entry.blocks as JsonObject[]) : [];
   const blocks = raw
     .filter((block) => typeof block.index === 'number')
-    .map((block) => ({ index: block.index as number, kind: kindOf(block.kind), text: typeof block.text === 'string' ? block.text : '', toolName: typeof block.name === 'string' ? block.name : null }));
+    .map((block) => ({
+      index: block.index as number,
+      kind: kindOf(block.kind),
+      text: typeof block.text === 'string' ? block.text : '',
+      toolName: typeof block.name === 'string' ? block.name : null,
+      settledBy: typeof block.uuid === 'string' ? block.uuid : null,
+    }));
   return { upTo: typeof entry.upTo === 'number' ? entry.upTo : -1, blocks };
 }
 
 export class StreamingLayer {
   private requests = new Map<string, Request>();
 
-  /** Replaces everything with a snapshot's `streaming`: the blocks still without a `block-row`, each with its `upTo`. */
+  /**
+   * Replaces everything with a snapshot's `streaming`: each request's blocks with its `upTo`. A block the snapshot carries
+   * named (its `uuid`) is drawn as one whose `block-row` came: it takes no later chunk and settles when that row lands,
+   * whether or not a `block-row` follows (the plane sends one; it changes nothing).
+   */
   load(streaming: readonly Streaming[]): void {
     this.requests = new Map();
     for (const entry of streaming) {
       const request = this.request(entry.turnId, entry.agentId, entry.step);
       const { upTo, blocks } = snapshotEntry(entry);
       request.upTo = upTo;
-      for (const block of blocks) request.blocks.set(block.index, { turnId: entry.turnId, agentId: entry.agentId, step: entry.step, settledBy: null, ...block });
+      for (const block of blocks) {
+        request.blocks.set(block.index, { turnId: entry.turnId, agentId: entry.agentId, step: entry.step, ...block });
+        if (block.settledBy !== null) request.named.add(block.index);
+      }
     }
   }
 
   /**
-   * A fresh snapshot's `streaming` after a disruption, over what was drawn before it. What the snapshot streams replaces
-   * what was drawn, as `load` does, a block drawn before keeping its identity (its live label's clock goes on). A block
-   * drawn before that the snapshot no longer streams had its row written, or its step ended, while the subscription was
-   * down: it stays drawn, taking no more chunks, until the row its `block-row` named lands, or, when none was named in
-   * time, until `landing` does (the newest row the snapshot brought, in the store once the transcript rebuilt from the
-   * snapshot is installed), so a block never leaves before its row is drawn. With neither, its step ended, and it goes.
-   * A snapshot cut before a `block-row` the old subscription delivered still streams the block that row named: its copy
-   * is dropped, and the block takes no more chunks, whether it was settled already or is still drawn awaiting its row.
-   * `lands` says whether a named row will land without a page (one held now, or one still to come live); a block whose
-   * named row will not waits for `landing` instead, so it is never left drawn for a row that may never come.
+   * A fresh snapshot's `streaming` after a disruption, over what was drawn before it. A block the snapshot carries is
+   * drawn from it, named or not, as `load` draws it, a block drawn before keeping its identity (its live label's clock
+   * goes on): its text the snapshot's, or, for a block the old subscription had named, the text drawn (its `block-row`
+   * came once the block was whole, so no copy holds more of it, and a copy cut before that holds less); named by the
+   * snapshot's `uuid` when it carries one, else by what named it before (a snapshot cut before a `block-row` the old
+   * subscription delivered carries the block unnamed, and that `block-row` follows it). So a block named and carried
+   * across an empty-history reconnect — its row not yet on disk, none landing — stays drawn until its row lands.
+   *
+   * A block drawn before that the snapshot no longer streams had its row written, or its step ended, while the
+   * subscription was down: it stays drawn, taking no more chunks, until the row its `block-row` named lands, or, when
+   * none was named in time, until `landing` does (the newest row the snapshot brought, in the store once the transcript
+   * rebuilt from the snapshot is installed), so a block never leaves before its row is drawn. With neither, its step
+   * ended, and it goes. `lands` says whether a named row will land without a page (one held now, or one still to come
+   * live); a block whose named row will not waits for `landing` instead, so it is never left drawn for a row that may
+   * never come. A block the old subscription named and already settled (its row landed) is not drawn again from a copy
+   * the snapshot carries unnamed: that copy was cut before the `block-row`, beside a row already drawn. Every block the
+   * old subscription named takes no more chunks.
    *
    * A snapshot whose watermark for a request is below the drawn one (a producer that went back) is older than what was
    * drawn of it, and changes nothing of that request, which keeps its blocks, the blocks named, its end and its watermark
@@ -114,7 +139,7 @@ export class StreamingLayer {
       const request = snapshot ?? (old.ended ? this.request(old.turnId, old.agentId, old.step) : undefined);
       if (request) {
         for (const index of old.named) {
-          request.blocks.delete(index);
+          if (!old.blocks.has(index) && request.blocks.get(index)?.settledBy === null) request.blocks.delete(index);
           request.named.add(index);
         }
         if (old.ended) {
@@ -125,7 +150,8 @@ export class StreamingLayer {
       for (const [index, block] of old.blocks) {
         const fresh = request?.blocks.get(index);
         if (fresh) {
-          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text: fresh.text, toolName: fresh.toolName, settledBy: null }));
+          const text = old.named.has(index) ? block.text : fresh.text;
+          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text, toolName: fresh.toolName, settledBy: fresh.settledBy ?? block.settledBy }));
           continue;
         }
         const settledBy = block.settledBy !== null && lands(block.settledBy) ? block.settledBy : landing;

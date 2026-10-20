@@ -36,5 +36,6 @@ export function registerPresentationEditor(deps: () => DeckTabDeps = windowDeps)
     Main: DeckMain,
     createState: (target) => new DeckTabState(target, deps()),
     dispose: (state) => state.dispose(),
+    moved: (state, target) => state.moveTo(target.surface), // P4-B3: the e2e seam reports the surface it is on
   });
 }

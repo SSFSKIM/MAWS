@@ -1,9 +1,11 @@
 // P3-G (§D1.3): a floating panel stands in the main column as a maximized one does: the grid gives it the main column's
 // place, and the sidebar is sized against the window less main's floor alone.
 import { describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { resetShellStores } from '../test-support/shell-stores';
 import '../shell/floating'; // P3-F wave S (F6): the float's rule, as the shell imports it
 import { gridColumns, panelInMain, regionWidths } from './regions';
@@ -44,6 +46,25 @@ describe('a float with no card session', () => {
     useLayout.setState({ hydrated: false });
     await useLayout.getState().hydrate(client, () => true);
     await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(panelInMain(useLayout.getState().regions)).toBe(false);
+    expect(gridColumns(useLayout.getState().regions, 1440)).toBe('300px minmax(0, 1fr) 380px');
+  });
+});
+
+// P4-B3 (its Decision Log 11): the split's float changes nothing about the regions; the panel stands in main only for
+// its own maximize or float.
+describe('a split float', () => {
+  it('is never the panel in main: the grid and the sidebar’s room are as docked', () => {
+    resetShellStores();
+    const SESSION: TabRef = { id: 'session:app-s', kind: 'session', appSessionId: 'app-s' as AppSessionId, pinned: false };
+    const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
+    useLayout.setState({
+      main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [SESSION], activeTabId: SESSION.id }, { tabs: [DIAGNOSTICS], activeTabId: DIAGNOSTICS.id }] } } },
+    });
+    const before = useLayout.getState().regions;
+    useLayout.getState().floatSplit(SESSION.id);
+    expect(currentSet(useLayout.getState().main).floating).toEqual({ sessionTabId: SESSION.id });
+    expect(useLayout.getState().regions).toBe(before);
     expect(panelInMain(useLayout.getState().regions)).toBe(false);
     expect(gridColumns(useLayout.getState().regions, 1440)).toBe('300px minmax(0, 1fr) 380px');
   });

@@ -1,0 +1,1436 @@
+{
+  "main": {
+    "versions": {
+      "node": "24.21.0",
+      "acorn": "8.18.0",
+      "ada": "4.0.0",
+      "amaro": "1.1.11",
+      "ares": "1.34.8",
+      "brotli": "1.2.0",
+      "cldr": "48.0",
+      "icu": "78.2",
+      "llhttp": "9.4.3",
+      "merve": "1.2.2",
+      "modules": "149",
+      "napi": "10",
+      "nbytes": "0.1.4",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.70.0",
+      "nghttp3": "",
+      "ngtcp2": "",
+      "openssl": "0.0.0",
+      "simdjson": "4.6.7",
+      "simdutf": "7.7.0",
+      "sqlite": "3.53.4",
+      "tz": "2025c",
+      "undici": "7.29.1",
+      "unicode": "17.0",
+      "uv": "1.52.1",
+      "uvwasi": "0.0.23",
+      "v8": "15.2.124.28-electron.0",
+      "zlib": "1.3.2.1-motley",
+      "zstd": "1.6.0",
+      "electron": "44.4.5",
+      "chrome": "152.0.7977.130"
+    },
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "renderer": {
+    "versions": {
+      "acorn": "8.18.0",
+      "ada": "4.0.0",
+      "amaro": "1.1.11",
+      "ares": "1.34.8",
+      "brotli": "1.2.0",
+      "cldr": "48.0",
+      "icu": "78.2",
+      "llhttp": "9.4.3",
+      "merve": "1.2.2",
+      "modules": "149",
+      "napi": "10",
+      "nbytes": "0.1.4",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.70.0",
+      "nghttp3": "",
+      "ngtcp2": "",
+      "node": "24.21.0",
+      "openssl": "0.0.0",
+      "simdjson": "4.6.7",
+      "simdutf": "7.7.0",
+      "sqlite": "3.53.4",
+      "tz": "2025c",
+      "undici": "7.29.1",
+      "unicode": "17.0",
+      "uv": "1.52.1",
+      "uvwasi": "0.0.23",
+      "v8": "15.2.124.28-electron.0",
+      "zlib": "1.3.2.1-motley",
+      "zstd": "1.6.0",
+      "electron": "44.4.5",
+      "chrome": "152.0.7977.130"
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.130 Electron/44.4.5 Safari/537.36",
+    "react": "19.3.0",
+    "documentHasFocus": true,
+    "visibilityState": "visible"
+  },
+  "dom": {
+    "moveBeforeAvailable": true,
+    "documentHasFocus": true,
+    "moveBefore": {
+      "error": null,
+      "before": {
+        "parent": "A-moveBefore",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-moveBefore",
+        "selection": {
+          "rangeCount": 1,
+          "text": "quick brown",
+          "collapsed": false,
+          "inCe": true,
+          "start": 4,
+          "end": 15
+        },
+        "liveRange": {
+          "text": "quick brown",
+          "collapsed": false,
+          "startContainer": "#text",
+          "startOffset": 4
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 324.8849999669938,
+          "transform": "matrix(1, 0, 0, 1, 64.977, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1
+        }
+      },
+      "syncAfter": {
+        "parent": "B-moveBefore",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-moveBefore",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": false,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 324.8849999669938,
+          "transform": "matrix(1, 0, 0, 1, 64.977, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1
+        }
+      },
+      "mutationRecordsSync": [
+        "childList target=A-moveBefore +0 -1",
+        "childList target=B-moveBefore +1 -0"
+      ],
+      "after": {
+        "parent": "B-moveBefore",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-moveBefore",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": true,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 767.284999966994,
+          "transform": "matrix(1, 0, 0, 1, 153.457, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1,
+          "selectionchange": 1
+        }
+      },
+      "resizeEntries": []
+    },
+    "insertBefore": {
+      "error": null,
+      "before": {
+        "parent": "A-insertBefore",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-insertBefore",
+        "selection": {
+          "rangeCount": 1,
+          "text": "quick brown",
+          "collapsed": false,
+          "inCe": true,
+          "start": 4,
+          "end": 15
+        },
+        "liveRange": {
+          "text": "quick brown",
+          "collapsed": false,
+          "startContainer": "#text",
+          "startOffset": 4
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 325.90199984982604,
+          "transform": "matrix(1, 0, 0, 1, 65.1804, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1
+        }
+      },
+      "syncAfter": {
+        "parent": "B-insertBefore",
+        "activeElementIsCe": false,
+        "activeElement": "body",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": false,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 0,
+        "iframe": {
+          "sameWindow": false,
+          "counter": null,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 0,
+          "currentTime": null,
+          "transform": "matrix(1, 0, 0, 1, 400, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1,
+          "ce.blur": 1,
+          "ce.focusout": 1,
+          "document.focusout": 1
+        }
+      },
+      "mutationRecordsSync": [
+        "childList target=A-insertBefore +0 -1",
+        "childList target=B-insertBefore +1 -0"
+      ],
+      "after": {
+        "parent": "B-insertBefore",
+        "activeElementIsCe": false,
+        "activeElement": "body",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": false,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 0,
+        "iframe": {
+          "sameWindow": false,
+          "counter": 0,
+          "loads": 2
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 0,
+          "currentTime": null,
+          "transform": "matrix(1, 0, 0, 1, 400, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1,
+          "ce.blur": 1,
+          "ce.focusout": 1,
+          "document.focusout": 1,
+          "transitioncancel": 1
+        }
+      },
+      "resizeEntries": []
+    },
+    "parkDisplayNone": {
+      "before": {
+        "parent": "A-parking-none",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-parking-none",
+        "selection": {
+          "rangeCount": 1,
+          "text": "quick brown",
+          "collapsed": false,
+          "inCe": true,
+          "start": 4,
+          "end": 15
+        },
+        "liveRange": {
+          "text": "quick brown",
+          "collapsed": false,
+          "startContainer": "#text",
+          "startOffset": 4
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 325.7319998756052,
+          "transform": "matrix(1, 0, 0, 1, 65.1464, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1
+        }
+      },
+      "parked": {
+        "parent": "P-parking-none",
+        "activeElementIsCe": false,
+        "activeElement": "body",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": false,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 0,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 0,
+          "currentTime": null,
+          "transform": "none"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1,
+          "ce.blur": 1,
+          "ce.focusout": 1,
+          "document.focusout": 1,
+          "transitioncancel": 1
+        }
+      },
+      "back": {
+        "parent": "B-parking-none",
+        "activeElementIsCe": false,
+        "activeElement": "body",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": false,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 0,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 0,
+          "currentTime": null,
+          "transform": "matrix(1, 0, 0, 1, 400, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1,
+          "ce.blur": 1,
+          "ce.focusout": 1,
+          "document.focusout": 1,
+          "transitioncancel": 1
+        }
+      },
+      "resizeEntries": [
+        "div:0x0",
+        "div.scroller:0x0",
+        "iframe:0x0",
+        "canvas:0x0",
+        "div:600x229",
+        "div.scroller:600x120",
+        "iframe:200x60",
+        "canvas:100x50"
+      ]
+    },
+    "parkOffscreen": {
+      "before": {
+        "parent": "A-parking-off",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-parking-off",
+        "selection": {
+          "rangeCount": 1,
+          "text": "quick brown",
+          "collapsed": false,
+          "inCe": true,
+          "start": 4,
+          "end": 15
+        },
+        "liveRange": {
+          "text": "quick brown",
+          "collapsed": false,
+          "startContainer": "#text",
+          "startOffset": 4
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 274.8810000244526,
+          "transform": "matrix(1, 0, 0, 1, 54.9762, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1
+        }
+      },
+      "parked": {
+        "parent": "P-parking-off",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-parking-off",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": true,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 499.7730000244527,
+          "transform": "matrix(1, 0, 0, 1, 99.9546, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1,
+          "selectionchange": 1
+        }
+      },
+      "back": {
+        "parent": "B-parking-off",
+        "activeElementIsCe": true,
+        "activeElement": "div#ce-parking-off",
+        "selection": {
+          "rangeCount": 1,
+          "text": "",
+          "collapsed": true,
+          "inCe": true,
+          "start": 0,
+          "end": 0
+        },
+        "liveRange": {
+          "text": "",
+          "collapsed": true,
+          "startContainer": "DIV",
+          "startOffset": 0
+        },
+        "scrollTop": 300,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 42,
+          "loads": 1
+        },
+        "canvas2dPixel": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "webglPixel": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "webglContextLost": false,
+        "transition": {
+          "running": 1,
+          "currentTime": 725.073000024453,
+          "transform": "matrix(1, 0, 0, 1, 145.015, 0)"
+        },
+        "events": {
+          "transitionrun": 1,
+          "transitionstart": 1,
+          "selectionchange": 2
+        }
+      },
+      "resizeEntries": []
+    },
+    "preconditions": {
+      "detachedIntoConnected": "HierarchyRequestError: Failed to execute 'moveBefore' on 'Element': State-preserving atomic move cannot be performed on nodes participating in an invalid hierarchy.",
+      "connectedIntoDetached": "HierarchyRequestError: Failed to execute 'moveBefore' on 'Element': State-preserving atomic move cannot be performed on nodes participating in an invalid hierarchy."
+    },
+    "scrollContainerAsMovedRoot": {
+      "scrollerItself": {
+        "before": 300,
+        "sync": 300,
+        "afterFrames": 300
+      },
+      "wrapped": {
+        "before": 300,
+        "sync": 300,
+        "afterFrames": 300
+      }
+    },
+    "scrollWithSelectionInside": {
+      "editableNoFocusNoSelection": {
+        "before": {
+          "scrollTop": 300,
+          "selection": "",
+          "active": "BODY"
+        },
+        "syncScrollTop": 300,
+        "syncSelection": {
+          "rangeCount": 0,
+          "collapsed": true,
+          "inside": false
+        },
+        "afterFramesScrollTop": 300,
+        "activeAfter": "BODY"
+      },
+      "editableFocusedCaretInside": {
+        "before": {
+          "scrollTop": 300,
+          "selection": "",
+          "active": "DIV"
+        },
+        "syncScrollTop": 0,
+        "syncSelection": {
+          "rangeCount": 1,
+          "collapsed": true,
+          "inside": true
+        },
+        "afterFramesScrollTop": 0,
+        "activeAfter": "DIV"
+      },
+      "editableFocusedRangeInside": {
+        "before": {
+          "scrollTop": 300,
+          "selection": "line 4",
+          "active": "DIV"
+        },
+        "syncScrollTop": 0,
+        "syncSelection": {
+          "rangeCount": 1,
+          "collapsed": true,
+          "inside": true
+        },
+        "afterFramesScrollTop": 0,
+        "activeAfter": "DIV"
+      },
+      "plainRangeInsideNoFocus": {
+        "before": {
+          "scrollTop": 300,
+          "selection": "line 4",
+          "active": "BODY"
+        },
+        "syncScrollTop": 300,
+        "syncSelection": {
+          "rangeCount": 1,
+          "collapsed": true,
+          "inside": false
+        },
+        "afterFramesScrollTop": 300,
+        "activeAfter": "BODY"
+      },
+      "plainFocusedInputInsideNoSelection": {
+        "before": {
+          "scrollTop": 300,
+          "selection": "",
+          "active": "INPUT"
+        },
+        "syncScrollTop": 0,
+        "syncSelection": {
+          "rangeCount": 1,
+          "collapsed": true,
+          "inside": true
+        },
+        "afterFramesScrollTop": 0,
+        "activeAfter": "INPUT"
+      },
+      "focusedInputBelowTheFold": {
+        "before": 300,
+        "syncScrollTop": 2603,
+        "afterFramesScrollTop": 2603,
+        "inputOffsetTop": 2702,
+        "scrollHeight": 2723,
+        "activeIsInput": true
+      },
+      "focusedInputInView": {
+        "before": 310,
+        "syncScrollTop": 310,
+        "afterFramesScrollTop": 310,
+        "inputOffsetTop": 350,
+        "scrollHeight": 2737,
+        "activeIsInput": true
+      }
+    }
+  },
+  "react": {
+    "withParking": {
+      "clickAtA": [
+        "pane-A native capture",
+        "keeper-zone react capture",
+        "child react capture",
+        "child react bubble",
+        "keeper-zone react bubble",
+        "pane-A native bubble"
+      ],
+      "atA": {
+        "label": "at A",
+        "hostParent": "ph-A-true",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 1,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 0",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": true,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 7
+        },
+        "ctxSeenLast": "panel:keeper"
+      },
+      "atB": {
+        "label": "moved A to B",
+        "hostParent": "ph-B-true",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 1,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 1",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": true,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 7
+        },
+        "ctxSeenLast": "main:keeper"
+      },
+      "clickAtB": [
+        "pane-B native capture",
+        "keeper-zone react capture",
+        "child react capture",
+        "child react bubble",
+        "keeper-zone react bubble",
+        "pane-B native bubble"
+      ],
+      "afterClickAtB": {
+        "label": "after click at B (state update renders in the moved DOM)",
+        "hostParent": "ph-B-true",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 1,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 2",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": true,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 7
+        },
+        "ctxSeenLast": "main:keeper"
+      },
+      "atNone": {
+        "label": "no pane shows it",
+        "hostParent": "parking-true",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 1,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 2",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": true,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 7
+        },
+        "ctxSeenLast": "main:keeper"
+      },
+      "backAtA": {
+        "label": "back at A",
+        "hostParent": "ph-A-true",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 1,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 2",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": true,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 7
+        },
+        "ctxSeenLast": "panel:keeper"
+      },
+      "moves": [
+        "into A:append",
+        "park from A:moveBefore",
+        "into B:moveBefore",
+        "park from B:moveBefore",
+        "into A:moveBefore",
+        "park from A:moveBefore"
+      ],
+      "moveErrors": [],
+      "registered": [
+        "register panel",
+        "unregister panel",
+        "register main",
+        "unregister main",
+        "register panel",
+        "unregister panel"
+      ],
+      "ctxSeen": [
+        "panel:keeper",
+        "main:keeper"
+      ],
+      "afterUnmount": {
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 1,
+          "input.onFocus": 1,
+          "child.layout.cleanup": 1,
+          "child.effect.cleanup": 1
+        }
+      }
+    },
+    "withoutParking": {
+      "clickAtA": [
+        "pane-A native capture",
+        "keeper-zone react capture",
+        "child react capture",
+        "child react bubble",
+        "keeper-zone react bubble",
+        "pane-A native bubble"
+      ],
+      "atA": {
+        "label": "at A",
+        "hostParent": "ph-A-false",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 1,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 0",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": true,
+        "iframe": {
+          "sameWindow": true,
+          "counter": 7
+        },
+        "ctxSeenLast": "panel:keeper"
+      },
+      "atB": {
+        "label": "moved A to B",
+        "hostParent": "ph-B-false",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 2,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 1",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": false,
+        "iframe": {
+          "sameWindow": false,
+          "counter": 0
+        },
+        "ctxSeenLast": "main:keeper"
+      },
+      "clickAtB": [
+        "pane-B native capture",
+        "keeper-zone react capture",
+        "child react capture",
+        "child react bubble",
+        "keeper-zone react bubble",
+        "pane-B native bubble"
+      ],
+      "afterClickAtB": {
+        "label": "after click at B (state update renders in the moved DOM)",
+        "hostParent": "ph-B-false",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 2,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 2",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": false,
+        "iframe": {
+          "sameWindow": false,
+          "counter": 0
+        },
+        "ctxSeenLast": "main:keeper"
+      },
+      "atNone": {
+        "label": "no pane shows it",
+        "hostParent": "ph-B-false",
+        "hostConnected": false,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 2,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 2",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": false,
+        "iframe": {
+          "sameWindow": false,
+          "counter": null
+        },
+        "ctxSeenLast": "main:keeper"
+      },
+      "backAtA": {
+        "label": "back at A",
+        "hostParent": "ph-A-false",
+        "hostConnected": true,
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 3,
+          "input.onFocus": 1
+        },
+        "buttonText": "clicks 2",
+        "sameButton": true,
+        "inputValue": "typed",
+        "activeElementIsInput": false,
+        "iframe": {
+          "sameWindow": false,
+          "counter": 0
+        },
+        "ctxSeenLast": "panel:keeper"
+      },
+      "moves": [
+        "into A:append",
+        "into B:append",
+        "into A:append"
+      ],
+      "moveErrors": [],
+      "registered": [
+        "register panel",
+        "unregister panel",
+        "register main",
+        "unregister main",
+        "register panel",
+        "unregister panel"
+      ],
+      "ctxSeen": [
+        "panel:keeper",
+        "main:keeper"
+      ],
+      "afterUnmount": {
+        "counts": {
+          "child.layout.mount": 1,
+          "child.effect.mount": 1,
+          "iframe.onLoad": 3,
+          "input.onFocus": 1,
+          "child.layout.cleanup": 1,
+          "child.effect.cleanup": 1
+        }
+      }
+    }
+  },
+  "editor": {
+    "reparent": {
+      "typedAlpha": true,
+      "typedBeta": true,
+      "before": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 152,
+          "to": 161,
+          "empty": false
+        },
+        "domSelection": "Paragraph",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 400,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "syncAfterMoveBefore": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 152,
+          "to": 161,
+          "empty": false
+        },
+        "domSelection": "",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 0,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "afterMoveBefore": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 1,
+          "to": 1,
+          "empty": true
+        },
+        "domSelection": "",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 0,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "beforeMoveBeforeResync": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 152,
+          "to": 161,
+          "empty": false
+        },
+        "domSelection": "Paragraph",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 400,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "syncAfterMoveBeforeResync": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 152,
+          "to": 161,
+          "empty": false
+        },
+        "domSelection": "Paragraph",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 0,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "afterMoveBeforeResync": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 152,
+          "to": 161,
+          "empty": false
+        },
+        "domSelection": "Paragraph",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 400,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "typedAfterMove": true,
+      "blocksAfterTyping": [
+        "Paragraph 1 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 2 lorem ipsum dolor sit amet, consectetur adipiscing elit. alpha beta",
+        "!! 3 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 4 lorem ipsum dolor sit amet, consectetur adipiscing elit."
+      ],
+      "afterTyping": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 154,
+          "to": 154,
+          "empty": true
+        },
+        "domSelection": "",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 82.5,
+        "undoDepth": 3,
+        "redoDepth": 0
+      },
+      "cmdZ1": "trusted",
+      "blocksAfterCmdZ1": [
+        "Paragraph 1 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 2 lorem ipsum dolor sit amet, consectetur adipiscing elit. alpha beta",
+        "Paragraph 3 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 4 lorem ipsum dolor sit amet, consectetur adipiscing elit."
+      ],
+      "cmdZ2": "trusted",
+      "blocksAfterCmdZ2": [
+        "Paragraph 1 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 2 lorem ipsum dolor sit amet, consectetur adipiscing elit. alpha",
+        "Paragraph 3 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 4 lorem ipsum dolor sit amet, consectetur adipiscing elit."
+      ],
+      "afterUndos": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 145,
+          "to": 145,
+          "empty": true
+        },
+        "domSelection": "",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 82.5,
+        "undoDepth": 1,
+        "redoDepth": 2
+      },
+      "beforeInsertBefore": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 217,
+          "to": 226,
+          "empty": false
+        },
+        "domSelection": "Paragraph",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 400,
+        "undoDepth": 1,
+        "redoDepth": 2
+      },
+      "syncAfterInsertBefore": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 217,
+          "to": 226,
+          "empty": false
+        },
+        "domSelection": "",
+        "viewHasFocus": false,
+        "pmFocusedFlag": false,
+        "activeElementIsView": false,
+        "scrollTop": 0,
+        "undoDepth": 1,
+        "redoDepth": 2
+      },
+      "afterInsertBefore": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 217,
+          "to": 226,
+          "empty": false
+        },
+        "domSelection": "",
+        "viewHasFocus": false,
+        "pmFocusedFlag": false,
+        "activeElementIsView": false,
+        "scrollTop": 0,
+        "undoDepth": 1,
+        "redoDepth": 2
+      },
+      "typedAfterInsertBeforeNoRefocus": false,
+      "blocksAfterInsertBeforeTyping": [
+        "Paragraph 1 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 2 lorem ipsum dolor sit amet, consectetur adipiscing elit. alpha",
+        "Paragraph 3 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+        "Paragraph 4 lorem ipsum dolor sit amet, consectetur adipiscing elit."
+      ]
+    },
+    "remountControl": {
+      "typedOne": true,
+      "typedTwo": true,
+      "textBefore": "Paragraph 6 lorem ipsum dolor sit amet, consectetur adipiscing elit. one two",
+      "before": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 437,
+          "to": 447,
+          "empty": false
+        },
+        "domSelection": "ragraph 7 ",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 500,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "afterDestroy": {
+        "managerUndoDepth": 2,
+        "managerStillListening": false,
+        "managerTrackedOrigins": 0,
+        "bindingOwnManagerStillListening": false
+      },
+      "afterRemount": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 437,
+          "to": 447,
+          "empty": false
+        },
+        "domSelection": "ragraph 7 ",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 500,
+        "undoDepth": 0,
+        "redoDepth": 0,
+        "restoredSelection": {
+          "from": 437,
+          "to": 447
+        }
+      },
+      "cmdZ1": "none",
+      "textAfterCmdZ1": "Paragraph 6 lorem ipsum dolor sit amet, consectetur adipiscing elit. one two",
+      "selectionAfterCmdZ1": {
+        "from": 437,
+        "to": 447,
+        "endOfBlock": 433
+      },
+      "cmdZ2": "none",
+      "textAfterCmdZ2": "Paragraph 6 lorem ipsum dolor sit amet, consectetur adipiscing elit. one two",
+      "undoDepthEnd": 0
+    },
+    "remountExternalManager": {
+      "swappedIn": true,
+      "syncPluginTracked": true,
+      "typedOne": true,
+      "typedTwo": true,
+      "textBefore": "Paragraph 5 lorem ipsum dolor sit amet, consectetur adipiscing elit. one two",
+      "before": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 445,
+          "to": 455,
+          "empty": false
+        },
+        "domSelection": "ragraph 7 ",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 500,
+        "undoDepth": 2,
+        "redoDepth": 0
+      },
+      "afterDestroy": {
+        "managerUndoDepth": 2,
+        "managerStillListening": true,
+        "managerTrackedOrigins": 1,
+        "bindingOwnManagerStillListening": false
+      },
+      "swappedInAgain": true,
+      "pluginHasUndoOps": true,
+      "afterRemount": {
+        "sameEditorView": true,
+        "viewDestroyed": false,
+        "pmSelection": {
+          "from": 445,
+          "to": 455,
+          "empty": false
+        },
+        "domSelection": "ragraph 7 ",
+        "viewHasFocus": true,
+        "pmFocusedFlag": true,
+        "activeElementIsView": true,
+        "scrollTop": 500,
+        "undoDepth": 2,
+        "redoDepth": 0,
+        "restoredSelection": {
+          "from": 445,
+          "to": 455
+        }
+      },
+      "cmdZ1": "trusted",
+      "textAfterCmdZ1": "Paragraph 5 lorem ipsum dolor sit amet, consectetur adipiscing elit. one",
+      "selectionAfterCmdZ1": {
+        "from": 359,
+        "to": 359,
+        "endOfBlock": 359
+      },
+      "cmdZ2": "trusted",
+      "textAfterCmdZ2": "Paragraph 5 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+      "typedThree": true,
+      "cmdZ3": "trusted",
+      "textAfterCmdZ3": "Paragraph 5 lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+      "undoDepthEnd": 0
+    }
+  },
+  "frames": {
+    "rafRan": 138,
+    "rafMissed": 0
+  }
+}

@@ -70,11 +70,11 @@ export const RestoreIcon = () => (
     <path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14" />
   </Icon>
 );
-// P3-G: the floating session card, a card at the frame's bottom left.
+// P3-G: the floating session card, a card at the frame's bottom right (P4-B3: both cards sit there).
 export const FloatIcon = () => (
   <Icon>
     <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
-    <rect x="4" y="8" width="5" height="3.5" rx="0.75" />
+    <rect x="7" y="8" width="5" height="3.5" rx="0.75" />
   </Icon>
 );
 // P3-G: Mark-up's pen (the header's Mark up and the overlay's Pen tool).

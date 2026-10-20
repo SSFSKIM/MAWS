@@ -37,6 +37,14 @@ export function cancelOpenRequest(serial: number): void {
   if (store.getState().request?.serial === serial) store.setState({ request: null });
 }
 
+// P4-B3: an open that carries its viewer's state (a move between surfaces) asks for no version, and an ask still left for
+// that artifact on that surface goes, so the moved viewer keeps the version it shows. P4-B4 (at the B3 merge): the open
+// request carries a link's place too, which goes with it: a moved viewer keeps its place as well.
+export function withdrawVersionRequest(artifactId: string, surface: EditorHostScope['surface']): void {
+  const request = store.getState().request;
+  if (request?.artifactId === artifactId && request.surface === surface) store.setState({ request: null });
+}
+
 // The request an editor of `artifactId` on `surface` should take, or null.
 export function useOpenRequest(artifactId: string, surface: EditorHostScope['surface']): OpenRequest | null {
   return useStore(store, (s) => (s.request?.artifactId === artifactId && s.request.surface === surface ? s.request : null));
