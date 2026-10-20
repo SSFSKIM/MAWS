@@ -16,7 +16,7 @@ What it is for: the owner says "the roadmap we discussed last week" in a fresh s
 - [x] 2026-10-20 05:35Z M1 — the shared contract (457dd1ee3; reviewer-medium on opus: correct, one P3 finding taken into M4)
 - [ ] M2 — the host mirror and the tool (b183b9e7c; a fix wave for Decision Logs 16 to 18, then review)
 - [ ] M3 — the instruction on the wire and the final fixtures (executed by the controller; in review)
-- [ ] M4 — fragments in the renderer and on `show_pane` (p4-b4-m4 e44dad54c, merged 2b6c7d557; in review)
+- [x] 2026-10-20 08:40Z M4 — fragments in the renderer and on `show_pane` (p4-b4-m4, merged 2b6c7d557 and 3457d1d6f; reviewer-medium on opus: a P1 (the reveal never scrolled an unfocused editor) and a P2 (the comment card dropped a link's place), both fixed in 76eb369ed, re-review correct)
 - [ ] M5 — the live run and R-3
 - [ ] M6 — gates, the whole-branch review, the hand-back
 
