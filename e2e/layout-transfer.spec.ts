@@ -44,12 +44,16 @@ test.afterEach(async () => {
 });
 
 // The product over the scenario on this test's profile, its window wide enough for a session and an editor side by side.
-async function start(requireFirst?: string): Promise<Page> {
+// `size` null: the window as launched (a relaunch restores its placement, which a size wider than the display would make
+// a maximized one).
+async function start(requireFirst?: string, size: [number, number] | null = [1440, 860]): Promise<Page> {
   launch = await launchMaws({ userData: userData!, requireFirst, env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: SESSIONS } });
   const { page, app } = launch;
   await expect.poll(async () => (await ok<{ state: string }>(page, 'engine.hostState')).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())!.setContentSize(1600, 900));
-  await page.waitForFunction(() => window.innerWidth === 1600 && window.innerHeight === 900);
+  if (size === null) return page;
+  const [width, height] = size;
+  await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w, h), [width, height] as const);
+  await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [width, height] as const);
   return page;
 }
 
@@ -159,6 +163,17 @@ async function stillAt(scope: Locator): Promise<void> {
 
 const occurrences = (text: string, of: string) => text.split(of).length - 1;
 
+// An application menu item by id (Playwright's keys never reach the macOS menu's key equivalents).
+async function menu(id: string): Promise<void> {
+  const clicked = await launch!.app.evaluate(({ Menu }, id) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+    if (!item?.enabled) return false;
+    item.click();
+    return true;
+  }, id);
+  expect(clicked, `menu item ${id} exists and is enabled`).toBe(true);
+}
+
 // What the host holds: the document exported as Markdown (main's export service reads the host's current revision).
 async function hostText(page: Page, artifactId: string): Promise<string> {
   const { path } = await ok<{ path: string }>(page, 'artifacts.export', { artifactId, format: 'md' });
@@ -251,13 +266,13 @@ test('the editor header’s Expand floats the session beside it into the main ar
   const page = await start();
   await (await sidebarRow(page, 'Harness A')).click();
   const id = await documentInMain(page, 'B3 expand');
-  await launch!.app.evaluate(({ Menu }) => Menu.getApplicationMenu()!.getMenuItemById('pane.split')!.click());
+  await menu('pane.split'); // the document into a right pane
   const right = page.getByRole('tablist', { name: 'Right pane tabs' });
   await expect(right.locator(`[data-tab-id="artifact:${id}"]`)).toBeVisible();
+  const left = page.getByRole('tablist', { name: 'Left pane tabs' });
+  await left.getByRole('tab', { name: /^Harness A/ }).click(); // the session beside it (the library tab stayed active there)
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const card = mainRegion(page).getByRole('region', { name: 'Session card' });
-  const left = page.getByRole('tablist', { name: 'Left pane tabs' });
-  await expect(left.getByRole('tab', { name: /^Harness A/ })).toBeVisible();
 
   await header.getByRole('button', { name: 'Expand pane' }).click();
   await expect(card).toBeVisible();
@@ -274,6 +289,110 @@ test('the editor header’s Expand floats the session beside it into the main ar
   await expect(mainRegion(page).getByRole('separator', { name: 'Resize panes' })).toBeVisible();
   await expect(header.getByRole('button', { name: 'Expand pane', pressed: false })).toBeVisible();
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// A comment started on paragraph k's "a line" (selected by a DOM range, as B1's e2e does; then the toolbar's Comment)
+// and typed, not sent: the compose card's field.
+async function startComment(page: Page, scope: Locator, k: number, text: string): Promise<void> {
+  await editorIn(scope).evaluate((el, prefix) => {
+    const block = Array.from(el.children).find((child) => child.textContent?.startsWith(prefix))!;
+    const node = document.createTreeWalker(block, NodeFilter.SHOW_TEXT).nextNode()!;
+    const at = node.textContent!.indexOf('a line');
+    const range = document.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + 'a line'.length);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+  }, `Paragraph ${k}:`);
+  await scope.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  const field = scope.locator('[data-comment-card] textarea');
+  await expect(field).toBeFocused();
+  await page.keyboard.insertText(text);
+  await expect(field).toHaveValue(text);
+}
+// Every compose field in the window holding `text`.
+const draftFields = (page: Page, text: string) =>
+  page.evaluate((text) => Array.from(document.querySelectorAll<HTMLTextAreaElement>('[data-comment-card] textarea')).filter((field) => field.value === text).length, text);
+
+test('a comment draft moves with its document, panel → main and back, kept once', async () => {
+  test.setTimeout(120_000);
+  const page = await start();
+  await pinArtifactsTool(page); // Harness A in main: a panel record's comment has a session to go to
+  const id = await documentInMain(page, 'B3 draft');
+  await mainTab(page, id).getByRole('button', { name: /^Close / }).click(); // the record will be the document's one view
+  await expect(mainTab(page, id)).toHaveCount(0);
+  await mainRegion(page).getByRole('tab', { name: /^Harness A/ }).click();
+  await openInPanel(page, id);
+  const panel = panelRegion(page);
+  const DRAFT = 'draft-note kept across the move';
+  await startComment(page, inPanel(page, id), 5, DRAFT);
+
+  // panel → main by the right edge, so the session stays beside it
+  await drag(page, inPanel(page, id).getByTitle('Drag to move to a tab'), mainRegion(page).getByTestId('drop-edge'), mainRegion(page).getByTestId('drop-edge-highlight'));
+  await expect(inMain(page, id)).toBeVisible();
+  await expect(inMain(page, id).locator('[data-comment-card] textarea'), 'the draft in main’s card').toHaveValue(DRAFT);
+  expect(await draftFields(page, DRAFT), 'one draft').toBe(1);
+
+  await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
+  await expect(inPanel(page, id)).toBeVisible();
+  await expect(inPanel(page, id).locator('[data-comment-card] textarea'), 'the draft back in the panel’s card').toHaveValue(DRAFT);
+  expect(await draftFields(page, DRAFT), 'one draft').toBe(1);
+  // the card closed (its draft with it), so the quit has no unsent comment to ask about
+  await inPanel(page, id).locator('[data-comment-card]').getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.locator('[data-comment-card]')).toHaveCount(0);
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// The owner's ask (the controller's, at B1's landing): at 1512 × 900 with the default layout, a session beside a
+// document with an open thread; what the document's margin draws in the split, after the header's Expand, and after
+// Expand with the panel closed. Measured, so the widths go into the report with the tier.
+test('the document margin’s tier at 1512 × 900: in the split, after Expand, and after Expand with the panel closed', async () => {
+  test.setTimeout(120_000);
+  const page = await start(undefined, [1512, 900]);
+  // the thread opened in the panel's record (Harness A in main gives its comment a session), then the record moved
+  // beside the session by the right edge
+  await pinArtifactsTool(page);
+  const id = await documentInMain(page, 'B3 margin');
+  await mainTab(page, id).getByRole('button', { name: /^Close / }).click();
+  await mainRegion(page).getByRole('tab', { name: /^Harness A/ }).click();
+  await openInPanel(page, id);
+  await startComment(page, inPanel(page, id), 5, 'an open thread');
+  await drag(page, inPanel(page, id).getByTitle('Drag to move to a tab'), mainRegion(page).getByTestId('drop-edge'), mainRegion(page).getByTestId('drop-edge-highlight'));
+  await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).locator(`[data-tab-id="artifact:${id}"]`)).toBeVisible();
+  const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
+  const measure = () =>
+    page.evaluate((id) => {
+      const width = (element: Element | null | undefined) => Math.round(element?.getBoundingClientRect().width ?? -1);
+      const tab = document.querySelector(`[data-artifact-tab="${id}"]`)!;
+      const scroll = tab.querySelector<HTMLElement>('.ds-doc')!;
+      return {
+        sidebar: width(document.querySelector('[data-region="sidebar"]')),
+        main: width(document.querySelector('[data-region="main"]')),
+        panel: width(document.querySelector('[data-region="panel"]')),
+        editor: width(tab),
+        scrollBox: scroll.clientWidth,
+        page: width(tab.querySelector('.ds-doc-page')),
+        tier: tab.querySelector('.doc-margin')?.getAttribute('data-margin-tier') ?? null,
+        threads: new Set(Array.from(tab.querySelectorAll<HTMLElement>('[data-thread]')).map((el) => el.dataset.thread)).size,
+        card: tab.querySelector('[data-comment-card]') !== null,
+      };
+    }, id);
+  const split = await measure();
+  await header.getByRole('button', { name: 'Expand pane' }).click();
+  await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toBeVisible();
+  await expect.poll(async () => (await measure()).editor).toBeGreaterThan(split.editor);
+  const expanded = await measure();
+  await menu('panel.toggle');
+  await expect.poll(async () => (await measure()).panel).toBeLessThanOrEqual(0);
+  await expect.poll(async () => (await measure()).editor).toBeGreaterThan(expanded.editor);
+  const panelClosed = await measure();
+  const measured = { split, expanded, panelClosed };
+  test.info().annotations.push({ type: 'margin widths', description: JSON.stringify(measured) });
+  // What holds (src/artifacts/comments/margin-tiers.ts): the margin is off under a 720 px body (rail-width.ts,
+  // RAIL_BESIDE_FROM_PX); cards need 333 px of side space beside the 816 px page (26 + 282 + 25), else icons. The default
+  // layout leaves main 832 px at 1512, so Expand alone gives 16 px of side space (icons); with the panel closed too, 396.
+  expect([split.tier, expanded.tier, panelClosed.tier], 'the tier in the split, after Expand, and with the panel closed too').toEqual(['off', 'icons', 'cards']);
+  expect([split.threads, expanded.threads, panelClosed.threads], 'the open thread came across').toEqual([1, 1, 1]);
 });
 
 // Loaded in main before its entry (launchMaws's requireFirst): a frame preload registered on the window's session before
@@ -296,13 +415,13 @@ app.once('ready', () => session.defaultSession.registerPreloadScript({ type: 'fr
 const sawNoOpenTabs = (page: Page) => page.evaluate(() => document.documentElement.hasAttribute('data-e2e-saw-no-open-tabs'));
 
 test('a relaunch brings the pinned Artifacts tab back on its record and never draws "No open tabs"', async () => {
-  test.setTimeout(150_000);
+  test.setTimeout(150_000); // two launches
   const preload = join(scratch!, 'no-open-tabs-preload.js');
   const hook = join(scratch!, 'no-open-tabs-hook.cjs');
   writeFileSync(preload, NO_TABS_PRELOAD);
   writeFileSync(hook, noTabsHook(preload));
 
-  let page = await start(hook);
+  let page = await test.step('first launch', () => start(hook, null));
   await expect.poll(() => sawNoOpenTabs(page), 'the watch sees a fresh profile’s empty main area').toBe(true);
   await pinArtifactsTool(page);
   const id = await documentInMain(page, 'B3 restore');
@@ -314,10 +433,10 @@ test('a relaunch brings the pinned Artifacts tab back on its record and never dr
   await expect
     .poll(async () => JSON.stringify((await ok<{ value: unknown }>(page, 'layout.get', { key: 'panelTools.params' })).value))
     .toContain(id);
-  await launch!.cleanup();
+  await test.step('quit', () => launch!.cleanup());
   launch = null;
 
-  page = await start(hook);
+  page = await test.step('relaunch', () => start(hook, null));
   const panel = panelRegion(page);
   await expect(inPanel(page, id), 'the pinned Artifacts tab back on its record').toBeVisible({ timeout: 15_000 });
   await expect(editorIn(inPanel(page, id))).toContainText(line(PARAGRAPHS));

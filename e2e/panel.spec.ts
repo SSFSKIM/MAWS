@@ -1230,8 +1230,8 @@ async function withLongSession(body: (s: Scene, id: AppSessionId) => Promise<voi
     seedTranscript(scratch.config, scratch.repo, engineId, t.records);
     const s = await launchScene(scratch);
     try {
-      await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())!.setContentSize(1600, 900));
-      await s.page.waitForFunction(() => window.innerWidth === 1600 && window.innerHeight === 900);
+      await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())!.setContentSize(1440, 860));
+      await s.page.waitForFunction(() => window.innerWidth === 1440 && window.innerHeight === 860);
       await body(s, s.ids[0]!);
     } catch (error) {
       await s.maws.cleanup();
@@ -1311,7 +1311,7 @@ test.describe('the main split’s float (P4-B3)', () => {
 
       const region = (await area.boundingBox())!;
       const r0 = await valueNow();
-      expect(region.width, 'the main area is wide enough for both floors and a free drag').toBeGreaterThan(800);
+      expect(region.width, 'the main area is wide enough for both floors and a drag to 400').toBeGreaterThanOrEqual(720);
 
       // The reader's row as the pane is held at its floor is the place a float carries: the narrowing from r0 re-wraps
       // the rows, and the transcript's own anchoring may move the row at the top by one as it does (any resize, before P4).
