@@ -6,7 +6,7 @@
 // resize, the provisional layer's growth, X35: the page frame calls `relayoutRef` from its frame callback, P4-B1), and on
 // the thread set, the active thread, a card's resize, a tab switch and a font load. Positions are written to the
 // entries' elements directly from the layout pass, so a keystroke re-renders nothing in React and the cards move in the
-// frame the text moved in: the pass re-reads the anchors (the marks' kept spans, locate.ts), runs the layout and sets
+// frame the text moved in: the pass re-reads the anchors (the display's decorations, P4-B1), runs the layout and sets
 // transforms. Moves caused by an activation, an add or a resolve animate; moves caused by edits never.
 //
 // Three tiers by the side space beside the page (margin-tiers.ts): cards, the icon rail (Docs' Minimize form: a dot at
@@ -24,15 +24,14 @@ import { memo /* P4-B1 */, useCallback, useEffect, useLayoutEffect, useMemo, use
 import { actorDisplay } from '@shared/artifacts/actor';
 import { layoutMargin, MARGIN_ACTIVE_SHIFT_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
 import { ICON_PX, tierFor, type MarginTier } from '../../../comments/margin-tiers';
-import { ThreadCard } from '../../../comments/ThreadCard';
+import { ThreadCard, type ThreadCardThread } from '../../../comments/ThreadCard';
 import type { CommentsView } from '../../../comments/view';
 import type { Doc } from '../../../yjs';
 import { nanoid8 } from '../../schema';
-import { reopen, reply, resolve, type ThreadState } from '../../threads';
-import { firstLineRect, MarginLocator } from './locate';
-import { activeThread, COMMENTS_ORIGIN } from './plugins';
+import { getThread, reopen, reply, resolve, type Thread } from '../../threads';
+import { activeThread, commentDisplayKey, COMMENTS_ORIGIN, drawnThreads } from './plugins';
 import type { CommentAuthor } from './surface';
-import { useThreadStates } from './use-threads';
+import { useOpenThreads } from './use-threads';
 
 export interface MarginThreadsProps {
   /** The live editor of the shown tab. */
@@ -63,24 +62,20 @@ export interface MarginThreadsProps {
   onDraftChange(threadId: string, text: string): void;
 }
 
-// P4-B1: what React draws (an entry's id and thread); the pass keeps each entry's anchoring element beside it, so an
-// edit that redraws a passage's span changes nothing React reads
+// P4-B1: what React draws (an entry's id and thread); the pass keeps where each is drawn beside it (`from`, the earliest
+// position of its decorations; null for the compose card's thread drawn nowhere here), so an edit changes nothing React
+// reads
 interface Entry {
   id: string;
-  thread: ThreadState | null; // null: the compose card's thread before the list caught up with it
+  thread: ThreadCardThread | null; // null: the compose card's thread before the list caught up with it
 }
 interface Located extends Entry {
-  element: Element;
+  from: number | null;
 }
 
 type Cause = 'activation' | 'set' | 'layout';
 
 const ANIMATED: ReadonlySet<Cause> = new Set<Cause>(['activation', 'set']);
-
-// P4-B1: the margin's own quiet moment before it re-reads the thread list. The 200-page workload's keys arrive 60 to 180
-// ms apart, and a re-read per pause scans every tab's marks (`liveThreadIds`), so the panel's 50 ms would re-read after
-// almost every key; the measured run (D13) re-bases it. An orphan leaves the margin, and returns after undo, within it.
-export const MARGIN_LIST_QUIET_MS = 400;
 
 // P4-B1: one entry's handlers, kept per thread id across renders (each reads the margin's latest actions), so a memoized
 // card sees the same functions while its thread is drawn
@@ -113,8 +108,8 @@ const NO_GROUPS: Groups = new Map();
 
 export function MarginThreads({ editor, doc, tabId, author, readOnly, view, relayoutRef, hosting, overlay, onComment, onTier, enterRef, drafts, onDraftChange }: MarginThreadsProps) {
   const column = useRef<HTMLDivElement>(null);
-  const states = useThreadStates(doc, { quietMs: MARGIN_LIST_QUIET_MS }); // P4-B1: the margin's quiet moment
-  const locator = useMemo(() => new MarginLocator(editor, doc), [editor, doc]);
+  // P4-B1: the tab's open threads from the threads map, at once (a reply, a resolve, a new thread in the task it lands in)
+  const open = useCardThreads(useOpenThreads(doc, tabId));
 
   // ── the tier: the body's, the scroll box's and the page's widths through one observer ──
   const [tier, setTier] = useState<MarginTier>({ kind: 'off' });
@@ -140,9 +135,15 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
 
   // ── the active thread, the editor's ──
   const [active, setActive] = useState<string | null>(() => activeThread(editor.state));
+  const passSoon = useRef<() => void>(() => {});
   useEffect(() => {
-    const report = () => setActive(activeThread(editor.state));
-    report();
+    const report = ({ transaction }: { transaction: { getMeta(key: unknown): unknown } }) => {
+      setActive(activeThread(editor.state));
+      // P4-B1: the display redrawn for the threads map (a reopen, a new thread drawn): what is drawn may have changed
+      const meta = transaction.getMeta(commentDisplayKey) as { threads?: true } | undefined;
+      if (meta?.threads) passSoon.current();
+    };
+    setActive(activeThread(editor.state));
     editor.on('transaction', report);
     return () => {
       editor.off('transaction', report);
@@ -150,16 +151,13 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   }, [editor]);
 
   // ── the entries: the open threads of this tab drawn here, in document order ──
-  // P4-B1: a thread unchanged since the list's last reading keeps its object (the list is re-read after every typing
-  // pause), so the cards re-render only for a thread that changed
-  const open = useStableThreads(states, tabId);
   const byId = useMemo(() => new Map(open.map((thread) => [thread.id, thread])), [open]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [groups, setGroups] = useState<Groups>(NO_GROUPS);
-  // P4-B1 (Z3): an orphan (no live text) is not looked for; undo's return makes it live, hence wanted, again. The
-  // compose card's thread is wanted regardless.
+  // P4-B1: the threads wanted here, the compose card's among them regardless; which are drawn (an orphan is not, Z3) and
+  // where is read from the display's decorations at each pass
   const wantedKey = useMemo(() => {
-    const ids = open.filter((thread) => thread.live).map((thread) => thread.id);
+    const ids = open.map((thread) => thread.id);
     if (hosting !== null && !ids.includes(hosting)) ids.push(hosting);
     return ids.join(' ');
   }, [open, hosting]);
@@ -178,7 +176,8 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   const groupsKey = useRef('');
   const updateAdd = useRef<() => void>(() => {});
 
-  // P4-B1: the layout pass, with its cause: the anchors re-read (the kept elements, locate.ts), the stack laid, the
+  // P4-B1: the layout pass, with its cause: the anchors re-read (the character after each thread's first position, so a
+  // passage starting at a soft wrap anchors on the line its first character is drawn on, P6), the stack laid, the
   // transforms written. The icon tier lays its groups (a dot each, ICON_PX tall) rather than its entries.
   const place = useCallback((cause: Cause) => {
     const root = column.current;
@@ -186,7 +185,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     const { active, tier } = latest.current;
     const list = located.current;
     const origin = root.getBoundingClientRect().top;
-    const anchorOf = (entry: Located) => Math.round(firstLineRect(entry.element).top - origin);
+    const anchorOf = (entry: Located) => (entry.from === null || editor.isDestroyed ? 0 : Math.round(editor.view.coordsAtPos(entry.from, 1).top - origin));
     const leaderOf = new Map<string, string>();
     let items: Array<{ id: string; anchor: number; height: number }>;
     if (tier.kind === 'icons') {
@@ -219,38 +218,53 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
       if (top !== undefined) placed.set(id, top);
     }
     tops.current = placed;
-    root.toggleAttribute('data-animate', ANIMATED.has(cause));
-    root.style.setProperty('--doc-margin-height', `${Math.ceil(laid.height)}px`);
+    // P4-B1: an animated cause animates its moves; an unanimated pass that moves nothing (the edit's own frame after an
+    // add, which now reaches the margin in the same task) leaves a running transition alone, and one that moves a card
+    // ends it there (an edit's moves never animate)
+    const moves: Array<[HTMLElement, string]> = [];
     for (const [id, top] of placed) {
       const node = nodes.current.get(id);
-      if (node) node.style.transform = transformOf(latest.current, id, top);
+      const transform = transformOf(latest.current, id, top);
+      if (node && node.style.transform !== transform) moves.push([node, transform]);
     }
+    if (ANIMATED.has(cause)) root.setAttribute('data-animate', '');
+    else if (moves.length > 0) root.removeAttribute('data-animate');
+    root.style.setProperty('--doc-margin-height', `${Math.ceil(laid.height)}px`);
+    for (const [node, transform] of moves) node.style.transform = transform;
     passes.current += 1;
     root.dataset.relayouts = String(passes.current);
     updateAdd.current();
-  }, []);
+  }, [editor]);
 
   // P4-B1: a pass with its cause: the threads located (React told only when the drawn set changed), the mounted cards'
-  // heights read when React has just drawn them (`measure`: an activation grows one card and compacts another), then laid
+  // heights read when React has just drawn them (`measure`: an activation grows one card and compacts another), then laid.
+  // What is drawn is the display's decorations (`drawnThreads`: one walk of about a hundred decorations, no document or
+  // DOM scan), in document order, ties to the older thread.
   const pass = useCallback(
     (cause: Cause, measure: boolean) => {
       const root = column.current;
       const { wantedKey, byId, hosting, tier, entries } = latest.current;
-      if (!root || tier.kind === 'off') return;
-      const found = locator.refresh(wantedKey === '' ? [] : wantedKey.split(' '));
-      const list: Located[] = found.map(({ id, element }) => ({ id, element, thread: byId.get(id) ?? null }));
+      if (!root || tier.kind === 'off' || editor.isDestroyed) return;
+      const drawn = drawnThreads(editor.state);
+      const wanted = wantedKey === '' ? [] : wantedKey.split(' ');
+      const list: Located[] = wanted
+        .filter((id) => drawn.has(id))
+        .map((id) => ({ id, from: drawn.get(id)!, thread: byId.get(id) ?? null }))
+        .sort((a, b) => a.from - b.from);
       // the compose card's thread drawn nowhere here (another tab's) heads the stack at the column's top
-      if (hosting !== null && !found.some(({ id }) => id === hosting)) list.unshift({ id: hosting, element: root, thread: byId.get(hosting) ?? null });
+      if (hosting !== null && !drawn.has(hosting)) list.unshift({ id: hosting, from: null, thread: byId.get(hosting) ?? null });
       located.current = list;
       if (!sameEntries(entries, list)) setEntries(list.map(({ id, thread }) => ({ id, thread })));
       lastCause.current = cause;
       if (measure) for (const [id, node] of nodes.current) heights.current.set(id, Math.round(node.getBoundingClientRect().height));
       place(cause);
     },
-    [locator, place],
+    [editor, place],
   );
   const passRef = useRef(pass);
   passRef.current = pass;
+  // P4-B1: after the display's redraw for the threads map, a pass with the cause of the list's change (an add animates)
+  passSoon.current = () => passRef.current(lastCause.current, false);
 
   // the passes React's state asks for: the thread set, the active thread, the tier and the hosting thread (the first
   // layout is not animated, D4)
@@ -376,20 +390,27 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   // the announcements (K4) ──
   const draftOf = (id: string) => drafts.get(id) ?? '';
   const [announced, setAnnounced] = useState('');
-  const seen = useRef(new Map<string, { status: ThreadState['status']; messages: number }>());
+  // P4-B1: read from the tab's open threads (the threads map, at once): a thread leaving the list resolved is announced
+  const seen = useRef(new Map<string, number>());
   useEffect(() => {
     const notes: string[] = [];
-    for (const thread of states) {
+    const now = new Set<string>();
+    for (const thread of open) {
+      now.add(thread.id);
       const before = seen.current.get(thread.id);
-      if (before && before.status === 'open' && thread.status === 'resolved') notes.push('Comment resolved');
-      if (before && thread.status === 'open' && thread.messages.length > before.messages && thread.id !== active) {
+      if (before !== undefined && thread.messages.length > before && thread.id !== active) {
         const last = thread.messages[thread.messages.length - 1];
         if (last && last.by.kind !== 'human') notes.push(`${actorDisplay(last.by).name} replied`);
       }
-      seen.current.set(thread.id, { status: thread.status, messages: thread.messages.length });
+      seen.current.set(thread.id, thread.messages.length);
+    }
+    for (const id of [...seen.current.keys()]) {
+      if (now.has(id)) continue;
+      seen.current.delete(id);
+      if (getThread(doc, id)?.status === 'resolved') notes.push('Comment resolved');
     }
     if (notes.length > 0) setAnnounced(notes.join('. '));
-  }, [states, active]);
+  }, [open, active, doc]);
 
   // P4-B1: the entries' actions as of this render, reached through each entry's kept handlers
   const write = (change: () => void) => !readOnly && change();
@@ -568,8 +589,8 @@ function IconRail({
 }
 
 // P4-B1: a thread's card, re-rendered only when its own inputs change (a list re-read hands an unchanged thread the
-// same object, `useStableThreads`, and the handlers are kept per id)
-const MarginCard = memo(function MarginCard({ thread, active, compact, index, count, readOnly, draft, handlers }: { thread: ThreadState; active: boolean; compact: boolean; index: number; count: number; readOnly: boolean; draft: string; handlers: EntryHandlers }) {
+// same object, `useOpenThreads`, and the handlers are kept per id)
+const MarginCard = memo(function MarginCard({ thread, active, compact, index, count, readOnly, draft, handlers }: { thread: ThreadCardThread; active: boolean; compact: boolean; index: number; count: number; readOnly: boolean; draft: string; handlers: EntryHandlers }) {
   return (
     <ThreadCard
       thread={thread}
@@ -609,31 +630,25 @@ function sameEntries(now: readonly Entry[], next: readonly Located[]): boolean {
   return now.length === next.length && now.every((entry, i) => entry.id === next[i]!.id && entry.thread === next[i]!.thread);
 }
 
-// P4-B1: the tab's open threads, each keeping its object while it is unchanged (the list re-reads every thread after
-// each typing pause), and the list itself while none changed
-function useStableThreads(states: readonly ThreadState[], tabId: string): ThreadState[] {
-  const kept = useRef<ThreadState[]>([]);
-  return useMemo(() => {
-    const before = new Map(kept.current.map((thread) => [thread.id, thread]));
-    const next = states.filter((thread) => thread.status === 'open' && thread.tabId === tabId).map((thread) => {
-      const was = before.get(thread.id);
-      return was && sameThread(was, thread) ? was : thread;
-    });
-    if (next.length !== kept.current.length || next.some((thread, i) => thread !== kept.current[i])) kept.current = next;
-    return kept.current;
-  }, [states, tabId]);
+// P4-B1: the card's form of each open thread (a thread the margin draws has live text: no orphan), kept per thread
+// object, so an unchanged thread keeps its card's input
+function useCardThreads(threads: readonly Thread[]): readonly ThreadCardThread[] {
+  const cards = useRef(new WeakMap<Thread, ThreadCardThread>());
+  return useMemo(
+    () =>
+      threads.map((thread) => {
+        let card = cards.current.get(thread);
+        if (!card) {
+          card = { ...thread, orphan: false };
+          cards.current.set(thread, card);
+        }
+        return card;
+      }),
+    [threads],
+  );
 }
 
-function sameThread(a: ThreadState, b: ThreadState): boolean {
-  if (a.status !== b.status || a.live !== b.live || a.orphan !== b.orphan || a.quote !== b.quote || a.tabId !== b.tabId) return false;
-  if (a.createdAt !== b.createdAt || a.resolvedAt !== b.resolvedAt || a.reopenedAt !== b.reopenedAt || a.messages.length !== b.messages.length) return false;
-  return a.messages.every((message, i) => {
-    const other = b.messages[i]!;
-    return message === other || (message.id === other.id && message.at === other.at && message.body === other.body);
-  });
-}
-
-const firstWords = (thread: ThreadState): string => (thread.messages[0]?.body ?? thread.quote).split(/\s+/).slice(0, 6).join(' ');
+const firstWords = (thread: ThreadCardThread): string => (thread.messages[0]?.body ?? thread.quote).split(/\s+/).slice(0, 6).join(' ');
 
 function sameTier(a: MarginTier, b: MarginTier): boolean {
   if (a.kind !== b.kind) return false;

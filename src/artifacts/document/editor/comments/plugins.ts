@@ -122,7 +122,7 @@ function decorateBlocks(doc: PMNode, byBlock: ReadonlyMap<string, string[]>, act
   if (byBlock.size === 0) return out;
   doc.descendants((node, pos) => {
     const ids = typeof node.attrs.id === 'string' ? byBlock.get(node.attrs.id) : undefined;
-    if (ids) out.push(Decoration.node(pos, pos + node.nodeSize, { class: ['comment', ...ids.map((id) => `comment-${id}`), ...(active !== null && ids.includes(active) ? ['comment-active'] : [])].join(' ') }, { blockComment: true }));
+    if (ids) out.push(Decoration.node(pos, pos + node.nodeSize, { class: ['comment', ...ids.map((id) => `comment-${id}`), ...(active !== null && ids.includes(active) ? ['comment-active'] : [])].join(' ') }, { blockComment: true, threads: ids } satisfies DisplaySpec /* P4-B1: threads */));
     return !node.isTextblock; // a textblock's inline content holds no block
   });
   return out;
@@ -146,12 +146,18 @@ type DisplayMeta = { active: string | null; cause?: ActivationCause } | { thread
 
 const CLASS_SAFE = /^[\w-]+$/;
 
+// P4-B1: a display decoration's spec names the open threads it draws (the margin reads where each is drawn from them)
+interface DisplaySpec {
+  threads: readonly string[];
+  blockComment?: true;
+}
+
 // The decorations of the open threads' text in [from, to), one per text node.
 function decorate(doc: PMNode, from: number, to: number, ydoc: Doc, active: string | null, out: Decoration[]): void {
   doc.nodesBetween(from, to, (node, pos) => {
     if (!node.isText) return true;
     const ids = node.marks.map(threadOf).filter((id): id is string => id !== null && CLASS_SAFE.test(id) && threadStatus(ydoc, id) === 'open');
-    if (ids.length > 0) out.push(Decoration.inline(pos, pos + node.nodeSize, { class: ['comment', ...ids.map((id) => `comment-${id}`), ...(active !== null && ids.includes(active) ? ['comment-active'] : [])].join(' ') }));
+    if (ids.length > 0) out.push(Decoration.inline(pos, pos + node.nodeSize, { class: ['comment', ...ids.map((id) => `comment-${id}`), ...(active !== null && ids.includes(active) ? ['comment-active'] : [])].join(' ') }, { threads: ids } satisfies DisplaySpec /* P4-B1 */));
     return false;
   });
 }
@@ -279,6 +285,24 @@ function display(ydoc: Doc, onActivate: ((threadId: string, cause: ActivationCau
       };
     },
   });
+}
+
+/**
+ * P4-B1: where each open thread is drawn in this editor: thread id → the earliest position of its decorations (a text
+ * passage's first character, a block thread's block). A thread with no decoration here (an orphan, another tab's) is
+ * absent. Read from the display's decorations, which follow every transaction (an undo brings a mark and its
+ * decoration back together), so no document or DOM is walked.
+ */
+export function drawnThreads(state: EditorState): Map<string, number> {
+  const out = new Map<string, number>();
+  const decorations = commentDisplayKey.getState(state)?.decorations.find() ?? [];
+  for (const decoration of decorations) {
+    for (const id of (decoration.spec as Partial<DisplaySpec>).threads ?? []) {
+      const at = out.get(id);
+      if (at === undefined || decoration.from < at) out.set(id, decoration.from);
+    }
+  }
+  return out;
 }
 
 /** The thread the editor shows as active (its card or its row in the rail), or null. */

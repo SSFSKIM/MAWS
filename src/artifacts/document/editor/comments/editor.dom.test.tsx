@@ -13,7 +13,6 @@ import { DocumentEditor } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, ticks, until } from '../test-world';
-import { MARGIN_LIST_QUIET_MS } from './MarginThreads'; // P4-B1
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { covered, findPos, highlighted, select } from './test-support';
 
@@ -367,7 +366,7 @@ describe('a click on a passage', () => {
 
     expect(clickOn(editor(), 'quarterly'), 'the click still places the caret').toBe(false);
     expect(active(editor())).toBe('ships quarterly');
-    await act(() => new Promise<void>((resolve) => setTimeout(resolve, MARGIN_LIST_QUIET_MS + 50))); // P4-B1: the margin's list quiet moment
+    await quiet();
     expect(screen.queryByRole('complementary', { name: 'Comments' }), 'the margin takes the activation: no list opens').toBeNull();
     const margin = screen.getByRole('region', { name: 'Comments' });
     expect(margin.getAttribute('data-margin-tier')).toBe('icons');
