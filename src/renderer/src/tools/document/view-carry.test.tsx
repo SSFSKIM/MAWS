@@ -20,7 +20,8 @@ import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
-import { liveBody } from './view-carry';
+import { liveBody, SCROLL_SETTLE_MS } from './view-carry';
+import { installResizeObserver } from '../../test-support/resize';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
 const panel: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
@@ -249,6 +250,55 @@ describe('a document moved between the panel and a main tab comes back where the
     expect(liveBody(moved), 'the document editor’s own tab choice').toBe(firstBody);
     expect(pageEl().scrollTop).toBe(0);
     expect(target.state.undoManagers(), 'one history per tab body').toHaveLength(2);
+  });
+
+  // M6 (the e2e's first Chromium layout): the panel's page drew its blocks, then grew them as its styles applied (the
+  // page 2164 px tall when the restore ran, 2458 px 20 ms later), so the scroll set a frame after the draw was clamped and
+  // then left on another block. The carried block is kept at the top while the page settles, until the owner scrolls,
+  // presses or types in it, or the settling time passes.
+  it('the carried block stays at the top while the page settles, until the owner scrolls or the settling time passes', async () => {
+    const { resize } = installResizeObserver();
+    try {
+      blockHeight = 40;
+      const source = mountIn(main);
+      const editor = await ready();
+      edit(editor, source.state);
+      act(() => void (pageEl().scrollTop = 7 * 40));
+      move(main, panel, source, 100);
+      const moved = await ready();
+      await settle();
+      expect(pageEl().scrollTop).toBe(7 * 100);
+      blockHeight = 120; // the page's styles apply: every block grows
+      resize(moved.view.dom, { width: 300, height: 120 * 20 });
+      expect(pageEl().scrollTop, 'block 7 kept at the top').toBe(7 * 120);
+      act(() => void pageEl().dispatchEvent(new WheelEvent('wheel', { deltaY: 40 })));
+      blockHeight = 150;
+      resize(moved.view.dom, { width: 300, height: 150 * 20 });
+      expect(pageEl().scrollTop, 'the owner’s scroll ends the hold').toBe(7 * 120);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('with no input the hold ends once the page has had its settling time', async () => {
+    const { resize } = installResizeObserver();
+    try {
+      blockHeight = 40;
+      const source = mountIn(main);
+      const editor = await ready();
+      edit(editor, source.state);
+      act(() => void (pageEl().scrollTop = 7 * 40));
+      move(main, panel, source, 100);
+      const moved = await ready();
+      await settle();
+      expect(pageEl().scrollTop).toBe(7 * 100);
+      await act(() => new Promise((resolve) => setTimeout(resolve, SCROLL_SETTLE_MS + 50)));
+      blockHeight = 120;
+      resize(moved.view.dom, { width: 300, height: 120 * 20 });
+      expect(pageEl().scrollTop, 'a resize after the settling time is the page’s own').toBe(7 * 100);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('only the first mount restores: a later remount of the target opens as an ordinary remount does', async () => {

@@ -10,7 +10,8 @@
 // - The view, on a move only (the registry's `captureView`, taken once by the target's first mount): the first visible
 //   block and how far into it the page was scrolled (the panel and a main tab differ in width, so the same offset would
 //   land elsewhere), the selection as Y relative positions (they survive the edits made meanwhile), and whether the page
-//   had the keyboard. Restored once the new editor has drawn its tab, focus first, then the scroll, then the selection.
+//   had the keyboard. Restored once the new editor has drawn its tab, focus first, then the scroll, then the selection;
+//   the scroll is held on its block while the page settles (M6), until the owner's first input in it.
 //   The tab the document editor shows is its own state (`src/artifacts/document/editor/`), so a view captured on
 //   another of the document's tabs restores nothing.
 import type { Editor } from '@tiptap/core';
@@ -109,6 +110,7 @@ function scrollPlace(editor: Editor, page: HTMLElement): DocumentView['scroll'] 
  */
 export function restoreDocumentViewWhenDrawn(editor: Editor, page: () => HTMLElement | null, view: DocumentView, onRestored: () => void): () => void {
   let frame: number | null = null;
+  let release = () => {};
   const ready = (): boolean => {
     if (editor.isDestroyed || liveBody(editor) !== view.body) {
       onRestored();
@@ -118,7 +120,7 @@ export function restoreDocumentViewWhenDrawn(editor: Editor, page: () => HTMLEle
     frame = requestAnimationFrame(() => {
       frame = null;
       onRestored();
-      if (!editor.isDestroyed) restoreDocumentView(editor, page(), view);
+      if (!editor.isDestroyed) release = restoreDocumentView(editor, page(), view);
     });
     return true;
   };
@@ -129,24 +131,60 @@ export function restoreDocumentViewWhenDrawn(editor: Editor, page: () => HTMLEle
   return () => {
     editor.off('transaction', onTransaction);
     if (frame !== null) cancelAnimationFrame(frame);
+    release();
   };
 }
 
-/** Focus first (ProseMirror's own, which does not scroll), then the scroll, then the selection. */
-export function restoreDocumentView(editor: Editor, page: HTMLElement | null, view: DocumentView): void {
+/**
+ * How long a restored scroll keeps its block at the page's top while the page settles (M6: the panel's page grew its
+ * blocks about 20 ms after drawing them, as its styles applied, so a scroll set once was clamped and then left on another
+ * block), unless the owner scrolls, presses or types in the page first.
+ */
+export const SCROLL_SETTLE_MS = 1000;
+const OWNER_INPUT = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;
+
+/**
+ * Focus first (ProseMirror's own, which does not scroll), then the scroll, then the selection. The scroll is held on
+ * its block while the page settles; returns the release.
+ */
+export function restoreDocumentView(editor: Editor, page: HTMLElement | null, view: DocumentView): () => void {
   const { view: pm } = editor;
+  let release = () => {};
   if (view.focused) pm.focus();
   if (page && view.scroll === 'top') page.scrollTop = 0;
   else if (page && typeof view.scroll === 'object' && view.scroll !== null) {
-    const [$block] = relativePositionsToResolvedPositions(pm, [view.scroll.block]);
-    const dom = $block ? pm.nodeDOM($block.depth === 0 ? $block.pos : $block.before(1)) : null;
-    if (dom instanceof HTMLElement) {
+    const { block, fraction } = view.scroll;
+    const aim = () => {
+      if (editor.isDestroyed) return;
+      const [$block] = relativePositionsToResolvedPositions(pm, [block]);
+      const dom = $block ? pm.nodeDOM($block.depth === 0 ? $block.pos : $block.before(1)) : null;
+      if (!(dom instanceof HTMLElement)) return;
       const rect = dom.getBoundingClientRect();
-      page.scrollTop += rect.top - page.getBoundingClientRect().top + view.scroll.fraction * rect.height;
-    }
+      page.scrollTop += rect.top - page.getBoundingClientRect().top + fraction * rect.height;
+    };
+    aim();
+    release = holdWhileSettling(page, pm.dom, aim);
   }
   const restored = view.selection && selectionAt(editor, view.selection);
   if (restored) pm.dispatch(editor.state.tr.setSelection(restored).setMeta('addToHistory', false));
+  return release;
+}
+
+// `aim` again whenever the page or its content changes size, until the owner's first input in the page or the settling
+// time; returns the release.
+function holdWhileSettling(page: HTMLElement, content: Element, aim: () => void): () => void {
+  if (typeof ResizeObserver === 'undefined') return () => {};
+  const observer = new ResizeObserver(aim);
+  const release = () => {
+    observer.disconnect();
+    clearTimeout(timer);
+    for (const type of OWNER_INPUT) page.removeEventListener(type, release, true);
+  };
+  observer.observe(page);
+  observer.observe(content);
+  for (const type of OWNER_INPUT) page.addEventListener(type, release, { capture: true, passive: true });
+  const timer = setTimeout(release, SCROLL_SETTLE_MS);
+  return release;
 }
 
 function selectionAt(editor: Editor, { node, anchor, head }: NonNullable<DocumentView['selection']>): Selection | null {
