@@ -13,7 +13,7 @@ What it is for: the owner says "the roadmap we discussed last week" in a fresh s
 ## Progress
 
 - [x] 2026-10-20 04:40Z M0 — the probes (R-2 and the deferral probe), zero spend: `spikes/protocol-probe/fixtures/p4/p4-b4-*.jsonl`, route (b) chosen (Decision Log 1).
-- [ ] M1 — the shared contract
+- [ ] M1 — the shared contract (executed 457dd1ee3; in review)
 - [ ] M2 — the host mirror and the tool
 - [ ] M3 — the instruction on the wire and the final fixtures
 - [ ] M4 — fragments in the renderer and on `show_pane`
@@ -130,6 +130,10 @@ The evidence an embeddings row would need is the misses of lexical search on the
 8. 2026-10-20. The fragment parts are written joined by `#` as the ledger's grammar shows them; `&` is read too, since a model may write either.
 9. 2026-10-20. The host store's schema version 4 is this child's (the X15 slot "the host store's next schema version"; B2 takes 5 if it needs one).
 10. 2026-10-20. The live run is a vitest live file over the engine host and the installed engine, not an Electron e2e: what it proves is the agent's search and its answer; the click to the block is M4's DOM tests. It runs on the MacBook under the slot.
+11. 2026-10-20 (M1). `ListedArtifactSchema` and `ArtifactEditorSchema` moved to the leaf `src/shared/maws/listed-artifact.ts` (re-exported by `tools.ts`), so `search-tools.ts` and `tools.ts` never import each other at load.
+12. 2026-10-20 (M1). The host lists `artifact_search` from M1 on through a placeholder that answers `unavailable`, so the host's `tools/list` pins stay green; M2 replaces it in place, after the document tools.
+13. 2026-10-20 (M1). The stale-text hint for one artifact reads in the singular ("1 artifact changed moments ago and was searched as it was before; search again shortly to include its changes."); two or more keep the text above. `searchHint({scope, hits, searchedAsBefore})` picks the hint: no hits, the scope's no-match text; hits with rows left stale, the stale text; else none.
+14. 2026-10-20 (M1). The query schema neither trims nor normalises (X9's validators never transform); `parseQuery` does NFC and the trim, as the ledger row's "(2..200, trimmed, NFC)" describes the query's reading. Only ASCII `"` opens a phrase. A hit's `read` is `{tab?, from?}` or `{paths?}`, never both. The link parser lowercases the id, takes a part written twice at its first, reads a version as `v` and 1 to 9 digits without a leading zero, and treats a content-form path (`maws-artifact://<id>/…`) as the artifact alone.
 
 ## Outcomes & Retrospective
 

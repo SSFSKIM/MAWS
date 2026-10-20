@@ -1,0 +1,496 @@
+{
+  "about": "R-3's labelled set for P4-B4's artifact_search: 18 reconstructed library artifacts of the sitting's kinds and 40 queries, each labelled with the artifacts it means, for measuring which realistic queries a lexical every-word-must-appear trigram search misses (the evidence a later embeddings decision would need). It is built only from what the repository holds of the owner's own words and of the artifacts the owner worked with (the P3 sitting evidence, the P4 spec and grounding, the E11 sitting and the live-run fixtures): artifact texts are reconstructions of what the repository says each one held (two are the owner's notes verbatim), and the cross-language and concept queries turn the owner's mixed Korean and English habits into queries rather than recording any, so the owner's own ten or twenty queries against the real library would make the set real.",
+  "corpus": [
+    {
+      "key": "note",
+      "kind": "document",
+      "title": "P3 sitting note",
+      "text": "P3 sitting note\n\nThis note comes after the P3 sitting. It records what comes next for the attendees and is the source of the P3 sitting deck. The reference page is example.com (https://example.com). This marked passage carries the accent colour, so that a restyle of the design system shows on the page.\n\nNext steps\n\n- Book the follow-up sitting and share the exported deck with the attendees.\n- Check the Korean sample.\n- Archive the sitting exports.\n- Check the Japanese price.\n\nOwner | Due date\nNote taker | 2026-10-22\nSession lead | 2026-10-24\nSpace owner (P3) | 2026-10-27\n\nRisks\n\nThe date of the follow-up depends on the Space owner. (confirmed)\n\n동시편집동시편집 하이유",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:13,17,18,28,50; docs/doperpowers/evidence/p3-finish/owner-script.txt:58; docs/doperpowers/evidence/p3-finish/owner-results.txt:107; docs/doperpowers/evidence/p3-finish/sitting-visual/owner-notes/additional-observations.vault.md:12"
+    },
+    {
+      "key": "obs",
+      "kind": "document",
+      "title": "Additional observations",
+      "text": "코멘트는 좀 구글 독스처럼 자연스럽게 원본 문서 옆에 코멘트 블록으로 뜨게 하자, 이렇게. 코멘트 열었다 닫았다 하는 UX는 좋지 않다\n\n코멘트를 가리게 하는 건 되는데 기본을 그냥.녹스처럼 그냥 구독자 똑같이 거의 똑같이 그냥 오른쪽에 나오게 하면 훨씬 더 시각적으로 자연스러운 형태가 되는 거지. 이러면 이제 코멘트 바랑 원문이랑 약간 분리가 된 느낌이지. Whereas 구글 독스처럼 그 하이라이트한, 코멘트 하이라이트한 부분 바로 옆에 코멘트 블락이 오른쪽 사이드에 붙고 그런 식으로.\n\n더할것: inline 하이퍼링킹. Agent can already open the document for human, but instead we can also let agent just Hyperlinked artifact which opens on the sidebar when human clicks.\n\n(and this adds to SessionStartHook for MAWS as instruction to hyperlink artifact or whatever so that human can open on sidebar with click)\n\nSo that the human doesn't have to ask again, can you open it for me? Where can I open it? And so on and so on. Just inline message hyperlinking opens the file within MAWS.\n\n(Like output style rendering with markdown backlink reference opens that file on cmd+click, some sort of reference linking in-line message should let user open that artifact/file by click)\n\nThree dot is not needed, Just make it like a regular web browser. Right click replace three dot, and ‘x’ is embedded in block so that closing artifact tab is easy\n\ndeck 편집중: docs처럼 사이드바를 특정 수준 이상 확장했을때 채팅이 오른쪽 아래 floating widget으로 축소되는게 없다. 이것도 필요\n\n슬라이드 편집이 상당히 스무스하지 않다. 캔바나 구글 슬라이드처럼 컴포넌트를 눌렀을 때 바로 편집 가능한 게 아니라 두 번, 세 번, 더블 클릭, 트리플 클릭해야지 텍스트를 수정할 수 있는 상태가 나온다. 이 부분에 대해서도 생각해봐야지 않을까.\n\nDesign도 마찬가지. 접근성 트리? DOM? 이 너무 구리다. 구글 슬라이드/캔바의 검증된 메커니즘을 그대로 Adopt하기.\n\n추가질문: Artifact Search 툴 있나? slide, docs, design, dashboard 등등을 그때그때 검색으로 로딩하게 해주는 툴 같은것? 그게 없다면은 모델은 어디에서 아티팩트의 맥락을 가져오는 건지, 세션에 로드된 아티팩트만을 기준으로 하는 건지?\n\n오른쪽의 sitting note또한 artifact인데 오른쪽의 사이드바 탭을 join할 . 수없는 모습이다. 탭에 대한 drag to move가 막힘.\n\n그래서 이렇게 중복으로 열린 모습\n\n맨 오른쪽의 'p3-sitting-project' (프로젝트 이름 표시 탭) 이건 탭 자리 말고 탭 위의 공간 (opennotion route check 글씨가 있는 바 공간) 에 들어가야한다. 탭은 안그래도 crowded하고 공간이 부족한데 별거 안하는 프로젝트 표시탭을 저기다 두면 안된다.\n\n프로젝트 표시 아이콘/탭을 탭바 위 공간의 바로 올리고, 클릭 할시에는 해당 프로젝트의 새 탭 공간을 열게 하자\n\n(왼쪽 사이드바에서 프로젝트 옆 '+'누르는것과 같은 효과)\n\nI don't know whose bug this is, but there are alphabets just floating there.",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:3 (origin); docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:10-53 (the owner's lines, verbatim; the repo holds this vault note and it is assumed imported as a document)"
+    },
+    {
+      "key": "catalogue",
+      "kind": "document",
+      "title": "Owner observations 2026-09-30",
+      "text": "we don't necessarily need to run each sessions through --bg daemons. it consumes more memory and is unstable (in claude's version).\n\nthe memory budget feature should be togglable and there would be users who just won't want the memory budget feature to be turned on.\n\nthe chatting component should be longer horizontally. currently it's too short horizontally and when prompt gets longer it disrupts the main chat.\n\nwe can utilize the main space more. currently we're leaving out the spaces too much in the main space. Leaving some blank space is good, but we're leaving too much currently. Claude Desktop과 Codex의 예시를 참조하여 이부분은 조정하도록.\n\n인간의 프롬프트 submission message가 너무 크게 표시된다. 이러한 전체적인 UI 비율은 코덱스/클로드 데스크탑을 그대로 참조하면된다. 세번째 스크린샷: 인간 프롬프트 서브미션 메시지는 너무 큼, 중앙에만 너무 집중돼있고 좌우공간을 너무 덜씀. 훨씬 좌우공간을 더 적극적으로 사용해도된다.\n\njust like ClaudeUsage works, let the top menubar panel be able to control things. if the inference goes through gateway, then usage panel on statusline means nothing. the overall account status matters more, and let the user only have to look at the top usage menubar for the usage control. (just copy the whole ClaudeUsage menubar pattern here. no 5h 0%, 7d 36% reset 4d23h things needed here. also 'auto' not needed because redundant.) One easy universal usage control, just like ClaudeUsage UX. Top menu.\n\nSittings: overview shows the sessions well. but I don't need to keep this tab every time.\n\nslash command popup shouldn't popup within chat interface. actually open a window on the panel.\n\nBecause we have translated the terminals' status line, we have things like cwd, ctx —, 5h 7d usage, and more that is just occupying spaces. They should be all gone, and only the main chatting component should be at the bottom. Our current ChatGPT-face UI makes the main session smaller because of the space it's taking up. Only what's shown below should exist:\n\nOverall main chat panel's typography is a little too big. 글자가 더 줄어도 된다. 공간이 정말 부족하니까 글자를 조금 줄여야 된다. 타이포그래피 크기는 코덱스나 클로드 데스크탑을 그대로 쓰도록. 검증된 UI 비율이다. 전체적인 공간이 굉장히 부족하게 느껴진다. 메인 채팅의 글자크기를 줄이다. 동시에 언급했듯 채팅 인터페이스가 차지하는 공간이 너무많다. 코덱스 데스크탑의 구현체를 그대로 쓰도록. 컴팩트한 채팅 컴포넌트.\n\n챗 인터페이스 위에 현재 프로젝트 디렉토리 및 +add dir가 있다. 이건 차라리 채팅 바 아래의 공간을 이용해 그곳에 넣자. '@'를 없애도 된다. Let human type it. That's needless UI component. '@'을 클릭해야만 하나? 아니다. Let user type it for exact same function. 이렇게 채팅방 안에 공간을 아끼고 그곳에 현재 디렉토리와 +add dir 버튼을 넣는다.\n\n웬만해서는 유저의 settings.json을 건드리지 않도록 한다. 현재 우리 코드중 그것을 건드리는게 있다면 알려주도록. claude code default subagent같이 명확하게 유저가 컨트롤해서 바뀌는 건 괜찮다. 유저가 모르게 settings.json이 바뀌는건 안됨.\n\nNo 'pinned' or 'Needs YOU' on top. Just project is enough.\n\nEach session component is too big, vertically long. We can make it much shorter, like half or 2/3 of current vertical length. Rather, let hovering the session UI component show recent message or whatever. Codex implementation shows you branch when you hover.\n\nwhen expand the project: only show the top few, and limit the length that it can expand lower. Because each project have lots of sessions, expanding the project just makes project to project unnavigable. Limit the expansion size when you click project, and let user scroll within the limited window of expansion to navigate to different sessions. Or even cowork style works too. Let user click '+' and we can show the previous sessions below the chat bar.\n\nwhen human queue or interrupt and send the message, Location of message is not correct. Even though the message is delivered to agent [before] its turn finished, the message is displayed as if the message [was] delivered after agent is done. This is a bug level.\n\nwhen editing the message, it brings message to chat component. better way to edit previous message is following codex's pattern: edit directly from the previous chat component",
+      "source": "docs/doperpowers/evidence/ux-2026-10-01/owner-observations.txt:1,3-40 (the owner's quoted words, verbatim; assumed imported as a document)"
+    },
+    {
+      "key": "launch",
+      "kind": "document",
+      "title": "Launch notes",
+      "text": "Launch notes\n\nThe launch moves to the following Tuesday. The team meets on Monday again.\n\nThe owner writes here. 안녕하세요 한글 입력\n\nBudget\n\nApprovals\n\nFinance approves the budget by Thursday.\n\nItem | Cost\nDesign | 100\nBuild | 250\n\nRisks\n\nNothing is known yet; the review is pending.",
+      "source": "docs/doperpowers/evidence/p3-finish/live/mini-39210063850-document-live-run.txt:7,18-38"
+    },
+    {
+      "key": "untitled-space",
+      "kind": "document",
+      "title": "Untitled document",
+      "text": "Space precedence check\n\nMade in the Space.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:39"
+    },
+    {
+      "key": "untitled-outside",
+      "kind": "document",
+      "title": "Untitled document",
+      "text": "Outside any Space\n\nMade outside any Space.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:39"
+    },
+    {
+      "key": "deck",
+      "kind": "presentation",
+      "title": "P3 sitting deck",
+      "text": "Overview\nOct 19, 2026\nP3 sitting note for the attendees\nWhat the P3 sitting covered and what happens next.\n\nPlan\nOwner | Due date\nSession lead | Thursday, October 22, 2026\nNote taker | 2026-10-22\nSpace owner | 동시편집 테스트 한국어 안ㄴ\nShare the exported deck with the attendees. Tell the Space owner first.\nSpeaker notes: Plan slide: read the table, then the to-do line.\n\nNext steps and owners\nArchive the sitting exports.\nCheck the Korean sample.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:29-33; docs/doperpowers/evidence/p3-finish/sitting-findings.md:53; docs/doperpowers/evidence/p3-finish/owner-results.txt:108"
+    },
+    {
+      "key": "design",
+      "kind": "design",
+      "title": "P3 sitting design",
+      "text": "Desktop page (1440 x 900)\nP3 sitting\nNext steps\nCheck the Korean sample.\nArchive the sitting exports.\nBook the follow-up 한국어 인간 인간 ㅇㅁㄴㄹㅇㅁ.\n할 일 일정이 겹치면 마감일 전에 알려 주세요.\n\nPhone screen (390 x 844)\nNext steps (phone)\n\nSquare card (1080 x 1080)\nP3 sitting",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:45; docs/doperpowers/evidence/p3-finish/owner-results.txt:109"
+    },
+    {
+      "key": "dash",
+      "kind": "dashboard",
+      "title": "P3 sitting dashboard",
+      "text": "P3 sitting dashboard\n\nPlanned hours for the work after the sitting, one row per task.\n\nTotal planned hours, all tasks: 5.75\n\nHours by owner, one bar per task row (not combined)\nSession lead 3; Note taker 1.5; Note taker 0.5; Space owner 0.75\n\nAll task rows\nTask | Owner | Hours\nPlan the next sitting | Session lead | 3\nWrite up the sitting notes | Note taker | 1.5\nArchive the sitting exports | Note taker | 0.5\nShare the exported deck | Space owner | 0.75\n\nSource: P3 sitting tasks, from tasks.csv (data/tasks.csv), updated 2026-10-19 10:17 UTC by P3 sitting note document.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:46,47; docs/doperpowers/evidence/p3-finish/sitting-findings.md:72-74"
+    },
+    {
+      "key": "route-check",
+      "kind": "html",
+      "title": "Notion route check",
+      "text": "Notion route check\n\nThis page declares the notion connector and its read-only tool notion-get-self. Refresh asks the tool and shows the answer: Status, Value, Route and Time. Route is the answer's via.route: engine when a connected session answered, direct when MAWS's own connection did.",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-results.txt:31; docs/doperpowers/evidence/p3-finish/owner-script.txt:13; docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:47"
+    },
+    {
+      "key": "console-check",
+      "kind": "html",
+      "title": "Console check",
+      "text": "Console check\n\nThis page writes one warning and one error to the console so that the artifact console shows a chip. An ordinary console.log is not captured.\nconsole.warn(\"OWNER_TEST_WARNING\");\nconsole.error(\"OWNER_TEST_ERROR\");",
+      "source": "docs/doperpowers/evidence/p1-e11/owner-results.txt:53; docs/doperpowers/evidence/p1-e11/owner-notes/joint-sitting-notes-2026-10-08.txt:97; docs/doperpowers/evidence/p3-finish/sitting-notes.md:8"
+    },
+    {
+      "key": "demo",
+      "kind": "html",
+      "title": "Demo page",
+      "text": "Demo artifact — version 2\n\nIncrement\nCount: 0\nNote: (text field)\nA link to example.com.",
+      "source": "docs/doperpowers/evidence/p1-e11/owner-results.txt:52; docs/doperpowers/evidence/p1-e11/owner-notes/joint-sitting-notes-2026-10-08.txt:14; docs/doperpowers/evidence/p3-finish/sitting-notes.md:8"
+    },
+    {
+      "key": "oopif",
+      "kind": "file",
+      "title": "E11 OOPIF page",
+      "text": "A field in a cross-site frame\n\nSecond site (frame)\nNote (text field)",
+      "source": "e2e/support/oopif-page.ts:1-6,33-35; docs/doperpowers/evidence/p3-finish/sitting-notes.md:8"
+    },
+    {
+      "key": "govuk",
+      "kind": "design_system",
+      "title": "GOV.UK sample",
+      "text": "GOV.UK sample\n\nAdopted from GOV.UK Frontend 6.1.0 as served on www.gov.uk. Derived from the home page and its stylesheet, with Official as the base.\n\nPalette\nText #0b0c0c and secondary text #484949 on white. Surface #f4f8fb. Border #cecece. Success #0f7a52, the same as the button. Error #ca3535. The accent is the brand blue #1d70b8. For documents only: link #1a65a6, visited #54319f, hover #0f385c, focus #ffdd00. Warning #8f5b00, from Official.\n\nType\nSizes 48, 36, 24 and 19, with body 19 and small 16; weights 400 and 700. The font is Arial, because GDS Transport is not licensed for others; Official's Hangul fallbacks follow it.\n\nSpace and shape\nSpacing steps from 5 to 50, and 60 for documents. Radius 0. A4 page size from Official.\n\nComponents\nStart button, inset text, warning text, notification banner, confirmation panel, summary list, table.\n\nLogos\nThe guidance describes the crown logotype and forbids its use; an organisation-name placeholder stands in.\n\nVoice\nFrom the GOV.UK A to Z style guide.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:41,42; docs/doperpowers/evidence/p3-finish/owner-results.txt:64"
+    },
+    {
+      "key": "ds-p3",
+      "kind": "design_system",
+      "title": "P3 sitting DS",
+      "text": "P3 sitting DS\n\nA copy of the MAWS design system, made for the P3 sitting Space and renamed P3 sitting DS. It is that Space's default design system.\n\nPalette\nEleven colour tokens, each with a hex field and a swatch. Accent #2f6f9f (it was #c9663f until the sitting recoloured it). Contrast: Text on ground 15.8:1 meets 4.5:1. Muted 4.6:1. Accent on ground 5.1:1 meets 3:1. Text on accent 5.4:1.\n\nType\nDocument and Deck samples, set in SF Pro with Apple SD Gothic Neo for Hangul.\n\nLaw\nThe accent appears once. Forbidden: a second accent, the accent on headings, rules, panels, links or status. To judge by hand: no accent on a heading, rule, panel, link or status; no body-size text in the accent; no status by colour alone; no second text column; no lorem ipsum.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:9,36,37; docs/doperpowers/evidence/p3-finish/sitting-findings.md:41"
+    },
+    {
+      "key": "maws-ds",
+      "kind": "design_system",
+      "title": "MAWS",
+      "text": "MAWS\n\nThe house system. Documents, decks and designs that name no system of their own, in no Space with a default, use it.\n\nPalette\nEleven colour tokens, each with a hex field and a swatch. Accent #c9663f. Contrast: Text on ground 15.8:1 meets 4.5:1. Muted 4.6:1. Accent on ground 3.7:1 meets 3:1. Text on accent 3.8:1.\n\nType\nDocument and Deck samples, set in SF Pro with Apple SD Gothic Neo for Hangul.\n\nLaw\nThe accent appears once. Forbidden: a second accent, the accent on headings, rules, panels, links or status.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:8,9,29,36,37; docs/doperpowers/evidence/p3-finish/sitting-findings.md:41"
+    },
+    {
+      "key": "official",
+      "kind": "design_system",
+      "title": "Official",
+      "text": "Official\n\nA built-in design system, and the base the GOV.UK sample was derived from. Its type stack carries Hangul fallbacks. A4 page size. Warning #8f5b00.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:8,41"
+    },
+    {
+      "key": "classroom",
+      "kind": "design_system",
+      "title": "Classroom",
+      "text": "Classroom\n\nA built-in design system. A white page, Classroom type and a brighter blue highlight.",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:8,39"
+    }
+  ],
+  "queries": [
+    {
+      "q": "Console",
+      "intent": "Owner script 1.1: \"Search a title and a word found only in content\"; the sitting searched the title \"Console\" and the library returned one row, \"Console check\".",
+      "expect": [
+        "console-check"
+      ],
+      "class": "title",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:8; docs/doperpowers/evidence/p3-finish/owner-script.txt:52"
+    },
+    {
+      "q": "Notion route check",
+      "intent": "The owner places the HTML page by its title in the bar above the tabs (\"opennotion route check 글씨가 있는 바 공간\"); the page titled Notion route check.",
+      "expect": [
+        "route-check"
+      ],
+      "class": "title",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:47; docs/doperpowers/evidence/p3-finish/owner-results.txt:31"
+    },
+    {
+      "q": "GOV.UK sample",
+      "intent": "The design system the owner had the agent derive from www.gov.uk, \"GOV.UK sample\".",
+      "expect": [
+        "govuk"
+      ],
+      "class": "title",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:41; docs/doperpowers/evidence/p3-finish/owner-results.txt:64"
+    },
+    {
+      "q": "P3 sitting deck",
+      "intent": "Owner script 5.1, \"Create a three-slide P3 sitting deck from the note\"; asked for later as the deck, not the note, design or dashboard that share its \"P3 sitting\" name.",
+      "expect": [
+        "deck"
+      ],
+      "class": "title",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-script.txt:76; docs/doperpowers/evidence/p3-finish/sitting-notes.md:29"
+    },
+    {
+      "q": "Additional observations",
+      "intent": "The owner's note \"WorkStation Design/Additional observations\" (titled 무제 when written), the one with the nine screenshots of what the owner saw after the sitting.",
+      "expect": [
+        "obs"
+      ],
+      "class": "title",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:3"
+    },
+    {
+      "q": "Japanese price",
+      "intent": "The document that got the seventh task, \"Check the Japanese price.\" (owner N.1, 11:52Z).",
+      "expect": [
+        "note"
+      ],
+      "class": "body",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-results.txt:107"
+    },
+    {
+      "q": "tasks.csv",
+      "intent": "The dashboard bound to data/tasks.csv: \"after the agent edited data/tasks.csv the views kept the old values\".",
+      "expect": [
+        "dash"
+      ],
+      "class": "body",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-findings.md:72; docs/doperpowers/evidence/p3-finish/sitting-notes.md:46"
+    },
+    {
+      "q": "Note taker",
+      "intent": "The chart where \"owner repeats Note taker; bars overlap\" (finding 68; the owner sent side-by-side bars to P4 as S-REPEATED-BARS). The note's owner table also lists a Note taker.",
+      "expect": [
+        "dash"
+      ],
+      "class": "body",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-findings.md:73; docs/doperpowers/evidence/p3-finish/owner-results.txt:147"
+    },
+    {
+      "q": "접근성 트리",
+      "intent": "The owner's remark on slide and design editing: \"접근성 트리? DOM? 이 너무 구리다\".",
+      "expect": [
+        "obs"
+      ],
+      "class": "body",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:34"
+    },
+    {
+      "q": "마감일 전에 알려",
+      "intent": "The Korean to-do line the owner had the agent write on the desktop board: \"할 일 일정이 겹치면 마감일 전에 알려 주세요.\"",
+      "expect": [
+        "design"
+      ],
+      "class": "body",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-results.txt:109"
+    },
+    {
+      "q": "Space precedence",
+      "intent": "Owner script 6.3 (\"confirm the intended precedence\"): the new document made inside the P3 sitting Space with no system named, titled by its first line, \"Space precedence check\".",
+      "expect": [
+        "untitled-space"
+      ],
+      "class": "body",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:39; docs/doperpowers/evidence/p3-finish/owner-script.txt:96"
+    },
+    {
+      "q": "코멘트",
+      "intent": "The note that opens \"코멘트는 좀 구글 독스처럼 자연스럽게 원본 문서 옆에 코멘트 블록으로 뜨게 하자\": the bare stem against 코멘트는, 코멘트를 and 코멘트 바랑.",
+      "expect": [
+        "obs"
+      ],
+      "class": "particle",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:10,12"
+    },
+    {
+      "q": "슬라이드를 편집",
+      "intent": "\"슬라이드 편집이 상당히 스무스하지 않다\": an agent writes the object form 슬라이드를 where the owner's text has the subject form 슬라이드 편집이.",
+      "expect": [
+        "obs"
+      ],
+      "class": "particle",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:32"
+    },
+    {
+      "q": "더블클릭",
+      "intent": "\"두 번, 세 번, 더블 클릭, 트리플 클릭해야지 텍스트를 수정할 수 있는 상태가 나온다\": the word written without the space the owner typed (더블 클릭).",
+      "expect": [
+        "obs"
+      ],
+      "class": "particle",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:32"
+    },
+    {
+      "q": "채팅을 축소",
+      "intent": "\"deck 편집중: ... 채팅이 오른쪽 아래 floating widget으로 축소되는게 없다\": the object particle 을 against the owner's subject particle 이.",
+      "expect": [
+        "obs"
+      ],
+      "class": "particle",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:29"
+    },
+    {
+      "q": "일정",
+      "intent": "\"할 일 일정이 겹치면 마감일 전에 알려 주세요.\": the two-syllable word 일정 on the design board's Korean line.",
+      "expect": [
+        "design"
+      ],
+      "class": "short-term",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-results.txt:109"
+    },
+    {
+      "q": "P3 DS",
+      "intent": "The owner's disposable copy of the MAWS system, named \"P3 sitting DS\", asked for by its two-letter initials.",
+      "expect": [
+        "ds-p3"
+      ],
+      "class": "short-term",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-results.txt:35; docs/doperpowers/evidence/p3-finish/sitting-notes.md:9"
+    },
+    {
+      "q": "문서 옆",
+      "intent": "\"원본 문서 옆에 코멘트 블록으로\": two two-syllable words from the owner's margin-comments remark.",
+      "expect": [
+        "obs"
+      ],
+      "class": "short-term",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:10"
+    },
+    {
+      "q": "\"Tell the Space owner first\"",
+      "intent": "The deck's slide 2 to-do line the owner extended by comment: \"a longer to-do line\", ending \"Tell the Space owner first.\"",
+      "expect": [
+        "deck"
+      ],
+      "class": "phrase",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:33"
+    },
+    {
+      "q": "\"Next steps and owners\"",
+      "intent": "Slide 3 of the deck, which the owner retitled during the race: \"Next steps\" to \"Next steps and owners\".",
+      "expect": [
+        "deck"
+      ],
+      "class": "phrase",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:32"
+    },
+    {
+      "q": "\"accent appears once\"",
+      "intent": "The rule finding 36 cites, \"against the design system's 'accent appears once' rule\": the systems that carry the MAWS law, MAWS and its copy P3 sitting DS.",
+      "expect": [
+        "ds-p3",
+        "maws-ds"
+      ],
+      "class": "phrase",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-findings.md:41"
+    },
+    {
+      "q": "\"follow-up sitting\"",
+      "intent": "The passage the owner commented on in the note: \"Book the follow-up sitting and share the\".",
+      "expect": [
+        "note"
+      ],
+      "class": "phrase",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:22,50"
+    },
+    {
+      "q": "참석자 슬라이드",
+      "intent": "Asks in Korean for the slides made \"for the attendees\" (slide 1: \"P3 sitting note for the attendees\"); the deck is in English.",
+      "expect": [
+        "deck"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-findings.md:53; docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:29"
+    },
+    {
+      "q": "리스크",
+      "intent": "Asks in Korean for the document where the agent inserted \"a short Risks section after Next steps\".",
+      "expect": [
+        "note"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:18"
+    },
+    {
+      "q": "예산 승인",
+      "intent": "Asks in Korean for the document that says who approves the budget (\"Finance approves the budget by Thursday.\"), which is in English.",
+      "expect": [
+        "launch"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/live/mini-39210063850-document-live-run.txt:28"
+    },
+    {
+      "q": "발표자 노트",
+      "intent": "Asks in Korean for the deck whose slide 2 speaker notes read \"Plan slide: read the table, then the to-do line.\" (the notes-field scene of 5.1b).",
+      "expect": [
+        "deck"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:31,33; docs/doperpowers/evidence/p3-finish/owner-results.txt:97"
+    },
+    {
+      "q": "정부 디자인 시스템",
+      "intent": "Asks in Korean for the design system derived from www.gov.uk, \"GOV.UK sample\", which is English throughout.",
+      "expect": [
+        "govuk"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:41"
+    },
+    {
+      "q": "Google Docs comments",
+      "intent": "The note that asks for comments \"구글 독스처럼 ... 원본 문서 옆에\" (Google Docs style, beside the passage), searched in English; the note writes 구글 독스 in Hangul.",
+      "expect": [
+        "obs"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:10"
+    },
+    {
+      "q": "accessibility tree",
+      "intent": "\"접근성 트리? DOM? 이 너무 구리다\" searched in English.",
+      "expect": [
+        "obs"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:34"
+    },
+    {
+      "q": "double click",
+      "intent": "\"더블 클릭, 트리플 클릭해야지 텍스트를 수정할 수 있는 상태가 나온다\" searched in English.",
+      "expect": [
+        "obs"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:32"
+    },
+    {
+      "q": "deadline reminder",
+      "intent": "The Korean to-do line \"마감일 전에 알려 주세요\" (\"tell me before the deadline\") searched in English.",
+      "expect": [
+        "design"
+      ],
+      "class": "cross-language",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-results.txt:109"
+    },
+    {
+      "q": "concurrent editing test",
+      "intent": "The three artifacts where the owner typed Korean while the agent edited: \"동시편집 작동함\" (document), \"동시편집 작동\" (slide), \"Design도 마찬가지로 동시편집 작동\" (design).",
+      "expect": [
+        "note",
+        "deck",
+        "design"
+      ],
+      "class": "concept",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-results.txt:75-77,107-109"
+    },
+    {
+      "q": "mobile layout",
+      "intent": "The phone board of the design (\"Phone screen\", 390x844), whose heading the owner edited in place.",
+      "expect": [
+        "design"
+      ],
+      "class": "concept",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:45"
+    },
+    {
+      "q": "workload per person",
+      "intent": "The dashboard chart \"Hours by owner, one bar per task row (not combined)\".",
+      "expect": [
+        "dash"
+      ],
+      "class": "concept",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-notes.md:46"
+    },
+    {
+      "q": "release date moved",
+      "intent": "The launch-notes document whose first paragraph moves the launch (\"The launch moves to the following Tuesday\").",
+      "expect": [
+        "launch"
+      ],
+      "class": "concept",
+      "source": "docs/doperpowers/evidence/p3-finish/live/mini-39210063850-document-live-run.txt:8,20"
+    },
+    {
+      "q": "stale data",
+      "intent": "The dashboard that \"does not notice the file changing\" (finding 67).",
+      "expect": [
+        "dash"
+      ],
+      "class": "concept",
+      "source": "docs/doperpowers/evidence/p3-finish/sitting-findings.md:72"
+    },
+    {
+      "q": "cross-origin iframe",
+      "intent": "E11's sitting page with a text field in a frame from a second site (an out-of-process iframe, the owner's step F).",
+      "expect": [
+        "oopif"
+      ],
+      "class": "concept",
+      "source": "e2e/support/oopif-page.ts:1-6,33"
+    },
+    {
+      "q": "Artifact Search 툴",
+      "intent": "\"추가질문: Artifact Search 툴 있나?\"",
+      "expect": [
+        "obs"
+      ],
+      "class": "mixed",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:36"
+    },
+    {
+      "q": "settings.json 건드리지",
+      "intent": "\"웬만해서는 유저의 settings.json을 건드리지 않도록 한다\"",
+      "expect": [
+        "catalogue"
+      ],
+      "class": "mixed",
+      "source": "docs/doperpowers/evidence/ux-2026-10-01/owner-observations.txt:29"
+    },
+    {
+      "q": "Canva 슬라이드 편집",
+      "intent": "\"캔바나 구글 슬라이드처럼 컴포넌트를 눌렀을 때 바로 편집 가능한 게 아니라\": Canva as the English name for the owner's 캔바.",
+      "expect": [
+        "obs"
+      ],
+      "class": "mixed",
+      "source": "docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md:32"
+    }
+  ]
+}
