@@ -244,12 +244,16 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
       element.contentWindow!.postMessage({ type: 'maws:pick', on: true }, '*');
     });
     const posted = () => maws.page.evaluate(() => (window as unknown as { __e2Posted: unknown[] }).__e2Posted);
-    // The move that shows the overlay is dispatched in the frame, again until the overlay is up (L64): the pick-on
-    // message is a task in the frame that a move sent as input can overtake, leaving no later move to place the overlay,
-    // and the desktop's own pointer still reaches an e2e window. The bridge hears mousemove at the window's capture phase.
+    // The overlay is shown by the pointer, moved again (a pixel back and forth) until the overlay is up, as the owner
+    // sees the highlight before they click. The pick-on message is a task in the frame that a move can overtake (L64);
+    // and Chromium routes input into a frame of another process only once the window's compositor has placed it, so in
+    // a run's first moments after the frame loaded an input event can still go to the app's document, where it reaches
+    // the iframe element and nothing in the frame (a click sent then was lost, with the overlay a move dispatched inside
+    // the frame had already put up). An overlay a real move placed is both settled, so the click below picks.
+    let nudge = 0;
     await expect
       .poll(async () => {
-        await frame.evaluate(() => document.getElementById('hero')!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 100 })));
+        await maws.page.mouse.move(100 + (nudge++ % 2), 100);
         return frame.locator('[data-maws-pick-overlay]').count();
       })
       .toBe(1);
