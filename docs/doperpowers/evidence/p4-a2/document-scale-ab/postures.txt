@@ -1,0 +1,12 @@
+ci-kit desktop (start): frontmost=터미널 display=2560x1440@2x remote=none load=2.06/3.18/3.36 computeruse=none
+ci-kit settle: settled in 30 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=2.06/3.18/3.36 computeruse=none; release: frontmost=터미널 display=2560x1440@2x remote=none load=2.03/3.07/3.31 computeruse=none
+ci-kit desktop (end): frontmost=터미널 display=2560x1440@2x remote=none load=2.29/2.78/3.13 computeruse=none
+ci-kit desktop (start): frontmost=터미널 display=2560x1440@2x remote=none load=1.88/2.58/3.03 computeruse=none
+ci-kit settle: settled in 31 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=1.88/2.58/3.03 computeruse=none; release: frontmost=터미널 display=2560x1440@2x remote=none load=1.94/2.51/2.99 computeruse=none
+ci-kit desktop (end): frontmost=터미널 display=2560x1440@2x remote=none load=2.62/2.60/2.93 computeruse=none
+ci-kit desktop (start): frontmost=터미널 display=2560x1440@2x remote=none load=1.96/2.40/2.83 computeruse=none
+ci-kit settle: settled in 31 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=1.96/2.40/2.83 computeruse=none; release: frontmost=터미널 display=2560x1440@2x remote=none load=2.30/2.44/2.83 computeruse=none
+ci-kit desktop (end): frontmost=터미널 display=2560x1440@2x remote=none load=1.61/2.02/2.53 computeruse=none
+ci-kit desktop (start): frontmost=터미널 display=2560x1440@2x remote=none load=1.52/1.95/2.48 computeruse=none
+ci-kit settle: settled in 31 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=1.56/1.95/2.47 computeruse=none; release: frontmost=터미널 display=2560x1440@2x remote=none load=1.54/1.90/2.44 computeruse=none
+ci-kit desktop (end): frontmost=터미널 display=2560x1440@2x remote=none load=1.64/1.98/2.35 computeruse=none
