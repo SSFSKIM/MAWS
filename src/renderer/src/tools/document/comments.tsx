@@ -28,7 +28,7 @@ import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import { closeCard, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
 import { focusAtEnd } from '../../side/card/CommentCard'; // P4-B1
 import { openCommentComposer, type CommentPlacement } from '../code/anchor/anchor'; // P4-B1: CommentPlacement
-import { beginCommentSend, commentDraftEntry, dropCommentDraft, recordCommentDraft } from './comment-drafts'; // P4-B1; P4-B3: beginCommentSend
+import { commentDraftEntry, dropCommentDraft, recordCommentDraft } from './comment-drafts'; // P4-B1
 import { cancelPendingComment, PendingCommentNotice, pendingThreadOf, startCommentSession, subscribePending, usePendingComment } from './comment-session'; // P3-F1
 
 const LABEL_MAX = 200; // X10's label cap
@@ -334,13 +334,11 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         const threadId = threadOf(card);
         if (threadId === null) return () => {};
         const release = holdReplica?.();
-        const answered = beginCommentSend(artifactId); // P4-B3 (Decision Log 37): a move waits for the answer
         const settle = draftsOf(hostId).sending(threadId, text, { record, withdraw: discard });
         return (went) => {
           try {
             settle(went);
           } finally {
-            answered();
             release?.();
           }
         };

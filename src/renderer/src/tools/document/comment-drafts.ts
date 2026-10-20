@@ -38,32 +38,3 @@ export function dropCommentDraft(artifactId: string, hostId: string, keep?: { se
   const draft = drafts.get(artifactId);
   if (draft?.hostId === hostId && draft.serial !== keep?.serial) drafts.delete(artifactId);
 }
-
-// P4-B3 (its Decision Log 37): the comments of an artifact whose send is on its way, so a move between the panel and a
-// main tab waits for the answer (the moved card's composer would come back enabled, and a second send would open a
-// second thread). Counted per artifact; a listener hears every change.
-const sending = new Map<string, number>();
-const sendListeners = new Set<() => void>();
-
-/** A send of a comment on `artifactId` set out; the call returned marks it answered (once). */
-export function beginCommentSend(artifactId: string): () => void {
-  sending.set(artifactId, (sending.get(artifactId) ?? 0) + 1);
-  for (const listener of sendListeners) listener();
-  let ended = false;
-  return () => {
-    if (ended) return;
-    ended = true;
-    const left = (sending.get(artifactId) ?? 1) - 1;
-    if (left > 0) sending.set(artifactId, left);
-    else sending.delete(artifactId);
-    for (const listener of sendListeners) listener();
-  };
-}
-
-/** Whether a comment on `artifactId` is being sent. */
-export const commentSending = (artifactId: string): boolean => sending.has(artifactId);
-
-export function subscribeCommentSends(listener: () => void): () => void {
-  sendListeners.add(listener);
-  return () => void sendListeners.delete(listener);
-}
