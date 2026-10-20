@@ -55,7 +55,10 @@ const TURN_MS = 300_000;
 const TITLE = 'Scale 200 live';
 const SECTIONS = 160; // about 200 pages (e2e/document-scale.spec.ts)
 const BLOCK = 's0first'; // the seed's first block, "Start." plus whatever its seeded human typed into it (read at the run)
-const OTHER = 's0p1'; // the first section's paragraph, where the test composes
+// The paragraph the test composes in: the second section's (the seed threads a passage of every third section's first
+// paragraph from the first, and a click on a commented passage opens the comments rail, a drawer over the panel's
+// narrow page that would then take the later clicks)
+const OTHER = 's1p1';
 const AGENT_NAME = 'Claude';
 const WARM = 'Start here.';
 // The edit's text: long enough that the model streams it over a second or more (haiku sent a 130-character sentence in
@@ -73,7 +76,7 @@ const STALE = 'The start was rewritten by the agent.';
 // haiku once refused rather than list) and the first block's text as the seed left it (its human edits type " edited"
 // into random paragraphs, so the quote the warm-up replaces is read from the page, never assumed).
 const promptsFor = (artifactId: string, start: string) => ({
-  warm: `Call artifact_read once on the document whose artifact id is ${artifactId} (pass exactly that id as "artifact"; its first page is enough). Then make one artifact_edit call on it (baseRevision: the revision the read returned) with a single op: replace_text in block ${BLOCK}, old "${start}" new "${WARM}". Then reply READY. Do nothing else.`,
+  warm: `Call artifact_read once on the document whose artifact id is ${artifactId}, with exactly these arguments: artifact "${artifactId}", count 10 (the document is 200 pages long; its first ten blocks are enough, and a larger read overflows the tool's output). Then make one artifact_edit call on it (baseRevision: the revision the read returned) with a single op: replace_text in block ${BLOCK}, old "${start}" new "${WARM}". Then reply READY. Do nothing else.`,
   edit: `Make exactly ONE artifact_edit call on the document whose artifact id is ${artifactId} and nothing else (do not read the document first; baseRevision is the revision your last artifact_edit returned) with a single op: replace_text in block ${BLOCK}, old "${WARM}" new "${NEW}". Reply DONE when the call succeeds.`,
   stale: `Without reading the document again, make exactly ONE artifact_edit call on the document whose artifact id is ${artifactId} (baseRevision: the revision your last artifact_edit returned) with a single op: replace_block of block ${BLOCK} with markdown "${STALE}". If the call is refused, do not retry, do not read, make no other call: reply REFUSED followed by the refusal's reason.`,
 });
@@ -341,7 +344,8 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     const start = ((await editor.locator(`[data-id="${BLOCK}"]`).textContent()) ?? '').trim(); // no cursor label yet: no agent has joined
     const PROMPTS = promptsFor(artifact.id, start);
     note(`the first block ${BLOCK} reads ${JSON.stringify(start)} as seeded`);
-    const seen = await recordDrawing(page, `[data-region="panel"] [data-artifact-record="${artifact.id}"] .ds-doc .ProseMirror[data-editor="live"]`);
+    // the two blocks the run reads (each sample of all 1,455 would weigh about 0.7 MB)
+    const seen = await recordDrawing(page, `[data-region="panel"] [data-artifact-record="${artifact.id}"] .ds-doc .ProseMirror[data-editor="live"]`, { blocks: [BLOCK, OTHER] });
 
     const spec = { ...launchDefaults(id as AppSessionId, sc.repo), model: MODEL, permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
     expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
@@ -362,7 +366,10 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     const warmDrawn = (await seen()).filter((smp) => smp.provisional.length > 0).length;
     note(`G0: the warm-up edit drew ${warmDrawn} provisional sample(s) (its stream ran under the permission card)`);
 
-    // 2: the measured edit, while the owner composes Korean at the end of another paragraph
+    // 2: the measured edit, while the owner composes Korean at the end of another paragraph. The warm-up's outline
+    // stays 4 s after its answer (D11's hold), so the turn's samples start once it is gone: the first outline they
+    // carry is the measured call's.
+    await expect(editor.locator('[data-agent-editing]')).toHaveCount(0, { timeout: 20_000 });
     const editsBefore = calls(s).filter((c) => c.name === 'artifact_edit').length;
     const samplesBefore = (await seen()).length;
     const ended2 = await ask(s, PROMPTS.edit);
@@ -396,7 +403,7 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     await expect.poll(async () => (await seen()).at(-1)?.blocks[OTHER]?.endsWith(typed), { timeout: 15_000 }).toBe(true);
     const otherBefore = (await seen())[samplesBefore - 1]?.blocks[OTHER] ?? '';
     const samples = (await seen()).slice(samplesBefore);
-    const firstPresence = samples.find((smp) => smp.outlines.includes(AGENT_NAME));
+    const firstPresence = samples.find((smp) => smp.outlines.includes(AGENT_NAME) && smp.at >= (call.firstDeltaAt ?? Infinity)); // drawn from this call's stream
     const firstLayer = samples.find((smp) => smp.provisional.some((p) => p.id === call.toolUseId));
     const texts = [...new Set(samples.flatMap((smp) => smp.provisional.filter((p) => p.id === call.toolUseId && p.op === 'replace_text').map((p) => p.text)))];
     const targetNamedAt = deltaCompleting(call, `"${BLOCK}"`); // the delta that named the target block
@@ -423,6 +430,7 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     await test.step('G1: presence within one delta of the call’s start, before the call completes', () => {
       expect(firstPresence, `the agent's outline was drawn; the turn's first samples ${JSON.stringify(samples.slice(0, 4))}`).toBeDefined();
       expect(targetNamedAt, 'the stream named the target block').not.toBeNull();
+      expect(firstPresence!.at, 'presence drawn from the call’s stream, not left from the warm-up').toBeGreaterThanOrEqual(call.firstDeltaAt!);
       expect(firstPresence!.at - targetNamedAt!, 'presence within 1 s of the delta that named the target').toBeLessThanOrEqual(1_000);
       expect(firstPresence!.at, 'presence before the call completed').toBeLessThanOrEqual(call.answeredAt!);
     });

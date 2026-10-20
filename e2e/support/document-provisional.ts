@@ -11,44 +11,67 @@ export interface DrawnSample {
   // block it sits in (the nearest `[data-id]` ancestor, or '' when it stands between blocks)
   provisional: { id: string; op: string; by: string; text: string; color: string; inBlock: string }[];
   outlines: string[]; // the presence outlines' names
-  blocks: Record<string, string>; // every top-level block's own text by id (the layer's widgets and the cursor labels left out)
+  // the top-level blocks' own text by id (the layer's widgets and the cursor labels left out): every one, or only those
+  // the recorder was given
+  blocks: Record<string, string>;
 }
 
-/** Records, from now on, every change of what the editor at `rootSelector` draws; answers the samples so far. */
-export async function recordDrawing(page: Page, rootSelector: string): Promise<() => Promise<DrawnSample[]>> {
-  await page.evaluate((selector) => {
-    const samples: DrawnSample[] = [];
-    let last = '';
-    (window as unknown as { __drawn: DrawnSample[] }).__drawn = samples;
-    const sample = () => {
-      const el = document.querySelector(selector);
-      if (!el) return;
-      const blocks: Record<string, string> = {};
-      for (const block of Array.from(el.querySelectorAll<HTMLElement>(':scope > [data-id]'))) {
+/**
+ * Records, from now on, every change of what the editor at `rootSelector` draws; answers the samples so far. It observes
+ * the editor's root alone (the attributes the layer and presence draw with, the text, the nodes), so the page's other
+ * surfaces cost it nothing. `blocks` names the top-level blocks whose text each sample keeps, for a long document whose
+ * every sample would otherwise clone the whole of it; without it, every top-level block's.
+ */
+export async function recordDrawing(page: Page, rootSelector: string, options: { blocks?: string[] } = {}): Promise<() => Promise<DrawnSample[]>> {
+  await page.evaluate(
+    ({ selector, only }) => {
+      const samples: DrawnSample[] = [];
+      let last = '';
+      (window as unknown as { __drawn: DrawnSample[] }).__drawn = samples;
+      const own = (block: Element) => {
         const clone = block.cloneNode(true) as HTMLElement;
         for (const extra of Array.from(clone.querySelectorAll('[data-provisional], .ProseMirror-yjs-cursor'))) extra.remove();
-        blocks[block.getAttribute('data-id') ?? ''] = (clone.textContent ?? '').replace(/⁠/g, '');
-      }
-      const drawn: Omit<DrawnSample, 'at'> = {
-        provisional: Array.from(el.querySelectorAll<HTMLElement>('[data-provisional]')).map((node) => ({
-          id: node.getAttribute('data-provisional') ?? '',
-          op: node.getAttribute('data-provisional-op') ?? '',
-          by: node.getAttribute('data-provisional-by') ?? '',
-          text: node.textContent ?? '',
-          color: getComputedStyle(node).color,
-          inBlock: node.parentElement?.closest('[data-id]')?.getAttribute('data-id') ?? '',
-        })),
-        outlines: Array.from(el.querySelectorAll<HTMLElement>('[data-agent-editing]')).map((node) => node.getAttribute('data-agent-editing') ?? ''),
-        blocks,
+        return (clone.textContent ?? '').replace(/⁠/g, '');
       };
-      const key = JSON.stringify(drawn);
-      if (key === last) return;
-      last = key;
-      samples.push({ at: Date.now(), ...drawn });
-    };
-    sample();
-    new MutationObserver(sample).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
-  }, rootSelector);
+      let root: Element | null = null;
+      const drawing = new MutationObserver(() => sample());
+      const sample = () => {
+        // the root resolved again once the one observed has left the page (the editor remounted), so the record goes on
+        if (!root?.isConnected) {
+          drawing.disconnect();
+          root = document.querySelector(selector);
+          if (root) drawing.observe(root, { subtree: true, childList: true, characterData: true, attributeFilter: ['data-provisional', 'data-provisional-op', 'data-agent-editing', 'class', 'style'] });
+        }
+        const el = root;
+        if (!el) return;
+        const blocks: Record<string, string> = {};
+        const read = only ? only.map((id) => el.querySelector(`:scope > [data-id="${CSS.escape(id)}"]`)) : Array.from(el.querySelectorAll(':scope > [data-id]'));
+        for (const block of read) if (block) blocks[block.getAttribute('data-id') ?? ''] = own(block);
+        const drawn: Omit<DrawnSample, 'at'> = {
+          provisional: Array.from(el.querySelectorAll<HTMLElement>('[data-provisional]')).map((node) => ({
+            id: node.getAttribute('data-provisional') ?? '',
+            op: node.getAttribute('data-provisional-op') ?? '',
+            by: node.getAttribute('data-provisional-by') ?? '',
+            text: node.textContent ?? '',
+            color: getComputedStyle(node).color,
+            inBlock: node.parentElement?.closest('[data-id]')?.getAttribute('data-id') ?? '',
+          })),
+          outlines: Array.from(el.querySelectorAll<HTMLElement>('[data-agent-editing]')).map((node) => node.getAttribute('data-agent-editing') ?? ''),
+          blocks,
+        };
+        const key = JSON.stringify(drawn);
+        if (key === last) return;
+        last = key;
+        samples.push({ at: Date.now(), ...drawn });
+      };
+      sample();
+      // the body's nodes are watched only to notice a remount: a removed root tells its own observer nothing
+      new MutationObserver(() => {
+        if (!root?.isConnected) sample();
+      }).observe(document.body, { subtree: true, childList: true });
+    },
+    { selector: rootSelector, only: options.blocks ?? null },
+  );
   return () => page.evaluate(() => (window as unknown as { __drawn: DrawnSample[] }).__drawn);
 }
 
