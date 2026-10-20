@@ -71,6 +71,7 @@ export class FakeEngineHost {
   declaresSystemPromptSnapshot = true; // P2-C: whether the binary declares --system-prompt-snapshot
   unavailable = false; // E10: every command answers host_unavailable (a supervisor main cannot reach)
   onCall: ((name: string) => void) | null = null; // E10: runs as each command arrives, before it is answered
+  ptyHost: ((name: string, input: unknown) => unknown) | null = null; // P4 W2-A: answers the pty host's commands (a pane take-over's)
   private readonly readyListeners = new Set<() => void>(); // E10: the session service's, told at becomeReady()
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
   private hostState: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
@@ -127,6 +128,7 @@ export class FakeEngineHost {
   }
 
   readonly dispatch: HostDispatch = async (owner, name, input) => {
+    if (owner === 'pty-host' && this.ptyHost !== null) return { ok: true, value: (await this.ptyHost(name, input)) as never };
     if (owner !== 'engine-host') throw new Error(`unexpected owner ${owner}`);
     this.calls.push({ name, input });
     this.onCall?.(name);

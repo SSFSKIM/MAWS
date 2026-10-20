@@ -554,7 +554,7 @@ export class SessionService {
         const deps: TakeOverDeps = {
           dispatch: this.s.dispatch, sessions: this.s.sessions, env: this.s.env, ...this.deps.takeOver, paneId,
           resumePane: async (target) => pauseTakeOver({
-            processes: readProcesses,
+            processes: this.deps.takeOver?.processes ?? readProcesses,
             write: (data) => paneCall(this.s.dispatch, 'pty.write', { ptyId: target.pane.ptyId, data }),
             foreground: () => paneCall(this.s.dispatch, 'pty.foreground', { ptyId: target.pane.ptyId }),
             signal: (pid, signal) => process.kill(pid, signal),
