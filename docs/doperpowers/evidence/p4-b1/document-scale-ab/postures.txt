@@ -1,0 +1,22 @@
+# The settle guard's lines per measured run (ci-kit mac/settle@v1: load bound 5, display @2x, remote none, computeruse none, 15 s bound), from each job's log.
+# Order on the mini: a1, b1, a2, b2 (the architect's A, B, A, B after CI-opt's go at 06:42Z: quiet flag up, @2x, remote none, computeruse none, load 1.71).
+
+a1  run 39382158609 job 118493536424  e2e:document-scale 2026-10-20T06:57:49Z -> 07:03:06Z
+    settled in 30 s; start: frontmost=Terminal display=2560x1440@2x remote=none load=4.59/3.79/3.49 computeruse=none; release: load=4.01/3.74/3.48; end: load=1.40/2.49/3.00
+
+b1  run 39384826568 job 118502118576  e2e:document-scale 2026-10-20T07:16:25Z -> 07:22:30Z   (launched as b1-ab-b1r3)
+    settled in 30 s; start: frontmost=Terminal display=2560x1440@2x remote=none load=3.29/2.66/2.68 computeruse=none; release: load=2.35/2.49/2.62; end: load=2.11/2.42/2.56
+
+a2  run 39385493461 job 118504266547  e2e:document-scale 2026-10-20T07:25:16Z -> 07:30:36Z   (launched as b1-ab-a2r2)
+    settled in 30 s; start: frontmost=Terminal display=2560x1440@2x remote=none load=2.51/2.47/2.55 computeruse=none; release: load=2.94/2.60/2.59; end: load=2.09/2.25/2.44
+
+b2  run 39386453874 job 118507442899  e2e:document-scale 2026-10-20T07:30:38Z -> 07:36:44Z   (launched as b1-ab-b2r)
+    settled in 31 s; start: frontmost=Terminal display=2560x1440@2x remote=none load=1.92/2.21/2.42 computeruse=none; release: load=1.60/2.10/2.38; end: load=1.68/1.79/2.14
+
+# Strays, outside the pair means (B's base rows only; the margin test drew icons at a 1600 and an 1800 px window).
+
+stray b1   run 39382175044 job 118493583168  e2e:document-scale 2026-10-20T06:47:05Z -> 06:52:44Z   (fe8881a96; the queue started it before a1)
+    settled in 31 s; start: frontmost=Terminal display=2560x1440@2x remote=none load=2.60/3.00/3.52 computeruse=none; release: load=2.25/2.87/3.46
+
+stray b1r2 run 39383570754 job 118498080872  e2e:document-scale 2026-10-20T07:03:08Z -> 07:08:42Z   (89cbb0a80)
+    settled in 30 s; start: frontmost=Terminal display=2560x1440@2x remote=none load=1.57/2.49/2.99 computeruse=none; release: load=1.54/2.39/2.94

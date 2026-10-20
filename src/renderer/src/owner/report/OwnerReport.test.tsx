@@ -82,7 +82,15 @@ describe('the report module draws one text’s marks as cards', () => {
     const unconfirmed = draw(QUESTION);
     expect(screen.getByText(/Sent — not confirmed/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Answer again' })).toBeTruthy();
+    expect(screen.queryByText(/transcript/)).toBeNull();
     unconfirmed.unmount();
+
+    // shown unconfirmed because the session's transcript keeps failing to be read: the card says so
+    withMarks([question(0, { state: 'unconfirmed', text: 'Answering "Which backend?": Postgres', origin: 'answer', members: [], reason: 'transcript-unreadable' })]);
+    const unreadable = draw(QUESTION);
+    expect(screen.getByText('Sent — not confirmed: MAWS can’t read the session’s transcript')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Answer again' })).toBeTruthy();
+    unreadable.unmount();
 
     withMarks([question(0, { state: 'delivered', answer: { text: 'Answering "Which backend?": SQLite, and keep it small\nplease', origin: 'reply', at: '2026-10-09T10:02:00.000Z' } })]);
     const delivered = draw(QUESTION);

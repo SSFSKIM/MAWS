@@ -1,10 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import { BootstrapNotes } from './intents';
 import type { SetupIntent } from '@shared/sessions/intent';
 import { SessionHarness } from '../../../test/support/session-harness';
+import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 
 vi.mock('electron', () => {
   throw new Error('SessionService must not load Electron');
@@ -326,15 +327,89 @@ describe('recovery with kept sessions (E10)', () => {
     handedOff(pin);
   });
 
-  it('a live row still initializing is handed off', async () => {
+  // W2-A (tracker 2026-10-07, the setup-intent row's residue): C3 refuses a send before ready, so a row still
+  // initializing at the quit is waited for beside the boot (no command waits on it), as the setup would have waited, and
+  // the intent keeps the message until its send is recorded; a start of the id meanwhile is refused `starting`
+  it('a live row still initializing is waited for, then sent its first message once and handed off', async () => {
     h.host.script = () => ({ ready: false });
     await start();
     await h.until(() => intentFile(h, id)?.progress.launch != null);
     await bound();
     const pin = pinOf();
     await h.restart({ keep: true });
+    expect(intentFile(h, id)).toMatchObject({ message: MESSAGE, progress: { send: null, lastFailure: null } });
+    await expect(h.service.startSession(id, { message: null, options: {} })).rejects.toMatchObject({ reason: 'starting' });
     nothingRelaunchedOrResent();
+    h.host.readyNow(id);
+    await h.until(() => h.events.some((e) => e.name === 'session.intent.changed' && (e.payload as { intent: unknown }).intent === null));
+    expect(h.host.launches).toEqual([]);
+    expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: id, content: MESSAGE.content }]);
     handedOff(pin);
+    expect(h.host.disk.queues.get(id)).toHaveLength(1); // C3's now
+  });
+
+  it('a live row still initializing that exits instead recovers as a row that exited: the intent fails with its message', async () => {
+    h.host.script = () => ({ ready: false });
+    await start();
+    await h.until(() => intentFile(h, id)?.progress.launch != null);
+    await bound();
+    const pin = pinOf();
+    await h.restart({ keep: true });
+    h.host.exitNow(id);
+    await h.until(() => intentFile(h, id)?.progress.lastFailure != null);
+    nothingRelaunchedOrResent();
+    expect(h.index.sessions.get(id)).toBeNull();
+    expect(intentFile(h, id)).toMatchObject({ message: MESSAGE, progress: { engineSessionId: pin, send: null, lastFailure: { phase: 'launching', message: 'MAWS quit before the session started' } } });
+  });
+
+  // W2-A: the setup rewinds a fork with a rewind point and then sends; the recovery does the same, never rewinding twice
+  // (a rewind the host saw succeed is on its event log as `boundary.rewind`; the engine refuses a second rewind to a
+  // target it already cut, `target_not_found`)
+  describe('a fork with a rewind point', () => {
+    const REWIND_TO = 'u-rewind' as MessageUuid;
+    const fork = async (): Promise<AppSessionId> => {
+      const SOURCE = sessionIdFor(0xf2a);
+      const source = h.index.sessions.upsertFromSummary(summary({ sessionId: SOURCE, directory: h.work })).record;
+      h.writeTranscript(h.work, SOURCE);
+      const outcome = await h.service.fork(source.appId, { kind: 'inPlace' }, { message: MESSAGE, rewindTo: REWIND_TO });
+      return outcome.appSessionId;
+    };
+    const rewindsAndSends = () => h.host.calls.map((c) => c.name).filter((name) => name === 'session.rewind' || name === 'session.send');
+
+    it('whose row was initializing at the quit is rewound once ready, then sent its first message once', async () => {
+      h.host.script = () => ({ ready: false });
+      const forked = await fork();
+      await h.until(() => intentFile(h, forked)?.progress.launch != null);
+      await h.restart({ keep: true });
+      h.host.readyNow(forked);
+      await h.until(() => intentFile(h, forked) === null);
+      expect(rewindsAndSends()).toEqual(['session.rewind', 'session.send']);
+      expect(h.host.calledWith('session.rewind')).toMatchObject([{ appSessionId: forked, targetMessageUuid: REWIND_TO, files: false }]);
+      expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: forked, content: MESSAGE.content }]);
+      expect(h.host.launches).toEqual([]);
+    });
+
+    it('rewound before the quit, its first message never reaching C3: not rewound again, sent once', async () => {
+      h.host.send = 'hang';
+      const forked = await fork();
+      await h.until(() => h.host.calls.some((c) => c.name === 'session.send'));
+      await h.restart({ keep: true });
+      expect(rewindsAndSends()).toEqual(['session.send']);
+      expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: forked, content: MESSAGE.content }]);
+      expect(intentFile(h, forked)).toBeNull();
+    });
+
+    it('whose rewind the engine refuses at recovery is not sent: the intent keeps its message and says why', async () => {
+      h.host.script = () => ({ ready: false });
+      const forked = await fork();
+      await h.until(() => intentFile(h, forked)?.progress.launch != null);
+      await h.restart({ keep: true });
+      h.host.rewound = false;
+      h.host.readyNow(forked);
+      await h.until(() => intentFile(h, forked)?.progress.lastFailure != null);
+      expect(rewindsAndSends()).toEqual(['session.rewind']);
+      expect(intentFile(h, forked)).toMatchObject({ message: MESSAGE, progress: { send: null, lastFailure: { message: expect.stringContaining(`the fork could not rewind to ${REWIND_TO}`) } } });
+    });
   });
 
   it('a first message C3 queued on a live row is left to the host', async () => {

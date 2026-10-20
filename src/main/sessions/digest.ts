@@ -69,33 +69,52 @@ function firstLine(block: { type: string } & Record<string, unknown>): string | 
 // (2.1.283's `cost-state` entry) and a resumed process restores it, so the resumed total continues the conversation's
 // (resume-fork-start ends at 0.02668, the resume of the same id, resume-fork-no-replay, reads 0.02951 after one short
 // turn, and the next resume 0.03220). The restored part is the previous process's final total: the session's cost is
-// what every finished process added beyond what it restored, plus what the live one has added. A process that restored
-// nothing (it was resumed while the previous one still ran, pass2/resume-live-second) shows as a first total below the
-// restored figure, and counts from zero. Not covered: a process killed before it could record its total (SIGKILL)
-// leaves an older `cost-state` to restore, which the ledger cannot tell apart; and a fork restores its source's total
-// (resume-fork-cli), so a forked session starts at its source's cost. A synthesised `turn.ended` (`seq: null`, C4's
-// backfill from disk, where no accounting is recorded per turn) carries no cost and leaves the ledger alone.
+// what every finished process added beyond what it restored, plus what the live one has added. A resume the ledger
+// cannot place alone takes its restored part from the transcript's last `cost-state` (restored-cost.ts), which the read
+// model reads and applies as a correction (`restoreCost`): a first total below the restored figure, counted from zero
+// until the transcript answers (a process resumed while the previous one still ran restored nothing,
+// pass2/resume-live-second; one resumed after a process killed before it could record its total, SIGKILL, restored the
+// older figure on disk), and any first total after an exit by a signal. Not covered: a fork restores its source's
+// total (resume-fork-cli, p1-fork-session-flag) while its own transcript carries none of the source's `cost-state`, so a
+// forked session starts at its source's cost. A synthesised `turn.ended` (`seq: null`, C4's backfill from disk, where no
+// accounting is recorded per turn) carries no cost and leaves the ledger alone.
 export interface CostLedger {
   finishedUsd: number; // what the processes that exited added beyond what each restored
   restoredUsd: number; // the live process's restored part: the previous process's final total
   runningUsd: number; // the live process's running total, restored part included
   awaitingFirst: boolean; // a process exited and its successor has reported no total yet
+  signalled: boolean; // that exit was a signal's: the process may have recorded no total (SIGKILL)
+  // while the transcript is to say what the live process restored: its first total and its predecessor's last sampled
+  // total; a new object per process, so a correction read for one never lands on its successor
+  restoring: { firstUsd: number; previousUsd: number } | null;
 }
 
 // A session's ledger when its fold begins: a cost already on the digest (scripted by the stub, seeded, or folded before
 // main restarted) is the live process's running total, all of it its own.
-export const costLedger = (d: SessionDigest): CostLedger => ({ finishedUsd: 0, restoredUsd: 0, runningUsd: d.cost?.totalUsd ?? 0, awaitingFirst: false });
+export const costLedger = (d: SessionDigest): CostLedger => ({ finishedUsd: 0, restoredUsd: 0, runningUsd: d.cost?.totalUsd ?? 0, awaitingFirst: false, signalled: false, restoring: null });
 
 // The session's cost the ledger holds.
 export const costOf = (ledger: CostLedger) => ledger.finishedUsd + ledger.runningUsd - ledger.restoredUsd;
 
 // A process's running total: the first one after an exit tells whether the process restored its predecessor's.
-const sample = (ledger: CostLedger, totalUsd: number): CostLedger => ({
-  ...ledger,
-  restoredUsd: ledger.awaitingFirst && totalUsd < ledger.restoredUsd ? 0 : ledger.restoredUsd,
-  runningUsd: totalUsd,
-  awaitingFirst: false,
-});
+const sample = (ledger: CostLedger, totalUsd: number): CostLedger => {
+  if (!ledger.awaitingFirst) return { ...ledger, runningUsd: totalUsd };
+  const below = totalUsd < ledger.restoredUsd;
+  const restoring = below || ledger.signalled ? { firstUsd: totalUsd, previousUsd: ledger.restoredUsd } : null;
+  return { ...ledger, restoredUsd: below ? 0 : ledger.restoredUsd, runningUsd: totalUsd, awaitingFirst: false, restoring };
+};
+
+// The transcript's word on what the live process restored (restored-cost.ts: its last `cost-state` total, 0 when it holds
+// none, null when it cannot say). A process's first total carries what it restored, so a figure above it was recorded
+// after the process started (its predecessor still ran when it was resumed) and the ledger's own rule stands. The
+// restored part is at most the predecessor's last sampled total: a figure above that one is what the predecessor spent
+// after its last sample and recorded at its shutdown (stopped mid-turn, then killed past the stop ladder), its own spend
+// and not its successor's, so the last sample stays the restored part.
+export function restoreCost(ledger: CostLedger, restoredUsd: number | null): CostLedger {
+  if (ledger.restoring === null) return ledger;
+  const taken = restoredUsd !== null && restoredUsd <= ledger.restoring.firstUsd;
+  return { ...ledger, restoredUsd: taken ? Math.min(restoredUsd, ledger.restoring.previousUsd) : ledger.restoredUsd, restoring: null };
+}
 
 export function foldCost(ledger: CostLedger, event: SessionEvent): CostLedger {
   if (event.agentId !== null || event.parentToolUseId !== null) return ledger; // a child's cost is inside the parent's total
@@ -105,7 +124,7 @@ export function foldCost(ledger: CostLedger, event: SessionEvent): CostLedger {
     case 'usage.sample':
       return sample(ledger, event.costUsd);
     case 'process.exited':
-      return { finishedUsd: costOf(ledger), restoredUsd: ledger.runningUsd, runningUsd: ledger.runningUsd, awaitingFirst: true };
+      return { finishedUsd: costOf(ledger), restoredUsd: ledger.runningUsd, runningUsd: ledger.runningUsd, awaitingFirst: true, signalled: event.signal !== null, restoring: null };
     default:
       return ledger;
   }

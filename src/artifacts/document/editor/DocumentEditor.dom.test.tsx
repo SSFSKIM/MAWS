@@ -18,6 +18,9 @@ import type { MentionSource, MentionTarget } from './MentionPicker';
 import type { CommentOverlayProps, DocumentComments } from './comments/surface';
 import { getThread, liveThreadIds } from '../threads';
 import { MemoryHistory } from './history/memory-history';
+import { TextSelection } from '@tiptap/pm/state'; // P4-B4 at the B1 merge
+import { activeThread, commentSelection } from './comments/plugins'; // P4-B4 at the B1 merge
+import { now, owner as ownerActor, select } from './comments/test-support'; // P4-B4 at the B1 merge
 import { TAB, World, doc, endOf, para, readOnlySwitch, ticks, until } from './test-world';
 
 let world: World | null = null;
@@ -1104,7 +1107,7 @@ describe('a reveal asked from outside', () => {
     };
     const view = (reveal: DocumentReveal | null) => <DocumentEditor artifactId="doc1" handle={handle} host={owner} history={history!} reveal={reveal} onRevealed={revealed} onEditor={onEditor} />;
     const rendered = render(view(first));
-    return { editor: () => current, revealed, scrolled, rerender: (reveal: DocumentReveal | null) => rendered.rerender(view(reveal)) };
+    return { editor: () => current, handle, revealed, scrolled, rerender: (reveal: DocumentReveal | null) => rendered.rerender(view(reveal)) };
   }
   const selectedTab = () => screen.getByRole('tab', { selected: true }).textContent;
   const startOf = (editor: Editor, id: string) => {
@@ -1134,6 +1137,25 @@ describe('a reveal asked from outside', () => {
     rerender({ serial: 3, location: { tab: 't2', block: 'a1' } }); // the block names its own tab
     await until(() => editor()?.getText() === 'First tab text' && editor()!.state.selection.head === startOf(editor()!, 'a1'), 'the first tab’s block');
     expect(revealed.mock.calls).toEqual([[2], [3]]);
+  });
+
+  // At the merge with P4-B1: a reveal leaves B1's active thread alone even when its block starts inside an open passage
+  // (the caret lands at the block's start, where the comment mark, not inclusive, is not yet the caret's), so a link or
+  // show_pane never opens a margin card by itself.
+  it('puts the caret in a commented passage without activating its thread', async () => {
+    const { editor, handle, rerender } = await mountRevealing(null);
+    await until(() => editor()?.getText() === 'First tab text', 'the first tab');
+    act(() => {
+      select(editor()!, 'First tab text');
+      commentSelection(editor()!, handle.doc, { threadId: 'r1', tabId: TAB, by: ownerActor, at: now(), body: 'About the first tab' });
+    });
+    act(() => void editor()!.commands.setActiveThread(null));
+    act(() => editor()!.view.dispatch(editor()!.state.tr.setSelection(TextSelection.atEnd(editor()!.state.doc))));
+    expect(activeThread(editor()!.state)).toBeNull();
+    rerender({ serial: 6, location: { block: 'a1' } });
+    await until(() => editor()!.state.selection.head === startOf(editor()!, 'a1'), 'the caret at the block');
+    await ticks(5);
+    expect(activeThread(editor()!.state)).toBeNull();
   });
 
   it('opens the history rail previewing a version named by its id', async () => {

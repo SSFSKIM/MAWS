@@ -1,0 +1,120 @@
+/* X36, the shared comment card (ThreadCard.tsx; P4-B1): app chrome wherever it is drawn (a document's margin and panel,
+   a deck's or a design's pin popover), so it reads the app's tokens only. */
+.thread-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  padding: calc(var(--space) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-size: var(--text-ui);
+  cursor: default;
+}
+.thread-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.thread-card[data-status='resolved'] {
+  background: var(--bg);
+  color: var(--fg-muted);
+}
+/* the surface's active thread, in the passage's highlight colour */
+.thread-card[aria-current='true'] {
+  border-color: var(--warning);
+  box-shadow: 0 0 0 1px var(--warning);
+}
+.thread-card-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-left: 3px solid var(--warning);
+  padding: 0 0 0 calc(var(--space) * 2);
+  cursor: pointer;
+}
+.thread-card-quote-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.thread-card-tab,
+.thread-card-note,
+.thread-card-more {
+  margin: 0;
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+}
+.thread-card-messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.thread-card-message {
+  display: flex;
+  flex-direction: column;
+}
+.thread-card-author {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+}
+.thread-card-chip {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-sm);
+}
+.thread-card-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thread-card-reply {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space);
+}
+.thread-card-reply-field {
+  flex: 1;
+  min-width: 0;
+  max-height: calc(var(--space) * 30);
+  field-sizing: content;
+  resize: none;
+  font: inherit;
+  font-size: var(--text-ui-sm);
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space) calc(var(--space) * 2);
+}
+.thread-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.thread-card-button {
+  font: inherit;
+  min-width: calc(var(--space) * 7);
+  height: calc(var(--space) * 7);
+  padding: 0 calc(var(--space) * 1.5);
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+.thread-card-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.thread-card-button:disabled {
+  color: var(--fg-faint);
+}

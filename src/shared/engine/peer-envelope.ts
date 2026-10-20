@@ -7,7 +7,9 @@
 // pieces inside `<system-reminder>`, with the "while you were working" header and a reply suffix) (E7 M0,
 // `pass3/e7-peer-a` seq 73 and 258, `e7-peer-transcripts/db45d92e…` line 74). The envelope is `<cross-session-message
 // …>` from another session or `<agent-message from="<agentId>">` from an in-process agent's SendMessage to the main
-// conversation (C8b, `test/fixtures/engine/handback-pointer.jsonl` seq 207).
+// conversation (C8b, `test/fixtures/engine/handback-pointer.jsonl` seq 207), or `<teammate-message teammate_id="<name>"
+// …>` from a teammate to the lead of a team an interactive terminal formed (E11 S2(d), 2.1.293: `pass3/e7-team-terminal`,
+// the lead's transcript line 35), which names its sender by name and no address.
 //
 // A message sminos sends through the engine's messaging socket opens its body with sminos's frame line, naming the
 // event, and ends it with a reply line; both are for the model. The body drawn cuts them (the agent_message row already
@@ -16,7 +18,7 @@ import type { ContentBlock, EventPayload } from '../graph/events';
 import type { AgentId, MessageUuid } from '../graph/ids';
 
 export interface PeerEnvelope {
-  kind: 'cross-session';
+  kind: 'cross-session' | 'teammate';
   from: string; // '' when the envelope names no address
   fromSession: string | null;
   fromName: string | null;
@@ -43,8 +45,8 @@ type SubagentMessagePayload = Extract<EventPayload, { kind: 'subagent.message' }
 // §38.23.2: the two headers assembled from "Another Claude session sent a message" and the standalone peer literal.
 const HEADER = /^(Another Claude session sent a message( while you were working)?:|A peer session sent a message while you were working:)\n/;
 const SYSTEM_REMINDER = /^<system-reminder>\n([\s\S]*)\n<\/system-reminder>$/;
-const OPENING = /^<(cross-session-message|agent-message)((?: [a-z-]+="[^"]*")*)>\n/;
-const ATTRIBUTE = / ([a-z-]+)="([^"]*)"/g;
+const OPENING = /^<(cross-session-message|agent-message|teammate-message)((?: [a-z_-]+="[^"]*")*)>\n/;
+const ATTRIBUTE = / ([a-z_-]+)="([^"]*)"/g;
 const DESCENDANT_TRAILER = 'That "other Claude session" is an agent working inside this same session';
 const HOST_INJECTED = 'is a host session id that SendMessage cannot reach';
 const HANDBACK_FRAME = /^\[Subagent hand-back\][^\n]*The report follows:\n/;
@@ -91,14 +93,18 @@ export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | nu
     const from = attributes.get('from');
     return from ? { kind: 'agent', fromAgentId: from, body, handback: HANDBACK_FRAME.test(body) } : null;
   }
-  const from = attributes.get('from') ?? '';
-  return {
-    kind: 'cross-session', from, fromSession: attributes.get('from-session') ?? null, fromName: attributes.get('from-name') ?? null,
-    fromMode: attributes.get('from-mode') ?? null, fromPlugin: attributes.get('from-plugin') ?? null,
-    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], ...sminosParts(body),
+  const delivery = {
     midTurn: header === null || header[0].includes('while you were working'),
     lineage: trailer.includes(DESCENDANT_TRAILER) ? 'descendant' : 'peer',
     replyable: !trailer.includes(HOST_INJECTED),
+  } as const;
+  if (tag === 'teammate-message') {
+    return { kind: 'teammate', from: '', fromSession: null, fromName: attributes.get('teammate_id') ?? null, fromMode: null, fromPlugin: null, hopChain: [], body, frame: null, ...delivery };
+  }
+  return {
+    kind: 'cross-session', from: attributes.get('from') ?? '', fromSession: attributes.get('from-session') ?? null, fromName: attributes.get('from-name') ?? null,
+    fromMode: attributes.get('from-mode') ?? null, fromPlugin: attributes.get('from-plugin') ?? null,
+    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], ...sminosParts(body), ...delivery,
   };
 }
 
@@ -125,7 +131,7 @@ export function messageText(content: string | ContentBlock[]): string {
 }
 
 // The X1 event a peer `user` frame or record stands for beside its `user.message` (Design §4): `peer.message` for a
-// cross-session envelope, `subagent.message` for an in-process agent's. `origin` is the frame's or record's own
+// cross-session or teammate envelope, `subagent.message` for an in-process agent's. `origin` is the frame's or record's own
 // `origin` object, which fills what the text never carries (the hop chain) or lacks (Decision Log 22). Null when the
 // text is no envelope: the message then stays a plain bubble. A message with no address to answer is not replyable:
 // `unknown` is the engine's stand-in for a sender whose envelope gave none (sminos's delivery, `origin.from`), no address.

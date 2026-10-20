@@ -54,7 +54,8 @@ const frame = (toolUseId: string, state: ArtifactProvisional['state'], ops: Prov
   ops,
 });
 
-async function mount(comments?: { overlay(props: CommentOverlayProps): null }) {
+// P4-B1: `commentsView` 'hide' keeps the margin off, so the comment overlay is drawn over the frame
+async function mount(comments?: { overlay(props: CommentOverlayProps): null }, commentsView?: 'expand' | 'hide') {
   world = new World(content());
   const handle = openMemoryHandle(world.host, { log: () => {} });
   handles.push(handle);
@@ -67,6 +68,7 @@ async function mount(comments?: { overlay(props: CommentOverlayProps): null }) {
       host={memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' })}
       onEditor={(e) => (editor = e)}
       {...(comments ? { comments: { opened: () => {}, overlay: comments.overlay } } : {})}
+      {...(commentsView ? { commentsView } : {})}
     />,
   );
   await until(() => editor !== null && editor.getText().length > 0, 'the editor to bind');
@@ -271,12 +273,15 @@ describe('the provisional layer', () => {
 
   it('bumps the comment overlay’s layout as the layer grows', async () => {
     const keys = new Set<string>();
-    const { container } = await mount({
-      overlay: ({ layoutKey }) => {
-        keys.add(layoutKey);
-        return null;
+    const { container } = await mount(
+      {
+        overlay: ({ layoutKey }) => {
+          keys.add(layoutKey);
+          return null;
+        },
       },
-    });
+      'hide', // P4-B1: the overlay over the frame, where its key carries the passages' moves
+    );
     await ticks(30);
     const settled = keys.size;
     for (const text of ['A', 'A longer', 'A longer text']) world!.host.announce(frame('tu1', 'streaming', [{ op: 'insert', after: 'p3', text }]));
@@ -284,6 +289,28 @@ describe('the provisional layer', () => {
     await until(() => keys.size > settled, 'a layout bump');
     await ticks(30);
     expect(keys.size - settled, 'coalesced to the animation frame').toBeLessThanOrEqual(2);
+  });
+
+  // P4-B1: with the margin drawn the growth re-lays the margin in the page frame's frame callback (`relayoutRef`), and
+  // the overlay it hosts (in flow, its key carrying no moves) is not drawn again for it
+  it.each([['with', true], ['without', false]] as const)('re-lays the margin as the layer grows, %s a comment surface, coalesced to the animation frame, without drawing its overlay again', async (_, surface) => {
+    const keys: string[] = [];
+    const overlay = (props: CommentOverlayProps) => {
+      keys.push(props.layoutKey);
+      return null;
+    };
+    const { container } = await mount(surface ? { overlay } : undefined);
+    const margin = container.querySelector<HTMLElement>('.doc-margin[data-margin-tier]')!;
+    expect(margin.dataset.marginTier, 'the margin drawn').not.toBe('off');
+    await ticks(30);
+    const passes = () => Number(margin.dataset.relayouts ?? 0);
+    const settled = { passes: passes(), calls: keys.length };
+    for (const text of ['A', 'A longer', 'A longer text']) world!.host.announce(frame('tu1', 'streaming', [{ op: 'insert', after: 'p3', text }]));
+    await until(() => drawn(container)[0]?.textContent === 'A longer text', 'the last frame');
+    await until(() => passes() > settled.passes, 'a margin layout pass');
+    await ticks(30);
+    expect(passes() - settled.passes, 'coalesced to the animation frame').toBeLessThanOrEqual(2);
+    expect(keys.length, 'the hosted overlay not drawn again').toBe(settled.calls); // its key is the margin's constant one: the calls, not the distinct keys, say whether it was drawn
   });
 });
 

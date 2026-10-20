@@ -9,7 +9,7 @@ import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
-import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
+import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
 export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/[^\r\n]+\.(?:txt|json))(?=[.;\s]|$)/;
@@ -180,15 +180,25 @@ function peerMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillC
     ctx.lastAssistantWasApiError = false;
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
   }
-  events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: record.isMeta === true, origin: 'peer', bash: null });
+  events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: record.isMeta === true || isTeammateMessage(record), origin: 'peer', bash: null });
   const companion = peerEventsOf(messageText(content), uuid, record.origin);
   if (companion) events.push({ ...base(), ...companion });
 }
 
+// E11 S2(d): a teammate's message to the lead of a team an interactive terminal formed (2.1.293; pass3/e7-team-terminal,
+// the lead's transcript line 35) is a plain `user` record, no origin and no `isMeta`, whose text is the header and a
+// `<teammate-message teammate_id=…>` envelope. It is a peer message all the same (its turn the engine's, its message
+// synthetic like the live peer frame), never the owner's prompt.
+function isTeammateMessage(record: TranscriptRecord): boolean {
+  const content = messageContent(record);
+  return record.type === 'user' && record.origin === undefined && typeof content === 'string' && parsePeerMessage(content)?.kind === 'teammate';
+}
+
 // A `user` record of the peer origin that carries text: a string, or blocks with a text block and no tool result (an
-// image beside the text too, whose text blocks the companion parses, as live parses the same frame's).
+// image beside the text too, whose text blocks the companion parses, as live parses the same frame's); or a teammate's.
 function isPeerPrompt(record: TranscriptRecord): boolean {
-  if (record.type !== 'user' || (record.origin as { kind?: unknown } | undefined)?.kind !== 'peer') return false;
+  if (record.type !== 'user') return false;
+  if ((record.origin as { kind?: unknown } | undefined)?.kind !== 'peer') return isTeammateMessage(record);
   const content = messageContent(record);
   if (typeof content === 'string') return true;
   return Array.isArray(content) && content.some((block) => isContentBlock(block) && block.type === 'text') && content.every((block) => isContentBlock(block) && block.type !== 'tool_result');

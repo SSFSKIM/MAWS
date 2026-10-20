@@ -13,6 +13,13 @@ import type { DocumentHarnessApi, Replica } from '../src/renderer/src/harness/do
 import { keystrokes, type Step } from './support/hangul';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
+// P4-B1 (LC-1 item 1; docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): a margin entry's top sits 4 px below its
+// passage's first line box top in both tiers (MARGIN_CARD_INSET_PX in src/artifacts/comments/margin-layout.ts; Docs'
+// Minimize puts its icons at the line's top + 4.5 too), and a card sits 26 px from the page (LC-1 item 6: Docs' page
+// gutter, `--doc-margin-page-gutter`)
+const CARD_INSET_PX = 4;
+const PAGE_GUTTER_PX = 26;
+
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
 
 type HarnessWindow = Window & { __maws_document: DocumentHarnessApi };
@@ -274,7 +281,7 @@ test.describe('the document editor', () => {
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
     await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
-    await expect(card.getByRole('heading')).toHaveText('Field notes, Notes');
+    await expect(card.getByRole('heading')).toHaveText('Field notes'); // P4-B1 (tracker L275): a one-tab document names no tab
     // the host's doc has the thread once replica A's update arrived over its port (as the next case reads it)
     const hostThreads = () => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
     await expect.poll(async () => (await hostThreads()).length, { message: 'the new thread at the host' }).toBe(1);
@@ -282,17 +289,43 @@ test.describe('the document editor', () => {
     expect(threads).toEqual([{ id: expect.any(String), status: 'open', quote: QUOTE, messages: [] }]);
     const threadId = threads[0]!.id;
 
-    // anchored: the card's top-left corner sits under the passage's first line, 4 px below it
+    // P4-B1: the card is hosted in the margin's stack at the passage's first line (the two replicas side by side leave
+    // no side space, so the margin is the icon rail and the compose card sits in its overlay over the icon); before
+    // P4-B1 it was anchored 4 px under the passage over the frame
     const mark = content(page, 'a').locator(`[data-thread="${threadId}"]`).first();
     await expect(mark).toHaveText(QUOTE);
     await expect(content(page, 'a').locator(`.comment-active.comment-${threadId}`)).toHaveText(QUOTE); // the display's decoration
+    const margin = replica(page, 'a').getByRole('region', { name: 'Comments' });
+    await expect(margin.locator('[data-margin-entry][data-compose] [data-comment-card]')).toBeVisible();
     const line = await mark.evaluate((el) => {
       const r = el.getClientRects()[0]!;
-      return { left: r.left, bottom: r.bottom };
+      return { left: r.left, top: r.top };
     });
-    const box = (await card.boundingBox())!;
-    expect(Math.abs(box.y - (line.bottom + 4))).toBeLessThanOrEqual(2);
-    expect(Math.abs(box.x - line.left)).toBeLessThanOrEqual(2);
+    // the stack's moves animate (350 ms), so the card is read once it has settled at the line
+    await expect.poll(async () => Math.abs((await card.boundingBox())!.y - line.top - CARD_INSET_PX), { message: 'the compose card at the passage’s first line' }).toBeLessThanOrEqual(2);
+    // P4-B1 (the fix wave): with less side space than the icon rail's 33 px past the page gutter, the rail hangs over
+    // the page's padding without moving the page: the page at the box's left edge, the icon and the card inside it (the
+    // rail moved by a negative margin had pushed the page right and both past the box's right edge)
+    const across = await replica(page, 'a')
+      .locator('.ds-doc')
+      .evaluate((box) => {
+        const outer = box.getBoundingClientRect();
+        const pageBox = box.querySelector('.ds-doc-page')!.getBoundingClientRect();
+        const rightOf = (selector: string) => box.querySelector(selector)!.getBoundingClientRect().right;
+        return {
+          side: box.clientWidth - pageBox.width,
+          left: outer.left + box.clientLeft,
+          right: outer.left + box.clientLeft + box.clientWidth,
+          page: pageBox.left,
+          icon: rightOf('[data-margin-entry][data-compose] .doc-margin-icon'),
+          card: rightOf('[data-margin-entry][data-compose] [data-comment-card]'),
+        };
+      });
+    if (across.side < 33) {
+      expect(Math.abs(across.page - across.left), 'the page at the box’s left edge').toBeLessThanOrEqual(1);
+      expect(across.icon, 'the icon inside the box').toBeLessThanOrEqual(across.right + 1);
+      expect(across.card, 'the compose card inside the box').toBeLessThanOrEqual(across.right + 1);
+    }
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
 
     await card.getByRole('button', { name: 'Resolve' }).click();
@@ -304,15 +337,17 @@ test.describe('the document editor', () => {
 
     await toolbar(page, 'b').getByRole('button', { name: /^Comments/ }).click();
     const resolved = replica(page, 'b').getByRole('region', { name: 'Resolved (1)' });
-    await expect(resolved.getByRole('article')).toHaveAttribute('data-thread', threadId);
+    await expect(resolved.getByRole('group')).toHaveAttribute('data-thread', threadId); // P4-B1: X36's card is a group
     await resolved.getByRole('button', { name: 'Reopen' }).click();
     await expect(content(page, 'a').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
   });
 
-  // M4's fix wave: in replica B a click on the passage A commented draws its thread active and opens B's rail on it,
-  // selected; a reply typed there lands in the thread (the host's and A's rail); a click on plain text draws none.
-  test('a click on a highlighted passage selects its thread in the rail, which takes a reply', async () => {
+  // M4's fix wave, re-read for P4-B1's margin: in replica B a click on the passage A commented draws its thread active
+  // in B's margin (the two replicas side by side leave no side space beside the page, so the margin is the icon rail
+  // and the active thread's card is overlaid over its icon); a reply typed there lands in the thread (the host's and
+  // A's panel); a click on plain text draws none and the overlaid card goes.
+  test('a click on a highlighted passage draws its thread active in the margin, whose card takes a reply', async () => {
     const { page } = maws;
     const QUOTE = 'river runs north';
     await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', QUOTE] as const);
@@ -327,20 +362,124 @@ test.describe('the document editor', () => {
 
     await passage.click();
     await expect(content(page, 'b').locator(`.comment-active.comment-${threadId}`)).toHaveText(QUOTE);
-    const rail = replica(page, 'b').getByRole('complementary', { name: 'Comments' });
-    const item = rail.locator(`article[data-thread="${threadId}"]`);
-    await expect(item).toHaveAttribute('aria-current', 'true');
+    const margin = replica(page, 'b').getByRole('region', { name: 'Comments' });
+    await expect(margin).toHaveAttribute('data-margin-tier', 'icons'); // 800 px per replica: no side space beside the page
+    await expect(replica(page, 'b').getByRole('complementary', { name: 'Comments' })).toHaveCount(0); // the panel stays closed
+    const card = margin.locator(`.doc-margin-overlay [data-thread="${threadId}"]`);
+    await expect(card).toHaveAttribute('aria-current', 'true');
 
-    await item.getByRole('textbox', { name: 'Reply' }).fill('Which river?');
-    await item.getByRole('textbox', { name: 'Reply' }).press('Enter');
-    await expect(item.getByRole('listitem')).toHaveText(['YouWhich river?']);
+    await card.getByRole('textbox', { name: 'Reply' }).fill('Which river?');
+    await card.getByRole('textbox', { name: 'Reply' }).press('Enter');
+    await expect(card.getByRole('listitem')).toHaveText(['YouWhich river?']);
     await expect.poll(async () => (await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads()))[0]!.messages).toEqual(['Which river?']);
     await toolbar(page, 'a').getByRole('button', { name: /^Comments/ }).click();
     await expect(replica(page, 'a').locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouWhich river?']);
 
     await content(page, 'b').getByText('The collaborator types here.').click();
     await expect(content(page, 'b').locator('.comment-active')).toHaveCount(0);
-    await expect(item).not.toHaveAttribute('aria-current', 'true');
+    await expect(margin.locator('.doc-margin-overlay')).toHaveCount(0);
+  });
+
+  // P4-B1 (the P4 spec §2 item 1; the prior art's P1, L2, R1, R2, R3, N6): the replicas stacked, each the window's
+  // width, so the margin has room for cards. A's two threads are cards at their passages' lines; the agent's reply
+  // grows the first card and the second is pushed down while the active thread stays; the owner's Enter above both
+  // moves both cards down by one line, with the stack's own layout, not a scroll's; resolving the last thread un-reserves
+  // the margin and the page centres again.
+  test('margin: an agent reply grows a card while the owner types, the stack re-laid, the active thread unchanged', async () => {
+    const { page } = maws;
+    await page.evaluate(() => {
+      location.hash = 'document-stack';
+    });
+    await page.waitForFunction(() => (window as unknown as Partial<HarnessWindow>).__maws_document?.ready() === true);
+    const api = () => (window as unknown as HarnessWindow).__maws_document;
+    const threads = () => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
+    const margin = replica(page, 'a').getByRole('region', { name: 'Comments' });
+    const pageBox = async () => (await replica(page, 'a').locator('.ds-doc-page').boundingBox())!;
+    const centredLeft = (await pageBox()).x;
+
+    // a kept thread on each of two passages (the card's Resolve keeps it; Reopen from the panel brings it back)
+    const keep = async (id: string, quote: string): Promise<string> => {
+      const before = new Set((await threads()).map((t) => t.id));
+      await page.evaluate(([blockId, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', blockId, text), [id, quote] as const);
+      await toolbar(page, 'a').getByRole('button', { name: 'Comment', exact: true }).click();
+      const card = replica(page, 'a').locator('[data-comment-card]');
+      await expect(card).toBeVisible();
+      await expect(margin.locator('[data-margin-entry][data-compose] [data-comment-card]'), 'the compose card hosted in the margin').toBeVisible();
+      await card.getByRole('button', { name: 'Resolve' }).click();
+      await expect(card).toHaveCount(0);
+      const threadId = (await threads()).find((t) => !before.has(t.id))!.id;
+      await toolbar(page, 'a').getByRole('button', { name: /^Comments/ }).click();
+      const panel = replica(page, 'a').getByRole('complementary', { name: 'Comments' });
+      await panel.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
+      await toolbar(page, 'a').getByRole('button', { name: /^Comments/ }).click();
+      await expect(panel).toHaveCount(0);
+      return threadId;
+    };
+    // two lines between the two passages (three line pitches): the compact cards fit at their lines, the active card
+    // with the agent's reply does not, so the reply's growth pushes the second
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.caretAtEnd('a', 'para0002'));
+    for (const line of ['Agenda item one.', 'Agenda item two.']) {
+      await page.keyboard.press('Enter');
+      await page.keyboard.type(line);
+    }
+    await expect(content(page, 'a').locator('p')).toHaveCount(5);
+    const t1 = await keep('para0002', 'river runs north');
+    const t2 = await keep('para0003', 'collaborator types');
+    await expect(margin).toHaveAttribute('data-margin-tier', 'cards');
+    const entry = (id: string) => margin.locator(`[data-margin-entry="${id}"]`);
+    await expect(entry(t1)).toBeVisible();
+    await expect(entry(t2)).toBeVisible();
+    // N6 as Docs (LC-1 item 6): the page and the column's reserve centre as one unit, so the page moved left by half the
+    // reserve; each card sits the page gutter from the page
+    const reserve = await margin.evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue('--doc-margin-reserve')));
+    expect(reserve, 'the margin reserved').toBeGreaterThan(0);
+    const moved = await pageBox();
+    expect(Math.abs(centredLeft - moved.x - reserve / 2), 'the page moved left by half the reserve (N6)').toBeLessThanOrEqual(1);
+    const entryLeft = async (id: string) => (await entry(id).boundingBox())!.x;
+    expect(Math.abs((await entryLeft(t1)) - (moved.x + moved.width) - PAGE_GUTTER_PX), 'the card at the page gutter').toBeLessThanOrEqual(1);
+
+    // P1: each card's top at its passage's first line
+    const lineTop = (id: string) => content(page, 'a').locator(`[data-thread="${id}"]`).first().evaluate((el) => el.getClientRects()[0]!.top);
+    const entryTop = async (id: string) => (await entry(id).boundingBox())!.y;
+    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX)).toBeLessThanOrEqual(2);
+    expect(Math.abs((await entryTop(t2)) - (await lineTop(t2)) - CARD_INSET_PX)).toBeLessThanOrEqual(2);
+
+    // the first thread active by its passage; the agent's long reply grows its card and pushes the second down (R2, R3)
+    await content(page, 'a').locator(`.comment-${t1}`).click();
+    await expect(entry(t1)).toHaveAttribute('data-active', '');
+    // LC-1 item 2: the active card is not shifted sideways; it is raised (the floating shadow), the inactive one flat
+    expect(Math.abs((await entryLeft(t1)) - (await entryLeft(t2))), 'the active card in the column').toBeLessThanOrEqual(1);
+    await expect(entry(t1).locator(`[data-thread="${t1}"]`)).not.toHaveCSS('box-shadow', 'none');
+    await expect(entry(t2).locator(`[data-thread="${t2}"]`)).toHaveCSS('box-shadow', 'none');
+    const t2Before = await entryTop(t2);
+    const h1Before = (await entry(t1).boundingBox())!.height;
+    await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.agentReply(id, text), [t1, 'A reply long enough to grow the card by several lines, so the next card in the stack is pushed down while the owner keeps the first thread active.'] as const);
+    await expect.poll(async () => (await entry(t1).boundingBox())!.height, { message: 'the card grew' }).toBeGreaterThan(h1Before + 20);
+    await expect(entry(t1)).toHaveAttribute('data-active', '');
+    await expect(content(page, 'a').locator(`.comment-active.comment-${t1}`)).toHaveCount(1);
+    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), 'the active card stays at its anchor').toBeLessThanOrEqual(2);
+    await expect.poll(() => entryTop(t2), { message: 'the second card pushed below the grown first' }).toBeGreaterThan(t2Before + 20);
+
+    // R1: the owner's Enter above both passages moves both cards with their lines
+    const [a1, a2] = [await lineTop(t1), await lineTop(t2)];
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.caretAtEnd('a', 'para0001'));
+    await page.keyboard.press('Enter');
+    await expect.poll(() => lineTop(t1)).toBeGreaterThan(a1 + 10);
+    await expect.poll(async () => Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), { message: 'the first card follows its line' }).toBeLessThanOrEqual(2);
+    expect((await lineTop(t2)) - a2).toBeGreaterThan(10);
+    await expect(entry(t1)).toHaveAttribute('data-active', '');
+
+    // Z1, N6: resolving both from the cards un-reserves the margin; the page centres again
+    for (const id of [t2, t1]) {
+      await entry(id).getByRole('button', { name: 'Resolve' }).click();
+      await expect(entry(id)).toHaveCount(0);
+    }
+    await expect.poll(async () => (await pageBox()).x, { message: 'the page centred again' }).toBeGreaterThan(centredLeft - 2);
+    await page.evaluate(() => {
+      location.hash = 'document';
+    });
+    await page.waitForFunction(() => (window as unknown as Partial<HarnessWindow>).__maws_document?.ready() === true);
+    void api;
   });
 
   // M5: version history in replica A. An agent session's turn is previewed in place, read-only, in the agent's author

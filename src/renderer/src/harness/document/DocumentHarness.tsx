@@ -21,7 +21,8 @@ import type { Actor } from '@shared/artifacts/actor';
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
-import { listThreads } from '@artifacts/document/threads';
+import { listThreads, reply } from '@artifacts/document/threads'; // P4-B1: reply
+import { nanoid8 } from '@artifacts/document/schema'; // P4-B1
 import type { AppSessionId } from '@shared/graph/ids';
 import { openComment } from '../../side/register';
 import { registerCommentComposer } from '../../tools/code/anchor/anchor';
@@ -85,7 +86,8 @@ function endOf(editor: Editor, id: string): number {
   return at;
 }
 
-export function DocumentHarness() {
+/** P4-B1: `stacked` puts the replicas one above the other, each the window's width, so a 1600 px window reaches the margin's cards tier. */
+export function DocumentHarness({ stacked = false }: { stacked?: boolean } = {}) {
   const [generation, setGeneration] = useState(1); // a reset opens the next one
   const [world, setWorld] = useState<World | null>(null);
   const [editors, setEditors] = useState<Partial<Record<Replica, Editor | null>>>({});
@@ -194,6 +196,11 @@ export function DocumentHarness() {
           block.insert(block.toArray().reduce<number>((n, part) => n + (typeof part === 'string' ? part.length : 1), 0), text);
         }, AGENT);
       },
+      // P4-B1: the agent's reply into a thread, as `artifact_reply` writes it on the host
+      agentReply: (threadId, text) => {
+        if (!world) throw new Error('no document');
+        world.host.write((doc) => reply(doc, threadId, { id: `${threadId}:${nanoid8()}`, by: AGENT, at: Date.now(), body: text }), AGENT);
+      },
       version: (kind, by, fields = {}) => {
         if (!world) throw new Error('no document');
         return world.history.version(kind, by === 'agent' ? AGENT : OWNER, fields).id;
@@ -216,7 +223,7 @@ export function DocumentHarness() {
 
   if (!world) return <div className="p-4 text-fg-muted">Opening the document…</div>;
   return (
-    <div className="grid h-full grid-cols-2 divide-x divide-border">
+    <div className={stacked ? 'grid h-full grid-rows-2 divide-y divide-border' /* P4-B1 */ : 'grid h-full grid-cols-2 divide-x divide-border'}>
       <section aria-label="Replica A" data-replica="a" className="min-h-0">
         <DocumentEditor artifactId="harness-doc" handle={world.handles.a} host={hosts.a} onEditor={onEditorA} comments={commentsA} history={world.history} />
       </section>
