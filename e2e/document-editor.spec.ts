@@ -389,8 +389,16 @@ test.describe('the document editor', () => {
       await expect(panel).toHaveCount(0);
       return threadId;
     };
+    // two lines between the two passages (three line pitches): the compact cards fit at their lines, the active card
+    // with the agent's reply does not, so the reply's growth pushes the second
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.caretAtEnd('a', 'para0002'));
+    for (const line of ['Agenda item one.', 'Agenda item two.']) {
+      await page.keyboard.press('Enter');
+      await page.keyboard.type(line);
+    }
+    await expect(content(page, 'a').locator('p')).toHaveCount(5);
     const t1 = await keep('para0002', 'river runs north');
-    const t2 = await keep('para0004', 'collaborator types');
+    const t2 = await keep('para0003', 'collaborator types');
     await expect(margin).toHaveAttribute('data-margin-tier', 'cards');
     const entry = (id: string) => margin.locator(`[data-margin-entry="${id}"]`);
     await expect(entry(t1)).toBeVisible();

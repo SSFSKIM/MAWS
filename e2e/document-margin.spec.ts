@@ -176,6 +176,9 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('End');
     await expect(entry(t1), 'the caret leaving by the keyboard keeps the thread').toHaveAttribute('data-active', '');
+    await text.evaluate((el) => {
+      (el as HTMLElement).dataset.marker = 'before-reply'; // survives only if the editor is not remounted by the reply
+    });
     const typing = (async () => {
       for (const ch of ' More words typed here.') {
         await page.keyboard.type(ch);
@@ -193,7 +196,14 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await expect(text.locator(`.comment-active.comment-${t1}`)).toHaveCount(1);
     expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), 'the active card stays at its anchor').toBeLessThanOrEqual(2);
     await expect.poll(() => entryTop(t2), { message: 'the second card pushed below the grown first' }).toBeGreaterThan(t2Before + 20);
-    await expect(text.locator('p').first()).toContainText('agenda is set. More words typed here.');
+    // where the keyboard was and whether the editor survived the reply, read into the message (the mini's run is the
+    // only evidence)
+    const where = await page.evaluate(() => {
+      const el = document.activeElement;
+      return { active: el ? `${el.tagName}.${el.className}` : null, editorKept: document.querySelector('.ProseMirror[data-marker="before-reply"]') !== null };
+    });
+    const paragraphs = await text.locator('p').allTextContents();
+    expect(paragraphs[0], `the owner's words appended to the first paragraph (${JSON.stringify({ ...where, paragraphs })})`).toContain('agenda is set. More words typed here.');
     await page.screenshot({ path: 'test-results/document-margin-grown.png' });
   });
 
