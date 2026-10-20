@@ -422,9 +422,13 @@ function forward(text: string, index: number, count: number): number {
   return index;
 }
 
-// The anchor (Decision Log 17): the longest term's first occurrence, Unicode case-insensitively, inside the first section
-// that holds every term, so a hit opens where the query's words are together; when no section holds them all, the
-// first occurrence in the body of the longest term the body holds.
+// A document's tab-title section (`{tab}` with no block): the document's own title again, more often than not.
+const isTabTitle = ([, place]: Section): boolean => place !== null && 'tab' in place && place.from === undefined;
+
+// The anchor (Decision Logs 17 and 22): the longest term's first occurrence, Unicode case-insensitively, inside the first
+// section that holds every term, so a hit opens where the query's words are together; else the first occurrence of the
+// longest term the body holds. A document's tab titles are passed over in both, since they repeat its title (which bm25
+// already ranked): a tab title is the anchor only when no other section holds any term.
 export function anchorOf(text: SectionedText, terms: readonly QueryTerm[]): { index: number; end: number } | null {
   const longestFirst = [...terms].sort((a, b) => codePoints(b.text) - codePoints(a.text)).map((term) => new RegExp(escaped(term.text), 'giu'));
   const at = (pattern: RegExp, from: number): { index: number; end: number } | null => {
@@ -432,21 +436,7 @@ export function anchorOf(text: SectionedText, terms: readonly QueryTerm[]): { in
     const found = pattern.exec(text.body);
     return found ? { index: found.index, end: found.index + found[0].length } : null;
   };
-  const together = sectionHoldingAll(text, longestFirst, at);
-  if (together !== null) return at(longestFirst[0]!, text.sections[together]![0]);
-  for (const pattern of longestFirst) {
-    const found = at(pattern, 0);
-    if (found) return found;
-  }
-  return null;
-}
-
-// The first section in which every pattern occurs, or null: each pattern's next occurrence from the candidate section's
-// start, the candidate moving to the furthest section one of them lands in, until all land in it (a walk that visits each
-// section at most once per pattern, not a scan of every occurrence).
-function sectionHoldingAll(text: SectionedText, patterns: RegExp[], at: (pattern: RegExp, from: number) => { index: number } | null): number | null {
   const { sections } = text;
-  if (sections.length === 0) return null;
   const sectionOf = (offset: number): number => {
     let low = 0;
     let high = sections.length - 1;
@@ -457,14 +447,58 @@ function sectionHoldingAll(text: SectionedText, patterns: RegExp[], at: (pattern
     }
     return low;
   };
-  for (let candidate = 0; ; ) {
+  // the first section at or after `index` that is not a tab title, or -1
+  const eligibleFrom = (index: number): number => {
+    for (let i = index; i < sections.length; i++) if (!isTabTitle(sections[i]!)) return i;
+    return -1;
+  };
+  // a pattern's first occurrence outside the tab titles
+  const outsideTitles = (pattern: RegExp): { index: number; end: number } | null => {
+    for (let from = 0; ; ) {
+      const found = at(pattern, from);
+      if (!found || sections.length === 0) return found;
+      const section = sectionOf(found.index);
+      if (!isTabTitle(sections[section]!)) return found;
+      const next = eligibleFrom(section + 1);
+      if (next < 0) return null;
+      from = sections[next]![0];
+    }
+  };
+  const together = sectionHoldingAll(longestFirst, at, sectionOf, eligibleFrom, sections);
+  if (together !== null) return at(longestFirst[0]!, sections[together]![0]);
+  for (const pattern of longestFirst) {
+    const found = outsideTitles(pattern);
+    if (found) return found;
+  }
+  for (const pattern of longestFirst) {
+    const found = at(pattern, 0);
+    if (found) return found;
+  }
+  return null;
+}
+
+// The first section, not a tab title, in which every pattern occurs, or null: each pattern's next occurrence from the
+// candidate section's start, the candidate moving to the furthest section one of them lands in (past it when that is a
+// tab title), until all land in it: a walk that visits each section at most once per pattern, not a scan of every
+// occurrence.
+function sectionHoldingAll(
+  patterns: RegExp[],
+  at: (pattern: RegExp, from: number) => { index: number } | null,
+  sectionOf: (offset: number) => number,
+  eligibleFrom: (index: number) => number,
+  sections: readonly Section[],
+): number | null {
+  let candidate = eligibleFrom(0);
+  if (candidate < 0) return null;
+  for (;;) {
     let moved = false;
     for (const pattern of patterns) {
       const found = at(pattern, sections[candidate]![0]);
       if (!found) return null;
       const section = sectionOf(found.index);
       if (section > candidate) {
-        candidate = section;
+        candidate = eligibleFrom(section);
+        if (candidate < 0) return null;
         moved = true;
         break;
       }
@@ -514,16 +548,16 @@ function sectionAround({ body, sections }: SectionedText, offset: number): { sta
 
 // A hit's snippet and `read` (Decision Log 20): the snippet is the passage `read` opens, around the anchor inside its
 // section (a document's block, a file model's file; one section, the whole body, for the other kinds); a title-only
-// hit's snippet is the start of the first section holding body text (past a document's tab titles) and it has no
-// `read`; an empty body has neither.
+// hit's snippet is about SNIPPET_LEAD code points from the first section holding body text (past a document's tab
+// titles), across sections, and it has no `read`; an empty body has neither.
 export function snippetAndRead(text: SectionedText, terms: readonly QueryTerm[]): { snippet?: string; read?: ArtifactSearchRead } {
   if (text.body === '') return {};
   const anchor = anchorOf(text, terms);
   if (!anchor) {
-    // a document's tab-title sections (`{tab}` with no block) repeat its title: the first section holding body text
-    const lead = text.sections.find(([, place]) => !(place && 'tab' in place && place.from === undefined))?.[0] ?? 0;
-    const first = sectionAround(text, lead);
-    return { snippet: excerpt(text.body, first.start, forward(text.body, first.start, SNIPPET_LEAD), first.start, first.end) };
+    // the lead: from the first section holding body text (past a document's tab titles, which repeat its title), across
+    // sections, since a title-only hit has no `read` the text must stay true to (Decision Log 22)
+    const lead = text.sections.find((section) => !isTabTitle(section))?.[0] ?? 0;
+    return { snippet: excerpt(text.body, lead, forward(text.body, lead, SNIPPET_LEAD), lead, text.body.length) };
   }
   const section = sectionAround(text, anchor.index);
   const snippet = excerpt(text.body, back(text.body, anchor.index, SNIPPET_BEFORE), forward(text.body, anchor.end, SNIPPET_AFTER), section.start, section.end);

@@ -362,6 +362,15 @@ describe('the snippet and read', () => {
     return { body: lines.join('\n'), sections };
   };
 
+  it('anchors in a tab title only when no other section holds a term', () => {
+    const titled = blocks('Roadmap review', 'An opening line.', 'The roadmap ships in December.', 'A review of the plan.');
+    expect(snippetAndRead(titled, terms('roadmap')).read).toEqual({ tab: 't', from: 'b2' });
+    expect(snippetAndRead(titled, terms('roadmap review')).read).toEqual({ tab: 't', from: 'b2' }); // no block holds both: the longest outside titles
+    expect(snippetAndRead(titled, terms('review opening')).read).toEqual({ tab: 't', from: 'b1' }); // the longer, "opening", outside titles
+    const onlyTitle = blocks('Roadmap review', 'Nothing here.');
+    expect(snippetAndRead(onlyTitle, terms('roadmap'))).toEqual({ snippet: 'Roadmap review', read: { tab: 't' } });
+  });
+
   it('keeps the snippet inside the anchor’s section: a short block alone, with no ellipsis', () => {
     const text = blocks('Plan', 'lorem ipsum dolor sit amet '.repeat(6).trim(), 'The 결론 is short.', 'consectetur adipiscing elit sed do '.repeat(6).trim());
     expect(snippetAndRead(text, terms('결론'))).toEqual({ snippet: 'The 결론 is short.', read: { tab: 't', from: 'b2' } });
@@ -381,8 +390,13 @@ describe('the snippet and read', () => {
     expect(snippet).not.toMatch(/before|after/);
     const atStart = blocks('Tab', `target ${'tail '.repeat(60)}`.trim(), 'after block');
     expect(snippetAndRead(atStart, terms('target')).snippet!.startsWith('target')).toBe(true); // the section's start: no ellipsis
-    // the tab's title is the document's own title again: the snippet starts at the first section holding body text
-    expect(snippetAndRead(text, terms('absent'))).toEqual({ snippet: 'before block' });
+    // the tab's title is the document's own title again: the lead starts at the first section holding body text and,
+    // with no `read` to stay true to, runs on across sections
+    const lead = snippetAndRead(text, terms('absent'));
+    expect(lead.snippet!.startsWith('before block word word')).toBe(true);
+    expect(lead.snippet!.endsWith('…')).toBe(true);
+    expect([...lead.snippet!].length).toBeLessThanOrEqual(241);
+    expect(lead).not.toHaveProperty('read');
     expect(snippetAndRead({ body: 'Only a tab', sections: [[0, { tab: 't' }]] }, terms('absent'))).toEqual({ snippet: 'Only a tab' });
     expect(snippetAndRead({ body: 'A page', sections: [[0, null]] }, terms('absent'))).toEqual({ snippet: 'A page' }); // no tab titles: unchanged
   });

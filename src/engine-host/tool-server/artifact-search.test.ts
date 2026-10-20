@@ -148,6 +148,14 @@ describe('artifact_search: read (acceptance 7)', () => {
     expect(hit).toMatchObject({ snippet: '지난주 목요일 회의에서 하반기 제품 로드맵을 검토했다.', read: { from: 'p1' } });
   });
 
+  it('anchors a title word in the block that holds it, not in the tab title that repeats the document’s title', async () => {
+    await document('하반기 로드맵', '시작하는 문단이다. ^p1\n\n다른 이야기를 한다. ^p2\n\n로드맵의 출시일은 12월 9일로 확정했다. ^p3');
+    for (const query of ['로드맵', '하반기 로드맵']) {
+      const [hit] = (await search({ query })).hits;
+      expect(hit, query).toMatchObject({ snippet: '로드맵의 출시일은 12월 9일로 확정했다.', read: { from: 'p3' } });
+    }
+  });
+
   it('names a document hit’s tab and block, which artifact_read opens at the match', async () => {
     const id = await document('Plan', '# Plan ^h1\n\nFirst paragraph. ^p1\n\nSecond paragraph. ^p2');
     const schema = schemaFor();
