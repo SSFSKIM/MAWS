@@ -100,6 +100,28 @@ describe('the seam’s commands', () => {
     expect(answer.text).toContain('nope');
   });
 
+  // P4-A2 (X35; R12): a call's input streamed to the session's provisional emitter as the engine's deltas would arrive,
+  // then committed by a call under the same tool-use id; another streamed and dropped
+  it('streams a call’s input to the document’s ports, then commits it under the same id, or drops it', async () => {
+    const id = await emptyDocument();
+    const seam = new DocumentPerfSeam(world.store);
+    await seam.run({ cmd: 'seed', artifactId: id, state: Buffer.from(stateV2(seedDoc())).toString('base64') });
+    const read = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: { artifact: id } })) as CallAnswer & { result: { revision: number } };
+    const end = world.connect(id, HUMAN);
+    const states = () => end.received.flatMap((frame) => (frame.type === 'provisional' ? [(JSON.parse(frame.json) as { toolUseId: string; state: string }).state] : []));
+    const args = { artifact: id, baseRevision: read.result.revision, ops: [{ op: 'insert', after: 'p1', markdown: 'Streamed in by the seam.' }] };
+    const text = JSON.stringify(args);
+    expect(await seam.run({ cmd: 'stream', session: 'perf-agent-1', toolUseId: 'toolu_seam_1', name: 'artifact_edit', deltas: [text.slice(0, -12), text.slice(-12)] })).toEqual({ ok: true, frames: 2 });
+    expect(states()).toEqual(['streaming', 'streaming']);
+    const edit = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: { ...args, toolUseId: 'toolu_seam_1' } })) as CallAnswer & { result: { revision: number } };
+    expect(edit).toMatchObject({ ok: true, isError: false });
+    expect(states()).toEqual(['streaming', 'streaming', 'committed']);
+    await seam.run({ cmd: 'stream', session: 'perf-agent-1', toolUseId: 'toolu_seam_2', name: 'artifact_edit', deltas: [text] });
+    expect(await seam.run({ cmd: 'drop', session: 'perf-agent-1', toolUseId: 'toolu_seam_2' })).toEqual({ ok: true });
+    expect(states()).toEqual(['streaming', 'streaming', 'committed', 'streaming', 'dropped']);
+    seam.close();
+  });
+
   it('answers the heap after a collection', async () => {
     const seam = new DocumentPerfSeam(world.store);
     const answer = (await seam.run({ cmd: 'heap' })) as { ok: true; heapUsed: number; rss: number; collected: boolean };

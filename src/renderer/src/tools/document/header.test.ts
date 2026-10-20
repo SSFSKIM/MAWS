@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DocumentState } from '@artifacts/host';
 import { documentHeader, savedOf, type DocumentHeaderCommands, type DocumentHeaderState } from './header';
 
-const live = (fields: Partial<DocumentState> = {}): DocumentState => ({ phase: 'live', synced: true, unsaved: 0, revision: 4, readOnly: false, ...fields });
+const live = (fields: Partial<DocumentState> = {}): DocumentState => ({ phase: 'live', synced: true, unsaved: 0, revision: 4, integrated: 0, readOnly: false, ...fields });
 
 function commands(): DocumentHeaderCommands {
   return { toggleRail: vi.fn(), saveVersion: vi.fn(), setSuggestions: vi.fn(), export: vi.fn(), dismissExport: vi.fn(), closeGuard: vi.fn(async () => true) };

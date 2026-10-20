@@ -1,0 +1,5 @@
+==== P4-A1 MAWS arm, 2026-10-20T02:43:53.721Z on SK.local: scope mirror (/tmp/maws-parity-bench/p4-a2-adaptation/mirror-config), engine ~/.local/share/claude/versions/2.1.304 2.1.304, relay http://127.0.0.1:8641, cwd /tmp/maws-parity-bench/maws-arm, profile /tmp/maws-parity-bench/p4-a2-adaptation/maws-profile, pin none (the owner's settings), tasks B1 x 1 from repetition 1
+seed: the deck dd525c3e-a7fc-4a32-8215-95ce9f8bce7b from seed/maws-deck (7 files) through the deck seam
+seed: the document 3c4631cd-9ef5-4667-b8ec-324bd6fb9c2b by a Haiku session's artifact_create; against seed/document.md: the same 1154 words in order
+B1 r1: PASS (block 3: Thursday -> Friday, nothing else changed); landed 6.345 s, first token 0.906 s, turn end 7.689 s, 4 requests, 498 output tokens, ["claude-opus-5-5"] ["xhigh"], cache cold; MAWS tool time artifact_read 18 ms, artifact_edit 31 ms; load 505.55 -> 518.62; US$0.1710; /tmp/maws-parity-bench/p4-a2-adaptation/maws-B1-r1/manifest.json
+spend: seed (Haiku) US$0.0080; B1 r1 US$0.1710; total US$0.1790

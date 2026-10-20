@@ -45,9 +45,10 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     return {
       doc,
       awareness: null as never,
-      state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false }),
+      state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false }),
       subscribe: () => () => {},
       onRestored: () => () => {},
+      onProvisional: () => () => {},
       holdRemote: () => {},
       close: closed,
     };
@@ -589,9 +590,10 @@ describe('lifetimes (fix wave 1)', () => {
     const handle: DocumentHandle = {
       doc,
       awareness: null as never,
-      state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0, readOnly: false }),
+      state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0, integrated: 0, readOnly: false }),
       subscribe: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
       onRestored: () => () => {},
+      onProvisional: () => () => {},
       holdRemote: () => {},
       close,
     };
@@ -626,7 +628,7 @@ describe('lifetimes (fix wave 1)', () => {
       </DesignSystemHostContext.Provider>,
     );
     view.unmount();
-    await act(async () => arrive({ doc: systemDoc(), awareness: null as never, state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0, readOnly: false }), subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close }));
+    await act(async () => arrive({ doc: systemDoc(), awareness: null as never, state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0, integrated: 0, readOnly: false }), subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote: () => {}, close }));
     expect(close).toHaveBeenCalledTimes(1);
   });
 });

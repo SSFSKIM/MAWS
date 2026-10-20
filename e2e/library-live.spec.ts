@@ -28,6 +28,7 @@ import type { ArtifactCreateResult, SendFileResult } from '@shared/maws/tools';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../test/live/support/live';
+import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
@@ -265,6 +266,7 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     const errors = maws.consoleErrors();
     note(`the window's console errors: ${JSON.stringify(errors)}`);
     expect.soft(errors).toEqual([]);
+    note(`tool time (P4-A2, X34): ${guardToolTime(journalPath).line}`); // after the last turn; throws over the bound
     note('PASS: an html artifact through artifact_create and a file artifact through send_file, each linked created to the session with the session as last editor; the panel tool lists both for the session; the library shows both with the session chip; search finds the page’s word');
   } catch (error) {
     failure = error;

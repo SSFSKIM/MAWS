@@ -50,7 +50,9 @@ export interface NormalizerWarning {
 
 interface Lane {
   apiMessageId: ApiMessageId | null;
-  started: { index: number; type: string }[];
+  // P4-A2 (X1 amendment, X35): a tool_use block's `content_block_start` announces its id and name, kept so its deltas
+  // carry them (the host joins the deltas to the `tools/call` that follows by the id)
+  started: { index: number; type: string; toolUseId: ToolUseId | null; toolName: string | null }[];
   userMessageUuid: MessageUuid | null;
 }
 
@@ -263,9 +265,12 @@ export class Normalizer {
         return;
       }
       case 'content_block_start': {
-        const block = event.content_block as { type?: unknown } | undefined;
+        const block = event.content_block as { type?: unknown; id?: unknown; name?: unknown } | undefined;
         const current = this.state.streaming.get(lane) ?? { apiMessageId: null, started: [], userMessageUuid: null };
-        current.started.push({ index: Number(event.index), type: typeof block?.type === 'string' ? block.type : 'unknown' });
+        const type = typeof block?.type === 'string' ? block.type : 'unknown';
+        const toolUseId = type === 'tool_use' && typeof block?.id === 'string' ? (block.id as ToolUseId) : null;
+        const toolName = type === 'tool_use' && typeof block?.name === 'string' ? block.name : null;
+        current.started.push({ index: Number(event.index), type, toolUseId, toolName });
         this.state.streaming.set(lane, current);
         return;
       }
@@ -282,6 +287,7 @@ export class Normalizer {
           thinkingDelta: delta.type === 'thinking_delta' ? (delta.thinking ?? '') : null,
           inputJsonDelta: delta.type === 'input_json_delta' ? (delta.partial_json ?? '') : null,
           userMessageUuid: current?.userMessageUuid ?? null,
+          toolUseId: started?.toolUseId ?? null, toolName: started?.toolName ?? null, // P4-A2 (X1 amendment)
         }, attribution);
         return;
       }

@@ -12,7 +12,7 @@
 // `maws-artifact:` link, the native handle a MAWS user pastes; the turn waited on through the journal; the content
 // exported after; the checker; the session stopped (the transcript complete); a manifest beside the before and after
 // copies naming the transcript, the X8 journal, the relay logs, the load before and after and the checker's verdict; the
-// parser's row; X34's reading of the journal (readToolSpans). A repetition that fails still writes its manifest, so the
+// parser's row; X34's reading of the journal (readToolCalls, the answered spans and the unanswered calls). A repetition that fails still writes its manifest, so the
 // record shows what was excluded and why; a later attempt at the same repetition writes into its own …-a2, …-a3
 // directory, so nothing recorded is overwritten.
 //
@@ -42,7 +42,7 @@ import type { CommandInput, CommandName } from '@shared/ipc/schema';
 import type { JournalRow } from '@shared/wire/journal';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { journalCost } from '../test/live/support/live';
-import { readToolSpans, type ToolSpan } from '../test/live/support/tool-time';
+import { readToolCalls } from '../test/live/support/tool-time';
 import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -321,7 +321,10 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
       const rows = journalPath && existsSync(journalPath) ? rowsOf(journalPath) : [];
       const sessionId = engineSessionOf(rows);
       const transcript = sessionId ? transcriptOf(bench!.configHome, sessionId) : null;
-      const spans: ToolSpan[] = journalPath && existsSync(journalPath) ? readToolSpans(journalPath) : [];
+      // P4-A2 (X34, at the landing): the reader answers the spans and the unanswered calls apart; the record keeps every
+      // call in journal order, an unanswered one (the engine withdrew it; MAWS answers nothing) with no time
+      const calls = journalPath && existsSync(journalPath) ? readToolCalls(journalPath) : { spans: [], unanswered: [] };
+      const spans = [...calls.spans.map(({ name, ms, toolUseId, requestSeq }) => ({ name, ms: ms as number | null, toolUseId, requestSeq })), ...calls.unanswered.map(({ name, toolUseId, requestSeq }) => ({ name, ms: null, toolUseId, requestSeq }))].sort((a, b) => a.requestSeq - b.requestSeq);
       const cost = journalCost(rows).costUsd;
       spent.push({ label: `${task} r${rep}`, usd: cost });
       const manifest = {

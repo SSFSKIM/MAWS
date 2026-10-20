@@ -20,7 +20,7 @@ const SCOPE: EditorHostScope = { surface: 'main', tabId: 'artifact:ds1' };
 function fakeHandle() {
   const doc = newDoc();
   writeSystem(doc, { 'DESIGN.md': '# Harbor\n', 'tokens.tokens.json': serializeTokens(parseTokens(complete).tokens!) }, { route: 'derived', at: 0 });
-  let state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  let state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const listeners = new Set<(state: DocumentState) => void>();
   const handle: DocumentHandle = {
     doc,
@@ -28,6 +28,7 @@ function fakeHandle() {
     state: () => state,
     subscribe: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
     onRestored: () => () => {},
+    onProvisional: () => () => {},
     holdRemote: () => {},
     close: () => {},
   };
@@ -119,7 +120,7 @@ describe('the Design System body (X32, Mark-up)', () => {
   });
 
   it('maps the replica’s state onto the header’s', () => {
-    const base: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+    const base: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
     expect(savedStateOf(base)).toBe('saved');
     expect(savedStateOf({ ...base, unsaved: 1 })).toBe('saving');
     expect(savedStateOf({ ...base, phase: 'handshake' })).toBe('reconnecting');
@@ -169,6 +170,7 @@ describe('the close guard (F-I1)', () => {
         state: () => ({ ...provider.state, readOnly: false }),
         subscribe: (listener) => provider.subscribe((s) => listener({ ...s, readOnly: false })),
         onRestored: (listener) => provider.onRestored(listener),
+        onProvisional: (listener) => provider.onProvisional(listener),
         holdRemote: (on) => provider.holdRemote(on),
         close: () => provider.destroy(),
       };
