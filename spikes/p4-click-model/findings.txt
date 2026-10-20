@@ -144,11 +144,16 @@ Preconditions
      or signing prompt. L8 uses the mini's clipboard and the spec puts it back.
 
 Steps (spikes/p4-click-model/cua-live.js holds them as cells; e2e/presentations-ime-live.spec.ts is the harness)
+  0. Before the hold, no GUI: `MAWS_IME_LIVE=1 MAWS_IME_LIVE_DRY=1 node_modules/.bin/playwright test
+     e2e/presentations-ime-live.spec.ts` checks the harness (a quiet window, no driver, nothing judged) and writes every
+     case's ready.json, with the slide's scale on that display.
   1. In the GUI session's shell, in the background: `MAWS_IME_LIVE=1 node_modules/.bin/playwright test
      e2e/presentations-ime-live.spec.ts` (or `pnpm e2e:ime-live`, which builds first). MAWS comes up foreground, its
-     window at 80,80, 1600 × 1000 points; the spec writes /tmp/maws-ime-live/L0.ready.json.
+     window filling the display's work area with the sidebar and the panel collapsed (the slide drawn at least 800 px
+     wide, or the spec stops); the spec writes /tmp/maws-ime-live/L8.ready.json.
   2. The setup cell, then L8 first (it types nothing natively, so it runs while the page's own undo stack is empty, which
-     the Edit menu's Undo turns on: finding 1; it also checks the coordinate mapping, and can be rerun), then L0: the
+     the Edit menu's Undo turns on: finding 1; its first cell, one press, checks the coordinate mapping and may be
+     repeated; once its keys cell has run, a clean rerun restarts the spec), then L0: the
      instrument check (cua's keys reach the input method: the notes field ends in 한, the trace holds keyCode-229
      keydowns). Stop if L0 fails: the L cases then need the owner's hands.
   3. L1 to L7, each: read <case>.ready.json, run its cell, write <case>.done with one line of what was seen, read

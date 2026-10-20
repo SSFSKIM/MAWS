@@ -8,6 +8,11 @@
 //
 //   MAWS_IME_LIVE=1 [MAWS_IME_LIVE_DIR=/tmp/maws-ime-live] [MAWS_IME_LIVE_CASES=L0,L1,…] [MAWS_IME_LIVE_MODE=clear|select]
 //     node_modules/.bin/playwright test e2e/presentations-ime-live.spec.ts   (after scripts/e2e-build.sh plain)
+//
+// The window fills the display's work area with the sidebar and the panel collapsed, so the slide is drawn at about half
+// size or more (in the simulated spec's 1600 × 1000 window it is 256 px wide, where a 9 px handle covers 70 slide px).
+// MAWS_IME_LIVE_DRY=1 checks the harness itself with no driver and no GUI: the window stays quiet, each case's done file
+// is written by the spec at once, and nothing is judged (the ready and result files are, for reading).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -24,6 +29,8 @@ const MODE: 'clear' | 'select' = process.env.MAWS_IME_LIVE_MODE === 'select' ? '
 // Undo turns on (findings.txt finding 1); a case that composes or types natively fills it
 const CASES = (process.env.MAWS_IME_LIVE_CASES ?? 'L8,L0,L1,L2,L3,L4,L5,L6,L7').split(',').map((c) => c.trim());
 const WAIT_MS = 15 * 60_000; // per case, for the driver
+const DRY = process.env.MAWS_IME_LIVE_DRY === '1';
+const MIN_FRAME_PX = 800; // the slide's drawn width the cases' targets need (a scale of about 0.42)
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -66,7 +73,7 @@ const STEPS: Record<string, string> = {
   L5: 'Click `a`; wait 300 ms; press g k; click `b`; wait 300 ms; press k; wait 300 ms; click `empty`.',
   L6: 'Click `a`; wait 300 ms; press g k s, BackSpace, Left, Right, g k, Return; wait 300 ms; press Escape twice.',
   L7: 'Click `a`; wait 300 ms; press g k s, then alt+Return; wait 800 ms; screenshot (the Hanja window should open at `a`); Escape; click `empty`. Write the verdict into the done file.',
-  L8: 'Click `a`; wait 300 ms; screenshot (a selected: the mapping holds); then cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; click `aCorner` (a corner of `a` the pasted copy does not cover); Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.',
+  L8: 'Click `a`; wait 300 ms; screenshot (a selected: the mapping holds); then cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; shift+Tab (back from the pasted copy to `a`, which a press could not reach: the copy covers it); Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.',
 };
 
 let launch: MawsLaunch | null = null;
@@ -88,14 +95,15 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
   test.beforeAll(async () => {
     test.setTimeout(120_000);
     mkdirSync(DIR, { recursive: true });
-    launch = await launchMaws({ env: { MAWS_E2E_FOREGROUND: '1', MAWS_E2E_QUIET: '0' } });
+    launch = await launchMaws({ env: DRY ? {} : { MAWS_E2E_FOREGROUND: '1', MAWS_E2E_QUIET: '0' } });
     page = launch.page;
-    await launch.app.evaluate(({ BrowserWindow, app }) => {
+    await launch.app.evaluate(({ BrowserWindow, app, screen }, dry) => {
       const win = BrowserWindow.getAllWindows()[0]!;
-      win.setBounds({ x: 80, y: 80, width: 1600, height: 1000 });
+      win.setBounds(screen.getPrimaryDisplay().workArea);
+      if (dry) return;
       app.focus({ steal: true });
       win.focus();
-    });
+    }, DRY);
     await expect.poll(async () => (await ok<{ state: string }>(page, 'engine.hostState')).state, { timeout: 20_000 }).toBe('ready');
     await expect.poll(() => page.evaluate(() => typeof (window as unknown as Partial<Seam>).__maws_presentations)).toBe('object');
     ({
@@ -105,6 +113,12 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
     await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
     await page.locator('[data-library]').getByRole('article', { name: 'IME live', exact: true }).click();
     await expect(page.locator(`[data-region="main"] [data-artifact-tab="${id}"] [data-deck-editor]`)).toBeVisible({ timeout: 15_000 });
+    // the sidebar and the panel collapsed, through the View menu's items (the shell's own actions)
+    for (const action of ['sidebar.toggle', 'panel.toggle']) await launch.app.evaluate(({ Menu }, a) => Menu.getApplicationMenu()?.getMenuItemById(a)?.click(), action);
+    const frame = page.locator(`[data-region="main"] [data-artifact-tab="${id}"] [data-stage-slide]`);
+    await expect
+      .poll(async () => (await frame.boundingBox())?.width ?? 0, { message: `the slide is drawn at least ${MIN_FRAME_PX} px wide (a bigger display, or the inspector closed)` })
+      .toBeGreaterThanOrEqual(MIN_FRAME_PX);
   });
 
   for (const name of CASES) {
@@ -122,6 +136,7 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       const run = async () => {
         await startTrace(page);
         writeFileSync(join(DIR, `${name}.ready.json`), JSON.stringify({ case: name, mode: MODE, steps: STEPS[name], ...where }, null, 1));
+        if (DRY) writeFileSync(join(DIR, `${name}.done`), 'dry run: no driver\n');
         await expect.poll(() => existsSync(join(DIR, `${name}.done`)), { timeout: WAIT_MS, intervals: [250] }).toBe(true);
         await page.waitForTimeout(500);
         return stopTrace(page);
@@ -136,6 +151,7 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       const events = name === 'L8' ? await withNativeClipboard(launch!.app, ['Hello', ''], run).finally(async () => (menu = await restoreMenu())) : await run();
       const out = await outcome(name, events, menu);
       writeFileSync(join(DIR, `${name}.result.json`), JSON.stringify({ case: name, mode: MODE, ...out, events }, null, 1));
+      if (DRY) return;
       if (name === 'L1') await writeFixture(events, out);
       for (const [label, [got, want]] of Object.entries(out.checks)) expect.soft(got, `${name} ${label}`).toEqual(want);
     });
@@ -230,6 +246,10 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       facts.clipboard = events.filter((e) => e.type === 'copy' || e.type === 'paste' || e.type === 'cut').map((e) => `${e.type} ${e.target} prevented=${e.defaultPrevented}`);
       checks['a keeps Hello'] = [a, 'Hello'];
       checks['⌘Z undid one nudge, in the box'] = [facts.left, '201px'];
+      // the keyboard's paste copied a at 200 (⌘C came before the nudges), the mouse's a at 201, each pasted 24 px on; a
+      // second paste at 248 would mean the mouse's Copy took the first copy, not a
+      facts.pasted = (await slide()).children.filter((c) => !['a', 'b', 's'].includes(c.id)).map((c) => c.style.left).sort();
+      checks['the pastes are copies of a, at 200 and at 201'] = [facts.pasted, ['224px', '225px']];
       // ⌘C and ⌘V left to the menu reach it; the ⌘Z the box cancelled does not; then the mouse's Undo, Copy, Paste, Undo
       checks['Q3: the menu saw ⌘C and ⌘V, not ⌘Z, then the mouse'] = [menu, ['copy', 'paste', 'undo', 'copy', 'paste', 'undo']];
       // finding 1's gap: the menu's Undo does nothing to the deck while Blink's own undo stack is empty, so both pastes stay
@@ -269,11 +289,11 @@ async function targets(page: Page, frame: ReturnType<Page['locator']>) {
   const scale = box.width / 1920;
   const at = (x: number, y: number) => ({ x: Math.round(box.x + x * scale), y: Math.round(box.y + y * scale) });
   const notes = await page.locator('.deck-notes-field').first().boundingBox();
-  // aCorner: inside a, outside a copy pasted from it (pasted 24 slide px down and right, drawn above it)
-  const page_ = { a: at(260, 250), aCorner: at(210, 210), b: at(1060, 250), empty: at(100, 1000), shape: at(1150, 600), notes: notes ? { x: Math.round(notes.x + 40), y: Math.round(notes.y + notes.height / 2) } : null };
+  const page_ = { a: at(260, 250), b: at(1060, 250), empty: at(100, 1000), shape: at(1150, 600), notes: notes ? { x: Math.round(notes.x + 40), y: Math.round(notes.y + notes.height / 2) } : null };
   const win = await page.evaluate(() => ({ outerX: screenX, outerY: screenY, outerW: outerWidth, outerH: outerHeight, innerW: innerWidth, innerH: innerHeight, dpr: devicePixelRatio }));
   return {
     page: page_,
+    scale,
     window: win,
     note: 'page px are CSS px from the content’s top-left; on macOS the content sits at the window’s top-left (MAWS hides the title bar), so window points = page px at zoom 1. Calibrate cua’s coordinate space with the L0 step before L1.',
   };

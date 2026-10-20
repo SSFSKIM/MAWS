@@ -25,10 +25,12 @@ const app = await cua.getApp('Electron');
 const shot = await app.getScreenshot({ emit: false });
 // Sky's coordinates on macOS are the window screenshot's pixels. The spec's targets are page px (CSS px from the
 // content's top-left; MAWS's window hides its title bar, so the content starts at the window's top-left). k maps one to
-// the other: the screenshot's width over the window's width in points (ready.json `window.outerW`).
+// the other: the screenshot's width over the window's width in points (the first ready.json's `window.outerW`; the
+// spec fills the display's work area, the sidebar and the panel collapsed, and records the slide's `scale`).
+const OUTER_W = 0; // set from ready.json's window.outerW before running this cell
 const pngSize = (b) => ({ w: (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19], h: (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23] });
 const size = pngSize(shot);
-globalThis.k = size.w / 1600; // the spec sets the window to 1600 × 1000 points; check against ready.json's window.outerW
+globalThis.k = size.w / OUTER_W;
 globalThis.press = (p) => app.click([Math.round(p.x * k), Math.round(p.y * k)]);
 globalThis.keys = async (list, gapMs = 60) => {
   for (const key of list.split(' ')) {
@@ -132,7 +134,7 @@ await press(T.empty);
 // checks the mapping: if a is not selected (no frame on a in the screenshot), fix k and run that cell again (a press
 // selects and types nothing, so nothing of the case is spent). Once the keys cell has run, a clean rerun of L8 means
 // restarting the spec with MAWS_IME_LIVE_CASES=L8,L0,L1,… (the deck and the probe's list reset only at a case's start).
-var T = { a: { x: 0, y: 0 }, aCorner: { x: 0, y: 0 }, empty: { x: 0, y: 0 } };
+var T = { a: { x: 0, y: 0 }, empty: { x: 0, y: 0 } };
 await press(T.a);
 await wait(300);
 await app.getScreenshot();
@@ -147,8 +149,9 @@ await app.pressKey('super+z'); // the box's own, cancelled: one step undone (201
 await app.pressKey('super+v'); // left to the menu: the element pasted, not its text into a
 await wait(500);
 await app.getAXState(); // find the menu bar's Edit item
-// Then with the mouse, by the AX indices of the state above: Edit › Undo; press(T.aCorner) (the pasted copy covers T.a,
-// and a press on the armed copy would edit it); Edit › Copy; Edit › Paste; Edit › Undo. Observe after each with
-// getAXState or a screenshot.
-// result: a keeps Hello; left 201px; facts.menu is copy, paste, undo, copy, paste, undo (no undo after the ⌘Z); both
-// Edit › Undo clicks do nothing to the deck (finding 1's gap: 5 elements, historyUndo 0).
+// Then with the mouse, by the AX indices of the state above: Edit › Undo; then app.pressKey('shift+Tab') (back from the
+// pasted copy, now armed, to a: the copy covers a's text and a press on it would edit the copy); Edit › Copy; Edit ›
+// Paste; Edit › Undo. Observe after each with getAXState or a screenshot.
+// result: a keeps Hello; left 201px; facts.menu is copy, paste, undo, copy, paste, undo (no undo after the ⌘Z); the two
+// pastes at 224px and 225px (copies of a at 200 and at 201); both Edit › Undo clicks do nothing to the deck (finding 1's
+// gap: 5 elements, historyUndo 0).
