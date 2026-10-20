@@ -1,0 +1,467 @@
+// `artifact_search`'s full-text mirror in the host's store (P4-B4: docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md,
+// "The mirror", "Freshness", "The query", "The snippet and `read`"; Decision Log 3 and 4; the X23 row for the mirror's
+// tables, schema 4 in `./migrations.ts`). One `artifact_text` row (trigram FTS5) per live artifact holds its title and
+// its sectioned body (`@artifacts/library/sections`); `artifact_text_rows` the revision and title the row was written
+// at, and the body's sections. Main's library index (`main/library/store.ts`) is not touched and nothing crosses to main.
+//
+// Freshness without a write-path extraction. A row is stale when it is missing for a live artifact, when its revision is
+// not the artifact's live revision (every write records one), or when its title is not the artifact's. A search first
+// brings the stale rows among the artifacts it may return up to date, newest first, within SEARCH_CATCHUP_MS, and names
+// what that budget left in its hint; beside it, a refresher re-extracts a changed artifact once its changes settle
+// (MIRROR_SETTLE_MS, one artifact per macrotask) and a sweep after the store opens (MIRROR_SWEEP_DELAY_MS) fills the rows
+// the migration left empty and drops those of deleted artifacts. The query joins the live `artifacts`, so a deleted
+// artifact is never returned meanwhile. So a write committed in the host is found by the next search.
+//
+// Writes follow the store's discipline: each artifact's row is written inside its own savepoint of the document
+// service's group-commit batch (`service.inBatch`), extracted in the same synchronous frame from the state that batch
+// holds, so the row commits with the rows it was read from or is taken back with them (a lost batch leaves the row as
+// it was: stale, which the next search repairs). A search's answer is read through `store.readCommitted`. A read-only
+// store (a newer app's file) searches what the mirror holds and writes nothing.
+import { readFiles } from '@artifacts/files';
+import { FILE_MODEL_KINDS, placeAt, sectionText, type Section, type SectionedText, type SectionSource } from '@artifacts/library/sections';
+import { FILE_TEXT_MAX_BYTES } from '@artifacts/library/text';
+import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
+import type { Actor } from '@shared/artifacts/actor';
+import { isDocKind, type ArtifactKind, type DocKind } from '@shared/artifacts/entity';
+import { instrTerms, matchExpression, type QueryTerm } from '@shared/artifacts/search-query';
+import type { ArtifactSearchRead } from '@shared/maws/search-tools';
+import { byteContentOf, fileBytes } from '../library/reads';
+import type { ArtifactStore, EntityRow } from './store';
+
+export const SEARCH_CATCHUP_MS = 400; // a search's budget for bringing stale rows up to date before it queries
+export const MIRROR_SETTLE_MS = 2_000; // the refresher re-extracts a changed artifact this long after its last change
+export const MIRROR_SWEEP_DELAY_MS = 5_000; // the sweep starts this long after the store opens
+// The catch-up yields to the host's loop after this much synchronous extraction (its rows commit in that batch), so a
+// search that has many rows to bring up to date shares the loop with the typing and the agents' batches.
+export const CATCHUP_SLICE_MS = 50;
+export const SNIPPET_BEFORE = 80; // code points before the anchor
+export const SNIPPET_AFTER = 160; // code points after the term
+export const SNIPPET_LEAD = 240; // a title-only hit's snippet: the body's first code points
+const SNIPPET_SNAP = 16; // an end moves to a whitespace this close, so no word is cut
+
+export interface SearchTimers {
+  setTimeout(run: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const hostTimers: SearchTimers = {
+  setTimeout: (run, ms) => setTimeout(run, ms).unref(),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+
+export interface ArtifactSearchOptions {
+  now?: () => number; // the catch-up's clock, in milliseconds
+  timers?: SearchTimers; // the refresher's and the sweep's
+  log?: (line: string) => void;
+  catchUpMs?: number;
+  settleMs?: number;
+  sweepDelayMs?: number;
+}
+
+export interface SearchRequest {
+  terms: readonly QueryTerm[]; // at least one (`parseQuery`'s)
+  kind?: ArtifactKind;
+  spaceId?: string;
+  linkedTo?: readonly string[]; // `scope: 'session'`: the lineage the artifacts must be linked to
+  limit: number;
+}
+
+// A hit with what `artifact_list`'s row is built from (read at the query, inside its commit barrier).
+export interface SearchHit {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  handle: string | null;
+  spaceId: string | null;
+  spaceName: string | undefined;
+  updatedAt: number;
+  revision: number;
+  lastWrite: { actor: Actor; at: number } | null;
+  snippet?: string;
+  read?: ArtifactSearchRead;
+}
+
+export interface SearchAnswer {
+  hits: SearchHit[];
+  more: boolean;
+  searchedAsBefore: number; // the changed artifacts the catch-up left searched in their earlier text
+}
+
+interface MirrorRow {
+  textRowid: number;
+  revision: number;
+  title: string;
+}
+
+interface QueryRow {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  handle: string | null;
+  spaceId: string | null;
+  updatedAt: number;
+  body: string;
+  sections: string;
+}
+
+export class ArtifactSearch {
+  private readonly now: () => number;
+  private readonly timers: SearchTimers;
+  private readonly log: (line: string) => void;
+  private readonly catchUpMs: number;
+  private readonly settleMs: number;
+  private readonly sweepDelayMs: number;
+  private readonly settling = new Map<string, unknown>(); // artifact → its settle timer
+  private readonly queue = new Set<string>(); // the refresher's and the sweep's artifacts, in order
+  private pumpTimer: unknown = null;
+  private sweepTimer: unknown = null;
+  private stepping = false;
+  private off: (() => void) | null = null;
+  private closed = false;
+
+  constructor(
+    private readonly store: ArtifactStore,
+    options: ArtifactSearchOptions = {},
+  ) {
+    this.now = options.now ?? (() => performance.now());
+    this.timers = options.timers ?? hostTimers;
+    this.log = options.log ?? ((line) => console.warn(`[search] ${line}`));
+    this.catchUpMs = options.catchUpMs ?? SEARCH_CATCHUP_MS;
+    this.settleMs = options.settleMs ?? MIRROR_SETTLE_MS;
+    this.sweepDelayMs = options.sweepDelayMs ?? MIRROR_SWEEP_DELAY_MS;
+  }
+
+  private get writable(): boolean {
+    return !this.store.storage.readOnly && !this.closed;
+  }
+
+  // The refresher on the store's change feed and the sweep after MIRROR_SWEEP_DELAY_MS; neither on a read-only store.
+  start(): void {
+    if (this.off || !this.writable) return;
+    this.off = this.store.onChange(({ artifactId, change }) => {
+      if (change !== 'linked') this.settle(artifactId);
+    });
+    this.sweepTimer = this.timers.setTimeout(() => this.sweep(), this.sweepDelayMs);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.off?.();
+    for (const timer of this.settling.values()) this.timers.clearTimeout(timer);
+    this.settling.clear();
+    this.queue.clear();
+    if (this.pumpTimer !== null) this.timers.clearTimeout(this.pumpTimer);
+    if (this.sweepTimer !== null) this.timers.clearTimeout(this.sweepTimer);
+    this.pumpTimer = this.sweepTimer = null;
+  }
+
+  // ── the search ──
+
+  async search(request: SearchRequest): Promise<SearchAnswer> {
+    const searchedAsBefore = this.writable ? await this.catchUp(this.stale(request)) : 0;
+    const { rows, spaceNames, more, revisions, lastWrites } = await this.store.readCommitted(() => {
+      const rows = this.query(request);
+      const shown = rows.slice(0, request.limit);
+      return {
+        rows: shown,
+        more: rows.length > request.limit,
+        revisions: shown.map((row) => this.store.revision(row.id)),
+        lastWrites: shown.map((row) => this.store.lastWrite(row.id)),
+        spaceNames: new Map(this.store.listSpaces().map((space) => [space.id, space.name])),
+      };
+    });
+    const hits = rows.map((row, index): SearchHit => {
+      const sectioned: SectionedText = { body: row.body, sections: JSON.parse(row.sections) as Section[] };
+      return {
+        id: row.id, kind: row.kind, title: row.title, handle: row.handle, spaceId: row.spaceId, spaceName: row.spaceId === null ? undefined : spaceNames.get(row.spaceId),
+        updatedAt: row.updatedAt, revision: revisions[index]!, lastWrite: lastWrites[index]!,
+        ...snippetAndRead(sectioned, request.terms),
+      };
+    });
+    return { hits, more, searchedAsBefore };
+  }
+
+  // The candidates' stale rows, newest first: the live artifacts the search may return whose row is missing, at another
+  // revision or under another title.
+  private stale(request: Omit<SearchRequest, 'terms' | 'limit'>): string[] {
+    const { where, params } = candidates(request);
+    const rows = this.store.storage.db
+      .prepare(`SELECT a.id, a.title, r.revision AS mirrored, r.title AS mirroredTitle FROM artifacts a LEFT JOIN artifact_text_rows r ON r.artifactId = a.id WHERE ${where.join(' AND ')} ORDER BY a.updatedAt DESC, a.id`)
+      .all(...params) as { id: string; title: string; mirrored: number | null; mirroredTitle: string | null }[];
+    return rows.filter((row) => row.mirrored === null || row.mirroredTitle !== row.title || row.mirrored !== this.store.revision(row.id)).map((row) => row.id);
+  }
+
+  // Brings `stale` up to date in order within the budget: extracted synchronously in slices of CATCHUP_SLICE_MS, each
+  // slice's rows committed with the batch they joined before the next. Answers how many it left (or whose batch failed).
+  private async catchUp(stale: string[]): Promise<number> {
+    const started = this.now();
+    const inBudget = () => this.now() - started < this.catchUpMs;
+    let next = 0;
+    let failed = 0;
+    while (next < stale.length && inBudget()) {
+      const slice = this.now();
+      const pending = [this.refresh(stale[next++]!)]; // a slice takes one at least, however long it runs
+      while (next < stale.length && inBudget() && this.now() - slice < CATCHUP_SLICE_MS) pending.push(this.refresh(stale[next++]!));
+      failed += (await Promise.all(pending)).filter((done) => !done).length;
+    }
+    return stale.length - next + failed;
+  }
+
+  // One artifact's row brought up to date in its own savepoint of the batch; true once that batch committed.
+  private refresh(artifactId: string): Promise<boolean> {
+    return this.store.service.inBatch(() => this.refreshInFrame(artifactId)).then(
+      () => true,
+      (error: unknown) => {
+        this.log(`the search mirror of ${artifactId} was not written: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      },
+    );
+  }
+
+  private refreshInFrame(artifactId: string): void {
+    const db = this.store.storage.db;
+    const row = this.store.entity(artifactId);
+    const mirrored = db.prepare('SELECT textRowid, revision, title FROM artifact_text_rows WHERE artifactId = ?').get(artifactId) as MirrorRow | undefined;
+    if (!row || row.deletedAt !== null) {
+      if (mirrored) {
+        db.prepare('DELETE FROM artifact_text WHERE rowid = ?').run(mirrored.textRowid);
+        db.prepare('DELETE FROM artifact_text_rows WHERE artifactId = ?').run(artifactId);
+      }
+      return;
+    }
+    const revision = this.store.revision(artifactId);
+    if (mirrored && mirrored.revision === revision) {
+      if (mirrored.title === row.title) return;
+      // a rename moves no revision: the title alone is rewritten
+      db.prepare('UPDATE artifact_text SET title = ? WHERE rowid = ?').run(row.title.normalize('NFC'), mirrored.textRowid);
+      db.prepare('UPDATE artifact_text_rows SET title = ? WHERE artifactId = ?').run(row.title, artifactId);
+      return;
+    }
+    const text = this.extract(row);
+    const sections = JSON.stringify(text.sections);
+    if (mirrored) {
+      db.prepare('UPDATE artifact_text SET title = ?, body = ? WHERE rowid = ?').run(row.title.normalize('NFC'), text.body, mirrored.textRowid);
+      db.prepare('UPDATE artifact_text_rows SET revision = ?, title = ?, sections = ? WHERE artifactId = ?').run(revision, row.title, sections, artifactId);
+    } else {
+      const textRowid = Number(db.prepare('INSERT INTO artifact_text (artifact_id, title, body) VALUES (?, ?, ?)').run(artifactId, row.title.normalize('NFC'), text.body).lastInsertRowid);
+      db.prepare('INSERT INTO artifact_text_rows (artifactId, textRowid, revision, title, sections) VALUES (?, ?, ?, ?, ?)').run(artifactId, textRowid, revision, row.title, sections);
+    }
+  }
+
+  // The artifact's text as its frame's batch holds it: a loaded document's live doc, another's stored state, a byte
+  // kind's latest content. An artifact whose content cannot be read is mirrored by its title alone (logged), so it is
+  // not read again until it changes.
+  private extract(row: EntityRow): SectionedText {
+    try {
+      if (isDocKind(row.kind)) {
+        const live = this.store.service.loaded(row.id);
+        if (live) return sectionText(this.docSource(row.kind, live));
+        const doc = newDoc();
+        try {
+          applyV2(doc, this.store.service.readState(row.id).state);
+          return sectionText(this.docSource(row.kind, doc));
+        } finally {
+          doc.destroy();
+        }
+      }
+      const content = byteContentOf(this.store, row.id);
+      const source: SectionSource = row.kind === 'html' && 'bytes' in content ? { kind: 'html', bytes: content.bytes } : { kind: 'file', name: content.name, bytes: 'bytes' in content ? content.bytes : fileBytes(content.path, FILE_TEXT_MAX_BYTES) };
+      return sectionText(source);
+    } catch (error) {
+      this.log(`the text of ${row.id} could not be read for search; its title alone is searched: ${error instanceof Error ? error.message : String(error)}`);
+      return { body: '', sections: [] };
+    }
+  }
+
+  // A file model's files as `artifact_read` answers them: the kind's own `readFiles`, else the generic file model's.
+  private docSource(kind: DocKind, doc: Doc): SectionSource {
+    if ((FILE_MODEL_KINDS as readonly string[]).includes(kind)) {
+      const files = this.store.service.adapterFor(kind)?.readFiles?.(doc) ?? readFiles(doc);
+      return { kind: kind as (typeof FILE_MODEL_KINDS)[number], files };
+    }
+    return { kind: kind as 'document' | 'dashboard', doc };
+  }
+
+  // Every `MATCH` term through the trigram index, every short term through `instr`; bm25 with the title weighed ten times
+  // the body, then recency, then id; with only short terms, how many the title holds, then recency, then id. `limit + 1`
+  // rows, so the caller can tell `more`.
+  private query(request: SearchRequest): QueryRow[] {
+    const { where, params } = candidates(request);
+    const match = matchExpression(request.terms);
+    const shorts = instrTerms(request.terms);
+    if (match !== null) {
+      where.push('artifact_text MATCH ?');
+      params.push(match);
+    }
+    for (const term of shorts) {
+      where.push('(instr(lower(artifact_text.title), ?) > 0 OR instr(lower(artifact_text.body), ?) > 0)');
+      params.push(term, term);
+    }
+    const order = match !== null ? 'bm25(artifact_text, 0, 10, 1), a.updatedAt DESC, a.id' : `${shorts.map(() => '(instr(lower(artifact_text.title), ?) > 0)').join(' + ')} DESC, a.updatedAt DESC, a.id`;
+    if (match === null) params.push(...shorts);
+    return this.store.storage.db
+      .prepare(
+        `SELECT a.id, a.kind, a.title, a.handle, a.spaceId, a.updatedAt, artifact_text.body AS body, r.sections AS sections FROM artifact_text JOIN artifact_text_rows r ON r.textRowid = artifact_text.rowid JOIN artifacts a ON a.id = r.artifactId WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`,
+      )
+      .all(...params, request.limit + 1) as unknown as QueryRow[];
+  }
+
+  // ── the refresher and the sweep ──
+
+  private settle(artifactId: string): void {
+    if (this.closed) return;
+    const pending = this.settling.get(artifactId);
+    if (pending !== undefined) this.timers.clearTimeout(pending);
+    this.settling.set(
+      artifactId,
+      this.timers.setTimeout(() => {
+        this.settling.delete(artifactId);
+        this.enqueue([artifactId]);
+      }, this.settleMs),
+    );
+  }
+
+  // Every live artifact whose row is stale, newest first, then the rows of artifacts deleted or gone.
+  private sweep(): void {
+    this.sweepTimer = null;
+    if (!this.writable) return;
+    const orphans = this.store.storage.db.prepare('SELECT r.artifactId AS id FROM artifact_text_rows r LEFT JOIN artifacts a ON a.id = r.artifactId WHERE a.id IS NULL OR a.deletedAt IS NOT NULL').all() as { id: string }[];
+    this.enqueue([...this.stale({}), ...orphans.map((row) => row.id)]);
+  }
+
+  private enqueue(artifactIds: readonly string[]): void {
+    for (const artifactId of artifactIds) this.queue.add(artifactId);
+    this.pump();
+  }
+
+  // One artifact per macrotask, the next once its row's batch has committed.
+  private pump(): void {
+    if (!this.writable || this.stepping || this.pumpTimer !== null || this.queue.size === 0) return;
+    this.pumpTimer = this.timers.setTimeout(() => {
+      this.pumpTimer = null;
+      void this.step();
+    }, 0);
+  }
+
+  private async step(): Promise<void> {
+    const artifactId = this.queue.values().next().value;
+    if (artifactId === undefined || !this.writable) return;
+    this.queue.delete(artifactId);
+    this.stepping = true;
+    try {
+      await this.refresh(artifactId);
+    } finally {
+      this.stepping = false;
+    }
+    this.pump();
+  }
+}
+
+// The live artifacts a search may return: of a kind, in a Space, linked to the lineage (`artifact_list`'s scope).
+function candidates({ kind, spaceId, linkedTo }: Pick<SearchRequest, 'kind' | 'spaceId' | 'linkedTo'>): { where: string[]; params: (string | number)[] } {
+  const where = ['a.deletedAt IS NULL'];
+  const params: (string | number)[] = [];
+  if (kind !== undefined) {
+    where.push('a.kind = ?');
+    params.push(kind);
+  }
+  if (spaceId !== undefined) {
+    where.push('a.spaceId = ?');
+    params.push(spaceId);
+  }
+  if (linkedTo !== undefined) {
+    where.push(`EXISTS (SELECT 1 FROM artifact_sessions s WHERE s.artifactId = a.id AND s.appSessionId IN (${linkedTo.map(() => '?').join(', ') || 'NULL'}))`);
+    params.push(...linkedTo);
+  }
+  return { where, params };
+}
+
+// ── the snippet and `read` ──
+
+const codePoints = (text: string): number => [...text].length;
+const isSpace = (char: string | undefined): boolean => char !== undefined && /\s/u.test(char);
+const escaped = (text: string): string => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+
+// Moves `index` back or forward by `count` code points, stopping at the text's ends.
+function back(text: string, index: number, count: number): number {
+  for (; count > 0 && index > 0; count--) {
+    index -= 1;
+    const low = text.charCodeAt(index);
+    if (low >= 0xdc00 && low <= 0xdfff && index > 0) {
+      const high = text.charCodeAt(index - 1);
+      if (high >= 0xd800 && high <= 0xdbff) index -= 1;
+    }
+  }
+  return index;
+}
+function forward(text: string, index: number, count: number): number {
+  for (; count > 0 && index < text.length; count--) index += text.codePointAt(index)! > 0xffff ? 2 : 1;
+  return index;
+}
+
+// The first occurrence in the body, Unicode case-insensitively, of the longest term it holds.
+export function anchorOf(body: string, terms: readonly QueryTerm[]): { index: number; end: number } | null {
+  for (const term of [...terms].sort((a, b) => codePoints(b.text) - codePoints(a.text))) {
+    const found = new RegExp(escaped(term.text), 'iu').exec(body);
+    if (found) return { index: found.index, end: found.index + found[0].length };
+  }
+  return null;
+}
+
+// `body.slice(start, end)` cleaned (whitespace collapsed, control characters removed), with "…" at an end that cuts.
+function excerpt(body: string, start: number, end: number): string {
+  let from = start;
+  let to = end;
+  if (from > 0 && !isSpace(body[from - 1])) {
+    for (let at = from, seen = 0; seen < SNIPPET_SNAP && at < to; seen++, at = forward(body, at, 1)) {
+      if (isSpace(body[at])) {
+        from = at + 1;
+        break;
+      }
+    }
+  }
+  if (to < body.length && !isSpace(body[to])) {
+    for (let at = back(body, to, 1), seen = 0; seen < SNIPPET_SNAP && at > from; seen++, at = back(body, at, 1)) {
+      if (isSpace(body[at])) {
+        to = at;
+        break;
+      }
+    }
+  }
+  // eslint-disable-next-line no-control-regex -- the control characters are what is removed
+  const text = body.slice(from, to).replace(/\s+/gu, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim();
+  return `${from > 0 ? '…' : ''}${text}${to < body.length ? '…' : ''}`;
+}
+
+// A hit's snippet and `read`: around the anchor, and the place of the section holding it; a title-only hit's snippet is
+// the body's start and it has no `read`; an empty body has neither.
+export function snippetAndRead(text: SectionedText, terms: readonly QueryTerm[]): { snippet?: string; read?: ArtifactSearchRead } {
+  if (text.body === '') return {};
+  const anchor = anchorOf(text.body, terms);
+  if (!anchor) return { snippet: excerpt(text.body, 0, forward(text.body, 0, SNIPPET_LEAD)) };
+  const snippet = excerpt(text.body, back(text.body, anchor.index, SNIPPET_BEFORE), forward(text.body, anchor.end, SNIPPET_AFTER));
+  const place = placeAt(text, anchor.index);
+  return { snippet, ...(place && { read: 'paths' in place ? { paths: place.paths } : { tab: place.tab, ...(place.from !== undefined && { from: place.from }) } }) };
+}
+
+// ── the host's one mirror per store ──
+
+const searches = new WeakMap<ArtifactStore, ArtifactSearch>();
+
+// The store's search, as the host started it at the store's open (`./index.ts`); a store opened without it (a test's)
+// gets one with no refresher or sweep, its searches catching up on their own.
+export function artifactSearchOf(store: ArtifactStore): ArtifactSearch {
+  let search = searches.get(store);
+  if (!search) searches.set(store, (search = new ArtifactSearch(store)));
+  return search;
+}
+
+// The refresher and the sweep over `store`, stopped by `close` before the store closes.
+export function startArtifactSearch(store: ArtifactStore, options: ArtifactSearchOptions = {}): ArtifactSearch {
+  searches.get(store)?.close();
+  const search = new ArtifactSearch(store, options);
+  searches.set(store, search);
+  search.start();
+  return search;
+}

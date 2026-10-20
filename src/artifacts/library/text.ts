@@ -51,26 +51,29 @@ function docText(doc: Doc): string {
     lines.push(text);
     budget -= text.length + 1;
   };
-  const walk = (node: Node) => {
-    let run = '';
-    for (const child of node.toArray() as unknown[]) {
-      if (budget <= 0) return;
-      if (typeof child === 'string') {
-        run += child;
-        continue;
-      }
-      push(run);
-      run = '';
-      if (isNode(child)) walk(child);
+  for (const root of byName(doc.share.entries() as Iterable<[string, unknown]>)) if (isNode(root) && budget > 0) walkText(root, push, () => budget > 0);
+  return lines.join('\n');
+}
+
+// P4-B4 (the search mirror's sections, `./sections.ts`): one node's texts in the extractor's order, each run handed to
+// `push` (an empty run included: the caller drops what it does not keep), the walk stopping once `more` answers false.
+export function walkText(node: Node, push: (text: string) => void, more: () => boolean): void {
+  let run = '';
+  for (const child of node.toArray() as unknown[]) {
+    if (!more()) return;
+    if (typeof child === 'string') {
+      run += child;
+      continue;
     }
     push(run);
-    for (const value of byName(node.attrEntries() as Iterable<[string, unknown]>)) {
-      if (budget <= 0) return;
-      if (isNode(value)) walk(value);
-    }
-  };
-  for (const root of byName(doc.share.entries() as Iterable<[string, unknown]>)) if (isNode(root) && budget > 0) walk(root);
-  return lines.join('\n');
+    run = '';
+    if (isNode(child)) walkText(child, push, more);
+  }
+  push(run);
+  for (const value of byName(node.attrEntries() as Iterable<[string, unknown]>)) {
+    if (!more()) return;
+    if (isNode(value)) walkText(value, push, more);
+  }
 }
 
 // ---- html ----------------------------------------------------------------------------------------------------------
@@ -96,7 +99,7 @@ function decodeEntities(text: string): string {
   });
 }
 
-function htmlText(markup: string): string {
+export function htmlText(markup: string): string { // P4-B4: exported for the search mirror's sections
   const stripped = markup.replace(COMMENT_OR_RAW_TEXT, ' ').replace(DECLARATION, ' ').replace(TAG, ' ');
   return decodeEntities(stripped).replace(/\s+/g, ' ').trim();
 }
@@ -117,8 +120,8 @@ function fileText(name: string, bytes: Uint8Array | null): string {
 // ---- the cap -------------------------------------------------------------------------------------------------------
 
 // The longest prefix of `text` whose UTF-8 is at most TEXT_MAX_BYTES; `encodeInto` stops before a character that would
-// not fit whole.
-function capped(text: string): string {
+// not fit whole. P4-B4: exported for the search mirror's sections.
+export function capped(text: string): string {
   if (text.length * 3 <= TEXT_MAX_BYTES) return text;
   const { read } = new TextEncoder().encodeInto(text, new Uint8Array(TEXT_MAX_BYTES));
   return text.slice(0, read);

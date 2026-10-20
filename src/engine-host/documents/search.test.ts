@@ -1,0 +1,288 @@
+// P4-B4 M2 (docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md, "Freshness", "The snippet and `read`"; Decision
+// Log 3): the search mirror over A's real store. The catch-up within its budget and the hint's count, the refresher on
+// the change feed (settled, one artifact per macrotask), the sweep after the store opens (filling what the migration
+// left empty, dropping deleted artifacts' rows), a read-only store searching what the mirror holds, a lost batch taking
+// the mirror's row back with the write it was read from, and the timers gone at close. The tool's acceptance is
+// artifact-search.test.ts's.
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseQuery } from '@shared/artifacts/search-query';
+import { HUMAN, openWorld, type World } from '../tool-server/artifact-world.fixture';
+import { STORE_MIGRATIONS, openStore } from './migrations';
+import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, snippetAndRead, startArtifactSearch, type SearchTimers } from './search';
+import { DocumentService } from './service';
+import { SqliteDocumentStorage } from './storage';
+import { ArtifactStore } from './store';
+
+let w: World;
+const searches: ArtifactSearch[] = [];
+beforeEach(() => {
+  w = openWorld();
+});
+afterEach(() => {
+  for (const search of searches.splice(0)) search.close();
+  w.close();
+});
+
+const turns = async (n = 5) => {
+  for (let i = 0; i < n; i++) await new Promise((resolve) => setImmediate(resolve));
+};
+const html = (text: string) => ({ bytes: new TextEncoder().encode(`<p>${text}</p>`), name: 'index.html' });
+const page = async (title: string, text: string) => (await w.store.create({ kind: 'html', title, content: html(text) }, HUMAN)).id;
+const rows = () => (w.storage.db.prepare('SELECT artifactId, revision, title FROM artifact_text_rows ORDER BY artifactId').all() as { artifactId: string; revision: number; title: string }[]);
+const mirrored = (id: string) => rows().find((row) => row.artifactId === id) ?? null;
+const current = (id: string) => mirrored(id)?.revision === w.store.revision(id);
+const find = (search: ArtifactSearch, query: string, limit = 10) => search.search({ terms: parseQuery(query).terms, limit });
+const foundIds = async (search: ArtifactSearch, query: string) => (await find(search, query)).hits.map((hit) => hit.id);
+
+// Timers the test runs one at a time, in the order they fall due on its own clock.
+function manualTimers(): SearchTimers & { advance(ms: number): Promise<void>; pass(ms: number): void; runNext(): Promise<boolean>; readonly pending: number } {
+  let now = 0;
+  let next = 1;
+  const due = new Map<number, { at: number; run: () => void }>();
+  const earliest = () => [...due.entries()].sort(([a, x], [b, y]) => x.at - y.at || a - b)[0];
+  const timers = {
+    setTimeout: (run: () => void, ms: number) => {
+      const id = next++;
+      due.set(id, { at: now + ms, run });
+      return id;
+    },
+    clearTimeout: (handle: unknown) => void due.delete(handle as number),
+    get pending() {
+      return due.size;
+    },
+    // runs the earliest timer due by now, then lets its batch commit
+    async runNext() {
+      const first = earliest();
+      if (!first || first[1].at > now) return false;
+      due.delete(first[0]);
+      first[1].run();
+      await turns();
+      return true;
+    },
+    // moves the clock without running anything
+    pass(ms: number) {
+      now += ms;
+    },
+    // moves the clock and runs everything due, what those runs schedule for now included
+    async advance(ms: number) {
+      now += ms;
+      while (await timers.runNext());
+    },
+  };
+  return timers;
+}
+
+const started = (timers: SearchTimers, store: ArtifactStore = w.store) => {
+  const search = startArtifactSearch(store, { timers, log: (line) => w.logs.push(line) });
+  searches.push(search);
+  return search;
+};
+const unstarted = (options: ConstructorParameters<typeof ArtifactSearch>[1] = {}, store: ArtifactStore = w.store) => {
+  const search = new ArtifactSearch(store, { log: (line) => w.logs.push(line), ...options });
+  searches.push(search);
+  return search;
+};
+
+describe('the search catch-up', () => {
+  it('brings every stale candidate up to date before it queries, so a write committed in the host is found by the next search', async () => {
+    const search = unstarted();
+    const id = await page('Status', 'alpha');
+    expect(rows()).toEqual([]);
+    expect(await foundIds(search, 'alpha')).toEqual([id]);
+    expect(current(id)).toBe(true);
+    await w.store.writeContent(id, html('omega'), HUMAN);
+    expect(current(id)).toBe(false);
+    expect(await foundIds(search, 'omega')).toEqual([id]);
+    expect(await find(search, 'omega')).toMatchObject({ searchedAsBefore: 0 });
+  });
+
+  it('within its budget, refreshes newest first and counts what it left, which is searched as it was', async () => {
+    const older = await page('Older', 'first text');
+    const newer = await page('Newer', 'first text');
+    await find(unstarted(), 'first'); // both mirrored
+    await w.store.writeContent(older, html('first text, then second'), HUMAN);
+    await w.store.writeContent(newer, html('first text, then second'), HUMAN);
+    w.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(1_000, older);
+    w.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(2_000, newer);
+    // the clock passes the budget once the newer artifact's row is current
+    const search = unstarted({ now: () => (current(newer) ? 10_000 : 0) });
+    const answer = await find(search, 'first');
+    expect(answer.searchedAsBefore).toBe(1);
+    expect(current(newer)).toBe(true);
+    expect(current(older)).toBe(false);
+    expect(answer.hits.map((hit) => hit.id).sort()).toEqual([newer, older].sort()); // the older one as it was
+    expect(await foundIds(unstarted({ catchUpMs: 0 }), 'second')).toEqual([newer]);
+  });
+
+  it('yields between slices of extraction, each slice committed before the next', async () => {
+    expect(CATCHUP_SLICE_MS).toBeLessThan(400);
+    for (let n = 0; n < 4; n++) await page(`Page ${n}`, 'sliced text');
+    // every extraction takes a whole slice: each slice is one artifact, committed before the next starts
+    const commits: number[] = [];
+    const commit = w.storage.commit.bind(w.storage);
+    w.storage.commit = () => {
+      if (w.storage.batchOpen) commits.push(rows().length);
+      commit();
+    };
+    const search = unstarted({ now: () => rows().length * CATCHUP_SLICE_MS });
+    const answer = await find(search, 'sliced');
+    expect(answer.hits).toHaveLength(4);
+    expect(commits).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe('the refresher and the sweep', () => {
+  it('fills the rows the migration left empty after MIRROR_SWEEP_DELAY_MS, one artifact per macrotask, newest first', async () => {
+    const ids = [await page('A', 'one'), await page('B', 'two'), await page('C', 'three')];
+    ids.forEach((id, n) => w.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(1_000 + n, id));
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS - 1);
+    expect(timers.pending).toBe(1);
+    timers.pass(1);
+    expect(await timers.runNext()).toBe(true); // the sweep: it queues them
+    expect(rows()).toEqual([]);
+    const order: string[] = [];
+    while (await timers.runNext()) {
+      const now = rows().map((row) => row.artifactId);
+      expect(now).toHaveLength(order.length + 1); // one artifact per macrotask
+      order.push(now.find((id) => !order.includes(id))!);
+    }
+    expect(order).toEqual([ids[2], ids[1], ids[0]]);
+    expect(timers.pending).toBe(0);
+  });
+
+  it('drops the rows of artifacts deleted while the mirror was not following', async () => {
+    const id = await page('Gone', 'text');
+    await find(unstarted(), 'text');
+    expect(mirrored(id)).not.toBeNull();
+    await w.store.delete(id);
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS);
+    expect(rows()).toEqual([]);
+    expect(w.storage.db.prepare('SELECT COUNT(*) AS n FROM artifact_text').get()).toEqual({ n: 0 });
+  });
+
+  it('re-extracts a changed artifact once its changes settle, a newer change restarting the wait', async () => {
+    const id = await page('Live', 'before');
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS);
+    expect(current(id)).toBe(true);
+    await w.store.writeContent(id, html('during'), HUMAN);
+    await turns();
+    await timers.advance(MIRROR_SETTLE_MS - 1);
+    await w.store.writeContent(id, html('after'), HUMAN);
+    await turns();
+    await timers.advance(MIRROR_SETTLE_MS - 1);
+    expect(current(id)).toBe(false);
+    await timers.advance(1);
+    expect(current(id)).toBe(true);
+    // a rename moves no revision: the row's title follows without a new extraction
+    await w.store.update(id, { title: 'Renamed' });
+    await timers.advance(MIRROR_SETTLE_MS);
+    expect(mirrored(id)).toMatchObject({ title: 'Renamed' });
+  });
+
+  it('stops every timer and listener at close', async () => {
+    await page('A', 'one');
+    const timers = manualTimers();
+    const search = started(timers);
+    expect(timers.pending).toBe(1); // the sweep
+    search.close();
+    expect(timers.pending).toBe(0);
+    await page('B', 'two');
+    await turns();
+    expect(timers.pending).toBe(0);
+  });
+
+  it('is closed with the documents the host opens, before the store', async () => {
+    const { openDocuments } = await import('.');
+    const documents = openDocuments(join(w.userData, 'opened'), () => {})!;
+    const closed = vi.spyOn(ArtifactSearch.prototype, 'close');
+    const storeClosed = vi.spyOn(documents.store, 'close');
+    documents.close();
+    expect(closed).toHaveBeenCalledOnce();
+    expect(closed.mock.invocationCallOrder[0]).toBeLessThan(storeClosed.mock.invocationCallOrder[0]!);
+    closed.mockRestore();
+  });
+});
+
+describe('the store’s discipline', () => {
+  it('takes the mirror’s row back with a lost batch, so the mirror and the store still agree after it', async () => {
+    const id = await page('Status', 'alpha');
+    const search = unstarted();
+    await find(search, 'alpha');
+    const before = mirrored(id);
+    const commit = w.storage.commit.bind(w.storage);
+    w.storage.commit = () => {
+      w.storage.commit = commit;
+      throw new Error('disk I/O error');
+    };
+    const write = w.store.writeContent(id, html('omega'), HUMAN); // the batch both join, lost at its commit
+    const lost = await find(search, 'omega');
+    await expect(write).rejects.toThrow(/failed to commit/);
+    expect(lost.hits).toEqual([]);
+    expect(lost.searchedAsBefore).toBe(1);
+    expect(mirrored(id)).toEqual(before);
+    expect(current(id)).toBe(true); // the write is gone too
+    expect(await find(search, 'alpha')).toMatchObject({ searchedAsBefore: 0, hits: [{ id }] });
+  });
+
+  it('on a read-only store (a newer app’s file) searches what the mirror holds, writes nothing and starts nothing', async () => {
+    const id = await page('Status', 'alpha');
+    await find(unstarted(), 'alpha');
+    await w.store.writeContent(id, html('omega'), HUMAN);
+    const path = join(w.userData, 'artifacts', 'store.sqlite');
+    w.store.close();
+    w.service.close();
+    w.storage.close();
+    const storage = new SqliteDocumentStorage(openStore(path, STORE_MIGRATIONS.slice(0, 3), () => {}));
+    const service = new DocumentService(storage, { kindOf: (artifactId) => storage.kindOf(artifactId), log: () => {} });
+    const store = new ArtifactStore(service, storage, { root: join(w.userData, 'artifacts'), log: () => {} });
+    try {
+      expect(storage.readOnly).toBe(true);
+      const timers = manualTimers();
+      const search = started(timers, store);
+      expect(timers.pending).toBe(0);
+      expect(await search.search({ terms: parseQuery('alpha').terms, limit: 10 })).toMatchObject({ hits: [{ id }], searchedAsBefore: 0 });
+      expect(await search.search({ terms: parseQuery('omega').terms, limit: 10 })).toMatchObject({ hits: [] });
+    } finally {
+      store.close();
+      service.close();
+      storage.close();
+    }
+  });
+});
+
+describe('the snippet and read', () => {
+  const terms = (query: string) => parseQuery(query).terms;
+  const plain = (body: string) => ({ body, sections: [[0, null]] as [number, null][] });
+
+  it('anchors at the first occurrence of the longest term the body holds, case-insensitively', () => {
+    const body = 'An intro. Then the Roadmap appears, and a plan; the roadmap again.';
+    expect(snippetAndRead(plain(body), terms('plan ROADMAP')).snippet).toBe(body);
+    const long = `${'word '.repeat(40)}target ${'tail '.repeat(60)}`.trim();
+    const { snippet } = snippetAndRead(plain(long), terms('target'));
+    expect(snippet!.startsWith('…word')).toBe(true);
+    expect(snippet!.endsWith('tail…')).toBe(true);
+    expect(snippet).toContain('target');
+  });
+
+  it('counts code points, so an astral character is one, and snaps an end to whitespace within 16', () => {
+    const before = '😀'.repeat(100);
+    const { snippet } = snippetAndRead(plain(`${before}목표`), terms('목표'));
+    expect([...snippet!].length).toBe(1 + 80 + 2); // the ellipsis, 80 emoji (no whitespace to snap to), the term
+    const spaced = `${'abcdefghi '.repeat(20)}목표`;
+    expect(snippetAndRead(plain(spaced), terms('목표')).snippet!.startsWith('…abcdefghi')).toBe(true);
+  });
+
+  it('names the place of the section holding the anchor, and none for a title-only hit or an empty body', () => {
+    const text = { body: 'Tab\nfirst block\nsecond block', sections: [[0, { tab: 't' }], [4, { tab: 't', from: 'b1' }], [16, { tab: 't', from: 'b2' }]] as [number, { tab: string; from?: string }][] };
+    expect(snippetAndRead(text, terms('second')).read).toEqual({ tab: 't', from: 'b2' });
+    expect(snippetAndRead(text, terms('absent')).read).toBeUndefined();
+    expect(snippetAndRead({ body: '', sections: [] }, terms('absent'))).toEqual({});
+  });
+});
