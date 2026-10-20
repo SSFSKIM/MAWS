@@ -86,8 +86,9 @@ export interface LayoutState {
   // P3-G (§D1.2): brings the main area back, a maximized or floating panel docking (the Overview opening over main,
   // attention navigation showing a session's pane).
   revealMain(): void;
-  // P3-G (§D1.5): the floating card's size over a panel tab (its id, or 'summary'); entries of tabs in no panel list are
-  // dropped and at most FLOATING_CARD_SIZES_MAX kept, the oldest first out.
+  // P3-G (§D1.5): the floating card's size over a panel tab (its id, or 'summary'), or (P4-B3) the split card's over a
+  // main tab (`mainCardKey`); entries of tabs no longer open in a panel list or in main are dropped and at most
+  // FLOATING_CARD_SIZES_MAX kept, the oldest first out.
   setFloatingCardSize(key: string, size: FloatingCardSize): void;
   setOverviewOpen(open: boolean): void;
   setOverviewRect(rect: LayoutRegions['overview']): void;
@@ -155,6 +156,9 @@ export function panelAfter(panel: PanelRegionState, patch: Partial<PanelRegionSt
 export const FLOATING_CARD_SIZES_MAX = 64;
 // The panel tab key of the resting summary (no tab selected), in `regions.floatingCard`.
 export const SUMMARY_CARD_KEY = 'summary';
+// P4-B3 (its Decision Log 10): the key of the split card's size over a main tab (the pane beside the card), pruned with
+// the open main tabs as a panel tab's key is with the panel lists.
+export const mainCardKey = (tabId: string): string => `main:${tabId}`;
 
 const samePins = (a: PanelTabRef[], b: PanelTabRef[]) =>
   a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
@@ -376,7 +380,12 @@ export function createLayoutStore() {
       setFloatingCardSize(key, size) {
         regions((r) => {
           const state = get();
-          const live = new Set([SUMMARY_CARD_KEY, ...state.panelPinned.map((t) => t.id), ...[...state.panelBySession.values()].flatMap((s) => s.tabs.map((t) => t.id))]);
+          const live = new Set([
+            SUMMARY_CARD_KEY,
+            ...state.panelPinned.map((t) => t.id),
+            ...[...state.panelBySession.values()].flatMap((s) => s.tabs.map((t) => t.id)),
+            ...model.allTabs(state.main).map((t) => mainCardKey(t.id)), // P4-B3
+          ]);
           const kept = Object.entries(r.floatingCard).filter(([k]) => k !== key && live.has(k));
           return { ...r, floatingCard: Object.fromEntries([...kept, [key, size]].slice(-FLOATING_CARD_SIZES_MAX)) };
         });

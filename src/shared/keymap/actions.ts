@@ -37,6 +37,9 @@ export const ACTIONS = {
   // P3-G (§D1.7): the panel's floating state, the third region state of the B family (⌘B the sidebar, ⇧⌘B the panel); a
   // page in the browser passes every ⌥⌘ chord to the menu, so it works with a page focused
   'panel.float':          { title: 'Float session over panel',    chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
+  // P4-B3 (X32 amendment; its Decision Log 12): the focused pane takes the main area and the session beside it floats in
+  // the split's card, as the editor header's Expand does; on a floating split it restores the split. No default chord
+  'main.expandArtifactPane': { title: 'Expand pane',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'theme.light':          { title: 'Appearance: Light',           chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'theme.dark':           { title: 'Appearance: Dark',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'theme.system':         { title: 'Appearance: System',          chord: null,           sink: 'menu', menu: 'view', scope: 'app' },

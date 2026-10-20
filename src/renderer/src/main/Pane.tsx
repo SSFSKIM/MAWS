@@ -3,19 +3,19 @@
 // content is mounted; a tab's content remounts when it becomes active again. With no tab open (W5: the Overview is no
 // tab), the pane offers the Overview and a new session, once the saved layout has applied.
 import { useId, useRef } from 'react';
-import type { TabRef } from '@shared/ipc/schema/layout';
+import type { TabRef, TabSet } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
 import { useSlot } from '../app/slots';
-import { useChordHint } from '../app/IconButton';
+import { IconButton, MaximizeIcon, RestoreIcon, useChordHint } from '../app/IconButton';
 import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { EditorHostScopeContext, useEditorHostRegistration, type EditorHostScope } from '../panel/editor-host'; // P3-G
 import { EditorHeader } from '../panel/PanelHeader'; // P3-G
 import { ArtifactTab } from '../library/ArtifactTab'; // P3-L
 import { SessionPane } from '../session/SessionPane';
-import { cardSession } from '../shell/floating'; // P3-G
+import { cardSession, expandPane } from '../shell/floating'; // P3-G; P4-B3: expandPane
 import { useLayout } from '../stores/layout';
-import { currentSet } from '../stores/layout-model';
+import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
 
@@ -85,7 +85,7 @@ function TabBody({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
   return (
     <EditorHostScopeContext.Provider value={scope}>
       <div className="flex h-full min-h-0 flex-col">
-        <TabHeader scope={scope} />
+        <TabHeader scope={scope} paneIndex={paneIndex} />
         <div className="relative min-h-0 flex-1">
           <TabContent tab={tab} paneIndex={paneIndex} />
         </div>
@@ -94,9 +94,31 @@ function TabBody({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
   );
 }
 
-function TabHeader({ scope }: { scope: EditorHostScope }) {
+function TabHeader({ scope, paneIndex }: { scope: EditorHostScope; paneIndex: PaneIndex }) {
   const registration = useEditorHostRegistration(scope);
-  return registration && <EditorHeader title={registration.title} registration={registration} scope={scope} />;
+  const expand = useLayout((s) => expandOf(currentSet(s.main), paneIndex));
+  const controls = expand && <ExpandButton expand={expand} paneIndex={paneIndex} />;
+  return registration && <EditorHeader title={registration.title} registration={registration} scope={scope} controls={controls} />;
+}
+
+// P4-B3 (X32 amendment; its Decision Log 12): the pane header's Expand, drawn by the main surface for every editor that
+// registers (no editor registers it). Shown while the other pane shows a session ("Expand pane": the session floats into
+// the split's card and this pane takes the area), or pressed while the other pane floats ("Restore split"); else absent.
+type Expand = 'expand' | 'restore';
+function expandOf(set: TabSet, pane: PaneIndex): Expand | null {
+  if (set.panes.length !== 2) return null;
+  const other: PaneIndex = pane === 0 ? 1 : 0;
+  const floated = floatingPane(set);
+  if (floated === other) return 'restore';
+  return floated === null && paneShowsSession(set, other) ? 'expand' : null;
+}
+
+function ExpandButton({ expand, paneIndex }: { expand: Expand; paneIndex: PaneIndex }) {
+  return (
+    <IconButton label={expand === 'restore' ? 'Restore split' : 'Expand pane'} action="main.expandArtifactPane" pressed={expand === 'restore'} onClick={() => expandPane(paneIndex)}>
+      {expand === 'restore' ? <RestoreIcon /> : <MaximizeIcon />}
+    </IconButton>
+  );
 }
 
 function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
@@ -128,7 +150,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 
 // P3-G (§D1.4): while the panel floats, the floating card is the only mount of the session it draws (one composer per
 // session, one focus target); the main region is at 0 px and inert then, so nothing is lost on screen. Held through the
-// pill too, so closing and reopening the card does not remount the pane behind it.
+// pill too, so closing and reopening the card does not remount the pane behind it. (P4-B3: the split's card draws a
+// pane's session the main area no longer renders, so this holds there with nothing to hide.)
 function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 'session' }>; paneIndex: PaneIndex }) {
   const inCard = useLayout((s) => cardSession(s) === tab.appSessionId);
   return inCard ? <div data-session-in-card className="h-full" /> : <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;

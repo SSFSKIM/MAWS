@@ -494,7 +494,9 @@ test('placement: the panel resized by the keyboard and by a 40-step drag, and th
 
 // ---- P3-G: the floating card's column over a Browser tab (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M2) ----------
 
-test('P3-G acceptance 6: over a Browser tab the floating card is a live column at the pane’s left, the view beside it and never covered; its right edge moves the page; closed, the pill sits in the chrome’s tab row and the page keeps its full height', async () => {
+// P4-B3 (parent Decision Log 15.7, its Decision Log 9 and 26): the column moved to the pane's right with the card, its
+// inner (left) edge the one that resizes it
+test('P3-G acceptance 6: over a Browser tab the floating card is a live column at the pane’s right, the view beside it and never covered; its left edge moves the page; closed, the pill sits in the chrome’s tab row and the page keeps its full height', async () => {
   await browserScene(['P3-G: column'], async (s) => {
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
@@ -508,10 +510,10 @@ test('P3-G acceptance 6: over a Browser tab the floating card is a live column a
     const column = s.panel.locator('[data-browser-reserved-column]');
     const pill = s.panel.getByRole('button', { name: 'Show session card' });
     const box = async (locator: Locator) => (await locator.boundingBox())!;
-    // the view's left edge as main holds it, against the column's right edge
+    // the view's right edge as main holds it, against the column's left edge
     const edges = async () => {
       const [view, c] = await Promise.all([viewOf(s, t), box(column)]);
-      return { view: view?.bounds?.x ?? null, column: Math.round(c.x + c.width) };
+      return { view: view?.bounds ? view.bounds.x + view.bounds.width : null, column: Math.round(c.x) };
     };
     const near = (a: number, b: number) => Math.abs(a - b) <= 1;
 
@@ -531,19 +533,19 @@ test('P3-G acceptance 6: over a Browser tab the floating card is a live column a
     expect((await tabState(s, t)).tab?.covered).toBe(false);
     expect(await offPaneAfterFrames(s, t, pane)).toBeNull();
 
-    // The column's right edge, dragged 80 px right in 8 steps: the page moves with the drag, not only on release
-    const handle = card.locator('[data-card-resize="right"]');
-    await expect(card.locator('[data-card-resize]')).toHaveCount(1); // the right edge only
+    // The column's left edge, dragged 80 px left in 8 steps: the page moves with the drag, not only on release
+    const handle = card.locator('[data-card-resize="left"]');
+    await expect(card.locator('[data-card-resize]')).toHaveCount(1); // the left edge only
     const h = await box(handle);
     const [x, y] = [h.x + h.width / 2, h.y + h.height / 2];
     await s.page.mouse.move(x, y);
     await s.page.mouse.down();
-    for (let k = 1; k <= 8; k++) await s.page.mouse.move(x + 10 * k, y);
+    for (let k = 1; k <= 8; k++) await s.page.mouse.move(x - 10 * k, y);
     expect(await offPaneAfterFrames(s, t, pane), 'mid-drag').toBeNull();
     await s.page.mouse.up();
     await expectOnPane(s, t, pane, 'panel');
     const moved = await edges();
-    expect(near(moved.view!, at.view! + 80), JSON.stringify({ at, moved })).toBe(true);
+    expect(near(moved.view!, at.view! - 80), JSON.stringify({ at, moved })).toBe(true);
     expect(near(moved.view!, moved.column)).toBe(true);
     expect(Math.round((await box(card)).width)).toBe(500);
     expect((await tabState(s, t)).tab?.covered).toBe(false);

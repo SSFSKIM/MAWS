@@ -9,6 +9,7 @@ import { journalToEvents } from '../dev/journal';
 import { BASH_RESULT, builder, request, tool, uuid } from '../model/test-events';
 import type { TranscriptSource } from '../source/types';
 import { Transcript } from './Transcript';
+import { markTranscriptCarry, recordTranscriptScroll, scrollSignature, takeTranscriptCarry } from './scroll-carry'; // P4-B3
 
 // happy-dom has no layout: give the scroller a viewport and every row a height so the virtualiser mounts rows.
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -421,5 +422,101 @@ describe('follow mode across a change of the viewport’s height', () => {
     scrolls.length = 0;
     act(() => resized.forEach((fire) => fire(1600)));
     expect(scrolls).toEqual([]);
+  });
+});
+
+// P4-B3 (its Decision Log 14; Claude's rule): a session moved between a pane and a floating card is a remount, and a
+// transcript mounts at its end. Each mount records where the reader was as it goes; a card's float or dock marks the
+// next mount, which comes back there: at the end when the reader followed, else at the same row when the content is
+// unchanged, else at the end. An unmarked mount (an ordinary tab switch) opens at the end as before.
+describe('the scroll carried across a card’s float and dock', () => {
+  const turns = () => {
+    const b = builder();
+    for (let i = 0; i < 80; i++) {
+      b.turn(`u${i}`);
+      b.text(`m${i}`, 0, `Answer ${i}`);
+      b.end([`u${i}`]);
+    }
+    return b.events;
+  };
+  const scroller = () => document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+  const rendered = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')];
+  const startOf = (row: HTMLElement) => Number(/translateY\((-?[\d.]+)px\)/.exec(row.style.transform)![1]);
+  // happy-dom has no scroll metrics: the scroller's, by hand, and every scroll the list makes kept
+  function scrollMetrics() {
+    let top = 0;
+    const scrolls: number[] = [];
+    vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      if (typeof options === 'object' && options.top !== undefined && this.hasAttribute('data-transcript-scroller')) scrolls.push((top = options.top));
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-transcript-scroller') ? top : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'set').mockImplementation(function (this: HTMLElement, value: number) {
+      if (this.hasAttribute('data-transcript-scroller')) top = value;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(20_000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(2_000);
+    onTestFinished(() => void vi.restoreAllMocks());
+    return { scrolls, scrollTo: (value: number) => act(() => void ((top = value), fireEvent.scroll(scroller()))) };
+  }
+  async function mount(key: string, events: SessionEvent[]) {
+    const view = render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    return view;
+  }
+
+  it('records, as it unmounts, whether the reader followed, the offset, the content’s signature and the first visible row', async () => {
+    const metrics = scrollMetrics();
+    const key = `transcript-test-${++keys}`;
+    const view = await mount(key, turns());
+    metrics.scrollTo(18_000); // at the end
+    metrics.scrollTo(410); // the reader scrolls up: follow mode ends
+    const first = rendered().find((row) => startOf(row) <= 410 && 410 < startOf(row) + 40)!;
+    const ids = useTranscriptStore.getState().entries[key].rows.map((row) => row.id);
+    view.unmount();
+    markTranscriptCarry(key);
+    expect(takeTranscriptCarry(key)).toEqual({ following: false, offset: 410, signature: `${ids.length}:${ids.at(-1)}`, anchor: first.dataset.rowId });
+  });
+
+  it('a marked mount of unchanged content comes back with the same row at the top, not following', async () => {
+    const metrics = scrollMetrics();
+    const key = `transcript-test-${++keys}`;
+    const events = turns();
+    (await mount(key, events)).unmount();
+    const ids = useTranscriptStore.getState().entries[key].rows.map((row) => row.id);
+    const anchor = ids[3];
+    recordTranscriptScroll(key, { following: false, offset: 999, signature: scrollSignature(ids.map((id) => ({ id }))), anchor });
+    markTranscriptCarry(key);
+    metrics.scrolls.length = 0;
+    await mount(key, events);
+    const row = rendered().find((r) => r.dataset.rowId === anchor)!;
+    expect(metrics.scrolls.at(-1), 'the row at the top, where the rows measured put it').toBe(startOf(row));
+    expect(metrics.scrolls.every((top) => top < 2_000), 'never to the end').toBe(true);
+    expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
+  });
+
+  it('a marked mount goes to the end when the reader followed, or when the content changed; an unmarked one always does', async () => {
+    const metrics = scrollMetrics();
+    const events = turns();
+    const ends = async (key: string) => {
+      metrics.scrolls.length = 0;
+      const view = await mount(key, events);
+      expect(metrics.scrolls.at(-1), 'at the end').toBeGreaterThan(2_000);
+      expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
+      view.unmount();
+    };
+    const key = `transcript-test-${++keys}`;
+    (await mount(key, events)).unmount();
+    const ids = useTranscriptStore.getState().entries[key].rows.map((row) => row.id);
+    const same = scrollSignature(ids.map((id) => ({ id })));
+    recordTranscriptScroll(key, { following: true, offset: 18_000, signature: same, anchor: ids[3] });
+    markTranscriptCarry(key);
+    await ends(key);
+    recordTranscriptScroll(key, { following: false, offset: 120, signature: `${ids.length - 1}:${ids.at(-2)}`, anchor: ids[3] });
+    markTranscriptCarry(key);
+    await ends(key);
+    recordTranscriptScroll(key, { following: false, offset: 120, signature: same, anchor: ids[3] });
+    await ends(key); // not marked
   });
 });

@@ -9,7 +9,10 @@
 // width; armed, the session pane ("S") stays mounted at 0 px with its strip and content hidden, so a disarm is lossless.
 // A floating split renders the other pane ("A") alone across the region, with no divider and no drop edge; S is not
 // rendered here. A's `Pane` keeps its place among the children through arm, disarm, float and dock, so it never remounts.
+// M2 (its Decision Log 10): S's session is drawn by the split's card, in a layer on the content row across the region
+// (after every other child, so nothing before it moves).
 import { useLayoutEffect, useRef, useState } from 'react';
+import { SplitCardLayer } from '../shell/FloatingCard'; // P4-B3 M2
 import { useLayout } from '../stores/layout';
 import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
 import { DropEdge } from './DropEdge';
@@ -43,6 +46,7 @@ export function MainArea() {
       {docked && <SplitDivider width={width} sessions={sessions} live={drag} onDrag={setDrag} />}
       {split && floated !== 1 && <Pane index={1} split={docked} column={docked ? 3 : 1} collapsed={docked && drag?.armed === 'right'} />}
       {dragging && !split && <DropEdge />}
+      {floated !== null && <SplitCardLayer />}
     </div>
   );
 }

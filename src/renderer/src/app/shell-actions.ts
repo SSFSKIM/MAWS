@@ -9,10 +9,10 @@ import { focusPaneElement } from '../main/pane-dom';
 import { focusOverview } from '../overview/OverviewPanel';
 import { togglePalette } from '../palette/CommandPalette';
 import { registerReplaceGuard, useLayout } from '../stores/layout';
-import { activeTab, currentSet } from '../stores/layout-model';
+import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
-import { togglePanelFloat } from '../shell/floating'; // P3-G
+import { expandPane, focusSplitCard, togglePanelFloat } from '../shell/floating'; // P3-G; P4-B3: expandPane, focusSplitCard
 import { startMarkup } from '../markup/session'; // P3-G
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { panelInMain } from './regions';
@@ -31,6 +31,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     ),
     // P3-G (§D1.2): the floating state; the store's `setPanel` keeps it exclusive with maximized and collapsed.
     registerAction('panel.float', togglePanelFloat),
+    registerAction('main.expandArtifactPane', () => expandPane()), // P4-B3 (its Decision Log 12)
     registerAction('markup.start', () => void startMarkup()), // P3-G (§D4.4)
     registerAction('theme.light', () => useSettings.getState().setTheme('light')),
     registerAction('theme.dark', () => useSettings.getState().setTheme('dark')),
@@ -58,11 +59,13 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('tab.next', () => layout().cycleTab(1)),
     registerAction('tab.previous', () => layout().cycleTab(-1)),
     registerAction('pane.split', () => layout().splitWithActive()),
-    // DOM focus moves too, so a pane-scoped chord (bound to the element that holds focus) follows the pane.
+    // DOM focus moves too, so a pane-scoped chord (bound to the element that holds focus) follows the pane. P4-B3 (its
+    // Decision Log 7): a pane that floats is its card's, which opens if it is a pill, its composer taking the keyboard.
     registerAction('pane.focusOther', () => {
       const shown = currentSet(layout().main);
       if (shown.panes.length < 2) return;
       const other = shown.focusedPane === 0 ? 1 : 0;
+      if (floatingPane(shown) === other) return focusSplitCard();
       layout().focusPane(other);
       focusPaneElement(other);
     }),

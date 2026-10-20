@@ -1121,21 +1121,22 @@ test.describe('the floating session card (P3-G)', () => {
         await page.getByRole('menuitem', { name: 'Session info' }).click();
         await expect(panel.locator(`[data-session-info="${USAGE_ID}"]`)).toBeVisible();
         await expect(card).toBeVisible();
+        // P4-B3 (parent Decision Log 15.7): the card sits at the panel body's bottom right (it sat at the bottom left)
         const near = async () => {
           const [region, box] = [(await panel.boundingBox())!, (await card.boundingBox())!];
-          return { left: Math.round(box.x - region.x), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
+          return { right: Math.round(region.x + region.width - (box.x + box.width)), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
         };
-        // The region's 1 px left border sits outside the body the card is placed in
-        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        // The region's 1 px border is on its left, outside the card's side
+        expect(await near()).toEqual({ right: 16, bottom: 16 });
         await panel.getByRole('button', { name: 'Add a tool' }).click();
         await page.getByRole('menuitem', { name: 'Artifacts' }).click(); // P3-L M6b: Deliverables' place
         await expect(panel.locator('[data-artifacts-list]')).toBeVisible();
-        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        expect(await near()).toEqual({ right: 16, bottom: 16 });
         // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
         // top, so the strip above it and its controls stay clear
-        const handle = card.locator('[data-card-resize="top-right"]');
+        const handle = card.locator('[data-card-resize="top-left"]'); // P4-B3: the corner mirrored with the card
         const from = (await handle.boundingBox())!;
-        await dragBy(page, handle, 2000, 1 - from.y);
+        await dragBy(page, handle, -2000, 1 - from.y);
         const [strip, body, box] = [
           (await panel.getByRole('tablist', { name: 'Panel tools' }).boundingBox())!,
           (await panel.locator('#panel-host-body').boundingBox())!,
@@ -1144,7 +1145,7 @@ test.describe('the floating session card (P3-G)', () => {
         expect(Math.round(box.y - body.y), 'the card’s top 16 px under the tool body’s').toBe(16);
         expect(box.y, 'the card below the strip').toBeGreaterThan(strip.y + strip.height);
         await panel.getByRole('button', { name: 'Add a tool' }).click({ trial: true }); // nothing covers it
-        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        expect(await near()).toEqual({ right: 16, bottom: 16 });
       });
 
       await test.step('acceptance 4: Dock restores the column at its width, and the main pane’s composer has the keyboard', async () => {
@@ -1172,8 +1173,8 @@ test.describe('the floating session card (P3-G)', () => {
       await (await sidebarRow(page, SIDEBAR_DRAG)).click(); // its permission is pending in nine-sessions.json
       await menu(app, 'panel.float');
       await expect(request.getByTestId('request-input')).toHaveText('git log --oneline');
-      const handle = card.locator('[data-card-resize="top-right"]');
-      await dragBy(page, handle, -2000, 2000);
+      const handle = card.locator('[data-card-resize="top-left"]'); // P4-B3: the corner mirrored with the card
+      await dragBy(page, handle, 2000, 2000);
       const frame = (await card.boundingBox())!;
       expect([Math.round(frame.width), Math.round(frame.height)], 'the card at its minimum').toEqual([360, 240]);
 

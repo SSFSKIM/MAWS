@@ -2,12 +2,14 @@
 // pointer handling rather than using the regions' `Resizer`, which clamps before `onChange` and so hides the raw width
 // the float needs. A drag is transient: each move hands the main area the left pane's live width and the armed side
 // (`splitDrag`), and nothing reaches `main.tabs` until release, which either writes the ratio or, armed, floats that
-// pane's session with the ratio untouched (Dock returns the ratio at pointer-down). A pointer-cancel or a lost capture
+// pane's session with the ratio untouched (Dock returns the ratio at pointer-down; M2: through the card's transition,
+// which focuses the card's composer). A pointer-cancel or a lost capture
 // writes nothing. The keyboard keeps the Resizer's rules within the pixel floors and never floats: arrows 8 px (Shift
 // 32), Home and End to the floors, Enter and a double-click to 0.5. Before the region has a width (a first render, a
 // test) a nominal 1000 px stands in.
 import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import { RESIZER_BIG_STEP, RESIZER_STEP } from '../app/Resizer';
+import { floatSplit } from '../shell/floating'; // P4-B3 M2: the float's focus and transcript marks
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { paneDomId } from './pane-dom';
@@ -65,7 +67,7 @@ export function SplitDivider({
       return;
     }
     const pane = currentSet(layout.main).panes[last.armed === 'left' ? 0 : 1];
-    if (pane) layout.floatSplit(pane.activeTabId);
+    if (pane) floatSplit(pane.activeTabId);
   };
 
   return (
