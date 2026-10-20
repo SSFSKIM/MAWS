@@ -343,56 +343,94 @@ test('a comment draft moves with its document, panel → main and back, kept onc
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 
-// The owner's ask (the controller's, at B1's landing): at 1512 × 900 with the default layout, a session beside a
-// document with an open thread; what the document's margin draws in the split, after the header's Expand, and after
-// Expand with the panel closed. Measured, so the widths go into the report with the tier.
-test('the document margin’s tier at 1512 × 900: in the split, after Expand, and after Expand with the panel closed', async () => {
+// The controller's measurement (at B1's landing): B1's margin tier (src/artifacts/comments/margin-tiers.ts, `tierFor`)
+// reads only the side space beside the page; our Expand pane widens the document to the main column. At 1512 × 900 with
+// the default layout (sidebar 300, panel 380) and a document with an open thread: (c) in the panel's record with the
+// panel floated (P3-G's card over it), (a) alone in main with the panel docked, (d) the same with the panel closed, (b)
+// beside a session in main after Expand pane. What the margin draws in each is asserted; the widths go to the report.
+type MarginReading = { scrollBox: number; page: number; tier: string | null; threads: number };
+const marginOf = (scope: Locator): Promise<MarginReading> =>
+  scope.evaluate((root) => {
+    const scroll = root.querySelector<HTMLElement>('.ds-doc')!;
+    return {
+      scrollBox: scroll.clientWidth,
+      page: Math.round(root.querySelector('.ds-doc-page')!.getBoundingClientRect().width),
+      tier: root.querySelector('.doc-margin')?.getAttribute('data-margin-tier') ?? null,
+      threads: new Set(Array.from(root.querySelectorAll<HTMLElement>('[data-thread]')).map((el) => el.dataset.thread)).size,
+    };
+  });
+
+test('the document margin’s tier at 1512 × 900: in the floated panel, alone in main, with the panel closed, and after Expand pane', async () => {
   test.setTimeout(120_000);
   const page = await start(undefined, [1512, 900]);
-  // the thread opened in the panel's record (Harness A in main gives its comment a session), then the record moved
-  // beside the session by the right edge
   await pinArtifactsTool(page);
   const id = await documentInMain(page, 'B3 margin');
   await mainTab(page, id).getByRole('button', { name: /^Close / }).click();
   await mainRegion(page).getByRole('tab', { name: /^Harness A/ }).click();
   await openInPanel(page, id);
-  await startComment(page, inPanel(page, id), 5, 'an open thread');
-  await drag(page, inPanel(page, id).getByTitle('Drag to move to a tab'), mainRegion(page).getByTestId('drop-edge'), mainRegion(page).getByTestId('drop-edge-highlight'));
-  await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).locator(`[data-tab-id="artifact:${id}"]`)).toBeVisible();
+  // an open thread that needs no session to stay (B1's e2e's way): its compose card resolved, then reopened from the
+  // Comments panel, so the thread outlives the comment's target (a document alone in main has no session to go to)
+  await startComment(page, inPanel(page, id), 5, 'an open thread'); // Harness A in main gives the comment a session
+  const record = inPanel(page, id);
+  await page.locator('[data-comment-card]').getByRole('button', { name: 'Resolve' }).click();
+  await expect(page.locator('[data-comment-card]')).toHaveCount(0);
+  const toolbar = record.getByRole('toolbar', { name: 'Formatting' });
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
+  await record.getByRole('complementary', { name: 'Comments' }).locator('article[data-thread]').getByRole('button', { name: 'Reopen' }).click();
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
+  await expect(record.getByRole('complementary', { name: 'Comments' })).toHaveCount(0);
+  const widths = () => page.evaluate(() => Object.fromEntries(['sidebar', 'main', 'panel'].map((r) => [r, Math.round(document.querySelector(`[data-region="${r}"]`)?.getBoundingClientRect().width ?? -1)])));
+  const readings: Record<string, unknown> = {};
+
+  // (c) the panel floated (⌥⌘B): the panel spans the area, the session's card over its body at the bottom right
+  await menu('panel.float');
+  const card = panelRegion(page).getByRole('region', { name: 'Session card' });
+  await expect(card).toBeVisible();
+  const floated = await marginOf(inPanel(page, id));
+  const covered = await page.evaluate(() => {
+    const card = document.querySelector('[data-region="panel"] [aria-label="Session card"]')!.getBoundingClientRect();
+    const meets = (r: DOMRect) => r.width > 0 && r.height > 0 && r.left < card.right && r.right > card.left && r.top < card.bottom && r.bottom > card.top;
+    const margin = document.querySelector('[data-region="panel"] .doc-margin');
+    return {
+      column: margin ? meets(margin.getBoundingClientRect()) : null,
+      entries: Array.from(document.querySelectorAll('[data-region="panel"] .doc-margin [data-margin-entry]')).filter((entry) => meets(entry.getBoundingClientRect())).length,
+    };
+  });
+  readings.c = { ...(await widths()), ...floated, cardCovers: covered };
+  await menu('panel.float');
+  await expect(card).toHaveCount(0);
+
+  // (a) alone in main, the panel docked: the record's grip onto main's pane
+  await drag(page, inPanel(page, id).getByTitle('Drag to move to a tab'), mainRegion(page).locator('[data-pane="0"] > [role="tabpanel"]'), mainRegion(page).getByText('Move to tab', { exact: true }));
+  await expect(inMain(page, id)).toBeVisible();
+  const alone = await marginOf(inMain(page, id));
+  readings.a = { ...(await widths()), ...alone };
+
+  // (d) the panel closed
+  await menu('panel.toggle');
+  await expect.poll(async () => (await widths()).panel).toBeLessThanOrEqual(0);
+  await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
+  const closed = await marginOf(inMain(page, id));
+  readings.d = { ...(await widths()), ...closed };
+  await menu('panel.toggle');
+  await expect.poll(async () => (await widths()).panel).toBeGreaterThan(0);
+
+  // (b) beside a session in main, then Expand pane (the session floats into the main area's card)
+  await menu('pane.split');
+  await page.getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click();
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
-  const measure = () =>
-    page.evaluate((id) => {
-      const width = (element: Element | null | undefined) => Math.round(element?.getBoundingClientRect().width ?? -1);
-      const tab = document.querySelector(`[data-artifact-tab="${id}"]`)!;
-      const scroll = tab.querySelector<HTMLElement>('.ds-doc')!;
-      return {
-        sidebar: width(document.querySelector('[data-region="sidebar"]')),
-        main: width(document.querySelector('[data-region="main"]')),
-        panel: width(document.querySelector('[data-region="panel"]')),
-        editor: width(tab),
-        scrollBox: scroll.clientWidth,
-        page: width(tab.querySelector('.ds-doc-page')),
-        tier: tab.querySelector('.doc-margin')?.getAttribute('data-margin-tier') ?? null,
-        threads: new Set(Array.from(tab.querySelectorAll<HTMLElement>('[data-thread]')).map((el) => el.dataset.thread)).size,
-        card: tab.querySelector('[data-comment-card]') !== null,
-      };
-    }, id);
-  const split = await measure();
+  const split = await marginOf(inMain(page, id));
   await header.getByRole('button', { name: 'Expand pane' }).click();
   await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toBeVisible();
-  await expect.poll(async () => (await measure()).editor).toBeGreaterThan(split.editor);
-  const expanded = await measure();
-  await menu('panel.toggle');
-  await expect.poll(async () => (await measure()).panel).toBeLessThanOrEqual(0);
-  await expect.poll(async () => (await measure()).editor).toBeGreaterThan(expanded.editor);
-  const panelClosed = await measure();
-  const measured = { split, expanded, panelClosed };
-  test.info().annotations.push({ type: 'margin widths', description: JSON.stringify(measured) });
-  // What holds (src/artifacts/comments/margin-tiers.ts): the margin is off under a 720 px body (rail-width.ts,
-  // RAIL_BESIDE_FROM_PX); cards need 333 px of side space beside the 816 px page (26 + 282 + 25), else icons. The default
-  // layout leaves main 832 px at 1512, so Expand alone gives 16 px of side space (icons); with the panel closed too, 396.
-  expect([split.tier, expanded.tier, panelClosed.tier], 'the tier in the split, after Expand, and with the panel closed too').toEqual(['off', 'icons', 'cards']);
-  expect([split.threads, expanded.threads, panelClosed.threads], 'the open thread came across').toEqual([1, 1, 1]);
+  await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(split.scrollBox);
+  const expanded = await marginOf(inMain(page, id));
+  readings.b = { ...(await widths()), split, ...expanded };
+  test.info().annotations.push({ type: 'margin readings', description: JSON.stringify(readings) });
+
+  // What holds (margin-tiers.ts): off under a 720 px body (rail-width.ts RAIL_BESIDE_FROM_PX); cards while the side
+  // space beside the 816 px page is at least 26 + 282 + 25 = 333 px; else icons.
+  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier }).toEqual({ c: 'cards', a: 'icons', d: 'cards', split: 'off', b: 'icons' });
+  expect([floated, alone, closed, expanded].map((r) => r.threads), 'the open thread in every reading').toEqual([1, 1, 1, 1]);
 });
 
 // Loaded in main before its entry (launchMaws's requireFirst): a frame preload registered on the window's session before
