@@ -307,7 +307,7 @@ test.describe('the document editor', () => {
         tier: (el as HTMLElement).dataset.marginTier,
         relayouts: (el as HTMLElement).dataset.relayouts,
         column: rect(el),
-        entries: [...el.querySelectorAll<HTMLElement>('[data-margin-entry]')].map((node) => `${node.dataset.marginEntry}: ${node.style.transform || 'no transform'} ${rect(node)}`),
+        entries: Array.from(el.querySelectorAll<HTMLElement>('[data-margin-entry]')).map((node) => `${node.dataset.marginEntry}: ${node.style.transform || 'no transform'} ${rect(node)}`),
         overlay: rect(hosted?.querySelector('.doc-margin-overlay')),
         card: rect(hosted?.querySelector('[data-comment-card]')),
       };
