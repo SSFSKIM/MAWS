@@ -83,6 +83,9 @@ interface Entry {
 }
 interface Located extends Entry {
   from: number | null;
+  // P4-B1 (the follow-up wave): the anchor the last pass measured, which the catch-up in `pass` hands in for an entry no
+  // longer drawn (a resolved thread's card, until the animated pass takes it out); measured from `from` otherwise
+  anchor?: number;
 }
 
 type Cause = 'activation' | 'set' | 'layout';
@@ -191,6 +194,9 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     latest.current = { wantedKey, byId, hosting, tier, entries };
   });
   const located = useRef<Located[]>([]);
+  // P4-B1 (the follow-up wave): each entry's anchor as the last pass measured it (the column's coordinates, before the
+  // inset), for the catch-up
+  const anchors = useRef(new Map<string, number>());
   const lastCause = useRef<Cause>('layout');
   const updateAdd = useRef<() => void>(() => {});
   // P4-B1 (the follow-up wave): the pin the last pass laid the stack from, and the pass the edits owe (margin-settle.ts),
@@ -214,9 +220,10 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     const { tier } = latest.current;
     const list = located.current;
     const origin = root.getBoundingClientRect().top;
-    const anchorOf = (entry: Located) => (entry.from === null || editor.isDestroyed ? 0 : Math.round(editor.view.coordsAtPos(entry.from, 1).top - origin));
+    const anchorOf = (entry: Located) => entry.anchor ?? (entry.from === null || editor.isDestroyed ? 0 : Math.round(editor.view.coordsAtPos(entry.from, 1).top - origin));
+    anchors.current = new Map(list.map((entry) => [entry.id, anchorOf(entry)]));
     const icons = tier.kind === 'icons';
-    const items = list.map((entry) => ({ id: entry.id, anchor: anchorOf(entry) + MARGIN_CARD_INSET_PX, height: icons ? ICON_PX : (heights.current.get(entry.id) ?? 0) }));
+    const items = list.map((entry) => ({ id: entry.id, anchor: anchors.current.get(entry.id)! + MARGIN_CARD_INSET_PX, height: icons ? ICON_PX : (heights.current.get(entry.id) ?? 0) }));
     const pin = pinAs !== undefined ? pinAs : editor.isDestroyed ? null : pinnedThread(editor.state);
     const pinned = pin !== null && list.some((entry) => entry.id === pin && entry.from !== null) ? pin : null;
     const placed = layoutMargin({ entries: items, pinned, gap: icons ? ICON_GAP_PX : MARGIN_GAP_PX });
@@ -277,12 +284,18 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
       const list = locate();
       if (list === null) return;
       // P4-B1 (the follow-up wave): an animated pass over a margin the edits left stale lands the edits' moves first,
-      // unanimated, from the stack as last laid (its entries at their passages' lines now, its heights, its pin), so an
-      // activation or an add that catches the margin up animates its own moves alone (D4). The second `place` reads the
+      // unanimated, from the stack as last laid (every entry of it, in its order, at its passage's line now; one no longer
+      // drawn, a resolve's, at the anchor last measured for it; one unlocated still unlocated; its heights, its pin), so
+      // an activation, an add or a resolve that catches the margin up animates its own moves alone (D4): a resolved card
+      // leaves and the stack closes up in the animated pass, an added one enters there. The second `place` reads the
       // column's rect first, which applies those moves before the animated ones are written
       if (ANIMATED.has(cause) && settle.stale) {
-        const at = new Map(list.map((entry) => [entry.id, entry.from]));
-        located.current = located.current.filter((entry) => at.has(entry.id)).map((entry) => ({ ...entry, from: at.get(entry.id)! }));
+        const now = new Map(list.map((entry) => [entry.id, entry.from]));
+        located.current = located.current.map((entry) => {
+          const from = now.get(entry.id);
+          if (from !== undefined) return { ...entry, from };
+          return entry.from === null ? entry : { ...entry, anchor: anchors.current.get(entry.id) };
+        });
         place('layout', laidPin.current);
       }
       located.current = list;
@@ -313,14 +326,15 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   }, [wantedKey, byId, hosting, active, pin, tier, pass]);
   // P4-B1: the passages' moves are the page frame's to report, from its frame callback. A frame resize re-lays at once.
   // Edits alone (the follow-up wave) owe the pass, which runs once they pause (margin-settle.ts), unless they drew or
-  // removed a passage (a deletion, its undo): the drawn set is read from the display's decorations, nothing measured
+  // removed a passage (a deletion, its undo; the compose card's thread moved between its line and the column's top by
+  // one): the drawn set is read from the display's decorations, nothing measured
   useEffect(() => {
     if (!relayoutRef) return;
     relayoutRef.current = (move) => {
       if (move === 'resize') return pass('layout', false);
       const list = locate();
       if (list === null) return;
-      if (sameIds(list, located.current)) settle.changed();
+      if (sameDrawn(list, located.current)) settle.changed();
       else pass('layout', false);
     };
     return () => {
@@ -656,9 +670,10 @@ const Hosted = memo(function Hosted({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
 });
 
-// P4-B1 (the follow-up wave): whether two located lists draw the same threads in the same order
-function sameIds(a: readonly Located[], b: readonly Located[]): boolean {
-  return a.length === b.length && a.every((entry, i) => entry.id === b[i]!.id);
+// P4-B1 (the follow-up wave): whether two located lists draw the same threads in the same order, each at a passage or at
+// the column's top alike (the compose card's thread stays an entry, at the top, once its passage is deleted)
+function sameDrawn(a: readonly Located[], b: readonly Located[]): boolean {
+  return a.length === b.length && a.every((entry, i) => entry.id === b[i]!.id && (entry.from === null) === (b[i]!.from === null));
 }
 
 // P4-B1: whether React's entries are the located ones (the same ids, in order, with the same threads)

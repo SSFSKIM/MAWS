@@ -526,6 +526,40 @@ describe('re-layout (R1 to R6)', () => {
     expect(relayouts() - passes0, 'nothing left owed').toBe(2);
   });
 
+  // P4-B1 (the follow-up wave, D4, Z1): a resolve over a margin the edits left stale catches it up with the resolved
+  // card still in the stack (at the anchor last measured for it), so the edits' moves land unanimated and the close-up
+  // is the resolve's own, animated
+  it('a resolve over a stale margin lands the edits’ moves unanimated, then the close-up animated (D4, Z1)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'design review', 150);
+    comment(m, 't3', 'track the budget', 160);
+    await settle();
+    act(() => void m.editor().commands.setActiveThread('t1')); // the pin on t1: the stack walks down from its anchor
+    act(() => void m.editor().commands.setActiveThread(null));
+    const stacked = 140 - scene.columnTop + MARGIN_CARD_INSET_PX;
+    const step = scene.entryHeight + MARGIN_GAP_PX;
+    expect(['t1', 't2', 't3'].map((id) => topOf(entry(id)))).toEqual([stacked, stacked + step, stacked + 2 * step]);
+    scene.lines.set('t1', { top: 160, height: 20 }); // a line typed above all three
+    scene.lines.set('t2', { top: 170, height: 20 });
+    scene.lines.set('t3', { top: 180, height: 20 });
+    type(m, 'X', 'The plan');
+    await frame();
+    const writes = recordWrites();
+    act(() => resolve(m.agent.doc, 't2', agentActor, now(), 'agent')); // within the edits' quiet
+    await settle();
+    const written = writes.stop();
+    expect(entry('t2')).toBeNull();
+    expect(written).toEqual([
+      // the edits' moves, t2 still stacked between: all three down a line, unanimated
+      { id: 't1', top: stacked + 20, animated: false },
+      { id: 't2', top: stacked + 20 + step, animated: false },
+      { id: 't3', top: stacked + 20 + 2 * step, animated: false },
+      // the resolve's close-up under t1, animated
+      { id: 't3', top: stacked + 20 + step, animated: true },
+    ]);
+  });
+
   // P4-B1 (the follow-up wave): the human's own changes re-lay at once, and settle what the edits owed
   it('a frame resize, a card’s resize, a font load and a view change re-lay at once, settling a pass the edits owed', async () => {
     const fonts = new EventTarget();
@@ -640,6 +674,26 @@ describe('re-layout (R1 to R6)', () => {
     expect(topOf(entry('t1'))).toBe(140 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(entry('t2')).not.toBeNull();
     expect(queries.mock.calls.filter(([selector]) => selector === '[data-thread]')).toHaveLength(0);
+  });
+
+  // P4-B1 (the follow-up wave, Z3): the compose card's thread stays an entry once its passage is deleted, at the column's
+  // top, so the deletion and its undo keep the same ids while they move it between its line and the top; each re-lays in
+  // its edit's frame
+  it('a hosted compose card’s passage deleted and restored by undo re-lays in each edit’s frame (Z3)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 240);
+    await settle();
+    act(() => m.overlay()!.hosting?.('t1'));
+    expect(entry('t1')!.hasAttribute('data-compose')).toBe(true);
+    const line = 240 - scene.columnTop + MARGIN_CARD_INSET_PX;
+    expect(topOf(entry('t1'))).toBe(line);
+    const from = findPos(m.editor(), 'ships quarterly');
+    act(() => m.editor().view.dispatch(m.editor().state.tr.delete(from, from + 'ships quarterly'.length)));
+    await frame();
+    expect(topOf(entry('t1')), 'at the column’s top, its inset below it').toBe(MARGIN_CARD_INSET_PX);
+    act(() => void m.editor().commands.undo());
+    await frame();
+    expect(topOf(entry('t1'))).toBe(line);
   });
 
   // P4-B1 (R2): the margin reads the threads map at once, so an agent's reply shows in its card while the owner types,
