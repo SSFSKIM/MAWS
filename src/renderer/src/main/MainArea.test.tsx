@@ -558,6 +558,38 @@ describe('the split’s float: the divider', () => {
     expect(body(0)).toBe(bodyA); // A never remounted
   });
 
+  // M6 (the e2e's round trip, Chromium layout): collapsed into a 0 px column, S's content reflowed at no width, so its
+  // transcript's rows were re-measured and the carry its float records named another row; it now keeps the width it was
+  // last laid out at, hidden and overflowing its column over A (left: from its start; right: from its end).
+  it('armed, S keeps the width it was last laid out at, hidden, so its content never reflows at 0 px', () => {
+    sessionBesideDiagnostics();
+    const bodyOf = (pane: 0 | 1) => main().querySelector<HTMLElement>(`[data-pane="${pane}"] > [role="tabpanel"]`)!;
+    down(750);
+    move(400);
+    resize(bodyOf(0), { width: 400, height: 700 });
+    move(159);
+    expect(columns()).toBe('0px 1px minmax(0, 1fr)');
+    expect(bodyOf(0).style).toMatchObject({ visibility: 'hidden', width: '400px', justifySelf: 'start' });
+    move(161);
+    expect(bodyOf(0).style.visibility).toBe('');
+    expect(bodyOf(0).style.width).toBe('');
+  });
+
+  it('armed on the right, S keeps its last width from its column’s end', () => {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openTab({ kind: 'diagnostics' });
+      useLayout.getState().openSession(idOf('Charter + research'), { split: true });
+    });
+    resize(region(), { width: W, height: 800 });
+    const bodyS = main().querySelector<HTMLElement>('[data-pane="1"] > [role="tabpanel"]')!;
+    resize(bodyS, { width: 749, height: 700 });
+    down(750);
+    move(1400);
+    expect(columns()).toBe('minmax(0, 1fr) 1px 0px');
+    expect(bodyS.style).toMatchObject({ visibility: 'hidden', width: '749px', justifySelf: 'end' });
+  });
+
   it('with two sessions the squeezed one floats and the other keeps its slot without remounting', () => {
     render(<Shell />);
     act(() => {

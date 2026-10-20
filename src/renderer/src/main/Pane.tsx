@@ -4,7 +4,7 @@
 // tab), the pane offers the Overview and a new session, once the saved layout has applied. P4-B3 (X38): while a panel
 // tab is dragged, the pane's body is covered by a target that appends a record here as a main tab, the whole pane
 // highlighted, and refuses (no drop cursor) what the transfer refuses.
-import { useId, useRef } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { TabRef, TabSet } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
 import { useSlot } from '../app/slots';
@@ -29,13 +29,18 @@ const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
 
 // `column` is the pane's column in the main region's grid (MainArea), where its strip and its content are placed.
 // `collapsed` (P4-B3 M1): the pane's column is at 0 px while a divider drag has armed its float; the strip and content
-// stay mounted but hidden, so a disarm in the same drag brings them back as they were.
+// stay mounted but hidden, so a disarm in the same drag brings them back as they were. M6: the hidden content keeps the
+// width it was last laid out at, overflowing its 0 px column over the other pane (the left pane from its start, the right
+// from its end), so nothing in it reflows at no width: a transcript re-measured at 0 px scrolled to other rows, and the
+// carry its float records named a row the reader never saw.
 export function Pane({ index, split, column, collapsed = false }: { index: PaneIndex; split: boolean; column: number; collapsed?: boolean }) {
   const pane = useLayout((s) => currentSet(s.main).panes[index]);
   const hydrated = useLayout((s) => s.hydrated);
   const cover = useCoverState('main'); // P4-B3 (Z5): a panel record dragged here appends to this pane
   const idPrefix = useId();
   const element = useRef<HTMLElement>(null);
+  const body = useRef<HTMLDivElement>(null); // P4-B3 M6
+  const laidOut = useLaidOutWidth(body, collapsed); // P4-B3 M6
   // ⌃Tab and ⌃⇧Tab cycle the pane that owns the focused element (renderer sink, pane scope: a tab or a card may take
   // it, text entry, key sinks and buttons may not). Focus follows to the newly active tab, since the content that held
   // it may have unmounted with its tab.
@@ -68,12 +73,13 @@ export function Pane({ index, split, column, collapsed = false }: { index: PaneI
         <TabStrip pane={index} split={split} idPrefix={idPrefix} />
       </div>
       <div
+        ref={body}
         role="tabpanel"
         aria-labelledby={active ? `${idPrefix}-tab-${activeIndex}` : undefined}
         aria-label={active || !hydrated ? undefined : 'No open tabs'}
         aria-busy={active || hydrated ? undefined : true}
         className="relative min-h-0 min-w-0 overflow-hidden"
-        style={{ gridRow: 3, gridColumn: column, ...(collapsed ? HIDDEN : null) }}
+        style={{ gridRow: 3, gridColumn: column, ...(collapsed ? collapsedBody(index, laidOut) : null) }}
       >
         {/* Until the saved layout applies, an empty pane is only not yet restored: it draws nothing rather than "No open
             tabs" (a relaunch flashed it). A tab opened before then draws at once. */}
@@ -228,3 +234,24 @@ function BrowserTab({ tab }: { tab: Extract<TabRef, { kind: 'browser' }> }) {
   return <Slot tab={tab} />;
 }
 // E4a end
+
+// P4-B3 M6: the body hidden in its 0 px column at the width it was last laid out at, from the column's start (the left
+// pane) or its end (the right pane), so it overflows over the other pane, invisible and never hit.
+function collapsedBody(index: PaneIndex, width: number | null): CSSProperties {
+  return width === null ? HIDDEN : { ...HIDDEN, width, justifySelf: index === 0 ? 'start' : 'end' };
+}
+
+// The element's width while the pane is not collapsed, kept as the last one measured above 0 once it collapses.
+function useLaidOutWidth(ref: RefObject<HTMLElement | null>, collapsed: boolean): number | null {
+  const [width, setWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || collapsed || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0) setWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, collapsed]);
+  return width;
+}
