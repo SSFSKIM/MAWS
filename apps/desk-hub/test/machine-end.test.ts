@@ -100,6 +100,50 @@ describe('a stream nobody reads, left alone', () => {
   });
 });
 
+// A slow reader is not a stuck one: the bound is each write's own wait at the head of the stream, not its wait behind
+// the writes queued before it (review of M4: thirteen projects' backlog pages queued at once on one stream).
+describe('a stream read slowly, with many projects writing to it at once', () => {
+  it('takes every write, though the whole queue takes longer than the bound', { timeout: 30_000 }, async () => {
+    const BOUND = 300;
+    const PACE = 100;
+    class Bounded extends Machine {
+      protected timing() {
+        return { ...super.timing(), writeTimeoutMs: BOUND };
+      }
+    }
+    const kv = new Map<string, unknown>();
+    const ctx = { storage: { kv: { get: (k: string) => kv.get(k), put: (k: string, v: unknown) => kv.set(k, v), delete: (k: string) => kv.delete(k) } } };
+    const env = { PROJECT: { idFromName: (name: string) => name, get: () => ({ closed: async () => {}, renew: async () => {} }) }, REGISTRY: { idFromName: (name: string) => name, get: () => ({ orgFrame: directory }) } };
+    const object = new Bounded(ctx as never, env as never);
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: string) => void lines.push(line));
+    try {
+      const response = await open(object);
+      const reader = response.body!.getReader();
+      let reading = true;
+      const paced = (async () => {
+        while (reading) {
+          const { done } = await reader.read();
+          if (done) return;
+          await new Promise((resolve) => setTimeout(resolve, PACE));
+        }
+      })();
+      // Twelve projects' pages, queued at once: the last waits well past the bound before it reaches the stream.
+      const started = Date.now();
+      const sends = Array.from({ length: 12 }, (_, i) => object.send({ t: 'events', project: `p-${i}`, events: [] } as DownFrame, 1));
+      expect(await Promise.all(sends)).toEqual(Array(12).fill('written'));
+      expect(Date.now() - started).toBeGreaterThan(BOUND * 2);
+      expect(lines.some((line) => line.includes('"cause":"write-stalled"'))).toBe(false);
+      reading = false;
+      await reader.cancel();
+      await paced;
+    } finally {
+      log.mockRestore();
+      object.revoke('client-1');
+    }
+  });
+});
+
 describe("a stream whose org directory the Registry could not give", () => {
   it('ends, so the machine reconnects for it, and nothing queued behind the directory is written', async () => {
     const machine = machineObject(async () => {

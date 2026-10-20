@@ -155,6 +155,62 @@ describe("a POST carrying many projects' hellos (the every-fifteen-minutes 503)"
     await m.close();
   });
 
+  it("applies one project's runs in order though another project's run sits between them", async () => {
+    const held = newProject();
+    const free = newProject();
+    const m = await machine('interleaved');
+    await m.sync(held);
+    await m.connect(); // a new stream: `held` must be opened again before its upload is
+    await hub.holdHellos(held, true);
+    const calls = (await hub.projectCalls(held)).calls;
+    const from = m.frames.length;
+    const post = m.post([
+      { t: 'hello', project: held, name: 'demo', have: {} },
+      { t: 'hello', project: free, name: 'demo', have: {} },
+      { t: 'events', project: held, events: [say(m, held, 1)] },
+    ]);
+    await m.next((f) => f.t === 'have' && f.project === free, "the free project's have", from);
+    // The held project's upload waits behind its hello: applied before it, it would be refused not-open.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(m.frames.slice(from).some((f) => f.t === 'refused')).toBe(false);
+    await hub.holdHellos(held, false);
+    const response = await post;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ frames: 3 });
+    expect(m.frames.slice(from).some((f) => f.t === 'refused')).toBe(false);
+    // Two runs of the held project, two calls; its event stored once, after its hello.
+    expect((await hub.projectCalls(held)).calls - calls).toBe(2);
+    const browser = await BrowserClient.open(hub, ADMIN, held);
+    browser.send({ t: 'resume', after: 0 });
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    expect(browser.logged.map((e) => e.event.seq)).toEqual([1]);
+    browser.close();
+    await m.close();
+  });
+
+  it("answers a failed early run with the POST-order prefix, though a later project's run applied", async () => {
+    const early = newProject();
+    const later = newProject();
+    const m = await machine('prefix');
+    await m.sync(early);
+    await m.connect();
+    await hub.holdHellos(early, true);
+    const from = m.frames.length;
+    const post = m.post([
+      { t: 'hello', project: early, name: 'demo', have: {} },
+      { t: 'hello', project: later, name: 'demo', have: {} },
+    ]);
+    // The later project's run applies (its `have` is on the stream) while the early one waits; then the early `have` fails.
+    await m.next((f) => f.t === 'have' && f.project === later, "the later project's have", from);
+    await hub.failNextSend(m.name, 'have');
+    await hub.holdHellos(early, false);
+    const response = await post;
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'delivery-failed', frames: 0 });
+    expect((await hub.projectMachines(later)).some((row) => row.name === m.name && row.generation === m.generation)).toBe(true);
+    await m.close();
+  });
+
   it("is answered 200 for thirteen projects' hellos in one POST, each project's have on the stream", async () => {
     const ids = Array.from({ length: 13 }, () => newProject());
     const m = await machine('thirteen');
@@ -176,7 +232,8 @@ describe("a POST carrying many projects' hellos (the every-fifteen-minutes 503)"
     await hub.failNextSend(m.name, 'have');
     const response = await m.post([{ t: 'hello', project, name: 'demo', have: {} }]);
     expect(response.status).toBe(503);
-    const line = hub.runtimeLogs.find((l) => l.message.includes('a failure the suite injected into the send of have') && l.message.includes('"event":"frame-failed"'));
+    const line = hub.runtimeLogs.find((l) => l.message.includes('"event":"frame-failed"') && l.message.includes(`"machine":"${m.name}"`));
+    expect(line?.message).toContain('a failure the suite injected into the send of have');
     expect(line?.message).toContain(`"project":"${project}"`);
     expect(line?.message).toContain('"frame":"hello"');
     await m.close();

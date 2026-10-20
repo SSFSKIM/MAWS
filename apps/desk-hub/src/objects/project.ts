@@ -3,8 +3,8 @@
 // tagged with its own id and carrying its member, visibility, log mark, and subscriptions' numbering in its attachment;
 // the routes from a subscription to its socket are in storage. So a woken object routes again before it handles
 // anything: hibernation is the common path (M1's probe). Machines reach it through their `Machine` objects
-// (`fromMachine`, `renew`, `closed`), and it reaches them back the same way, two ordered queues per machine stream: the
-// log plane's replies and the browsers' control frames.
+// (`fromMachine`, `renew`, `closed`), and it reaches them back the same way, two ordered queues of its own per machine
+// stream: the log plane's replies and the browsers' control frames.
 //
 // What the session plane keeps survives an eviction while sockets stay open (§2): machines' leases and presence,
 // sessions' presence, the pending set, delivery outcomes, RPC records, and subscription routes (session-store.ts).
@@ -81,9 +81,9 @@ const isName = (v: unknown, max = 200): v is string => typeof v === 'string' && 
 export class Project extends DurableObject<Env> {
   private readonly log: LogStore;
   private readonly plane: SessionStore;
-  /** Two promise chains per machine stream (`<machine>#<generation>#<lane>`, the `replies` and `control` lanes), so
-   * every frame this object sends a stream on one lane arrives in the order it was queued there; a chain that failed
-   * stays failed, its stream ended (`toMachine`). */
+  /** This project's two promise chains per machine stream (`<machine>#<generation>#<lane>`, the `replies` and
+   * `control` lanes), so every frame this object sends a stream on one lane arrives in the order it was queued there; a
+   * chain that failed stays failed, its stream ended (`toMachine`). */
   protected readonly queues = new Map<string, Promise<void>>();
   /** Part sets a socket is sending (lost with a hibernation, as the socket's half-sent frame would be). */
   private readonly parts = new Map<WebSocket, PartAssembler>();
@@ -1133,12 +1133,14 @@ export class Project extends DurableObject<Env> {
   // ---- Machines' streams -------------------------------------------------------------------------------------
 
   /**
-   * Queues a frame for a machine's stream on one of its two lanes, behind everything queued on that lane before, and
+   * Queues a frame for a machine's stream on one of this project's two lanes to it (every project keeps its own),
+   * behind everything this project queued on that lane before, and
    * resolves with what became of it: `replies` for what the log plane writes down the stream (what a machine's own
    * frames owe it, the backlog, the live fan-out of other machines' uploads), `control` for what the browsers' side
    * sends (subscriptions and their requests, forwarded RPCs and their acknowledgements, a session-plane frame's
-   * refusal). Both end at the machine's object, whose writer serializes them, so a browser's subscribe never waits
-   * behind a backlog being paged; a stream that takes no write stops both, until its write bound ends it. A stream that
+   * refusal). Every project's lanes end at the machine's object, which writes one frame at a time in arrival order,
+   * so a browser's subscribe never waits behind a backlog being paged here, only behind the frame on the stream; a
+   * stream that takes no write stops them all, until its write bound ends it. A stream that
    * is gone (or older than the machine's current one) leaves the fan-out until the machine's next `hello`. A send that
    * fails otherwise leaves it too, and its stream is ended, so the machine reconnects and its `hello` heals what it
    * missed. The lane stays failed from then on: nothing more is sent on it, and everything queued behind the failure

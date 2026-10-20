@@ -60,8 +60,10 @@ export type Stream = {
   ready: Promise<void>;
   /** The version of the directory written on this stream; 0 before the first. */
   directoryVersion: number;
-  /** How long a write may wait for the stream to take it (`WRITE_TIMEOUT_MS`, a suite's shorter one). */
+  /** How long the write at the head may wait for the stream to take it (`WRITE_TIMEOUT_MS`, a suite's shorter one). */
   writeTimeoutMs: number;
+  /** The last write queued: each write reaches the stream once the one before it settled (`write`). */
+  writing: Promise<boolean>;
 };
 
 /** How often the stream's heartbeat goes, how long a renewal keeps the machine online, how long a closed stream's lease
@@ -72,11 +74,11 @@ export type Timing = { heartbeatMs: number; leaseMs: number; graceMs: number; pr
 /** How often a stream's instance asks whether new requests still reach it: a replaced one ends its stream within this. */
 export const PROBE_MS = 1000;
 /**
- * How long a write may wait for the stream to take it before the stream ends `write-stalled`. A write waits on the client
- * reading (the stream holds nothing ahead of it), and on the writes queued before it, which a page at a time (about
- * 1 MiB) each lane keeps short: a frame of 1 MiB taking this long is 100 KB/s, a dead link rather than a slow one. Without
- * a bound, a client that stopped reading held every write, every send chain, and the POSTs waiting on them, until the
- * machine's own minute ran out.
+ * How long the write at the head of a stream may wait for the stream to take it before the stream ends `write-stalled`.
+ * Writes reach the stream one at a time, so the bound is one frame's wait on the client reading, never its wait behind
+ * the frames queued before it (many projects' backlog pages at once): a frame of 1 MiB taking this long is 100 KB/s, a
+ * dead link rather than a slow one. Without a bound, a client that stopped reading held every write, every send chain,
+ * and the POSTs waiting on them, until the machine's own minute ran out.
  */
 export const WRITE_TIMEOUT_MS = 10_000;
 /** How long a probe waits for its answer before it counts as no answer. */
@@ -231,6 +233,7 @@ export class Machine extends DurableObject<Env> {
       ready: Promise.resolve(),
       directoryVersion: 0,
       writeTimeoutMs,
+      writing: Promise.resolve(true),
     };
     this.stream = stream;
     note({ event: 'open', machine, generation, instance: this.life });
@@ -410,10 +413,20 @@ export class Machine extends DurableObject<Env> {
     }
   }
 
-  /** Writes a frame to the stream, after the directory unless `ordered` is false (the frames that open it). A write the
-   * stream does not take within its bound ends the stream `write-stalled`, which fails every write queued behind it. */
+  /** Writes a frame to the stream, after the directory unless `ordered` is false (the frames that open it), and behind
+   * every write queued on the stream before it, whichever project or lane queued it. */
   private async write(stream: Stream, frame: DownFrame, ordered = true): Promise<boolean> {
     if (ordered) await stream.ready;
+    const turn = stream.writing.then(() => this.take(stream, frame));
+    stream.writing = turn;
+    return turn;
+  }
+
+  /** The write at the head of the stream. Its bound starts here, not when it was queued: a write the stream does not
+   * take within the bound ends the stream `write-stalled`, which fails every write queued behind it, while a reader
+   * that takes each frame in time keeps the stream however long the queue behind the head is. */
+  private async take(stream: Stream, frame: DownFrame): Promise<boolean> {
+    if (stream.ended) return false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stalled = new Promise<'stalled'>((resolve) => (timer = setTimeout(() => resolve('stalled'), stream.writeTimeoutMs)));
     const writing = this.put(stream, frame);
