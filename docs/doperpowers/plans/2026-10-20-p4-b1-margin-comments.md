@@ -271,7 +271,31 @@ Retrospective (at hand-back, the measured set still to run after the architect's
 
 - Unit: `margin-settle.test.ts` (the pass owed, not run, for an edit; the quiet counted from the last edit; the idle timeout when no idle moment comes; the ceiling under an edit every 60 ms for 20 s with no idle moment, every wait ≤ 1,000 ms; with idle moments, the pass at the ceiling's timer, one per ceiling; a pass of any cause settling what is owed, also once due; an edit while due read by that pass; nothing owed after a run that drew nothing or a dispose; the page's clock asking `requestIdleCallback` with the idle bound).
 - DOM (`margin.dom.test.tsx`): no pass in an edit's frame and the card at its new line once the edits pause, unanimated (R1), a scroll none (R4); frames counted, edits in four frames no pass, one after the pause (D13); a pass within the ceiling under edits every 60 ms; the immediate paths (a frame resize, a card's resize, a font load, a view change each re-lay at once at the fresh line, and nothing is left owed); the catch-up's writes (the edits' moves unanimated, then the activation's animated, two passes, nothing owed after), and for a resolve inside the quiet (the edits' moves unanimated with the resolved card still in the stack, then the close-up animated; red before 3b40660d9); a hosted compose card's passage deleted and restored by undo re-laid in each edit's frame (red before 3b40660d9); the deletion and undo case (Z3) unchanged; the soft-wrap (P6), add and activation (D4) and close-up (Z1) cases waiting for the settle where they edit. `provisional.dom.test.tsx`: no pass in the growth's frames, one once it pauses, the hosted overlay not drawn again.
-- Gates: (filled as they run).
+- Gates: at 2a6170eb8 (the code of 3b40660d9), run 39393866900: static, unit and probes green on the pool, `e2e:document` and `e2e:document-app` green on the mini, and `e2e:document-scale` once as an unmeasured pre-run (no quiet window; red on its rows, as every mini run is on rows 1 and 2 at the spec's 20 and 50): the reading below.
+
+### The pre-run (unmeasured, 2026-10-20 about 08:50Z, run 39393866900, load 2.48 in the margin test)
+
+The deferral holds on the real page: `1m relayouts` 0.074 (40 passes over 540 frame callbacks in 41.6 s of typing, 0.96 a second, against B1's 1.00), none after the scripted scroll (R4); `1m stale` 1,063 ms (the pass fell due at 1,000 and started once the main thread reached its task). But the keystroke's tail did not move: `1m p95` 25.0 ms (p50 12.4, p99 32.9, max 36.8) against B1's B runs at 24.8 and 25.8 (p50 12.3 and 12.5), and the base gate's row 1 in the same job 20.4. With the pass in about one frame in fourteen instead of every frame, a cost the pass carried would have left the p95; it did not, so the pass was not what the +3.7 ms measured. The margin test and the base gate's step 1 also differ in their workload: the margin test runs at 1920 × 1080 (row 1 at the default 1280 × 820, about half the pixels) and feeds A2's streaming layer two sections under the caret, on screen, every 120 ms or so (row 1 has no layer). A diagnostic carrier (3d2b67de4, never merged; run 39398316541) runs the margin test as a 2 × 2 at 1920 × 1080, cards or Hide and the layer or none, interleaved, the first repeated last, to place the cost.
+
+Row limits set from this reading: `1m relayouts` ≤ 0.1 per frame callback; `1m stale` ≤ 1,200 ms (the 1 s ceiling and the main thread's queue under the step's load).
+
+### The diagnostic (unmeasured, 2026-10-20 09:12Z to 09:17Z, run 39398316541, carrier 3d2b67de4 on 168c0c330's code; loads 1.7 to 2.8)
+
+The margin test five times in one job at 1920 × 1080, each a fresh launch, in this order; keystroke → frame in ms (p50, p95, p99, max), the margin's passes over the frame callbacks:
+
+| Variant | p50 | p95 | p99 | max | passes / frames |
+|---|---|---|---|---|---|
+| cards and the layer | 12.1 | 25.5 | 30.7 | 35.5 | 40 / 555 (stale max 1,041) |
+| Hide and the layer | 12.3 | 24.9 | 29.6 | 33.3 | 0 / 556 |
+| cards, no layer | 14.2 | 23.3 | 33.3 | 35.2 | 41 / 348 |
+| Hide, no layer | 13.9 | 22.4 | 35.4 | 45.9 | 0 / 349 |
+| cards and the layer, again | 12.4 | 27.8 | 32.2 | 37.7 | 41 / 556 |
+
+Single runs, so read only the larger effects: the streaming layer about +2.5 to 3 ms at p95 (Hide 24.9 against 22.4; cards 26.7 on average against 23.3), the window about +2 (Hide without the layer at 1920, 22.4, against the pre-run's row 1 at 1280 × 820, 20.4), and the cards themselves about +1 to 2 with the pass deferred (23.3 against 22.4; 26.7 against 24.9), inside the spread of the two identical cards-and-layer runs (25.5 and 27.8). So B1's +3.7 (the margin test against row 1) was mostly the margin test's own workload (the larger window and the layer), not the margin; what the margin itself costs is about 1 ms at p95 and needs an interleaved read to separate from noise. The spec gains that read's control (F6).
+
+**F6. The control row.** `e2e/document-scale.spec.ts` runs the margin workload a second time with the margin hidden (View › Hide, no thread activated), rows `1h p95`, `1h max`, `1h ack p95` in the same results file, so `1m p95` minus `1h p95` is the margin's own cost in each job (about a minute and a half more on the mini).
+
+23. **2026-10-20 (the executor), the control row (F6) and the reading's premise.** The brief read the +3.7 ms as the per-keystroke pass; with the pass deferred to one in fourteen frames the p95 stayed (25.0, 25.5, 27.8 against B1's 24.8 and 25.8), and the diagnostic puts most of the gap in the workload. Comparing `1m` with row 1 therefore cannot show the margin "within noise of the closed one"; comparing `1m` with `1h` can. Rejected: changing row 1 or the margin test's window and layer (D13 chose them, and the A arm must run the same test).
 
 ### Review record
 

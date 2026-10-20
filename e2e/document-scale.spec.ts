@@ -243,10 +243,20 @@ const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} $
 // owes the margin a pass, run once the edits pause or at the 1 s ceiling (margin-settle.ts), so under the step's
 // constant writes the row reads about one pass a second against every frame the edits ran, where B1 read one pass a
 // frame; and `1m stale`, the longest any change waited for the pass that read it (the margin's `data-stale-max`, cleared
-// before the step), at most the ceiling. Results in test-results/document-scale-margin.json.
+// before the step), the ceiling and the main thread's queue. The follow-up wave also adds the control: the same workload
+// (1920 × 1080, the two agents, the streaming layer) with the margin hidden (View › Hide, no thread activated), rows
+// `1h p95`, `1h max` and `1h ack p95`, so the margin's own cost is `1m` minus `1h` in one job; `1m` against the base
+// gate's row 1 also carries the window (row 1 runs at the default 1280 × 820) and the layer (row 1 has none), which the
+// wave's diagnostic placed at about 2 and 2.5 to 3 ms of p95 on the mini (the execution document's follow-up section).
+// Results in test-results/document-scale-margin.json.
 const MARGIN_RESULTS = join(REPO_ROOT, 'test-results', 'document-scale-margin.json');
-const SETTLE_MAX_MS = 1_000; // P4-B1's follow-up: MARGIN_SETTLE_MAX_MS in src/artifacts/document/editor/comments/margin-settle.ts
-const RELAYOUTS_PER_FRAME = 0.15; // P4-B1's follow-up: about one pass a second over the step's 500 to 600 frames; set from the mini's reading
+// P4-B1's follow-up: the pass falls due at MARGIN_SETTLE_MAX_MS (src/artifacts/document/editor/comments/margin-settle.ts,
+// 1,000 ms) and starts once the main thread reaches its task; the limit is the ceiling and that queue under the step's
+// load, set from the mini's reading (1,063 ms at 2a6170eb8, run 39393866900)
+const STALE_LIMIT_MS = 1_200;
+// P4-B1's follow-up: about one pass a second over the step's frame callbacks; set from the mini's reading (0.074: 40
+// passes over 540 frame callbacks in 41.6 s, run 39393866900), with room for fewer frames under load
+const RELAYOUTS_PER_FRAME = 0.1;
 const STREAM_SECTION = TYPING_SECTION + 2; // kept clear of the agents, two sections under the caret: on screen with it
 const STREAM_TICK_MS = 120; // P4-B1: the layer's pace, a piece every 120 ms and the seam's round trip (the typing is about 36 s)
 const STREAM_ID = 'toolu_perf_stream_margin';
@@ -278,13 +288,18 @@ async function streamWhile(seam: PerfSeam, id: string, block: string, running: (
   return { on: true, pieces, frames, spanned: !running() };
 }
 
-test('the typing workload with the margin open: keystroke → frame p95 with about 53 cards beside the page and a streaming layer', async () => {
-  rmSync(MARGIN_RESULTS, { force: true });
+test('the typing workload with the margin open: keystroke → frame p95 with about 53 cards beside the page and a streaming layer', () => marginWorkload(false));
+// P4-B1's follow-up: the control, the same workload with the margin hidden (rows `1h`), after the open one in the job
+test('the typing workload with the margin hidden (the control for 1m): keystroke → frame p95, the same window, agents and layer', () => marginWorkload(true));
+
+async function marginWorkload(hidden: boolean): Promise<void> {
+  if (!hidden) rmSync(MARGIN_RESULTS, { force: true });
+  const R = hidden ? '1h' : '1m'; // P4-B1's follow-up: the rows' prefix
   const { large } = seedsOnce();
   const { page, app, seam } = await start();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1920, 1080));
   await page.waitForFunction(() => window.innerWidth === 1920);
-  const rows = new Rows(MARGIN_RESULTS, { run: new Date().toISOString(), seed: { large: large.stats }, margin: true });
+  const rows = new Rows(MARGIN_RESULTS, hidden ? { hiddenRun: new Date().toISOString() } : { run: new Date().toISOString(), seed: { large: large.stats }, margin: true });
   const loads: Record<string, number> = { launched: load1() };
   const id = await seeded(page, seam, 'Scale 200 margin', large.state);
   await openTimed(page, id, 'Scale 200 margin', large.stats.topBlocks - 20);
@@ -293,11 +308,20 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
   await expect(margin).toHaveAttribute('data-margin-tier', 'cards', { timeout: 15_000 });
   const cards = await margin.locator('[data-margin-entry]').count();
   expect(cards, 'the seed’s threads as cards').toBeGreaterThan(40);
-  // a thread near the caret activated by its passage: the margin's stack pinned around it, as a reader has it
   const near = [...Array(SECTIONS).keys()].filter((section) => section % 3 === 0).sort((a, b) => Math.abs(a - TYPING_SECTION) - Math.abs(b - TYPING_SECTION))[0]!;
   await main.locator(`.ProseMirror[data-editor="live"] [data-thread="th${near}"]`).first().scrollIntoViewIfNeeded();
-  await main.locator(`.ProseMirror[data-editor="live"] [data-thread="th${near}"]`).first().click();
-  await expect(margin.locator(`[data-margin-entry="th${near}"]`)).toHaveAttribute('data-active', '');
+  if (hidden) {
+    // the control: View › Hide (no thread activated: a click on a passage with the margin hidden opens the panel)
+    const toolbar = main.getByRole('toolbar', { name: 'Formatting' });
+    await toolbar.getByRole('button', { name: 'Comment view' }).click();
+    await toolbar.getByRole('menuitemradio', { name: 'Hide' }).click();
+    await expect(margin).toHaveCount(0);
+  } else {
+    // a thread near the caret activated by its passage: the margin's stack pinned around it, as a reader has it
+    await main.locator(`.ProseMirror[data-editor="live"] [data-thread="th${near}"]`).first().click();
+    await expect(margin.locator(`[data-margin-entry="th${near}"]`)).toHaveAttribute('data-active', '');
+  }
+  const marginAttr = async (name: string) => (hidden ? null : await margin.getAttribute(name)); // P4-B1's follow-up
 
   // window B, the agents' reads and first batches, as the gate's step 0 to 5 have them
   const [pageB] = await Promise.all([app.waitForEvent('window'), app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
@@ -317,15 +341,15 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
   const streamBlock = `s${STREAM_SECTION}p3`;
   const layer: { streamed: Streamed | null } = { streamed: null }; // set by the typing step
 
-  await test.step('1m: typing in A with the margin open, two agents writing, the layer growing', async () => {
+  await test.step(`${R}: typing in A with the margin ${hidden ? 'hidden' : 'open'}, two agents writing, the layer growing`, async () => {
     const { clientID } = await instrumentTyping(page, id);
     await watchRemote(pageB, id, clientID);
     await caretAtEnd(page, id, `s${TYPING_SECTION}p2`);
     await ok(page, 'artifacts.testLoopDelay', { reset: true });
     await seam.send({ cmd: 'loop', reset: true });
-    const relayoutsBefore = Number(await margin.getAttribute('data-relayouts'));
+    const relayoutsBefore = Number(await marginAttr('data-relayouts'));
     const framesBefore = Number(await main.locator('.ds-doc').getAttribute('data-frames')); // P4-B1: the page frame's callbacks
-    await margin.evaluate((el) => el.removeAttribute('data-stale-max')); // P4-B1's follow-up: the step's waits alone
+    if (!hidden) await margin.evaluate((el) => el.removeAttribute('data-stale-max')); // P4-B1's follow-up: the step's waits alone
     await startMeasuring(page);
     loads.steadyStart = load1();
     const reads: Array<{ session: string; answer: CallAnswer<ReadResult> }> = [];
@@ -349,26 +373,35 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     const report = await typingReport(page);
     const keys = keystrokeMeasures(report);
     const counted = everyKeystroke(report, await remoteSeen(pageB), drained.end);
-    const relayoutsAfter = Number(await margin.getAttribute('data-relayouts'));
+    const relayoutsAfter = Number(await marginAttr('data-relayouts'));
     const passes = relayoutsAfter - relayoutsBefore;
     const frames = Number(await main.locator('.ds-doc').getAttribute('data-frames')) - framesBefore;
-    const staleMax = await margin.getAttribute('data-stale-max'); // P4-B1's follow-up: null when no pass settled an edit
+    const staleMax = await marginAttr('data-stale-max'); // P4-B1's follow-up: null when no pass settled an edit
     // R4: a scripted scroll of the page runs no layout pass
     await main.locator('.ds-doc').evaluate((el) => {
       el.scrollTop += 400;
       el.dispatchEvent(new Event('scroll'));
     });
     await page.waitForTimeout(100);
-    const afterScroll = Number(await margin.getAttribute('data-relayouts'));
+    const afterScroll = Number(await marginAttr('data-relayouts'));
     const layerNote = streamed.on
       ? `a streaming layer (${streamed.pieces} pieces, ${streamed.frames} frames, ${streamed.spanned ? 'over the whole typing' : 'its pieces ran out before the typing did'}${streamed.why ? `; stopped: ${streamed.why}` : ''})`
       : `NO streaming layer (${streamed.why}): not the acceptance's tree`;
-    const note = `${keys.keystrokes} keystrokes; ${cards} cards, th${near} active; agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}; ${layerNote}`;
+    const note = `${keys.keystrokes} keystrokes; ${hidden ? `the margin hidden (${cards} threads)` : `${cards} cards, th${near} active`}; agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}; ${layerNote}`;
+    if (hidden) {
+      // P4-B1's follow-up: the control's rows, against which `1m p95` reads the margin's own cost
+      rows.add('1h p95', 'keystroke → frame in A, p95, the margin hidden (the 1m workload: 1920 × 1080, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (as 1m)', note);
+      rows.add('1h max', 'keystroke → frame in A, max, the margin hidden', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
+      rows.add('1h ack p95', 'keystroke → durable ack, p95, the margin hidden', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked`);
+      rows.write({ hidden: { loads, threads: cards, layer: streamed, typing: { ...keys, ack: counted.ack }, frames, loop } });
+      expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
+      return;
+    }
     rows.add('1m p95', 'keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (the mini’s calibration, P3 Decision Log 109; MacBook target 16)', note);
     rows.add('1m max', 'keystroke → frame in A, max, the margin open', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
     // P4-B1's follow-up: the passes the edits owed, settled once they paused or at the ceiling, none in an edit's frame
     rows.add('1m relayouts', 'the margin’s layout passes per frame callback (edits owe a pass, settled when they pause or at the 1 s ceiling)', +(passes / Math.max(1, frames)).toFixed(3), 'passes', RELAYOUTS_PER_FRAME, `≤ ${RELAYOUTS_PER_FRAME} per frame (about one a second under constant writes)`, `${passes} passes over ${frames} frame callbacks (${keys.keystrokes} keys) in ${typingSeconds.toFixed(1)} s of typing, ${(passes / typingSeconds).toFixed(2)} a second; after a scripted scroll ${afterScroll - relayoutsAfter} more (R4: none)`);
-    rows.add('1m stale', 'the longest a change waited for the margin’s pass that read it, the margin open', staleMax === null ? NaN : Number(staleMax), 'ms', SETTLE_MAX_MS, `≤ ${SETTLE_MAX_MS} ms (the settle’s ceiling)`, staleMax === null ? 'no pass settled an edit in the step' : undefined);
+    rows.add('1m stale', 'the longest a change waited for the margin’s pass that read it, the margin open', staleMax === null ? NaN : Number(staleMax), 'ms', STALE_LIMIT_MS, `≤ ${STALE_LIMIT_MS} ms (the settle’s 1 s ceiling and the main thread’s queue)`, staleMax === null ? 'no pass settled an edit in the step' : undefined);
     rows.add('1m ack p95', 'keystroke → durable ack, p95, the margin open', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked`);
     rows.add('5m p99', 'host event-loop delay over the run, p99, the margin open', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.write({ margin: { loads, cards, active: `th${near}`, layer: streamed, typing: { ...keys, ack: counted.ack }, relayouts: { passes, frames, keystrokes: keys.keystrokes, typingSeconds, staleMax: staleMax === null ? null : Number(staleMax), afterScroll: afterScroll - relayoutsAfter }, loop } });
@@ -378,12 +411,12 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     expect(landed.endsWith(typed), `the typed text landed whole: …${landed.slice(-80)}`).toBe(true);
   });
   if (layer.streamed?.on) await seam.send({ cmd: 'drop', session: 'perf-stream', toolUseId: STREAM_ID }).catch(() => {});
-  judged(rows, 'marginal');
-});
+  judged(rows, hidden ? 'marginalHidden' : 'marginal');
+}
 
 // The run passes when no row failed (Decision Log 44's reading of the parent's Decision Log 54): a marginal row is listed
 // for P3-F's re-measure, in the output and in the results' `marginal`, and does not fail the run.
-function judged(rows: Rows, key: 'marginal' | 'marginalSigkill'): void {
+function judged(rows: Rows, key: 'marginal' | 'marginalSigkill' | 'marginalHidden' /* P4-B1's follow-up */): void {
   const marginal = rows.rows.filter((r) => r.verdict === 'marginal');
   rows.write({ [key]: marginal.map((r) => ({ row: r.row, value: r.value, limit: r.limit, unit: r.unit, load: r.load })) });
   if (marginal.length > 0) console.log(`marginal rows (P3-F re-measures):\n${marginal.map((r) => `  ${r.row}: ${r.value} ${r.unit} against ${r.limit} at load ${r.load}`).join('\n')}`);
