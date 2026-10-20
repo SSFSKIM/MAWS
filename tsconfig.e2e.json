@@ -74,7 +74,7 @@
     "src/renderer/src/widgets/plugins/browse.ts",
     "src/renderer/src/widgets/plugins/library.ts",
     "test/live/support/live.ts",
-    "test/live/support/tool-time.ts", // P4-A2 (X34): the paid live specs read the tool-time guard after their last turn
+    "test/live/support/tool-time.ts", // P4-A2 (X34): the paid live specs read the tool-time guard after their last turn; P4-A1: the parity bench's arm reads MAWS's tool time through its reader
     "test/support/agents-fixtures-tail.ts",
     "test/support/chrome-profile.ts",
     "test/support/claude-env.ts",

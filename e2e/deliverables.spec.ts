@@ -529,10 +529,14 @@ test('the Artifacts tool: groups newest first, Back to the list’s scroll, the 
     const list = listOf(s);
     await expect(list.locator('[data-artifacts-group]')).toHaveCount(2);
     expect(await list.locator('[data-artifacts-group]').evaluateAll((els) => els.map((el) => el.getAttribute('data-artifacts-group')))).toEqual(['html', 'file']);
-    await expect(list.locator('[data-artifacts-group="html"] [data-part="title"]')).toHaveText(['Sales dashboard']);
+    // L134: the list is virtualised, so a group's rows are lines after its heading, not inside it; a row names its kind
+    await expect(list.locator('[data-artifact-row][data-kind="html"] [data-part="title"]')).toHaveText(['Sales dashboard']);
     // P3-L M6b: the Deliverables list's version count on the row's line ("v2 · …") is gone with it (the line is the
     // library's "Edited … by …")
-    await expect(list.locator('[data-artifacts-group="file"] [data-part="title"]')).toHaveText(notes.map((n) => n.title!).reverse());
+    // The rows mounted are the list's first, newest first; the rest mount as the list scrolls (L134)
+    const newestFirst = notes.map((n) => n.title!).reverse();
+    const fileTitles = () => list.locator('[data-artifact-row][data-kind="file"] [data-part="title"]').allTextContents();
+    await expect.poll(async () => { const shown = await fileTitles(); return shown.length > 0 && shown.every((title, i) => title === newestFirst[i]); }).toBe(true);
     // P3-L M6b: the row's caption ("the first note") is gone with the Deliverables list (Decision Log 18e: the caption is
     // the transcript's delivery row's)
 
@@ -1118,7 +1122,7 @@ test('a relaunch over the same profile lists every deliverable; the All scope sh
 
       await list.getByRole('button', { name: 'All', exact: true }).click();
       // the case's own three among the whole library (P3-D seeds default design systems: Decision Log 32c)
-      await expect(list.locator('[data-artifacts-group="html"] [data-artifact-row], [data-artifacts-group="file"] [data-artifact-row]')).toHaveCount(3);
+      await expect(list.locator('[data-artifact-row][data-kind="html"], [data-artifact-row][data-kind="file"]')).toHaveCount(3);
       await rowOf(list, report).click();
       await expect(viewer).toHaveAttribute('data-artifact-viewer', report.id);
       await expect((await frameAt(second.page, await pageUrlOf(second.page, report.id))).locator('#heading')).toHaveText('OTHER_REPORT');

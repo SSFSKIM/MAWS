@@ -82,6 +82,19 @@ export async function captureWindowRegion(rect: CaptureRect, client: MawsBridge 
   }
 }
 
+// What a session's overlay covers, `inert` for the session's life (tech debt L257): the surface element and the occluding
+// layers in its region (a card over the body, the floating card), which the still hides, so neither the keyboard nor a
+// pointer reaches them wherever focus goes from the overlay. The toasts, drawn above the overlay, and other regions'
+// layers stay live. The release leaves an element that was inert already as it was.
+export function coverMarkupSurface(element: HTMLElement): () => void {
+  const layers = element.closest('[data-region]')?.querySelectorAll<HTMLElement>(`[${MARKUP_OCCLUDER}]`) ?? [];
+  const covered = [element, ...layers].filter((covering) => !covering.inert);
+  for (const covering of covered) covering.inert = true;
+  return () => {
+    for (const covering of covered) covering.inert = false;
+  };
+}
+
 // Two frames: the style change is in a frame the compositor has drawn.
 const painted = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 

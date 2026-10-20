@@ -1,7 +1,7 @@
 // One pane of the main region (§5.2, D-8; residue *Split*): its tab strip over the active tab's content. A pointer
 // press or focus anywhere inside makes it the focused pane, the target of ⌘1…9, ⌘\ and ⌃Tab. Only the active tab's
 // content is mounted; a tab's content remounts when it becomes active again. With no tab open (W5: the Overview is no
-// tab), the pane offers the Overview and a new session.
+// tab), the pane offers the Overview and a new session, once the saved layout has applied.
 import { useId, useRef } from 'react';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
@@ -24,6 +24,7 @@ type PaneIndex = 0 | 1;
 // `column` is the pane's column in the main region's grid (MainArea), where its strip and its content are placed.
 export function Pane({ index, split, column }: { index: PaneIndex; split: boolean; column: number }) {
   const pane = useLayout((s) => currentSet(s.main).panes[index]);
+  const hydrated = useLayout((s) => s.hydrated);
   const idPrefix = useId();
   const element = useRef<HTMLElement>(null);
   // ⌃Tab and ⌃⇧Tab cycle the pane that owns the focused element (renderer sink, pane scope: a tab or a card may take
@@ -60,11 +61,14 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
       <div
         role="tabpanel"
         aria-labelledby={active ? `${idPrefix}-tab-${activeIndex}` : undefined}
-        aria-label={active ? undefined : 'No open tabs'}
+        aria-label={active || !hydrated ? undefined : 'No open tabs'}
+        aria-busy={active || hydrated ? undefined : true}
         className="relative min-h-0 min-w-0 overflow-hidden"
         style={{ gridRow: 3, gridColumn: column }}
       >
-        {active ? <TabBody key={active.id} tab={active} paneIndex={index} /> : <EmptyPane />}
+        {/* Until the saved layout applies, an empty pane is only not yet restored: it draws nothing rather than "No open
+            tabs" (a relaunch flashed it). A tab opened before then draws at once. */}
+        {active ? <TabBody key={active.id} tab={active} paneIndex={index} /> : hydrated && <EmptyPane />}
       </div>
     </section>
   );

@@ -107,7 +107,7 @@ describe('the ask capsule', () => {
     expect(after.indexOf(capsule(after))).toBeLessThan(after.findIndex((row) => row.kind === 'user' && row.text === 'something else'));
   });
 
-  it('a recognised steer after the turn closed and another turn ran answers the capsule; its bubble stays a user row of its own turn', () => {
+  it('a recognised steer after the turn closed and another turn ran answers the capsule; its envelope is no bubble in its own turn', () => {
     const b = builder();
     b.turn('u1');
     askCall(b, 'toolu_a', { blocking: false, questions: QUESTIONS });
@@ -123,7 +123,33 @@ describe('the ask capsule', () => {
     state = applyEvents(state, later.events);
     const rows = rowsOf(state);
     expect(capsule(rows)).toMatchObject({ state: 'answered', answers: ANSWERS, turnId: 'turn:u1' });
-    expect(ofKind(rows, 'user').find((row) => row.turnId === 'turn:u3')).toMatchObject({ text: steer, steer: false });
+    // the card says Answered with the answers; the envelope the engine received (the tag and the result's JSON) is no
+    // "Your message" bubble
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1', 'turn:u2']);
+    expect(rows.some((row) => row.kind === 'user' && row.text.includes('[MAWS ask'))).toBe(false);
+    expect(state.order).toContain('turn:u3'); // the steer's turn is kept: only its bubble is not drawn
+  });
+
+  it('a steer the engine folds into the running turn answers the capsule and is no steer bubble there, pending or taken', () => {
+    const b = builder();
+    b.turn('u1');
+    askCall(b, 'toolu_a', { blocking: false, questions: QUESTIONS });
+    b.result('toolu_a', json({ status: 'asked', askId: 'toolu_a' }));
+    b.toolUse('t1', 'Bash', { command: 'sleep 1' });
+    b.emit('user.message', { messageUuid: uuid('u2'), content: askSteerText('toolu_a', FILLED, ANSWERS), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const pending = rowsOf(applyEvents(createState(null, null), b.events)); // its own pending turn until the engine takes it
+    expect(capsule(pending)).toMatchObject({ state: 'answered', answers: ANSWERS });
+    expect(ofKind(pending, 'user').map((row) => row.text)).toEqual(['prompt u1']);
+    b.result('t1', 'ok');
+    b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
+    b.text('m1', 0, 'Blue it is.');
+    b.end(['u1', 'u2']);
+    const state = applyEvents(createState(null, null), b.events);
+    expect(state.order).toEqual(['turn:u1']); // folded
+    for (const rows of [rowsOf(state), rowsOf(withAllExpanded(state))]) {
+      expect(capsule(rows)).toMatchObject({ state: 'answered', answers: ANSWERS });
+      expect(ofKind(rows, 'user').map((row) => [row.text, row.steer])).toEqual([['prompt u1', false]]);
+    }
   });
 
   it('a steer applied to the latest state leaves an earlier snapshot readable as it was: asked there, answered in the latest', () => {
@@ -153,7 +179,10 @@ describe('the ask capsule', () => {
     b.end(['u2']);
     b.turn('u3', '[MAWS ask toolu_a] The user answered the questions you asked:\n1. Which colour? — Blue');
     b.end(['u3']);
-    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'asked', answers: null });
+    const rows = rowsOf(applyEvents(createState(null, null), b.events));
+    expect(capsule(rows)).toMatchObject({ state: 'asked', answers: null });
+    // and, answering no card here, each stays the bubble it was, so nothing it says is lost
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1', 'turn:u2', 'turn:u3']);
   });
 
   it('a cancellation arriving after the turn closed reads cancelled; an answer wins over it', () => {
@@ -335,11 +364,11 @@ describe('the recorded maws fixtures', () => {
     expect(done.answers?.map((a) => [a.id, a.status])).toEqual([['q1', 'answered'], ['q2', 'answered'], ['q3', 'skipped'], ['q4', 'answered'], ['q5', 'decide_for_me']]);
   });
 
-  it('p1-maws-ask-async: the capsule asked then answered across two main turns; the steer is the second turn’s prompt', () => {
+  it('p1-maws-ask-async: the capsule asked then answered across two main turns; the steer, the second turn’s prompt, is no bubble', () => {
     const rows = fixture('p1-maws-ask-async');
     const users = ofKind(rows, 'user');
-    expect(users).toHaveLength(2);
-    expect(users[1].text.startsWith('[MAWS ask toolu_016zBCDTWVXbAqbGdLyd1Zzj] ')).toBe(true);
+    expect(users).toHaveLength(1); // the steer (the second turn's prompt) is drawn by the capsule, not as a bubble
+    expect(rows.some((row) => row.kind === 'user' && row.text.includes('[MAWS ask'))).toBe(false);
     expect(ofKind(rows, 'divider')).toHaveLength(2);
     expect(capsule(rows)).toMatchObject({ state: 'answered', blocking: false, turnId: users[0].turnId, answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }] });
   });

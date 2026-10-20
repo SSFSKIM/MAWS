@@ -7,7 +7,7 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -137,6 +137,19 @@ export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'created
   return { id: rowId.held(entry.queueId), turnId: null, at: entry.createdAt, kind: 'user', messageUuid: null, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: false, steer: false, dropped: false, pending: 'held', ...anchorOf(text) /* E3 */ };
 }
 
+// An async ask's answers reach the engine as a steer of their envelope (`[MAWS ask <id>]` and the answered result's
+// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message.
+export const askSteerOf = (content: string | ContentBlock[]): string | null => parseAskSteer(messageText(content))?.askId ?? null;
+
+// Whether such a steer answered a capsule this state holds (the reducer's recordAskSteer): the capsule then reads
+// Answered with the answers, and the envelope is no bubble, neither the steer's own nor (L276) the held one a Stop
+// leaves in MAWS's queue with the same content while the steer waited for the running turn: drawn, it read "Your
+// message" holding raw JSON. A steer that answered nothing here keeps its bubble.
+export function askAnsweredHere(state: TranscriptState, askId: string): boolean {
+  const owner = state.index.toolUses.get(askId as ToolUseId);
+  return owner !== undefined && state.turns.get(owner)?.askSteers?.has(askId) === true;
+}
+
 // W1: what the session's transcript shows around its derived rows: no bubble for a prompt held back into MAWS's queue
 // (the engine reports it cancelled, and it is not lost: it waits in the queue), and the held messages at the tail.
 export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[]): Row[] {
@@ -192,9 +205,9 @@ export function withAllExpanded(state: TranscriptState): TranscriptState {
 function rowsOfTurn(state: TranscriptState, turn: TurnState): Row[] {
   let memo = state.memo.get(turn.id);
   const stamp = state.ui.stamps.get(turn.id) ?? 0;
-  if (!memo || memo.version !== turn.version || memo.uiVersion !== state.ui.global || memo.uiStamp !== stamp) {
+  if (!memo || memo.version !== turn.version || memo.uiVersion !== state.ui.global || memo.uiStamp !== stamp || (memo.agents !== undefined && memo.agents.read !== state.agents)) {
     const derived = deriveTurn(turn, state);
-    memo = { version: turn.version, uiVersion: state.ui.global, uiStamp: stamp, rows: derived.rows, work: derived.work };
+    memo = { version: turn.version, uiVersion: state.ui.global, uiStamp: stamp, rows: derived.rows, work: derived.work, ...(derived.readAgents && { agents: { read: state.agents } }) };
     state.memo.set(turn.id, memo);
   }
   const { receipts, spills } = state.ui;
@@ -281,6 +294,7 @@ interface TurnDerivation {
   summary: TurnSummary;
   cells: Cell[]; // every cell of the work area, disclosed or not
   work: TurnWork; // what the turn did, disclosed or not
+  readAgents: boolean; // the rows read the host's agent lookup (L197): they re-derive when it changes
 }
 
 // How many per-turn derivations ran (instrumentation: the memo tests pin that readers of the memo derive nothing).
@@ -324,6 +338,16 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     { refs: subagents.flatMap((group) => group.refs.map((ref) => ({ ...ref, agentId: ref.agentId ?? (ref.toolUseId ? (agentIds.get(ref.toolUseId) ?? null) : null) }))), ...namesOf(turn.events) },
     ...(state === null ? [] : earlierTurns(state, turn).map((earlier) => knownOfTurn(state, earlier))),
   ]);
+  // L197: an agent no loaded turn launched, from the host's lookup (an older page's, a nested agent's); reading it is
+  // recorded, so these rows re-derive when the lookup changes
+  let readAgents = false;
+  const agentOf = (key: string): SubagentRef | null => {
+    const ref = agentNamed(known(), key);
+    if (ref !== null || state === null) return ref;
+    readAgents = true;
+    const looked = state.agents?.get(key);
+    return looked?.kind === 'agent' ? looked : null;
+  };
 
   // *Turn boundaries on this engine*: the reducer retains a `command.lifecycle` on a turn only when it dropped that
   // turn's pending prompt, so its presence is the dropped mark. A prompt the engine folded into this turn
@@ -335,6 +359,12 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
+  // an async ask's answer steer whose capsule this state answered is no bubble (askAnsweredHere; the reducer recorded
+  // it when the steer arrived, so before this turn derives)
+  const answersHeldAsk = (event: Event<'user.message'>): boolean => {
+    const askId = state === null ? null : askSteerOf(event.content);
+    return askId !== null && askAnsweredHere(state!, askId);
+  };
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
   // it (the reducer re-derives every waiting turn when the running turn changes).
@@ -401,6 +431,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (originOf(event.origin) === 'peer' && parsePeerMessage(messageText(event.content)) !== null) {
           // E7: a message from another session or an in-process agent: its companion event (peer.message,
           // subagent.message) draws it; a peer text the parser refuses keeps its bubble below, so nothing is lost
+        } else if (answersHeldAsk(event)) {
+          // an async ask's answer: its capsule draws it (above)
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
           user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
@@ -442,7 +474,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
             kind: event.toolName === 'Workflow' ? 'workflow' : 'agent', subagentType: typeof input.subagent_type === 'string' ? input.subagent_type : null,
           });
         } else if (presentation === 'agent_message') {
-          items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), context) }); // E7: `to` classified against what the transcript knows; the result refines it
+          items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), agentOf, context) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
           asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
@@ -566,7 +598,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       case 'subagent.message': {
         if (event.direction === 'from_child') { // E7: the agent by its title, a hand-back as its report
-          items.push({ kind: 'later', row: () => agentMessageRow(event, turn.id, known()) });
+          items.push({ kind: 'later', row: () => agentMessageRow(event, turn.id, agentOf) });
           break;
         }
         const name = event.direction === 'to_child' ? event.toAgentId : event.fromAgentId;
@@ -796,7 +828,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
-  return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null) };
+  return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 
 // What the turn did whatever was disclosed, one entry per tool use from the turn's tool records (so the calls a merged
@@ -1168,15 +1200,16 @@ function inboundRow(event: Event<'peer.message'>, turnId: TurnId): RowOf<'agent_
 }
 
 // A SendMessage call: to `main` or `parent` a child's report up (`from_child`), to an agent this transcript knows the
-// parent's message down (`to_child`, the agent named by its ref, P3-F L260), to anything else a message to another session (`between`:
+// parent's message down (`to_child`, the agent named by its ref, P3-F L260; one no loaded turn launched by the host's
+// lookup, L197), to anything else a message to another session (`between`:
 // a peer's name or address, a teammate), refined by its result; one whose turn closed with none was never answered (E11).
-function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[], context: TurnContext): RowOf<'agent_message'> {
+function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[], agentOf: (key: string) => SubagentRef | null, context: TurnContext): RowOf<'agent_message'> {
   const input = record(use.input);
   const to = str(input.to);
   const message = str(input.message, str(input.content));
   const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, from: null };
   if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, message) };
-  const agent = to === '' ? null : agentNamed(known, to);
+  const agent = to === '' ? null : agentOf(to);
   if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', agent?.name ?? (to || null), message) };
   const outcome = result === undefined ? null : sendMessageOutcome(result);
   const preview = previewOf(message);
@@ -1194,8 +1227,8 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
 // An in-process agent's message to the main conversation (`<agent-message>`), the agent by its title and the message
 // by its first line, the whole of it kept as `body` when that line leaves some out; its hand-back reads as its report
 // (Decision Log 28's interim row replaced).
-function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, known: KnownAgents[]): RowOf<'agent_message'> {
-  const agent = event.fromAgentId === null ? null : agentNamed(known, event.fromAgentId);
+function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, agentOf: (key: string) => SubagentRef | null): RowOf<'agent_message'> {
+  const agent = event.fromAgentId === null ? null : agentOf(event.fromAgentId);
   const title = agent?.name ?? event.fromAgentId;
   const report = handbackReport(event.text);
   const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };

@@ -295,16 +295,15 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
   const sc = scratch();
   note(`P4-A2 document provisional live run (§5 A2's acceptance), ${new Date().toISOString()}`);
   note(`engine: ${engine.bin.replace(homedir(), '~')} (${engine.version}), unmodified, through the relay ${RELAY_URL}; model ${MODEL}; default permission mode; cap US$${CAP_USD}`);
-  note(`app: the product build (MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config}; the host's perf seam (MAWS_DOCUMENT_PERF=1) for the seed only; CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1 as the owner's shell exports it`);
+  note(`app: the product build (MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config}; the host's perf seam (MAWS_DOCUMENT_PERF=1) for the seed only; CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING in the launching shell: ${JSON.stringify(process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING ?? null)} (MAWS sets it in the engine's environment itself)`);
   note(`A-15 before the launch: ${before.keys.length} keys, sha1 ${before.digest}`);
 
-  // The owner's shell exports CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1, which MAWS passes to the engine (the
-  // `CLAUDE_` prefix of launch.ts's allowlist) and which Claude Desktop sets itself (research/p4-edit-speed-grounding.md
-  // §1.4): the API then streams a tool input's text as it is written. Without it the API emits a string value only once
+  // MAWS's constructed environment sets CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1 (launch.ts, as Claude Desktop
+  // does): the API then streams a tool input's text as it is written. Without it the API emits a string value only once
   // it closes, so a 790-character edit arrived in one 5 ms burst 7 ms before the `tools/call` (this spec's run of
-  // 2026-10-20 00:59Z, journal kept under /tmp): nothing to see as it is written. The scratch shell home exports
-  // nothing, so the run sets it as the owner's shell does (P1 §15: the live run stands for what the owner runs).
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_DOCUMENT_PERF: '1', CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING: '1' } });
+  // 2026-10-20 00:59Z, before launch.ts set it). The run sets nothing itself, so a multi-delta stream here is MAWS's
+  // own doing; the launching shell may even unset the variable.
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_DOCUMENT_PERF: '1' } });
   let live: Live | null = null;
   let completed = false;
   try {

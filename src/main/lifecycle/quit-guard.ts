@@ -196,7 +196,8 @@ export function quitQuestion(
     };
   }
   // E5 end
-  // E10: keep first; terminals cannot be kept, which the detail says when one is busy
+  // E10: keep first; terminals cannot be kept, which the detail says when one is busy. P4: the detail names what keep
+  // and the verb each do, since keep may be the default button under it
   if (keep) {
     return {
       type: 'warning',
@@ -204,7 +205,7 @@ export function quitQuestion(
       defaultId: keep.isDefault ? 0 : 1,
       cancelId: 3,
       message: parts.join(' · '),
-      detail: [stops, ...(report.busyTerminals > 0 ? [QUIT_KEEP.terminalsClose] : [])].join('\n'),
+      detail: [QUIT_KEEP.detail(verb), ...(report.busyTerminals > 0 ? [QUIT_KEEP.terminalsClose] : [])].join('\n'),
     };
   }
   return {

@@ -70,6 +70,43 @@ describe('readToolSpans', () => {
   });
 });
 
+// P4-A1's case for the reader it built to the same shape (merged at A2's landing, the architect keeping this one): an
+// answer to a request the reader never saw, an error answer counted as an answer, another MCP method skipped, another
+// launch's file left alone, and a rotation named on its own read alone.
+describe('readToolCalls, A1’s cases', () => {
+  const call = (seq: number, atIso: string, requestId: string, name: string, toolUseId?: string, method = 'tools/call'): JournalRow => ({
+    seq, direction: 'in', at: atIso,
+    frame: { type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: seq, method, params: { name, arguments: {}, ...(toolUseId ? { _meta: { 'claudecode/toolUseId': toolUseId } } : {}) } } } },
+  });
+  const answer = (seq: number, atIso: string, requestId: string, subtype: 'success' | 'error' = 'success'): JournalRow => ({
+    seq, direction: 'out', at: atIso,
+    frame: { type: 'control_response', response: subtype === 'success' ? { subtype, request_id: requestId, response: { mcp_response: { jsonrpc: '2.0', id: 0, result: { content: [] } } } } : { subtype, request_id: requestId, error: 'refused' } },
+  });
+  it('follows the launch into its rotations, keeps an unanswered call apart, counts an error answer and skips other MCP methods', () => {
+    dir = mkdtempSync(join(tmpdir(), 'maws-tool-time-'));
+    const write = (file: string, rows: JournalRow[]) => writeFileSync(join(dir!, file), rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    const base = join(dir, 'abcd1234.jsonl');
+    write('abcd1234.jsonl', [
+      { seq: 1, direction: 'meta', at: '2026-10-19T10:00:00.000Z', frame: { event: 'spawn' } },
+      call(2, '2026-10-19T10:00:01.000Z', 'r-list', 'tools/list', undefined, 'tools/list'),
+      answer(3, '2026-10-19T10:00:01.010Z', 'r-list'),
+      call(4, '2026-10-19T10:00:02.000Z', 'r-edit', 'artifact_edit', 'toolu_edit'),
+      answer(5, '2026-10-19T10:00:02.040Z', 'r-other'), // answers a request this reader never saw
+    ]);
+    write('abcd1234.1.jsonl', [answer(6, '2026-10-19T10:00:02.090Z', 'r-edit'), call(7, '2026-10-19T10:00:03.000Z', 'r-publish', 'artifact_publish', 'toolu_publish'), answer(8, '2026-10-19T10:00:03.500Z', 'r-publish', 'error')]);
+    write('abcd1234.2.jsonl', [call(9, '2026-10-19T10:00:04.000Z', 'r-read', 'artifact_read')]);
+    write('other999.jsonl', [answer(10, '2026-10-19T10:00:04.100Z', 'r-read')]); // another launch's file
+    const calls = readToolCalls(base);
+    expect(calls.spans).toEqual([
+      { toolUseId: 'toolu_edit', name: 'artifact_edit', requestSeq: 4, responseSeq: 6, startedAt: '2026-10-19T10:00:02.000Z', answeredAt: '2026-10-19T10:00:02.090Z', ms: 90 },
+      { toolUseId: 'toolu_publish', name: 'artifact_publish', requestSeq: 7, responseSeq: 8, startedAt: '2026-10-19T10:00:03.000Z', answeredAt: '2026-10-19T10:00:03.500Z', ms: 500 },
+    ]);
+    expect(calls.unanswered).toEqual([{ toolUseId: null, name: 'artifact_read', requestSeq: 9, startedAt: '2026-10-19T10:00:04.000Z' }]);
+    // a rotation named on its own is read alone
+    expect(readToolSpans(join(dir, 'abcd1234.1.jsonl')).map((s) => [s.name, s.ms])).toEqual([['artifact_publish', 500]]);
+  });
+});
+
 describe('expectToolTime', () => {
   it('passes the store calls under the bound and returns their median and max', () => {
     const spans = readToolSpans(launch([['artifact_read', 0, 20], ['artifact_edit', 100, 40], ['artifact_read', 200, 30], ['send_file', 300, 5_000]]));

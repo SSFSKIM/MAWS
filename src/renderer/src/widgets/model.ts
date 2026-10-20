@@ -82,15 +82,6 @@ export function rowNamed(models: readonly ModelRow[], name: string): ModelRow | 
   return models.find((m) => m.value.toLowerCase() === wanted) ?? models.find((m) => m.displayName.toLowerCase() === wanted) ?? models.find((m) => m.resolvedModel?.toLowerCase() === wanted);
 }
 
-// The engine's model for a live session: the one it accepted last (C3's requested, set only after `set_model`
-// succeeded), else the init frame's; pending until an init frame reports it.
-export function liveModel(models: readonly ModelRow[], model: EngineSessionStatus['model']): { row: ModelRow | undefined; id: string | null; pending: boolean } {
-  const id = model.requested ?? model.resolved;
-  const row = rowOf(models, id);
-  const confirmed = model.resolved === null || model.requested === null || (row !== undefined && (row.value === model.resolved || row.resolvedModel === model.resolved)) || id === model.resolved;
-  return { row, id, pending: !confirmed };
-}
-
 // Fast mode from the init frame (`fastMode.state`): `on` checked, `cooldown` checked and marked, `off` unchecked, and
 // the reason in words when one is reported.
 export interface FastView {

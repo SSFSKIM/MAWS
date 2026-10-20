@@ -5,7 +5,7 @@
 // tab following the shown session.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
@@ -52,6 +52,23 @@ const DECK = row(3, { kind: 'presentation', title: 'Q3 deck' });
 const SPEC = row(4, { title: 'Spec' });
 const CSV = row(5, { kind: 'file', title: 'data.csv' });
 const OTHER = row(6, { title: 'Other session’s doc', sessions: [{ appSessionId: B, title: 'Other work', roles: ['created'], lastAt: NOW }] });
+
+// happy-dom has no layout: the list's scroller gets a viewport (tall enough for every fixture unless a test shrinks it)
+// so the virtualiser mounts its lines, and every line a height, which the virtualiser measures it by (as
+// library/Library.test.tsx gives them).
+let viewport = 4000;
+const LINE = 48;
+const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.hasAttribute('data-artifacts-list')) return viewport;
+      return this.hasAttribute('data-index') ? LINE : 0;
+    },
+  });
+});
+afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
 
 let rows: LibraryRow[];
 let main: ReturnType<typeof installFakeMain>;
@@ -228,6 +245,26 @@ describe('the list', () => {
     expect(handle.snapshot().scrollTop).toBe(0);
   });
 
+  // The list Back mounts again is put back where it was; a scope chosen after that is another list, which starts at its
+  // top even when its lines arrive only after a reading (they mount afresh then, and must not be put back).
+  it('a scope change after Back starts the list at its top, though its lines mount again once the scope is read', async () => {
+    testEditor();
+    const { handle } = await mount();
+    const list = () => document.querySelector<HTMLElement>('[data-artifacts-list]')!;
+    list().scrollTop = 120;
+    fireEvent.scroll(list());
+    await openRow(1);
+    fireEvent.click(button('Back')!);
+    await settle();
+    expect(list().scrollTop, 'Back returns to where the list was').toBe(120);
+    fireEvent.click(button('All')!); // a scope the library has not read yet: its lines wait for the reading
+    expect(screen.getByText('Reading…')).toBeTruthy();
+    await settle();
+    expect(listed()).toContain(OTHER.id);
+    expect(list().scrollTop).toBe(0);
+    expect(handle.snapshot().scrollTop).toBe(0);
+  });
+
   it('with no session shown, This session says so and All still lists', async () => {
     await mount(undefined, null);
     expect(screen.getByText('Open a session to see its artifacts')).toBeTruthy();
@@ -235,6 +272,62 @@ describe('the list', () => {
     fireEvent.click(button('All')!);
     await settle();
     expect(listed()).toHaveLength(6);
+  });
+
+  // P3-L's landing (debt): a library of thousands mounts only the lines near the view, as the Artifacts tab does; the
+  // rows keep the kinds' order with their headings, every mounted row a tab stop in that order, the group at the top
+  // keeps its heading pinned, and a row holding the keyboard stays mounted while the list scrolls away from it
+  describe('a large library', () => {
+    const DOCS = 1500;
+    const DECKS = 1500;
+    const scrollTo = async (top: number) => {
+      const list = document.querySelector<HTMLElement>('[data-artifacts-list]')!;
+      list.scrollTop = top;
+      await act(async () => void list.dispatchEvent(new Event('scroll')));
+    };
+    // the expected order: documents newest first, then presentations
+    const order = () => [...Array.from({ length: DOCS }, (_, i) => id(i + 1)), ...Array.from({ length: DECKS }, (_, i) => id(DOCS + i + 1))];
+    beforeEach(() => {
+      viewport = 300;
+      rows = [
+        ...Array.from({ length: DOCS }, (_, i) => row(i + 1, { title: `Note ${i + 1}` })),
+        ...Array.from({ length: DECKS }, (_, i) => row(DOCS + i + 1, { kind: 'presentation', title: `Deck ${i + 1}` })),
+      ];
+    });
+    afterEach(() => {
+      viewport = 4000;
+    });
+
+    it('mounts a bounded number of rows, in the kinds’ order under their headings, wherever it is scrolled', async () => {
+      await mount();
+      await waitFor(() => expect(listed()[0]).toBe(id(1)));
+      expect(listed().length).toBeLessThan(40);
+      expect(listed()).toEqual(order().slice(0, listed().length)); // the first rows, in order
+      expect(groups()).toEqual([['document', 'Documents']]);
+      const tabStops = Array.from(document.querySelectorAll<HTMLElement>('[data-artifact-row]')).filter((r) => r.tabIndex === 0);
+      expect(tabStops.map((r) => r.dataset.artifactId)).toEqual(listed()); // each row its own stop, in the list's order
+
+      await scrollTo((DOCS + 100) * LINE); // among the presentations
+      await waitFor(() => expect(listed()).not.toContain(id(1)));
+      const shown = listed();
+      expect(shown.length).toBeLessThan(40);
+      const at = order().indexOf(shown[0]!);
+      expect(at).toBeGreaterThan(DOCS);
+      expect(shown).toEqual(order().slice(at, at + shown.length)); // a run of the list, in order
+      expect(groups()).toEqual([['presentation', 'Presentations']]); // the group at the top keeps its heading
+      expect(document.querySelector<HTMLElement>('[data-artifacts-group="presentation"]')!.className).toContain('sticky');
+    });
+
+    it('a row holding the keyboard stays mounted and focused while the list scrolls away from it', async () => {
+      await mount();
+      await waitFor(() => expect(listed()[0]).toBe(id(1)));
+      const second = rowOf(2);
+      act(() => second.focus());
+      await scrollTo(1000 * LINE);
+      await waitFor(() => expect(listed()).not.toContain(id(1)));
+      expect(rowOf(2)).toBe(second);
+      expect(document.activeElement).toBe(second);
+    });
   });
 
   it('Open library opens the Artifacts main tab', async () => {
