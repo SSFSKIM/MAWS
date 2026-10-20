@@ -333,6 +333,10 @@ export function DocumentEditor(props: DocumentEditorProps) {
             onShow={(thread) => {
               if (tabs.some((tab) => tab.id === thread.tabId)) setSelected(thread.tabId);
               setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1 });
+              // P4-B1 (the activation table): where the margin would host, the item chosen closes the panel and the
+              // margin returns with that thread active (the shown thread's activation reports 'margin', D5); the drawer
+              // stays open as before
+              if (commentsView !== 'hide' && marginTier !== 'off') openRail(null);
             }}
             onClose={() => openRail(null)}
           />
@@ -564,7 +568,8 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
 }
 
 // The page's scroll box and, over it, the comment surface's overlay with the editor's reach. The overlay re-renders at
-// most once a frame as the passages move (an edit, a scroll, a resize); the page does not.
+// most once a frame as the passages move (an edit, a scroll, a resize); the page does not. P4-B1: while the margin hosts
+// the comments, that frame callback runs the margin's layout pass and renders nothing.
 interface PageFrameProps {
   /** The editor on screen: the preview's while a version shows, else the live one. */
   editor: Editor;
@@ -597,12 +602,17 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
   const pending = useRef<number | null>(null);
+  // P4-B1: the margin's layout pass (MarginThreads fills it) runs in the frame callback itself, so the cards move in the
+  // frame the text moved in; the frame-level overlay's key is bumped only while that overlay is drawn
+  const relayoutRef = useRef<() => void>(() => {});
+  const overlayDrawn = useRef(false);
   const moved = useMemo(
     () => () => {
       if (pending.current !== null) return;
       pending.current = requestAnimationFrame(() => {
         pending.current = null;
-        setLayout((n) => n + 1);
+        relayoutRef.current(); // P4-B1
+        if (overlayDrawn.current) setLayout((n) => n + 1); // P4-B1: only while the frame-level overlay is drawn
       });
     },
     [],
@@ -639,8 +649,9 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   );
   const margin = marginView !== null && previewEditor === null;
   const marginHosts = margin && tier.kind !== 'off';
+  overlayDrawn.current = Boolean(comments) && !marginHosts; // P4-B1
   useEffect(() => {
-    if (!comments) return;
+    if (!comments && !margin) return; // P4-B1: && !margin (the margin follows edits with or without a surface)
     editor.on('update', moved);
     const box = frame.current;
     const observer = typeof ResizeObserver === 'undefined' || !box ? null : new ResizeObserver(moved);
@@ -651,7 +662,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       if (pending.current !== null) cancelAnimationFrame(pending.current);
       pending.current = null;
     };
-  }, [editor, comments, moved]);
+  }, [editor, comments, margin /* P4-B1 */, moved]);
 
   const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey' | 'placement'>>(() => {
     const { doc } = handle;
@@ -687,8 +698,8 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     onPage?.(page.current);
     return () => onPage?.(null);
   }, [onPage]);
-  // P4-B1: the margin's key never carries the scroll; the frame-level overlay's does
-  const marginKey = `${editor.instanceId}:${layout}`;
+  // P4-B1: the margin's compose card is in flow, so its key carries neither the scroll nor the passages' moves
+  const marginKey = editor.instanceId;
   const sheet = (
     <div ref={page} className="ds-doc" style={declared} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments && !marginHosts ? scrolled : undefined}>
       <div className="ds-doc-page">
@@ -705,7 +716,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
           author={author}
           readOnly={readOnly}
           view={marginView}
-          layoutKey={marginKey}
+          relayoutRef={relayoutRef} // P4-B1
           hosting={hosting}
           overlay={comments && marginHosts ? () => comments.overlay({ ...reach, layoutKey: marginKey, placement: 'margin' }) : null}
           onComment={onComment}

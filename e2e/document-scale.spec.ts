@@ -230,12 +230,42 @@ const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} $
 // threads (one in every third section, about 53 open) are cards in the margin, one near the typing section activated;
 // then the owner's 300 keystrokes with the two agents batching, and, through the seam's `stream` (P4-A2's provisional
 // emitter, X35), a layer growing in a block of a section two away from the typing one for the typing's whole span, so
-// the margin's re-layout on the layer's growth is in the measurement. Without `stream` (A2 not on this tree) the row
-// is recorded without the layer and says so; the acceptance's tree carries A2 (the child's Decision Log 6). Rows:
+// the margin's re-layout on the layer's growth is in the measurement (`streamWhile`: started with the typing, stopped
+// when it ends, its answer recorded in the row's note). Without `stream` (A2 not on this tree) the row is recorded
+// without the layer and says so; the acceptance's tree carries A2 (the child's Decision Log 6). Rows:
 // `1m p95` ≤ 20 ms (the mini's calibration), `1m max` ≤ 50 ms, `1m relayouts` (the margin's layout passes per keystroke,
 // at most one; the scripted scroll afterwards adds none, R4). Results in test-results/document-scale-margin.json.
 const MARGIN_RESULTS = join(REPO_ROOT, 'test-results', 'document-scale-margin.json');
 const STREAM_SECTION = TYPING_SECTION + 2; // kept clear of the agents, two sections under the caret: on screen with it
+const STREAM_TICK_MS = 120; // P4-B1: the layer's pace, a piece every 120 ms and the seam's round trip (the typing is about 36 s)
+const STREAM_ID = 'toolu_perf_stream_margin';
+
+// P4-B1: the streaming layer, a long replace_block into `block` fed piece by piece while `running()` holds, then left for
+// the caller to drop (never committed: the document is unchanged). The seam runs its commands one at a time in name
+// order (A2's `serveCommandFiles`), so a single `stream` of every piece would hold the agents' calls behind it for its
+// whole span: each piece is a `stream` command of its own, paced from here, and the agents' calls run between them.
+// Answers the pieces fed and the streaming frames the call sent, or why the seam refused (A2 not on the tree).
+type Streamed = { on: true; pieces: number; frames: number; spanned: boolean; why?: string } | { on: false; why: string };
+async function streamWhile(seam: PerfSeam, id: string, block: string, running: () => boolean): Promise<Streamed> {
+  const words = 'the agent keeps writing a long replacement for this block while the owner types elsewhere, and every piece grows the layer on the page '.repeat(20).trim();
+  const prefix = JSON.stringify({ artifact: id, baseRevision: 1, ops: [{ op: 'replace_block', id: block, markdown: '' }] }).replace('"markdown":""}]}', '"markdown":"');
+  const deltas = [prefix, ...words.split(' ').map((word) => `${word} `)];
+  let pieces = 0;
+  let frames = 0;
+  for (const piece of deltas) {
+    if (pieces > 0 && !running()) break;
+    try {
+      const answer = await seam.send<{ ok: boolean; frames?: number }>({ cmd: 'stream', session: 'perf-stream', toolUseId: STREAM_ID, name: 'artifact_edit', deltas: [piece], tickMs: 0 });
+      frames = answer.frames ?? frames; // the call's frames so far
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      return pieces === 0 ? { on: false, why } : { on: true, pieces, frames, spanned: !running(), why };
+    }
+    pieces += 1;
+    await sleep(STREAM_TICK_MS);
+  }
+  return { on: true, pieces, frames, spanned: !running() };
+}
 
 test('the typing workload with the margin open: keystroke → frame p95 with about 53 cards beside the page and a streaming layer', async () => {
   rmSync(MARGIN_RESULTS, { force: true });
@@ -272,23 +302,9 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     await readRest(seam, agent, id, read.result!);
   }
 
-  // the streaming layer: a long replace_block into a block two sections under the caret, fed piece by piece for about
-  // the typing's span (300 keys at 60 to 180 ms: about 36 s), then dropped (never committed: the document is unchanged)
+  // the streaming layer in a block two sections under the caret (P4-B1: fed alongside the typing below, `streamWhile`)
   const streamBlock = `s${STREAM_SECTION}p3`;
-  const streamed = await (async () => {
-    const words = 'the agent keeps writing a long replacement for this block while the owner types elsewhere, and every piece grows the layer on the page '.repeat(12).trim();
-    const prefix = JSON.stringify({ artifact: id, baseRevision: 1, ops: [{ op: 'replace_block', id: streamBlock, markdown: '' }] }).replace('"markdown":""}]}', '"markdown":"');
-    const deltas = [prefix, ...words.split(' ').map((word) => `${word} `)];
-    try {
-      const answer = await seam.send<{ ok: boolean; frames?: number; error?: string }>({ cmd: 'stream', session: 'perf-stream', toolUseId: 'toolu_perf_stream_margin', name: 'artifact_edit', deltas, tickMs: 120 }, 90_000);
-      return answer.ok ? { on: true as const, frames: answer.frames ?? 0 } : { on: false as const, why: answer.error ?? 'refused' };
-    } catch (error) {
-      return { on: false as const, why: error instanceof Error ? error.message : String(error) };
-    }
-  })();
-  // the stream runs its course in the host while the typing below goes on; its answer is awaited above only when the
-  // seam answers at once (no stream): otherwise the pieces are sent on their own ticks
-  void streamed;
+  const layer: { streamed: Streamed | null } = { streamed: null }; // set by the typing step
 
   await test.step('1m: typing in A with the margin open, two agents writing, the layer growing', async () => {
     const { clientID } = await instrumentTyping(page, id);
@@ -301,7 +317,17 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     loads.steadyStart = load1();
     const reads: Array<{ session: string; answer: CallAnswer<ReadResult> }> = [];
     const typing = type(page, TYPED, 300);
+    // P4-B1: the layer grows from the first keystroke to the last: its feed starts with the typing, not awaited, and
+    // stops when the typing ends; its answer is awaited after the typing
+    let typingEnded = false;
+    void typing.then(
+      () => (typingEnded = true),
+      () => (typingEnded = true),
+    );
+    const streaming = streamWhile(seam, id, streamBlock, () => !typingEnded);
     const [typed] = await Promise.all([typing, agentsRun(seam, agents, id, typing, null, reads)]);
+    const streamed = await streaming;
+    layer.streamed = streamed;
     const drained = await drain(page, pageB);
     const loop = await ok<{ p50: number; p99: number; max: number }>(page, 'artifacts.testLoopDelay', {});
     loads.steadyEnd = load1();
@@ -317,11 +343,13 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     });
     await page.waitForTimeout(100);
     const afterScroll = Number(await margin.getAttribute('data-relayouts'));
-    const layer = streamed.on ? `a streaming layer (${streamed.frames} frames)` : `NO streaming layer (${streamed.why}): not the acceptance's tree`;
-    const note = `${keys.keystrokes} keystrokes; ${cards} cards, th${near} active; agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}; ${layer}`;
+    const layerNote = streamed.on
+      ? `a streaming layer (${streamed.pieces} pieces, ${streamed.frames} frames, ${streamed.spanned ? 'over the whole typing' : 'its pieces ran out before the typing did'}${streamed.why ? `; stopped: ${streamed.why}` : ''})`
+      : `NO streaming layer (${streamed.why}): not the acceptance's tree`;
+    const note = `${keys.keystrokes} keystrokes; ${cards} cards, th${near} active; agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}; ${layerNote}`;
     rows.add('1m p95', 'keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (the mini’s calibration, P3 Decision Log 109; MacBook target 16)', note);
     rows.add('1m max', 'keystroke → frame in A, max, the margin open', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
-    rows.add('1m relayouts', 'the margin’s layout passes per keystroke (one bump per animation frame)', +(passes / Math.max(1, keys.keystrokes)).toFixed(2), 'passes', 1, '≤ 1 per keystroke', `${passes} passes over ${keys.keystrokes} keys; after a scripted scroll ${afterScroll - relayoutsAfter} more (R4: none)`);
+    rows.add('1m relayouts', 'the margin’s layout passes per keystroke (one pass per animation frame)', +(passes / Math.max(1, keys.keystrokes)).toFixed(2), 'passes', 1, '≤ 1 per keystroke', `${passes} passes over ${keys.keystrokes} keys; after a scripted scroll ${afterScroll - relayoutsAfter} more (R4: none)`);
     rows.add('1m ack p95', 'keystroke → durable ack, p95, the margin open', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked`);
     rows.add('5m p99', 'host event-loop delay over the run, p99, the margin open', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.write({ margin: { loads, cards, active: `th${near}`, layer: streamed, typing: { ...keys, ack: counted.ack }, relayouts: { passes, keystrokes: keys.keystrokes, afterScroll: afterScroll - relayoutsAfter }, loop } });
@@ -330,7 +358,7 @@ test('the typing workload with the margin open: keystroke → frame p95 with abo
     const landed = (await blockText(page, id, `s${TYPING_SECTION}p2`)) ?? '';
     expect(landed.endsWith(typed), `the typed text landed whole: …${landed.slice(-80)}`).toBe(true);
   });
-  if (streamed.on) await seam.send({ cmd: 'drop', session: 'perf-stream', toolUseId: 'toolu_perf_stream_margin' }).catch(() => {});
+  if (layer.streamed?.on) await seam.send({ cmd: 'drop', session: 'perf-stream', toolUseId: STREAM_ID }).catch(() => {});
   judged(rows, 'marginal');
 });
 

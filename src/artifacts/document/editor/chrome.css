@@ -1066,6 +1066,13 @@
 .doc-margin-add:hover {
   background: var(--bg-hover);
 }
+/* P4-B1: in the icon tier the button aligns with the dots, at the column's right edge: over the page's right padding
+   when the column reserves nothing or overlaps the page, so it never leaves a narrow scroll box (nor makes it scroll
+   sideways), and the page does not move as a selection shows it */
+.doc-margin[data-margin-tier='icons'] .doc-margin-add {
+  left: auto;
+  right: var(--doc-margin-gap, 8px);
+}
 /* the compose card's entry hosts P2's card in flow (CommentCardHost's margin layout) */
 .doc-margin-entry[data-compose] > * {
   position: relative;

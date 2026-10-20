@@ -176,7 +176,8 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     await settle();
     // the span's first client rect is empty: the next one is the line
     const span = m.editor().view.dom.querySelector('[data-thread="t1"]')!;
-    vi.spyOn(span, 'getClientRects').mockImplementation(() => [new DOMRect(0, 0, 0, 0), new DOMRect(120, 420, 200, 20)] as unknown as DOMRectList);
+    // P4-B1: Chromium's empty fragment at a soft wrap has no width but the full line's height
+    vi.spyOn(span, 'getClientRects').mockImplementation(() => [new DOMRect(320, 400, 0, 20), new DOMRect(120, 420, 200, 20)] as unknown as DOMRectList);
     act(() => m.editor().view.dispatch(m.editor().state.tr.insertText(' ', findPos(m.editor(), 'Owners'))));
     await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
     expect(topOf(entry('t1'))).toBe(420 - scene.columnTop);
@@ -195,11 +196,72 @@ describe('re-layout (R1 to R6)', () => {
     expect(topOf(entry('t1'))).toBe(320 - scene.columnTop);
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
     const after = relayouts();
-    expect(after).toBeGreaterThan(before);
+    expect(after).toBe(before + 1); // P4-B1: one pass per edit frame, run in the frame callback itself (D13's at most one)
     const scroller = document.querySelector('.ds-doc')!;
     fireEvent.scroll(scroller);
     await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
     expect(relayouts()).toBe(after);
+  });
+
+  // P4-B1: the layout pass runs in the frame's callback, so the card moves in the frame its text moved in, and no
+  // React render is needed for the move (the cards' elements and the active one's shift are left as the pass wrote them)
+  it('an edit moves the cards in the frame callback itself, the active card keeping its shift (R1)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'track the budget', 300);
+    await settle();
+    expect(activeThread(m.editor().state)).toBe('t2');
+    const card = within(entry('t2')!).getByRole('group');
+    scene.lines.set('t2', { top: 320, height: 20 });
+    act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'The plan'))));
+    await new Promise((r) => requestAnimationFrame(() => r(null))); // outside act: nothing React does may help
+    expect(topOf(entry('t2'))).toBe(320 - scene.columnTop);
+    expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
+    expect(within(entry('t2')!).getByRole('group')).toBe(card);
+    // a re-render that runs no pass (a reply being typed in the active card) keeps the shift
+    act(() => fireEvent.change(within(entry('t2')!).getByRole('textbox', { name: 'Reply' }), { target: { value: 'Typing a reply' } }));
+    expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
+    expect(topOf(entry('t2'))).toBe(320 - scene.columnTop);
+  });
+
+  // P4-B1 (D4): an add's or an activation's move stays animated through the follow-up pass the mounted card's height
+  // asks for; an edit's pass is not animated
+  it('keeps an add and an activation animated through the follow-up pass, an edit’s pass not (D4)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    await settle();
+    scene.heights.set('t2', 90);
+    comment(m, 't2', 'track the budget', 180);
+    await settle(); // the add: t2's entry mounts, its height read, the stack re-laid a microtask later
+    expect(topOf(entry('t1'))).toBe(180 - scene.columnTop - MARGIN_GAP_PX - scene.entryHeight); // pushed up by the active t2
+    expect(topOf(entry('t2'))).toBe(180 - scene.columnTop);
+    expect(margin()!.hasAttribute('data-animate')).toBe(true);
+    scene.heights.set('t1', 120); // the activated card grows its reply field
+    act(() => void m.editor().commands.setActiveThread('t1'));
+    await act(() => Promise.resolve()); // the follow-up passes' microtask
+    expect(margin()!.hasAttribute('data-animate')).toBe(true);
+    expect(topOf(entry('t2'))).toBe(140 - scene.columnTop + 120 + MARGIN_GAP_PX); // laid with the grown height
+    act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'Third'))));
+    await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    expect(margin()!.hasAttribute('data-animate')).toBe(false);
+  });
+
+  // P4-B1 (Z3): an orphan is not wanted, so a pass does not search the page for it every frame
+  it('does not search the page for an orphaned thread on every edit (Z3)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'track the budget', 300);
+    await settle();
+    const from = findPos(m.editor(), 'ships quarterly');
+    act(() => m.editor().view.dispatch(m.editor().state.tr.delete(from, from + 'ships quarterly'.length)));
+    await settle();
+    const queries = vi.spyOn(m.editor().view.dom, 'querySelectorAll');
+    for (const at of ['Owners', 'Third']) {
+      act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), at))));
+      await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    }
+    expect(queries.mock.calls.filter(([selector]) => selector === '[data-thread]')).toHaveLength(0);
+    expect(entry('t2')).not.toBeNull();
   });
 
   it('an agent’s reply grows a card and re-lays the cards below it; the active thread stays (R2, R3)', async () => {
@@ -255,13 +317,19 @@ describe('the tiers (N1 to N6) and the view states', () => {
     await settle();
     act(() => void m.editor().commands.setActiveThread(null));
     expect(margin()!.dataset.marginTier).toBe('icons');
+    // P4-B1 (N2): one dot for the pair, carrying the count, at the first one's anchor
     const icons = within(margin()!).getAllByRole('button', { name: /^Comment by/ });
-    expect(icons).toHaveLength(2);
-    expect(icons[0]!.textContent).toBe('2'); // the first carries the count of the pair
-    fireEvent.click(icons[0]!);
+    expect(icons).toHaveLength(1);
+    expect(icons[0]!.textContent).toBe('2');
+    expect(topOf(entry('t1'))).toBe(140 - scene.columnTop);
+    expect(topOf(entry('t2'))).toBe(140 - scene.columnTop);
+    act(() => fireEvent.click(icons[0]!));
     expect(activeThread(m.editor().state)).toBe('t1');
     expect(margin()!.querySelector('.doc-margin-overlay [data-thread="t1"]')).not.toBeNull();
-    fireEvent.click(icons[0]!); // the open icon again closes it
+    act(() => fireEvent.keyDown(within(margin()!.querySelector<HTMLElement>('.doc-margin-overlay')!).getByRole('group'), { key: 'j' }));
+    expect(activeThread(m.editor().state)).toBe('t2'); // J reaches the second of the pair
+    expect(margin()!.querySelector('.doc-margin-overlay [data-thread="t2"]')).not.toBeNull();
+    act(() => fireEvent.click(within(margin()!).getByRole('button', { name: /^Comment by/ }))); // the open dot again closes it
     expect(activeThread(m.editor().state)).toBeNull();
   });
 
@@ -329,6 +397,25 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(entry('t1')!.hasAttribute('data-active')).toBe(true);
     act(() => void m.editor().commands.setActiveThread(null));
     expect(m.rails[m.rails.length - 1]).toBeNull();
+  });
+
+  // P4-B1 (the activation table): an All comments item chosen while the margin would host closes the panel; the margin
+  // returns with that thread active and the rail state is margin
+  it('choosing an item in the panel closes it and the margin returns with that thread active (D5)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'track the budget', 300);
+    await settle();
+    m.rerender({ rail: 'comments' });
+    await settle();
+    const panel = screen.getByRole('complementary', { name: 'Comments' });
+    act(() => fireEvent.click(within(panel.querySelector<HTMLElement>('[data-thread="t1"]')!).getByRole('button', { name: /^Show/ })));
+    await settle();
+    expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
+    expect(margin()).not.toBeNull();
+    expect(activeThread(m.editor().state)).toBe('t1');
+    expect(entry('t1')!.hasAttribute('data-active')).toBe(true);
+    expect(m.rails.slice(-2)).toEqual([null, 'margin']);
   });
 
   // P4-B1 (X36's draft rule: a hidden card keeps its draft, one draft per thread): the reply drafts are the editor's,

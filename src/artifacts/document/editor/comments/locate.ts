@@ -36,7 +36,7 @@ export function passageElement(editor: Editor, doc: Doc, threadId: string): Elem
 /** The first line box of `element` in viewport coordinates (a zero-width first rect at a soft wrap is skipped, P6). */
 export function firstLineRect(element: Element): DOMRect {
   const rects = element.getClientRects();
-  for (const rect of rects) if (rect.width > 0 || rect.height > 0) return rect;
+  for (const rect of rects) if (rect.width > 0) return rect; // P4-B1: Chromium's empty fragment at a soft wrap has the line's height
   return rects[0] ?? element.getBoundingClientRect();
 }
 
@@ -60,10 +60,14 @@ export function passageRect(editor: Editor, frame: HTMLElement | null, threadId:
  * The margin's locator: every thread's anchoring element, found by one pass over the page's marks and kept while it is
  * still in the document. `refresh` is called once per layout pass with the thread ids wanted, in any order, and answers
  * them in document order with their elements; a thread whose kept element has gone is looked up again by the one query
- * (and a block thread by its position); a thread drawn nowhere here is left out.
+ * (and a block thread by its position); a thread drawn nowhere here is left out, and (P4-B1) not looked for again until
+ * the ids wanted change, so a thread the page no longer draws costs no pass a query.
  */
 export class MarginLocator {
   private readonly kept = new Map<string, Element>();
+  // P4-B1: the ids the last query could not find, kept while the ids wanted stay the same
+  private readonly unfound = new Set<string>();
+  private wantedKey = '';
 
   constructor(
     private readonly editor: Editor,
@@ -74,12 +78,18 @@ export class MarginLocator {
   refresh(threadIds: readonly string[]): Array<{ id: string; element: Element }> {
     if (this.editor.isDestroyed) return [];
     const root = this.editor.view.dom;
+    // P4-B1: a new set of ids wanted is looked for afresh
+    const key = threadIds.join(' ');
+    if (key !== this.wantedKey) {
+      this.wantedKey = key;
+      this.unfound.clear();
+    }
     const missing: string[] = [];
     for (const id of threadIds) {
       const element = this.kept.get(id);
       if (!element || !element.isConnected || !root.contains(element)) {
         this.kept.delete(id);
-        missing.push(id);
+        if (!this.unfound.has(id)) missing.push(id); // P4-B1
       }
     }
     if (missing.length > 0) {
@@ -93,6 +103,7 @@ export class MarginLocator {
         const block = blockPos(this.editor, this.doc, id);
         const node = block >= 0 ? this.editor.view.nodeDOM(block) : null;
         if (node instanceof Element) this.kept.set(id, node);
+        else this.unfound.add(id); // P4-B1
       }
     }
     const found = threadIds.filter((id) => this.kept.has(id)).map((id) => ({ id, element: this.kept.get(id)! }));

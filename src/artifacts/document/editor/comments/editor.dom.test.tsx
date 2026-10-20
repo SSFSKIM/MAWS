@@ -191,6 +191,11 @@ describe('the threads rail', () => {
     await act(() => ticks(5));
     expect(editor().view.dom.querySelector('.comment-active')?.textContent).toBe('ships quarterly');
     expect(editor().state.doc.textBetween(editor().state.selection.from, editor().state.selection.to)).toBe('ships quarterly');
+    // P4-B1 (the activation table): with the margin hosting (an unmeasured body is not narrow), the item chosen closes
+    // the panel and the margin shows the thread; the panel is opened again for the next one
+    expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
 
     act(() => fireEvent.click(within(rail()).getAllByRole('button', { name: /^Show/ })[2]!));
     await until(() => screen.getByRole('tab', { name: 'Appendix' }).getAttribute('aria-selected') === 'true', 'the other tab');

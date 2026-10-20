@@ -137,6 +137,10 @@ describe('commenting a block (P3-E)', () => {
     await act(() => ticks(5));
     const selection = editor().state.selection;
     expect(selection instanceof NodeSelection && selection.node.attrs.id).toBe('c1');
+    // P4-B1 (the activation table): the item chosen closed the panel, the margin hosting (an unmeasured body is not
+    // narrow); it is opened again
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
 
     act(() => void editor().commands.deleteSelection());
     await quiet();
