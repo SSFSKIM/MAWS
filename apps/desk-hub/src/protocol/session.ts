@@ -85,10 +85,15 @@ export type Streaming = {
    */
   upTo: number;
   /**
-   * Only blocks without a `block-row` yet. The producer (the bridge's endpoint; the fake machine) removes a block from
-   * its snapshot state when it applies the block's `block-row`, under the same lock that takes snapshots, so no
-   * snapshot holds a block whose `block-row` was already sent. An entry whose `blocks` is empty can remain until its
-   * step ends, and is skipped.
+   * Every block of the request, named or not (the desk open-fast spec, 2026-10-20, section 9). A block whose
+   * `block-row` the producer (the bridge's endpoint; the fake machine) applied stays here until its step ends or its
+   * turn completes, carrying `uuid` (the row it was named by) and `namedAt`, since the engine writes a message's rows
+   * only when the message ends and its text has no other copy until then; the plane drops a named block whose row is in
+   * the snapshot's history, and sends one `block-row` per named block it keeps right after the snapshot, before anything
+   * else of the subscription. A consumer draws a block the snapshot carries, named or not: a named one takes no later
+   * chunk and is drawn until its row lands, on a first snapshot and through a reconnect alike. A producer older than
+   * this removes a block when it applies its `block-row` and never sends `uuid`. An entry whose `blocks` is empty can
+   * remain until its step ends, and is skipped.
    */
   blocks: StreamingBlock[];
 };
@@ -105,12 +110,19 @@ export type StreamingBlock = {
   /** A tool block's call: its `tool_use_id` and tool name. */
   id?: string;
   name?: string;
+  /** The row the block's `block-row` named, once the producer applied it: the block is drawn until that row lands. */
+  uuid?: string;
+  /** When the block was named: the notice's `t`, ms on the machine's clock. */
+  namedAt?: number;
+  /** The producer kept only the block's last characters as `text` (its catch-up copy is bounded; chunks stay whole). */
+  truncated?: true;
 };
 
 /**
  * The row that settles a streaming block: sent when the engine writes the row for content block `index` of that step,
- * before the row itself arrives. Two moments: the producer drops the block from its snapshot state when it applies the
- * `block-row` (so later snapshots leave it out); the browser keeps drawing the block's partial text until the `row`
+ * before the row itself arrives. Two moments: the producer marks the block in its snapshot state with the row's `uuid`
+ * when it applies the `block-row` (a producer older than the open-fast spec dropped it, so its later snapshots leave it
+ * out); the browser keeps drawing the block's partial text until the `row`
  * whose `uuid` the `block-row` named arrives, which settles the block, and drops it then. Chunks for a settled block are
  * ignored. A row no `block-row` named (a server tool's) settles nothing and is simply drawn.
  * The hub relays it uninterpreted.
