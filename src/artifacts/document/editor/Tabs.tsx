@@ -13,6 +13,7 @@ import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { schemaFor } from '../schema';
 import { TAB_LIMIT_REFUSAL, addTab, deleteTab, moveTab, renameTab, tabBody, type TabInfo } from '../tabs';
+import { useOpenThreadCounts } from './comments/use-threads'; // P4-B1
 
 const DRAG_TYPE = 'application/x-maws-document-tab';
 
@@ -54,6 +55,16 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
     const held = element.ownerDocument.activeElement;
     if (!held || held === element.ownerDocument.body) element.focus();
   });
+  // P4-B1 (the prior art's Z6): a tab with open comment threads carries a dot, named by their count
+  const openCounts = useOpenThreadCounts(doc);
+  const openComments = (tabId: string) => {
+    const count = openCounts.get(tabId) ?? 0;
+    return count === 0 ? undefined : `${count} open ${count === 1 ? 'comment' : 'comments'}`;
+  };
+  const dot = (tabId: string) => {
+    const label = openComments(tabId);
+    return label && <span className="doc-tab-dot" role="img" aria-label={label} />;
+  };
   // the guide's limit (P3-F, tracker L155): Add tab is refused with the reason on it; a tab another replica added since
   // this render is refused by the writer itself, which writes nothing
   const full = tabs.length >= DOCUMENT_LIMITS.tabs;
@@ -150,6 +161,7 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
                   role="tab"
                   aria-selected={tab.id === active}
                   aria-label={title}
+                  aria-description={openComments(tab.id) /* P4-B1: a tab's children are presentational, so its dot is said here */}
                   data-tab-id={tab.id}
                   tabIndex={0}
                   className="doc-tab"
@@ -166,6 +178,7 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
                   onDrop={(event) => !readOnly && drop(event, tab)}
                 >
                   <span className="doc-tab-label">{title}</span>
+                  {dot(tab.id)}
                   {deletable && (
                     <button
                       type="button"

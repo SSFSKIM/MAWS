@@ -59,7 +59,7 @@ async function mount(content: JSONContent, { surface = true } = {}): Promise<Mou
 const content = () => doc(para('p1', 'The plan ships quarterly.'), para('p2', 'Owners track the budget.'));
 const toolbar = () => screen.getByRole('toolbar', { name: 'Formatting' });
 const commentButton = () => within(toolbar()).getByRole('button', { name: 'Comment' }) as HTMLButtonElement;
-const rail = () => screen.getByRole('complementary', { name: 'Comments' });
+const rail = () => screen.getByRole('complementary', { name: 'Comments' }); // P4-B1: each thread in it is X36's card, a group (K1)
 // the rail's list follows the document after a quiet moment (use-threads.ts)
 const quiet = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80)));
 
@@ -73,7 +73,7 @@ describe('commenting a selection', () => {
 
     expect(opened).toHaveLength(1);
     const [{ threadId, tabId, tabTitle, quote }] = opened as [CommentedPassage];
-    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: 'Main', quote: 'ships quarterly' });
+    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: '', quote: 'ships quarterly' }); // P4-B1 (tracker L275): one tab, no tab title
     expect(getThread(handle.doc, threadId)).toMatchObject({ tabId: TAB, blockId: 'p1', quote: 'ships quarterly', status: 'open', createdBy: { kind: 'human' }, messages: [] });
     expect(covered(editor())).toEqual({ [threadId]: 'ships quarterly' });
     await ticks(3);
@@ -165,7 +165,7 @@ describe('the threads rail', () => {
     expect(toggle.textContent).toContain('3');
     act(() => fireEvent.click(toggle));
     await quiet();
-    const items = within(rail()).getAllByRole('article');
+    const items = within(rail()).getAllByRole('group');
     expect(items.map((item) => item.dataset.thread)).toEqual([first, second, 'zz000001']);
     expect(items[0]!.textContent).toContain('ships quarterly');
     expect(items[0]!.textContent).toContain('Should this be monthly?');
@@ -177,7 +177,7 @@ describe('the threads rail', () => {
     await quiet();
     expect(getThread(handle.doc, first)!.status).toBe('resolved');
     const resolved = within(rail()).getByRole('region', { name: /Resolved/ });
-    expect(within(resolved).getAllByRole('article').map((item) => item.dataset.thread)).toEqual([first]);
+    expect(within(resolved).getAllByRole('group').map((item) => item.dataset.thread)).toEqual([first]);
     act(() => fireEvent.click(within(resolved).getByRole('button', { name: 'Reopen' })));
     await quiet();
     expect(getThread(handle.doc, first)!.status).toBe('open');
@@ -195,6 +195,68 @@ describe('the threads rail', () => {
     act(() => fireEvent.click(within(rail()).getAllByRole('button', { name: /^Show/ })[2]!));
     await until(() => screen.getByRole('tab', { name: 'Appendix' }).getAttribute('aria-selected') === 'true', 'the other tab');
   });
+
+  // P4-B1 (D9, the prior art's Z4): the rail is the All comments panel, its cards X36's; it filters by status, by tab and
+  // by a search over the messages, the quotes and the authors' names, and each card's reply draft is the panel's, so a
+  // card a filter hides keeps it.
+  it('filters by status, scope and a search, each card keeping its draft (P4-B1, Z4)', async () => {
+    const { handle, first, second } = await seeded();
+    act(() => void resolve(handle.doc, second, { kind: 'human' }, Date.now() + 2));
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    expect(within(rail()).getByRole('heading', { name: 'All comments' })).toBeTruthy();
+    const ids = () => within(rail()).queryAllByRole('group').map((card) => card.dataset.thread);
+    const choose = (name: string) => act(() => fireEvent.click(within(rail()).getByRole('radio', { name })));
+    const search = (value: string) => act(() => fireEvent.change(within(rail()).getByRole('searchbox', { name: 'Search comments' }), { target: { value } }));
+    const field = (id: string) => within(rail().querySelector<HTMLElement>(`[data-thread="${id}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
+    expect(ids()).toEqual([first, 'zz000001', second]); // All: open first, then the resolved section
+    expect(within(rail()).getByRole('radio', { name: 'All' })).toHaveProperty('checked', true);
+    expect(within(rail()).getByRole('radio', { name: 'All tabs' })).toHaveProperty('checked', true);
+    act(() => fireEvent.change(field(first), { target: { value: 'Draft kept' } }));
+
+    choose('Open');
+    expect(ids()).toEqual([first, 'zz000001']);
+    expect(within(rail()).queryByRole('region', { name: /Resolved/ })).toBeNull();
+    choose('Resolved');
+    expect(ids()).toEqual([second]);
+    expect(within(rail()).queryByRole('region', { name: /Resolved/ })).toBeNull();
+    choose('All');
+
+    choose('This tab');
+    expect(ids()).toEqual([first, second]);
+    choose('All tabs');
+
+    search('MONTHLY'); // a message's body, any case
+    expect(ids()).toEqual([first]);
+    search('appendix'); // a quote
+    expect(ids()).toEqual(['zz000001']);
+    search('claude'); // an author: the agent replied to the first and wrote the third
+    expect(ids()).toEqual([first, 'zz000001']);
+    search('owners'); // a resolved thread's quote: listed under Resolved, no note above it
+    expect(ids()).toEqual([second]);
+    expect(rail().querySelector('.doc-rail-empty')).toBeNull();
+    search('nothing like it');
+    expect(ids()).toEqual([]);
+    expect(rail().textContent).toContain('No comments match');
+    search('');
+    expect(ids()).toEqual([first, 'zz000001', second]);
+    expect(field(first).value).toBe('Draft kept');
+  });
+
+  it('moves the focus between its cards with J and K (P4-B1, K3)', async () => {
+    const { first } = await seeded();
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    const cards = () => within(rail()).getAllByRole('group');
+    cards()[0]!.focus();
+    expect(cards()[0]!.dataset.thread).toBe(first);
+    act(() => fireEvent.keyDown(cards()[0]!, { key: 'j' }));
+    expect(document.activeElement).toBe(cards()[1]);
+    act(() => fireEvent.keyDown(cards()[1]!, { key: 'k' }));
+    expect(document.activeElement).toBe(cards()[0]);
+    act(() => fireEvent.keyDown(cards()[0]!, { key: 'k' })); // the first has no previous
+    expect(document.activeElement).toBe(cards()[0]);
+  });
 });
 
 // Fix wave 1 (Decision Log 25): an open thread in the rail takes a reply, posted to the thread as the person (the
@@ -210,7 +272,7 @@ describe('a reply in the rail', () => {
     reply(handle.doc, id, { id: 'r1', by: SESSION, at: 2, body: 'Changed to monthly.' });
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
-    const item = within(rail()).getByRole('article');
+    const item = within(rail()).getByRole('group');
     expect(messages(item)).toEqual(['ClaudeChanged to monthly.']);
 
     const field = within(item).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
@@ -223,7 +285,7 @@ describe('a reply in the rail', () => {
     expect(getThread(handle.doc, id)!.messages.at(-1)).toMatchObject({ by: { kind: 'human' }, body: 'Thanks, monthly works.' });
     expect(field.value).toBe('');
     await quiet();
-    expect(messages(within(rail()).getByRole('article'))).toEqual(['ClaudeChanged to monthly.', 'YouThanks, monthly works.']);
+    expect(messages(within(rail()).getByRole('group'))).toEqual(['ClaudeChanged to monthly.', 'YouThanks, monthly works.']);
     expect(editor().storage.collaboration.undoManager?.canUndo()).toBe(false);
     await until(() => (getThread(world!.host.doc, id)?.messages.length ?? 0) === 2, 'the host to hold the reply');
 
@@ -242,7 +304,7 @@ describe('a reply in the rail', () => {
     act(() => void resolve(handle.doc, opened[0]!.threadId, { kind: 'human' }, 3));
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
-    const item = within(rail()).getByRole('article');
+    const item = within(rail()).getByRole('group');
     expect(within(item).queryByRole('textbox', { name: 'Reply' })).toBeNull();
     expect(within(item).getByRole('button', { name: 'Reopen' })).toBeTruthy();
   });
@@ -266,7 +328,7 @@ describe('a click on a passage', () => {
     return handled;
   }
   const active = (editor: Editor) => [...editor.view.dom.querySelectorAll('.comment-active')].map((span) => span.textContent).join('') || null;
-  const selectedInRail = () => within(rail()).queryAllByRole('article').filter((item) => item.getAttribute('aria-current') === 'true').map((item) => item.dataset.thread);
+  const selectedInRail = () => within(rail()).queryAllByRole('group').filter((item) => item.getAttribute('aria-current') === 'true').map((item) => item.dataset.thread);
 
   it('draws the clicked passage’s thread active and opens the rail on it, selected; plain text draws none', async () => {
     const { editor, opened } = await mount(content());
@@ -324,5 +386,46 @@ describe('a remote resolve', () => {
     await until(() => getThread(world!.host.doc, id) !== null, 'the host to hold the thread');
     world!.host.write((d) => resolve(d, id, SESSION, 5));
     await until(() => Object.keys(highlighted(editor())).length === 0, 'the highlight to go');
+  });
+});
+
+// P4-B1 (the prior art's Z6): a tab with open threads carries a dot in the strip, named by its count; resolving a tab's
+// last open thread takes its dot away.
+describe('the tab strip’s comment dot', () => {
+  it('marks each tab with open threads by their count', async () => {
+    const { editor, handle } = await mount(content());
+    world!.host.write((d) => addTab(d, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON(doc(para('a1', 'Appendix text.'))) }));
+    await until(() => screen.queryByRole('tab', { name: 'Appendix' }) !== null, 'the second tab');
+    const dot = (title: string) => screen.getByRole('tab', { name: title }).querySelector('.doc-tab-dot');
+    expect(dot('Main')).toBeNull();
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void select(editor(), 'Owners'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void addThread(handle.doc, { threadId: 'zz000001', tabId: 'tab2', blockId: 'a1', quote: 'Appendix', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() + 1 }));
+    await until(() => dot('Appendix') !== null, 'the dots');
+    expect(dot('Main')?.getAttribute('aria-label')).toBe('2 open comments');
+    expect(dot('Appendix')?.getAttribute('aria-label')).toBe('1 open comment');
+    expect(screen.getByRole('tab', { name: 'Main' }).getAttribute('aria-description')).toBe('2 open comments');
+    act(() => void resolve(handle.doc, 'zz000001', { kind: 'human' }, Date.now() + 2));
+    await until(() => dot('Appendix') === null, 'the resolved tab’s dot to go');
+    expect(dot('Main')).not.toBeNull();
+  });
+});
+
+// P4-B1 (tracker L275): a document of one tab names no tab in the passage it hands the surface, so a tab title that
+// differs from the document's does not label the comment card and the side thread "title, tab title"; with several
+// tabs the shown tab is named.
+describe('the commented passage’s tab title', () => {
+  it('is empty in a one-tab document and the shown tab’s title once there are more', async () => {
+    const { editor, opened } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    expect(opened[0]!.tabTitle).toBe('');
+    world!.host.write((d) => addTab(d, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON(doc(para('a1', 'Appendix text.'))) }));
+    await until(() => screen.queryByRole('tab', { name: 'Appendix' }) !== null, 'the second tab');
+    act(() => void select(editor(), 'Owners'));
+    act(() => fireEvent.click(commentButton()));
+    expect(opened[1]!.tabTitle).toBe('Main');
   });
 });

@@ -64,7 +64,7 @@ const posOf = (editor: Editor, id: string): number => {
 const selectBlock = (editor: Editor, id: string) => act(() => void editor.commands.setNodeSelection(posOf(editor, id)));
 const toolbar = () => screen.getByRole('toolbar', { name: 'Formatting' });
 const commentButton = () => within(toolbar()).getByRole('button', { name: 'Comment' }) as HTMLButtonElement;
-const rail = () => screen.getByRole('complementary', { name: 'Comments' });
+const rail = () => screen.getByRole('complementary', { name: 'Comments' }); // P4-B1: each thread in it is X36's card, a group (K1)
 const quiet = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80)));
 const chartDom = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('[data-node="chart"]')!;
 
@@ -77,7 +77,7 @@ describe('commenting a block (P3-E)', () => {
 
     expect(opened).toHaveLength(1);
     const [{ threadId, tabId, tabTitle, quote }] = opened as [CommentedPassage];
-    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: 'Main', quote: 'chart: Sales by region' });
+    expect({ tabId, tabTitle, quote }).toEqual({ tabId: TAB, tabTitle: '', quote: 'chart: Sales by region' }); // P4-B1 (tracker L275): one tab, no tab title
     expect(getThread(handle.doc, threadId)).toMatchObject({ tabId: TAB, blockId: 'c1', quote: 'chart: Sales by region', anchor: { kind: 'block' }, status: 'open', messages: [] });
     expect(JSON.stringify(editor().getJSON())).not.toContain('"comment"'); // no mark anywhere
     await ticks(3);
@@ -128,7 +128,7 @@ describe('commenting a block (P3-E)', () => {
     act(() => void editor().commands.setTextSelection(2));
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
-    const item = () => within(rail()).getByRole('article');
+    const item = () => within(rail()).getByRole('group');
     expect(item().dataset.thread).toBe(id);
     expect(item().textContent).toContain('chart: Sales by region');
     expect(item().dataset.orphan).toBeUndefined();

@@ -46,7 +46,7 @@ import { MarginThreads } from './comments/MarginThreads'; // P4-B1
 import type { ActivationCause } from './comments/plugins'; // P4-B1
 import type { CommentsView } from '../../comments/view'; // P4-B1
 import type { MarginTier } from '../../comments/margin-tiers'; // P4-B1
-import { ThreadsRail } from './comments/ThreadsRail';
+import { CommentsPanel } from './comments/CommentsPanel'; // P4-B1: the threads rail became the All comments panel
 import { useOpenThreadCount } from './comments/use-threads';
 import { editorExtensions } from './extensions';
 import { FindBar } from './Find';
@@ -273,7 +273,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               {...props}
               key={active.id}
               tabId={active.id}
-              tabTitle={active.title}
+              tabTitle={tabs.length === 1 ? '' : active.title} // P4-B1 (tracker L275): one tab names no tab in a comment's label
               author={author}
               rail={rail}
               openRail={openRail}
@@ -301,7 +301,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
           )}
         </div>
         {rail === 'comments' && (
-          <ThreadsRail
+          <CommentsPanel // P4-B1
             doc={doc}
             tabs={tabs}
             activeTab={active?.id ?? null}
