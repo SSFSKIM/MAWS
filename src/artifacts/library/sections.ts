@@ -12,12 +12,15 @@
 //   skipped, any other file's text as it is (`{paths: [path]}`).
 // - A dashboard, an html page and a file: the library's extractor's text (no place).
 //
-// Every body is NFC and capped at the extractor's TEXT_MAX_BYTES of UTF-8; a section that would start past the cap is
-// dropped. Offsets count UTF-16 code units of the body, as JavaScript indexes it.
+// Every body is NFC and capped at MIRROR_TEXT_MAX_BYTES of UTF-8 (Decision Log 16: the extractor's 256 KiB, main's
+// library's cap, left all but the first third of a 200-page document unsearchable); a section that would start past the
+// cap is dropped. Offsets count UTF-16 code units of the body, as JavaScript indexes it.
 import { listTabs, tabBody, TABS } from '@artifacts/document/tabs';
 import { listThreads, THREADS } from '@artifacts/document/threads';
 import type { Doc, Node } from '@artifacts/yjs';
-import { capped, extractText, htmlText, TEXT_MAX_BYTES, walkText, type TextSource } from './text';
+import { capped, extractText, htmlText, walkText, type TextSource } from './text';
+
+export const MIRROR_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 
 // Where a section opens: a document's tab and the top-level block to read from, or a file model's file. The shape of
 // `artifact_search`'s `read` (X33).
@@ -47,8 +50,8 @@ export function sectionText(source: SectionSource): SectionedText {
     case 'design_system':
       return fileSections(source.files);
     default: {
-      const body = extractText(source).normalize('NFC');
-      return body === '' ? { body, sections: [] } : { body: capped(body), sections: [[0, null]] };
+      const body = extractText(source, MIRROR_TEXT_MAX_BYTES).normalize('NFC');
+      return body === '' ? { body, sections: [] } : { body: capped(body, MIRROR_TEXT_MAX_BYTES), sections: [[0, null]] };
     }
   }
 }
@@ -76,7 +79,7 @@ class Builder {
   private length = 0;
 
   get full(): boolean {
-    return this.length > TEXT_MAX_BYTES;
+    return this.length > MIRROR_TEXT_MAX_BYTES;
   }
 
   add(text: string, place: SectionPlace | null): void {
@@ -92,7 +95,7 @@ class Builder {
   }
 
   done(): SectionedText {
-    const body = capped(this.parts.join(''));
+    const body = capped(this.parts.join(''), MIRROR_TEXT_MAX_BYTES);
     return { body, sections: this.sections.filter(([offset]) => offset < body.length) };
   }
 }

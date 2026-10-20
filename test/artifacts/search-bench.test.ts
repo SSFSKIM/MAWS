@@ -3,10 +3,10 @@
 //   MAWS_SEARCH_BENCH=1 pnpm exec vitest run test/artifacts/search-bench.test.ts --silent=false
 // (the numbers are wall time, so run at low load). Over A's real store with the document kind registered: a library of
 // LIBRARY artifacts (html pages and small documents, Korean and English) already mirrored, and S7b's 200-page document
-// (e2e/support/document-seed.ts) changed since its row was written, so a search's catch-up re-extracts it before the
-// query. Printed: the search with that catch-up, a search with nothing to catch up, a cold search over a library the
+// (e2e/support/document-seed.ts) changed in its last section since its row was written, so a search's catch-up
+// re-extracts the whole document (the mirror's 2 MiB cap, Decision Log 16) before the query. Printed: the search with that catch-up, a search with nothing to catch up, a cold search over a library the
 // migration left unmirrored (the budget's hint), a human's typed word in the 200-page document through the document
-// port until a search finds it, and the 50-hit answer's size.
+// port until a search finds it, a 50-hit answer over 55 copies of the 200-page document, and the 50-hit answer's size.
 import { describe, expect, it } from 'vitest';
 import { DocIndex } from '@artifacts/document/block-index';
 import { listTabs, tabBody } from '@artifacts/document/tabs';
@@ -62,15 +62,16 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
       const coldAgain = await run({ query: 'budget' });
 
       // warm the whole mirror (no budget), then change the 200-page document only
-      for (let k = 0; k < 20 && (await run({ query: 'item1' })).result.hint !== undefined; k++);
+      for (let k = 0; k < 100 && (await run({ query: 'item1' })).result.hint !== undefined; k++);
       const quiet: number[] = [];
       for (let k = 0; k < RUNS; k++) quiet.push((await run({ query: '로드맵' })).ms);
 
       const withCatchUp: number[] = [];
       for (let k = 0; k < RUNS; k++) {
-        await world.service.writeAs(big.id, HUMAN, (doc) => DocIndex.of(doc).find(`s${Math.floor(SECTIONS / 16)}p2`)!.node.insert(0, `bench${k} `));
+        await world.service.writeAs(big.id, HUMAN, (doc) => DocIndex.of(doc).find(`s${SECTIONS - 1}p1`)!.node.insert(0, `bench${k} `));
         const { ms, result } = await run({ query: `bench${k}` });
-        expect(result.hits.map((hit) => hit.id)).toEqual([big.id]);
+        expect(result.hits.map((hit) => hit.id)).toEqual([big.id]); // a word in its last section
+        expect(result.hits[0]!.read).toEqual({ tab: SEED_TAB, from: `s${SECTIONS - 1}p1` });
         withCatchUp.push(ms);
       }
 
@@ -86,11 +87,26 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
         expect(result.hits[0]!.read).toEqual({ tab: SEED_TAB, from: expect.stringMatching(new RegExp(`^s${Math.floor(SECTIONS / 8)}`)) });
       }
 
-      // the 256 KiB cap (the extractor's, Decision Log 4): how far into the document the mirror's body reaches
+      // the mirror's 2 MiB cap (Decision Log 16): how far into the document its body reaches
       const mirrored = world.storage.db.prepare('SELECT length(t.body) AS chars, r.sections FROM artifact_text t JOIN artifact_text_rows r ON r.textRowid = t.rowid WHERE r.artifactId = ?').get(big.id) as { chars: number; sections: string };
       const places = JSON.parse(mirrored.sections) as [number, { from?: string } | null][];
       const reach = { bodyChars: mirrored.chars, lastBlock: [...places].reverse().find(([, place]) => place?.from)?.[1]?.from, sections: SECTIONS };
       const fifty = await run({ query: '로드맵', limit: 50 });
+
+      // a 50-hit answer over large documents: copies of the 200-page one, mirrored, a two-word query whose snippet and
+      // read are found in each whole body (Decision Log 17's walk over its sections)
+      for (let n = 0; n < 54; n++) await world.store.duplicate(big.id, { title: `Copy ${n}` }, HUMAN);
+      let warming = 0;
+      for (; warming < 400 && (await run({ query: 'item1' })).result.hint !== undefined; warming++);
+      const large: number[] = [];
+      let largeAnswer = '';
+      for (let k = 0; k < RUNS; k++) {
+        const { ms, answer, result } = await run({ query: 'onboarding forecast', limit: 50 });
+        expect(result.hits).toHaveLength(50);
+        expect(result.hint).toBeUndefined();
+        large.push(ms);
+        largeAnswer = answer;
+      }
       const nonAscii = [...fifty.answer].filter((char) => char.charCodeAt(0) > 0x7f).length;
       console.log(
         JSON.stringify(
@@ -100,6 +116,7 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
             quietMedianMs: round(median(quiet)), quietMaxMs: round(Math.max(...quiet)),
             catchUpMedianMs: round(median(withCatchUp)), catchUpMaxMs: round(Math.max(...withCatchUp)),
             typedToFoundMedianMs: round(median(typed)), typedToFoundMaxMs: round(Math.max(...typed)),
+            largeFifty: { docs: 55, warmingSearches: warming, medianMs: round(median(large)), maxMs: round(Math.max(...large)), chars: [...largeAnswer].length, utf8Bytes: new TextEncoder().encode(largeAnswer).length },
             fifty: { hits: fifty.result.hits.length, chars: [...fifty.answer].length, utf8Bytes: new TextEncoder().encode(fifty.answer).length, nonAscii, ms: round(fifty.ms) },
           },
           null,
@@ -107,6 +124,7 @@ describe('artifact_search at scale (P4-B4 M2)', () => {
         ),
       );
       expect(Math.max(...withCatchUp)).toBeLessThan(1_000);
+      expect(Math.max(...large)).toBeLessThan(1_000);
     } finally {
       world.close();
     }

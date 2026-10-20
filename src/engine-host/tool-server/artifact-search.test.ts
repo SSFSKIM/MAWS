@@ -152,6 +152,8 @@ describe('artifact_search: read (acceptance 7)', () => {
     expect(hit!.read).toEqual({ tab: 'tabN', from: 'n2' });
     const read = json<{ markdown: string }>(await call('artifact_read', { artifact: hit!.id, ...hit!.read, count: 20 }));
     expect(read.markdown.split('\n\n')[0]).toContain('결론');
+    // Decision Log 17: a multi-word query opens at the first block holding every word, not the first naming the longest
+    expect((await search({ query: 'Second paragraph' })).hits[0]!.read).toEqual({ tab: expect.any(String), from: 'p2' });
     expect((await search({ query: '"Second paragraph"' })).hits[0]!.read).toEqual({ tab: expect.any(String), from: 'p2' });
   });
 

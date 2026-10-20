@@ -6,6 +6,7 @@
 // artifact-search.test.ts's.
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import { parseQuery } from '@shared/artifacts/search-query';
 import { HUMAN, openWorld, type World } from '../tool-server/artifact-world.fixture';
 import { STORE_MIGRATIONS, openStore } from './migrations';
@@ -34,6 +35,8 @@ const mirrored = (id: string) => rows().find((row) => row.artifactId === id) ?? 
 const current = (id: string) => mirrored(id)?.revision === w.store.revision(id);
 const find = (search: ArtifactSearch, query: string, limit = 10) => search.search({ terms: parseQuery(query).terms, limit });
 const foundIds = async (search: ArtifactSearch, query: string) => (await find(search, query)).hits.map((hit) => hit.id);
+// what the mirror holds now, with no catch-up
+const foundIdsIn = async (store: ArtifactStore, query: string) => (await new ArtifactSearch(store, { catchUpMs: 0 }).search({ terms: parseQuery(query).terms, limit: 10 })).hits.map((hit) => hit.id);
 
 // Timers the test runs one at a time, in the order they fall due on its own clock.
 function manualTimers(): SearchTimers & { advance(ms: number): Promise<void>; pass(ms: number): void; runNext(): Promise<boolean>; readonly pending: number } {
@@ -186,6 +189,38 @@ describe('the refresher and the sweep', () => {
     expect(mirrored(id)).toMatchObject({ title: 'Renamed' });
   });
 
+  it('leaves a document the service holds loaded to the search, and refreshes it once it unloads (Decision Log 18)', async () => {
+    // a store whose service unloads a document nobody holds after 30 ms, so the test sees the unload
+    const storage = SqliteDocumentStorage.open(join(w.userData, 'loaded', 'store.sqlite'), { log: () => {} });
+    const service = new DocumentService(storage, { kindOf: (artifactId) => storage.kindOf(artifactId), log: () => {}, idleUnloadMs: 30 });
+    const store = new ArtifactStore(service, storage, { root: join(w.userData, 'loaded'), log: () => {} });
+    try {
+      const id = (await store.create({ kind: 'dashboard', title: 'Board', initial: (doc) => doc.get('charts').insert(0, 'alpha') }, HUMAN)).id;
+      const replica = service.replica('app-holder' as AppSessionId, id); // an agent's replica holds it open
+      await replica.whenSynced();
+      const textRows = () => storage.db.prepare('SELECT artifactId FROM artifact_text_rows').all();
+      const timers = manualTimers();
+      started(timers, store);
+      await timers.advance(MIRROR_SWEEP_DELAY_MS); // the sweep reaches it: held, so skipped
+      expect(textRows()).toEqual([]);
+      await service.writeAs(id, HUMAN, (doc) => doc.get('charts').insert(5, ' beta'));
+      await turns();
+      await timers.advance(MIRROR_SETTLE_MS); // its change settles: still held, still skipped
+      expect(textRows()).toEqual([]);
+      expect(service.loaded(id)).not.toBeNull();
+      service.closeSession('app-holder' as AppSessionId);
+      for (let i = 0; i < 200 && service.loaded(id) !== null; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(service.loaded(id)).toBeNull();
+      await timers.advance(0); // the unload queued it
+      expect(textRows()).toEqual([{ artifactId: id }]);
+      expect(await foundIdsIn(store, 'beta')).toEqual([id]);
+    } finally {
+      store.close();
+      service.close();
+      storage.close();
+    }
+  });
+
   it('stops every timer and listener at close', async () => {
     await page('A', 'one');
     const timers = manualTimers();
@@ -277,6 +312,19 @@ describe('the snippet and read', () => {
     expect([...snippet!].length).toBe(1 + 80 + 2); // the ellipsis, 80 emoji (no whitespace to snap to), the term
     const spaced = `${'abcdefghi '.repeat(20)}목표`;
     expect(snippetAndRead(plain(spaced), terms('목표')).snippet!.startsWith('…abcdefghi')).toBe(true);
+  });
+
+  it('anchors inside the first section holding every term, else at the longest term’s first occurrence', () => {
+    const text = {
+      body: 'Tab\nthe plan for later\na budget line\nthe budget plan, at last',
+      sections: [[0, { tab: 't' }], [4, { tab: 't', from: 'b1' }], [23, { tab: 't', from: 'b2' }], [37, { tab: 't', from: 'b3' }]] as [number, { tab: string; from?: string }][],
+    };
+    const both = snippetAndRead(text, terms('plan budget'));
+    expect(both.read).toEqual({ tab: 't', from: 'b3' });
+    expect(both.snippet).toBe('Tab the plan for later a budget line the budget plan, at last'); // short: the whole body
+    // no section holds both: the longest term's first occurrence in the body
+    expect(snippetAndRead(text, terms('later budget')).read).toEqual({ tab: 't', from: 'b2' });
+    expect(snippetAndRead(text, terms('LATER plan')).read).toEqual({ tab: 't', from: 'b1' });
   });
 
   it('names the place of the section holding the anchor, and none for a title-only hit or an empty body', () => {

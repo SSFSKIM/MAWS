@@ -8,7 +8,7 @@ import { schemaFor } from '@artifacts/document/schema';
 import { addTab, createDocument, moveTab, tabBody } from '@artifacts/document/tabs';
 import { addThread, anchorOfMark } from '@artifacts/document/threads';
 import { newDoc, type Doc } from '@artifacts/yjs';
-import { placeAt, sectionText, type SectionedText } from './sections';
+import { MIRROR_TEXT_MAX_BYTES, placeAt, sectionText, type SectionedText } from './sections';
 import { TEXT_MAX_BYTES } from './text';
 
 const schema = schemaFor();
@@ -73,12 +73,15 @@ describe('sectionText: a document', () => {
     expect(body).toBe('로드맵\nCafé 로드맵');
   });
 
-  it('caps the body at 256 KiB of UTF-8 and keeps only the sections that start inside it', () => {
+  it('caps the body at 2 MiB of UTF-8 (not the library’s 256 KiB) and keeps only the sections that start inside it', () => {
+    expect(MIRROR_TEXT_MAX_BYTES).toBe(2 * 1024 * 1024);
     const ydoc = newDoc();
-    const big = '가'.repeat(30_000); // 90,000 bytes a block
+    const big = '가'.repeat(300_000); // 900,000 bytes a block
     createDocument(ydoc, { title: 'Big', id: 'tab1', body: doc(...[0, 1, 2, 3, 4].map((n) => para(`p${n}`, t(big)))) });
     const text = sectionText({ kind: 'document', doc: ydoc });
-    expect(new TextEncoder().encode(text.body).length).toBeLessThanOrEqual(TEXT_MAX_BYTES);
+    const bytes = new TextEncoder().encode(text.body).length;
+    expect(bytes).toBeLessThanOrEqual(MIRROR_TEXT_MAX_BYTES);
+    expect(bytes).toBeGreaterThan(MIRROR_TEXT_MAX_BYTES - 3);
     expect(text.sections.map(([, place]) => place)).toEqual([{ tab: 'tab1' }, { tab: 'tab1', from: 'p0' }, { tab: 'tab1', from: 'p1' }, { tab: 'tab1', from: 'p2' }]);
     expect(text.sections.every(([offset]) => offset < text.body.length)).toBe(true);
   });
@@ -105,6 +108,11 @@ describe('sectionText: a file model (a deck, a design, a design system)', () => 
 });
 
 describe('sectionText: the other kinds, as the library extractor reads them, with no place', () => {
+  it('keeps an html page’s text past the library’s 256 KiB', () => {
+    const long = `${'word '.repeat(TEXT_MAX_BYTES / 4)}the end`;
+    expect(sectionText({ kind: 'html', bytes: new TextEncoder().encode(`<p>${long}</p>`) }).body.endsWith('the end')).toBe(true);
+  });
+
   it('reads an html page without its markup', () => {
     const text = sectionText({ kind: 'html', bytes: new TextEncoder().encode('<h1>Launch</h1><script>x()</script><p>plan</p>') });
     expect(text).toEqual({ body: 'Launch plan', sections: [[0, null]] });

@@ -8,7 +8,8 @@
 // not the artifact's live revision (every write records one), or when its title is not the artifact's. A search first
 // brings the stale rows among the artifacts it may return up to date, newest first, within SEARCH_CATCHUP_MS, and names
 // what that budget left in its hint; beside it, a refresher re-extracts a changed artifact once its changes settle
-// (MIRROR_SETTLE_MS, one artifact per macrotask) and a sweep after the store opens (MIRROR_SWEEP_DELAY_MS) fills the rows
+// (MIRROR_SETTLE_MS, one artifact per macrotask; one the document service holds loaded waits for its unload, so no
+// extraction runs on the loop beside the owner's typing, Decision Log 18) and a sweep after the store opens (MIRROR_SWEEP_DELAY_MS) fills the rows
 // the migration left empty and drops those of deleted artifacts. The query joins the live `artifacts`, so a deleted
 // artifact is never returned meanwhile. So a write committed in the host is found by the next search.
 //
@@ -113,10 +114,11 @@ export class ArtifactSearch {
   private readonly sweepDelayMs: number;
   private readonly settling = new Map<string, unknown>(); // artifact → its settle timer
   private readonly queue = new Set<string>(); // the refresher's and the sweep's artifacts, in order
+  private readonly untilUnloaded = new Set<string>(); // queued while the document service held them loaded
   private pumpTimer: unknown = null;
   private sweepTimer: unknown = null;
   private stepping = false;
-  private off: (() => void) | null = null;
+  private offs: (() => void)[] = [];
   private closed = false;
 
   constructor(
@@ -135,19 +137,27 @@ export class ArtifactSearch {
     return !this.store.storage.readOnly && !this.closed;
   }
 
-  // The refresher on the store's change feed and the sweep after MIRROR_SWEEP_DELAY_MS; neither on a read-only store.
+  // The refresher on the store's change feed (and the document service's unloads) and the sweep after
+  // MIRROR_SWEEP_DELAY_MS; neither on a read-only store.
   start(): void {
-    if (this.off || !this.writable) return;
-    this.off = this.store.onChange(({ artifactId, change }) => {
-      if (change !== 'linked') this.settle(artifactId);
-    });
+    if (this.offs.length > 0 || !this.writable) return;
+    this.offs = [
+      this.store.onChange(({ artifactId, change }) => {
+        if (change !== 'linked') this.settle(artifactId);
+      }),
+      this.store.service.onUnload((artifactId) => {
+        if (this.untilUnloaded.delete(artifactId)) this.enqueue([artifactId]);
+      }),
+    ];
     this.sweepTimer = this.timers.setTimeout(() => this.sweep(), this.sweepDelayMs);
   }
 
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.off?.();
+    for (const off of this.offs) off();
+    this.offs = [];
+    this.untilUnloaded.clear();
     for (const timer of this.settling.values()) this.timers.clearTimeout(timer);
     this.settling.clear();
     this.queue.clear();
@@ -335,7 +345,7 @@ export class ArtifactSearch {
     this.pump();
   }
 
-  // One artifact per macrotask, the next once its row's batch has committed.
+  // One artifact per macrotask, the next once its row's batch has committed; one held loaded is set aside until it unloads.
   private pump(): void {
     if (!this.writable || this.stepping || this.pumpTimer !== null || this.queue.size === 0) return;
     this.pumpTimer = this.timers.setTimeout(() => {
@@ -348,6 +358,11 @@ export class ArtifactSearch {
     const artifactId = this.queue.values().next().value;
     if (artifactId === undefined || !this.writable) return;
     this.queue.delete(artifactId);
+    if (this.store.service.loaded(artifactId)) {
+      // Decision Log 18: held open (an editor, an agent's replica), so it waits for its unload; a search catches it up
+      this.untilUnloaded.add(artifactId);
+      return this.pump();
+    }
     this.stepping = true;
     try {
       await this.refresh(artifactId);
@@ -400,13 +415,55 @@ function forward(text: string, index: number, count: number): number {
   return index;
 }
 
-// The first occurrence in the body, Unicode case-insensitively, of the longest term it holds.
-export function anchorOf(body: string, terms: readonly QueryTerm[]): { index: number; end: number } | null {
-  for (const term of [...terms].sort((a, b) => codePoints(b.text) - codePoints(a.text))) {
-    const found = new RegExp(escaped(term.text), 'iu').exec(body);
-    if (found) return { index: found.index, end: found.index + found[0].length };
+// The anchor (Decision Log 17): the longest term's first occurrence, Unicode case-insensitively, inside the first section
+// that holds every term, so a hit opens where the query's words are together; when no section holds them all, the
+// first occurrence in the body of the longest term the body holds.
+export function anchorOf(text: SectionedText, terms: readonly QueryTerm[]): { index: number; end: number } | null {
+  const longestFirst = [...terms].sort((a, b) => codePoints(b.text) - codePoints(a.text)).map((term) => new RegExp(escaped(term.text), 'giu'));
+  const at = (pattern: RegExp, from: number): { index: number; end: number } | null => {
+    pattern.lastIndex = from;
+    const found = pattern.exec(text.body);
+    return found ? { index: found.index, end: found.index + found[0].length } : null;
+  };
+  const together = sectionHoldingAll(text, longestFirst, at);
+  if (together !== null) return at(longestFirst[0]!, text.sections[together]![0]);
+  for (const pattern of longestFirst) {
+    const found = at(pattern, 0);
+    if (found) return found;
   }
   return null;
+}
+
+// The first section in which every pattern occurs, or null: each pattern's next occurrence from the candidate section's
+// start, the candidate moving to the furthest section one of them lands in, until all land in it (a walk that visits each
+// section at most once per pattern, not a scan of every occurrence).
+function sectionHoldingAll(text: SectionedText, patterns: RegExp[], at: (pattern: RegExp, from: number) => { index: number } | null): number | null {
+  const { sections } = text;
+  if (sections.length === 0) return null;
+  const sectionOf = (offset: number): number => {
+    let low = 0;
+    let high = sections.length - 1;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (sections[mid]![0] <= offset) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  };
+  for (let candidate = 0; ; ) {
+    let moved = false;
+    for (const pattern of patterns) {
+      const found = at(pattern, sections[candidate]![0]);
+      if (!found) return null;
+      const section = sectionOf(found.index);
+      if (section > candidate) {
+        candidate = section;
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) return candidate;
+  }
 }
 
 // `body.slice(start, end)` cleaned (whitespace collapsed, control characters removed), with "…" at an end that cuts.
@@ -438,7 +495,7 @@ function excerpt(body: string, start: number, end: number): string {
 // the body's start and it has no `read`; an empty body has neither.
 export function snippetAndRead(text: SectionedText, terms: readonly QueryTerm[]): { snippet?: string; read?: ArtifactSearchRead } {
   if (text.body === '') return {};
-  const anchor = anchorOf(text.body, terms);
+  const anchor = anchorOf(text, terms);
   if (!anchor) return { snippet: excerpt(text.body, 0, forward(text.body, 0, SNIPPET_LEAD)) };
   const snippet = excerpt(text.body, back(text.body, anchor.index, SNIPPET_BEFORE), forward(text.body, anchor.end, SNIPPET_AFTER));
   const place = placeAt(text, anchor.index);
