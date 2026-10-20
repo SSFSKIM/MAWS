@@ -1,0 +1,79 @@
+engine /Users/new/.local/share/claude/versions/2.1.304 (2.1.304); model haiku; scratch home /private/tmp/maws-p4b4-config-GkkN3s; userData /private/tmp/maws-p4b4-live-LVd5Cp
+A-15 before: 174 keys
+case 1's prompt: "지난주 회의에서 정한 하반기 로드맵 말이야, 검색 기능 출시일이 언제로 정해졌고 담당자가 누구였지? 그 내용이 적힌 곳을 내가 바로 열어볼 수 있게 해줘. 도구는 에이전트를 시키지 말고 직접 호출해. 링크는 그 내용이 적힌 문단으로 바로 열리게 걸어줘."
+case 1: target 8d49e957-f538-4180-9791-01c933322ce3 "하반기 제품 로드맵 회의록", the answer in block Zp9dH4sE (the third of four); its links before []
+p4-b4-artifact-search: session live-89e355cf; init tools hold ToolSearch true, mcp__maws__artifact_search true
+p4-b4-artifact-search: tool uses [{"name":"ToolSearch","input":{"query":"select:mcp__maws__artifact_search,mcp__maws__artifact_read","max_results":2},"parent":null},{"name":"mcp__maws__artifact_search","input":{"query":"하반기 로드맵","limit":10},"parent":null},{"name":"mcp__maws__artifact_search","input":{"query":"roadmap","limit":10},"parent":null},{"name":"mcp__maws__artifact_read","input":{"artifact":"8d49e957-f538-4180-9791-01c933322ce3","tab":"dryinylp","from":"Rk3vQ8aT","count":3},"parent":null}]
+p4-b4-artifact-search: tool time (X34): 3 store calls, median 18 ms, max 20 ms (bound 1,000 ms, median 500 ms); 0 render calls, max 0 ms (bound 3,500 ms)
+p4-b4-artifact-search: answer "지난주 회의에서 정한 검색 기능 출시일은 **12월 9일**이고, 담당자는 **박서연 매니저**입니다. 내용은 「하반기 제품 로드맵 회의록」 문서에 있습니다.\n\n[검색 기능 출시일과 담당자가 적힌 문단](maws-artifact:8d49e957-f538-4180-9791-01c933322ce3#block=Zp9dH4sE)\n\n이 링크는 해당 문단으로 바로 열립니다. 같은 문서의 첫 문단은 회의를 연 사실을, 둘째 문단은 모바일 앱 개편이 11월 첫째 주로 미뤄졌다는 내용을 담고 있습니다.\n\n참고로 「상반기 로드맵 초안」에도 검색 기능이 언급되지만, 거기에는 \"확정된 내용은 없고 하반기 회의에서 다시 논의하기로 했다\"고만 적혀 있어 확정 근거가 아닙니다."
+journal: /private/tmp/maws-p4b4-live-LVd5Cp/engine-host/journal/live-89e355cf/h4776u7d.jsonl (total_cost_usd 0.0028)
+exported: /private/tmp/maws-p4b4-live-LVd5Cp/exports/p4-b4-artifact-search.jsonl (from /private/tmp/maws-p4b4-live-LVd5Cp/engine-host/journal/live-89e355cf/h4776u7d.jsonl)
+exported: /private/tmp/maws-p4b4-live-LVd5Cp/exports/p4-b4-artifact-search-transcript.jsonl (transcript /private/tmp/maws-p4b4-config-GkkN3s/projects/-private-tmp-maws-p4b4-repo-s43Sl3/2e34872a-2028-4ba3-aec6-d31ff453e8af.jsonl)
+init plugins: [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}]
+A-15 after: 174 keys (identical)
+p4-b4-artifact-search: spend total_cost_usd 0.0028 (maxBudgetUsd 0.22)
+case 1: artifact_search {"query":"하반기 로드맵","limit":10} answered {
+  "status": "found",
+  "hits": [
+    {
+      "id": "8d49e957-f538-4180-9791-01c933322ce3",
+      "kind": "document",
+      "title": "하반기 제품 로드맵 회의록",
+      "revision": 1,
+      "updatedAt": "2026-10-20T05:55:05.686Z",
+      "lastEditor": {
+        "by": "user",
+        "at": "2026-10-20T05:55:05.634Z"
+      },
+      "snippet": "지난주 목요일 회의에서 하반기 제품 로드맵을 팀장들과 함께 검토했다. 모바일 앱 개편은 디자인 시안이 늦어져 11월 첫째 주로 미루기로 했다. 검색 기능 출시일은 12월 9일로 확정했고, 출시 담당자는 박서연 매니저다. 다음 회의는 다음 달 둘째 주 화요일 오후 2시에 연다.",
+      "read": {
+        "tab": "dryinylp",
+        "from": "Rk3vQ8aT"
+      }
+    },
+    {
+      "id": "ad027fc3-7022-4bfd-acce-8c5f10404b29",
+      "kind": "document",
+      "title": "상반기 로드맵 초안",
+      "revision": 2,
+      "updatedAt": "2026-10-20T05:55:05.696Z",
+      "lastEditor": {
+        "by": "another session",
+        "appSessionId": "app-p4b4-elsewhere",
+        "at": "2026-10-20T05:55:05.693Z"
+      },
+      "snippet": "상반기 로드맵 초안이다. 확정된 내용은 없다. 검색 기능은 하반기 회의에서 다시 논의하기로 했다.",
+      "read": {
+        "tab": "tf9cuog8",
+        "from": "Ma3Na4Oa"
+      }
+    }
+  ],
+  "more": false
+}
+case 1: artifact_search {"query":"roadmap","limit":10} answered {
+  "status": "found",
+  "hits": [],
+  "more": false,
+  "hint": "No match; try fewer or other words, or the other language."
+}
+case 1: maws calls [{"name":"artifact_search","args":{"query":"하반기 로드맵","limit":10}},{"name":"artifact_search","args":{"query":"roadmap","limit":10}},{"name":"artifact_read","args":{"artifact":"8d49e957-f538-4180-9791-01c933322ce3","tab":"dryinylp","from":"Rk3vQ8aT","count":3}}]
+case 1: target links after [{"artifactId":"8d49e957-f538-4180-9791-01c933322ce3","appSessionId":"live-89e355cf","role":"viewed","lastAt":1792475714019}]
+case 1: links in the answer [{"text":"검색 기능 출시일과 담당자가 적힌 문단","href":"maws-artifact:8d49e957-f538-4180-9791-01c933322ce3#block=Zp9dH4sE","artifactId":"8d49e957-f538-4180-9791-01c933322ce3","at":{"block":"Zp9dH4sE"}}]
+case 1: verdict: searched true; linked at the answer's block true (linked blocks ["Zp9dH4sE"]); the date true; the owner true
+case 2: artifact 254d89d9-d66b-4bd0-9502-7f0aaa0708c9 "Q3 launch checklist"
+p4-b4-link-form: session live-a2a5b19c; init tools hold ToolSearch true, mcp__maws__artifact_search true
+p4-b4-link-form: tool uses []
+p4-b4-link-form: tool time (X34): 0 store calls, median 0 ms, max 0 ms (bound 1,000 ms, median 500 ms); 0 render calls, max 0 ms (bound 3,500 ms)
+p4-b4-link-form: answer "Open it at [Q3 launch checklist](maws-artifact:254d89d9-d66b-4bd0-9502-7f0aaa0708c9)."
+journal: /private/tmp/maws-p4b4-live-LVd5Cp/engine-host/journal/live-a2a5b19c/2ad3rdxk.jsonl (total_cost_usd 0.0011)
+exported: /private/tmp/maws-p4b4-live-LVd5Cp/exports/p4-b4-link-form.jsonl (from /private/tmp/maws-p4b4-live-LVd5Cp/engine-host/journal/live-a2a5b19c/2ad3rdxk.jsonl)
+exported: /private/tmp/maws-p4b4-live-LVd5Cp/exports/p4-b4-link-form-transcript.jsonl (transcript /private/tmp/maws-p4b4-config-GkkN3s/projects/-private-tmp-maws-p4b4-repo-gIjNIZ/0e1e823e-0e2b-4693-965e-7d6c9986c104.jsonl)
+init plugins: [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}]
+A-15 after: 174 keys (identical)
+p4-b4-link-form: spend total_cost_usd 0.0011 (maxBudgetUsd 0.08)
+case 2: ToolSearch calls 0 (none: no deferred maws tool was loaded); maws calls 0
+case 2: links in the answer [{"text":"Q3 launch checklist","href":"maws-artifact:254d89d9-d66b-4bd0-9502-7f0aaa0708c9","artifactId":"254d89d9-d66b-4bd0-9502-7f0aaa0708c9"}]
+case 2: verdict: no maws call true; no ToolSearch true; the link form true
+A-15 after the run: 174 keys
+vitest: both cases passed (the diagnostic variant MAWS_P4B4_POINTED=1: the prompt names the place as the paragraph holding the answer). run 3 spend: 0.0028 + 0.0011 = 0.0039 USD; the branch's live spend over runs 1 to 3: 0.0121 USD
