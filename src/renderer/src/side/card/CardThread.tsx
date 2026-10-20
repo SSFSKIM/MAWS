@@ -179,15 +179,17 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
   const { target } = card;
   return useMemo(
     () => ({
-      openArtifact(appSessionId, id, at) {
+      openArtifact(appSessionId, id, at, location) {
         const show = showVersion.current;
-        // the row's id is the artifact's, and the version it asks for (by revision, else by number, else the latest) is
-        // shown in this card's viewer
+        // the row's id is the artifact's, and the version it asks for (by revision, else by number, else the latest; P4-B4:
+        // a link's place, by the version id it names) is shown in this card's viewer
         if (target?.kind === 'artifact-page' && show !== undefined && id === target.artifactId) {
-          show(at ?? 'latest');
+          if (location) show(at ?? 'latest', location);
+          else show(at ?? 'latest');
           return;
         }
-        registeredActions().openArtifact(appSessionId, id, at);
+        if (location) registeredActions().openArtifact(appSessionId, id, at, location); // P4-B4: a link's place
+        else registeredActions().openArtifact(appSessionId, id, at);
       },
       userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
       editAndResubmit: (row) => editRowOf(child, row, 'edit'),

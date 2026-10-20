@@ -9,6 +9,7 @@
 import { mimeOf } from '@shared/files/mime';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import { x12VersionLabel } from '@shared/maws/deliverable';
+import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { SessionRecord } from '@shared/graph/session';
 
@@ -81,6 +82,11 @@ export function selectionOf(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kin
 export function selectionOfVersionId(ordered: readonly Pick<ArtifactVersion, 'id' | 'seq'>[], versionId: number): VersionSelection {
   const version = ordered.find((candidate) => candidate.id === versionId);
   return version ? { revision: version.seq } : 'latest';
+}
+
+// P4-B4: what an open asks for as a selection: the version a place names by its id when it names one, else `at`.
+export function selectionOfOpen(ordered: readonly Pick<ArtifactVersion, 'id' | 'seq' | 'kind' | 'label'>[], at: ArtifactOpenAt, location?: ArtifactLocation): VersionSelection {
+  return location?.version !== undefined ? selectionOfVersionId(ordered, location.version) : selectionOf(ordered, at);
 }
 
 // An absolute path with no `.` or `..` segment, no empty segment and no trailing separator: what the files service

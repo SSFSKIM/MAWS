@@ -1078,6 +1078,8 @@ describe('a control drawn before the store turned read-only', () => {
 // bound; a tab alone is selected; a version opens the history rail previewing it; a place the document does not have
 // opens it as a plain open does. Each reveal is taken once (`onRevealed`).
 describe('a reveal asked from outside', () => {
+  const restores: Array<() => void> = [];
+  afterEach(() => restores.splice(0).forEach((restore) => restore()));
   async function mountRevealing(first: DocumentReveal | null) {
     world = new World(doc(para('a1', 'First tab text')));
     world.host.write((d) => addTab(d, { title: 'Appendix', id: 't2', body: schemaFor().nodeFromJSON(doc(para('b1', 'Appendix opening'), para('b2', 'The answer is here'))) }));
@@ -1088,12 +1090,17 @@ describe('a reveal asked from outside', () => {
     await whenSynced(handle);
     let current: Editor | null = null;
     const revealed = vi.fn();
-    const scrolled: number[] = []; // the selection's head at each transaction that scrolled it into view
+    // the elements scrolled into view, with what held the keyboard then (the owner's field: a reveal never takes it)
+    const scrolled: Array<{ text: string; focus: Element | null }> = [];
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      scrolled.push({ text: this.textContent ?? '', focus: document.activeElement });
+    });
+    restores.push(() => scroll.mockRestore());
+    const field = document.body.appendChild(document.createElement('textarea'));
+    restores.push(() => field.remove());
+    field.focus();
     const onEditor = (editor: Editor | null) => {
       current = editor;
-      editor?.on('transaction', ({ transaction }) => {
-        if (transaction.scrolledIntoView) scrolled.push(transaction.selection.head);
-      });
     };
     const view = (reveal: DocumentReveal | null) => <DocumentEditor artifactId="doc1" handle={handle} host={owner} history={history!} reveal={reveal} onRevealed={revealed} onEditor={onEditor} />;
     const rendered = render(view(first));
@@ -1112,7 +1119,9 @@ describe('a reveal asked from outside', () => {
     const { editor, revealed, scrolled } = await mountRevealing({ serial: 1, location: { block: 'b2' } });
     await until(() => editor()?.getText().includes('The answer is here') === true && editor()!.state.selection.head === startOf(editor()!, 'b2'), 'the block revealed');
     expect(selectedTab()).toContain('Appendix');
-    expect(scrolled).toContain(startOf(editor()!, 'b2'));
+    const field = document.querySelector('textarea');
+    expect(scrolled, 'the block’s own element, the owner’s field keeping the keyboard').toContainEqual({ text: 'The answer is here', focus: field });
+    expect(document.activeElement).toBe(field);
     expect(revealed).toHaveBeenCalledWith(1);
   });
 
