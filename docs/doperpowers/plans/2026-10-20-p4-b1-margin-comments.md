@@ -112,7 +112,10 @@ Each measured value replaces its constant in `src/artifacts/comments/margin-layo
 
 ## Surprises & Discoveries
 
-- (recorded as they arise)
+1. **Tiptap's `keyboardShortcut` command captures the handler's transaction** and replays its steps alone, so a chord that sets a selection and a meta cannot be driven through it in a test; the activation suite dispatches real keydown events on the view instead. Tiptap's parser names the control key `Ctrl`, not `Control`.
+2. **happy-dom defines no `clientWidth`** and lays nothing out: the margin suite runs over a geometry stub that defines the getter on both prototypes and answers every rect from a scene (`margin-test-support.ts`).
+3. **The MacBook's display cannot reach the groups' 1600 × 900 window** (`launchMaws` waits for `innerWidth === 1600` and times out), so `e2e:document` and `e2e:document-app` run only on the mini, as the gate-offload rules already place them; the local run on this machine is not evidence.
+4. **A card host that is not mounted closes its card**: with the overlay rendered only in the hosting thread's entry, nothing drew the compose card before a thread was named; the margin keeps a slot for the surface's host while no card is up (M4's report found the same gap from its side).
 
 ## Decision Log
 
@@ -128,7 +131,9 @@ Each measured value replaces its constant in `src/artifacts/comments/margin-layo
 
 ## Review record
 
-- (per milestone)
+- **M1** (reviewer-medium on opus; the sol rung was at its usage limit): correct. One P3: `CommentCard.tsx`'s `relative` class and the thread-phase card's fixed height under the `margin` style, routed to M4, which took both.
+- **M2** (reviewer-medium on opus): incorrect on two binding X36 points, both real and fixed by the resumed executor: R on an inactive compacted card did nothing (no reply field mounted; R now activates as a click does, then focuses the field); the panel's and the margin's reply drafts lived in each host's own state and died with it (the Z5 round trip lost a typed reply), so the per-thread drafts are one map held by `DocumentEditor` and passed to both hosts. Everything else held: the ledger's prop names and forms, the keys' guards, Escape's draft-keeping exit, Z4's filters, K1 and K2, L275, the tab dot's cost.
+- **M3, M4**: (pending)
 
 ## Outcomes & Retrospective
 
