@@ -34,7 +34,7 @@ export function splitBounds(width: number, canFloat: SplitSessions): { min: numb
 }
 
 // The left pane's rendered width for a stored ratio: clamped to the floors at every width, so a window resize only
-// clamps and never floats or docks (VS Code #332314's rule).
+// clamps and never floats or docks (the rule of VS Code issue 332314).
 export function splitLeft(width: number, ratio: number, canFloat: SplitSessions): number {
   const { min, max } = splitBounds(width, canFloat);
   return Math.round(clamp(ratio * width, min, max));

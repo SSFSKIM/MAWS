@@ -588,6 +588,22 @@ describe('the split’s float', () => {
     expect(floatingPane(cur(activateTab(inA, 'artifact:doc-1')))).toBe(1);
   });
 
+  // The review's repro: S's session tab carried into A's pane, where it is active, would otherwise keep the float and
+  // hide the pane the person widened. A float belongs to the pane that collapsed; a change of pane docks it.
+  it('S’s session tab moved into A’s pane docks the split rather than floating A’s pane', () => {
+    const m = floated();
+    expect(cur(m).focusedPane).toBe(1);
+    const viaSplit = splitWithActive(m); // ⌘\ with S's pane focused
+    expect(ids(viaSplit)).toEqual([['artifact:doc-1', 'session:d'], ['session:e']]);
+    expect('floating' in cur(viaSplit)).toBe(false);
+    expect(floatingPane(cur(viaSplit))).toBeNull();
+    const viaOpen = openSession(m, 'd' as AppSessionId, { split: true }); // "Open in split" on the floating session
+    expect(ids(viaOpen)).toEqual([['artifact:doc-1', 'session:d'], ['session:e']]);
+    expect('floating' in cur(viaOpen)).toBe(false);
+    const viaMove = moveTab(m, 'session:d', 0, 1); // a drag between the strips
+    expect('floating' in cur(viaMove)).toBe(false);
+  });
+
   it('S’s session removed docks it the same way', () => {
     expect('floating' in cur(dropSession(floated(), 'd' as AppSessionId))).toBe(false);
   });

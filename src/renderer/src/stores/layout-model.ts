@@ -61,13 +61,22 @@ function onSet(main: LayoutMain, key: TabSetKey, fn: (view: View) => View): Layo
   const before: View = { ...(main.sets[key] ?? EMPTY_TAB_SET), closedTabs: main.closedTabs };
   const after = fn(before);
   if (after === before) return main;
-  return tidy({ ...main, sets: { ...main.sets, [key]: asSet(after) }, closedTabs: after.closedTabs });
+  return tidy({ ...main, sets: { ...main.sets, [key]: keptFloat(before, asSet(after)) }, closedTabs: after.closedTabs });
+}
+
+// P4-B3 (X37): a float belongs to the pane that collapsed. A transition that leaves its session tab active in the other
+// pane (⌘\, "Open in split", a drag between the strips) docks the split rather than floating the pane beside it.
+function keptFloat(before: TabSet, after: TabSet): TabSet {
+  const was = floatingPane(before);
+  const now = floatingPane(after);
+  return was === null || now === null || was === now ? after : asSet({ ...after, floating: undefined });
 }
 
 // P4-B3 (X37; its Decision Log 6): the float is normalised rather than policed. Every set written back keeps `floating`
 // only while it names the active session tab of one of two panes, so every transition docks a float its change ended:
 // A's last tab closing (one pane, S full width), S's tab closing or changing (docked at the ratio, or A alone), the
-// session removed. A float in a set the strip does not show stays stored with it.
+// session removed; `keptFloat` adds S's tab leaving its pane. A float in a set the strip does not show stays stored
+// with it.
 const asSet = ({ panes, focusedPane, splitRatio, floating }: TabSet): TabSet => {
   const set: TabSet = { panes, focusedPane, splitRatio };
   return floating && floatingPane({ ...set, floating }) !== null ? { ...set, floating: { sessionTabId: floating.sessionTabId } } : set;

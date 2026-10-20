@@ -530,6 +530,55 @@ describe('the split’s float: the divider', () => {
     expect(within(main()).getByRole('region', { name: 'Diagnostics' })).toBe(panelA); // A never remounted
   });
 
+  it('mirrored: a session on the right arms past W − 160, collapses to 0 px on the right, and floats leaving A in place', () => {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openTab({ kind: 'diagnostics' });
+      useLayout.getState().openSession(idOf('Charter + research'), { split: true });
+    });
+    resize(region(), { width: W, height: 800 });
+    const body = (pane: 0 | 1) => main().querySelector(`[data-pane="${pane}"] [role="tabpanel"]`)?.firstElementChild;
+    const bodyA = body(0)!;
+    const tabS = sessionTab()!;
+    down(750);
+    move(1300);
+    expect(columns()).toBe('1180px 1px minmax(0, 1fr)'); // S held at 320 on the right
+    move(1341);
+    expect(columns()).toBe('minmax(0, 1fr) 1px 0px'); // armed: A spans, S's column at 0 on the right
+    expect(within(main()).queryByRole('tab', { name: SESSION })).toBeNull();
+    expect(sessionTab()).toBe(tabS);
+    move(1339);
+    expect(columns()).toBe('1180px 1px minmax(0, 1fr)'); // disarmed
+    move(1400);
+    up(1400);
+    expect(set().floating).toEqual({ sessionTabId: `session:${idOf('Charter + research')}` });
+    expect(set().splitRatio).toBe(0.5);
+    expect(columns()).toBe('minmax(0, 1fr)');
+    expect(sessionTab()).toBeNull();
+    expect(body(0)).toBe(bodyA); // A never remounted
+  });
+
+  it('with two sessions the squeezed one floats and the other keeps its slot without remounting', () => {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+      useLayout.getState().openSession(idOf('Fix sidebar drag'), { split: true });
+    });
+    resize(region(), { width: W, height: 800 });
+    const body = (pane: 0 | 1) => main().querySelector(`[data-pane="${pane}"] [role="tabpanel"]`)?.firstElementChild;
+    const bodyRight = body(1)!;
+    const tabRight = within(main()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' });
+    down(750);
+    move(100);
+    expect(columns()).toBe('0px 1px minmax(0, 1fr)'); // the left session is squeezed: it arms
+    expect(body(1)).toBe(bodyRight);
+    up(100);
+    expect(set().floating).toEqual({ sessionTabId: `session:${idOf('Charter + research')}` });
+    expect(sessionTab()).toBeNull();
+    expect(body(1)).toBe(bodyRight); // the right session's pane kept its slot
+    expect(within(main()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' })).toBe(tabRight);
+  });
+
   it('a release that is not armed persists the ratio; A clamps at its floor and never collapses', () => {
     sessionBesideDiagnostics();
     down(750);
