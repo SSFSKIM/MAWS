@@ -142,9 +142,12 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await expect(entry(t1)).toHaveAttribute('data-active', '');
     const t2Before = await entryTop(t2);
     const h1Before = (await entry(t1).boundingBox())!.height;
-    // the owner types at the end of the first paragraph (above both passages) while the reply lands
-    await text.locator('p').first().click();
+    // the owner types at the end of the first paragraph (above both passages) while the reply lands. P4-B1: the caret
+    // gets there by the keyboard (a click on uncommented text would clear the active thread, D5; a caret leaving a
+    // passage by the keyboard keeps it): up out of the passage into the first paragraph, then to its end
+    await page.keyboard.press('ArrowUp');
     await page.keyboard.press('End');
+    await expect(entry(t1), 'the caret leaving by the keyboard keeps the thread').toHaveAttribute('data-active', '');
     const typing = (async () => {
       for (const ch of ' More words typed here.') {
         await page.keyboard.type(ch);
