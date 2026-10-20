@@ -20,7 +20,7 @@
 // slower there (de71da97a 17.0 on 10-19, 22.4 after a reboot on 10-20; the cause survived restarts, Chrome, System
 // Settings and Docker quit, and renderer accessibility is off), so `1 p95` ≤ 28 ms (clean runs on 10-20 read 20.3 to
 // 26.6) and `2 p95` ≤ 58 ms (Event Timing's 8 ms grain puts it at 48 or 56).
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { prng, seedDocument, type SeedStats } from './support/document-seed';
@@ -239,16 +239,18 @@ const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} $
 // the margin's re-layout on the layer's growth is in the measurement (`streamWhile`: started with the typing, stopped
 // when it ends, its answer recorded in the row's note). Without `stream` (A2 not on this tree) the row is recorded
 // without the layer and says so; the acceptance's tree carries A2 (the child's Decision Log 6). Rows:
-// `1m p95` ≤ 20 ms (the mini's calibration), `1m max` ≤ 50 ms, `1m relayouts` (the margin's layout passes per frame
+// `1m p95` ≤ the control's `1h p95` in the same job + 3 ms (P4-B1's follow-up, below; it was ≤ 20 ms, the mini's
+// calibration of row 1 before the margin existed), `1m max` ≤ 50 ms, `1m relayouts` (the margin's layout passes per frame
 // callback the page ran, `data-relayouts` over the page's `data-frames`: the agents' edits and the layer's growth run
 // frames of their own, so a ratio per keystroke would count them against the owner; the scripted scroll afterwards adds
 // none, R4). P4-B1's follow-up wave (docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md, "Follow-up"): an edit
 // owes the margin a pass, run once the edits pause or at the 1 s ceiling (margin-settle.ts), so under the step's
 // constant writes the row reads about one pass a second against every frame the edits ran, where B1 read one pass a
 // frame; and `1m stale`, the longest any change waited for the pass that read it (the margin's `data-stale-max`, cleared
-// before the step), the ceiling and the main thread's queue. The follow-up wave also adds the control: the same workload
-// (1920 × 1080, the two agents, the streaming layer) with the margin hidden (View › Hide, no thread activated), rows
-// `1h p95`, `1h max` and `1h ack p95`, so the margin's own cost is `1m` minus `1h` in one job; `1m` against the base
+// before the step), the ceiling and the main thread's queue. The follow-up wave also adds the control, run first: the
+// same workload (1920 × 1080, the two agents, the streaming layer) with the margin hidden (View › Hide, no thread
+// activated), rows `1h p95`, `1h max` and `1h ack p95`, recorded, so the margin's own cost is `1m` minus `1h` in one job
+// and `1m p95` is bounded by it (MARGIN_OVER_CONTROL_MS); `1m` against the base
 // gate's row 1 also carries the window (row 1 runs at the default 1280 × 820) and the layer (row 1 has none), which the
 // wave's diagnostic placed at about 2 and 2.5 to 3 ms of p95 on the mini (the execution document's follow-up section).
 // Results in test-results/document-scale-margin.json.
@@ -260,6 +262,12 @@ const STALE_LIMIT_MS = 1_200;
 // P4-B1's follow-up: about one pass a second over the step's frame callbacks; set from the mini's reading (0.074: 40
 // passes over 540 frame callbacks in 41.6 s, run 39393866900), with room for fewer frames under load
 const RELAYOUTS_PER_FRAME = 0.1;
+// P4-B1's follow-up (P4 Decision Logs 36 and 38: `1m p95`'s bound is the follow-up wave's): the margin open may cost at
+// most this much p95 over the control (the same workload, the margin hidden) run just before it in the same job, in
+// place of the absolute 20 ms calibrated before the margin existed. Three milliseconds is the mini's spread between
+// identical back-to-back runs of this workload (25.5 and 27.8, run 39398316541) and the A/B's "within about 3 ms"; the
+// diagnostic read the margin at +0.6 and +2.9 over its one control
+const MARGIN_OVER_CONTROL_MS = 3;
 const STREAM_SECTION = TYPING_SECTION + 2; // kept clear of the agents, two sections under the caret: on screen with it
 const STREAM_TICK_MS = 120; // P4-B1: the layer's pace, a piece every 120 ms and the seam's round trip (the typing is about 36 s)
 const STREAM_ID = 'toolu_perf_stream_margin';
@@ -291,12 +299,21 @@ async function streamWhile(seam: PerfSeam, id: string, block: string, running: (
   return { on: true, pieces, frames, spanned: !running() };
 }
 
-test('the typing workload with the margin open: keystroke → frame p95 with about 53 cards beside the page and a streaming layer', () => marginWorkload(false));
-// P4-B1's follow-up: the control, the same workload with the margin hidden (rows `1h`), after the open one in the job
+// P4-B1's follow-up: the control first, the same workload with the margin hidden (rows `1h`, recorded), then the margin
+// open, whose `1m p95` is bounded by the control's p95 in this job plus MARGIN_OVER_CONTROL_MS
 test('the typing workload with the margin hidden (the control for 1m): keystroke → frame p95, the same window, agents and layer', () => marginWorkload(true));
+test('the typing workload with the margin open: keystroke → frame p95 with about 53 cards beside the page and a streaming layer', () => marginWorkload(false));
+
+/** P4-B1's follow-up: the control's `1h p95` as this job's results file holds it, or null when the control has not run. */
+function controlP95(): number | null {
+  if (!existsSync(MARGIN_RESULTS)) return null;
+  const results = JSON.parse(readFileSync(MARGIN_RESULTS, 'utf8')) as { rows?: Array<{ row: string; value: number }> };
+  const row = results.rows?.find((r) => r.row === '1h p95');
+  return row && Number.isFinite(row.value) ? row.value : null;
+}
 
 async function marginWorkload(hidden: boolean): Promise<void> {
-  if (!hidden) rmSync(MARGIN_RESULTS, { force: true });
+  if (hidden) rmSync(MARGIN_RESULTS, { force: true });
   const R = hidden ? '1h' : '1m'; // P4-B1's follow-up: the rows' prefix
   const { large } = seedsOnce();
   const { page, app, seam } = await start();
@@ -393,14 +410,18 @@ async function marginWorkload(hidden: boolean): Promise<void> {
     const note = `${keys.keystrokes} keystrokes; ${hidden ? `the margin hidden (${cards} threads)` : `${cards} cards, th${near} active`}; agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}; ${layerNote}`;
     if (hidden) {
       // P4-B1's follow-up: the control's rows, against which `1m p95` reads the margin's own cost
-      rows.add('1h p95', 'keystroke → frame in A, p95, the margin hidden (the 1m workload: 1920 × 1080, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (as 1m)', note);
-      rows.add('1h max', 'keystroke → frame in A, max, the margin hidden', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
-      rows.add('1h ack p95', 'keystroke → durable ack, p95, the margin hidden', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked`);
+      // (recorded, no bound of their own: the control is the margin workload's level on this Mac in this job)
+      rows.add('1h p95', 'keystroke → frame in A, p95, the margin hidden (the 1m workload: 1920 × 1080, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', null, 'recorded: the control for 1m p95', note);
+      rows.add('1h max', 'keystroke → frame in A, max, the margin hidden', keys.frame.max, 'ms', null, 'recorded', `p50 ${keys.frame.p50}`);
+      rows.add('1h ack p95', 'keystroke → durable ack, p95, the margin hidden', counted.ack.p95, 'ms', null, 'recorded', `${counted.acked} of ${counted.keystrokes} acked`);
       rows.write({ hidden: { loads, threads: cards, layer: streamed, typing: { ...keys, ack: counted.ack }, frames, loop } });
       expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
       return;
     }
-    rows.add('1m p95', 'keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (the mini’s calibration, P3 Decision Log 109; MacBook target 16)', note);
+    // P4-B1's follow-up (P4 Decision Logs 36 and 38): the margin's own cost over the control run just before it
+    const control = controlP95();
+    const over = control === null ? null : +(keys.frame.p95 - control).toFixed(1);
+    rows.add('1m p95', 'keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer), against the control 1h p95 of this job', keys.frame.p95, 'ms', control === null ? null : control + MARGIN_OVER_CONTROL_MS, control === null ? 'the control did not run: recorded' : `p95 ≤ 1h p95 (${control}) + ${MARGIN_OVER_CONTROL_MS} ms`, `${note}; 1m − 1h ${over === null ? 'not read' : `${over >= 0 ? '+' : ''}${over} ms`}`);
     rows.add('1m max', 'keystroke → frame in A, max, the margin open', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
     // P4-B1's follow-up: the passes the edits owed, settled once they paused or at the ceiling, none in an edit's frame
     rows.add('1m relayouts', 'the margin’s layout passes per frame callback (edits owe a pass, settled when they pause or at the 1 s ceiling)', +(passes / Math.max(1, frames)).toFixed(3), 'passes', RELAYOUTS_PER_FRAME, `≤ ${RELAYOUTS_PER_FRAME} per frame (about one a second under constant writes)`, `${passes} passes over ${frames} frame callbacks (${keys.keystrokes} keys) in ${typingSeconds.toFixed(1)} s of typing, ${(passes / typingSeconds).toFixed(2)} a second; after a scripted scroll ${afterScroll - relayoutsAfter} more (R4: none)`);
@@ -408,6 +429,7 @@ async function marginWorkload(hidden: boolean): Promise<void> {
     rows.add('1m ack p95', 'keystroke → durable ack, p95, the margin open', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked`);
     rows.add('5m p99', 'host event-loop delay over the run, p99, the margin open', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.write({ margin: { loads, cards, active: `th${near}`, layer: streamed, typing: { ...keys, ack: counted.ack }, relayouts: { passes, frames, keystrokes: keys.keystrokes, typingSeconds, staleMax: staleMax === null ? null : Number(staleMax), afterScroll: afterScroll - relayoutsAfter }, loop } });
+    expect(control, 'the control (1h) ran before 1m in this job').not.toBeNull(); // P4-B1's follow-up
     expect(afterScroll - relayoutsAfter, 'a scroll runs no layout pass (R4)').toBe(0);
     expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
     const landed = (await blockText(page, id, `s${TYPING_SECTION}p2`)) ?? '';
