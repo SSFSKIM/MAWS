@@ -373,7 +373,7 @@ describe('the snippet and read', () => {
     expect(hit).toEqual({ snippet: '지난주 목요일 회의에서 하반기 제품 로드맵을 팀장들과 함께 검토했다.', read: { tab: 't', from: 'b1' } });
   });
 
-  it('cuts inside a long section with an ellipsis only where it cut, and gives a title-only hit its first section', () => {
+  it('cuts inside a long section with an ellipsis only where it cut, and gives a title-only hit its first block with text', () => {
     const long = `${'word '.repeat(40)}target ${'tail '.repeat(60)}`.trim();
     const text = blocks('Tab title', 'before block', long, 'after block');
     const { snippet } = snippetAndRead(text, terms('target'));
@@ -381,7 +381,10 @@ describe('the snippet and read', () => {
     expect(snippet).not.toMatch(/before|after/);
     const atStart = blocks('Tab', `target ${'tail '.repeat(60)}`.trim(), 'after block');
     expect(snippetAndRead(atStart, terms('target')).snippet!.startsWith('target')).toBe(true); // the section's start: no ellipsis
-    expect(snippetAndRead(text, terms('absent'))).toEqual({ snippet: 'Tab title' });
+    // the tab's title is the document's own title again: the snippet starts at the first section holding body text
+    expect(snippetAndRead(text, terms('absent'))).toEqual({ snippet: 'before block' });
+    expect(snippetAndRead({ body: 'Only a tab', sections: [[0, { tab: 't' }]] }, terms('absent'))).toEqual({ snippet: 'Only a tab' });
+    expect(snippetAndRead({ body: 'A page', sections: [[0, null]] }, terms('absent'))).toEqual({ snippet: 'A page' }); // no tab titles: unchanged
   });
 
   it('names the place of the section holding the anchor, and none for a title-only hit or an empty body', () => {

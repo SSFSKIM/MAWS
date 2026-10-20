@@ -514,12 +514,15 @@ function sectionAround({ body, sections }: SectionedText, offset: number): { sta
 
 // A hit's snippet and `read` (Decision Log 20): the snippet is the passage `read` opens, around the anchor inside its
 // section (a document's block, a file model's file; one section, the whole body, for the other kinds); a title-only
-// hit's snippet is the first section's start and it has no `read`; an empty body has neither.
+// hit's snippet is the start of the first section holding body text (past a document's tab titles) and it has no
+// `read`; an empty body has neither.
 export function snippetAndRead(text: SectionedText, terms: readonly QueryTerm[]): { snippet?: string; read?: ArtifactSearchRead } {
   if (text.body === '') return {};
   const anchor = anchorOf(text, terms);
   if (!anchor) {
-    const first = sectionAround(text, 0);
+    // a document's tab-title sections (`{tab}` with no block) repeat its title: the first section holding body text
+    const lead = text.sections.find(([, place]) => !(place && 'tab' in place && place.from === undefined))?.[0] ?? 0;
+    const first = sectionAround(text, lead);
     return { snippet: excerpt(text.body, first.start, forward(text.body, first.start, SNIPPET_LEAD), first.start, first.end) };
   }
   const section = sectionAround(text, anchor.index);
