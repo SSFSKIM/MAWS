@@ -2,6 +2,9 @@
 // docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.4, §4.10). Written in the spike's first phase; NOT RUN yet. It runs
 // in a GUI hold (findings.txt, "The real run"), by a session in the hold host's GUI session, with that host's own cua_repl.
 //
+// The order: setup, L8, L0, L1 … L7. L8 comes first because it makes no native edit: it must run while the page's undo
+// stack (Blink's) is empty, which is what the Edit menu's Undo turns on (findings.txt finding 1); it needs no input source.
+//
 // The protocol. e2e/presentations-ime-live.spec.ts (`pnpm e2e:ime-live`) brings MAWS up foreground, and for each case
 // writes /tmp/maws-ime-live/<case>.ready.json (what to press: page px, the window, the steps in words), then waits for
 // /tmp/maws-ime-live/<case>.done. For each case the session:
@@ -122,19 +125,24 @@ await wait(300);
 await press(T.empty);
 // done line: "hanja window at the box: yes|no (where)".
 
-// ---- cell: L8, shortcuts while armed, from the keyboard and from the Edit menu.
+// ---- cell: L8, shortcuts while armed, from the keyboard and from the Edit menu. For this case the spec's Edit menu is a
+// probe (the same items, each noting itself, then doing what the role item does), so it can tell whether a key reached
+// the menu: facts.menu lists what fired, in order. It is the first press of the run, so it also checks the mapping: if
+// a is not selected after press(T.a) (a screenshot shows its frame), fix k and run the case again; L8 types nothing
+// natively, so a rerun keeps the page's undo stack empty.
 var T = { a: { x: 0, y: 0 }, empty: { x: 0, y: 0 } };
 await press(T.a);
 await wait(300);
-await app.pressKey('super+c'); // the element copied (the trace: copy at textbox:a, prevented)
+await app.pressKey('super+c'); // left to the menu: its Copy fires and the stage copies the element (prevented)
 await app.pressKey('Right'); // a nudged to 201
 await wait(1200); // past the deck's 1 s typing pause: the next nudge is a second undo step
 await app.pressKey('Right'); // 202
 await wait(300);
-await app.pressKey('super+z'); // one step undone: 201 (a double undo, the menu's Undo too, would give 200)
-await app.pressKey('super+v'); // the element pasted, not its text into a
+await app.pressKey('super+z'); // the box's own, cancelled: one step undone (201), the menu's Undo not reached
+await app.pressKey('super+v'); // left to the menu: the element pasted, not its text into a
 await wait(500);
 await app.getAXState(); // find the menu bar's Edit item
-// Then with the mouse, by the AX indices of the state above: Edit › Undo (the paste undone); press(T.a); Edit › Copy;
-// Edit › Paste; Edit › Undo. Observe after each with getAXState or a screenshot.
-// result: a keeps Hello; left 201px; the pastes undone (3 elements); facts.historyUndo counts the menu's undos.
+// Then with the mouse, by the AX indices of the state above: Edit › Undo; press(T.a); Edit › Copy; Edit › Paste;
+// Edit › Undo. Observe after each with getAXState or a screenshot.
+// result: a keeps Hello; left 201px; facts.menu is copy, paste, undo, copy, paste, undo (no undo after the ⌘Z); both
+// Edit › Undo clicks do nothing to the deck (finding 1's gap: 5 elements, historyUndo 0).

@@ -159,15 +159,22 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
       root: editor.view.dom,
       armed: () => armedNow.current && !editor.isDestroyed,
       replace: () => {
-        const size = editor.state.doc.content.size;
-        // the first block kept, emptied: the key's own insertion or composition then lands in it
-        if (armedMode() === 'clear' && size > 2) editor.view.dispatch(editor.state.tr.delete(1, size - 1));
+        const { doc } = editor.state;
+        const size = doc.content.size;
+        // the first block kept, emptied: the key's own insertion or composition then lands in it, with the marks the
+        // whole text carried (bold over all of it stays bold), as a key typed over a selection keeps them
+        if (armedMode() === 'clear' && size > 2) {
+          const marks = doc.resolve(1).marksAcross(doc.resolve(size - 1));
+          const tr = editor.state.tr.delete(1, size - 1);
+          editor.view.dispatch(marks && marks.length ? tr.setStoredMarks(marks) : tr);
+        }
         session.editText(elementId);
       },
       editAll: () => {
         armSelection(editor, false);
         session.editText(elementId);
       },
+      focus: () => editor.view.focus(),
     });
     // P3-F F9: the keys the owner typed on the selected element before this box took the focus, typed over that
     // selection as a typed key replaces it; and any that reach the stage while the box is open, at its selection
@@ -203,11 +210,13 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
     const onPointerDown = (event: Event) => {
       const at = event.target as Node | null;
       // P4-B2 spike: a press in the armed box begins the edit, the caret at the press (T3, roughly: no drag from it); a
-      // press elsewhere on the stage is the stage's, whose selection ends the edit (ending it here first would arm the
-      // box again for the moment between, writing its selection while a composition may still be ending)
+      // plain press elsewhere on the stage is the stage's, whose new selection ends the edit (ending it here first would
+      // arm the box again for the moment between, writing its selection while a composition may still be ending). A
+      // modified press (it may keep the element selected) or a press on a pin (it selects nothing) still ends it here.
       if (at && armedNow.current && node.contains(at)) return session.editText(elementId);
       if (at && (node.contains(at) || bar.current?.contains(at))) return;
-      if (at && armedMode() !== null && node.closest('[data-stage-surface]')?.contains(at)) return;
+      const plain = !(event as PointerEvent).shiftKey && !(event as PointerEvent).metaKey && !(event as PointerEvent).ctrlKey;
+      if (at && plain && armedMode() !== null && node.closest('[data-stage-surface]')?.contains(at) && !(at as Element).closest?.('.deck-comment-pin')) return;
       session.editText(null);
     };
     document.addEventListener('pointerdown', onPointerDown, true);

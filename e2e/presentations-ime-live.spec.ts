@@ -20,7 +20,9 @@ import { launchMaws, type MawsLaunch } from './support/launch';
 const LIVE = process.env.MAWS_IME_LIVE === '1';
 const DIR = process.env.MAWS_IME_LIVE_DIR ?? '/tmp/maws-ime-live';
 const MODE: 'clear' | 'select' = process.env.MAWS_IME_LIVE_MODE === 'select' ? 'select' : 'clear';
-const CASES = (process.env.MAWS_IME_LIVE_CASES ?? 'L0,L1,L2,L3,L4,L5,L6,L7,L8').split(',').map((c) => c.trim());
+// L8 first: it makes no native edit, so it runs while the page's (Blink's) undo stack is still empty, which the Edit menu's
+// Undo turns on (findings.txt finding 1); a case that composes or types natively fills it
+const CASES = (process.env.MAWS_IME_LIVE_CASES ?? 'L8,L0,L1,L2,L3,L4,L5,L6,L7').split(',').map((c) => c.trim());
 const WAIT_MS = 15 * 60_000; // per case, for the driver
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
@@ -64,7 +66,7 @@ const STEPS: Record<string, string> = {
   L5: 'Click `a`; wait 300 ms; press g k; click `b`; wait 300 ms; press k; wait 300 ms; click `empty`.',
   L6: 'Click `a`; wait 300 ms; press g k s, BackSpace, Left, Right, g k, Return; wait 300 ms; press Escape twice.',
   L7: 'Click `a`; wait 300 ms; press g k s, then alt+Return; wait 800 ms; screenshot (the Hanja window should open at `a`); Escape; click `empty`. Write the verdict into the done file.',
-  L8: 'Click `a`; wait 300 ms; cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; click `a`; Copy; Paste; Undo.',
+  L8: 'Click `a`; wait 300 ms; cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; click `a`; Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.',
 };
 
 let launch: MawsLaunch | null = null;
@@ -124,9 +126,15 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
         await page.waitForTimeout(500);
         return stopTrace(page);
       };
-      // L8 copies through the Mac's pasteboard: what it held comes back after the case (e2e/support/clipboard.ts)
-      const events = name === 'L8' ? await withNativeClipboard(launch!.app, ['Hello', ''], run) : await run();
-      const out = await outcome(name, events);
+      // L8 copies through the Mac's pasteboard: what it held comes back after the case (e2e/support/clipboard.ts). Its
+      // Edit menu is a probe: the role items' effects (webContents' undo, copy, paste: what their selectors reach,
+      // render_widget_host_view_cocoa.mm undo:, copy:, paste:), each noted in the order it fires, so the case can tell
+      // whether a ⌘ key the box cancelled reached the menu (an Undo of the deck's stack via the menu does nothing while
+      // Blink's own undo stack is empty, findings.txt finding 1, so the effect alone cannot tell).
+      let menu: string[] = [];
+      if (name === 'L8') await probeMenu();
+      const events = name === 'L8' ? await withNativeClipboard(launch!.app, ['Hello', ''], run).finally(async () => (menu = await restoreMenu())) : await run();
+      const out = await outcome(name, events, menu);
       writeFileSync(join(DIR, `${name}.result.json`), JSON.stringify({ case: name, mode: MODE, ...out, events }, null, 1));
       if (name === 'L1') await writeFixture(events, out);
       for (const [label, [got, want]] of Object.entries(out.checks)) expect.soft(got, `${name} ${label}`).toEqual(want);
@@ -134,7 +142,44 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
   }
 
   // What each case is judged by: [what happened, what the case expects], and the facts the findings quote.
-  async function outcome(name: string, events: TraceEvent[]): Promise<{ checks: Record<string, [unknown, unknown]>; facts: Record<string, unknown> }> {
+  async function probeMenu(): Promise<void> {
+    await launch!.app.evaluate(({ Menu, BrowserWindow }) => {
+      const g = globalThis as unknown as { __menuOrder: string[]; __menu: { saved: Electron.Menu | null; set: typeof Menu.setApplicationMenu } };
+      g.__menuOrder = [];
+      g.__menu = { saved: Menu.getApplicationMenu(), set: Menu.setApplicationMenu.bind(Menu) };
+      const act = (name: 'undo' | 'redo' | 'cut' | 'copy' | 'paste') => () => {
+        g.__menuOrder.push(name);
+        (BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0])?.webContents[name]();
+      };
+      g.__menu.set(
+        Menu.buildFromTemplate([
+          { label: 'MAWS', submenu: [{ role: 'quit' }] },
+          {
+            label: 'Edit',
+            submenu: [
+              { label: 'Undo', accelerator: 'Cmd+Z', click: act('undo') },
+              { label: 'Redo', accelerator: 'Shift+Cmd+Z', click: act('redo') },
+              { type: 'separator' },
+              { label: 'Cut', accelerator: 'Cmd+X', click: act('cut') },
+              { label: 'Copy', accelerator: 'Cmd+C', click: act('copy') },
+              { label: 'Paste', accelerator: 'Cmd+V', click: act('paste') },
+            ],
+          },
+        ]),
+      );
+      Menu.setApplicationMenu = () => {}; // main reinstalls its menu as the page's actions change: not during the case
+    });
+  }
+  async function restoreMenu(): Promise<string[]> {
+    return launch!.app.evaluate(({ Menu }) => {
+      const g = globalThis as unknown as { __menuOrder: string[]; __menu: { saved: Electron.Menu | null; set: typeof Menu.setApplicationMenu } };
+      Menu.setApplicationMenu = g.__menu.set;
+      Menu.setApplicationMenu(g.__menu.saved);
+      return g.__menuOrder;
+    });
+  }
+
+  async function outcome(name: string, events: TraceEvent[], menu: string[] = []): Promise<{ checks: Record<string, [unknown, unknown]>; facts: Record<string, unknown> }> {
     const a = plain(await element('a'));
     const b = plain(await element('b'));
     const keys = events.filter((e) => e.type === 'keydown');
@@ -174,12 +219,16 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
     } else if (name === 'L7') {
       checks['a reads 한 or its Hanja'] = [a.length, 1];
     } else if (name === 'L8') {
-      const historyUndo = events.filter((e) => e.type === 'beforeinput' && e.inputType === 'historyUndo').length;
-      facts.historyUndo = historyUndo;
+      facts.menu = menu;
+      facts.historyUndo = events.filter((e) => e.type === 'beforeinput' && e.inputType === 'historyUndo').length;
       facts.clipboard = events.filter((e) => e.type === 'copy' || e.type === 'paste' || e.type === 'cut').map((e) => `${e.type} ${e.target} prevented=${e.defaultPrevented}`);
       checks['a keeps Hello'] = [a, 'Hello'];
-      checks['⌘Z undid one of the two nudges, not both (the menu’s Undo not reached)'] = [facts.left, '201px'];
-      checks['the pastes undone'] = [facts.elements, 3];
+      checks['⌘Z undid one nudge, in the box'] = [facts.left, '201px'];
+      // ⌘C and ⌘V left to the menu reach it; the ⌘Z the box cancelled does not; then the mouse's Undo, Copy, Paste, Undo
+      checks['Q3: the menu saw ⌘C and ⌘V, not ⌘Z, then the mouse'] = [menu, ['copy', 'paste', 'undo', 'copy', 'paste', 'undo']];
+      checks['the clipboard events taken by the stage, not the editor'] = [(facts.clipboard as string[]).every((c) => c.endsWith('prevented=true')), true];
+      // finding 1's gap: the menu's Undo does nothing to the deck while Blink's own undo stack is empty, so both pastes stay
+      checks['the Edit menu’s Undo left both pastes (today’s gap)'] = [[facts.elements, facts.historyUndo], [5, 0]];
     }
     return { checks, facts };
   }

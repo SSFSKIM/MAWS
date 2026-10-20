@@ -184,6 +184,11 @@ export async function startTrace(page: Page): Promise<void> {
       if (ed) r.textBefore = ed.textContent;
       events.push(r);
       open.set(e, r);
+      // an event a handler stopped never reaches the window's bubble phase: whether it was cancelled is read after its
+      // dispatch instead
+      setTimeout(() => {
+        if (r.defaultPrevented === undefined) r.defaultPrevented = e.defaultPrevented;
+      }, 0);
     };
     const last = (e: Event) => {
       const r = open.get(e);

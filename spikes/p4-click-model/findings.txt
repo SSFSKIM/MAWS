@@ -57,7 +57,9 @@ Q2. Can the content be cleared on the first keyCode-229 keydown, before the comp
   the document for its text or selection between keys and seeing it stale for one round trip. L1's trace settles it.
   If it does fail, replace need not degrade to append: mode select keeps replace with no clear at all. The same I2
   case passes in mode select, where compositionstart carries "Hello" (the selection it replaces) and the first input
-  leaves ㅎ alone. So the fallback order is clear, then select, then append.
+  leaves ㅎ alone. So the fallback order is clear, then select, then append. Both keep the marks a text carried all
+  over (a bold "World" typed over stays bold: mode clear sets them as the clearing transaction's stored marks, mode
+  select inherits them natively; I2 checks it in both modes).
 
 Q3. Does preventDefault suppress Electron's menu accelerators while armed?
   Yes. Chromium sends a ⌘ key equivalent to the page first (render_widget_host_view_cocoa.mm performKeyEquivalent:,
@@ -78,25 +80,31 @@ Q3. Does preventDefault suppress Electron's menu accelerators while armed?
   enables Copy on a collapsed caret), never on its text. Undo does not: see finding 1.
 
 Further findings
-  1. The Edit menu's Undo and Redo never reach the deck while Blink's own undo stack is empty: on the stage, on an
-     armed box, and in a box whose edits were all ProseMirror transactions. Blink runs Undo only when it can undo
-     (editor_command.cc L1320 EnabledUndo = CanUndo, L1968-1970 CanNotExecuteWhenDisabled, L2123-2127), so no
-     historyUndo reaches the box for it to claim; ⌘Z and the toolbar's Undo work. The Q3 case asserts the gap (Edit ›
-     Undo while armed: no event; a stage nudge unchanged by it). K6's "each also works from the Edit menu with the
-     mouse" therefore needs the Edit menu's Undo and Redo to be app actions the focused editor answers, in the shell's
-     menu (src/main/menu.ts), not role items; see [parent-impact] in the hand-back.
+  1. The Edit menu's Undo and Redo do not reach the deck's stack. Observed (the Q3 case, nothing typed natively in
+     the page): Edit › Undo while armed dispatches no event at all, and on the stage it leaves a nudge in place; ⌘Z and
+     the toolbar's Undo work. Read from the source: Blink runs Undo only when its own undo stack can undo
+     (editor_command.cc L1320 EnabledUndo = CanUndo, L1968-1970 CanNotExecuteWhenDisabled, L2123-2127), and when it
+     can, its beforeinput goes to the root editable of Blink's newest undo step, not to the focused element
+     (L2133-2149, UseUndoStepElementDispatchBeforeInput, stable at 152). So after native typing somewhere (the notes
+     field, a text box typed in), the menu's Undo is enabled and lands on that element, which may be neither the
+     selection nor the deck. K6's "each also works from the Edit menu with the mouse" therefore needs the Edit menu's
+     Undo and Redo to be app actions the focused editor answers, in the shell's menu (src/main/menu.ts), not role
+     items; see [parent-impact] in the hand-back.
   2. Playwright's keyboard never reaches Electron's menu: its CDP keys carry no native key code, and a key without one
      is marked skip_if_unhandled (input_handler.cc L1271-1272); with one, devtools builds the NSEvent's characters
      from `text` alone (native_input_event_builder_mac.mm), so the key matches no menu item unless `text` is set too.
      No e2e case has exercised a menu accelerator by key until this one (e2e/support/ime.ts `Ime.command`).
   3. L5's renderer half: a press on box B while box A composes 하 finishes A's composition as the stage takes the
      focus (compositionend 하 on A), A keeps 하 and B gets a fresh composition. The prototype needed one change for it:
-     the text box no longer ends the edit itself on a press elsewhere on the stage (that armed A again for a moment,
-     writing its selection while the composition was still ending); the stage's selection ends it.
+     the text box no longer ends the edit itself on a plain press elsewhere on the stage (that armed A again for a
+     moment, writing its selection while the composition was still ending); the stage's new selection ends it. A
+     modified press (shift or ⌘, which may keep A selected) and a press on a comment pin still end it from the box.
   4. Known gaps of the prototype, for the plan rather than the spike: a press on the armed box begins the edit there,
      so the armed text cannot be dragged (T2 needs the stage to keep the press: the armed root without pointer events,
      the caret placed by posAtCoords on release); arming binds the text, and the binding writes an empty text node into
-     an element that has none (ENSURE_ORIGIN): a model write on a selection; ⌘B, ⌘I and ⌘U act on the armed box's text
+     an element that has none (ENSURE_ORIGIN): a model write on a selection; a press the stage keeps while a box is
+     armed (a handle, a drag of the frame) gives the focus back to the box at its release, which the plan's PRESS and
+     DRAG states must keep doing; ⌘B, ⌘I and ⌘U act on the armed box's text
      (all of it in mode select, as Slides does for an object-selected box: a choice for the plan); boards are not
      armable yet (`armable` is the deck's stage only); F9's typed-key path and its Hangul exclusion stay for the
      prototype-off path.
@@ -134,12 +142,15 @@ Steps (spikes/p4-click-model/cua-live.js holds them as cells; e2e/presentations-
   1. In the GUI session's shell, in the background: `MAWS_IME_LIVE=1 node_modules/.bin/playwright test
      e2e/presentations-ime-live.spec.ts` (or `pnpm e2e:ime-live`, which builds first). MAWS comes up foreground, its
      window at 80,80, 1600 × 1000 points; the spec writes /tmp/maws-ime-live/L0.ready.json.
-  2. The setup cell, then L0: the instrument check (cua's keys reach the input method: the notes field ends in 한, the
-     trace holds keyCode-229 keydowns) and the coordinate mapping (the press lands where the spec says). Stop if L0
-     fails: the L cases then need the owner's hands.
-  3. L1 to L8, each: read <case>.ready.json, run its cell, write <case>.done with one line of what was seen, read
+  2. The setup cell, then L8 first (it types nothing natively, so it runs while the page's own undo stack is empty, which
+     the Edit menu's Undo turns on: finding 1; it also checks the coordinate mapping, and can be rerun), then L0: the
+     instrument check (cua's keys reach the input method: the notes field ends in 한, the trace holds keyCode-229
+     keydowns). Stop if L0 fails: the L cases then need the owner's hands.
+  3. L1 to L7, each: read <case>.ready.json, run its cell, write <case>.done with one line of what was seen, read
      <case>.result.json's checks and facts. A failed check is a finding, not a stop. L3 starts from ABC. L4's
-     facts.pressToFirstKeyMs says whether cua reached the 100 ms window. L7's verdict is the screenshot's.
+     facts.pressToFirstKeyMs says whether cua reached the 100 ms window. L7's verdict is the screenshot's. L8's Edit menu
+     is a probe for the case (each item notes itself, then does what the role item does: webContents' undo, copy and
+     paste, which the role selectors reach), so facts.menu shows whether the ⌘Z the box cancelled reached the menu.
   4. If L1 fails in mode clear, and for the comparison either way: MAWS_IME_LIVE_MODE=select
      MAWS_IME_LIVE_CASES=L1,L2,L4.
   5. Collect /tmp/maws-ime-live/*.result.json and l1-hangul.json; select ABC again; end_task; release the hold.

@@ -222,11 +222,19 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       setShown(g.frame(slidePoint({ x: e.clientX, y: e.clientY }), mods(e)));
     };
 
+    // P4-B2 spike: a press the stage kept while a box is armed (a handle, the frame, a drag) leaves the selection as it
+    // was, so the box stays armed: the focus goes back to it, or its keys would reach the stage, with no input method
+    const rearm = () => {
+      const box = armedBox(session);
+      if (box && el.ownerDocument.activeElement !== box.root) box.focus();
+    };
+
     // the gesture ends written, its step closed, and the layout passes it saw caught up
     const finish = (g: Gesture) => {
       g.end(true);
       setShown(null);
       catchUpLayout();
+      rearm();
     };
 
     const onUp = (e: PointerEvent) => {
@@ -238,6 +246,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (g) return finish(g);
       // a press without a drag inside a multi-selection narrows it to what was pressed
       if (pend && pend.target !== null && !pend.toggle && session.snapshot().selection.length > 1) session.select([pend.target]);
+      rearm();
     };
 
     // P3-F (L218): the capture lost with no release (the surface hidden, the system taking the pointer) ends the gesture
@@ -247,6 +256,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       gesture.current = null;
       pending.current = null;
       if (g) finish(g);
+      else rearm();
     };
 
     // a double-click goes into the selected container, or edits the selected text element (a pointer press carries no
@@ -274,6 +284,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       pending.current = null;
       setShown(null);
       catchUpLayout();
+      rearm();
     };
 
     el.addEventListener('pointerdown', onDown);

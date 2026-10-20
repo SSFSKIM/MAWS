@@ -40,6 +40,8 @@ export interface ArmedBox {
   replace(): void;
   /** T12: the edit begins with all the text selected. */
   editAll(): void;
+  /** The focus back on the box, its selection as it was (after a press the stage kept, on a handle or the frame). */
+  focus(): void;
 }
 
 const boxes = new WeakMap<object, ArmedBox>();

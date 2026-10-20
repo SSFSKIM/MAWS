@@ -26,7 +26,7 @@ interface ElementIR {
   id: string;
   style: Record<string, string>;
   children: ElementIR[];
-  text?: { inline: ({ text: string } | { br: true })[] }[];
+  text?: { inline: ({ text: string; marks: Record<string, unknown> } | { br: true })[] }[];
 }
 interface Seam {
   __maws_presentations: {
@@ -42,7 +42,7 @@ const DECK: Record<string, string> = {
   'project/deck.json': JSON.stringify({ v: 4, title: 'IME lab', cover: 'ime', order: ['ime'] }),
   'project/slides/ime.html': `<section id="ime" style="background:#ffffff; padding:128px">
 <p id="a" style="position:absolute; left:200px; top:200px; width:700px; font-size:64px">Hello</p>
-<p id="b" style="position:absolute; left:1000px; top:200px; width:700px; font-size:64px">World</p>
+<p id="b" style="position:absolute; left:1000px; top:200px; width:700px; font-size:64px"><b>World</b></p>
 <ul id="l" style="position:absolute; left:200px; top:500px; width:700px; font-size:48px"><li>One</li><li>Two</li></ul>
 <x-shape id="s" kind="ellipse" style="position:absolute; left:1000px; top:500px; width:300px; height:200px; background:#0000ff"></x-shape>
 <div id="g" data-group="" style="position:absolute; left:1400px; top:500px; width:400px; height:200px"><h2 id="gh" style="position:absolute; left:0px; top:0px; width:400px; font-size:48px">Grouped</h2></div>
@@ -66,6 +66,8 @@ interface Lab {
   click(eid: string): Promise<void>;
   clickSlide(p: { x: number; y: number }): Promise<void>;
   text(eid: string): Promise<string>;
+  /** the element's text runs with their marks */
+  runs(eid: string): Promise<{ text: string; marks: Record<string, unknown> }[]>;
   left(eid: string): Promise<string | undefined>;
   count(): Promise<number>;
   armed(mode: 'clear' | 'select' | null): Promise<void>;
@@ -117,6 +119,7 @@ async function lab(): Promise<Lab> {
       await page.mouse.click(q.x, q.y);
     },
     text: async (eid) => ((await element(eid))?.text ?? []).map((b) => b.inline.map((r) => ('text' in r ? r.text : '\n')).join('')).join('\n'),
+    runs: async (eid) => ((await element(eid))?.text ?? []).flatMap((b) => b.inline.flatMap((r) => ('text' in r ? [{ text: r.text, marks: r.marks }] : []))),
     left: async (eid) => (await element(eid))?.style.left,
     count: async () => (await slide()).children.length,
     armed: (mode) => page.evaluate((m) => (window as unknown as Seam).__maws_presentations.armed(m), mode),
@@ -180,6 +183,19 @@ test('ARMED: a selected text element’s box is focused and editable with its ca
   await expect(l.tab.locator('[data-overlay] [data-handle="se"]')).toHaveCount(1);
   await expect(l.tab.locator('.deck-markbar')).toHaveCount(0);
   expect(await l.state()).toEqual(expect.objectContaining({ selection: ['a'], editingText: null }));
+  // a press the stage keeps (a handle) leaves a armed, its focus given back
+  const handle = (await l.tab.locator('[data-overlay] [data-handle="se"]').boundingBox())!;
+  await l.page.mouse.click(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await expect.poll(() => l.focus()).toBe('textbox:a');
+  // an edit, then a shift-press on another element: the edit ends, both selected, the stage's
+  await l.ime.rawKey({ key: 'x', code: 'KeyX', keyCode: 88, text: 'x' });
+  await expect.poll(() => l.state()).toEqual(expect.objectContaining({ editingText: 'a' }));
+  await l.page.keyboard.down('Shift');
+  await l.click('b');
+  await l.page.keyboard.up('Shift');
+  await expect.poll(() => l.state()).toEqual(expect.objectContaining({ selection: ['a', 'b'], editingText: null }));
+  await expect(l.tab.locator('.deck-markbar')).toHaveCount(0);
+  expect(await l.focus()).toBe('stage');
   // a shape, a group, two elements: the stage
   await l.click('s');
   expect(await l.focus()).toBe('stage');
@@ -235,6 +251,13 @@ for (const mode of ['clear', 'select'] as const) {
     const start = events.find((e) => e.type === 'compositionstart')!;
     expect(start.textBefore).toBe(mode === 'clear' ? '' : 'Hello');
     expect(events.find((e) => e.type === 'input')?.textAfter).toBe('ㅎ'); // the first jamo is the box's whole text
+    // b's text is one bold run: replaced, it stays bold
+    await l.click('b');
+    await expect.poll(() => l.focus()).toBe('textbox:b');
+    await l.ime.type(HANA);
+    await l.clickSlide(EMPTY);
+    await expect.poll(() => l.text('b')).toBe('하나');
+    expect(await l.runs('b')).toEqual([{ text: '하나', marks: { b: {} } }]);
   });
 }
 
@@ -252,7 +275,9 @@ test('ARMED: a first jamo arriving bare, then a composition replacing it, ends a
   const afterKey1 = (await watched(l.page)).writes;
   await l.page.waitForTimeout(200);
   expect((await watched(l.page)).writes).toBe(afterKey1); // MAWS writes nothing to the box between keys 1 and 2
-  // key 2: the input method now attached, re-composing the bare ㅎ (macOS reports it as a replacement range)
+  // key 2: the input method now attached, re-composing the bare ㅎ through a replacement range. An assumption (research
+  // §2.4 I3), not observed: if the 2-Set input method starts a fresh composition instead, the real result keeps the bare
+  // ㅎ (ㅎ안글), which this case cannot show; L4 on the real Mac settles it
   await l.ime.processKey('ㅏ');
   await l.ime.compose('하', { start: 0, end: 1 });
   await l.ime.type(HANGEUL.slice(2));
@@ -262,12 +287,13 @@ test('ARMED: a first jamo arriving bare, then a composition replacing it, ends a
   await expect.poll(() => l.text('a')).toBe('한글');
   expect(events.find((e) => e.type === 'keydown')).toEqual(expect.objectContaining({ key: 'ㅎ', keyCode: 71, textBefore: 'Hello', textAfter: '' }));
 
-  // L2: 하나, the ㄴ of 한 moving to the next syllable
+  // L2: 하나, the ㄴ of 한 moving to the next syllable; b's text is one bold run, and the cleared box keeps it bold
   await l.click('b');
   await expect.poll(() => l.focus()).toBe('textbox:b');
   await l.ime.type(HANA);
   await l.clickSlide(EMPTY);
   await expect.poll(() => l.text('b')).toBe('하나');
+  expect(await l.runs('b')).toEqual([{ text: '하나', marks: { b: {} } }]);
 });
 
 test('keys during a composition take no element action, and a remote change waits for its end (I4, I5)', async () => {
