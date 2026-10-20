@@ -13,6 +13,10 @@ import type { DocumentHarnessApi, Replica } from '../src/renderer/src/harness/do
 import { keystrokes, type Step } from './support/hangul';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
+// P4-B1 (LC-1 item 1): a margin card's top sits 4 px below its passage's first line box top (MARGIN_CARD_INSET_PX in
+// src/artifacts/comments/margin-layout.ts); the icon tier's dot and overlay sit on the line
+const CARD_INSET_PX = 4;
+
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
 
 type HarnessWindow = Window & { __maws_document: DocumentHarnessApi };
@@ -295,7 +299,20 @@ test.describe('the document editor', () => {
       return { left: r.left, top: r.top };
     });
     const box = (await card.boundingBox())!;
-    expect(Math.abs(box.y - line.top), 'the compose card at the passage’s first line').toBeLessThanOrEqual(2);
+    // the margin's geometry as the page has it, read into the assertion's message (the mini's run is the only evidence)
+    const geometry = await margin.evaluate((el) => {
+      const rect = (node: Element | null | undefined) => (node ? JSON.stringify(node.getBoundingClientRect().toJSON()) : 'none');
+      const hosted = el.querySelector<HTMLElement>('[data-margin-entry][data-compose]');
+      return {
+        tier: (el as HTMLElement).dataset.marginTier,
+        relayouts: (el as HTMLElement).dataset.relayouts,
+        column: rect(el),
+        entries: [...el.querySelectorAll<HTMLElement>('[data-margin-entry]')].map((node) => `${node.dataset.marginEntry}: ${node.style.transform || 'no transform'} ${rect(node)}`),
+        overlay: rect(hosted?.querySelector('.doc-margin-overlay')),
+        card: rect(hosted?.querySelector('[data-comment-card]')),
+      };
+    });
+    expect(Math.abs(box.y - line.top), `the compose card at the passage’s first line (line ${JSON.stringify(line)}, card ${JSON.stringify(box)}, margin ${JSON.stringify(geometry)})`).toBeLessThanOrEqual(2);
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
 
     await card.getByRole('button', { name: 'Resolve' }).click();
@@ -396,8 +413,8 @@ test.describe('the document editor', () => {
     // P1: each card's top at its passage's first line
     const lineTop = (id: string) => content(page, 'a').locator(`[data-thread="${id}"]`).first().evaluate((el) => el.getClientRects()[0]!.top);
     const entryTop = async (id: string) => (await entry(id).boundingBox())!.y;
-    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)))).toBeLessThanOrEqual(2);
-    expect(Math.abs((await entryTop(t2)) - (await lineTop(t2)))).toBeLessThanOrEqual(2);
+    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX)).toBeLessThanOrEqual(2);
+    expect(Math.abs((await entryTop(t2)) - (await lineTop(t2)) - CARD_INSET_PX)).toBeLessThanOrEqual(2);
 
     // the first thread active by its passage; the agent's long reply grows its card and pushes the second down (R2, R3)
     await content(page, 'a').locator(`.comment-${t1}`).click();
@@ -408,7 +425,7 @@ test.describe('the document editor', () => {
     await expect.poll(async () => (await entry(t1).boundingBox())!.height, { message: 'the card grew' }).toBeGreaterThan(h1Before + 20);
     await expect(entry(t1)).toHaveAttribute('data-active', '');
     await expect(content(page, 'a').locator(`.comment-active.comment-${t1}`)).toHaveCount(1);
-    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1))), 'the active card stays at its anchor').toBeLessThanOrEqual(2);
+    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), 'the active card stays at its anchor').toBeLessThanOrEqual(2);
     await expect.poll(() => entryTop(t2), { message: 'the second card pushed below the grown first' }).toBeGreaterThan(t2Before + 20);
 
     // R1: the owner's Enter above both passages moves both cards with their lines
@@ -416,7 +433,7 @@ test.describe('the document editor', () => {
     await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.caretAtEnd('a', 'para0001'));
     await page.keyboard.press('Enter');
     await expect.poll(() => lineTop(t1)).toBeGreaterThan(a1 + 10);
-    await expect.poll(async () => Math.abs((await entryTop(t1)) - (await lineTop(t1))), { message: 'the first card follows its line' }).toBeLessThanOrEqual(2);
+    await expect.poll(async () => Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), { message: 'the first card follows its line' }).toBeLessThanOrEqual(2);
     expect((await lineTop(t2)) - a2).toBeGreaterThan(10);
     await expect(entry(t1)).toHaveAttribute('data-active', '');
 

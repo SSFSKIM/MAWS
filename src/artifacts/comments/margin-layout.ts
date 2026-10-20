@@ -9,6 +9,8 @@
 
 /** The gap between consecutive cards: Docs' 10 (LC-1 item 2, measured on the upward walk; the downward walk's gap pending). */
 export const MARGIN_GAP_PX = 10;
+/** How far below its passage's first line box top a card's top sits: Docs' 4 (LC-1 item 1, the same for every block kind and a soft-wrap start). The cards tier's; the icon tier's dot sits on the line. */
+export const MARGIN_CARD_INSET_PX = 4;
 /** How far left the active card stands from the column (`translateX(−S)`, beside the tops this places). LC-1 re-bases (item 2). */
 export const MARGIN_ACTIVE_SHIFT_PX = 12;
 

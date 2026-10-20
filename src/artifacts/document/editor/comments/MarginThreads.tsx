@@ -22,7 +22,7 @@
 import type { Editor } from '@tiptap/core';
 import { memo /* P4-B1 */, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject /* P4-B1 */ } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
-import { layoutMargin, MARGIN_ACTIVE_SHIFT_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
+import { layoutMargin, MARGIN_ACTIVE_SHIFT_PX, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
 import { ICON_PX, tierFor, type MarginTier } from '../../../comments/margin-tiers';
 import { ThreadCard, type ThreadCardThread } from '../../../comments/ThreadCard';
 import type { CommentsView } from '../../../comments/view';
@@ -210,7 +210,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
         groupsKey.current = key;
         setGroups(counts);
       }
-    } else items = list.map((entry) => ({ id: entry.id, anchor: anchorOf(entry), height: heights.current.get(entry.id) ?? 0 }));
+    } else items = list.map((entry) => ({ id: entry.id, anchor: anchorOf(entry) + MARGIN_CARD_INSET_PX, height: heights.current.get(entry.id) ?? 0 })); // the card's top below the line's by Docs' inset (LC-1 item 1)
     const laid = layoutMargin({ entries: items, active: active === null ? null : (leaderOf.get(active) ?? active), gap: MARGIN_GAP_PX });
     const placed = new Map<string, number>();
     for (const { id } of list) {

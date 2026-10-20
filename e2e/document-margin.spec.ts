@@ -11,6 +11,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PerfSeam } from './support/document-scale';
+
+// P4-B1 (LC-1 item 1): a margin card's top sits 4 px below its passage's first line box top (MARGIN_CARD_INSET_PX in
+// src/artifacts/comments/margin-layout.ts)
+const CARD_INSET_PX = 4;
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 
@@ -133,9 +137,10 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await page.keyboard.press('Enter');
     await page.keyboard.type('The budget review is on Friday with the whole team.');
     await page.keyboard.press('Enter');
-    // four lines between the two passages: the first card, compact, fits above the second without pushing it, and the
-    // agent's long reply then grows it into the second's room
-    for (const line of ['Agenda item one.', 'Agenda item two.', 'Agenda item three.', 'Agenda item four.']) {
+    // two lines between the two passages (three line pitches, about 117 px): the first card, compact, fits above the
+    // second without pushing it; the active card with the agent's reply (a name, two lines of text, the reply field) does
+    // not, so the reply's growth pushes the second (four lines left the grown card short of the second's room)
+    for (const line of ['Agenda item one.', 'Agenda item two.']) {
       await page.keyboard.type(line);
       await page.keyboard.press('Enter');
     }
@@ -154,8 +159,8 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await expect(margin).toHaveAttribute('data-margin-tier', 'cards');
     await expect(entry(t1)).toBeVisible();
     await expect(entry(t2)).toBeVisible();
-    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1))), 'the first card at its line').toBeLessThanOrEqual(2);
-    expect(Math.abs((await entryTop(t2)) - (await lineTop(t2))), 'the second card at its line').toBeLessThanOrEqual(2);
+    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), 'the first card at its line').toBeLessThanOrEqual(2);
+    expect(Math.abs((await entryTop(t2)) - (await lineTop(t2)) - CARD_INSET_PX), 'the second card at its line').toBeLessThanOrEqual(2);
     expect((await pageBox()).x, 'the page moved left (N6)').toBeLessThan(centredLeft - 40);
     await page.screenshot({ path: 'test-results/document-margin-cards.png' });
   });
@@ -186,7 +191,7 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await expect(entry(t1).getByRole('listitem').last()).toContainText('finance team');
     await expect(entry(t1)).toHaveAttribute('data-active', '');
     await expect(text.locator(`.comment-active.comment-${t1}`)).toHaveCount(1);
-    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1))), 'the active card stays at its anchor').toBeLessThanOrEqual(2);
+    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), 'the active card stays at its anchor').toBeLessThanOrEqual(2);
     await expect.poll(() => entryTop(t2), { message: 'the second card pushed below the grown first' }).toBeGreaterThan(t2Before + 20);
     await expect(text.locator('p').first()).toContainText('agenda is set. More words typed here.');
     await page.screenshot({ path: 'test-results/document-margin-grown.png' });

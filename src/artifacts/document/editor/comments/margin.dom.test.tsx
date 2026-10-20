@@ -6,7 +6,7 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MARGIN_ACTIVE_SHIFT_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
+import { MARGIN_ACTIVE_SHIFT_PX, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
 import { CARD_MAX_PX } from '../../../comments/margin-tiers';
 import type { CommentsView } from '../../../comments/view';
 import { addTab } from '../../tabs';
@@ -160,9 +160,9 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     comment(m, 't2', 'track the budget', 300);
     await settle();
     expect(reserve()).toBe(`${CARD_MAX_PX + 2 * MARGIN_GAP_PX}px`);
-    expect(topOf(entry('t1'))).toBe(140 - scene.columnTop); // P1: the line's top, in the column's coordinates
-    expect(topOf(entry('t2'))).toBe(300 - scene.columnTop);
-    expect(margin()!.style.getPropertyValue('--doc-margin-height')).toBe(`${300 - scene.columnTop + scene.entryHeight + MARGIN_GAP_PX}px`); // L6
+    expect(topOf(entry('t1'))).toBe(140 - scene.columnTop + MARGIN_CARD_INSET_PX); // P1: the line's top, in the column's coordinates, plus the card's inset
+    expect(topOf(entry('t2'))).toBe(300 - scene.columnTop + MARGIN_CARD_INSET_PX);
+    expect(margin()!.style.getPropertyValue('--doc-margin-height')).toBe(`${300 - scene.columnTop + MARGIN_CARD_INSET_PX + scene.entryHeight + MARGIN_GAP_PX}px`); // L6
   });
 
   it('stacks colliding cards by the gap, the active one pinned at its anchor and shifted left, its neighbour pushed (L2, L3)', async () => {
@@ -171,13 +171,13 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     comment(m, 't2', 'track the budget', 210); // 10 px under t1's line: no room for t1's 60 px card between them
     await settle();
     expect(activeThread(m.editor().state)).toBe('t2'); // the last comment written is active (the editor's rule)
-    expect(topOf(entry('t2'))).toBe(110);
+    expect(topOf(entry('t2'))).toBe(110 + MARGIN_CARD_INSET_PX);
     expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
-    expect(topOf(entry('t1'))).toBe(110 - MARGIN_GAP_PX - scene.entryHeight); // pushed up above the active one
+    expect(topOf(entry('t1'))).toBe(110 + MARGIN_CARD_INSET_PX - MARGIN_GAP_PX - scene.entryHeight); // pushed up above the active one
     act(() => void m.editor().commands.setActiveThread('t1'));
-    expect(topOf(entry('t1'))).toBe(100);
+    expect(topOf(entry('t1'))).toBe(100 + MARGIN_CARD_INSET_PX);
     expect(shiftOf(entry('t1'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
-    expect(topOf(entry('t2'))).toBe(100 + scene.entryHeight + MARGIN_GAP_PX); // pushed down below it
+    expect(topOf(entry('t2'))).toBe(100 + MARGIN_CARD_INSET_PX + scene.entryHeight + MARGIN_GAP_PX); // pushed down below it
     expect(shiftOf(entry('t2'))).toBe(0);
     expect(margin()!.hasAttribute('data-animate')).toBe(true); // an activation animates
     // L5: with the active one too close to the top for the card above, the card above takes the top and the active
@@ -198,7 +198,7 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     scene.lines.set('t1', { top: 420, beforeTop: 400, height: 20 }); // before the position: the line above's end
     type(m, ' ', 'Owners');
     await frame();
-    expect(topOf(entry('t1'))).toBe(420 - scene.columnTop);
+    expect(topOf(entry('t1'))).toBe(420 - scene.columnTop + MARGIN_CARD_INSET_PX);
   });
 });
 
@@ -211,7 +211,7 @@ describe('re-layout (R1 to R6)', () => {
     scene.lines.set('t1', { top: 320, height: 20 }); // the line moved down one line
     act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'The plan'))));
     await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
-    expect(topOf(entry('t1'))).toBe(320 - scene.columnTop);
+    expect(topOf(entry('t1'))).toBe(320 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
     const after = relayouts();
     expect(after).toBe(before + 1); // P4-B1: one pass per edit frame, run in the frame callback itself (D13's at most one)
@@ -233,13 +233,13 @@ describe('re-layout (R1 to R6)', () => {
     scene.lines.set('t2', { top: 320, height: 20 });
     act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'The plan'))));
     await new Promise((r) => requestAnimationFrame(() => r(null))); // outside act: nothing React does may help
-    expect(topOf(entry('t2'))).toBe(320 - scene.columnTop);
+    expect(topOf(entry('t2'))).toBe(320 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
     expect(within(entry('t2')!).getByRole('group')).toBe(card);
     // a re-render that runs no pass (a reply being typed in the active card) keeps the shift
     act(() => fireEvent.change(within(entry('t2')!).getByRole('textbox', { name: 'Reply' }), { target: { value: 'Typing a reply' } }));
     expect(shiftOf(entry('t2'))).toBe(-MARGIN_ACTIVE_SHIFT_PX);
-    expect(topOf(entry('t2'))).toBe(320 - scene.columnTop);
+    expect(topOf(entry('t2'))).toBe(320 - scene.columnTop + MARGIN_CARD_INSET_PX);
   });
 
   // P4-B1 (D4): an add's or an activation's move stays animated through the follow-up pass the mounted card's height
@@ -251,14 +251,14 @@ describe('re-layout (R1 to R6)', () => {
     scene.heights.set('t2', 90);
     comment(m, 't2', 'track the budget', 180);
     await settle(); // the add: t2's entry mounts, its height read, the stack re-laid a microtask later
-    expect(topOf(entry('t1'))).toBe(180 - scene.columnTop - MARGIN_GAP_PX - scene.entryHeight); // pushed up by the active t2
-    expect(topOf(entry('t2'))).toBe(180 - scene.columnTop);
+    expect(topOf(entry('t1'))).toBe(180 - scene.columnTop + MARGIN_CARD_INSET_PX - MARGIN_GAP_PX - scene.entryHeight); // pushed up by the active t2
+    expect(topOf(entry('t2'))).toBe(180 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(margin()!.hasAttribute('data-animate')).toBe(true);
     scene.heights.set('t1', 120); // the activated card grows its reply field
     act(() => void m.editor().commands.setActiveThread('t1'));
     await act(() => Promise.resolve()); // the follow-up passes' microtask
     expect(margin()!.hasAttribute('data-animate')).toBe(true);
-    expect(topOf(entry('t2'))).toBe(140 - scene.columnTop + 120 + MARGIN_GAP_PX); // laid with the grown height
+    expect(topOf(entry('t2'))).toBe(140 - scene.columnTop + MARGIN_CARD_INSET_PX + 120 + MARGIN_GAP_PX); // laid with the grown height
     // P4-B1: an edit's pass that moves nothing leaves the attribute (a running transition goes on); one that moves a card
     // is not animated
     type(m, 'X', 'Third');
@@ -267,7 +267,7 @@ describe('re-layout (R1 to R6)', () => {
     scene.lines.set('t1', { top: 160, height: 20 }); // a line typed above t1's passage
     type(m, 'X', 'Third');
     await frame();
-    expect(topOf(entry('t1'))).toBe(160 - scene.columnTop);
+    expect(topOf(entry('t1'))).toBe(160 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
   });
 
@@ -280,7 +280,7 @@ describe('re-layout (R1 to R6)', () => {
     comment(m, 't3', 'track the budget', 160);
     await settle();
     act(() => void m.editor().commands.setActiveThread(null));
-    const stacked = 140 - scene.columnTop;
+    const stacked = 140 - scene.columnTop + MARGIN_CARD_INSET_PX;
     const step = scene.entryHeight + MARGIN_GAP_PX;
     expect(topOf(entry('t3'))).toBe(stacked + 2 * step);
     scene.lines.set('t1', { top: 160, height: 20 }); // a line typed above: an edit's move, not animated
@@ -335,7 +335,7 @@ describe('re-layout (R1 to R6)', () => {
     act(() => void m.editor().commands.undo());
     await frame();
     expect(entry('t1')).not.toBeNull();
-    expect(topOf(entry('t1'))).toBe(140 - scene.columnTop);
+    expect(topOf(entry('t1'))).toBe(140 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(entry('t2')).not.toBeNull();
     expect(queries.mock.calls.filter(([selector]) => selector === '[data-thread]')).toHaveLength(0);
   });
@@ -361,14 +361,14 @@ describe('re-layout (R1 to R6)', () => {
     comment(m, 't2', 'track the budget', 230); // 90 px under: room for t1's 60 px card and the gap
     await settle();
     act(() => void m.editor().commands.setActiveThread('t2'));
-    expect(topOf(entry('t2'))).toBe(130);
+    expect(topOf(entry('t2'))).toBe(130 + MARGIN_CARD_INSET_PX);
     act(() => reply(m.agent.doc, 't1', { id: 't1:m1', by: agentActor, at: now(), body: 'A long reply that grows the card.' }, 'agent'));
     await settle();
     scene.heights.set('t1', 120); // the reply doubled the card
     resized();
     expect(activeThread(m.editor().state)).toBe('t2'); // R3: the agent changed nothing here
-    expect(topOf(entry('t2'))).toBe(130); // the active card stays at its anchor
-    expect(topOf(entry('t1'))).toBe(130 - MARGIN_GAP_PX - 120); // t1 pushed up to make room
+    expect(topOf(entry('t2'))).toBe(130 + MARGIN_CARD_INSET_PX); // the active card stays at its anchor
+    expect(topOf(entry('t1'))).toBe(130 + MARGIN_CARD_INSET_PX - MARGIN_GAP_PX - 120); // t1 pushed up to make room
   });
 
   // P4-B1: the list follows the threads map; an unchanged thread keeps its object and its card is not drawn again
