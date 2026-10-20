@@ -84,9 +84,9 @@ export interface CostLedger {
   runningUsd: number; // the live process's running total, restored part included
   awaitingFirst: boolean; // a process exited and its successor has reported no total yet
   signalled: boolean; // that exit was a signal's: the process may have recorded no total (SIGKILL)
-  // the live process's first total while the transcript is to say what it restored; a new object per process, so a
-  // correction read for one never lands on its successor
-  restoring: { firstUsd: number } | null;
+  // while the transcript is to say what the live process restored: its first total and its predecessor's last sampled
+  // total; a new object per process, so a correction read for one never lands on its successor
+  restoring: { firstUsd: number; previousUsd: number } | null;
 }
 
 // A session's ledger when its fold begins: a cost already on the digest (scripted by the stub, seeded, or folded before
@@ -100,16 +100,20 @@ export const costOf = (ledger: CostLedger) => ledger.finishedUsd + ledger.runnin
 const sample = (ledger: CostLedger, totalUsd: number): CostLedger => {
   if (!ledger.awaitingFirst) return { ...ledger, runningUsd: totalUsd };
   const below = totalUsd < ledger.restoredUsd;
-  return { ...ledger, restoredUsd: below ? 0 : ledger.restoredUsd, runningUsd: totalUsd, awaitingFirst: false, restoring: below || ledger.signalled ? { firstUsd: totalUsd } : null };
+  const restoring = below || ledger.signalled ? { firstUsd: totalUsd, previousUsd: ledger.restoredUsd } : null;
+  return { ...ledger, restoredUsd: below ? 0 : ledger.restoredUsd, runningUsd: totalUsd, awaitingFirst: false, restoring };
 };
 
 // The transcript's word on what the live process restored (restored-cost.ts: its last `cost-state` total, 0 when it holds
 // none, null when it cannot say). A process's first total carries what it restored, so a figure above it was recorded
-// after the process started (its predecessor still ran when it was resumed) and the ledger's own rule stands.
+// after the process started (its predecessor still ran when it was resumed) and the ledger's own rule stands. The
+// restored part is at most the predecessor's last sampled total: a figure above that one is what the predecessor spent
+// after its last sample and recorded at its shutdown (stopped mid-turn, then killed past the stop ladder), its own spend
+// and not its successor's, so the last sample stays the restored part.
 export function restoreCost(ledger: CostLedger, restoredUsd: number | null): CostLedger {
   if (ledger.restoring === null) return ledger;
   const taken = restoredUsd !== null && restoredUsd <= ledger.restoring.firstUsd;
-  return { ...ledger, restoredUsd: taken ? restoredUsd : ledger.restoredUsd, restoring: null };
+  return { ...ledger, restoredUsd: taken ? Math.min(restoredUsd, ledger.restoring.previousUsd) : ledger.restoredUsd, restoring: null };
 }
 
 export function foldCost(ledger: CostLedger, event: SessionEvent): CostLedger {

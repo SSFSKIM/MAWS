@@ -134,7 +134,7 @@ describe('digest fold', () => {
     }
     expect(totals).toEqual([0.3, 0.3, 0.35, 0.37]);
     // a first total below the restored figure: what the process restored is the transcript's to say (restoreCost)
-    expect(ledger).toEqual({ finishedUsd: 0.3, restoredUsd: 0, runningUsd: 0.07, awaitingFirst: false, signalled: false, restoring: { firstUsd: 0.05 } });
+    expect(ledger).toEqual({ finishedUsd: 0.3, restoredUsd: 0, runningUsd: 0.07, awaitingFirst: false, signalled: false, restoring: { firstUsd: 0.05, previousUsd: 0.3 } });
   });
 
   // Each journal's result totals as the engine reported them, one process per journal, an exit between processes.
@@ -185,7 +185,7 @@ describe('digest fold', () => {
     it('a first total below the restored figure: the older figure it restored, not zero (the restored part counted twice)', () => {
       const ledger = ledgerAfter(FIRST + 0.001); // a cheaper turn than the killed process's
       expect(costOf(ledger)).toBeCloseTo(SECOND + FIRST + 0.001, 12); // the ledger's own rule
-      expect(ledger.restoring).toEqual({ firstUsd: FIRST + 0.001 });
+      expect(ledger.restoring).toEqual({ firstUsd: FIRST + 0.001, previousUsd: SECOND });
       expect(costOf(restoreCost(ledger, FIRST))).toBeCloseTo(SECOND + 0.001, 12);
       expect(restoreCost(ledger, FIRST).restoring).toBeNull();
     });
@@ -196,6 +196,13 @@ describe('digest fold', () => {
       expect(costOf(restoreCost(ledger, FIRST))).toBeCloseTo(FIRST + 2 * TURN, 12);
     });
 
+    it('a process a signal ended after it recorded a total above its last sample (stopped mid-turn, its shutdown past the stop ladder): that spend is kept', () => {
+      const recorded = SECOND + 0.0005; // spent after its last sample, then recorded at its shutdown before the SIGKILL
+      const ledger = ledgerAfter(recorded + TURN); // the next resume restored the recorded figure
+      expect(costOf(ledger)).toBeCloseTo(recorded + TURN, 12); // the ledger's own rule: the unsampled 0.0005 is counted
+      expect(costOf(restoreCost(ledger, recorded))).toBeCloseTo(recorded + TURN, 12); // the last sample stays the restored part
+    });
+
     it('after an exit that recorded its total and a first total above it, nothing is read', () => {
       expect(ledgerAfter(SECOND + TURN, { signal: null, code: 0, reason: 'quit' }).restoring).toBeNull();
     });
@@ -204,7 +211,7 @@ describe('digest fold', () => {
       // pass2/resume-live-second: resumed while its holder still ran, which recorded 0.061483 at its exit afterwards
       const live = costLedger(emptyDigest(APP));
       foldEvents(emptyDigest(APP), new Set(), processes('pass2/resume-live-holder', 'pass2/resume-live-second').flat().slice(0, -1), live);
-      expect(live.restoring).toEqual({ firstUsd: expect.closeTo(0.0060484, 12) });
+      expect(live.restoring).toEqual({ firstUsd: expect.closeTo(0.0060484, 12), previousUsd: expect.closeTo(0.061483, 12) });
       expect(costOf(restoreCost(live, 0.061483))).toBeCloseTo(0.061483 + 0.0060484, 12);
       expect(costOf(restoreCost(live, null))).toBeCloseTo(0.061483 + 0.0060484, 12);
       expect(restoreCost(live, null).restoring).toBeNull();
