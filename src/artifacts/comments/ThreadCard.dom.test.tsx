@@ -270,6 +270,24 @@ describe('the keys on a focused card', () => {
     expect(document.activeElement).toBe(within(card()).getByRole('textbox', { name: 'Reply' }));
   });
 
+  it('R on an inactive compacted card activates it, as a click does, and focuses the reply field once it is active', () => {
+    render(<Host />);
+    const card = screen.getByRole('group');
+    card.focus();
+    expect(within(card).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    expect(press(card, 'r')).toBe(true);
+    expect(card.getAttribute('aria-current')).toBe('true');
+    expect(document.activeElement).toBe(within(card).getByRole('textbox', { name: 'Reply' }));
+  });
+
+  it('R activates nothing on a resolved or read-only card', () => {
+    const { card, on, view } = show({ thread: thread({ status: 'resolved' }) });
+    expect(press(card(), 'r')).toBe(false);
+    view.rerender(<ThreadCard thread={thread()} active={false} compact readOnly draft="" {...on} />);
+    expect(press(card(), 'r')).toBe(false);
+    expect(on.onActivate).not.toHaveBeenCalled();
+  });
+
   it('E resolves an open thread and reopens a resolved one; not read-only', () => {
     const { card, on, view } = show();
     expect(press(card(), 'e')).toBe(true);
