@@ -14,6 +14,7 @@ import type { AppSessionId, AttentionId, RequestId, SessionId, ToolUseId } from 
 import { PANE_ANSWER_MS } from '@shared/maws/panes';
 import { askSteerText } from '@shared/maws/ask';
 import { MAWS_TOOL_ANNOTATIONS, mawsToolList, TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
+import { MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions'; // P4-B4
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadJournal } from '../../test/support/fixtures';
@@ -82,7 +83,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
   it('answers the handshake and lists the twelve tools with their annotations', async () => {
     const run = await mawsSession();
     const init = await run.answered(run.mcp({ id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } } }));
-    expect(init.result).toEqual({ protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: '0.9.0' } });
+    expect(init.result).toEqual({ protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: '0.9.0' }, instructions: MAWS_SERVER_INSTRUCTIONS });
     expect(await run.answered(run.mcp({ method: 'notifications/initialized' }))).toEqual({ jsonrpc: '2.0', result: {}, id: 0 });
     const list = await run.answered(run.mcp({ id: 1, method: 'tools/list' }));
     expect(list.result!.tools).toEqual(mawsToolList());
@@ -771,7 +772,7 @@ describe('an app replay of pass3/p1-sdk-mcp-roundtrip (E0a Q1)', () => {
     expect((initOut.frame as { request: Record<string, unknown> }).request.sdkMcpServers).toEqual(['maws']);
     // the host's own answers to seqs 5, 10, 13 and 71 (the replay matched each against seqs 6, 11, 14 and 72)
     const answerTo = (seq: number) => (journal.rows.find((r) => r.direction === 'out' && (r.frame as { type: string; response?: { request_id?: string } }).response?.request_id === recorded(seq).request_id)?.frame as { response: { response: { mcp_response: Rpc } } } | undefined)?.response.response.mcp_response;
-    expect(answerTo(5)).toEqual({ jsonrpc: '2.0', id: 0, result: { protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: 'unknown' } } });
+    expect(answerTo(5)).toEqual({ jsonrpc: '2.0', id: 0, result: { protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: 'unknown' }, instructions: MAWS_SERVER_INSTRUCTIONS } });
     expect(answerTo(10)).toEqual({ jsonrpc: '2.0', result: {}, id: 0 });
     expect(answerTo(13)).toEqual({ jsonrpc: '2.0', id: 1, result: { tools: mawsToolList() } });
     expect(answerTo(71)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true } });

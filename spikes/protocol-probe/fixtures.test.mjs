@@ -379,3 +379,67 @@ test('pass3 p2-c3-subagent-ask: each subagent ask is framed with its parent befo
   assert.ok(use);assert.equal(use.name,'mcp__maws__ask');assert.match(use.parent,/^toolu_/);assert.ok(use.seq<call.seq);}
  assert.ok(!rows.some(r=>r.frame.type==='control_request'&&r.frame.request.subtype==='can_use_tool'));
 });
+// P4-B4 (docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md, M0 and M3; the P4 spec §4.6, R-2): what the pinned
+// engine sends the model for MAWS's `maws` server, recorded against the scripted Messages API stand-in (stub-api.mjs,
+// nothing spent). The served list and paragraph are scenarios/pass3/p4-maws-tools.json, which a unit test pins to
+// src/shared/maws/tools.ts and instructions.ts, so these checks hold the wire to MAWS's own X33 texts.
+const dir4=new URL('./fixtures/p4/',import.meta.url);
+const load4=n=>readFileSync(new URL(n+'.jsonl',dir4),'utf8').trim().split('\n').map(JSON.parse);
+const served4=JSON.parse(readFileSync(new URL('./scenarios/pass3/p4-maws-tools.json',import.meta.url),'utf8'));
+const B4=['p4-b4-instructions','p4-b4-owner-style','p4-b4-append','p4-b4-no-tool-search','p4-b4-resume-first','p4-b4-resume'];
+const meta4=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+const mainRequests4=rows=>meta4(rows,'stub_requests')[0].requests.filter(q=>q.main);
+// The engine's context message (role system inside `messages`) of a request, as the stub recorded it.
+const contextText4=q=>q.messages.filter(m=>m.role==='system').flatMap(m=>m.blocks).map(b=>b.text??'').join('\n');
+for(const name of B4)test('p4/'+name+' is ordered NDJSON with correlated replies, P4-B4 provenance, the owner file unchanged and nothing spent',()=>{
+ const rows=load4(name);let seq=0;const pending=new Set();const answered=new Set();
+ for(const row of rows){assert.equal(row.seq,++seq);const f=row.frame;
+  if(f.type==='control_request')pending.add(row.direction+':'+f.request_id);
+  // 2.1.304 echoes the probe's answers to its handshake mcp_message requests back on stdout (Surprise 4 of the B4 document)
+  if(f.type==='control_response'&&row.direction==='in'&&answered.has(f.response.request_id))continue;
+  if(f.type==='control_response'&&row.direction==='out')answered.add(f.response.request_id);
+  if(f.type==='control_response')assert.ok(pending.delete((row.direction==='in'?'out':'in')+':'+f.response.request_id));
+  assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
+ assert.equal(pending.size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-B4');assert.equal(prov.served,'p4-maws-tools.json');assert.match(prov.pin,/^[0-9a-f]{40}$/);
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ assert.ok(meta4(rows,'spend')[0].result.total_cost_usd<0.0001);
+});
+test('p4 the maws server lists artifact_search exactly as MAWS describes it, read-only, and the engine connects it',()=>{
+ const rows=load4('p4-b4-instructions');
+ const listed=rows.find(r=>r.direction==='out'&&r.frame.type==='control_response'&&r.frame.response.response?.mcp_response?.result?.tools)?.frame.response.response.mcp_response.result.tools;
+ const search=listed.find(t=>t.name==='artifact_search');const expected=served4.tools.find(t=>t.name==='artifact_search');
+ assert.deepEqual(search,expected);assert.equal(search.annotations.readOnlyHint,true);assert.ok(search.description.length<4096);
+ const init=meta4(rows,'init_tools')[0];assert.ok(init.maws.includes('mcp__maws__artifact_search'));assert.deepEqual(init.mcp_servers,[{name:'maws',status:'connected',source:'sdk'}]);
+ // without tool search the model is given it loaded, with the description and schema as listed
+ const loaded=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools.find(t=>t.name==='mcp__maws__artifact_search');
+ assert.equal(loaded.defer_loading,null);assert.equal(loaded.description,expected.description);assert.deepEqual(loaded.input_schema.properties,expected.inputSchema.properties);
+});
+test('p4 R-2: the server\'s instructions reach the model under ## maws in the engine\'s context message, the owner\'s style case and tool search off included',()=>{
+ for(const name of ['p4-b4-instructions','p4-b4-owner-style','p4-b4-no-tool-search','p4-b4-append']){
+  const q=mainRequests4(load4(name))[0];const context=contextText4(q);
+  assert.ok(context.includes('# MCP Server Instructions'),name);assert.ok(context.includes('## maws\n'+served4.instructions),name);
+  assert.equal(q.system.mcpInstructions,false,name); // not in the top-level system prompt
+ }
+ const style=contextText4(mainRequests4(load4('p4-b4-owner-style'))[0]);assert.ok(style.includes('# Output Style: probe-to-human'));
+ const append=mainRequests4(load4('p4-b4-append'))[0];assert.equal(append.system.linkMarker,true);assert.equal(append.system.contractMarker,true); // route (a)'s text would land in the top-level system
+});
+test('p4 deferral (for P4-A3): under tool search the maws tools are deferred and named for ToolSearch, alwaysLoad loads one, a direct call still runs and the model reads its JSON text',()=>{
+ const rows=load4('p4-b4-instructions');const [first,second]=mainRequests4(rows);
+ const names=first.tools.map(t=>t.name);assert.ok(names.includes('ToolSearch'));
+ assert.ok(names.includes('mcp__maws__show_pane')); // listed with _meta["anthropic/alwaysLoad"]: true
+ for(const tool of served4.tools.filter(t=>t.name!=='show_pane'))assert.ok(!names.includes('mcp__maws__'+tool.name),tool.name);
+ const context=contextText4(first);const listing=context.slice(context.indexOf('The following deferred tools are now available via ToolSearch'));
+ assert.ok(listing.includes('mcp__maws__artifact_search'));
+ const calls=meta4(rows,'server_calls')[0].calls;assert.deepEqual(calls,[{name:'artifact_search',arguments:{query:'로드맵'}}]);
+ const result=second.messages.flatMap(m=>m.blocks).find(b=>b.type==='tool_result'&&b.tool_use_id==='toolu_stub_search');
+ assert.equal(result.is_error,false);assert.equal(JSON.parse(result.content[0].text).status,'found');
+ const all=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools.map(t=>t.name);
+ for(const tool of served4.tools)assert.ok(all.includes('mcp__maws__'+tool.name),tool.name);
+});
+test('p4 resume: a resumed session keeps the paragraph it was first given; the server\'s changed text is not announced',()=>{
+ const q=mainRequests4(load4('p4-b4-resume'))[0];const context=contextText4(q);
+ assert.ok(context.includes('## maws\n'+served4.instructions));
+ assert.ok(!JSON.stringify(q).includes('RESUMED-PARAGRAPH-CHANGED'));
+});

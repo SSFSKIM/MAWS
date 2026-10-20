@@ -15,7 +15,7 @@ What it is for: the owner says "the roadmap we discussed last week" in a fresh s
 - [x] 2026-10-20 04:40Z M0 — the probes (R-2 and the deferral probe), zero spend: `spikes/protocol-probe/fixtures/p4/p4-b4-*.jsonl`, route (b) chosen (Decision Log 1).
 - [x] 2026-10-20 05:35Z M1 — the shared contract (457dd1ee3; reviewer-medium on opus: correct, one P3 finding taken into M4)
 - [ ] M2 — the host mirror and the tool
-- [ ] M3 — the instruction on the wire and the final fixtures
+- [ ] M3 — the instruction on the wire and the final fixtures (executed by the controller; in review)
 - [ ] M4 — fragments in the renderer and on `show_pane`
 - [ ] M5 — the live run and R-3
 - [ ] M6 — gates, the whole-branch review, the hand-back
@@ -117,6 +117,7 @@ The evidence an embeddings row would need is the misses of lexical search on the
 1. 2026-10-20 (M0). On 2.1.304 an SDK server's `instructions` and the session's output style are not in the top-level `system`; the engine writes both into a `system`-role context message second in `messages`, after the environment block. `--append-system-prompt` text is at the end of the top-level `system`. Both reach the model; the route choice does not turn on position.
 2. 2026-10-20 (M0). A resumed session keeps the paragraph it was first given: the engine replays the announcement from the transcript and did not announce the server's changed text. A wording change to the paragraph reaches new sessions only; a session started before this lands is given the paragraph at its next resume (nothing announced for `maws` yet).
 3. 2026-10-20 (M0). Under MAWS's launch (`ENABLE_TOOL_SEARCH=true` behind the gateway) every maws tool is deferred: a session has no artifact tool in its tool list until it calls ToolSearch, so "a session with no artifact tool loaded" is every session's start. `_meta["anthropic/alwaysLoad"]: true` on an SDK server's tool loads it (static reading `cli.pretty.js:652053`; fixture `p4-b4-instructions`). A direct call to a deferred maws tool still ran.
+4. 2026-10-20 (M3). 2.1.304 echoes the host's answers to the server's handshake requests (`initialize`, `notifications/initialized`, `tools/list`) back on stdout as `control_response` frames under the same request ids; `tools/call` answers are not echoed. MAWS's normaliser ignores a response to a request it did not send (`normalizer.ts` `inboundResponse`), so nothing changes in the product; the fixture check tolerates the echo.
 
 ## Decision Log
 
