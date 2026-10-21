@@ -20,6 +20,10 @@
 // an edit's caret goes when it begins (`editText`'s placement, which the text box takes once), whether the stage owns the
 // keyboard (ARMED exists only then), whether a gesture is dragging, and whether an input method is composing in the box.
 // P3-F F9's typed keys retire: the armed box is focused before the first key.
+// P4-B2 (D17): the replica's hold has two reasons, an input method composing and a gesture dragging, and stands while
+// either does. A drop's re-assert (the gesture's last values written again where a held remote write moved them) runs
+// after the flush that applies what the gesture held: in the gesture's own step, or, when a composition kept the hold
+// past the drop, in a step of its own when that composition ends.
 import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
 import { hasSlide, readNotes } from '../../yjs/slides';
@@ -67,7 +71,10 @@ export interface DeckSessionState {
 export type TextPlacement = { kind: 'all' } | { kind: 'end' } | { kind: 'keep' } | { kind: 'point'; x: number; y: number } | { kind: 'word'; x: number; y: number };
 
 export interface DeckSessionOptions {
-  /** The replica's composition hold (A's provider, parent Decision Log 33 to 35): set while an IME composes. */
+  /**
+   * The replica's hold (A's provider, parent Decision Log 33 to 35): set while an IME composes, and (P4-B2 D17) while a
+   * gesture drags.
+   */
   holdRemote?: (on: boolean) => void;
   /**
    * Fix wave 1: the replica's awareness, and who this replica is (`name`, `color` an author colour's custom property,
@@ -111,6 +118,9 @@ export interface DeckTimings {
 
 const TYPING_PAUSE_MS = 1_000; // typing in one field after this long a pause starts a new undo step
 
+/** P4-B2 (D17): why the replica's remote frames wait: an input method composing, a gesture dragging. */
+type HoldReason = 'composition' | 'gesture';
+
 export class DeckSession {
   readonly undo: DeckUndo;
   private state: DeckSessionState;
@@ -122,6 +132,8 @@ export class DeckSession {
   private writesHeld = false; // B4: the editor shows a version in place of the live deck
   private readonly notesDrafts = new Map<string, NotesDraft>(); // L203
   private placement: { id: string; at: TextPlacement } | null = null; // P4-B2: where the edit's caret goes, taken once
+  private readonly holding = new Set<HoldReason>(); // P4-B2 (D17): the hold stands while any reason does
+  private reasserts: (() => void)[] = []; // D17: the drops' re-asserts waiting for the hold's flush
 
   constructor(
     readonly doc: Doc,
@@ -266,7 +278,35 @@ export class DeckSession {
 
   /** The composition hold: remote updates wait while an IME composes in the text box (no-op without a replica). */
   holdRemote(on: boolean): void {
-    this.options.holdRemote?.(on);
+    this.hold('composition', on);
+  }
+
+  /**
+   * P4-B2 (D17): one replica hold for two reasons, standing while either does. A reason beginning sets it again, which
+   * restarts the provider's 5 s cap; the last reason ending releases it (the held frames applied) and then runs the
+   * drops' re-asserts that waited for that flush, while the session takes writes.
+   */
+  private hold(reason: HoldReason, on: boolean): void {
+    if (on) {
+      this.holding.add(reason);
+      this.options.holdRemote?.(true);
+      return;
+    }
+    if (!this.holding.delete(reason) || this.holding.size > 0) return;
+    const reasserts = this.reasserts.splice(0);
+    try {
+      this.options.holdRemote?.(false);
+    } finally {
+      // the provider applied its frames even when a listener of them threw
+      const run = () => {
+        for (const reassert of reasserts) if (this.writable()) reassert();
+      };
+      // the drop's own re-assert lands in its gesture's step (endDrag cuts after it); one a composition put off, alone
+      if (reasserts.length > 0) {
+        if (reason === 'gesture') run();
+        else this.step(run);
+      }
+    }
   }
 
   /** Selects elements of the current slide (in pick order); ends a text edit whose element is no longer selected. */
@@ -306,15 +346,27 @@ export class DeckSession {
     this.set({ composing });
   }
 
-  /** A drag: the writes between `begin` and `end` are one undo step. */
+  /** A drag: the writes between `begin` and `end` are one undo step. P4-B2 (D17): the replica's remote frames wait. */
   beginDrag(): void {
     this.typingIn = null;
     this.undo.cut();
+    this.hold('gesture', true);
     this.set({ dragging: true });
   }
-  endDrag(): void {
-    this.undo.cut();
-    this.set({ dragging: false });
+  /**
+   * The drop. P4-B2 (D17): the gesture's hold reason ends, and with it (no composition holding) the hold, its frames
+   * applied before the step's closing cut; `reassert` then writes the gesture's last values again where a held write
+   * moved them, in the gesture's step, if the session still takes writes (it re-checks its own targets). A composition
+   * still holding keeps the hold, and the re-assert waits for its flush. A throw leaves no reason, step or drag standing.
+   */
+  endDrag(reassert?: () => void): void {
+    try {
+      if (reassert && this.holding.has('gesture')) this.reasserts.push(reassert);
+      this.hold('gesture', false);
+    } finally {
+      this.undo.cut();
+      this.set({ dragging: false });
+    }
   }
 
   undoStep(): void {
@@ -362,6 +414,12 @@ export class DeckSession {
 
   dispose(): void {
     this.disposed = true; // B4: an awaited edit still running writes nothing
+    // D17: a drag or a composition the tab closed on holds nothing after it, and re-asserts nothing
+    this.reasserts = [];
+    if (this.holding.size > 0) {
+      this.holding.clear();
+      this.options.holdRemote?.(false);
+    }
     const presence = this.options.presence;
     if (presence && presence.awareness.getLocalState()) presence.awareness.setLocalStateField('deck', null);
     this.stopUndo();
