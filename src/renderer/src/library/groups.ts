@@ -4,6 +4,7 @@
 // this year, then Older. By Space shows one group per Space, by name, then No Space. Rows keep the order main answered
 // (newest first); a group is present only when it has rows, but By Space can keep a Space that has none, so the owner
 // sees and manages every Space.
+import { dateTimeFormat } from '@shared/app/date-format';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { GROUP_COPY } from './copy';
 
@@ -14,10 +15,10 @@ export interface RowGroup {
   space?: { id: string; name: string } | null; // By Space: the group's Space, null for No Space
 }
 
-const LOCALE = 'en-US'; // the group titles sit among English copy
-const weekday = new Intl.DateTimeFormat(LOCALE, { weekday: 'long' });
-const month = new Intl.DateTimeFormat(LOCALE, { month: 'long' });
-const monthYear = new Intl.DateTimeFormat(LOCALE, { month: 'long', year: 'numeric' });
+// the group titles in the display locale, as every date MAWS shows (`@shared/app/date-format`)
+const weekday = dateTimeFormat({ weekday: 'long' });
+const month = dateTimeFormat({ month: 'long' });
+const monthYear = dateTimeFormat({ month: 'long', year: 'numeric' });
 
 const midnight = (t: number): number => {
   const d = new Date(t);

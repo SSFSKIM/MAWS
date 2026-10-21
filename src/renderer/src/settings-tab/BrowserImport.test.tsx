@@ -16,7 +16,7 @@ import { FAILS_ID, IMPORT_ID, importBridge, RECORD, WALLET_ID, type ImportBridge
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { browser } from '../tools/browser/store';
 import { BrowserImport } from './BrowserImport';
-import { formatDate } from '../app/date-format';
+import { formatDate } from '@shared/app/date-format';
 
 const A = 'app-a' as AppSessionId;
 let b: ImportBridge;

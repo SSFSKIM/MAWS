@@ -1,10 +1,11 @@
 // The history list's model (D10 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; §4.7 of the parent): the
 // versions grouped by day newest first with runs of automatic versions folded, the Named only filter, each row's title
 // and one-line summary, an author from an actor key, and the version "See N new changes" compares the live document
-// with. Dates in the United States frame (the owner's Decision Log 43). P4 W1-B (the tracker's "P4 version history
+// with. Dates in the display locale (the owner's Decision Log 43; English throughout, P4 Decision Log 4). P4 W1-B (the tracker's "P4 version history
 // lines"): a turn's summary is stored as the tools' own lines, which name blocks as ^id and comments as c:id; the row
 // reads them in words, naming each block and comment as the live document holds it (`SummaryWords`), so the stored
 // provenance line stays as the tools wrote it.
+import { dateTimeFormat, formatClock, formatDayTime } from '@shared/app/date-format';
 import { actorDisplay, type Actor, type AuthorColor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactVersion } from '@shared/artifacts/version';
@@ -20,11 +21,8 @@ export interface DayGroup {
   entries: Entry[];
 }
 
-const LOCALE = 'en-US';
-const TIME = new Intl.DateTimeFormat(LOCALE, { hour: 'numeric', minute: '2-digit' });
-const DAY = new Intl.DateTimeFormat(LOCALE, { month: 'long', day: 'numeric' });
-const DAY_YEAR = new Intl.DateTimeFormat(LOCALE, { month: 'long', day: 'numeric', year: 'numeric' });
-const WHEN = new Intl.DateTimeFormat(LOCALE, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const DAY = dateTimeFormat({ month: 'long', day: 'numeric' });
+const DAY_YEAR = dateTimeFormat({ month: 'long', day: 'numeric', year: 'numeric' });
 
 const dayKey = (time: number): string => {
   const d = new Date(time);
@@ -61,10 +59,10 @@ export function groupVersions(versions: readonly ArtifactVersion[], { now, named
 }
 
 /** A row's title: its label, else its time. */
-export const versionTitle = (version: ArtifactVersion): string => version.label ?? TIME.format(version.at);
+export const versionTitle = (version: ArtifactVersion): string => version.label ?? formatClock(version.at);
 
 /** A date and time (epoch ms) as the preview's heading and Show editors write it: "Oct 12, 9:41 AM". */
-export const formatWhen = (at: number): string => WHEN.format(at);
+export const formatWhen = (at: number): string => formatDayTime(at);
 
 /**
  * A row's one line: the turn's summary in words (`words` names its blocks and comments; without it, or for one gone,

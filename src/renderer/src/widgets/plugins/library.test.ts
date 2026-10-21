@@ -187,13 +187,13 @@ describe('the library model: the row’s words', () => {
   });
 
   it('dates relative under a week, then the month and day, the year added when it is not this year', () => {
-    // in the system locale (3일 전, 10월 2일; the Korean Desktop's words), as `app/date-format.test.ts` pins
-    const system = (at: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(undefined, options).format(Date.parse(at));
+    // in English (3 days ago, Oct 2) under the Korean system locale the suite runs in (P4 DL 4)
+    const english = (at: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', options).format(Date.parse(at));
     expect(dateWords(ago(3), NOW)?.text).toBe(REL.ago(3, 'day'));
     expect(dateWords(ago(6.9), NOW)?.text).toBe(REL.ago(6, 'day'));
-    expect(dateWords(ago(7), NOW)?.text).toBe(system(ago(7), { month: 'short', day: 'numeric' }));
-    expect(dateWords('2025-10-03T12:00:00', NOW)?.text).toBe(system('2025-10-03T12:00:00', { month: 'short', day: 'numeric', year: 'numeric' }));
-    expect(dateWords(ago(3), NOW)?.title).toBe(system(ago(3), { dateStyle: 'medium', timeStyle: 'short' })); // the full date and time in the tooltip
+    expect(dateWords(ago(7), NOW)?.text).toBe(english(ago(7), { month: 'short', day: 'numeric' }));
+    expect(dateWords('2025-10-03T12:00:00', NOW)?.text).toBe(english('2025-10-03T12:00:00', { month: 'short', day: 'numeric', year: 'numeric' }));
+    expect(dateWords(ago(3), NOW)?.title).toBe(english(ago(3), { dateStyle: 'medium', timeStyle: 'short' })); // the full date and time in the tooltip
     expect(dateWords(null, NOW)).toBeNull();
     expect(dateWords('not a date', NOW)).toBeNull();
   });

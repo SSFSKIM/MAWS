@@ -6,18 +6,17 @@
 // `afterRestore` and the `restore` version, all in one commit, then `restored` (frame 101) to every connection. A byte
 // kind restores by writing the version's bytes as a new write with a `restore` version.
 import { applyV2, newDoc, revertUpdate, stateV2 } from '@artifacts/yjs';
+import { formatDayTime } from '@shared/app/date-format';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import { isDocKind } from '@shared/artifacts/entity';
 import type { ContentRef } from './bytes';
 import type { ArtifactStore, EntityRow, InFrame } from './store';
 import type { VersionStore } from './versions';
 
-const WHEN = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-
 type VersionRow = NonNullable<ReturnType<VersionStore['get']>>;
 
-// "Restored from <the version's label, else its time>".
-export const restoreLabel = (version: Pick<VersionRow, 'label' | 'at'>): string => `Restored from ${version.label ?? WHEN.format(version.at)}`;
+// "Restored from <the version's label, else its time>", the time in the display locale (`@shared/app/date-format`).
+export const restoreLabel = (version: Pick<VersionRow, 'label' | 'at'>): string => `Restored from ${version.label ?? formatDayTime(version.at)}`;
 
 // `inFrame` (the store's recording seam) runs in the savepoint of the restore's own write, after its `restore` version.
 export async function restoreArtifact(store: ArtifactStore, row: EntityRow, version: VersionRow, actor: Actor, inFrame?: InFrame<{ revision: number; versionId: number }>): Promise<{ revision: number; versionId: number }> {
