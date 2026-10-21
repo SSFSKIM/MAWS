@@ -38,6 +38,8 @@ const MOVES = 200;
 const MOVE_EVERY_MS = 16;
 const PUBLISH_EVERY_MS = 700;
 const PAIRS = 4; // the measured run's control and agent trials, alternating
+/** The pointer's step `i` of a drag out and back: out for the first half of the moves, back over the second. */
+const outAndBack = (i: number) => (i <= MOVES / 2 ? i : MOVES - i);
 const TITLE = 'Bench drag';
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const median = (xs: number[]) => {
@@ -122,8 +124,11 @@ async function dragOnce(page: Page, tab: Locator, id: string, agent: DeckAgent, 
   try {
     await page.mouse.move(from.x, from.y);
     await page.mouse.down();
+    // out and back (the first half in `direction`): every trial starts where the picture was drawn at first, since a
+    // drift of 160 px a trial took it off the slide drawn at the default chrome (about 256 px wide) after two trials,
+    // and every later press missed it (run 39675318425: trials 3 to 8 wrote nothing)
     for (let i = 1; i <= MOVES; i++) {
-      await page.mouse.move(from.x + direction * i * 0.8, from.y + (i % 40));
+      await page.mouse.move(from.x + direction * outAndBack(i) * 0.8, from.y + (i % 40));
       await page.waitForTimeout(MOVE_EVERY_MS);
     }
     await page.mouse.up();

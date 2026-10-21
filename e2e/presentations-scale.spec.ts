@@ -263,8 +263,10 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       try {
         await page.mouse.move(from.x, from.y);
         await page.mouse.down();
+        // out and back (P4-B2 M0's trials: six drags in place of one), so every trial starts on the picture where it was
+        // first drawn: a drift of 160 px a trial took it off the slide and later presses missed it (run 39675318425)
         for (let i = 1; i <= 200; i++) {
-          await page.mouse.move(from.x + (k % 2 === 0 ? -i : i) * 0.8, from.y + (i % 40));
+          await page.mouse.move(from.x + (k % 2 === 0 ? -1 : 1) * (i <= 100 ? i : 200 - i) * 0.8, from.y + (i % 40));
           await page.waitForTimeout(16);
         }
         await page.mouse.up();
