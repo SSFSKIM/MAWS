@@ -158,12 +158,18 @@ export class HubDouble {
     return double;
   }
 
+  /**
+   * Ends every connection, not only the idle ones `close()` ends by itself: a browser still open at teardown (a test's
+   * page outlives its hub) can hold a connection it opened and never sent on, which Node's `close()` waits on for as long
+   * as the browser keeps it (Chrome keeps an unused one 60 s or more).
+   */
   async close(): Promise<void> {
     for (const socket of this.allSockets()) socket.terminate();
     this.wss.close();
+    const closed = [this.server, this.access].map((server) => new Promise<void>((resolve) => server.close(() => resolve())));
+    this.server.closeAllConnections();
     this.access.closeAllConnections();
-    await new Promise<void>((resolve) => this.access.close(() => resolve()));
-    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    await Promise.all(closed);
   }
 
   // The log.
