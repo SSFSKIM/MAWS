@@ -123,10 +123,16 @@ export function SplitCardLayer() {
 // will open it, sized as the card will be (what it will sit over: the pane beside the floating one). Nothing of the
 // session mounts for it: S stays in its pane, held at 0 px, and its card mounts once, on release (its Decision Log 5).
 // The main area renders it in the card layer's cell while armed only, so a disarm, a cancel or the release removes it.
+// None beside a Browser tab: there the card lies on the column the page's pane reserves on release, and while armed the
+// page's native view covers the whole pane, so no outline drawn here would show where the card goes.
 export function SplitCardOutline({ floating }: { floating: 0 | 1 }) {
   const area = useRef<HTMLDivElement>(null);
   const bounds = useSize(area);
-  const stored = useLayout((s) => s.regions.floatingCard[mainCardKey(currentSet(s.main).panes[floating === 0 ? 1 : 0]?.activeTabId ?? '')]);
+  const other = (s: { main: Parameters<typeof currentSet>[0] }) => currentSet(s.main).panes[floating === 0 ? 1 : 0];
+  const beside = useLayout((s) => other(s)?.activeTabId ?? '');
+  const overPage = useLayout((s) => other(s)?.tabs.find((t) => t.id === beside)?.kind === 'browser');
+  const stored = useLayout((s) => s.regions.floatingCard[mainCardKey(beside)]);
+  if (overPage) return null;
   const size = bounds && placeCard(stored, bounds, 'split');
   return (
     <div ref={area} aria-hidden className="pointer-events-none relative z-20 min-h-0 min-w-0" style={{ gridRow: 3, gridColumn: '1 / -1' }}>

@@ -157,6 +157,20 @@ describe('the armed drag’s outline of the card', () => {
     expect(card()).toBeNull();
     expect(useLayout.getState().main).toBe(before);
   });
+
+  // Beside a Browser tab the card lies on the column the page's pane reserves, and the page's native view covers the
+  // pane while armed: no outline predicts a place it cannot show.
+  it('draws none beside a Browser tab', () => {
+    const page: TabRef = { id: tabId({ kind: 'browser', appSessionId: B, browserTabId: 'b_0123456789ab' }), kind: 'browser', appSessionId: B, browserTabId: 'b_0123456789ab', pinned: false };
+    useLayout.setState({ main: splitOf(page) });
+    shell();
+    press();
+    at(150);
+    expect(columns()).toBe('0px 1px minmax(0, 1fr)'); // armed
+    expect(outline()).toBeNull();
+    act(() => void fireEvent.pointerUp(divider(), { pointerId: 1, clientX: 150 }));
+    expect(card()).not.toBeNull();
+  });
 });
 
 describe('the split’s floating card in the Shell', () => {
