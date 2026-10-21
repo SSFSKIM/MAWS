@@ -55,7 +55,8 @@ type Request = {
 
 /**
  * The shortest overlap `spliced` joins at. A shorter one may be chance — text that repeats a line's end, or a lone
- * character — where the gap streamed as much as the tail holds, or nearly, and nothing drawn overlaps it.
+ * character — where the gap streamed as much as the tail holds, or nearly, and nothing drawn overlaps it. A second
+ * overlap this long leaves which one the gap streamed unknown, so `spliced` joins only where there is one alone.
  */
 const SPLICE_MIN = 256;
 
@@ -63,9 +64,10 @@ const SPLICE_MIN = 256;
  * `drawn`, a block's text as drawn before a reconnect, with `tail`, the fresh snapshot's copy of the block cut to its
  * last characters, spliced on: the text from `drawn`'s start through the snapshot's cut. `drawn` runs from the block's
  * start, or from a tail an earlier snapshot gave, to a point the tail's watermark has passed, so where the gap streamed
- * less than the tail holds the tail starts inside `drawn`, its first characters `drawn`'s last. They join at the longest
- * such overlap: text that repeats can overlap more than once, and every join then reads alike. Null when they overlap by
- * fewer than SPLICE_MIN characters: the gap streamed past what `drawn` reaches, or may have, and the tail alone is drawn.
+ * less than the tail holds the tail starts inside `drawn`, its first characters `drawn`'s last. They join at that
+ * overlap when it is the only one of SPLICE_MIN characters or more. Null otherwise, and the tail alone is drawn: with
+ * none, the gap streamed past what `drawn` reaches, or may have; with more than one, as text that repeats can give,
+ * which one the gap streamed is unknown, and the longest can drop what it streamed.
  */
 function spliced(drawn: string, tail: string): string | null {
   // The longest prefix of `tail` that ends `drawn`, by Knuth–Morris–Pratt: the tail's failure function, then `drawn`'s
@@ -83,7 +85,8 @@ function spliced(drawn: string, tail: string): string | null {
     while (k > 0 && drawn.charCodeAt(i) !== tail.charCodeAt(k)) k = fail[k - 1];
     if (drawn.charCodeAt(i) === tail.charCodeAt(k)) k++;
   }
-  return k >= SPLICE_MIN ? drawn + tail.slice(k) : null;
+  // Every shorter overlap is a border of `tail`'s first `k` characters, so the next longest is `fail[k - 1]`.
+  return k >= SPLICE_MIN && fail[k - 1] < SPLICE_MIN ? drawn + tail.slice(k) : null;
 }
 
 const requestKey = (turnId: string, agentId: string | null, step: number) => `${turnId}\u0000${agentId ?? ''}\u0000${step}`;

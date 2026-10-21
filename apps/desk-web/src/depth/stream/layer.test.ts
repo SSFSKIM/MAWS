@@ -358,6 +358,14 @@ describe('the streaming layer', () => {
       layer.resume(tailOf(whole.slice(0, tailFrom + TAIL), 1), null, () => false);
       expect(layer.blocks(null)[0].text).toBe(whole.slice(tailFrom, tailFrom + TAIL));
     });
+
+    it('draws the tail alone when text that repeats overlaps the end drawn more than one way', () => {
+      // The longest overlap joins after 65,533 characters, where the gap streamed 5,003: it would drop 5,000 of them.
+      const layer = streamed('PREFIX:' + 'a'.repeat(90_000));
+      const later = 'PREFIX:' + 'a'.repeat(95_000) + 'END';
+      layer.resume(tailOf(later, 1), null, () => false);
+      expect(layer.blocks(null)[0].text).toBe(later.slice(-TAIL));
+    });
   });
 });
 
