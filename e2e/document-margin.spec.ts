@@ -216,7 +216,9 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await expect(entry(t1).getByRole('listitem').last()).toContainText('finance team');
     await expect(entry(t1)).toHaveAttribute('data-active', '');
     await expect(text.locator(`.comment-active.comment-${t1}`)).toHaveCount(1);
-    expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), 'the active card stays at its anchor').toBeLessThanOrEqual(2);
+    // P4-B1 (the follow-up wave): the owner's last keys owe the margin a pass, run once they pause (within 700 ms), so the
+    // anchor is read as the margin settles
+    await expect.poll(async () => Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), { message: 'the active card stays at its anchor' }).toBeLessThanOrEqual(2);
     await expect.poll(() => entryTop(t2), { message: 'the second card pushed below the grown first' }).toBeGreaterThan(t2Before + 20);
     // where the keyboard was and whether the editor survived the reply, read into the message (the mini's run is the
     // only evidence)

@@ -16,6 +16,7 @@ import { DocumentEditor, type DocumentRail } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
+import { MARGIN_SETTLE_MAX_MS, MARGIN_SETTLE_QUIET_MS } from './margin-settle';
 import { resetScene, resized, scene, shiftOf, stubCoords, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
 import { MarginThreads } from './MarginThreads';
 import { activeThread, commentDisplayKey, commentSelection, pinnedThread } from './plugins';
@@ -140,7 +141,10 @@ function comment(m: Mounted, id: string, needle: string, top: number, body = `Ab
 }
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80))); // use-threads' quiet moment (the panel's)
 const frame = () => act(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
-const type = (m: Mounted, text: string, at: string) => act(() => m.editor().view.dispatch(m.editor().state.tr.insertText(text, findPos(m.editor(), at))));
+// P4-B1 (the follow-up wave): past the edits' quiet, by when the pass they owe has run (margin-settle.ts; happy-dom has no
+// idle callback, so the pass is a task of its own right after the quiet)
+const afterEdits = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, MARGIN_SETTLE_QUIET_MS + 50)));
+const type =(m: Mounted, text: string, at: string) => act(() => m.editor().view.dispatch(m.editor().state.tr.insertText(text, findPos(m.editor(), at))));
 const margin = () => screen.queryByRole('region', { name: 'Comments' });
 const entry = (id: string) => document.querySelector<HTMLElement>(`[data-margin-entry="${id}"]`);
 const relayouts = () => Number(margin()?.getAttribute('data-relayouts') ?? 0);
@@ -148,6 +152,50 @@ const frames = () => Number(document.querySelector('.ds-doc')?.getAttribute('dat
 const reserve = () => margin()?.style.getPropertyValue('--doc-margin-reserve') ?? null;
 const cardWidth = () => margin()?.style.getPropertyValue('--doc-margin-card') ?? null; // P4-B1: the drawn card's width
 const overlap = () => margin()?.style.getPropertyValue('--doc-margin-overlap') ?? null;
+// P4-B1 (the follow-up wave): from now until `stop`, each entry's top as the passes wrote it, in order, with whether the
+// column animated when it was written (each record's value is the next record's old value, or the value at the end).
+// happy-dom reports an old value of '' as null, so `data-animate` (always '') is mirrored as `data-animate-seen`, on or
+// off, at each set and removal, and that is what is read
+function recordWrites(): { stop(): Array<{ id: string; top: number | null; animated: boolean }> } {
+  const root = margin()!;
+  const set = root.setAttribute.bind(root);
+  const remove = root.removeAttribute.bind(root);
+  const sets = vi.spyOn(root, 'setAttribute').mockImplementation((name, value) => {
+    set(name, value);
+    if (name === 'data-animate') set('data-animate-seen', 'on');
+  });
+  const removes = vi.spyOn(root, 'removeAttribute').mockImplementation((name) => {
+    remove(name);
+    if (name === 'data-animate') set('data-animate-seen', 'off');
+  });
+  const initially = root.hasAttribute('data-animate');
+  const seen: MutationRecord[] = [];
+  const observer = new MutationObserver((batch) => seen.push(...batch));
+  observer.observe(root, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-animate-seen', 'style'] });
+  return {
+    stop: () => {
+      const records = [...seen, ...observer.takeRecords()].filter((record) => (record.target === root ? record.attributeName === 'data-animate-seen' : (record.target as HTMLElement).dataset.marginEntry !== undefined));
+      observer.disconnect();
+      sets.mockRestore();
+      removes.mockRestore();
+      const value = (i: number) => {
+        const later = records.slice(i + 1).find((next) => next.target === records[i]!.target && next.attributeName === records[i]!.attributeName);
+        return later ? later.oldValue : (records[i]!.target as Element).getAttribute(records[i]!.attributeName!); // an old value of null: absent then
+      };
+      const out: Array<{ id: string; top: number | null; animated: boolean }> = [];
+      let animated = initially;
+      records.forEach((record, i) => {
+        if (record.target === root) return void (animated = value(i) === 'on');
+        const styled = document.createElement('div');
+        styled.setAttribute('style', value(i) ?? '');
+        const id = (record.target as HTMLElement).dataset.marginEntry!;
+        const top = topOf(styled);
+        if (out.findLast((w) => w.id === id)?.top !== top) out.push({ id, top, animated });
+      });
+      return out;
+    },
+  };
+}
 // ⌃⌘ and a key, as the keyboard sends it (activation.dom.test.tsx's: Ctrl off a Mac, one ctrlKey here)
 const chord = (editor: Editor, key: string): boolean => {
   const event = new KeyboardEvent('keydown', { key, code: `Key${key.toUpperCase()}`, ctrlKey: true, metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true });
@@ -212,7 +260,7 @@ describe('placement (P1 to P6) and the stack (L1, L2)', () => {
     await settle();
     scene.lines.set('t1', { top: 420, beforeTop: 400, height: 20 }); // before the position: the line above's end
     type(m, ' ', 'Owners');
-    await frame();
+    await afterEdits();
     expect(topOf(entry('t1'))).toBe(420 - scene.columnTop + MARGIN_CARD_INSET_PX);
   });
 });
@@ -276,27 +324,33 @@ describe('the pin (D2, LC-1 item 3)', () => {
 });
 
 describe('re-layout (R1 to R6)', () => {
-  it('an edit moves the card with its line in the same pass, without animation (R1), and a scroll runs no layout (R4)', async () => {
+  // P4-B1 (the follow-up wave): an edit owes the pass rather than running it in the frame that paints the edit; the card
+  // follows its line once the edits pause
+  it('an edit moves the card with its line once the edits pause, not in the edit’s frame, without animation (R1), and a scroll runs no layout (R4)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'track the budget', 300);
     await settle();
     const before = relayouts();
     scene.lines.set('t1', { top: 320, height: 20 }); // the line moved down one line
     act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'The plan'))));
-    await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    await frame();
+    expect(relayouts(), 'nothing measured in the edit’s frame').toBe(before);
+    expect(topOf(entry('t1'))).toBe(300 - scene.columnTop + MARGIN_CARD_INSET_PX);
+    await afterEdits();
     expect(topOf(entry('t1'))).toBe(320 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
     const after = relayouts();
-    expect(after).toBe(before + 1); // P4-B1: one pass per edit frame, run in the frame callback itself (D13's at most one)
+    expect(after).toBe(before + 1);
     const scroller = document.querySelector('.ds-doc')!;
     fireEvent.scroll(scroller);
-    await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    await frame();
     expect(relayouts()).toBe(after);
   });
 
-  // P4-B1 (review finding 1): the page counts the frame callbacks that ran (an edit's, an agent's, the layer's growth),
-  // so the scale gate reads the margin's passes per frame, not per keystroke; edits within one frame are one callback
-  it('counts the frame callbacks on the page, the margin never running more than one pass per frame (D13)', async () => {
+  // P4-B1 (review finding 1; the follow-up wave): the page counts the frame callbacks that ran (an edit's, an agent's, the
+  // layer's growth), against which the scale gate reads the margin's passes; edits in a run of frames run none in their
+  // frames, and one pass once they pause
+  it('counts the frame callbacks on the page; edits run no pass in their frames and one once they pause (D13)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'track the budget', 300);
     await settle();
@@ -306,17 +360,42 @@ describe('re-layout (R1 to R6)', () => {
       await frame();
     }
     expect(frames() - frames0).toBe(3);
-    expect(relayouts() - passes0).toBe(3);
+    expect(relayouts() - passes0).toBe(0);
     type(m, 'x', 'The plan');
     type(m, 'y', 'The plan'); // the same frame
     await frame();
     expect(frames() - frames0).toBe(4);
-    expect(relayouts() - passes0).toBe(4);
+    expect(relayouts() - passes0).toBe(0);
+    await afterEdits();
+    expect(relayouts() - passes0).toBe(1);
+    expect(Number(margin()!.dataset.staleMax)).toBeLessThanOrEqual(MARGIN_SETTLE_MAX_MS); // the wait, written for the scale gate
   });
 
-  // P4-B1: the layout pass runs in the frame's callback, so the card moves in the frame its text moved in, and no
-  // React render is needed for the move (the cards' elements and their transforms are left as the pass wrote them)
-  it('an edit moves the cards in the frame callback itself, the active card unshifted (R1)', async () => {
+  // P4-B1 (the follow-up wave): under edits that never pause the margin is never stale past the ceiling
+  it('under edits that never pause, a pass reads them within the ceiling (margin-settle.ts)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'track the budget', 300);
+    await settle();
+    const passes0 = relayouts();
+    margin()!.removeAttribute('data-stale-max');
+    const started = performance.now();
+    let firstPass: number | null = null;
+    for (let k = 1; performance.now() - started < MARGIN_SETTLE_MAX_MS + 400; k += 1) {
+      scene.lines.set('t1', { top: 300 + k, height: 20 }); // every keystroke moves the line
+      type(m, 'z', 'The plan');
+      await act(() => new Promise<void>((resolve) => setTimeout(resolve, 60)));
+      if (firstPass === null && relayouts() > passes0) firstPass = performance.now() - started;
+    }
+    expect(firstPass, 'a pass while the edits went on').not.toBeNull();
+    expect(firstPass!).toBeLessThanOrEqual(MARGIN_SETTLE_MAX_MS + 60); // the ceiling, read at the 60 ms steps
+    expect(Number(margin()!.dataset.staleMax)).toBeLessThanOrEqual(MARGIN_SETTLE_MAX_MS);
+    await afterEdits();
+    expect(topOf(entry('t1'))).toBe(Math.round(scene.lines.get('t1')!.top) - scene.columnTop + MARGIN_CARD_INSET_PX); // settled at the last line
+  });
+
+  // P4-B1: the move needs no React render (the cards' elements and their transforms are left as the pass wrote them);
+  // the follow-up wave: the pass the edits owe, once they pause
+  it('the edits’ pass moves the cards with no render, the active card unshifted (R1)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
     comment(m, 't2', 'track the budget', 300);
@@ -325,7 +404,7 @@ describe('re-layout (R1 to R6)', () => {
     const card = within(entry('t2')!).getByRole('group');
     scene.lines.set('t2', { top: 320, height: 20 });
     act(() => m.editor().view.dispatch(m.editor().state.tr.insertText('X', findPos(m.editor(), 'The plan'))));
-    await new Promise((r) => requestAnimationFrame(() => r(null))); // outside act: nothing React does may help
+    await new Promise((r) => setTimeout(r, MARGIN_SETTLE_QUIET_MS + 50)); // outside act: nothing React does may help
     expect(topOf(entry('t2'))).toBe(320 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(shiftOf(entry('t2'))).toBe(0);
     expect(within(entry('t2')!).getByRole('group')).toBe(card);
@@ -355,11 +434,11 @@ describe('re-layout (R1 to R6)', () => {
     // P4-B1: an edit's pass that moves nothing leaves the attribute (a running transition goes on); one that moves a card
     // is not animated
     type(m, 'X', 'Third');
-    await frame();
+    await afterEdits();
     expect(margin()!.hasAttribute('data-animate')).toBe(true);
     scene.lines.set('t1', { top: 160, height: 20 }); // a line typed above t1's passage
     type(m, 'X', 'Third');
-    await frame();
+    await afterEdits();
     expect(topOf(entry('t1'))).toBe(160 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
   });
@@ -383,7 +462,7 @@ describe('re-layout (R1 to R6)', () => {
     scene.lines.set('t2', { top: 170, height: 20 });
     scene.lines.set('t3', { top: 180, height: 20 });
     type(m, 'X', 'The plan');
-    await frame();
+    await afterEdits();
     expect(margin()!.hasAttribute('data-animate')).toBe(false);
     // the margin's attribute and t3's transform in the order they were written, each with the value it was written to
     // (the next record's old value, or the value at the end), so a later pass re-setting the attribute cannot make a
@@ -413,6 +492,115 @@ describe('re-layout (R1 to R6)', () => {
     });
     expect(moves.length).toBeGreaterThan(0);
     expect(moves.every(Boolean)).toBe(true); // the close-up written while the margin animates
+  });
+
+  // P4-B1 (the follow-up wave, D4): an activation over a margin the edits left stale catches the margin up; the edits'
+  // moves are written unanimated first (from the stack as last laid), then the activation's own moves animated
+  it('an activation over a stale margin lands the edits’ moves unanimated, then its own animated (D4)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 200);
+    comment(m, 't2', 'track the budget', 210); // 10 px under t1's: t2 pinned, t1 pushed up above it
+    await settle();
+    const step = scene.entryHeight + MARGIN_GAP_PX;
+    expect([topOf(entry('t1')), topOf(entry('t2'))]).toEqual([114 - step, 114]);
+    scene.lines.set('t1', { top: 220, height: 20 }); // a line typed above both
+    scene.lines.set('t2', { top: 230, height: 20 });
+    type(m, 'X', 'The plan');
+    await frame();
+    const passes0 = relayouts();
+    const writes = recordWrites();
+    act(() => void m.editor().commands.setActiveThread('t1')); // the human's: the pin to t1
+    const written = writes.stop();
+    expect(relayouts() - passes0, 'the catch-up and the activation, at once').toBe(2);
+    // the edits' moves (t2 still pinned): t2 at its new line, t1 pushed above it, unanimated
+    expect(written.filter((w) => w.top === 134 || w.top === 134 - step)).toEqual([
+      { id: 't1', top: 134 - step, animated: false },
+      { id: 't2', top: 134, animated: false },
+    ]);
+    // the activation's (t1 pinned): t1 at its line, t2 pushed below it, animated
+    expect(written.filter((w) => w.top === 124 || w.top === 124 + step)).toEqual([
+      { id: 't1', top: 124, animated: true },
+      { id: 't2', top: 124 + step, animated: true },
+    ]);
+    await afterEdits();
+    expect(relayouts() - passes0, 'nothing left owed').toBe(2);
+  });
+
+  // P4-B1 (the follow-up wave, D4, Z1): a resolve over a margin the edits left stale catches it up with the resolved
+  // card still in the stack (at the anchor last measured for it), so the edits' moves land unanimated and the close-up
+  // is the resolve's own, animated
+  it('a resolve over a stale margin lands the edits’ moves unanimated, then the close-up animated (D4, Z1)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'design review', 150);
+    comment(m, 't3', 'track the budget', 160);
+    await settle();
+    act(() => void m.editor().commands.setActiveThread('t1')); // the pin on t1: the stack walks down from its anchor
+    act(() => void m.editor().commands.setActiveThread(null));
+    const stacked = 140 - scene.columnTop + MARGIN_CARD_INSET_PX;
+    const step = scene.entryHeight + MARGIN_GAP_PX;
+    expect(['t1', 't2', 't3'].map((id) => topOf(entry(id)))).toEqual([stacked, stacked + step, stacked + 2 * step]);
+    scene.lines.set('t1', { top: 160, height: 20 }); // a line typed above all three
+    scene.lines.set('t2', { top: 170, height: 20 });
+    scene.lines.set('t3', { top: 180, height: 20 });
+    type(m, 'X', 'The plan');
+    await frame();
+    const writes = recordWrites();
+    act(() => resolve(m.agent.doc, 't2', agentActor, now(), 'agent')); // within the edits' quiet
+    await settle();
+    const written = writes.stop();
+    expect(entry('t2')).toBeNull();
+    expect(written).toEqual([
+      // the edits' moves, t2 still stacked between: all three down a line, unanimated
+      { id: 't1', top: stacked + 20, animated: false },
+      { id: 't2', top: stacked + 20 + step, animated: false },
+      { id: 't3', top: stacked + 20 + 2 * step, animated: false },
+      // the resolve's close-up under t1, animated
+      { id: 't3', top: stacked + 20 + step, animated: true },
+    ]);
+  });
+
+  // P4-B1 (the follow-up wave): the human's own changes re-lay at once, and settle what the edits owed
+  it('a frame resize, a card’s resize, a font load and a view change re-lay at once, settling a pass the edits owed', async () => {
+    const fonts = new EventTarget();
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+    try {
+      const m = await mount(content());
+      comment(m, 't1', 'track the budget', 300);
+      await settle();
+      let line = 300;
+      const edit = async () => {
+        line += 20;
+        scene.lines.set('t1', { top: line, height: 20 });
+        type(m, 'X', 'The plan');
+        await frame();
+      };
+      const at = () => topOf(entry('t1'));
+      const fresh = () => line - scene.columnTop + MARGIN_CARD_INSET_PX;
+      await edit();
+      const passes0 = relayouts();
+      resized((target) => target.classList.contains('doc-page-frame')); // the window or the panel resized
+      await frame();
+      expect([relayouts() - passes0, at()]).toEqual([1, fresh()]);
+      await edit();
+      scene.heights.set('t1', 90); // a reply field growing
+      resized((target) => (target as HTMLElement).dataset.marginEntry !== undefined);
+      expect([relayouts() - passes0, at()]).toEqual([2, fresh()]);
+      await edit();
+      act(() => void fonts.dispatchEvent(new Event('loadingdone')));
+      expect([relayouts() - passes0, at()]).toEqual([3, fresh()]);
+      await edit();
+      expect(relayouts() - passes0).toBe(3);
+      m.rerender({ commentsView: 'minimize' });
+      expect(margin()!.dataset.marginTier).toBe('icons');
+      expect(relayouts() - passes0).toBeGreaterThanOrEqual(4);
+      expect(at()).toBe(fresh());
+      const passes1 = relayouts();
+      await afterEdits();
+      expect(relayouts(), 'no pass left owed').toBe(passes1);
+    } finally {
+      delete (document as unknown as { fonts?: unknown }).fonts;
+    }
   });
 
   // P4-B1 (review finding 7): at a Comment the host names the compose card's thread before the display draws its
@@ -486,6 +674,26 @@ describe('re-layout (R1 to R6)', () => {
     expect(topOf(entry('t1'))).toBe(140 - scene.columnTop + MARGIN_CARD_INSET_PX);
     expect(entry('t2')).not.toBeNull();
     expect(queries.mock.calls.filter(([selector]) => selector === '[data-thread]')).toHaveLength(0);
+  });
+
+  // P4-B1 (the follow-up wave, Z3): the compose card's thread stays an entry once its passage is deleted, at the column's
+  // top, so the deletion and its undo keep the same ids while they move it between its line and the top; each re-lays in
+  // its edit's frame
+  it('a hosted compose card’s passage deleted and restored by undo re-lays in each edit’s frame (Z3)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 240);
+    await settle();
+    act(() => m.overlay()!.hosting?.('t1'));
+    expect(entry('t1')!.hasAttribute('data-compose')).toBe(true);
+    const line = 240 - scene.columnTop + MARGIN_CARD_INSET_PX;
+    expect(topOf(entry('t1'))).toBe(line);
+    const from = findPos(m.editor(), 'ships quarterly');
+    act(() => m.editor().view.dispatch(m.editor().state.tr.delete(from, from + 'ships quarterly'.length)));
+    await frame();
+    expect(topOf(entry('t1')), 'at the column’s top, its inset below it').toBe(MARGIN_CARD_INSET_PX);
+    act(() => void m.editor().commands.undo());
+    await frame();
+    expect(topOf(entry('t1'))).toBe(line);
   });
 
   // P4-B1 (R2): the margin reads the threads map at once, so an agent's reply shows in its card while the owner types,

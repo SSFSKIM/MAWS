@@ -63,12 +63,12 @@ class FakeResizeObserver {
   }
 }
 
-/** Reports a resize of every observed target (the scene has changed meanwhile). */
-export const resized = (): void =>
+/** Reports a resize of every observed target (the scene has changed meanwhile), or of those `only` takes (P4-B1). */
+export const resized = (only?: (target: Element) => boolean): void =>
   act(() => {
     for (const { callback, self, targets } of [...observers]) {
-      const entries = [...targets].map((target) => ({ target, contentRect: rectOf(target), borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }) as unknown as ResizeObserverEntry);
-      callback(entries, self);
+      const entries = [...targets].filter((target) => only?.(target) ?? true).map((target) => ({ target, contentRect: rectOf(target), borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }) as unknown as ResizeObserverEntry);
+      if (entries.length > 0) callback(entries, self);
     }
   });
 

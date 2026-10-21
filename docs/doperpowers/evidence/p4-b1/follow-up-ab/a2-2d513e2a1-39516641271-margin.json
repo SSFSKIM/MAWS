@@ -1,0 +1,143 @@
+{
+  "run": "2026-10-20T23:49:30.316Z",
+  "seed": {
+    "large": {
+      "sections": 160,
+      "topBlocks": 1455,
+      "paragraphs": 2184,
+      "words": 102944,
+      "typed": 42000,
+      "deleted": 404,
+      "formatted": 276,
+      "v2Bytes": 1067299,
+      "ms": 707
+    }
+  },
+  "margin": {
+    "loads": {
+      "launched": 2.8,
+      "steadyStart": 2.89,
+      "steadyEnd": 2.43
+    },
+    "cards": 54,
+    "active": "th81",
+    "layer": {
+      "on": true,
+      "pieces": 236,
+      "frames": 236,
+      "spanned": true
+    },
+    "typing": {
+      "keystrokes": 300,
+      "noTransaction": 0,
+      "frame": {
+        "n": 300,
+        "p50": 12.1,
+        "p95": 26.8,
+        "p99": 34.9,
+        "max": 40.7
+      },
+      "postPaint": {
+        "n": 300,
+        "p50": 14.7,
+        "p95": 32.5,
+        "p99": 49.7,
+        "max": 56.2
+      },
+      "presented": {
+        "n": 300,
+        "p50": 40,
+        "p95": 56,
+        "p99": 64,
+        "max": 72
+      },
+      "presentedReported": 300,
+      "ack": {
+        "n": 300,
+        "p50": 15.1,
+        "p95": 39.6,
+        "p99": 56.2,
+        "max": 60.5
+      },
+      "acked": 300,
+      "longTasks": {
+        "n": 0,
+        "max": 0
+      }
+    },
+    "relayouts": {
+      "passes": 557,
+      "frames": 557,
+      "keystrokes": 300,
+      "afterScroll": 0
+    },
+    "loop": {
+      "p50": 10.264575,
+      "p99": 17.317887,
+      "max": 63.930367,
+      "mean": 10.523613477564881
+    }
+  },
+  "rows": [
+    {
+      "row": "1m p95",
+      "measure": "keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer)",
+      "bound": "p95 ≤ 20 ms (the mini’s calibration, P3 Decision Log 109; MacBook target 16)",
+      "limit": 20,
+      "value": 26.8,
+      "unit": "ms",
+      "pass": false,
+      "verdict": "failed",
+      "load": 2.43,
+      "note": "300 keystrokes; 54 cards, th81 active; agents: perf-agent-1 33 batches, 0 refused; perf-agent-2 32 batches, 0 refused; a streaming layer (236 pieces, 236 frames, over the whole typing)"
+    },
+    {
+      "row": "1m max",
+      "measure": "keystroke → frame in A, max, the margin open",
+      "bound": "max ≤ 50 ms",
+      "limit": 50,
+      "value": 40.7,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.43,
+      "note": "p50 12.1"
+    },
+    {
+      "row": "1m relayouts",
+      "measure": "the margin’s layout passes per frame callback (one pass per edit frame, never more)",
+      "bound": "≤ 1 per frame",
+      "limit": 1,
+      "value": 1,
+      "unit": "passes",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.43,
+      "note": "557 passes over 557 frame callbacks (300 keys); after a scripted scroll 0 more (R4: none)"
+    },
+    {
+      "row": "1m ack p95",
+      "measure": "keystroke → durable ack, p95, the margin open",
+      "bound": "p95 ≤ 100 ms",
+      "limit": 100,
+      "value": 39.6,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.43,
+      "note": "300 of 300 acked"
+    },
+    {
+      "row": "5m p99",
+      "measure": "host event-loop delay over the run, p99, the margin open",
+      "bound": "p99 ≤ 50 ms",
+      "limit": 50,
+      "value": 17.32,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 2.43
+    }
+  ],
+  "marginal": []
+}

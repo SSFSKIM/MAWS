@@ -50,7 +50,7 @@ import type { ExtraChange } from '../history'; // P3-E
 import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges, type CommentsOptions /* P3-E */ } from './comments/plugins';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments } from './comments/surface';
 import { blockPos, passageRect } from './comments/locate'; // P4-B1
-import { MarginThreads } from './comments/MarginThreads'; // P4-B1
+import { MarginThreads, type PageMove } from './comments/MarginThreads'; // P4-B1
 import type { ActivationCause } from './comments/plugins'; // P4-B1
 import type { CommentsView } from '../../comments/view'; // P4-B1
 import type { MarginTier } from '../../comments/margin-tiers'; // P4-B1
@@ -687,7 +687,8 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
 
 // The page's scroll box and, over it, the comment surface's overlay with the editor's reach. The overlay re-renders at
 // most once a frame as the passages move (an edit, a scroll, a resize); the page does not. P4-B1: while the margin hosts
-// the comments, that frame callback runs the margin's layout pass and renders nothing.
+// the comments, that frame callback tells the margin what moved and renders nothing (a resize re-lays it in that frame,
+// edits alone owe it a pass once they pause).
 interface PageFrameProps {
   /** The editor on screen: the preview's while a version shows, else the live one. */
   editor: Editor;
@@ -722,9 +723,11 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
   const pending = useRef<number | null>(null);
-  // P4-B1: the margin's layout pass (MarginThreads fills it) runs in the frame callback itself, so the cards move in the
-  // frame the text moved in; the frame-level overlay's key is bumped only while that overlay is drawn
-  const relayoutRef = useRef<() => void>(() => {});
+  // P4-B1: the margin (MarginThreads fills it) is told in the frame callback what moved the passages: the frame's size
+  // (a pass at once) or edits alone (a pass owed until they pause, the follow-up wave); the frame-level overlay's key is
+  // bumped only while that overlay is drawn
+  const relayoutRef = useRef<(move: PageMove) => void>(() => {});
+  const resizedSince = useRef(false); // P4-B1: the frame resized since the last callback
   const overlayDrawn = useRef(false);
   // P4-B1: the frame callbacks run, written on the page (`data-frames`, no render) beside the margin's `data-relayouts`,
   // so the scale gate reads the margin's passes per frame (D13: at most one); an agent's edit and the layer's growth
@@ -738,11 +741,21 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
         pending.current = null;
         frames.current += 1; // P4-B1
         page.current?.setAttribute('data-frames', String(frames.current)); // P4-B1
-        relayoutRef.current(); // P4-B1
+        const move: PageMove = resizedSince.current ? 'resize' : 'edit'; // P4-B1
+        resizedSince.current = false;
+        relayoutRef.current(move); // P4-B1
         if (overlayDrawn.current) setLayout((n) => n + 1); // P4-B1: only while the frame-level overlay is drawn
       });
     },
     [],
+  );
+  // P4-B1: the frame's own resize (the window, the panel): the human's, so the margin re-lays in that frame
+  const resized = useMemo(
+    () => () => {
+      resizedSince.current = true;
+      moved();
+    },
+    [moved],
   );
   // P4-B1: a scroll moves the passages under the frame-level overlay alone (the margin scrolls with the page and never
   // re-lays on it, R4), so it has a key of its own, coalesced the same way
@@ -781,7 +794,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     if (!comments && !margin) return; // P4-B1: && !margin (the margin follows edits with or without a surface)
     editor.on('update', moved);
     const box = frame.current;
-    const observer = typeof ResizeObserver === 'undefined' || !box ? null : new ResizeObserver(moved);
+    const observer = typeof ResizeObserver === 'undefined' || !box ? null : new ResizeObserver(resized); // P4-B1: resized
     if (box) observer?.observe(box);
     return () => {
       editor.off('update', moved);
@@ -789,7 +802,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       if (pending.current !== null) cancelAnimationFrame(pending.current);
       pending.current = null;
     };
-  }, [editor, comments, margin /* P4-B1 */, moved]);
+  }, [editor, comments, margin /* P4-B1 */, moved, resized]);
   // P4-A2 (X35): the provisional layer grows the page without an editor update; with neither the overlay nor the margin
   // (P4-B1: its layout pass runs in `moved`'s frame callback) nothing reads the layout
   useLayoutEffect(() => {

@@ -291,9 +291,10 @@ describe('the provisional layer', () => {
     expect(keys.size - settled, 'coalesced to the animation frame').toBeLessThanOrEqual(2);
   });
 
-  // P4-B1: with the margin drawn the growth re-lays the margin in the page frame's frame callback (`relayoutRef`), and
-  // the overlay it hosts (in flow, its key carrying no moves) is not drawn again for it
-  it.each([['with', true], ['without', false]] as const)('re-lays the margin as the layer grows, %s a comment surface, coalesced to the animation frame, without drawing its overlay again', async (_, surface) => {
+  // P4-B1: with the margin drawn the growth is told to the margin from the page frame's frame callback (`relayoutRef`),
+  // and the overlay it hosts (in flow, its key carrying no moves) is not drawn again for it. The follow-up wave: an
+  // agent's streamed write owes the margin a pass, run once the growth pauses, none in the growth's own frames
+  it.each([['with', true], ['without', false]] as const)('re-lays the margin once the layer’s growth pauses, %s a comment surface, without drawing its overlay again', async (_, surface) => {
     const keys: string[] = [];
     const overlay = (props: CommentOverlayProps) => {
       keys.push(props.layoutKey);
@@ -305,11 +306,15 @@ describe('the provisional layer', () => {
     await ticks(30);
     const passes = () => Number(margin.dataset.relayouts ?? 0);
     const settled = { passes: passes(), calls: keys.length };
+    const frames = () => Number(container.querySelector<HTMLElement>('.ds-doc')?.dataset.frames ?? 0);
+    const framesBefore = frames();
     for (const text of ['A', 'A longer', 'A longer text']) world!.host.announce(frame('tu1', 'streaming', [{ op: 'insert', after: 'p3', text }]));
     await until(() => drawn(container)[0]?.textContent === 'A longer text', 'the last frame');
+    await until(() => frames() > framesBefore, 'the growth’s frame callback');
+    expect(passes() - settled.passes, 'none in the growth’s frames').toBe(0);
     await until(() => passes() > settled.passes, 'a margin layout pass');
     await ticks(30);
-    expect(passes() - settled.passes, 'coalesced to the animation frame').toBeLessThanOrEqual(2);
+    expect(passes() - settled.passes, 'one pass once the growth paused').toBe(1);
     expect(keys.length, 'the hosted overlay not drawn again').toBe(settled.calls); // its key is the margin's constant one: the calls, not the distinct keys, say whether it was drawn
   });
 });

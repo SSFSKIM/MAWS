@@ -1,0 +1,14 @@
+# The settle guard's lines per measured run (ci-kit mac/settle@v1: load bound 5, display @2x, remote none, computeruse none, 15 s bound), from each job's log.
+# Order on the mini: a1, b1, a2, b2, after the coordinator's quiet go at about 23:34Z (posture read twice 30 s apart: @2x, remote none, load 1.25 then 1.39, quiet flag up, runner idle; the Tart pull paused).
+
+a1  run 39515914730 job 118947995910  e2e:document-scale 2026-10-20T23:34:54Z -> 23:40:58Z
+    settled in 31 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=1.75/2.00/2.39 computeruse=none; release: load=1.94/2.02/2.38; end: load=1.75/1.78/2.15
+
+b1  run 39515977820 job 118948163584  e2e:document-scale 2026-10-20T23:41:01Z -> 23:47:58Z
+    settled in 31 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=1.71/1.77/2.14 computeruse=none; release: load=1.42/1.69/2.10; end: load=0.94/1.56/1.94
+
+a2  run 39516641271 job 118950323221  e2e:document-scale 2026-10-20T23:48:00Z -> 23:54:01Z
+    settled in 31 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=1.02/1.55/1.93 computeruse=none; release: load=1.28/1.56/1.92; end: load=1.49/1.71/1.91
+
+b2  run 39517371311 job 118952747249  e2e:document-scale 2026-10-20T23:54:03Z -> 2026-10-21T00:00:51Z
+    settled in 30 s; start: frontmost=터미널 display=2560x1440@2x remote=none load=1.49/1.70/1.90 computeruse=none; release: load=1.52/1.68/1.89; end: load=3.45/2.51/2.21
