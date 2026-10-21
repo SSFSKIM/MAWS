@@ -3,7 +3,8 @@
 // (unit:darwin's own set, scripts/darwin-unit-files.sh), only the suites that are both related and filtered: vitest's CLI
 // cannot say that (its `related` command takes no filters, and `--related` is no option of `run`), its API can, as
 // `startVitest` with both. Otherwise this is the CLI's own start and exit, so the reporters, the JUnit report
-// (MAWS_TEST_JUNIT) and the exit status are those of `vitest run`.
+// (MAWS_TEST_JUNIT) and the exit status are those of `vitest run`, and the module cache (`fsModuleCache`) that of the
+// gate's `--fsModuleCache`.
 // Usage: UNIT_RELATED='["src/a.ts",…]' node .github/scripts/unit-related.mjs <max-workers> [file filter…]
 import { normalize } from 'node:path';
 import process from 'node:process';
@@ -24,7 +25,7 @@ if (!(Number(maxWorkers) >= 1 && Number.isInteger(Number(maxWorkers))) || !Array
 }
 process.stdout.write(`unit-related: vitest related over ${related.length} paths${filters.length > 0 ? `, within ${filters.length} files` : ''}\n`);
 try {
-  const ctx = await startVitest('test', filters.map(normalize), { run: true, watch: false, related, passWithNoTests: true, maxWorkers: Number(maxWorkers) });
+  const ctx = await startVitest('test', filters.map(normalize), { run: true, watch: false, related, passWithNoTests: true, maxWorkers: Number(maxWorkers), fsModuleCache: true });
   if (!ctx.shouldKeepServer()) await ctx.exit();
 } catch (error) {
   // As the CLI does with an error before the run starts.
