@@ -5,8 +5,8 @@
 // (`cardPosition`), hidden until placed and while the pin is off the stage. One thread is active: the asked one, else the
 // newest; the human moves it (a click on a card, R on a compacted one, J and K), and nothing else does: an agent's reply
 // or new thread leaves it where it is, and only a resolve that takes it out of the list gives way to the newest. When the
-// popover first shows, the active card's reply field takes the keyboard (ThreadCard focuses only after its own click).
-// Escape, U and Escape in the reply field exit; the drafts are the host's (`drafts`, `onDraftChange`), so closing keeps
+// popover first shows, the active card's reply field takes the keyboard (ThreadCard focuses only after its own click),
+// scrolled into view in the popover's own capped box and nowhere else, as is a card J or K moves to. Escape, U and Escape in the reply field exit; the drafts are the host's (`drafts`, `onDraftChange`), so closing keeps
 // them. Portable: the binding (slides/editor/comments/PinPopover.tsx) places it and closes it.
 import { useEffect, useRef, useState } from 'react';
 import { cardPosition, type CardStyle } from './placement';
@@ -53,13 +53,18 @@ export function ThreadPopover({ threads, initial = null, placement, hidden = fal
     const node = root.current;
     if (!node || !shown || active === null) return;
     const card = cardOf(node, active);
+    let to: HTMLElement | null = null;
     if (!focused.current) {
       focused.current = true;
-      (card?.querySelector<HTMLElement>('textarea') ?? card)?.focus({ preventScroll: true });
+      to = card?.querySelector<HTMLElement>('textarea') ?? card;
     } else if (focusCard.current === active || focusCard.current === AFTER_RESOLVE) {
-      card?.focus({ preventScroll: true });
+      to = card;
     }
     focusCard.current = null;
+    if (!to) return;
+    // never scrolling anything around it (the stage's scroll is its own), but in view in its own scroll box
+    to.focus({ preventScroll: true });
+    scrollIntoBox(node, to);
   }, [shown, active]);
 
   // the host hears every change of the active thread, the first one included
@@ -117,6 +122,14 @@ export function ThreadPopover({ threads, initial = null, placement, hidden = fal
 }
 
 const AFTER_RESOLVE = '\0resolved'; // no thread's id
+
+/** Scrolls `box` (and nothing else) the least that shows `node`, its top first when it is taller than the box. */
+function scrollIntoBox(box: HTMLElement, node: HTMLElement): void {
+  const b = box.getBoundingClientRect();
+  const n = node.getBoundingClientRect();
+  if (n.top < b.top || n.height > b.height) box.scrollTop -= b.top - n.top;
+  else if (n.bottom > b.bottom) box.scrollTop += n.bottom - b.bottom;
+}
 
 /** A thread's card in the popover. */
 function cardOf(root: HTMLElement, threadId: string): HTMLElement | null {

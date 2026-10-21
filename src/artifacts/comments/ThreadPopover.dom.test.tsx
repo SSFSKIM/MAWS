@@ -169,6 +169,42 @@ describe('exiting keeps the draft', () => {
   });
 });
 
+// the review's P2: the popover's height is capped and its content scrolls; the keyboard's place must be in view there
+describe('the keyboard’s place in view', () => {
+  it('scrolls the popover itself (only it) to the newest reply field on opening, and to a card J or K moves to', () => {
+    // a 200 px tall popover at the window's top; each card 150 px tall down its content, its reply field at its bottom
+    const scroll = { top: 0 };
+    const at = (top: number, height: number) => ({ top: top - scroll.top, bottom: top - scroll.top + height, left: 0, right: 300, width: 300, height, x: 0, y: top - scroll.top, toJSON: () => ({}) }) as DOMRect;
+    const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this instanceof HTMLElement && this.dataset.pinPopover !== undefined) return { ...at(0, 200), top: 0, bottom: 200, y: 0 };
+      const card = this.closest<HTMLElement>('[data-thread]');
+      const i = card ? ['t1', 't2', 't3'].indexOf(card.dataset.thread!) : -1;
+      if (i < 0) return at(0, 0);
+      return this instanceof HTMLTextAreaElement ? at(i * 150 + 110, 30) : at(i * 150, 150);
+    });
+    // the popover's scroll offset, observable (happy-dom keeps none); nothing else here scrolls
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTop');
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', { configurable: true, get: () => scroll.top, set: (v: number) => (scroll.top = v) });
+    try {
+      try {
+        render(<Host threads={[thread('t1', 1), thread('t2', 10), thread('t3', 20)]} />);
+        expect(document.activeElement).toBe(field('t3'));
+        expect(scroll.top).toBe(300 + 110 + 30 - 200); // the field's bottom at the box's bottom
+        fireEvent.keyDown(card('t3'), { key: 'k' });
+        expect(document.activeElement).toBe(card('t2'));
+        expect(scroll.top).toBe(150); // the card's top at the box's top (it was above)
+        fireEvent.keyDown(card('t2'), { key: 'j' });
+        expect(document.activeElement).toBe(card('t3'));
+        expect(scroll.top).toBe(300 + 150 - 200); // the card's bottom at the box's bottom (it was below)
+      } finally {
+        if (original) Object.defineProperty(HTMLElement.prototype, 'scrollTop', original);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('the placement', () => {
   it('stands where the card’s placement says: below the pin, above it, or docked in the host', () => {
     const view = render(<Host threads={[thread('t1', 1)]} placement={BELOW} />);
