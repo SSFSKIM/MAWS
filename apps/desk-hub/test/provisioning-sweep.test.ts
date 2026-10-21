@@ -184,4 +184,26 @@ describe('the offline sweep', () => {
     // Its alarm waits for the retry rather than spinning.
     expect(await hub.registryAlarm()).toBeGreaterThan(failed + 30_000);
   });
+
+  it('completes a revocation whose fence was placed, though the machine reads online again before the retry', async () => {
+    const { token } = await provisioningKey(hub, ADMIN, { label: 'fenced', prefix: 'dc-', offline_revoke_s: HOUR });
+    const creds = await confirmed(token, 'dc-fenced-1');
+    hub.expectRuntimeLog(/a revocation answer the suite lost/);
+    // The sweep fences the credential at its Machine object, and the object's answer is lost.
+    await hub.faultNextRevoke('dc-fenced-1', 'lose');
+    await hub.backdate({ machines: [{ name: 'dc-fenced-1', confirmed: ago(2 * HOUR) }] });
+    await waitFor(() => (hub.runtimeLogs.some((l) => l.message.includes('"desk":"offline-revoke"') && l.message.includes('dc-fenced-1')) ? true : undefined), 10_000);
+    expect(await listed('dc-fenced-1')).toMatchObject({ state: 'active' });
+    // A reconnect's lease report, in flight when the fence was placed, arrives: the machine reads online.
+    expect((await leased('dc-fenced-1', creds, true)).machines.find((m) => m.name === 'dc-fenced-1')?.online).toBe(true);
+    // The retry comes due (shortened from the minute) and completes the revocation all the same.
+    await hub.offlineRetry(0);
+    try {
+      await gone('dc-fenced-1');
+    } finally {
+      await hub.offlineRetry(null);
+    }
+    await waitFor(() => (tokensNamed('dc-fenced-1').length === 0 ? true : undefined));
+    expect(await refusal(await self(creds))).toBe('401 access');
+  });
 });

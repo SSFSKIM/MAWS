@@ -21,6 +21,7 @@ import {
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
+  OFFLINE_RETRY_PATH,
   MACHINE_ABORT_PATH,
   MACHINE_FETCH_FAULT_PATH,
   MACHINE_PROBE_PATH,
@@ -314,6 +315,11 @@ export async function startLocalHub() {
     /** The Registry's alarm (ms, or null); with `clear`, deleted first. */
     async registryAlarm(clear = false): Promise<number | null> {
       return (JSON.parse(await seam('REGISTRY', ORG, ALARM_PATH, clear ? { clear } : undefined)) as { alarm: number | null }).alarm;
+    },
+    /** Sets how long an unfinished offline revocation waits before it is tried again (null: the deployed minute), and
+     * wakes the Registry's alarm. */
+    async offlineRetry(ms: number | null) {
+      await seam('REGISTRY', ORG, OFFLINE_RETRY_PATH, { ms });
     },
     /** Holds the Registry's next `leave` (a machine's `DELETE /machine/enrollment`, once the Worker resolved it) until
      * `releaseLeave`. */

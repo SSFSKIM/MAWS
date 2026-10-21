@@ -30,7 +30,8 @@
 //   - a `Registry` whose machines' `seen` and `confirmed`, keys' expiry and enrollments' expiry are moved back, as the
 //     time having passed would leave them, and whose alarm is read or cleared;
 //   - a `Registry` armed to hold its next `leave` until the suite releases it, as the Worker held between resolving a
-//     machine's credential and asking for its revocation would be.
+//     machine's credential and asking for its revocation would be;
+//   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again.
 import { Machine as DeployedMachine, type Stream, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
@@ -45,6 +46,7 @@ import {
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
+  OFFLINE_RETRY_PATH,
   MACHINE_ABORT_PATH,
   MACHINE_FETCH_FAULT_PATH,
   MACHINE_PROBE_PATH,
@@ -84,6 +86,11 @@ export class Registry extends DeployedRegistry {
   private asPrevious = false;
   private leaveRelease: (() => void) | undefined;
 
+  /** A suite's wait before an unfinished offline revocation is tried again, over the deployed minute. */
+  protected offlineRetryMs(): number {
+    return this.ctx.storage.kv.get<number>('offline-retry-ms') ?? super.offlineRetryMs();
+  }
+
   /** Armed, the next leave waits for the suite's release before the Registry's own. */
   async leave(machine: MachineRecord): ReturnType<DeployedRegistry['leave']> {
     if (this.ctx.storage.kv.get<boolean>('leave-hold')) {
@@ -104,6 +111,13 @@ export class Registry extends DeployedRegistry {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === OFFLINE_RETRY_PATH) {
+      const { ms } = (await request.json()) as { ms: number | null };
+      if (ms === null) this.ctx.storage.kv.delete('offline-retry-ms');
+      else this.ctx.storage.kv.put('offline-retry-ms', ms);
+      await this.ctx.storage.setAlarm(Date.now() + 100);
+      return new Response('set');
+    }
     if (url.pathname === LEAVE_HOLD_PATH) {
       this.ctx.storage.kv.put('leave-hold', true);
       return new Response('armed');

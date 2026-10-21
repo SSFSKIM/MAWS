@@ -142,8 +142,10 @@ export class Registry extends DurableObject<Env> {
 
   private readonly keys: OrgKeys;
   private readonly provisioning: ProvisioningKeys;
-  /** Per enrollment, when an offline revocation that failed is tried again (an object restart forgets it). */
-  private readonly offlineRetry = new Map<string, number>();
+  /** Per enrollment, an offline revocation the sweep began and has not seen complete, and when it last began: its fence
+   * may be placed, so it is tried again until it completes, whatever the machine's online state or offline deadline
+   * reads since (an object restart forgets it). */
+  private readonly unfinished = new Map<string, { name: string; began: number }>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -799,21 +801,28 @@ export class Registry extends DurableObject<Env> {
    * too: the machines it enrolled outlive it). The candidates are read in one step and revoked in turn, each bound to
    * the enrollment read: while one's revocation waits on its `Machine` object, a later one's name may be revoked and
    * enrolled anew, and that machine is not the candidate. A lease report that reaches `summary` once a candidate's
-   * revocation began does not save it. One that fails is tried again a minute on, the others going ahead.
+   * revocation began does not save it: one that did not complete (its `Machine` object's answer lost, the fence perhaps
+   * placed) is tried again a minute on, the others going ahead, until it completes — whatever the machine's online state
+   * or offline deadline reads meanwhile, since a fenced credential whose record and token stay held is neither enrolled
+   * nor free. Bound to its enrollment, a retry leaves a name enrolled anew alone, and so ends.
    */
   private async sweepOffline(now: number): Promise<void> {
-    const candidates = this.offlineDeadlines();
-    for (const enrollment of this.offlineRetry.keys()) if (!candidates.some((c) => c.enrollment === enrollment)) this.offlineRetry.delete(enrollment);
-    for (const { name, enrollment, deadline } of candidates) {
-      if (deadline > now || (this.offlineRetry.get(enrollment) ?? 0) > now) continue;
+    const retries = [...this.unfinished].filter(([, u]) => u.began + this.offlineRetryMs() <= now).map(([enrollment, u]) => ({ name: u.name, enrollment }));
+    const overdue = this.offlineDeadlines().filter((c) => c.deadline <= now && !this.unfinished.has(c.enrollment));
+    for (const { name, enrollment } of [...retries, ...overdue]) {
+      this.unfinished.set(enrollment, { name, began: Date.now() });
       try {
         await this.revokeMachine(name, { enrollment });
-        this.offlineRetry.delete(enrollment);
+        this.unfinished.delete(enrollment);
       } catch (error) {
-        this.offlineRetry.set(enrollment, Date.now() + RETRY_MS);
         console.error(JSON.stringify({ desk: 'offline-revoke', machine: name, message: error instanceof Error ? error.message : String(error) }));
       }
     }
+  }
+
+  /** How long an unfinished offline revocation waits before it is tried again. */
+  protected offlineRetryMs(): number {
+    return RETRY_MS;
   }
 
   /** Each active machine enrolled through a key with an offline time, offline now, and when that time is up: from `seen`,
@@ -885,7 +894,8 @@ export class Registry extends DurableObject<Env> {
       .exec<{ expires: string }>("SELECT expires FROM enrollments WHERE state IN ('open', 'pending')")
       .toArray()
       .map((e) => Date.parse(e.expires));
-    for (const { enrollment, deadline } of this.offlineDeadlines()) next.push(Math.max(deadline, this.offlineRetry.get(enrollment) ?? 0));
+    for (const { enrollment, deadline } of this.offlineDeadlines()) if (!this.unfinished.has(enrollment)) next.push(deadline);
+    for (const { began } of this.unfinished.values()) next.push(began + this.offlineRetryMs());
     if (this.sql.exec('SELECT 1 FROM orphans UNION ALL SELECT 1 FROM revocations LIMIT 1').toArray().length > 0) next.push(now + RETRY_MS);
     if (next.length === 0) return;
     const at = Math.max(Math.min(...next), now + 250);
