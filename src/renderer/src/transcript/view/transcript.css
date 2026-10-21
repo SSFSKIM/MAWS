@@ -272,7 +272,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell[data-bookkeeping] .transcript-cell-line { opacity: 0.75; }
 /* The status mark is drawn here, so the line's text is its label alone. */
 .transcript-cell-line::before { flex: none; width: 12px; text-align: center; }
-.transcript-cell[data-status="running"] > .transcript-cell-line::before {
+/* The running ring, shared with E4c's browser row (its own rule below adds the row's flex and margin). */
+.transcript-cell[data-status="running"] > .transcript-cell-line::before,
+.transcript-browser-action[data-state="running"] .transcript-browser-action-line::before {
   content: '';
   width: 9px;
   height: 9px;
@@ -555,17 +557,7 @@ button.transcript-chip[data-chip="anchor"]:hover { background: var(--bg-hover); 
 .transcript-browser-action-heading { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .transcript-browser-action[data-state="error"] .transcript-browser-action-heading, .transcript-browser-action[data-state="cancelled"] .transcript-browser-action-heading { color: var(--fg-muted); }
 .transcript-browser-action[data-state="running"] .transcript-browser-action-line > .transcript-icon { display: none; }
-.transcript-browser-action[data-state="running"] .transcript-browser-action-line::before {
-  content: '';
-  flex: none;
-  width: 9px;
-  height: 9px;
-  margin: 0 1.5px;
-  border: 1.5px solid var(--border-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: transcript-spin 1s linear infinite;
-}
+.transcript-browser-action[data-state="running"] .transcript-browser-action-line::before { flex: none; margin: 0 1.5px; }
 .transcript-browser-action-actions { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
 .transcript-browser-action-actions .transcript-quiet-button { margin-top: 0; }
 .transcript-browser-action-note { margin: 0 0 2px 23px; overflow-wrap: anywhere; }
