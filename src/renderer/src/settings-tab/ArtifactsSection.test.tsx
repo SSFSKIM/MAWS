@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V15 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V16 } from '@shared/settings/defaults';
 import { resetLibrary } from '../library/store';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
@@ -30,7 +30,7 @@ const space = (id: string, name: string): LibrarySpace => ({ id, name, createdAt
 let b: SettingsBridge;
 
 async function renderSection(artifacts: Settings['artifacts'], spaces: LibrarySpace[] = []) {
-  b = settingsBridge({ ...SETTINGS_DEFAULTS_V15, artifacts });
+  b = settingsBridge({ ...SETTINGS_DEFAULTS_V16, artifacts });
   b.answers['library.list'] = () => ({ rows: [system(MAWS, 'MAWS'), system(CLASSROOM, 'Classroom')], counts });
   b.answers['library.spaces'] = () => ({ spaces });
   window.maws = b.bridge;

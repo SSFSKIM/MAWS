@@ -5,6 +5,7 @@
 // `settings.engineApplied`), the engine's config home (read-only to MAWS), the subagent model new sessions launch with,
 // and (W3) the mode a session takes when the engine refuses auto. W7: the memory budget's switch, whose rows show only
 // while it is on. R1: one information line on what MAWS shows of a plugin. E10: the Background supervisor group last.
+// P4-R8: the MCP servers every session MAWS launches loads, after the plugins' line.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId } from 'react';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
@@ -23,6 +24,7 @@ import { openEngineUpdate } from './engine-update'; // W13
 import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 import { BudgetSwitch, MemoryBudget, StatefulServers } from './BudgetSettings'; // C12; W7: the switch
 import { SupervisorSettings } from './SupervisorSettings'; // E10
+import { McpServers } from './McpServersSettings'; // P4-R8
 
 const BINARY_INFO_KEY = ['maws', 'engine.binaryInfo', undefined];
 // W13: the host resolves the binary per call, so the row follows an update made in a terminal while it is shown
@@ -90,6 +92,7 @@ export function EngineSection({ settings }: { settings: Settings }) {
       <Setting label={ENGINE.plugins}>
         <span className="text-ui-sm text-fg-muted">{ENGINE.pluginsNote}</span>
       </Setting>
+      <McpServers settings={settings} /> {/* P4-R8: settings version 16 */}
       <SubagentModel settings={settings} />
       <AutoFallback settings={settings} /> {/* W3 */}
       {/* C12 start: the memory budget and the stateful MCP servers (settings v4); W7: behind its switch (settings v7) */}

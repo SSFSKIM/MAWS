@@ -1,6 +1,7 @@
 // The Settings tab's words (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04). Every row says
 // where its value comes from and what MAWS will not touch.
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
+import { MAX_APP_MCP_SERVERS } from '@shared/engine/app-mcp-servers'; // P4-R8
 
 export const SECTIONS = {
   engine: 'Engine',
@@ -46,6 +47,23 @@ export const ENGINE = {
   autoFallback: 'When auto mode is unavailable',
   autoFallbackNote: "Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS then sets this mode for the session and says so; the next resume asks for auto again.",
 };
+
+// P4-R8 start: Settings › Engine › MCP servers (settings version 16)
+export const MCP_SERVERS = {
+  label: 'MCP servers',
+  note: "Loaded by every session MAWS starts, forks or resumes, never by a terminal session. An entry wins over a server of the same name in your own or a project's config, and a sign-in Claude Code made for the same name and URL carries over. A change applies at each session's next launch.",
+  name: 'Server name',
+  url: 'Server URL',
+  namePlaceholder: 'name',
+  urlPlaceholder: 'https://…/mcp',
+  add: 'Add',
+  remove: (name: string) => `Remove ${name}`,
+  badName: "A name takes letters, digits, hyphens and underscores, up to 64 of them; maws is MAWS's own server.",
+  badUrl: "Enter the server's http or https URL.",
+  duplicate: (name: string) => `${name} is already in the list.`,
+  full: `The list holds at most ${MAX_APP_MCP_SERVERS} servers.`,
+};
+// P4-R8 end
 
 // C12 start: the memory budget's rows in Settings › Engine (C12 execution document, "Surfaces of the budget")
 export const BUDGET_SETTINGS = {

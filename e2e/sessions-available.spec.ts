@@ -135,12 +135,15 @@ test.describe('sessions available on demand (P2-A)', () => {
     await expect(control).toHaveText('Send');
     await expect(control).toHaveAttribute('aria-description', 'Starts this session');
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on open').toBe(false);
+    value(await invoke(page, 'settings.set', { engine: { mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } })); // P4-R8
     await control.click();
     await expect(control).toHaveText('Starting…');
     await expect(mainRegion(page).getByText(REPLY, { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(composer).toHaveText('');
     expect(spawns(maws, appId)).toHaveLength(1);
     expect(spawns(maws, appId)[0]!.frame.args, 'the same conversation').toEqual(expect.arrayContaining(['--resume', SEND_SESSION]));
+    const resumed = spawns(maws, appId)[0]!.frame.args!;
+    expect(JSON.parse(resumed[resumed.indexOf('--mcp-config') + 1]!), "the resume carries the app's MCP servers (P4-R8)").toEqual({ mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
     expect(writtenUsers(maws, appId).map((r) => (r.frame as { message?: { content?: unknown } }).message?.content), 'sent once').toEqual(['Reply with OK']);
 
     // stopped: what the engine reported is kept, labelled with when

@@ -289,6 +289,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       return [parentJournal(cwd).write(dir, 'parent'), thread.write(dir, 'thread')];
     });
     const { page, maws, repo, parent } = c;
+    // P4-R8: the app's MCP servers, set after the parent launched, reach the thread's launch (the next one) alone
+    value(await invoke(page, 'settings.set', { engine: { mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } }));
     const { child, pane } = await openThreadFromGutter(c);
 
     // the thread's head names the line; its first prompt is the comment under the anchor chip; its reply follows
@@ -312,6 +314,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(args).toContain('--fork-session');
     expect(args[args.indexOf('--session-id') + 1]).toBe(CHILD);
     expect(args[args.indexOf('--permission-mode') + 1], "the parent's mode").toBe(record!.permissionMode.requested);
+    expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), "the app's MCP servers (P4-R8)").toEqual({ mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
+    expect(spawnRow(maws, parent).args, 'the parent launched before the setting').not.toContain('--mcp-config');
     const first = writtenUsers(maws, child);
     expect(first).toHaveLength(1);
     expect(first[0]!.frame.message!.content).toEqual([{ type: 'text', text: anchoredMessage({ anchor: fileAnchor(repo, 3), text: COMMENT, destination: 'thread', screenshot: false }) }]);

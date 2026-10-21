@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V15 } from '../../settings/defaults';
+import { SETTINGS_DEFAULTS_V16 } from '../../settings/defaults';
 import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
 
-const base = SETTINGS_DEFAULTS_V15;
+const base = SETTINGS_DEFAULTS_V16;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
@@ -23,7 +23,10 @@ describe('settings keymap is a partial record', () => {
     expect(issueCodes({ ...base, keymap: { 'tab.close': 'Cmd J!' } })).toEqual(['invalid_format']);
   });
 
-  it('is version 11 (W13: no engine pin; E9: the voice section; E10: the supervisor section; E4a: the browser section) and carries the notification policy', () => {
+  it('is version 16 and carries the notification policy (P4-R8: the app MCP servers)', () => {
+    expect(base.version).toBe(16);
+    expect(SettingsSchema.safeParse({ ...base, version: 15 }).success).toBe(false); // P4-R8
+    expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, mcpServers: undefined } }).success).toBe(false); // P4-R8: required, even when empty
     expect(SettingsSchema.safeParse({ ...base, version: 10 }).success).toBe(false); // E4a
     expect(SettingsSchema.safeParse({ ...base, browser: undefined }).success).toBe(false); // E4a
     expect(SettingsSchema.safeParse({ ...base, version: 9 }).success).toBe(false); // E10
