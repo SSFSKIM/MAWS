@@ -46,6 +46,11 @@ const mawsSchemaPlugin = { rules: { 'one-schema': builtinRules.get('no-restricte
 const DESK_WEB = 'apps/desk-web/src/ runs in a browser (the DC5 plan): no Node or Electron module.'; // DC5
 const DESK_WEB_NO_PRELOAD = 'apps/desk-web/src/ runs in a browser with no MAWS preload: `window.maws` does not exist there (the desk composite, DC6).'; // DC6
 const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
+// L154 (P2-F W-V): code built under the React Compiler (the renderer; the desk's web app) never reads a postfix ++/--.
+const COMPILED_POSTFIX = {
+  selector: 'UpdateExpression[prefix=false]:not(ExpressionStatement > UpdateExpression):not(ForStatement > UpdateExpression.update):not(ForStatement > SequenceExpression.update > UpdateExpression)',
+  message: 'A postfix ++/-- whose value is read can compile to the prefix form under the React Compiler (L154): save the value you need first (const old = n), then increment or decrement as its own statement (n++).',
+};
 
 module.exports = defineConfig(
   { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/', 'apps/*/dist/', 'apps/*/.wrangler/'] }, // DC3: the desk apps' build and wrangler state
@@ -77,10 +82,7 @@ module.exports = defineConfig(
     rules: {
       'no-restricted-syntax': [
         'error',
-        {
-          selector: 'UpdateExpression[prefix=false]:not(ExpressionStatement > UpdateExpression):not(ForStatement > UpdateExpression.update):not(ForStatement > SequenceExpression.update > UpdateExpression)',
-          message: 'A postfix ++/-- whose value is read can compile to the prefix form under the React Compiler (L154): save the value you need first (const old = n), then increment or decrement as its own statement (n++).',
-        },
+        COMPILED_POSTFIX,
         YJS_DYNAMIC, // P3-A
       ],
     },
@@ -168,6 +170,8 @@ module.exports = defineConfig(
     languageOptions: { globals: globals.browser },
     ...reactHooks.configs.flat.recommended,
   },
+  // The desk builds under the React Compiler as the renderer does (vite.config.ts), so the renderer's L154 rule holds here.
+  { files: ['apps/desk-web/src/**/*.{ts,tsx}'], rules: { 'no-restricted-syntax': ['error', COMPILED_POSTFIX] } },
   {
     files: ['apps/desk-web/src/**/*.{ts,tsx}'],
     ignores: ['apps/desk-web/src/**/*.test.{ts,tsx}'],

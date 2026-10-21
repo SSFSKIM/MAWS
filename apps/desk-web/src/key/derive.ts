@@ -74,9 +74,17 @@ export function passphraseProblem(passphrase: string): string | null {
 }
 
 let lastPassphraseWork: { ms: number; cost: PassphraseCost } | null = null;
+const passphraseWorkListeners = new Set<() => void>();
 
 /** How long this tab's last passphrase derivation took, and at what cost: what a phone pays per unlock (the M4 walk). */
 export const passphraseWork = () => lastPassphraseWork;
+
+/** Calls `listener` each time a derivation records its work, until the returned function is called: a view that shows
+ * the work subscribes (`useSyncExternalStore`), since it changes outside React and a compiled render keeps its read. */
+export function subscribePassphraseWork(listener: () => void): () => void {
+  passphraseWorkListeners.add(listener);
+  return () => passphraseWorkListeners.delete(listener);
+}
 
 /** A wrapping key's bytes from a passphrase (seconds of work, reported through `progress` from 0 to 1). */
 export async function wrappingKeyFromPassphrase(passphrase: string, org: string, cost: PassphraseCost, progress?: (fraction: number) => void): Promise<Uint8Array> {
@@ -89,6 +97,7 @@ export async function wrappingKeyFromPassphrase(passphrase: string, org: string,
     const started = performance.now();
     const bytes = await argon2idAsync(password, utf8(passphraseSalt(org)), { ...cost, dkLen: 32, version: 0x13, onProgress: progress });
     lastPassphraseWork = { ms: Math.round(performance.now() - started), cost };
+    for (const listener of passphraseWorkListeners) listener();
     return bytes;
   } finally {
     password.fill(0);

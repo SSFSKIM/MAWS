@@ -105,8 +105,15 @@ describe('ProjectLog', () => {
 
   it('records only a contiguous prefix: a failed write is retried with the next batch, never skipped', async () => {
     const record = memoryLogRecord();
-    let fail = 1;
-    const flaky = { ...record, append: async (project: string, entries: Parameters<typeof record.append>[1]) => (fail-- > 0 ? Promise.reject(new Error('quota')) : record.append(project, entries)) };
+    let fails = 1;
+    const flaky = {
+      ...record,
+      append: async (project: string, entries: Parameters<typeof record.append>[1]) => {
+        if (fails === 0) return record.append(project, entries);
+        fails--;
+        throw new Error('quota');
+      },
+    };
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const log = new ProjectLog(PROJECT, flaky);
     await log.load();

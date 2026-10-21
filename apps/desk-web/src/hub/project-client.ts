@@ -357,7 +357,9 @@ export class ProjectClient implements SessionPlane {
           return;
         }
         open.sub = null;
-        const wait = (this.options.resubscribeDelay ?? backoff)(open.failedStarts++);
+        const failed = open.failedStarts;
+        open.failedStarts++;
+        const wait = (this.options.resubscribeDelay ?? backoff)(failed);
         open.retry = setTimeout(() => {
           open.retry = null;
           if (this.subs.has(open) && this.welcomed && open.sub === null) this.sendSubscribe(open);
