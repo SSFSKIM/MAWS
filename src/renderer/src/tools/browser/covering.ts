@@ -10,6 +10,7 @@
 // The watch runs only while a pane is mounted; the last pane leaving lifts any cover it had asked for. Any change of the
 // notices store refreshes the watch on the next frame (after the toast host rendered it): the toast viewport unmounts
 // while toasts are held and remounts as a new element the DOM watch cannot see by itself.
+import type { AppSessionId } from '@shared/graph/ids';
 import { panelInMain } from '../../app/regions';
 import { ipc } from '../../ipc/client';
 import { useLayout, type LayoutState } from '../../stores/layout';
@@ -18,7 +19,7 @@ import { watchCoverLayers, type CoverWatch, type PaneRect } from './cover';
 
 type RectOf = () => PaneRect | null; // a mounted pane's rect while it owns its view, else null
 
-const panes = new Set<RectOf>();
+const panes = new Map<RectOf, AppSessionId | null>(); // each mounted pane, and the session whose browser it shows
 const holds = new Set<symbol>();
 let watch: CoverWatch | null = null;
 let offLayout: (() => void) | null = null;
@@ -39,7 +40,7 @@ function sync(): void {
   if (covered) answered = answer;
 }
 
-const rects = () => [...panes].flatMap((rectOf) => rectOf() ?? []);
+const rects = () => [...panes.keys()].flatMap((rectOf) => rectOf() ?? []);
 
 const overviewShownIn = (state: LayoutState): boolean => state.overviewOpen && !panelInMain(state.regions);
 
@@ -83,9 +84,9 @@ function stop(): void {
 }
 
 // A pane mounted: the watch starts with the first. `refresh` after the pane moved, so the layers are measured against
-// its new rect; `release` on unmount.
-export function coverPane(rectOf: RectOf): { refresh(): void; release(): void } {
-  panes.add(rectOf);
+// its new rect; `release` on unmount. `appSessionId`: the session whose browser the pane shows.
+export function coverPane(rectOf: RectOf, appSessionId: AppSessionId | null = null): { refresh(): void; release(): void } {
+  panes.set(rectOf, appSessionId);
   if (panes.size === 1) start();
   sync();
   return {
@@ -96,6 +97,12 @@ export function coverPane(rectOf: RectOf): { refresh(): void; release(): void } 
       else watch?.refresh();
     },
   };
+}
+
+// P4 W2-C (tracker 2026-10-07): the sessions whose browser pane is on screen (it owns its view, so an app toast over it
+// would cover the window), in the order the panes mounted: where a line about the browser goes instead of a toast.
+export function sessionsOnScreen(): AppSessionId[] {
+  return [...panes].flatMap(([rectOf, appSessionId]) => (appSessionId !== null && rectOf() !== null ? [appSessionId] : []));
 }
 
 // A layer of the chrome's own, held until the returned function runs (once).
