@@ -2350,8 +2350,8 @@ default) [2026-10-15, DC3, from DC5's real-hub suite]. A half-open client is bou
 
 `Refusal` is `{reason, writer?, seq?, message}`, `reason` one of `writer-not-yours` (a writer outside `<machine>/`,
 or `legacy/` from a machine that is not the project's archive machine), `conflict` (a payload at an existing
-`(writer, seq)` whose canonical form differs), `bad-shape`, `too-large`, `not-open` (events, or a `rejected` report,
-for a project the current stream has not opened with `hello`), `stale-generation`, and `gap` (kept in the type, never
+`(writer, seq)` whose canonical form differs), `bad-shape`, `too-large`, `not-open` (any frame but `hello` for a
+project the current stream has not opened with `hello`), `stale-generation`, and `gap` (kept in the type, never
 sent: a gap is answered by `resend`). The hub reports a refusal down the stream and records it in the project's audit
 record (DX3), `gap` excepted.
 
@@ -2411,8 +2411,19 @@ opened on: a newer stream receives nothing of a project until the machine sends 
 
 **The POST's answer and the replies.** The hub writes its replies to a POST's frames — `have` and the backlog after a
 `hello`, `resend`, `refused` — down the stream, in frame order, and answers the POST only after they are written:
-`200 {"ok": true, "frames": <frames applied>}`. So when a POST returns, its replies are already on the stream ahead of
-anything later. The POST itself is refused whole, with nothing applied, as `409 {"error": "stale-generation"}` when
+`200 {"ok": true, "frames": <frames applied>, "refused": [{"index": <n>, "reason": <reason>}]}`. So when a POST
+returns, its replies are already on the stream ahead of anything later. **[2026-10-20, MAWS #88; `test/session-plane.test.ts`]** `refused` names, in
+POST order, each frame the hub refused whole: one for a project the stream has not opened (`not-open`), and one it
+cannot read (`bad-shape`, a frame naming no project id among them). `index` is the frame's place among the POST's
+frames from 0, in the numbering `frames` counts (each non-blank line is one frame, each `part` one, and a set joined in
+this POST is named by its last part); `reason` is the stream refusal's. `refused` is `[]` when the hub refused none, so
+a machine tells that from a hub older than #88, whose answer has no `refused`; `frames` counts refused frames as
+applied, as before. Each such frame is still refused down the stream too (a session-plane frame's refusal on the
+control lane, unawaited), for machines that read only the stream; the answer is what lets a machine act on a refusal in
+the same exchange rather than whenever the stream's arrives. An upload some of whose events were refused
+(`writer-not-yours`, `conflict`, one event's `bad-shape`) is not refused whole: those go down the stream alone. The
+`409` and `503` answers below that count `frames` carry `refused` for those frames too. The POST itself is refused
+whole, with nothing applied, as `409 {"error": "stale-generation"}` when
 `X-Desk-Generation` is not the machine's current stream (or it has none: open the stream first), `413 {"error":
 "too-large"}` over 4 MiB or for a frame over 1 MiB (with its `line`), and `400 {"error": "bad-shape", "line":
 <0-based>}` for a line that is not a JSON object with a string `t`. Blank lines are skipped. A frame naming no `.smns`

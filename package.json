@@ -81,6 +81,7 @@
     "e2e:desk-web": "pnpm --filter desk-web e2e",
     "e2e:desk-web-hub": "pnpm --filter desk-web e2e:hub",
     "e2e:document-scale": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 MAWS_DOCUMENT_PERF=1 playwright test e2e/document-scale.spec.ts",
+    "e2e:document-scale-repeat": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 MAWS_DOCUMENT_PERF=1 MAWS_DOCUMENT_REPEAT=${MAWS_DOCUMENT_REPEAT:-40} playwright test e2e/document-scale.spec.ts -g \"5r: \"",
     "e2e:dashboard": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test --config playwright.dashboard.config.ts",
     "e2e:dashboard-live": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 MAWS_LIVE=1 playwright test e2e/dashboard-live.spec.ts",
     "e2e:dashboard-live-data": "scripts/e2e-build.sh plain && MAWS_DASHBOARD_LIVE_DATA=1 playwright test e2e/dashboard-live-data.spec.ts",

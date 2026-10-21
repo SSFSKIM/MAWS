@@ -28,7 +28,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { readLimited } from '../drain';
 import { CLIENT_HEADER, heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
-import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type OrgFrame, type UpFrame } from '../protocol/machine';
+import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type OrgFrame, type PostAnswer, type RefusedFrame, type UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { described, PROJECT_ID, type MachineContext } from './project';
 
@@ -104,9 +104,10 @@ function note(line: Record<string, unknown>): void {
 }
 
 /** A POST's frames for one project, consecutive in the POST, handed to it in one call; each frame weighs the posted lines
- * it took (a joined frame its parts). */
-type Run = { project: string; frames: UpFrame[]; weights: number[] };
-type Applied = { applied: number; stale: boolean; failed: boolean };
+ * it took (a joined frame its parts), and sits at its index among the POST's frames (a joined frame its last part's). */
+type Run = { project: string; frames: UpFrame[]; weights: number[]; indices: number[] };
+/** What a project made of its run; `refused` indexes the run's frames. */
+type Applied = { applied: number; stale: boolean; failed: boolean; refused: RefusedFrame[] };
 
 /** The project a frame up is addressed to, or null for one that names none (`hb-ack`). */
 function projectOf(frame: UpFrame): unknown {
@@ -263,7 +264,10 @@ export class Machine extends DurableObject<Env> {
    * stream: a POST that a newer stream outlived stops there (`stale-generation`, with how many frames it applied), so it
    * changes nothing the newer stream set up. A reply that could not be written — the call or the send threw, the stream
    * went, or a write outlasted `WRITE_TIMEOUT_MS` — ends the stream and answers `503 delivery-failed`, with the frames
-   * applied before the run's frame that owed it: reconnect, and the handshake heals it.
+   * applied before the run's frame that owed it: reconnect, and the handshake heals it. Every answer that counts the
+   * frames applied names, among them, those the hub refused whole (`refused`, MAWS #88: a frame for a project the
+   * stream has not opened, one the hub cannot read), each by its index in the POST, so the machine learns a refusal in
+   * the same exchange and not only later on its stream, where it is still sent.
    */
   private async frames(request: Request): Promise<Response> {
     const stream = this.stream;
@@ -286,8 +290,10 @@ export class Machine extends DurableObject<Env> {
     const body = await readLimited(request.body, POST_LIMIT);
     if (!body) return json(413, { error: 'too-large' });
     const text = new TextDecoder().decode(body);
+    // The frames refused whole among those counted applied, in POST order: every answer that counts frames names them.
+    const refused: RefusedFrame[] = [];
     const stale = (applied: number) =>
-      json(409, { error: 'stale-generation', message: 'a newer stream of this machine opened while this POST was read; send it again on that one', frames: applied });
+      json(409, { error: 'stale-generation', message: 'a newer stream of this machine opened while this POST was read; send it again on that one', frames: applied, refused });
     if (this.stream !== stream) return stale(0);
 
     const frames: UpFrame[] = [];
@@ -311,10 +317,10 @@ export class Machine extends DurableObject<Env> {
     // session plane's limit (M5's measured run). Each frame weighs the posted lines it took (a joined frame its parts),
     // so `applied` counts posted frames as before. The parts are joined and the runs formed first; a part that cannot
     // be joined ends the POST there, after what came before it.
-    const items: Array<{ run: Run } | { frame: UpFrame; weight: number }> = [];
+    const items: Array<{ run: Run } | { frame: UpFrame; weight: number; index: number }> = [];
     let carry = 0;
     let refusal: Response | null = null;
-    for (const posted of frames) {
+    for (const [index, posted] of frames.entries()) {
       let frame: UpFrame | undefined = posted;
       if (posted.t === 'part') {
         try {
@@ -337,12 +343,13 @@ export class Machine extends DurableObject<Env> {
         if (last && 'run' in last && last.run.project === project) {
           last.run.frames.push(frame);
           last.run.weights.push(weight);
+          last.run.indices.push(index);
         } else {
-          items.push({ run: { project, frames: [frame], weights: [weight] } });
+          items.push({ run: { project, frames: [frame], weights: [weight], indices: [index] } });
         }
         continue;
       }
-      items.push({ frame, weight });
+      items.push({ frame, weight, index });
     }
 
     if (this.stream !== stream) return stale(0);
@@ -350,7 +357,7 @@ export class Machine extends DurableObject<Env> {
     let applied = 0;
     const failed = () => {
       this.end(stream, 'undeliverable');
-      return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied });
+      return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied, refused });
     };
     // The answer reads the runs in the POST's order: a run that failed, or that a newer stream outlived, answers for the
     // POST with what came before it, though other projects' runs after it went on.
@@ -358,22 +365,24 @@ export class Machine extends DurableObject<Env> {
       if ('run' in item) {
         const result = await results.get(item.run)!;
         applied += item.run.weights.slice(0, result.applied).reduce((sum, weight) => sum + weight, 0);
+        for (const { index, reason } of result.refused) refused.push({ index: item.run.indices[index], reason });
         if (result.failed) return failed();
         if (result.stale) return stale(applied);
         continue;
       }
       if (this.stream !== stream) return stale(applied);
-      const { frame, weight } = item;
+      const { frame, weight, index } = item;
       const project = projectOf(frame);
       if (project === null) {
         // `hb-ack`: renews the lease in every project this stream opened, when it names this stream's generation.
         if (frame.t === 'hb-ack' && frame.generation === stream.generation) await this.renew(stream);
       } else {
         await this.send({ t: 'refused', project: String(project), refusal: { reason: 'bad-shape', message: 'the frame names no .smns project id' } }, stream.generation);
+        refused.push({ index, reason: 'bad-shape' });
       }
       applied += weight;
     }
-    return refusal ?? json(200, { ok: true, frames: applied + carry });
+    return refusal ?? json(200, { ok: true, frames: applied + carry, refused } satisfies PostAnswer);
   }
 
   /**
@@ -390,7 +399,7 @@ export class Machine extends DurableObject<Env> {
     runs.forEach((run, index) => {
       const before = last.get(run.project);
       const result = before
-        ? before.then((earlier) => (earlier.failed || earlier.stale ? { applied: 0, stale: earlier.stale, failed: earlier.failed } : this.apply(stream, run, index, runs.length)))
+        ? before.then((earlier) => (earlier.failed || earlier.stale ? { applied: 0, stale: earlier.stale, failed: earlier.failed, refused: [] } : this.apply(stream, run, index, runs.length)))
         : this.apply(stream, run, index, runs.length);
       results.set(run, result);
       last.set(run.project, result);
@@ -400,7 +409,7 @@ export class Machine extends DurableObject<Env> {
 
   /** One run to its project; a call that fails, or a run that fails, is logged with where it stood in the POST. */
   private async apply(stream: Stream, run: Run, index: number, runs: number): Promise<Applied> {
-    if (this.stream !== stream) return { applied: 0, stale: true, failed: false };
+    if (this.stream !== stream) return { applied: 0, stale: true, failed: false, refused: [] };
     const where = { machine: stream.machine, generation: stream.generation, project: run.project, run: index + 1, runs, frames: run.frames.length };
     try {
       const result = await this.project(stream, run.project).fromMachine(this.context(stream, run.project), run.frames);
@@ -409,7 +418,7 @@ export class Machine extends DurableObject<Env> {
     } catch (error) {
       // The call itself failed: what the project applied of this run is unknown, so none of it counts.
       note({ event: 'run-failed', ...where, applied: null, error: described(error) });
-      return { applied: 0, stale: false, failed: true };
+      return { applied: 0, stale: false, failed: true, refused: [] };
     }
   }
 

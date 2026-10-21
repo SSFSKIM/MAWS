@@ -1,0 +1,55 @@
+// SCRATCH (P4-R6, not committed): the scale gate's read, then its first batch, on a real store in this process, the
+// seam's own record printed as one JSON line per iteration.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { it } from 'vitest';
+import { openDocuments } from '../index';
+import { registerDocumentKind } from './document';
+import { DocumentPerfSeam, type CallAnswer } from './document-perf';
+import { Agent, type ReadResult } from '../../../../e2e/support/document-scale';
+import { prng, seedDocument } from '../../../../e2e/support/document-seed';
+
+const HUMAN = { kind: 'human' } as const;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+it('probe', { timeout: 600_000 }, async () => {
+  const seeds = { large: seedDocument(160), small: seedDocument(16) };
+  const dir = mkdtempSync(join(tmpdir(), 'r6-probe-'));
+  const docs = openDocuments(dir, () => {})!;
+  const kind = registerDocumentKind(docs.store);
+  try {
+    const seam = new DocumentPerfSeam(docs.store);
+    const make = async (title: string, state: Uint8Array) => {
+      const a = await docs.store.create({ kind: 'document', title }, HUMAN);
+      for (let k = 0; k < 100 && docs.store.revision(a.id) === 0; k++) await sleep(10);
+      await seam.run({ cmd: 'seed', artifactId: a.id, state: Buffer.from(state).toString('base64') });
+      return a.id;
+    };
+    const id = await make('Scale 200', seeds.large.state);
+    const smallId = await make('Scale 20', seeds.small.state);
+    await docs.store.createVersion(id, { kind: 'named', actor: HUMAN, label: 'Seeded' });
+    await seam.run({ cmd: 'call', session: 'perf-warm', tool: 'artifact_read', args: { artifact: smallId } });
+    await seam.run({ cmd: 'release', session: 'perf-warm' });
+    await sleep(3_000);
+    const all = [...Array(160).keys()].filter((s) => !(Math.abs(s - 80) <= 2 || Math.abs(s - 40) <= 2));
+    const agents = [new Agent('perf-agent-1', all.filter((s) => s % 2 === 0), prng(101)), new Agent('perf-agent-2', all.filter((s) => s % 2 === 1), prng(202))];
+    const out: Record<string, unknown> = {};
+    for (const [k, agent] of agents.entries()) {
+      const read = (await seam.run({ cmd: 'call', session: agent.session, tool: 'artifact_read', args: { artifact: id } })) as CallAnswer & { result: ReadResult };
+      agent.learn(read.result);
+      await sleep(8);
+      const { ops } = agent.firstBatch();
+      const batch = (await seam.run({ cmd: 'call', session: agent.session, tool: 'artifact_edit', args: { artifact: id, baseRevision: 'last', ops } })) as CallAnswer;
+      out[`read${k + 1}`] = { max: +read.loop.max.toFixed(1), bg: read.background };
+      out[`batch${k + 1}`] = { max: +batch.loop.max.toFixed(1), wall: +batch.wallMs.toFixed(1), err: batch.isError, bg: batch.background };
+      await sleep(30);
+    }
+    console.log(`R6JSON ${JSON.stringify(out)}`);
+    seam.close();
+  } finally {
+    kind.close();
+    docs.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

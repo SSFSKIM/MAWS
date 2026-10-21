@@ -12,6 +12,7 @@ import type { Section } from '@artifacts/library/sections';
 import { HUMAN, openWorld, type World } from '../tool-server/artifact-world.fixture';
 import { STORE_MIGRATIONS, openStore } from './migrations';
 import { ArtifactSearch, CATCHUP_SLICE_MS, MIRROR_BACKGROUND_MAX_BYTES, MIRROR_QUIET_MS, MIRROR_SETTLE_MS, MIRROR_SWEEP_DELAY_MS, searchQuery, snippetAndRead, startArtifactSearch, type SearchRequest, type SearchTimers } from './search';
+import { hostWorkBetween, watchHostWork } from './host-work'; // P4-R6
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore } from './store';
@@ -133,6 +134,47 @@ describe('the search catch-up', () => {
     const answer = await find(search, 'sliced');
     expect(answer.hits).toHaveLength(4);
     expect(commits).toEqual([1, 2, 3, 4]);
+  });
+});
+
+// P4-R6: what shared an agent's batch is named from the host's work record, so each refresh is in it with what it did
+describe('the host’s work record', () => {
+  it('names a search’s catch-up and the background refresh apart, each with what it extracted', async () => {
+    const unwatch = watchHostWork();
+    try {
+      const id = await page('Status', 'alpha');
+      await foundIds(unstarted(), 'alpha');
+      expect(hostWorkBetween(0, Infinity).work.filter((entry) => entry.what.startsWith('mirror'))).toEqual([expect.objectContaining({ what: 'mirror catch-up', detail: 'html text, 5 characters' })]);
+      await w.store.writeContent(id, html('omega words'), HUMAN);
+      const timers = manualTimers();
+      started(timers);
+      await timers.advance(MIRROR_SWEEP_DELAY_MS + MIRROR_QUIET_MS);
+      expect(current(id)).toBe(true);
+      expect(hostWorkBetween(0, Infinity).work.filter((entry) => entry.what === 'mirror')).toEqual([expect.objectContaining({ detail: 'html text, 11 characters' })]);
+    } finally {
+      unwatch();
+    }
+  });
+
+  // P4-R6: an agent's read links the artifact `viewed`, which the mirror counts as the host being busy, so the batch an
+  // agent sends right after its read never shares the loop with a background extraction
+  it('holds a due extraction off for MIRROR_QUIET_MS after a session’s read links an artifact', async () => {
+    const id = await page('Read', 'before');
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS + MIRROR_QUIET_MS);
+    expect(current(id)).toBe(true);
+    await w.store.writeContent(id, html('after'), HUMAN);
+    await turns();
+    await timers.advance(MIRROR_SETTLE_MS - 1);
+    await w.store.link(id, 'perf-agent-1' as AppSessionId, 'viewed'); // an agent's read, the moment before the settle
+    await turns();
+    await timers.advance(1); // settled: due, but the link restarted the quiet window
+    expect(current(id)).toBe(false);
+    await timers.advance(MIRROR_QUIET_MS - 2);
+    expect(current(id)).toBe(false);
+    await timers.advance(1);
+    expect(current(id)).toBe(true);
   });
 });
 

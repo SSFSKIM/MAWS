@@ -42,6 +42,7 @@ export interface Row {
   verdict: Verdict;
   load: number;
   note?: string;
+  background?: CallBackground; // P4-R6: what shared the measured call's loop (the seam's answer)
 }
 
 /**
@@ -63,9 +64,9 @@ export class Rows {
   readonly rows: Row[] = [];
   constructor(private readonly path: string, private readonly meta: Record<string, unknown>) {}
 
-  add(row: string, measure: string, value: number, unit: string, limit: number | null, bound: string, note?: string): Row {
+  add(row: string, measure: string, value: number, unit: string, limit: number | null, bound: string, note?: string, background?: CallBackground /* P4-R6 */): Row {
     const load = load1();
-    const entry: Row = { row, measure, bound, limit, value: +value.toFixed(2), unit, pass: limit === null ? null : value <= limit, verdict: verdictOf(value, limit, load), load, ...(note && { note }) };
+    const entry: Row = { row, measure, bound, limit, value: +value.toFixed(2), unit, pass: limit === null ? null : value <= limit, verdict: verdictOf(value, limit, load), load, ...(note && { note }), ...(background && { background }) };
     this.rows.push(entry);
     this.write();
     return entry;
@@ -86,6 +87,14 @@ export interface LoopStats {
   p99: number;
   mean: number;
 }
+// P4-R6: what shared a call's loop, as the host's seam answers it (`CallBackground` in
+// src/engine-host/documents/kinds/document-perf.ts): the longest gap (`loop.max`; `at` ms after the call's start), the main
+// thread's CPU time inside it (null where the platform does not tell it: near the gap's length the thread ran, well
+// under it the thread waited), the host's work and V8's collections that overlapped it, and the call's work by kind.
+export interface CallBackground {
+  longest: { at: number; ms: number; cpuMs: number | null; work: Array<{ what: string; at: number; ms: number; detail?: string }> } | null;
+  call: Record<string, { count: number; ms: number }>;
+}
 export interface CallAnswer<R = unknown> {
   ok: true;
   isError: boolean;
@@ -93,6 +102,7 @@ export interface CallAnswer<R = unknown> {
   text: string;
   wallMs: number;
   loop: LoopStats;
+  background?: CallBackground; // P4-R6
 }
 
 export class PerfSeam {
@@ -175,7 +185,7 @@ export class Agent {
   private deleting: { run: number; id: string } | null = null;
   private lastInsertedText: string | null = null;
   readonly blocks = new Map<string, string>(); // what this agent knows of each block's markdown
-  readonly applied: Array<{ run: number; revision: number; wallMs: number; loop: LoopStats; firstAfterRead: boolean; load: number }> = [];
+  readonly applied: Array<{ run: number; revision: number; wallMs: number; loop: LoopStats; background?: CallBackground /* P4-R6 */; firstAfterRead: boolean; load: number }> = [];
   readonly refused: string[] = [];
   private readSince = true;
 
@@ -273,7 +283,7 @@ export class Agent {
     if (deleting) this.deleted.add(deleting);
     const insert = answer.result!.results[2];
     if (insert?.newIds?.[0]) this.inserted.push(insert.newIds[0]);
-    this.applied.push({ run, revision: answer.result!.revision, wallMs: answer.wallMs, loop: answer.loop, firstAfterRead: this.readSince, load: load1() });
+    this.applied.push({ run, revision: answer.result!.revision, wallMs: answer.wallMs, loop: answer.loop, background: answer.background, firstAfterRead: this.readSince, load: load1() });
     this.readSince = false;
   }
 }

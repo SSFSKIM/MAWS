@@ -6,9 +6,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeMachine, loadRecording, TWO_SUBAGENTS } from '../fake-machine';
 import type { GridDown, ProjectDown, ProjectSummary, ProjectUp } from '../src/protocol/browser';
-import { FRAME_LIMIT } from '../src/protocol/parts';
+import { FRAME_LIMIT, toWire } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
-import type { DownFrame } from '../src/protocol/machine';
+import type { DownFrame, UpFrame } from '../src/protocol/machine';
 import type { Rpc, RpcDraft } from '../src/protocol/rpc';
 import type { Delivery, Raised, SessionMessage, Settled } from '../src/protocol/session';
 import { BrowserClient, enroll, GridClient, MachineClient, waitFor, type Credentials } from './support/clients';
@@ -688,6 +688,77 @@ describe('the pending set, decisions, and deliveries', () => {
     expect(deliveries.deliveries).toEqual([second, elsewhere]);
     live.close();
     b.close();
+    await m.close();
+  });
+});
+
+describe("a POST's answer names the frames it refused (MAWS #88)", () => {
+  it('names a settlement for a project its stream has not opened, in the same answer; an applied one names none', async () => {
+    const open = newProject();
+    const closed = newProject();
+    const m = await machine(open);
+    const response = await m.post([{ t: 'session', message: envelope(m, closed, 'settled', await settled(closed, 'toolu_closed', 'web', 'allow', memberId)) }]);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, frames: 1, refused: [{ index: 0, reason: 'not-open' }] });
+
+    const applied = await m.post([{ t: 'session', message: envelope(m, open, 'presence', presence('idle')) }]);
+    expect(await applied.json()).toEqual({ ok: true, frames: 1, refused: [] });
+    await m.close();
+  });
+
+  it("applies an open project's frames and names only the others, across runs, a part set, and a frame naming no project", async () => {
+    const open = newProject();
+    const closed = newProject();
+    const other = newProject();
+    const m = await machine(open);
+    const b = await browser(open);
+    await b.next((f) => f.t === 'pending', 'pending on connect');
+    const request = await raised(open, 'toolu_mixed');
+    // A settlement of a project not open, sent as parts: named by its last part.
+    const parts = toWire({ t: 'session', message: envelope(m, other, 'settled', await settled(other, 'toolu_parts', 'web', 'allow', memberId)) }, 200).map((line) => JSON.parse(line) as UpFrame);
+    expect(parts.length).toBeGreaterThan(1);
+    const frames: UpFrame[] = [
+      { t: 'session', message: envelope(m, open, 'raised', request) },
+      { t: 'session', message: envelope(m, closed, 'settled', await settled(closed, 'toolu_elsewhere', 'web', 'allow', memberId)) },
+      // An empty upload, the uplink's probe: refused on the replies lane, which this POST waits for.
+      { t: 'events', project: closed, events: [] },
+      { t: 'session', message: envelope(m, open, 'presence', presence('busy')) },
+      ...parts,
+      { t: 'pending', project: 'not-a-project-id', raised: [] },
+      { t: 'pending', project: open, raised: [request] },
+    ];
+    const last = 3 + parts.length;
+    const response = await m.post(frames);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      frames: frames.length,
+      refused: [
+        { index: 1, reason: 'not-open' },
+        { index: 2, reason: 'not-open' },
+        { index: last, reason: 'not-open' },
+        { index: last + 1, reason: 'bad-shape' },
+      ],
+    });
+
+    await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+    expect(lastPending(b)).toEqual([{ machine: m.name, raised: request, terminal_only: false }]);
+    expect(sessionKinds(b).filter((x) => x.kind === 'presence').map((x) => x.body)).toEqual([presence('busy')]);
+    b.close();
+    await m.close();
+  });
+
+  it('still refuses the frame down the stream, on the control lane, for a machine that reads only the stream', async () => {
+    const open = newProject();
+    const closed = newProject();
+    const m = await machine(open);
+    const from = m.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, closed, 'settled', await settled(closed, 'toolu_stream', 'web', 'allow', memberId)) }]);
+    expect(await m.next((f) => f.t === 'refused' && f.project === closed, 'the refusal on the stream', from)).toEqual({
+      t: 'refused',
+      project: closed,
+      refusal: { reason: 'not-open', message: 'send hello for this project on this stream first' },
+    });
     await m.close();
   });
 });
