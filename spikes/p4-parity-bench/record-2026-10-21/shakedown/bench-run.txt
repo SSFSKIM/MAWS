@@ -1,0 +1,5 @@
+==== P4-A1 MAWS arm, 2026-10-21T11:53:41.220Z on Mac-mini.local: scope owner (the owner's ~/.claude, no CLAUDE_CONFIG_DIR), engine ~/.local/share/claude/versions/2.1.306 2.1.306, relay http://127.0.0.1:8641, cwd /tmp/maws-parity-bench/maws-arm, profile /tmp/maws-parity-bench/run-20261021/maws-profile, pin sonnet:low (measurement-only), tasks B1 x 1 from repetition 1
+seed: the deck be72619f-e2e6-4d9e-b23a-b12195b7a2b0 from seed/maws-deck (7 files) through the deck seam
+seed: the document fc5e2c4d-4d2e-474c-a75d-0fed3ca269a6 by a Haiku session's artifact_create; against seed/document.md: the same 1154 words in order
+B1 r1: PASS (block 3: Thursday -> Friday, nothing else changed); landed 6.954 s, first token 2.228 s, turn end 9.547 s, 4 requests, 472 output tokens, ["claude-sonnet-5-5"] ["low"], cache cold; MAWS tool time artifact_read 14 ms, artifact_edit 18 ms; load 4.68 -> 4.34; US$0.1406; /tmp/maws-parity-bench/shakedown/maws-B1-r1/manifest.json
+spend: seed (Haiku) US$0.0109; B1 r1 US$0.1406; total US$0.1515

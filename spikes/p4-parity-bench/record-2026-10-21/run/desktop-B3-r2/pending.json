@@ -1,0 +1,21 @@
+{
+  "arm": "desktop",
+  "task": "B3",
+  "rep": 2,
+  "attempt": 1,
+  "kind": "document",
+  "surface": "code",
+  "host": "Mac-mini.local",
+  "armDir": "/tmp/maws-parity-bench/MAWS parity bench",
+  "prompt": "In the document doc.md, rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "promptMatch": ", rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "startedAt": "2026-10-21T12:04:48.243862+00:00",
+  "loadBefore": [
+    2.8,
+    3.36,
+    3.13
+  ],
+  "seedId": null,
+  "seedTranscript": null,
+  "seedUrl": null
+}

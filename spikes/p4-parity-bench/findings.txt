@@ -5,12 +5,16 @@ binding on the decision rule; contracts X34 and X39; Decision Logs 10, 16, 17 an
 f3ac0e8cfd701a95e4dde4a2b847bf1e04e49189 at master bb8b9de7d. Root spec docs/charter.md. A spike: findings, never a
 merge of a verdict; the harness lands as a live spec.
 
-Status: phase 1 of 2 (Decision Log 19), the harness, done 2026-10-19. No record run has happened and no verdict exists.
-The decision rule below is fixed before any record run. It was amended the same day, after the harness's review and
+Status: phase 1 of 2 (Decision Log 19), the harness, done 2026-10-19. The decision rule below is fixed before any record run. It was amended the same day, after the harness's review and
 still before any record run: a voiding control is compared only where both arms' records carry it, the validity rules
 gained the permission mode, human stops, missing records and a rebuilt seed's check, and a task is judged on one Desktop
 surface. The record run is phase 2, in a GUI hold the architect schedules (§7 "The record run"); it moved to the Mac mini
 on 2026-10-21 (P4 Decision Log 45), and §7a amends §7 for it.
+
+Phase 2 ran on the mini on 2026-10-21 (§7b Part A, §7c Part B and the record). The verdict, with the decks judged on
+deck.html in Code sessions (fallback (c): the cloud hand-over was blocked by a safeguard): parity on B1 (0.889), B5
+(0.689) and B7 (0.953); Desktop faster on B3 (1.273). B3's gap is the edit request's generation, with MAWS's model
+thinking about twice as long before its one edit, which is none of the deferred levers (§7c).
 
 The question, in the owner's words (Decision Log 10): if Claude Desktop is equally slow from server round trips and
 output time, MAWS has no problem; if not, something else is wrong. The verdict decides whether the edit-protocol child
@@ -643,3 +647,146 @@ The usage gauges: the Code tab read 26% of the weekly quota for all models, and 
 임박". The owner chose to go on as planned, under the limit rule of §7a.
 
 Spend: one Code turn and three Claude-tab turns, all untimed. That is subscription quota.
+
+
+## 7c. Part B and the record run on the mini, 2026-10-21 11:44 to 12:27Z
+
+The hold: the go at 11:44Z (hard end 16:30Z), the mini released at 12:27Z. The record is in record-2026-10-21/ (run/
+with report.json, every manifest and measured.json, bench-run.txt; check/ the dry Code repetition; shakedown/ the MAWS
+shakedown). The transcripts stay on the mini, under /tmp/maws-parity-bench/run-20261021/transcripts/ (43 copies).
+
+The facts at the start (11:46Z):
+- Desktop 3.1623.0 running, its engine 2.1.304. The mini's installed engine, MAWS's arm, is now 2.1.306, not §1's
+  2.1.305.
+- 1-minute load 1.9 to 2.0, the relay 200, the quiet flag up.
+- The mini's settings.json equals the MacBook's key by key, so the hold went on. Both had changed since §7a's read: model
+  `opus` (was `opus[1m]`), the subagent limits, CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS 16, 9 plugins (daily-journal
+  off), 7 hooks. ANTHROPIC_DEFAULT_OPUS_MODEL is still claude-opus-5-5[1m] and claude-opus-5-5 is still at xhigh, so MAWS
+  requested claude-opus-5-5[1m]; Desktop's picker has no 1M entry, so its Code sessions requested claude-opus-5-5. The
+  served model is claude-opus-5-5 in both.
+
+Step 1, the hand-over, and why the decks were judged on (c):
+- On the Part A Cowork probe session the hand-over worked end to end: SendUserFile's card, its Download, the save
+  panel, the file in ~/Downloads, read by the parser.
+- That transcript records the session's first turn only as placeholders: entrypoint sdk-cli 2.1.285, model
+  claude-sonnet-4-6, no request ids and no usage, before an `upgrade_relay_marker` at 02:08:47Z. Only the turns after
+  the marker are remote_cowork records (claude-opus-5-5, xhigh, no `api-request` records). A fresh cloud session's
+  first turn is the only one §1's first-turn rule times, and it is the one turn the hand-over does not give real
+  records for.
+- One seed session made the Slides deck (claude.ai/artifact/3G82JzugT38qYt5AgfDFoH, 74 s). Its hand-over was refused
+  twice. The first follow-up got "I wasn't able to send that transcript file; the attempt was stopped". On the second,
+  re-worded, Desktop paused the session: "일시중지됨 … Opus 5.5의 세이프가드가 이 메시지를 감지했습니다 … 세부 정보:
+  [reasoning_extraction]". Nothing was tried to get past the safeguard.
+- No seed transcript reaches the mini, and a timed session's first turn would carry placeholder records anyway, so the
+  hand-over cannot work for the bench. The decks took Decision Log 25's fallback (c) without asking: deck.html in Code
+  sessions on the mini, judged with `--judge B5=code --judge B7=code`. No further seeds were made.
+
+Steps 2 to 4:
+- The clone, install and build finished at 11:50:08Z.
+- The queue runner ran in gui/501.
+- The MAWS shakedown (B1 on sonnet:low) passed, landed in 6.954 s, at US$0.1515 (the profile's Haiku seeding,
+  US$0.0109, included).
+- The dry Code B1 was valid and landed in 7.4 s.
+
+The record, 11:55:03 to 12:24:31Z:
+- Five rounds in §7's order, the arm that goes first alternating, then round 6 for Desktop B7.
+- 41 repetitions, 40 of them valid. Every valid one ran in Auto, as its session's first turn (priorTurns 0), with its
+  check passed.
+- The 1-minute load before a repetition was 2.1 to 5.6 (load1 per cell in report.json).
+- Desktop B7 r5 is invalid: it changed deck.html through Bash (a python script), so no Edit, Write or MultiEdit
+  landed, although the check passed. Round 6's B7 r6 is valid.
+
+The verdict (parse.py report, judged on code for the decks):
+
+| Task | Verdict | MAWS/Desktop | MAWS landed, median [min..max] s | Desktop landed s |
+|---|---|---|---|---|
+| B1 | parity | 0.889 | 7.436 [6.61..15.758] | 8.36 [5.513..14.103] |
+| B3 | Desktop faster | 1.273 | 32.534 [20.6..49.283] | 25.559 [21.59..38.741] |
+| B5 | parity | 0.689 | 11.297 [9.194..12.635] | 16.392 [12.054..35.133] |
+| B7 | parity | 0.953 | 13.721 [12.11..22.612] | 14.399 [11.93..15.963] |
+
+The medians beside them (MAWS, then Desktop):
+
+| Task | First token s | Turn end s | Requests | Output tokens |
+|---|---|---|---|---|
+| B1 | 1.574, 1.508 | 9.171, 13.414 | 4, 4 | 576, 744 |
+| B3 | 2.486, 1.317 | 37.612, 52.523 | 5, 8 | 3698, 4192 |
+| B5 | 1.76, 3.838 | 15.95, 31.281 | 6, 7 | 1141, 1361 |
+| B7 | 2.191, 1.43 | 19.225, 24.272 | 6, 6 | 1568, 1875 |
+
+Recorded beside the verdicts, none voiding (§1):
+- the advisor model: Desktop claude-opus-5-5, MAWS none;
+- the requested variant: MAWS claude-opus-5-5[1m], Desktop claude-opus-5-5. It is in the cells' controls but not on
+  the report's beside line;
+- the engines: MAWS 2.1.306, Desktop 2.1.304;
+- the route: MAWS through the gateway, Desktop direct. B7 r6's route was not read (None);
+- thinking adaptive in both, effort xhigh in both;
+- the cache. MAWS's first request read 9,666 tokens (its system prompt and 10 tools) and wrote about 16.3K in 17 of 20
+  repetitions (7,419, 0 and 9,562 read in the other three), "cold" in all 20. Desktop's read 38,589 in all 21 (its
+  29K-character system prompt and 48 tools) and wrote about 24.8K ("warm"). In both arms, two sessions' first messages differ only by the owner's sminos SessionStart line
+  (`Sminos-Session: <name>#<id>`) near the message's end, so every new session writes its first message to the cache
+  afresh. That is the same in both arms, so it is not a cause.
+
+B3's cause, from report.json's perRequest over the requests up to the landing (medians):
+- Requests to the landing: 3 in both arms. MAWS made ToolSearch, artifact_read, artifact_edit. Desktop made its
+  update_plan with a Bash backup, Read, then Edit, with a Bash call before the Edit in two of five.
+- First-byte wait, summed: MAWS 6.8 s, Desktop 5.9 s. MAWS's server hold was 0.7 s and its tool time 35 ms.
+- Generation: MAWS 25.2 s, Desktop 15.8 s. Thinking tokens: MAWS 2712, Desktop 1287. Output tokens: MAWS 3275, Desktop
+  2358.
+- The context at the first request: MAWS 26K, Desktop 63K.
+So the gap is the edit request's generation: MAWS's model reasons about twice as long before its one edit. Neither
+arm's records carry the thinking text, so why it does is not readable.
+
+How the arms did B3:
+- MAWS made one edit in every repetition (128 words to 131 to 140), then at most a read-back.
+- Desktop's first Edit was a long draft every time (137 to 158 words). In four of five it then counted the words with
+  Bash (`wc`, `diff`) and trimmed with one or two more Edits, ending at 134 to 138 words.
+- The drafts pass check.py's 0.6 to 1.4 length rule, so under §1 they are landings.
+- Send to the turn's last landing: MAWS 32.5 s, Desktop 38.7 s (0.84). Send to turn end: MAWS 37.6 s, Desktop 52.5 s.
+
+How firm B3 is:
+- Five repetitions with these spreads give a wide ratio of medians: a bootstrap (20,000 resamples within each arm)
+  puts it at 0.79 to 1.93 (95 %), with 66 % of resamples above 1.2.
+- The rule fixed beforehand has no middle band, so B3 stands as Desktop faster.
+
+Where the cause falls (§1 "What follows"):
+- It is not one of the deferred levers. Patch publish is the decks' lever. The request diet removes requests, and MAWS
+  made no more requests to the landing than Desktop. The context diet does not apply, since MAWS's context is the
+  smaller one.
+- It is not one of the named outside causes either: the relay's first byte (0.9 s more, summed), the tool count, a
+  server hold (0.7 s).
+- Under §1 it is therefore a tracker row.
+- One lever still moves B3's number. The request diet's `alwaysLoad` drops the ToolSearch request MAWS makes before
+  every edit (its first byte and generation, a median of about 2.9 s). On this record that puts B3's MAWS median at
+  29.7 s, a ratio of 1.163.
+
+The spend in Part B:
+- The MAWS arm: US$6.60 over the 20 record repetitions, by the engine's cost-state (B1 1.07, B3 1.62, B5 1.92, B7 1.99),
+  and US$0.15 for the shakedown, US$6.76 in all.
+- Desktop's Code sessions: US$7.64 over the 21 record repetitions and US$0.62 for the dry one, US$8.25 in all, as an
+  API equivalent. They were priced from their usage at the engine's own Opus 5.5 rates, fitted to MAWS's cost-state
+  records with a residual under US$0.00001 over 20 repetitions: output US$20, 1-hour cache write US$8, cache read
+  US$0.20 per million tokens, and input taken as US$4. On the owner's Max plan these turns are quota, not dollars.
+- Cloud Cowork: one seed turn and three hand-over follow-ups, all quota. The cloud records carry no usage, so it is
+  not measurable.
+- Total: about US$15, against the US$25 to 35 approved.
+
+The cleanup:
+- Done: the runner booted out, the hand-over file removed from ~/Downloads, no MAWS Electron left, the input source at
+  ABC, cua's task ended.
+- Not done, because cua asks for the owner's confirmation at the moment of a deletion and a subagent cannot ask:
+  - the Code tab's sessions in the "MAWS parity bench" folder: 21 record, the dry one, and Part A's probe "Available
+    tools inventory";
+  - the Claude tab's "Available tools and system info" (claude.ai/chat/55cfb041-2381-476f-939b-a5078f7f0e4d) and
+    "Autumn Workshops 2026 slide deck" (claude.ai/chat/e4a03a4d-8b54-4650-aa67-01ac8c4c2b94);
+  - the Slides deck 3G82JzugT38qYt5AgfDFoH.
+  In the Code tab, each session's "버튼 <title>" opens a context menu with "보관" and "삭제".
+- Left on the mini as the owner's records: /tmp/maws-parity-bench (the checkout, the run with its transcripts,
+  check/, shakedown/), the engines' transcripts under ~/.claude/projects/, and the folder's workspace trust in
+  ~/.claude.json.
+
+The labels the driver had wrong:
+- In the Claude tab's recent list an item is "버튼 <title>", with "팝업 버튼 <title>에 대한 더 많은 옵션" beside it, not
+  the "항목 …" `recentItem` assumed. With the seeds dropped, the label went unused.
+- No probe report was saved under RUN/ax/, so driver_labels_test.mjs has not gained these lines. The harness stays at
+  1eaac0fe5.

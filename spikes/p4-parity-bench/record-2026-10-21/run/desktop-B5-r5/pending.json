@@ -1,0 +1,21 @@
+{
+  "arm": "desktop",
+  "task": "B5",
+  "rep": 5,
+  "attempt": 1,
+  "kind": "presentation",
+  "surface": "code",
+  "host": "Mac-mini.local",
+  "armDir": "/tmp/maws-parity-bench/MAWS parity bench",
+  "prompt": "In the slide deck deck.html, on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "promptMatch": ", on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "startedAt": "2026-10-21T12:22:25.961710+00:00",
+  "loadBefore": [
+    5.02,
+    4.15,
+    3.57
+  ],
+  "seedId": null,
+  "seedTranscript": null,
+  "seedUrl": null
+}

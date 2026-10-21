@@ -1,0 +1,70 @@
+{
+  "arm": "maws",
+  "task": "B5",
+  "rep": 4,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "presentation",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T12:17:53.387Z",
+  "prompt": "In the slide deck [Autumn Workshops 2026](maws-artifact:17e9d9c7-0cc1-4f3c-b0c5-01cd2171318d), on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "promptMatch": ", on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "artifactId": "17e9d9c7-0cc1-4f3c-b0c5-01cd2171318d",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/47ff44ff-62d9-4a9e-9c20-598213c2372c.jsonl",
+  "journal": "/tmp/maws-parity-bench/run-20261021/maws-profile/engine-host/journal/fda07cdf-b04a-42d8-9551-4e4f2a432041/35lnvirs.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "47ff44ff-62d9-4a9e-9c20-598213c2372c",
+  "appSessionId": "fda07cdf-b04a-42d8-9551-4e4f2a432041",
+  "load": {
+    "before": [
+      2.66,
+      3.26,
+      3.18
+    ],
+    "after": [
+      3.15,
+      3.33,
+      3.21
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "slide 2: the session lead date -> 21 October, nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.39177139999999994,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 16,
+      "toolUseId": "toolu_0128ux7ny7CeCxTxaDYzZekj"
+    },
+    {
+      "name": "artifact_describe_type",
+      "ms": 14,
+      "toolUseId": "toolu_01RBsYkjK8iVX48TPYjvBCjc"
+    },
+    {
+      "name": "artifact_publish",
+      "ms": 32,
+      "toolUseId": "toolu_01PRZLbUuDGWAFJJpECneXuf"
+    },
+    {
+      "name": "artifact_read",
+      "ms": 11,
+      "toolUseId": "toolu_014ppyLra2DH87QCbDse3PAL"
+    }
+  ]
+}
