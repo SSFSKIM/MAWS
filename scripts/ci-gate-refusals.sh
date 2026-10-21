@@ -13,9 +13,11 @@
 # specs this run's `default` ran, not also those of every group the relaunch leaves out (Decision Log 66).
 # The invocation's own names go through verbatim, its --gates (`all` included; ci-gate.sh refuses a call without one)
 # among them: the relaunch's plan normalises them exactly as this run's plan did.
+# A job's name is its gate's, but for unit's shards on the pool, `unit <k>/<n>`, each a job of the gate `unit`: the
+# relaunch names that gate once, the plan sharding it again. Names are whole, spaces included: the refused, one a line.
 refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   local refused beside relaunch="scripts/ci-gate.sh $sha"
-  refused=$(printf '%s\n' "$2" | perl -ne 'print "$1\n" if /^([^\t]+)\t[^\t]*\t\S+ ci-kit: .*rerun\s*$/' | sort -u | tr '\n' ' ')
+  refused=$(printf '%s\n' "$2" | perl -ne 'print "$1\n" if /^([^\t]+)\t[^\t]*\t\S+ ci-kit: .*rerun\s*$/' | sort -u)
   [[ -n $refused ]] || return 0
   [[ -n $runner ]] && relaunch+=" --runner $runner"
   [[ -n $class1a ]] && relaunch+=" --class1a $class1a"
@@ -25,14 +27,16 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
     printf '%s\n' "$1" | awk -F'\t' '$1 != "skipped" && $2 ~ /^e2e:[A-Za-z0-9._:-]+$/ { print substr($2, 5) }'
     printf '%s\n' "$default_beside" | tr ', ' '\n'
   } | awk 'NF && $0 != "default" && !seen[$0]++' | paste -sd, -)
-  printf '%s\n' "$1" | awk -F'\t' -v refused="$refused" -v relaunch="$relaunch" -v label="$label" -v asked="$gates" -v beside="$beside" '
-    BEGIN { n = split(refused, names, " "); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }
+  # The refused through the environment, since awk's -v takes no newline.
+  printf '%s\n' "$1" | refused=$refused awk -F'\t' -v relaunch="$relaunch" -v label="$label" -v asked="$gates" -v beside="$beside" '
+    function relaunched(job) { if (job ~ /^unit [0-9]+\/[0-9]+$/) job = "unit"; if (!(job in named)) { named[job] = 1; gates = gates "," job } }
+    BEGIN { n = split(ENVIRON["refused"], names, "\n"); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }
     # Under GATE_RUNNER=macos the plan runs on the mini too; refused, it ran nothing, so the relaunch is the whole run.
     $2 == "plan" && $2 in isrefused { plan = 1 }
     $2 == "plan" || $1 == "skipped" { next }
-    $2 in isrefused { r = r " " $2; gates = gates "," $2; nr++; next }
+    $2 in isrefused { r = r " " $2; relaunched($2); nr++; next }
     $1 == "success" { g = g " " $2; ng++; next }
-    { d = d " " $2 ($1 == "failure" ? "" : " (" $1 ")"); gates = gates "," $2; nd++ }
+    { d = d " " $2 ($1 == "failure" ? "" : " (" $1 ")"); relaunched($2); nd++ }
     END {
       if (plan) {
         printf "ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: %s --gates %s%s --label %s --evidence\n", relaunch, asked, (beside != "" ? " --default-beside " beside : ""), label

@@ -4,6 +4,7 @@
 // code shown once with the line each machine runs at boot) and revokes one, on a step that says what revoking does: no
 // new machine enrolls through it, and the machines it enrolled stay until each is removed.
 import { useId, useState, type FormEvent } from 'react';
+import { formatDate } from '@shared/app/date-format';
 import { MAX_PROVISIONING_KEY_USES, PROVISIONING_KEY_TTL_S, type ProvisioningKeyRecord, type ProvisioningKeyRequest } from 'desk-hub/protocol';
 import { BOOT_COMMAND, createProvisioningKey, prefixProblem, provisioningCode, revokeProvisioningKey } from '../../enroll/enrollment';
 import { HubRequestError } from '../../hub/http';
@@ -33,7 +34,7 @@ const OFFLINE_TIMES: ReadonlyArray<{ seconds: number | null; words: string }> = 
   { seconds: 7 * DAY_S, words: '7 days' },
 ];
 
-const day = (iso: string) => new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+const day = (iso: string) => formatDate(Date.parse(iso));
 const lifetimeWords = (seconds: number) => LIFETIMES.find((l) => l.seconds === seconds)?.words ?? `${Math.round(seconds / DAY_S)} days`;
 const offlineWords = (seconds: number) => OFFLINE_TIMES.find((o) => o.seconds === seconds)?.words ?? `${Math.round(seconds / 3600)} hours`;
 

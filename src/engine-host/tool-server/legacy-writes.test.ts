@@ -138,11 +138,17 @@ describe('a held legacy dashboard’s writes', () => {
     const reached = new Promise<void>((resolve) => (gate.reached = resolve));
     gate.path = realpathSync(path); // the bind opens the file where its symlinks lead
     const binding = call('artifact_dataset', { artifact: 'board', baseRevision: base, id: 'sales', path: 'sales.csv' }, 'toolu_race');
-    await reached; // the bind is reading its file
-    await world.store.restore(board.id, before!, human);
-    expect(legacyDashboardFiles(world.service.live(board.id))).toEqual(['index.html']);
-    const restored = world.store.revision(board.id);
-    release();
+    let restored: number;
+    try {
+      await reached; // the bind is reading its file
+      await world.store.restore(board.id, before!, human);
+      expect(legacyDashboardFiles(world.service.live(board.id))).toEqual(['index.html']);
+      restored = world.store.revision(board.id);
+    } finally {
+      // whatever threw above, the parked read goes on and the bind settles here, so its descriptor closes with the case
+      release();
+      await Promise.allSettled([binding]);
+    }
     const answer = await binding;
     expect(artifactRefusalOf(text(answer))).toMatchObject({ reason: 'invalid', kind: 'dashboard', held: ['index.html'] });
     expect(world.store.revision(board.id)).toBe(restored);

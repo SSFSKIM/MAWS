@@ -10,6 +10,7 @@
 // provider's hold, parent Decision Log 33 to 35) until ProseMirror has ended the composition.
 import { Editor, Extension } from '@tiptap/core';
 import { Plugin, TextSelection } from '@tiptap/pm/state';
+import { useEditorState } from '@tiptap/react';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent, type Ref, type SyntheticEvent } from 'react';
 import type { Node as PmNode } from '@tiptap/pm/model';
 import { isBindingTransaction, onUpdate, type Doc } from '../../yjs';
@@ -260,9 +261,22 @@ function MarkBar({ ref, editor, node, session, refused }: { ref: Ref<HTMLDivElem
   const [panel, setPanel] = useState<Panel>(null);
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // P4-R9: the marks at the selection, read from the editor's state at each transaction (the owner's, a remote one's,
+  // a caret move): the compiler memoizes a read of `editor` on the editor itself, which a transaction never replaces
+  const marks = useEditorState({
+    editor,
+    selector: ({ editor: e }) => ({
+      empty: e.state.selection.empty,
+      b: e.isActive('b'),
+      i: e.isActive('i'),
+      u: e.isActive('u'),
+      a: e.isActive('a'),
+      span: e.isActive('span'),
+      color: e.getAttributes('span').color as string | undefined,
+    }),
+  });
   if (editor.isDestroyed) return null;
-  const { empty } = editor.state.selection;
-  const inLink = editor.isActive('a');
+  const { empty, a: inLink } = marks;
 
   const run = (command: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => {
     session.step(() => void command(editor.chain().focus()).run());
@@ -305,7 +319,7 @@ function MarkBar({ ref, editor, node, session, refused }: { ref: Ref<HTMLDivElem
   const preview = (color: string) => computed?.getPropertyValue(color.slice(4, -1)).trim() || undefined;
 
   const toggle = (name: 'b' | 'i' | 'u', label: string, glyph: string) => (
-    <button type="button" className="deck-markbar-button" data-mark={name} aria-label={label} title={label} aria-pressed={editor.isActive(name)} onClick={() => run((chain) => chain.toggleMark(name))}>
+    <button type="button" className="deck-markbar-button" data-mark={name} aria-label={label} title={label} aria-pressed={marks[name]} onClick={() => run((chain) => chain.toggleMark(name))}>
       {glyph}
     </button>
   );
@@ -325,8 +339,8 @@ function MarkBar({ ref, editor, node, session, refused }: { ref: Ref<HTMLDivElem
             ⌫
           </button>
         )}
-        <button type="button" className="deck-markbar-button" aria-label={C.colour} title={C.colour} aria-pressed={editor.isActive('span')} aria-expanded={panel === 'colour'} onClick={() => open('colour')}>
-          <span className="deck-markbar-swatch" style={{ background: (editor.getAttributes('span').color as string | undefined) ?? 'currentColor' }} />
+        <button type="button" className="deck-markbar-button" aria-label={C.colour} title={C.colour} aria-pressed={marks.span} aria-expanded={panel === 'colour'} onClick={() => open('colour')}>
+          <span className="deck-markbar-swatch" style={{ background: marks.color ?? 'currentColor' }} />
         </button>
       </div>
       {panel === 'colour' && (

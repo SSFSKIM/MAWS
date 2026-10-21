@@ -6,6 +6,7 @@
 // keeps it. Removing a machine, and revoking a key, are an admin's, confirmed on a step that says what it does (DX7's
 // revocation: disconnected at once, its credential deleted, enrolled again to be used again); neither takes the key.
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { formatClock } from '@shared/app/date-format';
 import { useState, type FormEvent } from 'react';
 import { machineNameKey, type MachineRecord, type ProvisioningKeyRecord } from 'desk-hub/protocol';
 import { createEnrollment, ENROLL_COMMAND, enrollmentCode, listMachines, listProvisioningKeys, machineNameProblem, removeMachine } from '../../enroll/enrollment';
@@ -190,7 +191,7 @@ function enrollConfirming(me: Me, machine: string): Confirming {
     issue: async (key) => {
       const { enrollment, token } = await createEnrollment();
       const code = enrollmentCode({ hub: location.origin, org: me.org.id, token, machine, key });
-      const until = new Date(enrollment.expires).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const until = formatClock(Date.parse(enrollment.expires));
       return {
         code,
         instructions: (

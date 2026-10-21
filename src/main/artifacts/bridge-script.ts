@@ -28,6 +28,13 @@
 // picking or changes the page. The capture window loads the page top-level, where there is no parent to listen to, so
 // the script does nothing there.
 //
+// P4 W2-C (tracker 2026-10-06, E2): a click on a link (`<a>` or `<area>`, an SVG link's too) to an address outside the
+// scheme, the web or `mailto:` alike, has its default prevented in the capture phase on `window`, so the page stays in
+// place: the app page's `frame-src` would refuse the navigation and leave the frame on Chromium's blocked page until
+// Reload. The page's own handlers still hear the click. A link within the scheme (an anchor in the page, another
+// revision, which main's frame guard judges) and a `javascript:` link are left alone. A delivered file carries no
+// bridge (it is served byte for byte), so its links keep Reload.
+//
 // P3-H H4: the page's connector runtime (`window.mawsConnectors`, ./page-connectors.ts) runs in the same script, after
 // the picker; its requests go over a port the app's frame hands the page at each load, never to `window.parent` itself.
 //
@@ -35,6 +42,7 @@
 // Served as one line: it goes ahead of the artifact's own scripts, so a line of its own would move every line number
 // Chromium reports for the page's console errors away from the agent's file. The source below is written so that
 // joining its lines changes nothing (no `//` comments, every statement ended by its semicolon).
+import { ARTIFACT_SCHEME } from '@shared/artifacts/scheme';
 import { PAGE_CONNECTORS_SOURCE } from './page-connectors';
 
 const SOURCE = String.raw`(function () {
@@ -209,6 +217,27 @@ const SOURCE = String.raw`(function () {
     var picked = { type: 'maws:picked', selector: selectorOf(el), label: labelOf(el), text: textOf(el), rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
     stop();
     post(picked);
+  }, true);
+
+  function linkOf(event) {
+    var path = event.composedPath();
+    for (var i = 0; i < path.length; i++) {
+      var node = path[i];
+      if (node instanceof Element && (node.localName === 'a' || node.localName === 'area')) {
+        var href = node.getAttribute('href');
+        if (href === null) href = node.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        if (href !== null) return href;
+      }
+    }
+    return null;
+  }
+
+  window.addEventListener('click', function (event) {
+    var href = linkOf(event);
+    if (href === null) return;
+    var url;
+    try { url = new URL(href, document.baseURI); } catch (error) { return; }
+    if (url.protocol !== '${ARTIFACT_SCHEME}:' && url.protocol !== 'javascript:') event.preventDefault();
   }, true);
 
   window.addEventListener('keydown', function (event) {

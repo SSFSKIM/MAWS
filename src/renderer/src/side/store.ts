@@ -21,7 +21,8 @@ import { ipc } from '../ipc/client';
 
 export type SideView = { kind: 'thread'; childAppSessionId: AppSessionId } | { kind: 'btw' };
 
-interface SidePane {
+// exported because connectVisibility's default `stores` names it in its declaration (TS4076 in the composite build)
+export interface SidePane {
   view: SideView | null;
   shownChild: AppSessionId | null; // the child whose transcript the pane draws while the pane is on screen
   exchanges: readonly SideExchange[] | null; // the side questions, oldest first; null until first listed

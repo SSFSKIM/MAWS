@@ -60,8 +60,18 @@ runs:
         # so text sets in metrics close to the Mac's; zsh, the Mac's login shell, which the e2e jobs name in SHELL.
         if [[ $E2E == true ]]; then packages+=(xvfb fonts-noto-cjk fonts-inter fonts-jetbrains-mono zsh); fi
         if [[ $LIBREOFFICE == true ]]; then packages+=(libreoffice-writer libreoffice-impress); fi
-        sudo apt-get update -q
-        sudo apt-get install -yq --no-install-recommends "${packages[@]}"
+        # Only what is missing: ci-kit's pool image carries these, and apt there cost ~35 s a job (static, each unit
+        # shard) and failed outright when the git-core PPA answered 503 (run 39630489726).
+        missing=()
+        for p in "${packages[@]}"; do
+          dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || missing+=("$p")
+        done
+        if (( ${#missing[@]} )); then
+          sudo apt-get update -q -o Acquire::Retries=3
+          sudo apt-get install -yq --no-install-recommends "${missing[@]}"
+        else
+          echo "apt: ${packages[*]} already installed"
+        fi
         if [[ $LIBREOFFICE == true ]]; then soffice --version; fi
     # Electron's renderer sandbox needs unprivileged user namespaces, which Ubuntu 24.04's apparmor restricts; the app
     # keeps its sandbox (never --no-sandbox), so the runner lifts the restriction.

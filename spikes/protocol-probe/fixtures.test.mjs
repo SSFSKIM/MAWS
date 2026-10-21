@@ -654,3 +654,128 @@ test('p4 R8 scratch: a server that needs auth reads needs-auth with no tools, an
  assert.ok(meta4(rows,'local_hits')[0].hits.some(h=>h.method==='POST'&&h.path==='/register')); // registered before it answered
  assert.equal(unknown.error,'Server not found: no-such-server');
 });
+// P4-A2P (docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.2 "The per-session launch profile", acceptance R-7;
+// scenarios/pass3/p4-a2p-profile.mjs; findings-p4-a2p-profile.txt): the launch profile through the launch's own flags
+// (src/shared/engine/launch-profile.ts profileSettings in `--settings`; under hooks none the alias appended), on the
+// installed engine 2.1.306, in a scratch home seeded from read-only copies of the owner's model, effort and style, three
+// of the owner's user-scope plugins and probe-owned user hooks. Stub arms against the scripted API (each launch's `step`
+// notes: every request with the alias and the user hooks' markers placed), two relay arms, and the home's manifest.
+const launchProfile=await import('../../src/shared/engine/launch-profile.ts');
+const A2P_STUB=['plain','plugins','style','hooks-group','hooks','hooks-resume','hooks-fork','hooks-user-kept','hooks-user','full'].map(s=>'p4-a2p-stub-'+s);
+const A2P_RELAY=['p4-a2p-relay-plain','p4-a2p-relay-full'];
+const A2P_PLUGINS=['designer@designer','doperpowers@doperpowers','eli5@claude-community'];
+const one2p=(name,event)=>meta4(load4(name),event)[0];
+const main2p=name=>meta4(load4(name),'step').map(s=>s.requests.filter(q=>q.main)); // per step, the main loop's requests
+const flat2p=name=>main2p(name).flat();
+const responses2p=name=>one2p(name,'hooks').frames.filter(h=>h.subtype==='hook_response').map(h=>h.hook_name);
+const noneOf2p=name=>one2p(name,'provenance').profile.hooks==='none';
+// MAWS's `--settings` and `--append-system-prompt` for a lane-on launch under a profile, from MAWS's own modules
+const flagFor2p=prov=>({dialogExpiry:'never',...launchProfile.profileSettings(prov.profile),env:{[ownerContract.NATIVE_TO_HUMAN_ENV]:String(ownerContract.TO_HUMAN_CONTRACT_VERSION)},...(prov.group?{hooks:{SessionStart:[ownerContract.messageToolHookGroup()]}}:{})});
+const appendFor2p=prov=>(prov.profile.outputStyle==='maws'?ownerContract.TO_HUMAN_CONTRACT:ownerContract.TO_HUMAN_SUPPLEMENT)+(prov.profile.hooks==='none'&&prov.group===false?`\n\n${ownerContract.MESSAGE_TOOL_ALIAS}`:'');
+const argAfter2p=(args,flag)=>{const i=args.indexOf(flag);return i<0?null:args[i+1];};
+for(const name of [...A2P_STUB,...A2P_RELAY])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-A2P provenance on the installed engine, MAWS\'s launch under its profile, the owner file unchanged and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-A2P');assert.equal(prov.pin,'246354256c404b41189c6cbeb67a7c1157a9f0e6');assert.equal(prov.engineVersion,'2.1.306');
+ assert.deepEqual(launchProfile.LaunchProfileSchema.parse(prov.profile),prov.profile);assert.deepEqual(prov.profileSettings,launchProfile.profileSettings(prov.profile));
+ assert.deepEqual(prov.flagSettings,flagFor2p(prov));assert.equal(prov.append,appendFor2p(prov));
+ const args=meta4(rows,'spawn')[0].args;
+ assert.ok(!args.includes('--model')); // the model and the effort come from the user scope
+ assert.equal(argAfter2p(args,'--setting-sources'),'user,project,local');
+ assert.equal(argAfter2p(args,'--settings'),JSON.stringify(prov.flagSettings));assert.equal(argAfter2p(args,'--append-system-prompt'),prov.append);
+ assert.equal(argAfter2p(args,'--system-prompt-snapshot'),prov.snapshotOff?'off':null);
+ assert.equal(argAfter2p(args,'--resume'),prov.resume);assert.equal(args.includes('--fork-session'),prov.fork);
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ for(const s of meta4(rows,'step'))assert.equal(s.result.subtype,'success',s.prompt);
+});
+test('p4 A2P R-7 (1): under every profile the model and the effort are the user scope\'s; init lists the user\'s plugins less the off ids and the chosen style',()=>{
+ const plain=one2p('p4-a2p-stub-plain','settings');
+ assert.deepEqual([plain.effective.model,plain.applied.model],['opus','claude-opus-5-5']);
+ // the user's effort for the model, per model (a top-level effortLevel applies to legacy models only)
+ assert.deepEqual([plain.effective.effortLevel,plain.effective.modelSettings[plain.applied.model].effortLevel,plain.applied.effort],['high','xhigh','xhigh']);
+ const builtins=one2p('p4-a2p-stub-plain','inits').inits[0].plugins.filter(p=>p.source.endsWith('@builtin')).map(p=>p.source);
+ const init=load4('p4-a2p-stub-plain').find(r=>r.direction==='in'&&r.frame.type==='system'&&r.frame.subtype==='init').frame;assert.ok(!('effort' in init));
+ for(const name of [...A2P_STUB,...A2P_RELAY]){
+  const {profile}=one2p(name,'provenance');const s=one2p(name,'settings');const inits=one2p(name,'inits').inits;const off=profile.plugins.off;
+  const style=profile.outputStyle==='maws'?'default':'doperpowers:to-human';
+  assert.deepEqual([s.applied.model,s.applied.effort,s.effective.outputStyle,s.effective.disableAllHooks],[plain.applied.model,plain.applied.effort,style,profile.hooks==='none'?true:null],name);
+  for(const id of A2P_PLUGINS)assert.equal(s.effective.enabledPlugins[id],!off.includes(id),name);
+  for(const i of inits){
+   assert.deepEqual([i.model,i.output_style],[plain.applied.model,style],name);
+   assert.deepEqual(i.plugins.map(p=>p.source).filter(x=>!x.endsWith('@builtin')).sort(),A2P_PLUGINS.filter(id=>!off.includes(id)),name);
+   assert.deepEqual(i.plugins.filter(p=>p.source.endsWith('@builtin')).map(p=>p.source),builtins,name);
+  }
+  // what the model was sent: the user's effort; the owner's style (the engine's output-style message) only under it; an off plugin's skills never
+  for(const q of flat2p(name)){
+   assert.equal(q.effort,plain.applied.effort,name);assert.equal(q.style.body>0,style!=='default',name);
+   assert.deepEqual([q.skills.doperpowers>0,q.skills.eli5>0,q.skills.designer>0],[true,!off.includes('eli5@claude-community'),!off.includes('designer@designer')],name);
+  }
+ }
+});
+test('p4 A2P R-7 (2): the user\'s hooks and the plugins\' run under the user scope; under hooks none none runs, MAWS\'s group left in the flag JSON included, and no new hook context reaches the model',()=>{
+ for(const name of ['p4-a2p-stub-plain','p4-a2p-stub-plugins','p4-a2p-stub-style','p4-a2p-relay-plain']){
+  // the user's printf, MAWS's group and doperpowers' kairos.sh at startup; the user's UserPromptSubmit; doperpowers' MessageDisplay
+  const ran=responses2p(name);assert.equal(ran.filter(h=>h==='SessionStart:startup').length,3,name);assert.ok(ran.includes('UserPromptSubmit')&&ran.includes('MessageDisplay'),name);
+  const [q]=main2p(name)[0];assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length,q.hits.alias.messages.length,q.hits.alias.system],[1,1,1,0],name);
+ }
+ assert.ok(one2p('p4-a2p-stub-plain','debug_lines').lines.some(l=>l.includes('hooks module doperpowers@doperpowers loaded')));
+ for(const name of [...A2P_STUB,...A2P_RELAY].filter(noneOf2p)){
+  assert.deepEqual(one2p(name,'hooks').frames,[],name);
+  assert.ok(one2p(name,'debug_lines').lines.some(l=>l.includes('hooks module doperpowers@doperpowers not loaded')),name);
+  for(const q of flat2p(name))assert.equal(q.hits.userSessionStart.system+q.hits.userPromptSubmit.system,0,name);
+ }
+ // a session begun under hooks none: no marker anywhere; a resume of the user-scope session: its own history's copies, none added
+ for(const name of ['p4-a2p-stub-hooks-group','p4-a2p-stub-hooks','p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-full','p4-a2p-relay-full'])for(const q of flat2p(name))assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length],[0,0],name);
+ for(const name of ['p4-a2p-stub-hooks-user-kept','p4-a2p-stub-hooks-user'])for(const q of flat2p(name))assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length,q.hits.alias.messages.length],[1,1,1],name);
+ // MAWS's group still in the flag JSON beside disableAllHooks: it does not run, and the alias reaches the model nowhere
+ const g=one2p('p4-a2p-stub-hooks-group','provenance');assert.deepEqual([g.flagSettings.disableAllHooks,g.flagSettings.hooks],[true,{SessionStart:[ownerContract.messageToolHookGroup()]}]);
+ for(const q of flat2p('p4-a2p-stub-hooks-group'))assert.deepEqual([q.hits.alias.system,q.hits.alias.messages.length,q.appendWhole],[0,0,true]);
+});
+test('p4 A2P R-7 (2) the route: under hooks none the alias appended after the supplement or the contract is in the system prompt at startup, after /compact and /clear, at a --resume and a --fork-session with snapshot off, and at a snapshot-off resume of a user-scope session',()=>{
+ const sys=name=>main2p(name).map(qs=>qs.map(q=>q.hits.alias.system));
+ assert.deepEqual(sys('p4-a2p-stub-hooks'),[[1],[1],[1],[],[1]]); // the first turn, the compaction's own request, the turn after it, the clear (no request), the turn after it
+ for(const name of ['p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-hooks-user','p4-a2p-stub-full','p4-a2p-relay-full'])assert.deepEqual(sys(name),[[1]],name);
+ for(const name of ['p4-a2p-stub-hooks','p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-hooks-user','p4-a2p-stub-full','p4-a2p-relay-full'])for(const q of flat2p(name))assert.deepEqual([q.appendWhole,q.appended],[true,one2p(name,'provenance').profile.outputStyle==='maws'?'contract:7':'supplement:2'],name);
+ // in a session begun under hooks none the system prompt is the one place it is
+ for(const name of ['p4-a2p-stub-hooks','p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-full','p4-a2p-relay-full'])for(const q of flat2p(name))assert.equal(q.hits.alias.messages.length,0,name);
+ // the compaction left a boundary; the clear began the session the resume and the fork read
+ const ids=[...new Set(meta4(load4('p4-a2p-stub-hooks'),'step').map(s=>s.session_id))];assert.equal(ids.length,2);
+ for(const name of ['p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork'])assert.equal(one2p(name,'provenance').resume,ids[1],name);
+ const disk=one2p('p4-a2p-stub-hooks','disk').sessions;assert.equal(disk.find(s=>s.sessionId===ids[0]).boundaries,1);assert.ok(disk.every(s=>s.snapshots.length>0&&s.snapshots.every(x=>x.alias===1)));
+});
+test('p4 A2P R-7 (2): without snapshot off a resume reuses the recorded system prompt, dropping the new append; a launch with snapshot off records no snapshot of its own',()=>{
+ const [plain]=main2p('p4-a2p-stub-plain')[0];const [kept]=main2p('p4-a2p-stub-hooks-user-kept')[0];const [live]=main2p('p4-a2p-stub-hooks-user')[0];
+ assert.deepEqual([kept.hits.alias.system,kept.appendWhole,kept.appended,kept.systemChars],[0,false,'supplement:2',plain.systemChars]);
+ assert.deepEqual([live.hits.alias.system,live.appendWhole,live.systemChars-plain.systemChars],[1,true,`\n\n${ownerContract.MESSAGE_TOOL_ALIAS}`.length]);
+ const id=one2p('p4-a2p-stub-plain','inits').inits[0].session_id;
+ for(const name of ['p4-a2p-stub-hooks-user-kept','p4-a2p-stub-hooks-user'])assert.equal(one2p(name,'provenance').resume,id,name);
+ // after both resumes the user-scope session's transcript holds its first launch's snapshots only, neither with the alias
+ const t=one2p('p4-a2p-home','transcripts').sessions.find(s=>s.sessionId===id);
+ assert.deepEqual(t.snapshots,one2p('p4-a2p-stub-plain','disk').sessions[0].snapshots.map(({alias,appended})=>({alias,appended})));assert.ok(t.snapshots.every(s=>s.alias===0));
+});
+test('p4 A2P on a real model: asked which tool stands for mcp__to-human__message, the user scope (the alias from MAWS\'s group) and the full profile (the alias only in the appended prompt) both name mcp__maws__message; under US$1',()=>{
+ const answers=name=>main2p(name)[0].map(q=>[q.status,q.answer.replace(/<\/?message>/g,'').trim()]);
+ assert.deepEqual(answers('p4-a2p-relay-plain'),[[200,'mcp__maws__message']]);assert.deepEqual(answers('p4-a2p-relay-full'),[[200,'mcp__maws__message']]);
+ const [p]=main2p('p4-a2p-relay-plain')[0];const [f]=main2p('p4-a2p-relay-full')[0];
+ assert.deepEqual([p.hits.alias.system,p.hits.alias.messages.length,f.hits.alias.system,f.hits.alias.messages.length],[0,1,1,0]);
+ const spent=A2P_RELAY.reduce((n,name)=>n+one2p(name,'spend').result.total_cost_usd,0);assert.ok(spent<1,String(spent));
+});
+test('p4 A2P R-7 (3): the scratch home\'s seeded files are read-only and byte-identical after the last launch, and every other change is a write the engine makes for a session',()=>{
+ const rows=load4('p4-a2p-home');
+ const prov=meta4(rows,'provenance')[0];assert.deepEqual([prov.child,prov.pin,prov.engineVersion,prov.arms],['P4-A2P','246354256c404b41189c6cbeb67a7c1157a9f0e6','2.1.306',['stub','relay']]);
+ const seeded=meta4(rows,'seeded')[0];
+ // the owner's model, effort and style; the copied plugins; the probe's own hooks (nothing of the owner's hooks, env or permissions)
+ assert.deepEqual(Object.keys(seeded.settings).sort(),['effortLevel','enabledPlugins','hooks','model','modelSettings','outputStyle']);
+ assert.deepEqual(Object.keys(seeded.settings.hooks).sort(),['SessionStart','UserPromptSubmit']);
+ for(const [event,groups] of Object.entries(seeded.settings.hooks))assert.deepEqual(groups,[{hooks:[{type:'command',command:'/usr/bin/printf',args:['%s',JSON.stringify({hookSpecificOutput:{hookEventName:event,additionalContext:`PROBE_USER_HOOK_${event}`}})]}]}],event);
+ assert.deepEqual([Object.keys(seeded.settings.enabledPlugins).sort(),Object.keys(seeded.registry.plugins).sort()],[A2P_PLUGINS,A2P_PLUGINS]);
+ assert.ok(Object.values(seeded.markets).every(m=>!('autoUpdate' in m))); // nothing to fetch
+ assert.ok(seeded.readOnly);assert.ok(seeded.files>1000);
+ const [before,after]=meta4(rows,'manifest');assert.deepEqual([after.seededDigest,after.seededSame,after.seededChanged],[before.seededDigest,true,[]]);
+ const {changes,other}=meta4(rows,'changes')[0];assert.deepEqual(other,[]);
+ assert.deepEqual([...new Set(changes.map(c=>c.class))].sort(),['auto memory directory','file checkpoints','global config','global config backup','plugin data','plugin in-use marker','plugin in-use sweep stamp','session environment','session registry','transcript']);
+ assert.deepEqual(changes.filter(c=>c.kind!=='added').map(c=>c.path),['.claude.json']); // nothing removed; the one changed file the engine's own state
+ assert.deepEqual(changes.filter(c=>c.path.startsWith('plugins/cache/')).map(c=>c.path.split('/').at(-1)),['.in_use','.in_use','.in_use']);
+});

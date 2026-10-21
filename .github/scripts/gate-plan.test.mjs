@@ -108,7 +108,7 @@ test('a macOS lane never takes a POOL_E2E group: the pool when class 1a is pool,
 
   const pooled = plan({ ...lists, HEAD_MESSAGE: macRun('\nClass1a: pool') });
   assert.deepEqual(runners(pooled.outputs), { library: mac, 'desk-web': box });
-  assert.equal(pooled.outputs.static_runner, JSON.stringify(box));
+  assert.equal(pooled.outputs.static_runner, JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-16']));
   assert.equal(pooled.outputs.pool, 'true');
   assert.match(pooled.summary, /E2e lane: macos \(on the pool: desk-web\)\./);
   // The repository's variables as they stand (GATE_RUNNER=pool, GATE_E2E_RUNNER=macos), the default set included.
@@ -225,20 +225,262 @@ test("every LIVE_E2E group's spec skips on a flag the e2e job sets under live", 
 });
 
 // A measured group's job waits first for ci-kit's measured-job guard on a Mac, and gets the guard's 15-minute bound on
-// top of the usual 30 (Decision Log 75's posture go, automated).
-test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml guards and times it by that mark', () => {
+// top of the usual 30 (Decision Log 75's posture go, automated); on the exclusive Mac instance, both get the 10 minutes
+// its start may wait for the shared instances to stop on top (ci-kit's mac-lane concurrency spec, M2).
+test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml guards it by that mark and times it by the entry', () => {
   const { outputs } = plan({ MEASURED_E2E: 'artifacts-perf document-scale', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:artifacts-perf,e2e:library\nRunner: macos' });
-  assert.deepEqual(Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, entry.measured])), { 'artifacts-perf': true, library: false });
+  assert.deepEqual(Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, [entry.measured, entry.timeout]])), { 'artifacts-perf': [true, 55], library: [false, 40] });
 
   const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
   const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   for (const group of /^ {2}MEASURED_E2E: (.*)$/m.exec(workflow)[1].split(/\s+/).filter(Boolean)) assert.ok(scripts[`e2e:${group}`], `e2e:${group} has a package script`);
   const job = /\n {2}e2e:\n((?: {4}.*\n|\n)*?)(?= {2}\S|$)/.exec(workflow)[1];
-  assert.match(job, /\n {4}timeout-minutes: \$\{\{ matrix\.measured && 45 \|\| 30 \}\}\n/);
+  assert.match(job, /\n {4}timeout-minutes: \$\{\{ matrix\.timeout \}\}\n/);
   // The guard is the job's first step, before the checkout, and only for a measured group on a Mac.
   assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- id: checkout\n {8}uses: actions\/checkout@v7\n/);
   // A job refused before its checkout uploads nothing: the Mac's persistent workspace still holds the last job's reports.
   assert.match(job, /\n {6}- if: \(failure\(\) \|\| needs\.plan\.outputs\.evidence == 'true'\) && steps\.checkout\.outcome == 'success'\n {8}uses: actions\/upload-artifact@v7\n/);
+});
+
+// ci-kit's mac-lane concurrency spec (M2): a Mac job asks for today's labels, which only ci-kit's exclusive instance
+// carries, so it runs alone, unless MAC_SHARED_E2E names it; then it asks for the shared instances' one label, which no
+// `self-hosted` job reaches. Each start may wait in ci-kit's hook, and the timeout carries that wait: an exclusive job's
+// 10 minutes for the shared instances to stop, a shared job's 60 while an exclusive job holds the desktop.
+const sharedMac = ['ci-kit-mac-shared'];
+// A list of gate.yml's env as the runner reads it: one line, a folded `>-` block, or '' (empty).
+const workflowList = (workflow, name) => {
+  const [, value, folded] = new RegExp(`^ {2}${name}: (.*)\\n((?: {4}\\S.*\\n)*)`, 'm').exec(workflow);
+  return (value === '>-' ? folded.trim().split(/\s+/).join(' ') : value).replace(/^''$/, '');
+};
+const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, [JSON.parse(entry.runner), entry.timeout]]));
+
+test("with MAC_SHARED_E2E empty, as gate.yml has it, every Mac job asks for today's labels, with the exclusive wait on its timeout", () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E'];
+  const own = Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
+  assert.equal(own.MAC_SHARED_E2E, '');
+  // The repository's variables as they stand, and the default set: class 1a on the pool, unit:darwin and every class-1
+  // group on the Mac but desk-web.
+  const { outputs, summary } = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test' });
+  const offMac = own.POOL_E2E.split(/\s+/);
+  const groups = Object.entries(placement(outputs));
+  assert.ok(groups.length > 30, `the class-1 set (${groups.length} groups)`);
+  for (const [group, where] of groups) assert.deepEqual(where, offMac.includes(group) ? [box, 30] : [mac, 40], group);
+  assert.equal(outputs.unit_darwin, 'true');
+  assert.equal(outputs.unit_darwin_runner, JSON.stringify(mac));
+  assert.deepEqual(JSON.parse(outputs.timeouts), { static: 30, unit: 30, probes: 30, unit_darwin: 40 });
+  assert.doesNotMatch(summary, /Shared Mac|MAC_SHARED_E2E/);
+  // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
+  const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
+  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [mac, 55], group);
+  assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
+});
+
+test('MAC_SHARED_E2E sends its groups and unit:darwin to the shared instances, the shared wait on their timeout; the run\'s other Mac jobs stay exclusive', () => {
+  const asked = 'ci-gate: test\n\nGates: unit:darwin,e2e:library,e2e:browser\nRunner: macos';
+  const { outputs, summary } = plan({ MAC_SHARED_E2E: 'browser unit:darwin', HEAD_MESSAGE: asked });
+  assert.deepEqual(placement(outputs), { library: [mac, 40], browser: [sharedMac, 90] });
+  assert.equal(outputs.unit_darwin_runner, JSON.stringify(sharedMac));
+  assert.deepEqual(JSON.parse(outputs.timeouts), { static: 30, unit: 30, probes: 30, unit_darwin: 90 });
+  assert.match(summary, /\. Shared Mac instances: unit:darwin, e2e:browser\.\n$/);
+  // The list is the workflow's, whatever started the run.
+  assert.deepEqual(placement(plan({ MAC_SHARED_E2E: 'browser', EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:browser', INPUT_RUNNER: 'macos' }).outputs), { browser: [sharedMac, 90] });
+  // Off the Mac a listed group keeps its runner: the Linux lane's, the pool's for a POOL_E2E group.
+  const linuxRun = plan({ ...lists, MAC_SHARED_E2E: 'library desk-web', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library,e2e:desk-web\nRunner: linux\nClass1a: pool' });
+  assert.deepEqual(placement(linuxRun.outputs), { library: [hosted, 30], 'desk-web': [box, 30] });
+  assert.doesNotMatch(linuxRun.summary, /Shared Mac/);
+});
+
+// The spec's "What it must not be": a measured group's bounds were calibrated alone, and a foreground group's cases test
+// the app in front, so neither shares the desktop, even on a scratch commit that lists it for a trial.
+test('a MEASURED_E2E or foreground group on MAC_SHARED_E2E stays on the exclusive instance, and the summary says so', () => {
+  const { outputs, summary } = plan({
+    MEASURED_E2E: 'artifacts-perf',
+    MAC_SHARED_E2E: 'artifacts-perf widgets default library',
+    HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:artifacts-perf,e2e:widgets,e2e:default,e2e:library\nRunner: macos',
+  });
+  assert.deepEqual(placement(outputs), { 'artifacts-perf': [mac, 55], widgets: [mac, 40], default: [mac, 40], library: [sharedMac, 90] });
+  assert.match(summary, /\. Shared Mac instances: e2e:library\. On MAC_SHARED_E2E but measured or foreground, so alone: e2e:artifacts-perf, e2e:widgets, e2e:default\.\n$/);
+});
+
+// A name joins MAC_SHARED_E2E on trial evidence (the spec's M4): it must be a job the plan can place there.
+test('every MAC_SHARED_E2E name is unit:darwin or a class-1 Mac group, neither measured nor foreground', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  const list = (name) => workflowList(workflow, name).split(/\s+/).filter(Boolean);
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  for (const name of list('MAC_SHARED_E2E')) {
+    if (name === 'unit:darwin') continue;
+    assert.ok(list('CLASS1_E2E').includes(name) && !list('POOL_E2E').includes(name), `${name} is a class-1 group that runs on the Mac`);
+    assert.ok(!list('MEASURED_E2E').includes(name), `${name} is not measured`);
+    assert.doesNotMatch(scripts[name === 'default' ? 'e2e' : `e2e:${name}`] ?? '', /MAWS_E2E_FOREGROUND=1/, `${name} is not foreground`);
+  }
+});
+
+test("gate.yml times every job that can take the exclusive Mac instance by the plan, and runs unit:darwin where the plan says", () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  const body = (job) => new RegExp(`\\n {2}${job}:\\n((?: {4}.*\\n|\\n)*?)(?= {2}\\S|$)`).exec(workflow)[1];
+  for (const [job, key] of [['static', 'static'], ['unit', 'unit'], ['probes', 'probes'], ['unit-darwin', 'unit_darwin']]) {
+    assert.match(body(job), new RegExp(`\\n {4}timeout-minutes: \\$\\{\\{ fromJSON\\(needs\\.plan\\.outputs\\.timeouts\\)\\.${key} \\}\\}\\n`), job);
+  }
+  assert.match(body('unit-darwin'), /\n {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_darwin_runner\) \}\}\n/);
+  assert.match(body('packaged'), /\n {4}runs-on: \[self-hosted, macOS, ARM64\]\n {4}timeout-minutes: 40 /);
+  assert.match(body('plan'), /\n {4}timeout-minutes: \$\{\{ vars\.GATE_RUNNER == 'macos' && 40 \|\| 30 \}\}\n/);
+  assert.match(workflow, /\n {6}unit_darwin_runner: \$\{\{ steps\.plan\.outputs\.unit_darwin_runner \}\}\n {6}timeouts: \$\{\{ steps\.plan\.outputs\.timeouts \}\}\n/);
+  // H1 of the spec's audit: each runner instance restores and stores its builds in a directory of its own.
+  assert.match(body('e2e'), /export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME /);
+});
+
+// ci-kit's job-started hook refuses a job by failing its start, which does not abort it: a later step whose condition
+// can hold after a failure still runs, beside whatever the hook would not admit it beside. ci-kit's contract (its
+// mac-lane concurrency spec): such a step of a Mac job leaves the desktop alone. Here that means an artifact upload, or a
+// step that waits on the outcome of a step only an admitted job runs. The walk reads the workflow's text as gate.yml
+// writes it, and fails closed: a job, a step, a condition or a runs-on it cannot read counts against the workflow.
+let macPlans;
+// The plans a runs-on is read from, run once: every gate on a Mac, exclusive and shared.
+const everyMacPlan = () => {
+  const message = 'ci-gate: test\n\nGates: static,unit,unit:darwin,probes,e2e:library\nRunner: macos\nClass1a: macos';
+  macPlans ??= [{}, { MAC_SHARED_E2E: 'library unit:darwin' }].map((shared) => plan({ CLASS1_E2E: 'library', ...shared, HEAD_MESSAGE: message }).outputs);
+  return macPlans;
+};
+// The label sets a runs-on can resolve to: a literal list or label, or fromJSON over a plan output or the e2e matrix's
+// runner. null for any other form (an expression over a variable, a block sequence), which counts as a Mac.
+const labelSets = (spec) => {
+  if (/^\[[^\]$]*\]$/.test(spec)) return [spec.slice(1, -1).split(',').map((label) => label.trim().replace(/^(['"])(.*)\1$/, '$2'))];
+  if (/^[\w.-]+$/.test(spec)) return [[spec]];
+  const [, output, matrix] = /^\$\{\{\s*fromJSON\((?:needs\.plan\.outputs\.(\w+)|(matrix\.runner))\)\s*\}\}$/.exec(spec) ?? [];
+  if (output) return everyMacPlan().map((outputs) => [JSON.parse(outputs[output])].flat());
+  if (matrix) return everyMacPlan().flatMap((outputs) => JSON.parse(outputs.e2e).map((entry) => [JSON.parse(entry.runner)].flat()));
+  return null;
+};
+// A runner takes a job when it carries every label the job asks for, case aside; the Mac's instances are known by the
+// labels the plan asks for: today's three for the exclusive one, theirs for the shared ones.
+const onMac = (labels) => [mac, sharedMac].some((carried) => labels.every((label) => carried.some((own) => own.toLowerCase() === label.toLowerCase())));
+// A step's keys, each with the lines of its value: the rest of the key's line, then the lines indented under it. null
+// when a line at the keys' indent is no plain `key:` (a flow mapping, a merge key, a quoted key) or a key repeats.
+const stepKeys = (step) => {
+  const keys = new Map();
+  let key = null;
+  for (const line of step.replace(/^ {6}- /, ' '.repeat(8)).split('\n')) {
+    if (/^\s*$/.test(line)) continue;
+    if (key && /^ {9}/.test(line)) keys.get(key).push(line.trim());
+    else if (/^ {0,8}#/.test(line)) key = null;
+    else {
+      [, key] = /^ {8}([\w-]+):(?: |$)/.exec(line) ?? [];
+      if (!key || keys.has(key)) return null;
+      keys.set(key, [line.slice(line.indexOf(':') + 1).trim()]);
+    }
+  }
+  return keys;
+};
+// A value as YAML reads it, line breaks as spaces: a block scalar's lines under its indicator, a plain one's all.
+const scalar = ([first, ...rest]) => (/^[|>][1-9+-]*$/.test(first) ? rest : [first, ...rest]).filter(Boolean).join(' ');
+// A step's condition, its `${{ }}` dropped: '' when it has none, null when the walk cannot read it (a quoted, tagged or
+// interpolated value, or an unreadable step).
+const condition = (keys) => {
+  if (!keys?.has('if')) return keys ? '' : null;
+  const value = scalar(keys.get('if'));
+  const text = value.replace(/^\$\{\{(.*)\}\}$/, '$1').trim();
+  return /^[!&*'"[{%@`]/.test(value) || /\$\{\{|\}\}/.test(text) || !text ? null : text;
+};
+// Any status check drops GitHub's implicit `success() &&`, so the step can run after a failed start: success() too
+// (`!success()`), which a step that means `success() && x` can leave out.
+const afterFailure = (cond) => cond === null || /\b(?:success|failure|always|cancelled)\s*\(/i.test(cond);
+// An expression's operands of `op` (&& or ||) outside its parentheses and string literals; null when those do not
+// balance.
+const operands = (text, op) => {
+  const parts = [];
+  let depth = 0;
+  let quoted = false;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "'") quoted = !quoted;
+    else if (quoted) continue;
+    else if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth--;
+    else if (depth === 0 && text.startsWith(op, i)) {
+      parts.push(text.slice(start, i).trim());
+      start = i + op.length;
+    }
+    if (depth < 0) return null;
+  }
+  return depth === 0 && !quoted ? [...parts, text.slice(start).trim()] : null;
+};
+// An expression wholly in parentheses, the opening one closing at its very end, without them.
+const unwrap = (text) => (/^\(.*\)$/.test(text) && operands(text.slice(1, -1), '||') ? unwrap(text.slice(1, -1).trim()) : text);
+// A guard: an admitted-only step's outcome compared with success or failure, or a parenthesized || of such alone.
+const guard = (conjunct, admitted) =>
+  operands(unwrap(conjunct), '||')?.every((comparison) => admitted.includes(/^steps\.([\w-]+)\.outcome\s*==\s*'(?:success|failure)'$/.exec(unwrap(comparison))?.[1])) === true;
+// Every top-level || alternative of the condition has a top-level && conjunct that is a guard (&& binds tighter).
+const waits = (cond, admitted) => operands(unwrap(cond), '||')?.every((alternative) => operands(unwrap(alternative), '&&')?.some((conjunct) => guard(conjunct, admitted))) === true;
+
+// The workflow's Mac jobs, and each of their steps that can run after a refused start yet is no upload and waits on no
+// admitted step.
+const refusedStartWalk = (workflow) => {
+  const macJobs = [];
+  const unsafe = [];
+  const jobs = /^jobs:\n((?:[ #].*\n|\n)*)/m.exec(workflow)[1];
+  const jobPattern = /^ {2}([\w-]+):\n((?: {4}.*\n| *#.*\n|\n)*)/gm;
+  // A line no job takes in starts a job the walk cannot read.
+  const unread = jobs.replace(jobPattern, '').split('\n').find((line) => !/^\s*(?:#|$)/.test(line));
+  if (unread) unsafe.push({ job: null, step: unread.trim(), condition: null });
+  for (const [, job, body] of jobs.matchAll(jobPattern)) {
+    if (labelSets(/^ {4}runs-on:(.*)$/m.exec(body)?.[1].trim() ?? '')?.some(onMac) === false) continue;
+    macJobs.push(job);
+    const [head, ...chunks] = body.slice(body.indexOf('    steps:\n')).split(/\n(?= {6}- )/);
+    if (!/^ {4}steps:(?:\n *(?:#.*)?)*$/.test(head)) unsafe.push({ job, step: 'steps:', condition: null });
+    const steps = chunks.map((chunk) => ({ chunk, keys: stepKeys(chunk) }));
+    // The steps that run only after a start that succeeded: their outcome is success or failure only in an admitted job.
+    const admitted = steps.filter(({ keys }) => !afterFailure(condition(keys))).map(({ keys }) => scalar(keys.get('id') ?? [''])).filter(Boolean);
+    for (const { chunk, keys } of steps) {
+      const cond = condition(keys);
+      if (!afterFailure(cond) || scalar(keys?.get('uses') ?? ['']).startsWith('actions/upload-artifact@') || (cond !== null && waits(cond, admitted))) continue;
+      unsafe.push({ job, step: keys ? scalar(keys.get('run') ?? keys.get('uses') ?? ['']) : chunk.trim().split('\n')[0], condition: cond });
+    }
+  }
+  return { macJobs: macJobs.sort(), unsafe };
+};
+const gateMacJobs = ['e2e', 'packaged', 'plan', 'probes', 'static', 'unit', 'unit-darwin'];
+
+test('a step of a Mac job that can run after its start was refused is an upload, or waits on a step only an admitted job runs', () => {
+  assert.deepEqual(refusedStartWalk(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8')), { macJobs: gateMacJobs, unsafe: [] });
+});
+
+// Each mutation rewrites a few of today's lines, matched once, into a form the walk must not pass.
+test('the walk fails closed: a rewrite that lets a step run after a refused start comes back unsafe, and a runs-on it cannot read counts as a Mac', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  // static's wait steps (gate-bg.sh), each `- name:` first, then its condition.
+  const waitStep = (check, name) => [`      - name: ${name}\n`, "        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}\n", `        run: .github/scripts/gate-bg.sh wait ${check}\n`];
+  const [lintName, lintIf, lint] = waitStep('lint', 'pnpm lint');
+  const [typecheckName, typecheckIf, typecheck] = waitStep('typecheck', 'pnpm typecheck');
+  const fuses = "        run: .github/scripts/gate-run.sh 'RunAsNode|verify:fuses' pnpm verify:fuses\n";
+  const mutations = [
+    // The guard dropped: a bare !cancelled() runs the step after a refused start.
+    [typecheckName + typecheckIf + typecheck, typecheckName + '        if: ${{ !cancelled() }}\n' + typecheck, ['static: typecheck']],
+    // A folded condition is the lines under its indicator.
+    [lintName + lintIf + lint, lintName + '        if: >-\n          ${{ always() }}\n' + lint, ['static: lint']],
+    // success() is a status check too: the implicit `success() &&` is gone.
+    [lintName + lintIf + lint, lintName + '        if: ${{ !success() }}\n' + lint, ['static: lint']],
+    // && binds tighter than ||: the outcome guards one alternative, and failure() alone runs the step.
+    [lintName + lintIf + lint, lintName + "        if: ${{ failure() || needs.plan.outputs.evidence == 'true' && steps.checkout.outcome == 'success' }}\n" + lint, ['static: lint']],
+    // A step a refused start skips has the outcome skipped.
+    [
+      "      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}\n" + fuses,
+      "      - if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}\n" + fuses,
+      ['packaged: verify:fuses'],
+    ],
+    ['      - if: matrix.build\n', '      - if: always() && matrix.build\n', ['e2e: build']],
+    // A checkout that can run after a refused start guards nothing.
+    ['    steps:\n      - id: checkout\n', '    steps:\n      - id: checkout\n        if: always()\n', ['static: actions/checkout@v7', 'static: typecheck', 'static: lint', 'static: build', 'static: gate-scripts']],
+    // An expression over a variable can name the Mac.
+    ['    runs-on: [self-hosted, macOS, ARM64]\n', "    runs-on: ${{ vars.PACKAGED_RUNNER || 'ubuntu-24.04' }}\n", []],
+  ];
+  for (const [before, after, expected] of mutations) {
+    const parts = workflow.split(before);
+    assert.equal(parts.length, 2, before);
+    const { macJobs, unsafe } = refusedStartWalk(parts.join(after));
+    assert.deepEqual(macJobs, gateMacJobs, after);
+    assert.deepEqual(unsafe.map(({ job, step }) => `${job}: ${step.split(' ').at(-1)}`), expected, after);
+  }
 });
 
 // Selection for iteration runs (ci-kit's test-history spec, M4; gate-affected.mjs): a push whose commit says
@@ -251,8 +493,10 @@ test('a run without the Selection: trailer writes the outputs and the summary it
   const pushed = plan({ HEAD_MESSAGE: 'ci-gate: 0123abcd\n\nNonce: 1-2\nGates: static,unit,probes\nClass1a: pool' });
   const outputs = [
     'static=true', 'unit=true', 'unit_darwin=false', 'probes=true', 'e2e=[]',
-    `static_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-4'])}`, `unit_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-8'])}`, `probes_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-2'])}`, 'pool=true',
+    `static_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-16'])}`, `unit_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-8'])}`, `probes_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-2'])}`, 'pool=true',
     'packaged=false', 'evidence=false', 'live=false', 'default_beside=[]',
+    `unit_shards=${JSON.stringify([{ shard: '1/4', slug: '-1of4' }, { shard: '2/4', slug: '-2of4' }, { shard: '3/4', slug: '-3of4' }, { shard: '4/4', slug: '-4of4' }])}`,
+    `unit_darwin_runner=${JSON.stringify(['self-hosted', 'macOS', 'ARM64'])}`, 'timeouts={"static":30,"unit":30,"probes":30,"unit_darwin":40}',
   ];
   assert.equal(pushed.raw, `${outputs.join('\n')}\n`);
   assert.equal(pushed.summary, '### Gates\n\n- `static`\n- `unit`\n- `probes`\n\nFrom: the `Gates:` trailer. Class 1a: pool. E2e lane: linux.\n');
@@ -403,4 +647,30 @@ test("a path under docs/ but evidence/p1-e8 counts for nothing: docs alone run n
   const evidence = plan({ HEAD_MESSAGE: selected([...docs, 'M\tdocs/doperpowers/evidence/p1-e8/g0-cli-probe.txt']) });
   assert.equal(evidence.outputs.related, '');
   assert.match(evidence.summary, /\nSelection: affected — full suite: read through fs, a glob or a query import \(docs\/doperpowers\/evidence\/p1-e8\/g0-cli-probe.txt\)\n$/);
+});
+
+// The pool runs the whole unit suite as UNIT_SHARDS jobs, each with its --shard and its JUnit artifact's suffix, which
+// ci-kit's collector reads as one `unit` report; vitest's related mode, and a runner off the pool, keep the one job.
+test('on the pool the whole unit suite runs in shards; related mode and the other runners keep one unit job', () => {
+  const shards = (env) => JSON.parse(plan(env).outputs.unit_shards);
+  const sharded = shards({ HEAD_MESSAGE: 'ci-gate: 0123abcd\n\nGates: static,unit,probes\nClass1a: pool' });
+  const n = sharded.length;
+  assert.ok(n > 1);
+  assert.deepEqual(sharded, Array.from({ length: n }, (_, i) => ({ shard: `${i + 1}/${n}`, slug: `-${i + 1}of${n}` })));
+  const one = [{ shard: '', slug: '' }];
+  for (const class1a of ['linux', 'macos']) assert.deepEqual(shards({ HEAD_MESSAGE: `ci-gate: 0123abcd\n\nGates: unit\nClass1a: ${class1a}` }), one, class1a);
+  assert.deepEqual(shards({ HEAD_MESSAGE: selected(['M\tsrc/shared/a.ts']) }), one);
+  // A selected run that falls back to the whole suite runs it in shards, as any whole-suite run on the pool does.
+  assert.deepEqual(shards({ HEAD_MESSAGE: selected(['M\tpnpm-lock.yaml']) }), sharded);
+});
+
+test("gate.yml runs the unit job over the plan's shards: its name, its --shard (beside the module cache) and its artifact's name", () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  assert.match(workflow, /\n {6}unit_shards: \$\{\{ steps\.plan\.outputs\.unit_shards \}\}\n/);
+  const body = /\n {2}unit:\n((?: {4}.*\n|\n)*?)(?= {2}\S|$)/.exec(workflow)[1];
+  assert.match(body, /^ {4}name: \$\{\{ matrix\.shard && format\('unit \{0\}', matrix\.shard\) \|\| 'unit' \}\}\n/);
+  assert.match(body, /\n {8}include: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_shards\) \}\}\n/);
+  assert.match(body, /\n {10}SHARD: \$\{\{ matrix\.shard \}\}\n/);
+  assert.match(body, /pnpm test --maxWorkers="\$cores" --fsModuleCache \$\{SHARD:\+--shard="\$SHARD"\}\n/);
+  assert.match(body, /\n {10}name: test-results-unit\$\{\{ matrix\.slug \}\}-\$\{\{ github\.run_attempt \}\}\n/);
 });

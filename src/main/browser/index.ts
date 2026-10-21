@@ -250,7 +250,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     cua, // E13
     partitions, // E4b
     extensions: extensionUi, // cua #90
-    // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
+    // At will-quit, once the hosts' drain has settled (P4 W2-B): nothing more is sampled or placed, tabs.json is written,
+    // every page closed.
     stop: () => {
       commentMode.stop(); // E4d
       extensionUi.stop(); // cua #90: every popup closed

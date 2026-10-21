@@ -16,7 +16,7 @@ import { projectList } from './derive';
 import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;

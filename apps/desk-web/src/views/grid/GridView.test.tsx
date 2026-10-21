@@ -75,6 +75,14 @@ it("shows a project whose summary carries no live count, as a Registry on the ve
   expect(tiles()).toEqual(['arkho']);
 });
 
+// The desk's one display locale (P4 Decision Log 4): this project runs under a Korean system locale (vitest.config.ts),
+// where a formatter on the default locale writes "PM 02:05" (a Korean browser, "오후 02:05").
+it('says how old the held counts are in English while it reconnects', () => {
+  useGrid.setState({ status: 'connecting', asOf: new Date(2026, 9, 6, 14, 5).getTime() });
+  render(<GridView onEnroll={() => {}} />);
+  expect(screen.getByTestId('grid-stale').textContent!.replace(/\s/g, ' ')).toContain('Counts as of 2:05 PM.');
+});
+
 it('says no project has a live session when none is active, with every project one tap away', () => {
   useGrid.setState({ projects: [summary('MAWS'), summary('mini', { kind: 'machine' })] });
   render(<GridView onEnroll={() => {}} />);

@@ -224,7 +224,10 @@ export async function runDeck ({ profile = 'normal', months = 6, encoding = 'del
     const target = rows[rows.length - 1]
     version('auto', now, 'human')
     const t0 = performance.now()
-    const R = revertUpdate(store.stateAt(target.seq).state, Y.encodeStateAsUpdateV2(doc))
+    // P4: the restore's update is authored under an id of the soak's own, not Yjs's random one. A later restore that
+    // re-creates a node redoes its entries in an order that follows their authors' ids, readFlat reads the node in that
+    // order (attrEntries), and the seeded picks index into it: with random ids one descriptor's runs diverged
+    const R = revertUpdate(store.stateAt(target.seq).state, Y.encodeStateAsUpdateV2(doc), nextClient++)
     const ms = performance.now() - t0
     setActor('human:restore', nextClient++)
     Y.applyUpdateV2(doc, R)

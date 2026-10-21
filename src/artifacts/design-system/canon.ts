@@ -45,6 +45,12 @@ export interface DomNodeLike {
 }
 export interface HtmlParser {
   parseFromString(source: string, type: 'text/html'): { head: DomNodeLike | null; body: DomNodeLike | null };
+  /**
+   * False for a source this parser cannot build as the page's `DOMParser` does: `validateCanon` then checks that file by
+   * its limits only and leaves its structure to the page's Check, so a stand-in parser (the host's parse5) never refuses
+   * what the page accepts. The page's own parser has none and judges every file.
+   */
+  buildsPageTree?(source: string): boolean;
 }
 
 export const PLACEHOLDER_ROLES = ['title', 'subtitle', 'body', 'image', 'caption', 'notes'] as const;
@@ -331,7 +337,9 @@ export function validateCanon(files: Readonly<Record<string, string>>, parser: H
         ? ['not a canon path: layouts are layouts/<name>.html, components components/<name>.html or components/document.css']
         : kind === 'stylesheet'
           ? stylesheetProblems(text, names)
-          : htmlProblems(kind, text, parser);
+          : parser.buildsPageTree?.(text) === false
+            ? [] // the page's Check judges it (HtmlParser.buildsPageTree)
+            : htmlProblems(kind, text, parser);
     for (const message of messages) problems.push({ path, message });
   }
   return problems;

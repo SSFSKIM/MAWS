@@ -8,7 +8,8 @@ import { EffortSchema, type Effort, type LaunchSpec } from '@shared/engine/launc
 import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { appMcpConfig, type AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
-import { messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09); P4-R7y: the hook
+import { profileSettings, userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
+import { MESSAGE_TOOL_ALIAS, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09); P4-R7y: the hook
 
 export type Attestation = { accepted: true; directory: string };
 type Gateway = LaunchSpec['gateway'];
@@ -17,12 +18,13 @@ type Gateway = LaunchSpec['gateway'];
 // Settings v3 is C11's; until it lands C10 reads these defaults here, so nothing changes when C11 lands but the source.
 export interface C10Settings {
   gateway: { defaultRoute: Gateway; relayUnreachable: 'ask' | 'direct' | 'wait' };
-  engine: { subagentModel: string | null; mcpServers: readonly AppMcpServer[] }; // P4-R8: the app's MCP servers (settings v16)
+  // P4-R8: the app's MCP servers (settings v16); P4-A2: the launch profile every launch runs under (settings v17)
+  engine: { subagentModel: string | null; mcpServers: readonly AppMcpServer[]; launchProfile: LaunchProfile };
   permissions: { autoFallback: PermissionMode }; // W3: settings v6, the mode a refused auto falls back to
 }
 export const C10_SETTING_DEFAULTS: C10Settings = Object.freeze({
   gateway: Object.freeze({ defaultRoute: 'gateway', relayUnreachable: 'ask' }),
-  engine: Object.freeze({ subagentModel: null, mcpServers: Object.freeze([]) }),
+  engine: Object.freeze({ subagentModel: null, mcpServers: Object.freeze([]), launchProfile: Object.freeze(userScopeProfile()) }),
   permissions: Object.freeze({ autoFallback: 'acceptEdits' }),
 }) as C10Settings;
 
@@ -68,13 +70,25 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     sessionId: input.sessionId,
     trust: input.trust,
     mcpConfig: appMcpConfig(settings.engine.mcpServers), // P4-R8: every launch MAWS owns passes the app's MCP servers
-    // the engine's environment is an allowlist (engine-host/launch.ts): `--settings` env is the one way to add a variable
-    extraSettings: input.browserBackend ? { env: { CUA_BROWSER_BACKENDS: input.browserBackend } } : null,
+    extraSettings: extraSettingsOf(input, settings),
     maxBudgetUsd: null,
     replay: input.replay,
     inheritGrantsFrom: input.inheritGrantsFrom,
   };
 }
+
+// The launch's own `--settings` keys before the host's: the launch profile's (P4-A2: flag-level keys, none for the user
+// scope, so a user-scope launch is what it was before the profile existed) and the session's cua socket. The engine's
+// environment is an allowlist (engine-host/launch.ts): `--settings` env is the one way to add a variable.
+function extraSettingsOf(input: LaunchInput, settings: C10Settings): Record<string, unknown> | null {
+  const merged = { ...profileSettings(settings.engine.launchProfile), ...(input.browserBackend ? { env: { CUA_BROWSER_BACKENDS: input.browserBackend } } : {}) };
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+// P4-A2: a launch whose own settings turn every hook off (the profile's hooks `none`). The engine then runs no hook from
+// a settings file, the `--settings` JSON's included (it keeps only policy hooks: findings-p4-a2p-profile.txt), so a
+// SessionStart group there would never run.
+export const hooksOff = (spec: Pick<LaunchSpec, 'extraSettings'>): boolean => spec.extraSettings?.disableAllHooks === true;
 
 // P2-C start (2026-10-09): the owner channel's launch decision applied to a spec (the P2-C document, Design §2, §3;
 // src/main/owner/launch.ts decides). While the lane is on, MAWS_NATIVE_TO_HUMAN (the contract version) joins the
@@ -98,12 +112,15 @@ export function withOwnerChannel(spec: LaunchSpec, flags: OwnerChannelFlags): La
   const env: Record<string, unknown> = { ...(callerEnv as Record<string, unknown> | undefined) };
   delete env[NATIVE_TO_HUMAN_ENV];
   if (flags.laneOn) env[NATIVE_TO_HUMAN_ENV] = String(TO_HUMAN_CONTRACT_VERSION);
-  const hooks = withMessageToolHook(callerHooks, flags.laneOn); // P4-R7y
+  // P4-A2: under hooks off the alias rides the appended prompt instead of the group, which would never run
+  const viaPrompt = flags.laneOn && hooksOff(spec);
+  const hooks = withMessageToolHook(callerHooks, flags.laneOn && !viaPrompt); // P4-R7y
   const merged = { ...settings, ...(Object.keys(env).length > 0 ? { env } : {}), ...(hooks !== undefined ? { hooks } : {}) };
+  const appended = [flags.append !== null ? APPENDED[flags.append] : null, viaPrompt ? MESSAGE_TOOL_ALIAS : null].filter((text): text is string => text !== null).join('\n\n');
   return {
     ...rest,
     extraSettings: Object.keys(merged).length > 0 ? merged : null,
-    ...(flags.append !== null ? { appendSystemPrompt: APPENDED[flags.append] } : {}),
+    ...(appended !== '' ? { appendSystemPrompt: appended } : {}),
     ...(flags.snapshotOff ? { systemPromptSnapshot: 'off' as const } : {}),
   };
 }
@@ -111,7 +128,9 @@ export function withOwnerChannel(spec: LaunchSpec, flags: OwnerChannelFlags): La
 // P4-R7y (2026-10-21, the owner's ask): under the same condition as the advertisement, MAWS's SessionStart group
 // (`messageToolHookGroup`: the model told at every start that the plugin's message tool is MAWS's here) joins the
 // settings' hooks after the caller's, once; with the lane off, where the plugin's tool is real, it is taken out (a
-// retried spec). The caller's other hooks stay as they were.
+// retried spec). The caller's other hooks stay as they were. P4-A2: under the launch profile's hooks `none` the group
+// would never run, so it is left out and the same text is appended to the system prompt after the contract or the
+// supplement (the owner channel passes "off" where the launch would reuse a snapshot recorded without it).
 const MESSAGE_TOOL_GROUP = JSON.stringify(messageToolHookGroup());
 function withMessageToolHook(hooks: unknown, on: boolean): Record<string, unknown> | undefined {
   const rest: Record<string, unknown> = typeof hooks === 'object' && hooks !== null && !Array.isArray(hooks) ? { ...hooks } : {};

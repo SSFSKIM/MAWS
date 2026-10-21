@@ -5,7 +5,7 @@
 // reports its failed requests itself, and MAWS never relaunches on its own initiative (D-16).
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { ActionId } from '@shared/keymap/actions';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { runAction as runShellAction } from '../keymap/actions-runtime';
 import { useNotices, type NoticesState } from '../stores/notices';
 import { useSessions, type SessionsState } from '../stores/sessions';
@@ -28,7 +28,7 @@ export interface RelayMonitorDeps {
 }
 
 // How long the relay has not answered, from the first check that found it down to the latest (mockup 06 vignette 02).
-// In the system locale (`app/date-format.ts`): "now", "30 seconds ago", "1 minute ago" (30초 전).
+// In the display locale (`@shared/app/date-format`): "now", "30 seconds ago", "1 minute ago".
 const since = (fromIso: string, toIso: string): string => formatAgo(Math.max(0, Date.parse(toIso) - Date.parse(fromIso)), { seconds: true });
 
 function bannerText(live: number, outageSince: string, checkedAt: string): string {

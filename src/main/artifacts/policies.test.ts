@@ -11,6 +11,7 @@ import {
   artifactConsoleMessageOf,
   attributeConsole,
   guardFrames,
+  guardWindowNavigation,
   installFramePolicies,
   isCspExempt,
   beneathStoreFrame,
@@ -361,6 +362,40 @@ describe('the policies installed on a session and a window', () => {
     expect(allowed.preventDefault).not.toHaveBeenCalled();
     expect(app.preventDefault).not.toHaveBeenCalled();
     await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation https://example.invalid/', 'blocked-navigation https://example.invalid/pdf-link']));
+  });
+
+  // P4 W2-C (tracker 2026-10-06, E2): the window's own guard writes the line the frame guard writes, so the e2e sees a
+  // PDF's link refused at the top level (Chromium's viewer navigates the window itself) as it sees a frame's
+  it('refuses every navigation of the app window itself and writes the seam line under MAWS_E2E', async () => {
+    const contents = new EventEmitter();
+    guardWindowNavigation(contents as unknown as WebContents, e2e());
+    const link = { url: 'https://example.invalid/pdf-link', isMainFrame: true, preventDefault: vi.fn() };
+    const app = { url: APP, isMainFrame: true, preventDefault: vi.fn() };
+    for (const event of [link, app]) contents.emit('will-navigate', event);
+    await settle();
+    expect(link.preventDefault).toHaveBeenCalled();
+    expect(app.preventDefault).toHaveBeenCalled();
+    await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation https://example.invalid/pdf-link', `blocked-navigation ${APP}`]));
+  });
+
+  // P4 W2-C (tracker 2026-09-28, C6): in development a page's own `location.reload()` reaches `will-navigate` (a renderer
+  // navigation to its own URL), and the transcript store's hot update reloads that way
+  it('lets the dev server’s page reload itself, and refuses every other navigation there', async () => {
+    const DEV = 'http://localhost:5173/harness.html';
+    const contents = Object.assign(new EventEmitter(), { getURL: () => DEV });
+    guardWindowNavigation(contents as unknown as WebContents, e2e(), { reloads: true });
+    const reload = { url: DEV, isMainFrame: true, preventDefault: vi.fn() };
+    const away = { url: 'http://localhost:5173/index.html', isMainFrame: true, preventDefault: vi.fn() };
+    for (const event of [reload, away]) contents.emit('will-navigate', event);
+    const built = Object.assign(new EventEmitter(), { getURL: () => APP });
+    guardWindowNavigation(built as unknown as WebContents, e2e());
+    const rebuilt = { url: APP, isMainFrame: true, preventDefault: vi.fn() };
+    built.emit('will-navigate', rebuilt);
+    await settle();
+    expect(reload.preventDefault).not.toHaveBeenCalled();
+    expect(away.preventDefault).toHaveBeenCalled();
+    expect(rebuilt.preventDefault).toHaveBeenCalled(); // a built app's page never reloads itself this way
+    await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation http://localhost:5173/index.html', `blocked-navigation ${APP}`]));
   });
 
   class PermissionSession {

@@ -58,6 +58,8 @@ const NOTICE_EDGE: Record<ChromeNotice['kind'], Edge> = {
   commentCannotName: 'warning',
   commentCropTooLarge: 'warning', // P2-E2
   commentCropFailed: 'warning', // P2-E2
+  commentCannotOpen: 'warning', // P4 W2-C
+  commentOpenedElsewhere: 'info', // P4 W2-C
   // E4d end
   dialogAnswered: 'info', // E4c
   extensionPopupFailed: 'warning', // cua #90
@@ -91,6 +93,11 @@ export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' 
       return COMMENT_COPY.cropTooLarge;
     case 'commentCropFailed':
       return COMMENT_COPY.cropFailed;
+    // P4 W2-C: a page opener's lines, here rather than in a toast while a browser is on screen
+    case 'commentCannotOpen':
+      return COMMENT_COPY.cannotOpen(notice.name ?? '');
+    case 'commentOpenedElsewhere':
+      return COMMENT_COPY.openedElsewhere(notice.name ?? '');
     // E4d end
     // E4c start
     case 'dialogAnswered':

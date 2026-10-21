@@ -4,7 +4,7 @@
 // No real gh or git process starts here: every child is a FakeChild and every kill a fake.
 import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,7 @@ interface GhAnswer {
 
 describe('scm service runs confirmed plans, probes gh and caches PR state', () => {
   let root: string;
+  let directories: Map<AppSessionId, string>; // each session's directory
   let trust: TrustStoreFixture;
   let status: GitStatus;
   let remotes: string;
@@ -77,7 +78,13 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
   function service(): ScmService {
     const read: GitRun = async (directory, args) => {
       const command = args.join(' ');
-      if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`; // the trust key's read
+      // the trust key's read and the checkout's keys: a subdirectory answers its root, a linked worktree its own top
+      // level beside the root's common dir
+      if (args[0] === 'rev-parse') {
+        if (directory === join(root, 'sub')) return `${root}\n${root}/.git\n${root}/.git\n`;
+        if (directory === join(root, 'wt')) return `${directory}\n${root}/.git\n${root}/.git/worktrees/wt\n`;
+        return `${directory}\n${directory}/.git\n${directory}/.git\n`;
+      }
       if (command === 'remote') return remotes;
       if (command === 'remote -v') return remotes.split('\n').filter(Boolean).map((name) => `${name}\thttps://github.com/o/r.git (fetch)\n${name}\thttps://github.com/o/r.git (push)\n`).join(''); // E11: status's one read
       if (command === UPSTREAM_FORMAT) return '*\0origin\0refs/heads/main\n';
@@ -90,7 +97,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       throw new Error(`unexpected read: git ${command}`);
     };
     return new ScmService({
-      records: (id) => (id === ID || id === OTHER ? { directory: root, worktree: null } : null),
+      records: (id) => (directories.has(id) ? { directory: directories.get(id)!, worktree: null } : null),
       read,
       // the plans' destination reads answer from the same fake, recording which git and capture they were made for
       pushRead: (program, given) => {
@@ -111,6 +118,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
 
   beforeEach(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scm-remote-')));
+    directories = new Map([[ID, root], [OTHER, root]]);
     trust = new TrustStoreFixture();
     trust.write({ [root]: { hasTrustDialogAccepted: true } });
     captured = { HOME: root, CLAUDE_CONFIG_DIR: trust.configHome, PATH: '/nowhere' };
@@ -331,6 +339,30 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       expect(kill).not.toHaveBeenCalled();
       await scm.cancel({ appSessionId: ID, token: plan.token });
       expect(kill).toHaveBeenCalledWith(lastPush().pid, 'SIGTERM');
+    });
+
+    // P4 W2-B (tracker 2026-10-06 "The mutation chain and admission queue are keyed by the checkout's realpath…"): a
+    // run, a plan and a PR state belong to the worktree a session works in, so a subdirectory shares its root's and a
+    // linked worktree of the same repository keeps its own
+    it("shares a run and the PR state between a checkout's root and its subdirectory, never with a linked worktree", async () => {
+      const SIDE = 'c3333333-3333-4333-8333-333333333333' as AppSessionId;
+      mkdirSync(join(root, 'sub'));
+      mkdirSync(join(root, 'wt'));
+      directories.set(OTHER, join(root, 'sub')).set(SIDE, join(root, 'wt'));
+      await scm.prState({ appSessionId: OTHER, refresh: false });
+      await scm.prState({ appSessionId: SIDE, refresh: false });
+      expect(ghCalls('pr view')).toHaveLength(2);
+      const plan = await planPush();
+      await scm.run({ appSessionId: ID, token: plan.token }, 'push');
+      expect(await scm.last(OTHER)).toMatchObject({ token: plan.token, running: true });
+      expect(await scm.last(SIDE)).toBeNull();
+      const theirs = (await scm.planPush({ appSessionId: OTHER })) as RemotePlan;
+      expect(await scm.run({ appSessionId: OTHER, token: theirs.token }, 'push')).toMatchObject({ refused: 'busy' });
+      lastPush().close(0);
+      await scm.prState({ appSessionId: OTHER, refresh: false }); // the root's run ended: asked again
+      await scm.prState({ appSessionId: SIDE, refresh: false }); // still kept
+      expect(ghCalls('pr view')).toHaveLength(3);
+      expect(pushes()).toHaveLength(1);
     });
 
     it('stops every run on dispose and answers nothing after', async () => {

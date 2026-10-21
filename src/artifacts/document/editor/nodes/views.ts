@@ -6,6 +6,7 @@ import type { Editor, NodeViewRenderer } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { NodeView } from '@tiptap/pm/view';
 import katex from 'katex';
+import { formatCalendarDay } from '@shared/app/date-format';
 import { CALLOUT_TONES } from '../../schema';
 import type { EditorHost } from '../host-types';
 import type { Doc } from '../../../yjs'; // P3-E
@@ -82,12 +83,10 @@ export function imageSrc(node: PMNode, env: ViewEnvironment): string | null {
   return SAFE_IMAGE.test(src) ? src : null;
 }
 
-// Dates in the owner's United States frame, read as calendar days (no time zone shift).
-const DATE = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' });
+// Dates in the display locale, read as calendar days (no time zone shift; `@shared/app/date-format`).
 export function formatDate(iso: unknown): string {
   const text = typeof iso === 'string' ? iso : '';
-  const at = /^\d{4}-\d{2}-\d{2}$/.test(text) ? Date.parse(`${text}T00:00:00Z`) : NaN;
-  return Number.isNaN(at) ? text || 'Date' : DATE.format(at);
+  return formatCalendarDay(text) ?? (text || 'Date');
 }
 
 // What a drawing is themed by (renderDiagram's contract; mermaid.ts reads the same): the text colour and face where it is

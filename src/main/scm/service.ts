@@ -4,15 +4,16 @@
 // trusts, read on demand with the captured login-shell environment (the file the engine itself reads). A local mutation
 // validates the renderer's paths against a fresh status, runs through the mutating runner (hooks on, transport off),
 // answers the status read after, and asks C4's watcher to re-read the root so `git.changed` stays the one ordered path
-// to every surface. Mutations of one checkout run one at a time, keyed by its realpath. Nothing is retried or forced.
+// to every surface. Mutations of one repository run one at a time, keyed by its common git dir (keysOf). Nothing is
+// retried or forced.
 //
 // The remote half (Design §4, §6): a push or a pull request runs only through a plan (plans.ts) the sheet showed, by its
 // one-shot token; the run is refused `busy` before the token is spent, then revalidated against fresh reads, and spawned
-// by the remote runner only when nothing moved. The revalidation and the spawn take their turn in the checkout's chain,
-// so a panel commit already under way lands before the head is compared; the run itself does not hold the chain. gh is
-// probed once per process (10 minutes) outside any checkout; PR state is kept 60 s per checkout and branch and dropped
-// when a run of that checkout ends.
-import { realpath } from 'node:fs/promises';
+// by the remote runner only when nothing moved. The revalidation and the spawn take their turn in the repository's
+// chain, so a panel commit already under way lands before the head is compared; the run itself does not hold the
+// chain. Runs, plans and PR state belong to the checkout (its worktree's top level). gh is probed once per process (10
+// minutes) outside any checkout; PR state is kept 60 s per checkout and branch and dropped when a run of that checkout
+// ends.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type {
@@ -77,9 +78,15 @@ interface Kept<T> {
   value: T;
 }
 
+// A checkout's two keys (keysOf).
+interface Keys {
+  checkout: string; // its worktree's top level: one run, its plans and its PR state
+  repository: string; // its common git dir: one mutation chain
+}
+
 export class ScmService {
-  private readonly chains = new Map<string, Promise<unknown>>();
-  private admission: Promise<unknown> = Promise.resolve(); // the last key resolved for a chain (admit)
+  private readonly chains = new Map<string, Promise<unknown>>(); // repository key
+  private readonly admissions = new Map<string, Promise<unknown>>(); // checkout as given: its last key resolution (admit)
   private readonly now: () => number;
   private readonly plans: PlanTable;
   private readonly runner: RemoteRunner;
@@ -167,24 +174,24 @@ export class ScmService {
   async planPush({ appSessionId, remote }: ScmPushPlanInput): Promise<ScmPlanResult> {
     const checkout = this.checkout(appSessionId);
     const draft = await planPush(await this.sources(checkout), { remote });
-    return isRefusal(draft) ? draft : this.plans.issue(draft, { appSessionId, key: await keyOf(checkout) });
+    return isRefusal(draft) ? draft : this.plans.issue(draft, { appSessionId, key: (await this.keysOf(checkout)).checkout });
   }
 
   async planPr({ appSessionId, ...fields }: ScmPrPlanInput): Promise<ScmPlanResult> {
     const checkout = this.checkout(appSessionId);
     const draft = await planPr(await this.sources(checkout), fields);
-    return isRefusal(draft) ? draft : this.plans.issue(draft, { appSessionId, key: await keyOf(checkout) });
+    return isRefusal(draft) ? draft : this.plans.issue(draft, { appSessionId, key: (await this.keysOf(checkout)).checkout });
   }
 
   // `scm.push` and `scm.pr.create`: busy is decided before the token is spent (the sheet keeps it for after the run in
-  // flight); then the token, then the revalidation in the checkout's turn, then the spawn only when nothing moved.
+  // flight); then the token, then the revalidation in the repository's turn, then the spawn only when nothing moved.
   async run({ appSessionId, token }: ScmRunInput, kind: 'push' | 'pr'): Promise<ScmRunStarted> {
     const checkout = this.checkout(appSessionId);
-    return this.admit(checkout, async (key): Promise<ScmRunStarted> => {
+    return this.admit(checkout, async ({ checkout: key, repository }): Promise<ScmRunStarted> => {
       if (this.runner.isRunning(key)) return refusal('busy', BUSY_DETAIL);
       const issued = this.plans.consume(token, { appSessionId, key, kind });
       if (isRefusal(issued)) return issued;
-      return this.serial(key, async (): Promise<ScmRunStarted> => {
+      return this.serial(repository, async (): Promise<ScmRunStarted> => {
         const moved = await revalidatePlan(await this.sources(checkout), issued);
         if (moved !== null) return moved;
         return this.runner.start({ appSessionId, key, plan: issued.plan, captured: await this.deps.captured() });
@@ -195,11 +202,11 @@ export class ScmService {
   // Cancel and the latest run start nothing of the owner's, so they are not behind the trust gate: a run started before
   // trust was withdrawn can still be watched and stopped.
   async cancel({ appSessionId, token }: ScmRunInput): Promise<void> {
-    this.runner.cancel(await keyOf(this.checkout(appSessionId)), token);
+    this.runner.cancel((await this.keysOf(this.checkout(appSessionId))).checkout, token);
   }
 
   async last(appSessionId: AppSessionId): Promise<ScmRemoteLast> {
-    return this.runner.last(await keyOf(this.checkout(appSessionId)));
+    return this.runner.last((await this.keysOf(this.checkout(appSessionId))).checkout);
   }
 
   // The current branch's PR and its checks. Without an answer to ask for (untrusted, not a repository, detached, no
@@ -227,7 +234,7 @@ export class ScmService {
     // git refuses such a name, but a ref written by hand can carry one; gh would read it as an option
     if (branch.startsWith('-')) return answer(branch, `MAWS does not ask gh about a branch named ${JSON.stringify(branch)}`);
 
-    const key = await keyOf(checkout);
+    const key = (await this.keysOf(checkout)).checkout;
     const ended = this.runsEnded.get(key) ?? 0;
     const kept = this.prStates.get(key)?.get(branch);
     if (!refresh && kept !== undefined && this.now() - kept.at < PR_STATE_KEPT_MS) return kept.value;
@@ -257,6 +264,7 @@ export class ScmService {
     this.runsEnded.clear();
     this.ghProbe = null;
     this.chains.clear();
+    this.admissions.clear();
   }
 
   private checkout(appSessionId: AppSessionId): string {
@@ -339,7 +347,7 @@ export class ScmService {
     facts: (checkout: string) => Promise<{ commit?: { sha: string; subject: string } }> = async () => ({}),
   ): Promise<ScmMutation> {
     const checkout = this.checkout(appSessionId);
-    return this.admit(checkout, (key) => this.serial(key, async (): Promise<ScmMutation> => {
+    return this.admit(checkout, ({ repository }) => this.serial(repository, async (): Promise<ScmMutation> => {
       if (!(await this.trust(checkout)).trusted) return refusal('untrusted', UNTRUSTED_DETAIL);
       let before: GitStatus;
       try {
@@ -367,24 +375,37 @@ export class ScmService {
     }));
   }
 
-  // The checkout's key, resolved in call order: `enter` runs for each call in the order the calls were made, so work
-  // reaches its chain in the order the owner asked for it, even when a later call's realpath answers first. `enter`
-  // must reach `serial` without awaiting.
-  private admit<T>(checkout: string, enter: (key: string) => Promise<T>): Promise<T> {
-    const key = this.admission.then(() => keyOf(checkout)); // keyOf never rejects
-    this.admission = key;
-    return key.then(enter);
+  // The checkout's keys, resolved in call order: `enter` runs for each call in the order the calls were made, so work
+  // reaches its chain in the order the owner asked for it. `enter` must reach `serial` without awaiting. P4 W2-B
+  // (tracker 2026-10-06 "The mutation chain and admission queue are keyed by the checkout's realpath…"): the order is
+  // kept per checkout as the session names it, each in a queue of its own, so one whose resolution hangs (a stalled
+  // mount) holds up only its own calls; calls naming two directories of one repository are not ordered between them.
+  private admit<T>(checkout: string, enter: (keys: Keys) => Promise<T>): Promise<T> {
+    return queue(this.admissions, checkout, () => this.keysOf(checkout)).then(enter);
   }
 
-  // One promise chain per key: work starts after every earlier work of the key settled, whichever way it settled.
-  private serial<T>(key: string, work: () => Promise<T>): Promise<T> {
-    const result = (this.chains.get(key) ?? Promise.resolve()).then(work); // a kept tail never rejects
-    const tail = result.then(() => {}, () => {});
-    this.chains.set(key, tail);
-    void tail.then(() => {
-      if (this.chains.get(key) === tail) this.chains.delete(key);
-    });
-    return result;
+  // One promise chain per repository: work starts after every earlier work of the repository settled.
+  private serial<T>(repository: string, work: () => Promise<T>): Promise<T> {
+    return queue(this.chains, repository, work);
+  }
+
+  // A checkout's keys from one read bounded by the read runner's timeout (a read that times out rejects, for the router
+  // to answer). `--path-format=absolute` answers canonical paths, so `/tmp` and `/private/tmp` share keys and no
+  // realpath runs on main. The repository key is the common git dir, which every worktree of a repository shares: a
+  // session at the root and one in a subdirectory write one index, so their mutations take turns; linked worktrees
+  // have an index each but share refs, packed-refs and the objects, and take turns too (the safe reading: one
+  // worktree's slow commit hook delays another's mutations). The checkout key is the worktree's top level: a linked
+  // worktree has its own branch, so its own run, plans and PR state. Where git cannot answer (outside any repository, a
+  // directory gone, a repository of another owner) both keys are the directory as given; trust and status fail there
+  // too, so nothing mutates or runs under them.
+  private async keysOf(checkout: string): Promise<Keys> {
+    try {
+      const [top, common] = (await this.deps.read(checkout, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'])).split('\n');
+      return { checkout: top, repository: common };
+    } catch (error) {
+      if (error instanceof NotARepositoryError || error instanceof GitCommandError) return { checkout, repository: checkout };
+      throw error;
+    }
   }
 
   private async remoteNames(directory: string, read: GitRun): Promise<string[]> {
@@ -431,9 +452,16 @@ export class ScmService {
   }
 }
 
-// A checkout's key: its realpath, so `/tmp` and `/private/tmp` share one chain, one run and one cache.
-function keyOf(checkout: string): Promise<string> {
-  return realpath(checkout).catch(() => checkout);
+// One promise chain per key of `chains`: work starts after every earlier work of the key settled, whichever way it
+// settled; the key is dropped once its last work settled.
+function queue<T>(chains: Map<string, Promise<unknown>>, key: string, work: () => Promise<T>): Promise<T> {
+  const result = (chains.get(key) ?? Promise.resolve()).then(work); // a kept tail never rejects
+  const tail = result.then(() => {}, () => {});
+  chains.set(key, tail);
+  void tail.then(() => {
+    if (chains.get(key) === tail) chains.delete(key);
+  });
+  return result;
 }
 
 // A repository-relative path, taken literally (no globbing) from the top level, as the read service passes it.

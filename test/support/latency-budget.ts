@@ -4,6 +4,9 @@
 // average, read when the test starts, is under QUIET_LOAD_PER_CORE per core; on a loaded machine the number is recorded
 // and only a loose ceiling (LOADED_CEILING times the bound) is asserted, which still catches a real regression. The e2e
 // suites read it through `e2e/support/latency.ts`.
+// A job on one of ci-kit's shared Mac runner instances (CI_KIT_SHARED_DESKTOP=1 in its environment; ci-kit's mac-lane
+// concurrency spec, M2) counts as loaded whatever the load reads when it starts: the job beside it may start its build or
+// its flood at any moment after that read.
 import { cpus, loadavg } from 'node:os';
 
 export const QUIET_LOAD_PER_CORE = 1;
@@ -12,9 +15,10 @@ export const LOADED_CEILING = 5;
 export interface MachineLoad {
   load: number; // the one-minute load average
   cores: number;
+  shared?: boolean; // on a desktop ci-kit shares with another job
 }
 
-export const machineLoad = (): MachineLoad => ({ load: loadavg()[0], cores: cpus().length });
+export const machineLoad = (env: Record<string, string | undefined> = process.env): MachineLoad => ({ load: loadavg()[0], cores: cpus().length, shared: env.CI_KIT_SHARED_DESKTOP === '1' });
 
 // The ceiling to assert, and why it is not the bound itself (null when it is).
 export interface BudgetVerdict {
@@ -22,9 +26,16 @@ export interface BudgetVerdict {
   reason: string | null;
 }
 
-export function budgetVerdict(label: string, ms: number, budget: number, machine: MachineLoad): BudgetVerdict {
-  if (machine.load < machine.cores * QUIET_LOAD_PER_CORE) return { ceiling: budget, reason: null };
+// Where a bound is loosened, the machine that makes it so ("at load 74.3 on 10 cores"); null where it holds as named.
+export function loosenedOn(machine: MachineLoad): string | null {
+  if (!machine.shared && machine.load < machine.cores * QUIET_LOAD_PER_CORE) return null;
   const load = Math.round(machine.load * 10) / 10;
+  return `${machine.shared ? 'on a shared desktop (CI_KIT_SHARED_DESKTOP=1), ' : ''}at load ${load} on ${machine.cores} cores`;
+}
+
+export function budgetVerdict(label: string, ms: number, budget: number, machine: MachineLoad): BudgetVerdict {
+  const where = loosenedOn(machine);
+  if (where === null) return { ceiling: budget, reason: null };
   const ceiling = budget * LOADED_CEILING;
-  return { ceiling, reason: `${label}: ${ms} ms against ${budget} ms, held to ${ceiling} ms at load ${load} on ${machine.cores} cores` };
+  return { ceiling, reason: `${label}: ${ms} ms against ${budget} ms, held to ${ceiling} ms ${where}` };
 }

@@ -177,6 +177,12 @@ const MEASURE_ARGS: MeasureArgs = { textTags: [...TEXT_TAGS] };
 // transparent when only its paint is wanted. Answers, after two frames, the rect to capture: the element's box as now
 // drawn (the whole slide for `slide` and `background`), which may be larger than the window. P3-E (E1 M5; E0's finding
 // (e)): a design board's frame (`data-size`) is the whole slide's box as drawn, at its size and any zoom its draw sets.
+// P4 (the skewed-element row and its review): `drawn` moves, flattens and unclips nothing, so the element stands in
+// place as the slide draws it (skewed, and clipped by its ancestors as the canvas clips it: moving an ancestor would make
+// it the containing block of what is pinned inside it); the elements measured on their own (pictured or mapped on their
+// own) are hidden within it, as a table's rows and cells are not, and the window captures the region the measure says it
+// paints (the job's box, in slide px), moved by the slide's own offset in its frame, which `drawn` answers (a section may
+// carry a transform of its own).
 export const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode']) => `(() => {
   const slide = ${JSON.stringify(slideId)}, eid = ${JSON.stringify(elementId)}, mode = ${JSON.stringify(mode)};
   document.body.setAttribute('data-shown', '');
@@ -195,13 +201,15 @@ export const STAGE = (slideId: string, elementId: string | null, mode: PictureJo
     for (let at = target; at && !at.classList.contains('maws-slide'); at = at.parentElement) at.setAttribute('data-maws-flat', '');
     for (let at = target.parentElement; at && !at.classList.contains('maws-slide'); at = at.parentElement) at.setAttribute('data-maws-open', '');
   }
+  const own = el + ' [data-eid]:not(tr):not(th):not(td)';
   st.textContent = mode === 'slide' ? '' : mode === 'background'
     ? on + '.maws-slide * { visibility: hidden !important; }'
     : on + '.maws-slide { background: transparent !important; box-shadow: none !important; overflow: visible !important; }\\n' + '.maws-frame[data-shown] { overflow: visible !important; }\\n' + on + '.maws-slide * { visibility: hidden !important; opacity: 1 !important; }\\n'
       + on + '[data-maws-flat] { transform: none !important; }\\n'
       + on + '[data-maws-open] { overflow: visible !important; }\\n'
       + el + ' { visibility: visible !important; opacity: 1 !important;' + (mode === 'self' ? ' color: transparent !important;' : '') + ' }\\n'
-      + (mode === 'tree' ? el + ' * { visibility: visible !important; }' : '');
+      + (mode === 'tree' ? el + ' * { visibility: visible !important; }' : '')
+      + (mode === 'drawn' ? el + ' * { visibility: visible !important; }\\n' + own + ', ' + own + ' * { visibility: hidden !important; }' : '');
   scrollTo(0, 0);
   const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const rectOf = () => {
@@ -210,6 +218,7 @@ export const STAGE = (slideId: string, elementId: string | null, mode: PictureJo
     return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height };
   };
   return frames().then(() => {
+    if (mode === 'drawn' && frame) { const s = frame.querySelector('.maws-slide').getBoundingClientRect(); const o = frame.getBoundingClientRect(); return { x: s.left - o.left, y: s.top - o.top, w: s.width, h: s.height }; }
     if (!isolated) { const sized = frame && frame.hasAttribute('data-size') ? frame.getBoundingClientRect() : null; return { x: 0, y: 0, w: sized ? sized.width : ${SLIDE_W}, h: sized ? sized.height : ${SLIDE_H} }; }
     const at = rectOf();
     target.setAttribute('data-maws-moved', '');
@@ -259,7 +268,10 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
       measure: async () => (await live().webContents.executeJavaScript(`(${String(measureDeckPage)})(${JSON.stringify(MEASURE_ARGS)}, ${String(shrinkScale)})`, true)) as MeasuredDeck,
       capture: async (job, size) => {
         const w = live();
-        const box = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true)) as { x: number; y: number; w: number; h: number };
+        const staged = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true)) as { x: number; y: number; w: number; h: number };
+        // a `drawn` picture is taken in place, of the region the measure says the element paints (P4), in slide px: moved
+        // by where the slide sits in the frame
+        const box = job.mode === 'drawn' ? { ...job.box, x: job.box.x + staged.x, y: job.box.y + staged.y } : staged;
         const x = Math.max(0, Math.floor(box.x));
         const y = Math.max(0, Math.floor(box.y));
         // an element larger than the slide: the window grows to hold it for this picture (fix wave 2)

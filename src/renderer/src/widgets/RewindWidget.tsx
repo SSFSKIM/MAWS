@@ -7,6 +7,7 @@
 // conversation rewind the composer holds the engine's `prefillText`, the chosen message's text, as the Edit path does;
 // the transcript hides the rewound turns from C3's boundary. Nothing is issued while a turn runs.
 import { useState } from 'react';
+import { formatClock } from '@shared/app/date-format';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { prefillComposer } from '../composer';
 import { newestUserUuid, type UserRow } from '../composer/edit-prefill';
@@ -22,7 +23,6 @@ import { WidgetFrame } from './WidgetFrame';
 type What = 'conversation' | 'files' | 'both';
 const WHAT: readonly What[] = ['conversation', 'files', 'both'];
 const NO_ROWS: readonly unknown[] = [];
-const TIME = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
 
 // The human's own prompts, newest first.
 export function rewindTargets(rows: readonly { kind: string }[]): (UserRow & { messageUuid: MessageUuid })[] {
@@ -85,7 +85,7 @@ export function RewindWidget({ appSessionId, close }: { appSessionId: AppSession
                 className="flex w-full min-w-0 items-baseline gap-3 rounded-sm px-2 py-1 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 aria-checked:bg-bg-active"
               >
                 <span className="min-w-0 flex-1 truncate">{typedFromRowText(row.text).split('\n')[0]}</span>
-                <span className="shrink-0 text-ui-sm text-fg-faint">{TIME.format(Date.parse(row.at))}</span>
+                <span className="shrink-0 text-ui-sm text-fg-faint">{formatClock(Date.parse(row.at))}</span>
               </button>
             ))}
           </div>

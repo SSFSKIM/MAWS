@@ -53,6 +53,17 @@ const presence = (m: MachineClient, project: string, status: string) =>
 const machinePresence = (m: MachineClient, project: string) =>
   ({ project, machine: m.name, session: null, kind: 'machine', sub: null, n: null, body: { online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] } }) as unknown as SessionMessage;
 
+/** `promise`, or a failure naming `what` once `ms` pass before it settles. */
+async function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`no ${what} within ${ms} ms`)), ms)));
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The same machine's POST on another connection, under the stream's generation: the uplink's second lane. */
 const alongside = (m: MachineClient) => {
   const other = new MachineClient(hub, m.name, m.creds);
@@ -75,10 +86,11 @@ describe("a POST waits for its own frames' replies, not the reply chain's tail",
     // The hello is applied (the project is open on this stream) and its `have` waits at the machine's object.
     await waitFor(async () => ((await hub.projectMachines(project)).some((row) => row.name === m.name && row.generation === m.generation) ? true : undefined));
     const browser = await BrowserClient.open(hub, ADMIN, project);
-    const started = performance.now();
-    const answered = await alongside(m).post([{ t: 'session', message: presence(m, project, 'idle') }]);
+    // Answered while the have is still held (it is released below), which a POST waiting behind the have never is. Bounded
+    // as the subscribe below is, at 5 s: a bound of 200 ms measured the box, and a loaded pool box's answer took 1,046 ms
+    // (run 39669676842).
+    const answered = await within(alongside(m).post([{ t: 'session', message: presence(m, project, 'idle') }]), 5000, 'answer to the session POST while the have is held');
     expect(answered.status).toBe(200);
-    expect(performance.now() - started).toBeLessThan(200);
 
     const sub = newNonce();
     browser.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
@@ -119,7 +131,13 @@ describe('a hello whose have the stream does not take (D1)', () => {
     ] as UpFrame[]);
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: 'delivery-failed', frames: 0 });
-    expect(performance.now() - started).toBeLessThan(1000 + 1000);
+    // The stream's own bound answered it: the POST waited the stalled write out, and was answered well before the
+    // deployed bound (WRITE_TIMEOUT_MS, 10 s) would have been. How far past the bound it comes is the box's, since the
+    // POST's round trip (the suite's proxy, the Worker, the Registry, the Machine and the Project) is all in it: on
+    // loaded pool boxes it came 1.2 and 1.4 s past (runs 39608865906, 39607160893), where this allowed one second.
+    const waited = performance.now() - started;
+    expect(waited).toBeGreaterThanOrEqual(1000);
+    expect(waited).toBeLessThan(10_000);
     expect(hub.runtimeLogs.some((l) => l.message.includes('"cause":"write-stalled"') && l.message.includes(`"machine":"${m.name}"`))).toBe(true);
     expect((await hub.projectMachines(project)).filter((row) => row.name === m.name)).toEqual([]);
 

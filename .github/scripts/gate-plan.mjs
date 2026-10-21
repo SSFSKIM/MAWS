@@ -29,6 +29,14 @@
 // It adds `selection` and `related` (the paths for vitest related as JSON, or empty for the full suite) to the outputs
 // and one line saying which to the summary; a run without the trailer writes neither. Such a run is never landing
 // evidence.
+// The Mac's two kinds of runner (ci-kit's mac-lane concurrency spec, M2): a Mac job asks for today's labels, which only
+// ci-kit's exclusive instance carries, so it runs alone on the desktop, unless it is on MAC_SHARED_E2E, the e2e groups
+// (and `unit:darwin`) a trial showed giving beside a neighbour the results they give alone; those ask for
+// [ci-kit-mac-shared] alone, the label only the instances that run two jobs at a time carry. A MEASURED_E2E group, or a
+// foreground one (its script sets MAWS_E2E_FOREGROUND=1), stays exclusive whatever the list says. Each kind's start may
+// wait in ci-kit's job-started hook, counted against the job's timeout, which carries that bound on top of its own
+// minutes (`timeouts`, and each e2e entry's `timeout`): an exclusive job MAC_EXCLUSIVE_WAIT_MINUTES for the shared
+// instances to stop, a shared one MAC_SHARED_WAIT_MINUTES while an exclusive job holds the desktop.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -56,13 +64,29 @@ const trailer = (key) =>
     ?.slice(key.length + 1)
     .trim();
 
-const RUNNERS = { linux: 'ubuntu-24.04', macos: ['self-hosted', 'macOS', 'ARM64'] };
+// The shared label alone: ci-kit registers the shared instances with nothing else, so no job asking for `self-hosted`
+// (today's, an old commit's) can reach one.
+const RUNNERS = { linux: 'ubuntu-24.04', macos: ['self-hosted', 'macOS', 'ARM64'], macShared: ['ci-kit-mac-shared'] };
+// ci-kit's bounds on the waits in its job-started hook; past one, the hook refuses the job with the `ci-kit: … rerun`
+// line ci-gate.sh relaunches. Added to the job's own minutes, so the refusal comes before GitHub's timeout.
+const MAC_EXCLUSIVE_WAIT_MINUTES = 10;
+const MAC_SHARED_WAIT_MINUTES = 60;
+const timeoutOn = (runner, minutes) => minutes + (runner === RUNNERS.macos ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
 const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
+// On the pool the whole unit suite runs as UNIT_SHARDS jobs, `unit <k>/<n>`, each vitest's --shard=<k>/<n> on a box of
+// UNIT_CPUS. One vitest process keeps its box's cores only 55-70% busy (its main process transforms for every worker),
+// so more processes on more boxes end the suite sooner than more cores on one. Five or more shards, or 16-core shards,
+// turned suites red that wait on those transforms cold (TranscriptSlot's hooks under renderer-compiled); four shards of
+// eight cores did not (CI-opt's critical-path arms, 2026-10-21). A selected run that tests only the related suites, and
+// a run off the pool, is the one job `unit`.
+const UNIT_SHARDS = 4;
+const UNIT_CPUS = 8;
 const CLASS1A_RUNNERS = {
   linux: { static: RUNNERS.linux, unit: RUNNERS.linux, probes: RUNNERS.linux },
   macos: { static: RUNNERS.macos, unit: RUNNERS.macos, probes: RUNNERS.macos },
-  // unit at 8 cores leaves one 16-core box room for static's 4 and probes' 2, so the three start together.
-  pool: { static: poolBox(4), unit: poolBox(8), probes: poolBox(2) },
+  // Each pool job is a GCE VM of its own (Decision Log 52). static runs its checks at once and needs the 16-core box's
+  // 32 GB (about 15 GB at its peak); unit's box is each shard's (UNIT_SHARDS).
+  pool: { static: poolBox(16), unit: poolBox(UNIT_CPUS), probes: poolBox(2) },
 };
 const gateRunner = (env.GATE_RUNNER ?? '').toLowerCase();
 const class1a = ((dispatched ? env.INPUT_CLASS1A : trailer('Class1a')) || gateRunner || 'linux').toLowerCase();
@@ -106,14 +130,23 @@ const measured = new Set(words(env.MEASURED_E2E));
 // desk-web, the one POOL_E2E group, is one Playwright worker; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
 // e2-highcpu-2 has 2 GB for the build, two browsers and the hub double, at about the same price (Decision Log 68).
 const offMac = new Set(words(env.POOL_E2E));
-const placed = (group) => (!offMac.has(group) ? RUNNERS[lane] : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
+// MAC_SHARED_E2E less what never shares the desktop (the spec's "What it must not be"): a measured group, whose bounds
+// were calibrated alone, and a foreground one, whose cases test the app in front. An unknown name matches no job.
+const foreground = (group) => /(^|\s)MAWS_E2E_FOREGROUND=1\s/.test(scripts[scriptOf(group)] ?? '');
+const listedShared = words(env.MAC_SHARED_E2E);
+const keptAlone = listedShared.filter((name) => name !== 'unit:darwin' && (measured.has(name) || foreground(name)));
+const macShared = new Set(listedShared.filter((name) => !keptAlone.includes(name)));
+const onMac = (name) => (macShared.has(name) ? RUNNERS.macShared : RUNNERS.macos);
+const placed = (group) => (!offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
 const e2e = [...gates]
   .filter((gate) => gate.startsWith('e2e:'))
   .map((gate) => {
     const group = gate.slice(4);
-    const runner = JSON.stringify(placed(group));
-    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), runner };
+    const where = placed(group);
+    const runner = JSON.stringify(where);
+    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), runner, timeout: timeoutOn(where, measured.has(group) ? 45 : 30) };
   });
+const unitDarwinRunner = onMac('unit:darwin');
 
 // Group names; an `e2e:` prefix, as --gates writes them, is read as the group.
 const defaultBeside = dispatched ? [] : [...new Set(words(trailer('DefaultBeside')).map((name) => name.replace(/^e2e:/, '')))].filter((group) => group !== 'default');
@@ -131,13 +164,26 @@ appendFileSync(
     `static_runner=${JSON.stringify(runners.static)}\nunit_runner=${JSON.stringify(runners.unit)}\nprobes_runner=${JSON.stringify(runners.probes)}\npool=${pool}\n`,
 );
 appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\nlive=${live}\ndefault_beside=${JSON.stringify(defaultBeside)}\n`);
+// The unit job's matrix: its shards, each with the `--shard` value and the suffix of its JUnit artifact's name
+// (test-results-unit-<k>of<n>-<attempt>, which ci-kit's test-history collector reads as one `unit` report), or the one
+// unsharded job.
+const shards = class1a === 'pool' && !selection?.related ? UNIT_SHARDS : 1;
+const unitShards = shards > 1 ? Array.from({ length: shards }, (_, i) => ({ shard: `${i + 1}/${shards}`, slug: `-${i + 1}of${shards}` })) : [{ shard: '', slug: '' }];
+appendFileSync(env.GITHUB_OUTPUT, `unit_shards=${JSON.stringify(unitShards)}\n`);
+// The jobs' minutes outside the e2e matrix (whose entries carry their own): packaged is always on the exclusive instance.
+const timeouts = { static: timeoutOn(runners.static, 30), unit: timeoutOn(runners.unit, 30), probes: timeoutOn(runners.probes, 30), unit_darwin: timeoutOn(unitDarwinRunner, 30) };
+appendFileSync(env.GITHUB_OUTPUT, `unit_darwin_runner=${JSON.stringify(unitDarwinRunner)}\ntimeouts=${JSON.stringify(timeouts)}\n`);
 const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
 const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
 // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
 const moved = e2e.filter((entry) => offMac.has(entry.group) && entry.runner !== JSON.stringify(RUNNERS[lane])).map((entry) => entry.group);
 const pooledNote = moved.length > 0 ? ` (${class1a === 'pool' ? 'on the pool' : 'on the hosted Linux runner'}: ${moved.join(', ')})` : '';
-appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}\n`);
-process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}`);
+// Said only when MAC_SHARED_E2E reaches a job of this run, or names one it keeps alone.
+const sharedJobs = [...(gates.has('unit:darwin') && unitDarwinRunner === RUNNERS.macShared ? ['unit:darwin'] : []), ...e2e.filter((entry) => entry.runner === JSON.stringify(RUNNERS.macShared)).map((entry) => `e2e:${entry.group}`)];
+const keptAloneHere = keptAlone.map((group) => `e2e:${group}`).filter((gate) => gates.has(gate));
+const sharedNote = `${sharedJobs.length > 0 ? ` Shared Mac instances: ${sharedJobs.join(', ')}.` : ''}${keptAloneHere.length > 0 ? ` On MAC_SHARED_E2E but measured or foreground, so alone: ${keptAloneHere.join(', ')}.` : ''}`;
+appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${sharedNote}\n`);
+process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${sharedNote ? `${sharedNote.trim()}\n` : ''}`);
 if (selection) {
   const line = selection.related
     ? `Selection: affected — ${selection.paths} paths, unit runs vitest related`

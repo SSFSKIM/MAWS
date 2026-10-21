@@ -10,6 +10,13 @@ import { startOopifPage } from '../../e2e/support/oopif-page';
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
 const prompt = (seq: number) => row(seq, 'out', { type: 'user', message: { role: 'user', content: 'hi' } });
 const result = (seq: number, usd: number) => row(seq, 'in', { type: 'result', subtype: 'success', parent_tool_use_id: null, num_turns: 1, total_cost_usd: usd });
+const unpriced = (seq: number, frame: Record<string, unknown> = {}) => row(seq, 'in', { type: 'result', subtype: 'success', parent_tool_use_id: null, num_turns: 1, ...frame });
+// A Send to main steer: a prompt written with priority `next` while a turn runs, joining that turn.
+const steer = (seq: number) => row(seq, 'out', { type: 'user', message: { role: 'user', content: 'steer' }, parent_tool_use_id: null, priority: 'next' });
+// A `/btw` side question and its answer: a control response, no result frame.
+const sideQuestion = (seq: number) => row(seq, 'out', { type: 'control_request', request_id: `r${seq}`, request: { subtype: 'side_question', question: 'q' } });
+const sideAnswer = (seq: number) => row(seq, 'in', { type: 'control_response', response: { subtype: 'success', request_id: `r${seq - 1}`, response: { response: 'Red', synthetic: false } } });
+const sideQuestionReservation = (id: string): Charge => ({ key: 's3-btw', case: 's3', label: 'the /btw side question', usd: 0.05, sideQuestionOf: id });
 
 describe('the caps', () => {
   it('holds each sitting to its own cap (Design §5) and the run to MAWS_P1_LIVE_MAX_USD, their sum when unset', () => {
@@ -62,8 +69,49 @@ describe('the caps', () => {
     // a timeout or a crash before the result: the whole budget stays, still against the receipts (the larger counts)
     const kept = settledReservation(reserved, [prompt(1), result(2, 0.06), prompt(3)]);
     expect(kept).toMatchObject({ key: reserved.key, usd: 0.4, against: 'app-5' });
-    expect(kept.label).toBe('the launch budget of browser, kept whole: a prompt went unreceipted (its receipts US$0.0600)');
+    expect(kept.label).toBe('the launch budget of browser, kept whole: a paid call went unreceipted (its receipts US$0.0600)');
     expect(settledReservation(reserved, []).usd).toBe(0); // launched, nothing asked
+  });
+
+  it('settles a steered turn: a `next` prompt written while the turn ran is covered by that turn’s result', () => {
+    const reserved = launchReservation('s3', 'app-1', 'parent', 0.37);
+    expect(settledReservation(reserved, [prompt(1), result(2, 0.0038), prompt(3), steer(4), result(5, 0.0045)]).usd).toBe(0);
+  });
+
+  it('settles a journal ending in a side question only when every side question it holds carries its own reservation', () => {
+    const reserved = launchReservation('s3', 'app-1', 'parent', 0.37);
+    const btw = sideQuestionReservation('app-1');
+    // S3's parent (docs/doperpowers/evidence/p1-e11/live-s3.txt): case 1's turn, case 3's turn with its steer, case 4's /btw
+    const s3 = [prompt(1), result(2, 0.0037743), prompt(3), steer(4), result(5, 0.00445831), sideQuestion(6), sideAnswer(7)];
+    const settled = settledReservation(reserved, s3, [btw]);
+    expect(settled).toMatchObject({ key: reserved.key, usd: 0, against: 'app-1' });
+    expect(settled.label).toBe('the launch budget of parent, settled to its receipts (US$0.0045), its 1 side question charged apart');
+    // the side question with no reservation of its own is unreceipted spend: the launch budget stays whole
+    expect(settledReservation(reserved, s3).usd).toBe(0.37);
+    expect(settledReservation(reserved, s3, [{ ...btw, sideQuestionOf: 'app-2' }]).usd).toBe(0.37); // another session's
+    expect(settledReservation(reserved, [...s3, sideQuestion(8), sideAnswer(9)], [btw]).usd).toBe(0.37); // two asked, one reserved
+    expect(settledReservation(reserved, [...s3, sideQuestion(8), sideAnswer(9)], [btw, { ...btw, key: 'btw-2' }]).usd).toBe(0); // each reserved
+    expect(settledReservation(reserved, s3, [btw, btw]).usd).toBe(0); // one charge recorded twice is one reservation
+    expect(settledReservation(reserved, [...s3, sideQuestion(8)], [btw, btw]).usd).toBe(0.37);
+    // a reserved side question never covers a prompt with no result after it, nor a result without its figure
+    expect(settledReservation(reserved, [...s3, prompt(8)], [btw]).usd).toBe(0.37);
+    expect(settledReservation(reserved, [prompt(1), unpriced(2), sideQuestion(3)], [btw]).usd).toBe(0.37);
+    // the side questions alone, no prompt: nothing beyond the receipts (none) and the side question's own charge
+    expect(settledReservation(reserved, [sideQuestion(1), sideAnswer(2)], [btw]).usd).toBe(0);
+  });
+
+  it('counts a side question’s reservation in full, never drawn down by its session’s receipts', () => {
+    const reserved = launchReservation('s3', 'app-1', 'parent', 0.37);
+    const s3 = [prompt(1), result(2, 0.0037743), prompt(3), steer(4), result(5, 0.00445831), sideQuestion(6), sideAnswer(7)];
+    const charges: Charge[] = [
+      reserved,
+      { key: 's3-fork', case: 's3', label: 'the side thread’s allocation', usd: 0.08 },
+      { key: 's3-fork', case: 's3', label: 'the side thread, settled', usd: 0 },
+      sideQuestionReservation('app-1'),
+    ];
+    charges.push(settledReservation(reserved, s3, charges));
+    // S3's figure for the child's ledger: US$0.0047 receipted (the parent's US$0.0045, the fork's US$0.0003) + the /btw's US$0.05
+    expect(spentBySitting({ s3: 0.0047 }, charges, { 'app-1': 0.0045 }).sittings.s3).toBeCloseTo(0.0547, 10);
   });
 
   it('names a side thread’s receipts beyond its allocation as a finding', () => {
@@ -101,14 +149,12 @@ describe('a paid call’s charge', () => {
     expect(chargeOf([prompt(1)], 0.05)).toEqual({ usd: 0.05, receipted: 0, settled: false });
     expect(chargeOf([prompt(1), result(2, 0.02), prompt(3)], 0.08)).toEqual({ usd: 0.08, receipted: 0.02, settled: false });
     expect(chargeOf([prompt(1), result(2, 0.09), prompt(3)], 0.08)).toEqual({ usd: 0.09, receipted: 0.09, settled: false });
-    const sideQuestion = row(3, 'out', { type: 'control_request', request_id: 'r', request: { subtype: 'side_question', question: 'q' } });
-    expect(chargeOf([prompt(1), result(2, 0.02), sideQuestion], 0.05).settled).toBe(false);
+    expect(chargeOf([prompt(1), result(2, 0.02), sideQuestion(3)], 0.05).settled).toBe(false);
     // a subagent's result is no receipt for the main conversation's prompt
     expect(chargeOf([prompt(1), row(2, 'in', { type: 'result', parent_tool_use_id: 'toolu_1', total_cost_usd: 0.01 })], 0.05).usd).toBe(0.05);
   });
 
   it('reads a main result without its cost figure as unknown, never as zero', () => {
-    const unpriced = (seq: number, frame: Record<string, unknown> = {}) => row(seq, 'in', { type: 'result', subtype: 'success', parent_tool_use_id: null, num_turns: 1, ...frame });
     expect(chargeOf([prompt(1), unpriced(2)], 0.05)).toEqual({ usd: 0.05, receipted: 0, settled: false });
     expect(chargeOf([prompt(1), unpriced(2, { total_cost_usd: null })], 0.05)).toEqual({ usd: 0.05, receipted: 0, settled: false });
     // an earlier turn's figure does not settle a later turn whose result carries none
