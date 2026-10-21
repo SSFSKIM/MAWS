@@ -154,18 +154,32 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
-      - if: ${{ !cancelled() }}
-        run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
-      # The whole `pnpm build` (verify's step): class 1a's proof that the renderer and the apps build. It ran in unit
+      # The checks run at once (gate-bg.sh), each still a step of its own below, with its log and its gate-run summary:
+      # tsc and eslint are single-threaded, and in series they held class 1a's critical path on a box whose other cores
+      # sat idle. Each project of `pnpm typecheck` is a process of its own, read from the script.
+      # The whole `pnpm build` (verify's step) is class 1a's proof that the renderer and the apps build; it ran in unit
       # until 2026-10-21, where it held the critical path (unit builds main and the preloads alone now).
-      - if: ${{ !cancelled() }}
-        run: .github/scripts/gate-run.sh 'built in|error' pnpm build
-      # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts), seconds and no lane: vitest collects
-      # no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec or a
-      # group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
-      - if: ${{ !cancelled() }}
-        run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
+      # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts) have no lane of their own: vitest
+      # collects no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec
+      # or a group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
+      - run: |
+          bg=.github/scripts/gate-bg.sh
+          $bg start-parts typecheck 'error TS|problems?\b' typecheck
+          $bg start lint 'error TS|problems?\b' pnpm lint
+          $bg start build 'built in|error' pnpm build
+          $bg start gate-scripts '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
+      - name: pnpm typecheck
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait typecheck
+      - name: pnpm lint
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait lint
+      - name: pnpm build
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait build
+      - name: the gate scripts' tests
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait gate-scripts
 
   unit:
     needs: plan

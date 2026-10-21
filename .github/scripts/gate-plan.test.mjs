@@ -108,7 +108,7 @@ test('a macOS lane never takes a POOL_E2E group: the pool when class 1a is pool,
 
   const pooled = plan({ ...lists, HEAD_MESSAGE: macRun('\nClass1a: pool') });
   assert.deepEqual(runners(pooled.outputs), { library: mac, 'desk-web': box });
-  assert.equal(pooled.outputs.static_runner, JSON.stringify(box));
+  assert.equal(pooled.outputs.static_runner, JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-16']));
   assert.equal(pooled.outputs.pool, 'true');
   assert.match(pooled.summary, /E2e lane: macos \(on the pool: desk-web\)\./);
   // The repository's variables as they stand (GATE_RUNNER=pool, GATE_E2E_RUNNER=macos), the default set included.
@@ -251,7 +251,7 @@ test('a run without the Selection: trailer writes the outputs and the summary it
   const pushed = plan({ HEAD_MESSAGE: 'ci-gate: 0123abcd\n\nNonce: 1-2\nGates: static,unit,probes\nClass1a: pool' });
   const outputs = [
     'static=true', 'unit=true', 'unit_darwin=false', 'probes=true', 'e2e=[]',
-    `static_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-4'])}`, `unit_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-8'])}`, `probes_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-2'])}`, 'pool=true',
+    `static_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-16'])}`, `unit_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-8'])}`, `probes_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-2'])}`, 'pool=true',
     'packaged=false', 'evidence=false', 'live=false', 'default_beside=[]',
   ];
   assert.equal(pushed.raw, `${outputs.join('\n')}\n`);

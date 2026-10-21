@@ -61,8 +61,9 @@ const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
 const CLASS1A_RUNNERS = {
   linux: { static: RUNNERS.linux, unit: RUNNERS.linux, probes: RUNNERS.linux },
   macos: { static: RUNNERS.macos, unit: RUNNERS.macos, probes: RUNNERS.macos },
-  // unit at 8 cores leaves one 16-core box room for static's 4 and probes' 2, so the three start together.
-  pool: { static: poolBox(4), unit: poolBox(8), probes: poolBox(2) },
+  // Each pool job is a GCE VM of its own (Decision Log 52). static runs its checks at once and needs the 16-core box's
+  // 32 GB (about 15 GB at its peak).
+  pool: { static: poolBox(16), unit: poolBox(8), probes: poolBox(2) },
 };
 const gateRunner = (env.GATE_RUNNER ?? '').toLowerCase();
 const class1a = ((dispatched ? env.INPUT_CLASS1A : trailer('Class1a')) || gateRunner || 'linux').toLowerCase();

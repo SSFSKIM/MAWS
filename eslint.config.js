@@ -53,7 +53,9 @@ const COMPILED_POSTFIX = {
 };
 
 module.exports = defineConfig(
-  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/', 'apps/*/dist/', 'apps/*/.wrangler/'] }, // DC3: the desk apps' build and wrangler state
+  // electron-vite bundles its config to electron.vite.config.<ms>.mjs beside it for the moment it loads it; the gate's
+  // static job lints while it builds, and a file listed then gone failed the lint (ENOENT, run 39599150487).
+  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/', 'apps/*/dist/', 'apps/*/.wrangler/', 'electron.vite.config.*.mjs'] }, // DC3: the desk apps' build and wrangler state
   js.configs.recommended,
   tseslint.configs.recommended,
   {
