@@ -9,7 +9,8 @@ Status: phase 1 of 2 (Decision Log 19), the harness, done 2026-10-19. No record 
 The decision rule below is fixed before any record run. It was amended the same day, after the harness's review and
 still before any record run: a voiding control is compared only where both arms' records carry it, the validity rules
 gained the permission mode, human stops, missing records and a rebuilt seed's check, and a task is judged on one Desktop
-surface. The record run is phase 2, in a GUI hold the architect schedules (§7 "The record run").
+surface. The record run is phase 2, in a GUI hold the architect schedules (§7 "The record run"); it moved to the Mac mini
+on 2026-10-21 (P4 Decision Log 45), and §7a amends §7 for it.
 
 The question, in the owner's words (Decision Log 10): if Claude Desktop is equally slow from server round trips and
 output time, MAWS has no problem; if not, something else is wrong. The verdict decides whether the edit-protocol child
@@ -268,6 +269,8 @@ counted in `bench.rep()`'s result, which step 3 passes on.
 
 ## 7. The record run
 
+(Amended for the Mac mini by §7a, 2026-10-21; where the two differ, §7a holds.)
+
 The host: the MacBook. Desktop 2.42304.2 is installed, running and signed in there to the owner's account (the cached
 account id c07e5b82…, org 0b4c585b…), the owner's user scope and the relay live there, and the sitting ran there. The
 Mac mini has Desktop 2.2553.1 (an August build with engine 2.1.275, last used 2026-09-21, the same cached account id) and
@@ -334,3 +337,123 @@ Expected spend: about US$15 to 25 at list price, on the owner's subscription acc
 scope about US$0.25 to 0.45 per repetition (the smoke's US$0.14 to 0.28 at the mirror's smaller context), 24 at most;
 Desktop's Code sessions about US$0.3 to 0.6 each at the owner's scope (the 2026-10-01 session opened at 54K tokens), 24
 at most; the probes and seeds about US$2. No cap was set; the spend is reported from the receipts.
+
+
+## 7a. Amendment 2026-10-21: the record run on the Mac mini (P4 Decision Log 45)
+
+The owner proposed the mini (its compute mostly idle) and the architect adopted it as §7's named alternative; the
+owner's proposal is the go for cua on the mini for this run, and X39's account rules stand (one project named for the
+bench, deleted after, no sharing). The decks are still judged on Cowork's Slides (Decision Log 25), with (c) the
+fallback on the same conditions. This section replaces §7's host, its precondition 1 and the MacBook's lock and route;
+§7's interleaving order, validity and report steps stand.
+
+What the mini is (read over ssh, read-only, 2026-10-21 about 01:40Z): Mac-mini.local, macOS 27.0, 10 cores, 1-minute
+load 1.9; the console user is `new`, uid 501, the ssh user too, the user the ci-kit runner (com.ssfskim.ci-kit.mac-runner)
+and the cua agent (com.ssfskim.cua.agent) run as; sleep and display sleep off. Claude Desktop 2.2553.1, not running,
+the bundle owned by new:staff (so its own updater can replace it without an admin prompt), its cached account the
+owner's (the same id as the MacBook's), locale ko-KR, one Code engine on disk (2.1.275), a Cowork VM bundle of 11 GB
+from July, no Code session since 2026-09-16 and no Cowork session since July. ClaudeUsage running, /api/hello 200.
+The installed engine ~/.local/bin/claude is 2.1.305. node 22.18.0 under ~/.nvm (Homebrew's default is 26.4.0), pnpm
+11.23.0, git reaches origin. 142 GiB free. `launchctl print gui/501` answers from an ssh session.
+
+The settings both arms read: the mini's own ~/.claude (MAWS_BENCH_SCOPE=owner). Its settings.json matches the
+MacBook's on every key that decides a session (compared key by key, secret values by hash): model `opus[1m]`,
+claude-opus-5-5 at effortLevel xhigh, defaultMode auto, output style doperpowers:to-human, the same 10 plugins and 7
+hooks, enableArtifact false, disableClaudeAiConnectors true, and the same env (the relay's URL,
+ANTHROPIC_DEFAULT_OPUS_MODEL claude-opus-5-5[1m], CLAUDE_CODE_MAX_CONTEXT_TOKENS 500000, ENABLE_TOOL_SEARCH true, the
+fine-grained tool streaming flag). Desktop's Code sessions read that user scope (settingSources user, project, local)
+and nothing can give them a mirror without writing the owner's settings, so both arms reading it is the one way they
+share one set of settings; the mirror scope stays for runs that are not the record. The comparison is read again at
+each hold's start, and a difference on one of those keys stops the hold before any repetition. Both arms load the same
+Stop hooks; they run after a turn's last assistant record, so no measure includes them.
+
+The Desktop arm: cua's remote device `mini` (enrolled in this client's device store, the project's relay): `devices_list`,
+`devices_use mini`, desktop-driver.js loaded in that device's kernel; `end_task` and `devices_use local` when a hold
+ends. desktop-prep.py (before, after, deck, kinds) runs on the mini over ssh from the bench's checkout there, so it
+reads Desktop's records where Desktop writes them.
+
+The MAWS arm: the bench's checkout on the mini at /tmp/maws-parity-bench/repo, a fresh clone of this branch at the go
+(never the mini's ~/Developer/GitHub/MAWS or the runner's work tree), node 22.18.0, built once with
+`scripts/e2e-build.sh plain`. Each repetition runs inside the console's login session, where the gate's own e2e jobs
+run, not in the ssh session: an ssh session is a security session of its own, and a login-keychain prompt raised from
+it would stop the hold (gate-offload Decision Log 79's rule keeps such prompts to holds, and only the owner answers
+them). A queue runner, started as a one-shot LaunchAgent bootstrapped into gui/501 from ssh (its plist under the run
+directory, nothing in ~/Library/LaunchAgents, booted out when the hold ends), takes one request file at a time (task,
+repetition, scope owner, the run directory and profile), runs that repetition's playwright invocation and writes its
+exit code and log; the operator writes the request and waits for its answer over ssh, so the interleaving stays in one
+hand. If the bootstrap is refused, the same runner is started by one command typed into a Terminal window opened
+through cua.
+
+The parser: `parse.py report` runs on the mini over the run directory (both arms' manifests, the mini's transcripts, MAWS's
+journals, the mini's relay logs). The run directory less the transcripts is copied back to this branch as
+spikes/p4-parity-bench/record-<date>/ with report.json; the transcripts stay on the mini, the owner's records.
+
+Controls the mini adds, recorded per repetition and not voiding (§1):
+- The engines differ by construction: MAWS's arm runs the mini's installed engine, Desktop the engine it bundles (read
+  after its update).
+- The model's variant: MAWS requests claude-opus-5-5[1m]; Desktop's picker is set to the Opus 5.5 entry that matches it
+  (the 1M entry when it lists one), and the request's model is read from both arms' records, where it voids if it differs.
+- The route: MAWS through the mini's ClaudeUsage; Desktop direct, checked again by the relay join.
+- The load: the quiet flag pauses the runner for each hold, both arms share the host through the interleaving, the
+  1-minute load is recorded per repetition, and any ad-hoc headless Canvas read from College (1 to 3 minutes; its times
+  forwarded by the architect) is written against the repetitions it overlaps. Nothing is excluded for it: both arms
+  are exposed, and the rule is fixed.
+
+A Cowork deck's timed turn runs in a fresh session of its own. Its deck is a seed made beforehand by an untimed Cowork
+session, one seed per timed repetition, and the timed prompt names that deck by its claude.ai url ({ref}), as MAWS's
+names its working copy by its maws-artifact link. So the timed turn carries none of the seed's context or cache, and §6's
+"T possibly the timed transcript itself" is not used for a record repetition. The seed's transcript is the repetition's
+`--seed-transcript`; before the repetition runs, its deck must pass `check.py same seed/maws-deck` and its seed turn
+must be recorded in auto (`desktop-prep.py deck`). Cowork's effort is read from the probe: if Cowork cannot run Opus 5.5
+at Extra high, the deck cells are measurement-only (§2), with MAWS_BENCH_PIN set to Cowork's recorded setting for B5 and
+B7. If Cowork has no Auto for the account, the decks fall back to (c) and the result says why (Decision Log 25).
+
+Harness additions before the prep hold, made on the MacBook with tests (about 30 minutes, none of it on the mini):
+`desktop-prep.py before --ref <url>`, so a Cowork timed prompt names its seed deck; `desktop-prep.py seed-prompt`, the
+exact untimed prompt that has a Cowork session create the Slides deck from seed/maws-deck and reply with its url, and a
+seeds ledger (the seed's transcript, its url, `same`, the recorded mode) that the timed repetitions draw from;
+spikes/p4-parity-bench/mini/, holding the queue runner, its LaunchAgent template and the request-and-wait wrapper the
+operator calls over ssh.
+
+The owner's part, asked once:
+1. A sign-in: if Desktop asks for one after its update, the owner signs in to their Claude account on the mini (it goes
+   through the browser). The hold waits for it.
+2. Any macOS system dialog in either hold: a keychain prompt (SecurityAgent), a Notifications or Local Network request
+   from the new build, an Accessibility or Screen Recording request for cua's helper, a firewall or admin-password prompt.
+   The owner answers it and nothing else clicks it; the hold stops until it is gone. None is expected for the update
+   itself (the bundle is the user's).
+3. cua's app approval in this client ("Allow Computer Use to use Claude?"), once per connection, if it reaches the
+   owner.
+4. The mini unlocked for both holds: a locked screen stops cua, and only the owner unlocks it.
+5. Optional, which shortens the prep and removes its main unknown: the owner updates Claude Desktop on the mini and
+   confirms it is signed in, about 5 minutes, any time before the prep hold.
+Not the owner's: the per-session settings (Opus 5.5, Extra high, Auto in Code sessions and in Cowork), which cua sets
+on every session; the bench's project; the deletions after.
+
+The prep hold (a GUI hold with the quiet flag), about 2 hours 30 minutes, separable into two parts:
+- Part A, about 45 to 60 minutes, everything that may need the owner. It covers re-reading the facts and the posture;
+  `devices_use mini`; launching Desktop and updating it through its own updater; the sign-in check; the new build's
+  first screens; `bench.probe()` with the driver's labels fixed against the live Korean tree; one untimed Code probe
+  session and one untimed Cowork probe session read with `kinds` (the tools, the engine, the recorded mode, model and
+  effort, whether Cowork offers Auto and Extra high), and any Cowork VM bundle download the new build asks for, which
+  is the one open-ended step (5 to 20 minutes).
+- Part B, about 1 hour 30 minutes. The clone, install and build (about 8 minutes, the hold's one CPU burst). The queue
+  runner, the MAWS profile's seeds and one MAWS shakedown repetition (B1 on sonnet:low, in its own run directory). One
+  untimed dry repetition per Desktop surface (B1 in a Code session, B5 in Cowork) through before, the driver and after.
+  The twelve Cowork seeds (ten needed and two spare, about 4 minutes each), each passing `deck`'s `same` and recorded
+  in auto.
+Part B can open the record hold instead, which then runs about 4 hours. The gap between the holds should stay short:
+if Desktop updates itself in between, the record hold opens with `bench.probe()` again (10 minutes).
+
+The record hold (a GUI hold with the quiet flag), about 2 hours 30 minutes:
+- Five rounds in §7's order, about 20 minutes each. A round is four MAWS repetitions at about 1.5 minutes, two Code
+  document repetitions at about 2.5 minutes, two Cowork deck repetitions at about 3 minutes (the seeds already made)
+  and the hand-offs between them: 100 minutes in all.
+- Round 6 for any short cell, about 15 minutes.
+- The cleanup in the owner's account, about 25 minutes: the Code and Cowork sessions, every Slides deck in the seeds
+  ledger, the Space or project.
+- The report and the copy back, about 10 minutes.
+
+The expected spend: about US$25 to 35. MAWS about US$10 (25 to 30 repetitions with the shakedown); Desktop's Code
+sessions about US$5; the Cowork deck repetitions about US$7; the twelve Cowork seeds about US$6; the probes and dry
+runs about US$3. There is no cap; the spend is reported from the receipts.
