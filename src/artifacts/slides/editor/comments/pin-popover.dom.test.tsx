@@ -9,6 +9,7 @@
 // comments suite's fake layout), and the frame, the stage and the pins the rects stubbed below.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import type { Actor } from '@shared/artifacts/actor';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '../../../document/editor/comments/surface';
 import { newDoc, transact, type Doc } from '../../../yjs';
 import { deleteElementTree, importSlide, writeDeckKeys } from '../../model';
@@ -99,7 +100,7 @@ afterEach(() => {
 });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80))); // the rail's quiet moment
 const HUMAN = { kind: 'human' } as const;
-const AGENT = { kind: 'session', appSessionId: 'a1111111-1111-4111-8111-111111111111' } as const;
+const AGENT = { kind: 'session', appSessionId: 'a1111111-1111-4111-8111-111111111111' } as Actor;
 
 async function mount({ readOnly = false } = {}) {
   const doc = deck();
