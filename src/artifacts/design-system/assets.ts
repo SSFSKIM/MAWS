@@ -49,7 +49,7 @@ export function systemFamilies(tokens: TokenSet): Set<string> {
 }
 
 // The descriptors an `@font-face` block may carry; anything else in one is dropped.
-const FACE_DESCRIPTORS = new Set([
+export const FACE_DESCRIPTORS: ReadonlySet<string> = new Set([
   'font-family', 'src', 'font-weight', 'font-style', 'font-stretch', 'font-display', 'unicode-range', 'font-feature-settings',
   'font-variation-settings', 'ascent-override', 'descent-override', 'line-gap-override', 'size-adjust',
 ]);

@@ -4,7 +4,13 @@
 // not changing, named here or not", so every key is kept: the known ones checked (an entry that breaks its rule is
 // dropped with a warning, as Claude ignores it), unknown ones verbatim. MAWS adds one key, `dsOverrides` (X28's
 // `TokenOverrides`, the deck's design-system overrides; D10), which the Claude-facing writers leave out.
+// P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): a Google Fonts face (`href`) gains the engine
+// host's record of its fetch, `google` (./google-faces.ts): the files and the licence it stored in the deck's assets, or
+// the refusal by name. The record is the host's alone: the loader drops it from every index it reads (what an agent
+// sends, and the base it read), and the readers draw a face only from a record that validates here and answers the
+// face's canonical request; any other is no record, and the face is pending.
 import { isAssetRef } from './css';
+import { googleRequest, refusalMessage } from './google-faces';
 import { ID_RE } from './parse';
 
 export const DECK_PATH = 'project/deck.json';
@@ -36,11 +42,28 @@ export interface DeckSection {
 }
 export interface DeckFace {
   family: string;
-  /** A Google Fonts css2 link (named in MAWS, never fetched; D6). */
+  /** A Google Fonts css2 link: fetched once by the host into the deck's assets when its licence is OFL (D19). */
   href?: string;
   /** An uploaded face (`assets/<name>`, `/_blob/<id>`) or an installed system's (`project/ds/<folder>/<file>`). */
   src?: string;
+  /** The host's record of an `href` face's fetch (D19); read through `googleRecord`, never trusted as written. */
+  google?: unknown;
   [key: string]: unknown;
+}
+
+/** One file of a fetched face: its asset, and the weight and style it draws. */
+export interface GoogleFaceFile {
+  src: string;
+  weight: string;
+  style: 'normal' | 'italic';
+}
+/** The host's record (X27 as amended by D19): the canonical request it answers, then the files saved or the refusal. */
+export type GoogleRecord = { request: string; licence: 'OFL'; licenceSrc: string; files: GoogleFaceFile[] } | { request: string; refused: string };
+/** A file a face draws from, for every reader alike: an uploaded face's one file, or a fetched face's files. */
+export interface FaceFile {
+  src: string;
+  weight?: string;
+  style?: 'normal' | 'italic';
 }
 export interface DeckJson {
   v?: unknown;
@@ -73,6 +96,10 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const FAMILY_RE = /^[A-Za-z][A-Za-z0-9 _-]{0,39}$/;
 const GOOGLE_FONTS_RE = /^https:\/\/fonts\.googleapis\.com\/css2\?\S+$/;
 const DS_OVERRIDE_RE = /^--ds-[a-z0-9-]+$/;
+const UPLOAD_RE = /^assets\/[^/?#\s]+$/;
+const WEIGHT_RE = /^\d{1,4}$/;
+const RECORD_MAX_FILES = 18;
+const REFUSED_RE = /^[\w .+-]{1,40}$/;
 /** The face key Claude asks for: the family lowercased, spaces as `-`. */
 export const faceKey = (family: string): string => family.toLowerCase().replace(/ /g, '-');
 
@@ -160,7 +187,7 @@ function faces(value: Record<string, unknown>, warn: (p: string, m: string) => v
       warn(where, 'a face is {family, href | src} with a family of a letter, then letters, digits, spaces, _ and - (40 at most); dropped');
       continue;
     }
-    const { href, src } = entry;
+    const { href, src, google: _hostRecord, ...kept } = entry; // the host's record is never the sender's (D19)
     const linked = typeof href === 'string' && GOOGLE_FONTS_RE.test(href);
     const uploaded = typeof src === 'string' && isAssetRef(src);
     if ((href === undefined) === (src === undefined) || (href !== undefined && !linked) || (src !== undefined && !uploaded)) {
@@ -172,9 +199,79 @@ function faces(value: Record<string, unknown>, warn: (p: string, m: string) => v
       continue;
     }
     if (key !== faceKey(entry.family)) note(where, `a face is keyed by its family lowercased with spaces as -: "${faceKey(entry.family)}"`);
-    out[key] = entry as DeckFace;
+    out[key] = { ...kept, ...(href !== undefined && { href }), ...(src !== undefined && { src }) } as DeckFace;
   }
   return out;
+}
+
+const onlyKeys = (v: Record<string, unknown>, keys: readonly string[]) => Object.keys(v).every((k) => keys.includes(k));
+
+/**
+ * The face's host record when it is one (D19) and answers the face's canonical request: `{request, licence: 'OFL',
+ * licenceSrc, files}` with every file an uploaded asset and one per style and weight, or `{request, refused}`. Anything
+ * else (a record of an earlier link, a malformed one) is no record.
+ */
+export function googleRecord(face: DeckFace): GoogleRecord | null {
+  const record = face.google;
+  if (typeof face.href !== 'string' || !isRecord(record) || typeof record.request !== 'string') return null;
+  const asked = googleRequest(face.family, face.href);
+  if (!asked.ok || asked.request.url !== record.request) return null;
+  if ('refused' in record) return onlyKeys(record, ['request', 'refused']) && typeof record.refused === 'string' && REFUSED_RE.test(record.refused) ? { request: record.request, refused: record.refused } : null;
+  const { licence, licenceSrc, files } = record;
+  if (!onlyKeys(record, ['request', 'licence', 'licenceSrc', 'files']) || licence !== 'OFL' || typeof licenceSrc !== 'string' || !UPLOAD_RE.test(licenceSrc)) return null;
+  if (!Array.isArray(files) || files.length === 0 || files.length > RECORD_MAX_FILES) return null;
+  const seen = new Set<string>();
+  const out: GoogleFaceFile[] = [];
+  for (const file of files) {
+    if (!isRecord(file) || !onlyKeys(file, ['src', 'weight', 'style'])) return null;
+    const { src, weight, style } = file;
+    if (typeof src !== 'string' || !UPLOAD_RE.test(src) || src.includes('..') || typeof weight !== 'string' || !WEIGHT_RE.test(weight) || (style !== 'normal' && style !== 'italic')) return null;
+    if (seen.has(`${style} ${weight}`)) return null;
+    seen.add(`${style} ${weight}`);
+    out.push({ src, weight, style });
+  }
+  return { request: record.request, licence, licenceSrc, files: out };
+}
+
+/** The files a face draws from (D19): an uploaded face's asset, a fetched face's saved files; none for any other. */
+export function faceFiles(face: DeckFace): FaceFile[] {
+  if (typeof face.src === 'string') return UPLOAD_RE.test(face.src) && !face.src.includes('..') ? [{ src: face.src }] : [];
+  const record = googleRecord(face);
+  return record && 'files' in record ? record.files.map((file) => ({ ...file })) : [];
+}
+
+/** Every asset a face keeps in the deck: its files, and a fetched face's licence beside them (the mirror's copies). */
+export const faceAssetRefs = (face: DeckFace): string[] => {
+  const record = googleRecord(face);
+  return [...faceFiles(face).map((file) => file.src), ...(record && 'licenceSrc' in record ? [record.licenceSrc] : [])];
+};
+
+/** A Google Fonts face's state for its readers (D19): saved, pending (no record yet), or refused by name; null otherwise. */
+export type GoogleFaceState = { state: 'saved' } | { state: 'pending' } | { state: 'refused'; message: string };
+export function googleFaceState(face: DeckFace): GoogleFaceState | null {
+  if (typeof face.href !== 'string' || typeof face.family !== 'string') return null;
+  const asked = googleRequest(face.family, face.href);
+  if (!asked.ok) return { state: 'refused', message: refusalMessage(face.family, asked.problem) };
+  const record = googleRecord(face);
+  if (!record) return { state: 'pending' };
+  return 'refused' in record ? { state: 'refused', message: refusalMessage(face.family, record.refused) } : { state: 'saved' };
+}
+
+/** A face as an agent compares it: the host's record left out (D19). */
+export function withoutRecord<T>(face: T): T {
+  if (!isRecord(face) || !('google' in face)) return face;
+  const { google: _record, ...rest } = face;
+  return rest as T;
+}
+
+/**
+ * The face an agent's write leaves (D19): its own value, carrying the live face's host record forward when the record
+ * still answers the written face's request, so the host's write never turns the agent's next face edit into a conflict.
+ */
+export function carryRecord(written: unknown, live: unknown): unknown {
+  if (!isRecord(written) || !isRecord(live) || live.google === undefined) return written;
+  const next = { ...written, google: live.google } as DeckFace;
+  return typeof next.family === 'string' && googleRecord(next) ? next : written;
 }
 
 function overrides(value: Record<string, unknown>, warn: (p: string, m: string) => void): Record<string, string> {
@@ -210,7 +307,7 @@ function orderedMap<T extends Record<string, unknown>>(map: Record<string, T>, f
 export function serializeDeckJson(deck: DeckJson): string {
   const out: Record<string, unknown> = { ...deck };
   if (deck.sections) out.sections = orderedMap(deck.sections, ['description', 'start', 'before']);
-  if (deck.faces) out.faces = orderedMap(deck.faces, ['family', 'href', 'src']);
+  if (deck.faces) out.faces = orderedMap(deck.faces, ['family', 'href', 'src', 'google']);
   if (deck.dsOverrides) out.dsOverrides = Object.fromEntries(Object.entries(deck.dsOverrides).sort(([a], [b]) => (a < b ? -1 : 1)));
   return JSON.stringify(ordered(out, DECK_KEYS), null, 2) + '\n';
 }
