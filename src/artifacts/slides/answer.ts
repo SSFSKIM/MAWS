@@ -2,10 +2,12 @@
 // beyond its files. A read names the slides held, with their reasons (the file it returns is the held source, which
 // fails to load). A read and a publish name each picture and face whose source the deck's assets do not hold: MAWS
 // draws only an uploaded asset (`assets/<name>`), so Claude's `/_blob/<id>` and `project/ds/<folder>/<file>`, kept
-// verbatim, draw as a placeholder too (D6). Portable: A's tools call it on the host's doc.
+// verbatim, draw as a placeholder too (D6). Portable: A's tools call it on the host's doc. P4-B2 D19: and each Google
+// Fonts face that does not draw yet: refused by name (its link, its licence or its files), or pending while the host
+// fetches it (the publish never waits on the network).
 import type { PublishWarning } from '../files';
 import type { Doc } from '../yjs';
-import { DECK_PATH, slideIdOf, slidePath } from './deck';
+import { DECK_PATH, googleFaceState, slideIdOf, slidePath, type DeckFace } from './deck';
 import { heldOf, readDeckJson, readFlat, slideOrder } from './model';
 
 export const ASSET_PREFIX = 'assets/';
@@ -25,6 +27,14 @@ function missing(src: string, assets: ReadonlySet<string>): string | null {
   return `${src} is a Claude reference with no asset in MAWS (drawn as a placeholder): upload the file with artifact_upload_asset and use its assets/<name> ref`;
 }
 
+/** Why a Google Fonts face draws as its fallback, or null when it draws (D19). */
+function googleFaceWarning(face: DeckFace): string | null {
+  const state = googleFaceState(face);
+  if (state?.state === 'refused') return state.message;
+  if (state?.state === 'pending') return `${face.family} is not in this deck yet: MAWS fetches it from Google Fonts once (OFL faces only), and until then it draws as its fallback; nothing to do`;
+  return null;
+}
+
 /**
  * A warning for each picture and face whose source the deck's `assets` (their refs) do not hold: in every file, or in
  * the files at `paths` (a publish's changed files). A held slide is left out: its reasons already name it.
@@ -34,7 +44,7 @@ export function assetWarnings(doc: Doc, assets: ReadonlySet<string>, paths?: rea
   const named = paths ? new Set(paths) : null;
   if (!named || named.has(DECK_PATH)) {
     for (const [key, face] of Object.entries(readDeckJson(doc).faces ?? {})) {
-      const message = typeof face.src === 'string' ? missing(face.src, assets) : null;
+      const message = typeof face.src === 'string' ? missing(face.src, assets) : googleFaceWarning(face);
       if (message) warnings.push({ path: DECK_PATH, property: `faces.${key}`, message });
     }
   }
