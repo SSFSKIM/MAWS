@@ -428,20 +428,15 @@ export function createViewerStore(client: MawsBridge) {
       if (document !== undefined) patch(tabId, { dirty: document !== next.text });
     };
 
-    // E5: a save's conflict answered with a hash the tab has not seen: the file is read whole (one hashed read within the
-    // editor's caps) and shown as theirs in the merge view; a read answering yet another hash is newer and wins. The
-    // read lands only on the incarnation that saved (`current`); answers whether it landed. P4 W2-C (tracker
-    // 2026-10-06): it carries the tab's generation as a load does, superseding the loads in flight (read before it, they
-    // may answer a disk it has seen move on) and superseded by a newer one, whose read then says what the disk holds. A
-    // conflict answering the theirs already shown reads nothing but supersedes the loads in flight all the same, so an
-    // older read of the baseline cannot withdraw that theirs while the disk holds it (the review); the disk's next change
-    // brings its own read.
-    const conflicted = async (tabId: string, entry: ViewerEntry, hash: string, current: () => boolean): Promise<boolean> => {
-      if (entry.theirs?.hash === hash) {
-        supersede(tabId);
-        patch(tabId, { saving: false, theirs: { ...entry.theirs, view: 'merge' } });
-        return true;
-      }
+    // E5: a save's conflict: the file is read whole (one hashed read within the editor's caps) and shown as theirs in the
+    // merge view, whatever hash the conflict answered, the theirs already shown included; a read answering yet another
+    // hash is newer and wins. The read lands only on the incarnation that saved (`current`); answers whether it landed.
+    // P4 W2-C (tracker 2026-10-06): it carries the tab's generation as a load does, superseding the loads in flight and
+    // superseded by a newer one, whose read then says what the disk holds. Issued after the conflict's reply, it sees the
+    // disk at or after the conflict, which a reply alone does not (the reply may describe a disk older than a change read
+    // in flight), so superseding the older loads is sound only through it (the reviews). A read answering the baseline's
+    // own hash withdraws theirs: the disk is back where the document started, and the next save lands.
+    const conflicted = async (tabId: string, entry: ViewerEntry, current: () => boolean): Promise<boolean> => {
       const generation = ++lastGeneration;
       generations.set(tabId, generation);
       const answer = await readChunk(entry, 0, FILES_READ_MAX_LENGTH, true);
@@ -459,6 +454,10 @@ export function createViewerStore(client: MawsBridge) {
         kind: kindOf({ name: entry.path, mime: read.mime, bytes: read.bytes, encoding: read.encoding }), mime: read.mime, encoding: read.encoding, bytes: read.bytes,
         text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8,
       };
+      if (file.hash !== null && file.hash === get().entries.get(tabId)?.hash) {
+        patch(tabId, { saving: false, theirs: null });
+        return true;
+      }
       // A file that is no longer a text the editor could take (grown past its cap, binary, not UTF-8) is not offered;
       // the bar says why (E11 W-D), and a theirs shown earlier is withdrawn, the disk no longer holding it (W-D review I1).
       patch(
@@ -586,7 +585,7 @@ export function createViewerStore(client: MawsBridge) {
           patch(tabId, { saving: false, saveError: answer.error.message });
           return 'error';
         }
-        if (answer.value.status === 'conflict') return (await conflicted(tabId, get().entries.get(tabId)!, answer.value.hash, current)) ? 'conflict' : 'noop';
+        if (answer.value.status === 'conflict') return (await conflicted(tabId, get().entries.get(tabId)!, current)) ? 'conflict' : 'noop';
         supersede(tabId); // a read issued before the write lands nowhere
         moveBaseline(tabId, { text: content, hash: answer.value.hash, saving: false });
         return 'ok';
