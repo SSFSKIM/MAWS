@@ -5,6 +5,7 @@
 // restore (an `auto` version first when the document moved, the revert since the version keeping conversations
 // through the document adapter's `revertScope`, a `restore` version "Restored from …", then `restored` to every
 // replica), Make a copy (recorded), markViewed (an `auto` version when the document moved, then the time). Portable.
+import { formatDayTime } from '@shared/app/date-format';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import { applyV2, attributionMap, carryAttribution, contentIdsOf, encodeMap, mergeMaps, newDoc, revertUpdate, stateV2, type Carry, type ContentMap } from '../../../yjs';
@@ -14,7 +15,6 @@ import type { MemoryDocumentHost } from '../memory-host';
 import type { HistoryApi } from './api';
 
 const HUMAN: Actor = { kind: 'human' };
-const WHEN = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 interface Stored extends ArtifactVersion {
   state: Uint8Array;
@@ -121,7 +121,7 @@ export class MemoryHistory implements HistoryApi {
     const update = revertUpdate(target.state, stateV2(this.host.doc), revertScope(this.host.doc, old).keep);
     old.destroy();
     this.host.write((doc) => applyV2(doc, update));
-    const restored = this.version('restore', HUMAN, { label: `Restored from ${target.label ?? WHEN.format(target.at)}` });
+    const restored = this.version('restore', HUMAN, { label: `Restored from ${target.label ?? formatDayTime(target.at)}` });
     this.host.announceRestored(restored.id);
     return { revision: this.host.revision, versionId: restored.id };
   }
