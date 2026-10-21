@@ -19,7 +19,9 @@ print -r -- $$ > $queue/runner.pid
 child=
 trap 'rm -f $queue/runner.pid' EXIT
 trap '[[ -n $child ]] && kill -TERM $child 2>/dev/null; rm -f $queue/runner.pid; exit 143' TERM INT
-keys=(MAWS_BENCH_TASKS MAWS_BENCH_REPS MAWS_BENCH_REP_FROM MAWS_BENCH_SCOPE MAWS_BENCH_PIN MAWS_BENCH_OUT MAWS_BENCH_PROFILE MAWS_BENCH_CWD)
+keys=(MAWS_BENCH_TASKS MAWS_BENCH_REPS MAWS_BENCH_REP_FROM MAWS_BENCH_SCOPE MAWS_BENCH_PIN MAWS_BENCH_OUT MAWS_BENCH_PROFILE MAWS_BENCH_CWD MAWS_BENCH_VARIANT)
+# P4-A3: MAWS_BENCH_REPO=<checkout> runs the request in another of the bench's checkouts (a lever's build beside the base
+# one, their repetitions interleaved through this one runner); it is where the repetition runs, not a key it reads
 finish() { print -r -- $2 > $1.done.tmp && mv $1.done.tmp $1.done; }
 while [[ ! -e $queue/stop ]]; do
   touch $queue/heartbeat
@@ -28,21 +30,28 @@ while [[ ! -e $queue/stop ]]; do
   reqs=(${(o)reqs})  # the oldest name first: bench-queue.sh names a request by its time
   base=${reqs[1]%.req}
   mv $base.req $base.run || continue
-  envs=() bad=()
+  envs=() bad=() at=$repo
   while IFS= read -r line || [[ -n $line ]]; do
     [[ -z $line ]] && continue
-    if (( ${keys[(Ie)${line%%=*}]} )) && [[ $line == *=* ]]; then envs+=($line); else bad+=(${line%%=*}); fi
+    if [[ $line == MAWS_BENCH_REPO=* ]]; then at=${line#MAWS_BENCH_REPO=}
+    elif (( ${keys[(Ie)${line%%=*}]} )) && [[ $line == *=* ]]; then envs+=($line); else bad+=(${line%%=*}); fi
   done < $base.run
   if (( ${#bad} )); then
     print -r -- "refused: not the bench's keys: ${bad[*]}" > $base.log
     finish $base 2
     continue
   fi
-  print -r -- "$(date -u +%FT%TZ) start ${envs[*]}" >> $queue/runner.log
+  if [[ $at != $repo && ! -f $at/e2e/bench-edit-live.spec.ts ]]; then
+    print -r -- "refused: MAWS_BENCH_REPO $at is not a checkout of the bench (no e2e/bench-edit-live.spec.ts)" > $base.log
+    finish $base 2
+    continue
+  fi
+  where=; [[ $at != $repo ]] && where=" in $at"
+  print -r -- "$(date -u +%FT%TZ) start ${envs[*]}$where" >> $queue/runner.log
   if [[ -n ${BENCH_QUEUE_CMD:-} ]]; then
-    (cd $repo && env MAWS_LIVE=1 MAWS_HARNESS=0 MAWS_E2E_QUIET=1 $envs /bin/zsh -c $BENCH_QUEUE_CMD) > $base.log 2>&1 &
+    (cd $at && env MAWS_LIVE=1 MAWS_HARNESS=0 MAWS_E2E_QUIET=1 $envs /bin/zsh -c $BENCH_QUEUE_CMD) > $base.log 2>&1 &
   else
-    (cd $repo && env MAWS_LIVE=1 MAWS_HARNESS=0 MAWS_E2E_QUIET=1 $envs node_modules/.bin/playwright test e2e/bench-edit-live.spec.ts --reporter=line) > $base.log 2>&1 &
+    (cd $at && env MAWS_LIVE=1 MAWS_HARNESS=0 MAWS_E2E_QUIET=1 $envs node_modules/.bin/playwright test e2e/bench-edit-live.spec.ts --reporter=line) > $base.log 2>&1 &
   fi
   child=$!
   wait $child
