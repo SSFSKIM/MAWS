@@ -97,10 +97,10 @@ export function StreamView({ items, outbox, landed = null, workLabel = 'on a com
  * at the oldest edge (a box that grew under a reader nearer that edge than it grew). Where the browser left the reader
  * at their distance from the bottom, or clamped them there, the view's top is put back where it was: where the reader
  * was when last seen, plus the box's height then, less its height now. Where its anchoring moved them, that stands: it
- * also follows the rows a rotation rewraps, which a distance cannot. Last seen is a scroll event's place or this
- * observer's own; a scroll that arrives while a change of the box's height is not handled yet is the browser's, not the
- * reader's. At the tail the tail stays in view. Without anchoring, the fallback holds a resize itself, with the rows it
- * rewraps (`useAnchoringFallback`).
+ * also follows the rows a rotation rewraps, which a distance cannot, and so does a place the reader scrolled to in the
+ * same moment. Last seen is a scroll event's place or this observer's own; a scroll that arrives while a change of the
+ * box's height is not handled yet is left for this observer to judge. A reader the browser left at the tail stays at
+ * it. Without anchoring, the fallback holds a resize itself, with the rows it rewraps (`useAnchoringFallback`).
  */
 function useResizeHold(scroller: RefObject<HTMLDivElement | null>) {
   useLayoutEffect(() => {
@@ -117,7 +117,7 @@ function useResizeHold(scroller: RefObject<HTMLDivElement | null>) {
       const now = -box.scrollTop;
       const left = Math.abs(now - seen) < 0.5;
       const clamped = height > was && now < seen && now >= box.scrollHeight - height - 1;
-      if (height !== was && (seen < 1 || left || clamped)) {
+      if (height !== was && (left || clamped)) {
         const to = seen < 1 ? 0 : Math.max(0, seen + was - height);
         if (Math.abs(to - now) >= 0.5) box.scrollTop = -to;
       }
@@ -146,7 +146,9 @@ function useResizeHold(scroller: RefObject<HTMLDivElement | null>) {
  * this holds too on such an engine, the view's top being that place plus the box's height then, its row found as the
  * list was laid out, so the rows a rotation rewraps move nothing either; and after a shrink of the list under a reader
  * nearer its oldest edge than the shrink, whom the browser clamps at the edge before this runs. A scroll that arrives
- * while either is not handled yet is the browser's, not the reader's. A reader at the edge before the shrink stays.
+ * while either is not handled yet is left for the observer to judge: without anchoring the browser only leaves a reader
+ * at their distance from the bottom or clamps them at the oldest edge, so a resize that finds them anywhere else found
+ * a scroll of their own, which stands. A reader at the edge before the shrink stays.
  *
  * A row is an innermost item, not a block: a sender's run is one block holding many items, and an opened run of agent
  * traffic one item holding its lines, each an item of its own. A message arriving in the run the reader is in, or one
@@ -171,9 +173,10 @@ function useAnchoringFallback(scroller: RefObject<HTMLDivElement | null>, list: 
       const was = height;
       height = box.clientHeight;
       const now = -box.scrollTop;
+      const theirs = height !== was && Math.abs(now - seen) >= 0.5 && !(now < seen && now >= box.scrollHeight - height - 1);
       // The reader's distance from the bottom before this change, and the view's top as the list was laid out.
       const back = height !== was ? seen : clamped() ? Math.max(seen, now) : now;
-      if (back >= 1) {
+      if (back >= 1 && !theirs) {
         const top = back + was;
         const anchor = laidOut.find(([row, at]) => at < top && row.isConnected);
         const moved = anchor ? fromBottom(anchor[0]) - anchor[1] : 0;

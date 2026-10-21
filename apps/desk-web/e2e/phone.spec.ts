@@ -574,6 +574,23 @@ for (const anchoring of ['the engine’s', 'none'] as const)
     await page.waitForTimeout(300);
     expect(await events.evaluate((el) => el.scrollTop)).toBeCloseTo(0, 0);
     await expect(last).toBeInViewport();
+
+    // A scroll of the reader's own in the same moment as a resize, before either is reported, stands: from the tail
+    // back into the history, and from there to the tail.
+    const together = (top: number, composer: string) =>
+      textbox.evaluate(
+        (el, [top, composer]) => {
+          document.querySelector<HTMLElement>('[data-testid="channel-events"]')!.scrollTop = Number(top);
+          el.style.height = String(composer);
+        },
+        [top, composer],
+      );
+    await together(-200, '');
+    await page.waitForTimeout(300);
+    expect(await events.evaluate((el) => el.scrollTop), 'scrolled back as the composer shrank').toBeLessThan(-1);
+    await together(0, '200px');
+    await page.waitForTimeout(300);
+    expect(await events.evaluate((el) => el.scrollTop), 'scrolled to the tail as the composer grew').toBeCloseTo(0, 0);
   });
 
 test('@layout on an engine without scroll anchoring (Safari before 27), a reader scrolled back keeps their row as a message arrives below and as a row below or above them grows or shrinks, nearer the oldest edge than a shrink too, and their line in an opened run of agent traffic as a say arrives in it; at the tail the channel follows', async ({ browserName, page, hub }) => {
