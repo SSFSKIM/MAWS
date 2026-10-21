@@ -1,17 +1,32 @@
 // P3-C M7 fix wave 1 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9; Decision Log 33, 35): a deck's
 // comment opens P2's card through B's surface on an `artifact-comment` anchor that names the presentation kind, so the
 // agent's lead names the element and the presentation (Decision Log 36); a document's anchor stays as B writes it.
-import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Awareness } from '@y/protocols/awareness';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import { importSlide, writeDeckKeys } from '@artifacts/slides/model';
+import { loadSlide } from '@artifacts/slides/parse';
+import { listThreads } from '@artifacts/slides/threads';
+import { newDoc, transact, type Doc } from '@artifacts/yjs';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../../test/support/builders';
+import { fakeClient } from '../../../../../test/support/fake-client';
+import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
+import { resetLibrary } from '../../library/store';
+import { resetMarkupSurfaces } from '../../markup/surface';
+import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
 import { useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
+import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
 import { artifactCommentAnchor, useDocumentComments } from '../document/comments';
+import { registerPresentationEditor } from './index';
+import type { DeckTabState } from './tab-state';
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const passage = { threadId: 't1', tabId: 's3', tabTitle: 'slide 3: Plan', quote: 'One path' };
@@ -48,5 +63,103 @@ describe('a deck comment’s anchor', () => {
     act(() => opened!(passage));
     await act(async () => {});
     expect(useCommentCard.getState().open?.anchor).toMatchObject({ kind: 'artifact-comment', artifactKind: 'presentation', threadId: 't1' });
+  });
+});
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; X36's draft rule, as B1's document): the deck's
+// body, mounted as a main tab mounts it beside a chat, opts into the draft rule: Escape on a typed comment keeps the card
+// and its text, the toolbar's Comment refocuses that draft instead of writing a second thread, a blur with nothing typed
+// discards the card, and the tab's close guard asks before the draft is lost (not on a move, which keeps the card).
+describe('a deck’s compose card keeps its draft', () => {
+  const DECK = '77777777-7777-4777-8777-777777777777';
+  const scope: EditorHostScope = { surface: 'main', tabId: 'main-tab-1' };
+  let off = () => {};
+  beforeEach(() => {
+    resetLibrary();
+    resetEditorHosts();
+    resetMarkupSurfaces();
+    resetArtifactEditors();
+  });
+  afterEach(() => {
+    cleanup();
+    releaseArtifactEditorState(scope);
+    off();
+    delete (window as { maws?: unknown }).maws;
+  });
+
+  function deck(): Doc {
+    const doc = newDoc();
+    transact(doc, () => {
+      writeDeckKeys(doc, { v: 4, title: 'Q3 review', order: ['s1'] });
+      const loaded = loadSlide('<section id="s1"><p id="body" style="font-size:32px">One path</p></section>', { fileId: 's1' });
+      if (!loaded.ok) throw new Error('fixture');
+      importSlide(doc, loaded.slide, 'a0');
+    });
+    return doc;
+  }
+  async function mount() {
+    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: null } }).client;
+    const doc = deck();
+    const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
+    const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
+    const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
+    const confirmDiscard = vi.fn<(title: string, about?: 'comment') => Promise<boolean>>(async () => false);
+    act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it
+    off = registerPresentationEditor(() => ({ host, log: () => {}, confirmDiscard }));
+    const editor = artifactEditorFor('presentation')!;
+    const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, 'presentation', editor as never);
+    const Main = editor.Main;
+    render(
+      <EditorHostScopeContext.Provider value={scope}>
+        <Main artifactId={DECK} state={hold.state} scope={scope} visible onShown={() => {}} />
+      </EditorHostScopeContext.Provider>,
+    );
+    await waitFor(() => expect(hold.state.snapshot().session).not.toBeNull());
+    const session = hold.state.snapshot().session!;
+    const comment = async () => {
+      act(() => session.select(['body']));
+      const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Comment' }));
+      act(() => button.click());
+      await act(async () => {});
+    };
+    return { doc, state: hold.state, confirmDiscard, comment };
+  }
+  const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
+
+  it('Escape on a typed comment keeps the card and its text; Comment refocuses it rather than writing another thread', async () => {
+    const { doc, comment } = await mount();
+    await comment();
+    expect(useCommentCard.getState().open).toMatchObject({ hostId: expect.stringMatching(/^deck:tab-/), anchor: { artifactKind: 'presentation', locator: 'One path' } });
+    await userEvent.type(field(), 'Shorter?');
+    await userEvent.keyboard('{Escape}');
+    expect(useCommentCard.getState().open).not.toBeNull();
+    expect(field().value).toBe('Shorter?');
+    expect(document.activeElement).not.toBe(field());
+    await comment();
+    expect(listThreads(doc)).toHaveLength(1);
+    expect(document.activeElement).toBe(field());
+  });
+
+  it('an empty card is discarded on Escape, its thread withdrawn', async () => {
+    const { doc, comment } = await mount();
+    await comment();
+    await userEvent.keyboard('{Escape}');
+    await act(async () => {});
+    expect(useCommentCard.getState().open).toBeNull();
+    expect(listThreads(doc)).toHaveLength(0);
+  });
+
+  it('the tab’s close guard asks before an unsent comment is lost, keeps the tab when refused, and lets a move go', async () => {
+    const { state, confirmDiscard, comment } = await mount();
+    expect(await state.closeGuard()).toBe(true); // nothing typed: nothing asked
+    expect(confirmDiscard).not.toHaveBeenCalled();
+    await comment();
+    await userEvent.type(field(), 'Shorter?');
+    expect(await state.closeGuard()).toBe(false);
+    expect(confirmDiscard).toHaveBeenCalledWith('Presentation', 'comment');
+    expect(useCommentCard.getState().open).not.toBeNull();
+    expect(await state.closeGuard({ moving: true })).toBe(true); // the move keeps the card with the state
+    confirmDiscard.mockResolvedValueOnce(true);
+    expect(await state.closeGuard()).toBe(true);
   });
 });

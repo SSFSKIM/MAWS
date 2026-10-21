@@ -14,6 +14,7 @@
 // is on (the surface's `hosting`). Comment first refocuses the artifact's kept draft (X36's one draft per artifact) and
 // closes the popover, so the card it opens or reveals shows; showing a thread from the rail opens its pin's popover (V11).
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { CommentAuthor, DocumentComments } from '../../../document/editor/comments/surface';
 import { resolveAnchor, slideOrder } from '../../model';
 import { addThread, elementQuote, newThreadId, slideTitle, threadStatus, type DeckThread } from '../../threads';
@@ -115,25 +116,29 @@ export function useDeckComments({ session, surface, author = HUMAN_AUTHOR, readO
     setPinsHidden((hidden) => !hidden);
     setPopover(null);
   }, []);
+  // the compose card's host is hidden under an open popover: shown (committed) before its field takes the keyboard
+  const revealCard = useCallback(() => {
+    if (popover !== null) flushSync(() => setPopover(null));
+  }, [popover]);
   // X36's one draft per artifact: a comment being written takes a new one's place, its card shown
   const resumeDraft = useCallback((): string | null => {
     const kept = surface?.draft?.() ?? null;
     if (kept === null) return null;
-    setPopover(null);
+    revealCard();
     setActive(kept);
     surface?.focusDraft?.();
     return kept;
-  }, [surface]);
+  }, [surface, revealCard]);
   const pressPin = useCallback(
     (target: PinTarget, threadIds: readonly string[]) => {
       if (samePin(popover, target)) return setPopover(null);
       if (threadIds.length === 1 && threadIds[0] === composing && surface?.focusDraft) {
-        setPopover(null);
+        revealCard();
         return surface.focusDraft();
       }
       setPopover({ slideId: target.slideId, elementId: target.elementId });
     },
-    [popover, composing, surface],
+    [popover, composing, surface, revealCard],
   );
   // P4-B2 end
   const show = useCallback(

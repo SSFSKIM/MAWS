@@ -20,10 +20,11 @@ const windowDeps = (): DeckTabDeps => ({
     const record = useSessions.getState().records.get(appSessionId as AppSessionId);
     return record ? displayTitle(record) : undefined;
   },
-  confirmDiscard: (title) =>
+  confirmDiscard: (title, about) =>
     confirm({
       title: `Close “${title || 'this presentation'}”?`,
-      body: 'Some of its changes are not saved yet. Closing now loses them.',
+      // P4-B2 (X36's draft rule): the unsent comment in its compose card, asked about as the document's tab asks
+      body: about === 'comment' ? 'Your comment is not sent yet. Closing now discards it.' : 'Some of its changes are not saved yet. Closing now loses them.',
       confirmLabel: 'Close and discard',
       destructive: true,
     }),
