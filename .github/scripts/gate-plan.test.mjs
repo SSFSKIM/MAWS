@@ -446,6 +446,163 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
   }
 });
 
+// The contract's other half: outside a measured job no raw time bound can break beside a busy guest. A spec's upper bound
+// on a time (`expect(<a time>).toBeLessThan(<a number>)`, the time read from its own text or, for a bare name, from its
+// declaration) holds only behind a measurement switch (a skip, or an `if (<const>)` whose const reads a MAWS_*_PERF or
+// MAWS_*_SCALE switch), so it runs in a measured job alone; through the load-aware budget (e2e/support/latency.ts,
+// which a guest or ci-kit's VM lane holds to its loaded ceiling); or as one of the bounds below, each on a timer of the
+// product's own with seconds of margin, or in a spec no gate job runs, which a neighbour's load cannot reach. A new raw
+// bound fails here until it takes one of those forms, or joins this list with its reason.
+const LIVENESS_BOUNDS = {
+  'e2e/browser-cua.spec.ts': {
+    'expect(Date.now() - refusedAt).toBeLessThan(2_000);': 'the refusal of an acting command while a person holds the tab is immediate; 2 s against the command\'s own 3 s timeout tells it from a timeout',
+  },
+  'e2e/c12-quit.spec.ts': {
+    'expect(exitAt - ended).toBeLessThan(10_000);': 'the quit\'s own 2 s re-read after the last busy thing ends, then the hosts\' stop',
+    'expect(reportMs).toBeLessThan(PROBE_BOUND_MS);': 'the quit probe\'s own 2 s bound (C12 acceptance 8), a timer of the product\'s',
+    'expect(exitAt - started).toBeLessThan(PROBE_BOUND_MS + 8_000); // the report, then the existing quit path (the hosts stop)': 'that probe and the existing quit path, with 8 s of margin',
+  },
+  'e2e/connectors-direct.spec.ts': {
+    'expect(closedMs).toBeLessThan(5_000);': 'the transport\'s close of its process group: a signal, against 5 s',
+    'expect(goneMs).toBeLessThan(10_000);': 'the transport\'s own 5 s idle bound, read between 5 s and 10 s',
+    'expect(goneMs).toBeLessThan(5_000);': 'the lifeline\'s end when its host is killed: a signal, against 5 s',
+    "expect(elapsedMs, 'from main’s kill until every member is gone').toBeLessThan(5_000);": 'the detached host\'s client-gone cleanup after main\'s kill: signals, against 5 s',
+  },
+  'e2e/document-provisional.spec.ts': {
+    "expect(Date.now() - composingAt, 'the batch landed inside the hold’s cap').toBeLessThan(4_500);": 'the hold\'s own cap, a timer of the product\'s',
+  },
+  'e2e/engine-replay.spec.ts': {
+    'expect(ms).toBeLessThan(10_000);': 'the host\'s own 8 s deadline, read before the router\'s 10 s',
+  },
+  'e2e/sessions.spec.ts': {
+    'expect(failedAfterMs).toBeLessThan(110_000);': 'two of the product\'s first-output bounds (58 s or more), read before the long class\'s 120 s',
+  },
+  'e2e/smoke.spec.ts': {
+    "expect(Date.now() - launchedAt, 'the window shows its regions within ten seconds').toBeLessThan(10_000);": 'a launch\'s liveness: the regions visible within 10 s',
+  },
+  'e2e/dashboard-live-data.spec.ts': {
+    "expect(Date.parse(scheduled.at) - Date.parse(last.at), 'the scheduled call within the schedule (and a margin)').toBeLessThanOrEqual(35_000);": 'the product\'s own 30 s schedule; and no gate job runs it (MAWS_DASHBOARD_LIVE_DATA, outside every list)',
+  },
+  'e2e/agent-tools-live.spec.ts': {
+    "for (const l of latency) expect(l.rowShownAfterMs, `row of ${l.agentId} shown within a second of its start`).toBeLessThan(1_000);": 'no gate job runs it: no group\'s script names it, and the bare set skips it without its live flags',
+  },
+  'e2e/p1-live-keep-quit.spec.ts': {
+    "expect(relaunchMs, 'relaunched within 10 s').toBeLessThan(RELAUNCH_WITHIN_MS);": 'no gate job runs it: MAWS_P1_LIVE over a packaged build, which no group sets',
+  },
+};
+const TIME_WORD = /Date\.now\(\)|Date\.parse\(|performance\.now\(\)|\b\w*(?:Ms|MS|_MS)\b|\bms\b|\btimings?\b|\btimes\b|\belapsed\w*|\blatency\b|\bduration\b|\b[a-z]\w*At\b/;
+// A number: digits, or a constant in capitals (a property of one too), joined by arithmetic.
+const NUMBER = /^(?:[\d_]+(?:\.\d+)?|[A-Z][A-Z0-9_]*(?:\.\w+)*)(?:\s*[-+*/]\s*(?:[\d_]+(?:\.\d+)?|[A-Z][A-Z0-9_]*(?:\.\w+)*))*$/;
+// The text of a call's first argument from the index after its opening parenthesis: up to its top-level comma or close.
+const firstArgument = (text, from) => {
+  let depth = 0;
+  for (let i = from; i < text.length; i++) {
+    if ('([{'.includes(text[i])) depth++;
+    else if (')]}'.includes(text[i])) {
+      if (depth === 0) return text.slice(from, i);
+      depth--;
+    } else if (text[i] === ',' && depth === 0) return text.slice(from, i);
+  }
+  return text.slice(from);
+};
+const indentOf = (line) => /^ */.exec(line)[0].length;
+// The lines (0-based) a measurement switch covers in one file: a skip on it covers its block (the whole file at the top
+// level); an `if (<const>)` on a const that reads it covers its statement or its block.
+const switchedLines = (lines) => {
+  const covered = new Set();
+  const guards = new Set(lines.map((line) => /^\s*const (\w+) = process\.env\.MAWS_\w+_(?:PERF|SCALE) === '1'/.exec(line)?.[1]).filter(Boolean));
+  lines.forEach((line, i) => {
+    const k = indentOf(line);
+    if (/(?:test|describe)\.skip(?:If)?\(process\.env\.MAWS_\w+_(?:PERF|SCALE) !== '1'/.test(line)) {
+      let start = i;
+      let end = i;
+      if (k > 0) {
+        while (start > 0 && (indentOf(lines[start]) >= k || !lines[start].trim())) start--;
+        while (end < lines.length - 1 && (indentOf(lines[end + 1]) >= k || !lines[end + 1].trim())) end++;
+      } else [start, end] = [0, lines.length - 1];
+      for (let j = start; j <= end; j++) covered.add(j);
+    }
+    const guard = /^\s*if \((\w+)\)\s*(\{)?\s*(.*)$/.exec(line);
+    if (guard && guards.has(guard[1])) {
+      covered.add(i);
+      if (guard[2]) for (let j = i + 1; j < lines.length && !(indentOf(lines[j]) === k && lines[j].trim().startsWith('}')); j++) covered.add(j);
+    }
+  });
+  return covered;
+};
+// Every raw upper bound on a time in a file, outside its switched lines: the statement's text, trimmed.
+const rawTimeBounds = (text) => {
+  const lines = text.split('\n');
+  const switched = switchedLines(lines);
+  const found = [];
+  lines.forEach((line, i) => {
+    const bound = /\.toBeLessThan(?:OrEqual)?\(/.exec(line);
+    if (!bound || switched.has(i)) return;
+    let k = i;
+    while (k > 0 && !/\bexpect\b/.test(lines[k])) k--;
+    const statement = lines.slice(k, i + 1).join('\n');
+    const open = /\bexpect(?:\.soft|\.poll)?\(/.exec(statement);
+    if (!open) return;
+    if (!NUMBER.test(firstArgument(line, bound.index + bound[0].length).trim())) return; // an order between two times
+    const subject = firstArgument(statement, open.index + open[0].length).trim();
+    const declaration = /^[A-Za-z_$][\w$]*$/.test(subject) ? (lines.slice(0, i).reverse().find((before) => new RegExp(`\\b(?:const|let)\\s+${subject}\\s*=`).test(before)) ?? '') : '';
+    if (TIME_WORD.test(subject) || TIME_WORD.test(declaration)) found.push(line.trim());
+  });
+  return found;
+};
+
+test("outside a measured job no raw time bound runs: each is behind a measurement switch, through the load-aware budget, or a listed liveness bound", () => {
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  const measured = workflowList(workflow, 'MEASURED_E2E').split(/\s+/);
+  // Every e2e file (the bare `pnpm e2e` collects every spec), and the vitest files a group outside MEASURED_E2E runs.
+  const files = execFileSync('git', ['ls-files', 'e2e/*.ts', 'e2e/**/*.ts'], { cwd: root, encoding: 'utf8' }).trim().split('\n');
+  for (const [name, script] of Object.entries(scripts)) {
+    if (/^e2e:/.test(name) && !measured.includes(name.slice(4))) files.push(...script.split(/\s+/).filter((word) => /^test\/.*\.test\.ts$/.test(word)));
+  }
+  const found = {};
+  for (const file of [...new Set(files)].sort()) {
+    const bounds = rawTimeBounds(readFileSync(join(root, file), 'utf8'));
+    if (bounds.length > 0) found[file] = bounds;
+  }
+  const listed = Object.fromEntries(Object.entries(LIVENESS_BOUNDS).map(([file, bounds]) => [file, Object.keys(bounds)]).sort(([a], [b]) => a.localeCompare(b)));
+  assert.deepEqual(Object.fromEntries(Object.entries(found).map(([file, bounds]) => [file, [...new Set(bounds)]])), listed);
+});
+
+test('the time-bound walk finds what it must: a raw bound by its subject or the subject\'s declaration, not one behind a switch, an order, or a distance', () => {
+  const spec = [
+    "test('open', async () => {",
+    '  const open = timings.drawnAt - timings.openedAt;',
+    '  expect(open).toBeLessThanOrEqual(1_000);',
+    '  expect(drag.inputToFrameMs.p95).toBeLessThanOrEqual(16);',
+    '  expect(Date.now() - startedAt).toBeLessThan(BOUND_MS + 500);',
+    '  expect(firstPresence.at).toBeLessThanOrEqual(call.answeredAt);',
+    '  expect(box.x + box.width).toBeLessThanOrEqual(1920);',
+    '  if (MEASURED) expect(loaded.ms).toBeLessThan(3000);',
+    '  if (MEASURED) {',
+    '    expect(framesP95Ms).toBeLessThanOrEqual(17);',
+    '  }',
+    '});',
+    "test('perf', async () => {",
+    "  test.skip(process.env.MAWS_ARTIFACTS_PERF !== '1', 'measured only');",
+    '  expect(firstSyncMs).toBeLessThan(PERF_BOUNDS.firstSyncMs);',
+    '});',
+    '  expect(',
+    '    elapsedMs,',
+    "    'over two lines',",
+    '  ).toBeLessThan(5_000);',
+  ];
+  const guarded = ["const MEASURED = process.env.MAWS_TRANSCRIPT_PERF === '1';", ...spec].join('\n');
+  assert.deepEqual(rawTimeBounds(guarded), [
+    'expect(open).toBeLessThanOrEqual(1_000);',
+    'expect(drag.inputToFrameMs.p95).toBeLessThanOrEqual(16);',
+    'expect(Date.now() - startedAt).toBeLessThan(BOUND_MS + 500);',
+    ').toBeLessThan(5_000);',
+  ]);
+  // A guard on a const that reads no measurement switch covers nothing.
+  assert.deepEqual(rawTimeBounds(["const MEASURED = process.env.MAWS_LIVE === '1';", ...spec].join('\n')).length, 6);
+});
+
 test("gate.yml times every job that can take the exclusive Mac instance by the plan, and runs unit:darwin where the plan says", () => {
   const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
   const body = (job) => new RegExp(`\\n {2}${job}:\\n((?: {4}.*\\n|\\n)*?)(?= {2}\\S|$)`).exec(workflow)[1];

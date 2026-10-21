@@ -15,7 +15,12 @@
 # when the file carries the line below at the number ci-kit knows; any other job keeps the guest off until it ends. The
 # line promises that the guest can be kept off every job whose results it could change: every group with a timing bound
 # is on MEASURED_E2E, and on a Mac every MEASURED_E2E job's first step is ci-kit's settle, which holds the guest off for
-# it. gate-plan.test.mjs pins that promise; the number moves only when what it pins does.
+# it; and outside a measured job no raw time bound runs. A spec's upper bound on a time holds there only behind a
+# measurement switch (MAWS_<name>_PERF or _SCALE, so a measured job alone asserts it), through the load-aware latency
+# budget (test/support/latency-budget.ts, which holds it to its loaded ceiling in the guest and on a host with the lane,
+# CI_KIT_VM_GUEST=1 and CI_KIT_VM_LANE=1), or as a liveness bound gate-plan.test.mjs lists with its reason: a timer of
+# the product's own with seconds of margin, or a spec no gate job runs. gate-plan.test.mjs pins that promise; the number
+# moves only when what it pins does.
 # ci-kit-vm-contract: 1
 name: gate
 

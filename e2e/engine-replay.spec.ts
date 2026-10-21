@@ -10,6 +10,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import { latencyBudgets } from './support/latency';
 import { REPO_ROOT, test } from './support/launch';
 
 test.use({ mawsEnv: { MAWS_ENGINE_REPLAY: '1' } });
@@ -131,6 +132,9 @@ test('a replayed permission round trip crosses the X2 surface and survives reloa
 });
 
 test('reads answer through the bridge and generateTitle completes as an operation', async ({ maws }) => {
+  // A replayed read answers in milliseconds; 1 s tells an answer from the host's 8 s deadline, held through the
+  // load-aware budget beside a neighbour or ci-kit's guest (gate.yml's VM contract).
+  const budget = latencyBudgets();
   const { page } = maws;
   const id = 'e2e-reads';
   await collect(page);
@@ -147,12 +151,12 @@ test('reads answer through the bridge and generateTitle completes as an operatio
   for (const [name, input, seq] of reads) {
     const { result, ms } = await timedInvoke(page, name, { appSessionId: id, ...input } as never);
     expect(result, name).toEqual({ ok: true, value: recordedResponse(READS, seq) });
-    expect(ms, name).toBeLessThan(1_000);
+    budget(`${name} answered`, ms, 1_000, name);
   }
 
   const { result: receipt, ms } = await timedInvoke(page, 'session.generateTitle', { appSessionId: id, description: 'Protocol probe', persist: false }); // seq 86
   const { opId } = value(receipt);
-  expect(ms).toBeLessThan(1_000);
+  budget('session.generateTitle receipt', ms, 1_000, 'session.generateTitle');
   await expect.poll(async () => (await logOf(page)).operations.find((o) => o.opId === opId)).toEqual({ appSessionId: id, opId, command: 'session.generateTitle', late: false, outcome: { ok: true, value: { title: 'Protocol probe' } } }); // seq 87
   expect((await invoke(page, 'session.renameSession', { appSessionId: id, title: 'MAWS protocol probe' })).ok).toBe(true); // seq 89, answered at 90
   await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id })).process).toBe('exited'); // the meta exit row, seq 92

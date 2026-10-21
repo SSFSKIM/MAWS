@@ -39,6 +39,7 @@ import { recordDrawing, swapOffenders } from './support/document-provisional';
 import { imeStep, PerfSeam } from './support/document-scale';
 import { seedDocument } from './support/document-seed';
 import { keystrokes } from './support/hangul';
+import { latencyBudgets } from './support/latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { liveSpend } from './support/live-lifecycle';
 import { eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seedTranscripts, type McpResult } from './support/maws-tools';
@@ -282,6 +283,7 @@ async function caretAtEnd(editor: Locator, id: string): Promise<void> {
 // ---- the run ---------------------------------------------------------------------------------------------------------
 
 test('the live run: the agent’s edit on a 200-page document is seen as it is written, swapped without a gap while the owner composes, a stale batch withdrawn; the tool time guarded', async () => {
+  const budget = latencyBudgets();
   mkdirSync(EVIDENCE, { recursive: true });
   let relay = relaySkipReason(RELAY_URL);
   if (relay !== null) {
@@ -430,7 +432,8 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
       expect(firstPresence, `the agent's outline was drawn; the turn's first samples ${JSON.stringify(samples.slice(0, 4))}`).toBeDefined();
       expect(targetNamedAt, 'the stream named the target block').not.toBeNull();
       expect(firstPresence!.at, 'presence drawn from the call’s stream, not left from the warm-up').toBeGreaterThanOrEqual(call.firstDeltaAt!);
-      expect(firstPresence!.at - targetNamedAt!, 'presence within 1 s of the delta that named the target').toBeLessThanOrEqual(1_000);
+      // Through the load-aware budget, read at the test's start: a neighbour or ci-kit's guest may run beside a live run.
+      budget('presence after the delta that named the target', firstPresence!.at - targetNamedAt!, 1_000, 'presence within 1 s of the delta that named the target');
       expect(firstPresence!.at, 'presence before the call completed').toBeLessThanOrEqual(call.answeredAt!);
     });
     await test.step('G2: the provisional text at the target block before the call completes, growing as it streamed', () => {
