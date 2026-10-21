@@ -115,6 +115,28 @@ describe('the seam’s commands', () => {
     seam.close();
   });
 
+  // P4-R6 (the review's P2): a call longer than the record's two-second horizon keeps its whole window
+  it('keeps a long call’s work in its record past the record’s horizon', { timeout: 10_000 }, async () => {
+    const spin = (ms: number) => {
+      const until = performance.now() + ms;
+      while (performance.now() < until);
+    };
+    const tool = {
+      call: async () => {
+        timed('mirror', () => spin(60));
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        timed('commit', () => spin(5));
+        return { content: [{ type: 'text' as const, text: '{"revision":1}' }] };
+      },
+    };
+    const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: tool, artifact_edit: tool }) as never });
+    const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: {} })) as CallAnswer;
+    expect(answer.background.longest?.work.filter((entry) => entry.what !== 'gc').map((entry) => entry.what)).toEqual(['mirror']);
+    expect(Object.keys(answer.background.call).filter((what) => what !== 'gc').sort()).toEqual(['commit', 'mirror']);
+    expect(answer.background.partial).toBeUndefined();
+    seam.close();
+  });
+
   // P4-R6: a first read's replica applies the whole document from the host after the read, a stretch the record names
   it('records a first read’s replica sync, the whole document applied on the agent’s replica, as the host’s work', async () => {
     const id = await emptyDocument();
@@ -123,7 +145,7 @@ describe('the seam’s commands', () => {
     const from = performance.now();
     await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: { artifact: id } });
     await settle();
-    const work = hostWorkBetween(from, performance.now());
+    const { work } = hostWorkBetween(from, performance.now());
     expect(work.some((entry) => entry.what === 'replica' && /^step2, \d+ bytes$/.test(entry.detail ?? ''))).toBe(true);
     expect(work.some((entry) => entry.what === 'frame' && /^step1, \d+ bytes from session:perf-agent-1$/.test(entry.detail ?? ''))).toBe(true);
     expect(work.some((entry) => entry.what === 'commit')).toBe(true);

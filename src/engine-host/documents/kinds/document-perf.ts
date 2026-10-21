@@ -39,7 +39,7 @@ import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { artifactEditTool, artifactReplyTool /* P4-B1 */, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
 import { ProvisionalEmitter } from '../../tool-server/provisional';
 import type { McpToolDefinition } from '../../tool-server/server';
-import { hostWorkBetween, watchHostWork, type HostWork } from '../host-work'; // P4-R6
+import { holdHostWork, hostWorkBetween, watchHostWork, type HostWork } from '../host-work'; // P4-R6
 import type { ArtifactStore } from '../store';
 
 const HUMAN: Actor = { kind: 'human' };
@@ -130,10 +130,12 @@ export interface LongestGap {
   cpuMs: number | null; // the main thread's CPU time inside it; null where the platform does not tell it
 }
 
-/** P4-R6: what shared a call's loop. `at` is ms after the call's start; entries may nest. */
+/** P4-R6: what shared a call's loop. `at` is ms after the call's start; entries may nest; `partial` when the record
+ * dropped some of the call's window (a call far past the host's usual load). */
 export interface CallBackground {
   longest: { at: number; ms: number; cpuMs: number | null; work: Array<{ what: HostWork; at: number; ms: number; detail?: string }> } | null;
   call: Partial<Record<HostWork, { count: number; ms: number }>>;
+  partial?: true;
 }
 
 /** A tool call's answer: its result (or, refused, the tool's text), its wall time and the loop's delay around it. */
@@ -151,7 +153,7 @@ const tenth = (ms: number) => Math.round(ms * 10) / 10;
 
 /** P4-R6: the host's work over [from, to), and inside the sampler's longest gap. */
 export function backgroundOf(sampler: LoopSampler, from: number, to: number): CallBackground {
-  const work = hostWorkBetween(from, to);
+  const { work, partial } = hostWorkBetween(from, to);
   const call: CallBackground['call'] = {};
   for (const entry of work) {
     const sum = (call[entry.what] ??= { count: 0, ms: 0 });
@@ -168,7 +170,7 @@ export function backgroundOf(sampler: LoopSampler, from: number, to: number): Ca
           cpuMs: gap.cpuMs === null ? null : tenth(gap.cpuMs),
           work: work.filter((entry) => entry.at < gap.at + gap.ms && entry.at + entry.ms > gap.at).map((entry) => ({ what: entry.what, at: tenth(entry.at - from), ms: tenth(entry.ms), ...(entry.detail !== undefined && { detail: entry.detail }) })),
         };
-  return { longest, call };
+  return { longest, call, ...(partial && { partial: true as const }) };
 }
 
 export type PerfAnswer =
@@ -300,11 +302,13 @@ export class DocumentPerfSeam {
     await turned(LOOP_TICK_MS * 3);
     this.loop.reset();
     const started = performance.now();
-    const result = await definition.call(input, ctx);
-    const wallMs = performance.now() - started;
-    await turned(LOOP_TICK_MS * 5); // the gap the call left closes once the loop turns after it
-    const loop = this.loop.stats();
-    const background = backgroundOf(this.loop, started, performance.now()); // P4-R6
+    const release = holdHostWork(started); // P4-R6: the call's window kept however long it runs
+    const { result, wallMs, loop, background } = await (async () => {
+      const result = await definition.call(input, ctx);
+      const wallMs = performance.now() - started;
+      await turned(LOOP_TICK_MS * 5); // the gap the call left closes once the loop turns after it
+      return { result, wallMs, loop: this.loop.stats(), background: backgroundOf(this.loop, started, performance.now()) /* P4-R6 */ };
+    })().finally(release);
     const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
     const isError = result.isError === true;
     let parsed: unknown;

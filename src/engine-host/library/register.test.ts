@@ -11,6 +11,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { HostCommandError, type HostOn } from '@shared/host/runtime';
 import { commands, type CommandName, type CommandOutput } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
+import { hostWorkBetween, watchHostWork } from '../documents/host-work'; // P4-R6
 import { DocumentService } from '../documents/service';
 import { SqliteDocumentStorage } from '../documents/storage';
 import { ArtifactStore } from '../documents/store';
@@ -233,6 +234,19 @@ describe('library.text (M2)', () => {
     const { revision, text } = await call('library.text', { artifactId: doc.id });
     expect(revision).toBe(store.revision(doc.id));
     expect(text.split('\n')).toEqual(['Quarterly results', 'remember the demo', '분기 실적']);
+  });
+
+  // P4-R6: main's text read of a large document is a long stretch of the host's loop, so a scale gate's record names it
+  it('records its state read and its extraction as the host’s work', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Named' }, human);
+    await store.testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'named text' }], human);
+    const unwatch = watchHostWork();
+    try {
+      await call('library.text', { artifactId: doc.id });
+      expect(hostWorkBetween(0, Infinity).work.filter((entry) => entry.what === 'library text').map((entry) => entry.detail)).toEqual([`the state of ${doc.id}`, `the text of ${doc.id}`]);
+    } finally {
+      unwatch();
+    }
   });
 
   it('reads an unloaded document without keeping it loaded', async () => {

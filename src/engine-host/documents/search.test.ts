@@ -144,16 +144,37 @@ describe('the host’s work record', () => {
     try {
       const id = await page('Status', 'alpha');
       await foundIds(unstarted(), 'alpha');
-      expect(hostWorkBetween(0, Infinity).filter((entry) => entry.what.startsWith('mirror'))).toEqual([expect.objectContaining({ what: 'mirror catch-up', detail: 'html text, 5 characters' })]);
+      expect(hostWorkBetween(0, Infinity).work.filter((entry) => entry.what.startsWith('mirror'))).toEqual([expect.objectContaining({ what: 'mirror catch-up', detail: 'html text, 5 characters' })]);
       await w.store.writeContent(id, html('omega words'), HUMAN);
       const timers = manualTimers();
       started(timers);
       await timers.advance(MIRROR_SWEEP_DELAY_MS + MIRROR_QUIET_MS);
       expect(current(id)).toBe(true);
-      expect(hostWorkBetween(0, Infinity).filter((entry) => entry.what === 'mirror')).toEqual([expect.objectContaining({ detail: 'html text, 11 characters' })]);
+      expect(hostWorkBetween(0, Infinity).work.filter((entry) => entry.what === 'mirror')).toEqual([expect.objectContaining({ detail: 'html text, 11 characters' })]);
     } finally {
       unwatch();
     }
+  });
+
+  // P4-R6: an agent's read links the artifact `viewed`, which the mirror counts as the host being busy, so the batch an
+  // agent sends right after its read never shares the loop with a background extraction
+  it('holds a due extraction off for MIRROR_QUIET_MS after a session’s read links an artifact', async () => {
+    const id = await page('Read', 'before');
+    const timers = manualTimers();
+    started(timers);
+    await timers.advance(MIRROR_SWEEP_DELAY_MS + MIRROR_QUIET_MS);
+    expect(current(id)).toBe(true);
+    await w.store.writeContent(id, html('after'), HUMAN);
+    await turns();
+    await timers.advance(MIRROR_SETTLE_MS - 1);
+    await w.store.link(id, 'perf-agent-1' as AppSessionId, 'viewed'); // an agent's read, the moment before the settle
+    await turns();
+    await timers.advance(1); // settled: due, but the link restarted the quiet window
+    expect(current(id)).toBe(false);
+    await timers.advance(MIRROR_QUIET_MS - 2);
+    expect(current(id)).toBe(false);
+    await timers.advance(1);
+    expect(current(id)).toBe(true);
   });
 });
 

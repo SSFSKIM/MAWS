@@ -3,11 +3,13 @@
 // can share is recorded with its start (performance.now()'s clock) and length while a seam watches (`watchHostWork`):
 // the store's background tasks (the search mirror's refresh, a head rewrite, an unload, the maintenance pass, an auto
 // version, the idle replica sweep), a read's block-index warm slices, a frame the host takes from a connection or an
-// agent's replica applies, a commit with its fsync, and V8's collections. A seam reads what overlapped a measured call
-// (`hostWorkBetween`), so a slow row names what shared its loop. Entries may nest (a frame that evicts a document holds its
-// unload); work under RECORD_FLOOR_MS is not kept, nor any older than HORIZON_MS (a seam reads a call's window as it
-// ends), so the record holds a few hundred entries at most and leaves the gate's heap rows as they were. With no seam
-// watching, `timed` is the call it wraps.
+// agent's replica applies, a commit with its fsync, a request main or a window made of the host (its synchronous part)
+// and main's library text read, and V8's collections. A seam reads what overlapped a measured call (`hostWorkBetween`),
+// so a slow row names what shared its loop. Entries may nest (a frame that evicts a document holds its unload); work
+// under RECORD_FLOOR_MS is not kept, nor any that ended more than HORIZON_MS ago unless a measured call still holds its
+// window (`holdHostWork`), so the record holds a few hundred entries and leaves the gate's heap rows as they were; past
+// MAX_ENTRIES the oldest go and a window they overlapped is answered as partial. With no seam watching, `timed` is the
+// call it wraps.
 import { constants, PerformanceObserver, type PerformanceEntry } from 'node:perf_hooks';
 import { MSG_ACK, MSG_AWARENESS, MSG_PROVISIONAL, MSG_RESTORED, MSG_SYNC } from '@artifacts/provider/frames';
 
@@ -23,6 +25,8 @@ export type HostWork =
   | 'replica sweep' // the idle agent replicas closed
   | 'frame' // a frame the host took from a connection (a renderer's or an agent replica's)
   | 'replica' // a frame from the host applied on an agent's replica (replica.ts)
+  | 'request' // the synchronous part of a request main or a window made of the host (the command the detail; index.ts)
+  | 'library text' // main's library reading an artifact's text (library/reads.ts: the state read, then the extraction)
   | 'gc'; // a V8 collection's pause (its kind the detail)
 
 export interface WorkEntry {
@@ -34,7 +38,7 @@ export interface WorkEntry {
 
 const RECORD_FLOOR_MS = 0.1;
 const HORIZON_MS = 2_000;
-const CAPACITY = 1_024;
+const MAX_ENTRIES = 16_384;
 const GC_KINDS: Record<number, string> = {
   [constants.NODE_PERFORMANCE_GC_MAJOR]: 'major',
   [constants.NODE_PERFORMANCE_GC_MINOR]: 'minor',
@@ -45,6 +49,9 @@ const GC_KINDS: Record<number, string> = {
 let watchers = 0;
 let entries: WorkEntry[] = [];
 let gcObserver: PerformanceObserver | null = null;
+const holds = new Map<number, number>(); // a measured call's hold → the start of its window
+let nextHold = 1;
+let lostThrough = -Infinity; // the latest end among entries MAX_ENTRIES pushed out
 
 function takeCollections(list: readonly PerformanceEntry[]): void {
   for (const entry of list) {
@@ -69,15 +76,25 @@ export function watchHostWork(): () => void {
     gcObserver?.disconnect();
     gcObserver = null;
     entries = [];
+    holds.clear();
+    lostThrough = -Infinity;
   };
+}
+
+/** Keeps every entry that ends after `from` until the answered function is called (a measured call's window). */
+export function holdHostWork(from: number): () => void {
+  const hold = nextHold++;
+  holds.set(hold, from);
+  return () => void holds.delete(hold);
 }
 
 export function recordHostWork(what: HostWork, at: number, ms: number, detail?: string): void {
   if (watchers === 0 || ms < RECORD_FLOOR_MS) return;
   entries.push({ what, at, ms, ...(detail !== undefined && { detail }) });
-  const horizon = performance.now() - HORIZON_MS;
-  let old = entries.length > CAPACITY ? entries.length - CAPACITY : 0;
-  while (old < entries.length && entries[old]!.at + entries[old]!.ms < horizon) old += 1;
+  const keepFrom = Math.min(performance.now() - HORIZON_MS, ...holds.values());
+  let old = 0;
+  for (; old < entries.length - MAX_ENTRIES; old++) lostThrough = Math.max(lostThrough, entries[old]!.at + entries[old]!.ms);
+  while (old < entries.length && entries[old]!.at + entries[old]!.ms < keepFrom) old += 1;
   if (old > 0) entries.splice(0, old);
 }
 
@@ -92,10 +109,11 @@ export function timed<T>(what: HostWork, run: () => T, detail?: () => string | u
   }
 }
 
-/** The work recorded that overlapped [from, to), collections not yet delivered to the observer included. */
-export function hostWorkBetween(from: number, to: number): WorkEntry[] {
+/** The work recorded that overlapped [from, to), collections not yet delivered to the observer included; `partial` when
+ * MAX_ENTRIES pushed out an entry that may have overlapped it. */
+export function hostWorkBetween(from: number, to: number): { work: WorkEntry[]; partial: boolean } {
   if (gcObserver) takeCollections(gcObserver.takeRecords());
-  return entries.filter((entry) => entry.at < to && entry.at + entry.ms > from);
+  return { work: entries.filter((entry) => entry.at < to && entry.at + entry.ms > from), partial: lostThrough > from };
 }
 
 const SYNC_KINDS = ['step1', 'step2', 'update'];
