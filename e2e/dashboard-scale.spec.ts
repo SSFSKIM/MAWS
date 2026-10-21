@@ -475,7 +475,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         const startedAt = Date.now() - t0;
         const load = load1();
         const mb = await privateNow();
-        samples.push({ startedAt, completedAt: Date.now() - t0, load, mb: +mb.toFixed(1) });
+        samples.push({ startedAt, completedAt: Date.now() - t0, load, mb }); // raw: memoryVerdict rounds only what it reports (P4 L189)
       }
       const judged = memoryVerdict(samples, 500);
       // the diagnostic, after the binding samples: the same renderer after a forced collection (never the gate)
@@ -494,7 +494,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         best: null,
         verdict: judged.verdict,
         admitted: samples.filter((sample) => sample.load < LOAD_BELOW).length,
-        trials: samples.map((sample, k) => ({ value: sample.mb, load: sample.load, loadAfter: sample.load, settle: [], note: `the ${(k * MEMORY_SPACING_MS) / 1000} s mark: started ${(sample.startedAt / 1000).toFixed(1)} s, completed ${(sample.completedAt / 1000).toFixed(1)} s (overhead ${sample.completedAt - sample.startedAt} ms)${judged.excluded.some((e) => e.mark === k * MEMORY_SPACING_MS) ? `; started more than ${MEMORY_LATE_MS / 1000} s late, in no deciding pair` : ''}` })),
+        trials: samples.map((sample, k) => ({ value: +sample.mb.toFixed(1), load: sample.load, loadAfter: sample.load, settle: [], note: `the ${(k * MEMORY_SPACING_MS) / 1000} s mark: started ${(sample.startedAt / 1000).toFixed(1)} s, completed ${(sample.completedAt / 1000).toFixed(1)} s (overhead ${sample.completedAt - sample.startedAt} ms)${judged.excluded.some((e) => e.mark === k * MEMORY_SPACING_MS) ? `; started more than ${MEMORY_LATE_MS / 1000} s late, in no deciding pair` : ''}` })),
         ...(judged.reason && { reason: judged.reason }),
         note: `after a forced collection (diagnostic only): private ${collected.privateMB} MB, working set ${collected.workingSetMB} MB, JS heap ${collected.jsHeapMB} MB`,
       });
