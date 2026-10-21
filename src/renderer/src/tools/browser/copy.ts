@@ -3,7 +3,7 @@
 // own elsewhere. The Settings section keeps its own (`settings-tab/copy.ts`).
 import type { LoadErrorKind } from '@shared/browser/errors';
 
-const UNREADABLE = 'Chrome의 북마크 파일을 읽지 못함'; // cua #90: the profile popover's line for a failed bookmarks read
+const UNREADABLE = 'Couldn’t read Chrome’s bookmarks file'; // cua #90: the profile popover's line for a failed bookmarks read
 
 export const BROWSER_COPY = {
   title: 'Browser',
@@ -130,21 +130,22 @@ export const BROWSER_COPY = {
     folderTitle: (name: string) => name,
     suggestion: 'Bookmark', // the star's label on an address suggestion
   },
-  // the pill's avatar and its popover (Chrome's profile bubble); the Korean lines are the spec's, as the owner's own
+  // the pill's avatar and its popover (Chrome's profile bubble); in English like the rest of MAWS (the owner,
+  // 2026-10-21: "영어로 통일", one language on the popover; P4 Decision Log 4)
   profile: {
     label: (name: string) => `Profile: ${name}`, // the popover's accessible name
     defaultName: 'Default profile', // the Default partition's popover heading
     defaultRow: 'Default', // the Default partition in Switch profile
-    signedIn: (parts: string[]) => `로그인: ${parts.join(' · ')}`,
-    notSignedIn: 'Chrome에 로그인되지 않은 프로필',
+    signedIn: (parts: string[]) => `Signed in as ${parts.join(' · ')}`,
+    notSignedIn: 'Not signed in to Chrome',
     switchProfile: 'Switch profile',
-    appliesToNewTabs: '새 탭에 적용', // a switch sets the profile new tabs open in; this tab keeps its own
+    appliesToNewTabs: 'Applies to new tabs', // a switch sets the profile new tabs open in; this tab keeps its own
     switchTo: (name: string) => `Open a new tab as ${name}`,
     syncNow: 'Sync bookmarks now',
     syncing: 'Syncing bookmarks…',
-    lastSynced: (age: string) => `마지막 동기화 ${age}`,
+    lastSynced: (age: string) => `Last synced ${age}`,
     unreadableShort: UNREADABLE,
-    unreadable: (age: string | null) => `${UNREADABLE} · 마지막 동기화 ${age ?? '없음'}`, // the record's error, with the last good read
+    unreadable: (age: string | null) => `${UNREADABLE} · ${age === null ? 'Never synced' : `Last synced ${age}`}`, // the record's error, with the last good read
     indexUnavailable: 'Unavailable in this build',
     syncFailed: (why: string) => `Bookmarks could not be synced: ${why}`,
     reimport: 'Re-import this profile…',
