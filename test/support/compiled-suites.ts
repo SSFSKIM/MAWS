@@ -1,5 +1,6 @@
-// The renderer suites vitest's `renderer-compiled` project runs again under the React Compiler (P3-F, the tracker's
-// compiled-include row: the library's first Export of a kind never showed while its uncompiled hook suite passed). Every
+// The renderer suites vitest's `renderer-compiled` project runs under the React Compiler, and `renderer` leaves out
+// since ci-kit's test-history M5 (P3-F, the tracker's compiled-include row: the library's first Export of a kind never
+// showed while its uncompiled hook suite passed). Every
 // component or hook suite of the `renderer` project: each `.tsx` suite, and each `.ts` suite that imports React,
 // React DOM or Testing Library's React (`renderHook`, `createElement`), under src/renderer and among main's DOM suites
 // that render renderer components; never the terminal's Node-run suites or the whole-app timing suites, which

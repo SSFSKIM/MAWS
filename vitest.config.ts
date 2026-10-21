@@ -115,11 +115,12 @@ export default defineConfig({
           name: 'renderer',
           environment: 'happy-dom',
           include: ['src/renderer/**/*.test.{ts,tsx}', 'src/main/artifacts/*.dom.test.tsx'],
-          exclude: [...configDefaults.exclude, RENDERER_NODE_TESTS, ...TIMING_RENDERER_TESTS],
+          // The suites that render or call hooks run under the React Compiler alone (`renderer-compiled`), as the app and
+          // the desk build them; this project keeps the rest.
+          exclude: [...configDefaults.exclude, RENDERER_NODE_TESTS, ...TIMING_RENDERER_TESTS, ...compiledRendererSuites(__dirname, TIMING_RENDERER_TESTS)],
           setupFiles: HAPPY_DOM_SETUP,
         },
       },
-      { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, setupFiles: HAPPY_DOM_SETUP, ...TIMING_TIMEOUTS } },
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
@@ -152,7 +153,9 @@ export default defineConfig({
       // own suites; P3-F widened it to every renderer component and hook suite, `.ts` ones that render or call hooks
       // included (test/support/compiled-suites.ts; the tracker's compiled-include row: the library's first Export of a
       // kind never showed, its formats read from the module's cache in render, while its uncompiled hook suite passed).
-      // The whole-app suites keep their timing budget in a project of their own.
+      // The whole-app suites keep their timing budget in a project of their own. Since ci-kit's test-history M5 these
+      // suites run only here, not also uncompiled in `renderer`: the app and the desk both build the renderer with the
+      // compiler.
       compiled({ name: 'renderer-compiled', include: [...compiledRendererSuites(__dirname, TIMING_RENDERER_TESTS), 'src/artifacts/design-system/**/*.test.tsx' /* P3-D M4 */], exclude: [...configDefaults.exclude, ...TIMING_RENDERER_TESTS] }),
       compiled({ name: 'renderer-compiled-timing', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS }),
       // C8a end
