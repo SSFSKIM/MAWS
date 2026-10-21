@@ -18,7 +18,7 @@ type Item = MenuItemConstructorOptions;
 const items = (template: Item[]): Item[] => template.flatMap((item) => [item, ...(Array.isArray(item.submenu) ? items(item.submenu) : [])]);
 // The app's own items standing in for a role (src/main/menu.ts), by id: each holds its role's chord, so it is listed as
 // that role.
-const STAND_INS: Record<string, string> = { 'edit.selectAll': 'selectAll' };
+const STAND_INS: Record<string, string> = { 'edit.selectAll': 'selectAll', 'edit.undo': 'undo', 'edit.redo': 'redo' }; // P4-B2 K6: Undo, Redo
 
 describe('the reserved menu-role chords follow the menu', () => {
   const template = menuTemplate(ACTIONS, {}, new Set<ActionId>(ACTION_IDS), vi.fn());

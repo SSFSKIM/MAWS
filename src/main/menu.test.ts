@@ -7,11 +7,17 @@ import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 interface Contents {
   id: number;
   selectAll(): void;
+  // P4-B2 K6: the native commands the Edit menu's Undo and Redo run, and the one page's event they send
+  undo(): void;
+  redo(): void;
+  send(channel: string, payload: unknown): void;
+  isDestroyed(): boolean;
 }
 const electron = vi.hoisted(() => ({
   setApplicationMenu: vi.fn(),
   windows: [] as { webContents: Contents }[],
   focused: null as Contents | null,
+  handlers: new Map<string, (input: unknown, context: { sender: unknown }) => unknown>(), // P4-B2 K6: main's handlers
 }));
 vi.mock('./windows', () => ({ appWindows: () => electron.windows })); // E2: the app-window registry Select All reads
 vi.mock('electron', () => ({
@@ -19,9 +25,11 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => electron.windows },
   webContents: { getFocusedWebContents: () => electron.focused },
 }));
+vi.mock('./ipc/router', () => ({ registerMainHandler: (name: string, handler: never) => electron.handlers.set(name, handler) })); // P4-B2 K6
 
 const { emit } = await import('./ipc/events');
-const { menuTemplate, startMenu } = await import('./menu');
+const { menuTemplate, registerMenuHandlers, startMenu } = await import('./menu');
+const { eventChannel } = await import('@shared/ipc/schema'); // P4-B2 K6
 
 type Item = MenuItemConstructorOptions;
 const SETTINGS: Settings = SETTINGS_DEFAULTS_V17;
@@ -31,7 +39,8 @@ const MENU_SINK = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
 function items(template: Item[]): Item[] {
   return template.flatMap((item) => [item, ...(Array.isArray(item.submenu) ? items(item.submenu) : [])]);
 }
-const actionItems = (template: Item[]) => items(template).filter((item) => item.id !== undefined && item.id !== 'edit.selectAll');
+const EDIT_ITEMS = new Set(['edit.selectAll', 'edit.undo', 'edit.redo']); // the Edit menu's own items, not actions (P4-B2 K6: Undo, Redo)
+const actionItems = (template: Item[]) => items(template).filter((item) => item.id !== undefined && !EDIT_ITEMS.has(item.id));
 const actionOf = (item: Item) => item.id!.split(':')[0] as ActionId;
 const byId = (template: Item[], id: string) => items(template).find((item) => item.id === id);
 const top = (template: Item[], label: string) => template.find((item) => item.label === label);
@@ -106,7 +115,7 @@ describe('application menu', () => {
     expect(roles).not.toContain('close');
     expect(roles).not.toContain('resetZoom'); // ⌘0 is the Overview
     const edit = (top(template, 'Edit')!.submenu as Item[]).map((item) => item.role);
-    expect(edit).toEqual(expect.arrayContaining(['undo', 'redo', 'cut', 'copy', 'paste']));
+    expect(edit).toEqual(expect.arrayContaining(['cut', 'copy', 'paste'])); // P4-B2 K6: Undo and Redo are the app's own (below)
     expect((top(template, 'Window')!.submenu as Item[]).map((item) => item.role).filter(Boolean)).toEqual(['minimize', 'zoom', 'front']);
     const accelerators = actionItems(template).map((item) => item.accelerator).filter(Boolean);
     expect(new Set(accelerators).size).toBe(accelerators.length);
@@ -118,7 +127,7 @@ describe('application menu', () => {
 // (electron.d.ts, MenuItemConstructorOptions.role), so the item is the app's own.
 describe('Edit ▸ Select All', () => {
   const selectAll = (send = vi.fn()) => (top(menuTemplate(ACTIONS, {}, ALL, send), 'Edit')!.submenu as Item[]).find((item) => item.label === 'Select All')!;
-  const contents = (id: number): Contents => ({ id, selectAll: vi.fn() });
+  const contents = (id: number): Contents => ({ id, selectAll: vi.fn(), undo: vi.fn(), redo: vi.fn(), send: vi.fn(), isDestroyed: () => false });
   afterEach(() => {
     electron.windows = [];
     electron.focused = null;
@@ -158,6 +167,84 @@ describe('Edit ▸ Select All', () => {
     expect(devtools.selectAll).toHaveBeenCalledTimes(1);
     expect(page.selectAll).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+// P4-B2 K6 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D10; finding 1 of spikes/p4-click-model): the
+// Edit menu's Undo and Redo never reached a deck's or a design's own stack. The roles run Blink's Undo, which acts only
+// while Blink's own undo stack can undo, and then on the newest undo step's element. The items are the app's own: a page
+// is told which op and answers it from its focused editor, or asks for the native command back; any other contents run
+// the native command as the roles did.
+describe('Edit ▸ Undo and Redo', () => {
+  const editItem = (id: string, send = vi.fn()) => items(menuTemplate(ACTIONS, {}, ALL, send)).find((item) => item.id === id)!;
+  const click = (id: string, send = vi.fn()) => (editItem(id, send).click as () => void)();
+  const contents = (id: number): Contents => ({ id, selectAll: vi.fn(), undo: vi.fn(), redo: vi.fn(), send: vi.fn(), isDestroyed: () => false });
+  const sent = (target: Contents) => vi.mocked(target.send).mock.calls;
+  const calls = (...fns: (() => void)[]) => fns.map((fn) => vi.mocked(fn).mock.calls.length);
+  afterEach(() => {
+    electron.windows = [];
+    electron.focused = null;
+  });
+
+  it('are the app’s own items holding ⌘Z and ⇧⌘Z, always enabled, ahead of the clipboard’s', () => {
+    const edit = top(menuTemplate(ACTIONS, {}, new Set<ActionId>(), vi.fn()), 'Edit')!.submenu as Item[];
+    expect(edit.slice(0, 3).map((item) => item.id ?? item.type)).toEqual(['edit.undo', 'edit.redo', 'separator']);
+    expect(edit[0]).toMatchObject({ id: 'edit.undo', label: 'Undo', accelerator: 'Cmd+Z' });
+    expect(edit[1]).toMatchObject({ id: 'edit.redo', label: 'Redo', accelerator: 'Cmd+Shift+Z' });
+    for (const item of edit.slice(0, 2)) {
+      expect(item.role).toBeUndefined();
+      expect(item.enabled ?? true).toBe(true); // with no action enabled, as Select All is
+    }
+  });
+
+  it('tell the focused app page alone which op, and run nothing natively', () => {
+    const page = contents(1);
+    const other = contents(2); // a second window's page: its own focused element is not this one's
+    electron.windows = [{ webContents: page }, { webContents: other }];
+    electron.focused = page;
+    const send = vi.fn();
+    click('edit.undo', send);
+    click('edit.redo', send);
+    expect(sent(page)).toEqual([
+      [eventChannel('layout.edit'), { op: 'undo' }],
+      [eventChannel('layout.edit'), { op: 'redo' }],
+    ]);
+    expect(sent(other)).toEqual([]);
+    expect(send).not.toHaveBeenCalled(); // not broadcast
+    expect(calls(page.undo, page.redo, other.undo, other.redo)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('tell the window’s page when no contents hold focus (a window shown without being key)', () => {
+    const page = contents(1);
+    electron.windows = [{ webContents: page }];
+    click('edit.undo');
+    expect(sent(page)).toEqual([[eventChannel('layout.edit'), { op: 'undo' }]]);
+    expect(page.undo).not.toHaveBeenCalled();
+  });
+
+  it('run the native command in other focused contents (DevTools, a webview) and leave the page alone, as the roles did', () => {
+    const page = contents(1);
+    const devtools = contents(2);
+    electron.windows = [{ webContents: page }];
+    electron.focused = devtools;
+    click('edit.undo');
+    click('edit.redo');
+    expect(calls(devtools.undo, devtools.redo)).toEqual([1, 1]);
+    expect(sent(page)).toEqual([]);
+    expect(sent(devtools)).toEqual([]);
+  });
+
+  it('do nothing with no window at all', () => {
+    expect(() => click('edit.undo')).not.toThrow();
+  });
+
+  it('layout.nativeEdit runs the native command in the page that asked (no editor of its own claimed the op)', () => {
+    registerMenuHandlers({ setEnabled: vi.fn(), stop: vi.fn() });
+    const page = contents(1);
+    const nativeEdit = electron.handlers.get('layout.nativeEdit')!;
+    nativeEdit({ op: 'undo' }, { sender: page });
+    nativeEdit({ op: 'redo' }, { sender: page });
+    expect(calls(page.undo, page.redo)).toEqual([1, 1]);
   });
 });
 

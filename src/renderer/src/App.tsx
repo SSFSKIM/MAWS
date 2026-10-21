@@ -11,6 +11,7 @@ import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
 import { queryClient } from './ipc/query';
 import { connectActions, connectKeys } from './keymap/dispatcher';
+import { connectEditClaimants } from './keymap/edit-claimants'; // P4-B2 K6
 import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
@@ -167,6 +168,7 @@ export function App() {
   useEffect(() => connectPluginPanes(), []); // R2: a plugin's panes as panel tabs, from the engine's roster
   useEffect(() => connectKeys(), []); // C5: renderer-sink chords, bound to the element that holds focus
   useEffect(() => connectActions(), []); // C5: menu actions in, the enabled set out
+  useEffect(() => connectEditClaimants(), []); // P4-B2 K6: Edit ▸ Undo and Redo, the focused editor's or native
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario
   useEffect(() => connectVisibility(), []); // C5: which sessions are on screen, for the unread rule
   useEffect(() => connectTranscript(), []); // C6: the transcript slot and its path chips' file tabs

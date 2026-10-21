@@ -25,6 +25,7 @@ import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { sendToSubject, useSendToAction } from '../../delivery/header'; // P4-B5
 import { useEditorHost } from '../../panel/editor-host';
+import { registerEditClaimant } from '../../keymap/edit-claimants'; // P4-B2 K6
 import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F1
 import { useDocumentComments } from '../document/comments'; // M7: B's surface
@@ -163,6 +164,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         onPreviewDrawn={onPreviewDrawn}
         reveal={reveal} /* P4-B4 */
         onRevealed={takeOpenRequest}
+        registerEditClaimant={registerEditClaimant} /* P4-B2 K6: the Edit menu's Undo and Redo on the deck's stack */
       />
     </div>
   );

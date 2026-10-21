@@ -23,6 +23,8 @@
 //   obs 9: labels one letter a line over the canvas).
 // - P3-F wave S F9: words typed on a selected text element, and on a grouped heading after the first double-click, enter
 //   its edit typed over its text (c43: they were dropped).
+// - P4-B2 K6: the Edit menu's Undo and Redo, clicked by id, undo and redo a nudge on the stage and only the field's own
+//   typing in the inspector.
 import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
@@ -568,6 +570,50 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   await expect(tab.locator('[data-overlay] .deck-remote-name')).toHaveText('Claude');
   await page.evaluate(() => (window as unknown as Seam).__maws_presentations.presence.clear());
   await expect(tab.locator('[data-overlay] [data-remote-selected]')).toHaveCount(0);
+
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// P4-B2 K6 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D10; finding 1 of spikes/p4-click-model): the Edit
+// menu's Undo and Redo reach the deck's stack while the stage holds the focus, and stay the field's own native undo in
+// the inspector. Clicked by id in main as the native menu calls them: Playwright's keys carry no native key code, so they
+// never reach Electron's menu (finding 2).
+test('Edit ▸ Undo and Redo: the deck’s step on the stage, the field’s own typing in the inspector', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const app = launch!.app;
+  const id = await createDeck(page, 'Layout lab', LAB);
+  const tab = await openFromLibrary(page, 'Layout lab', id);
+  const { at } = await stageAt(tab);
+  const element = (eid: string) => elementOf(page, id, 'lab', eid);
+  const fromMenu = async (item: 'edit.undo' | 'edit.redo') =>
+    expect(await app.evaluate(({ Menu }, menuId) => {
+      const found = Menu.getApplicationMenu()?.getMenuItemById(menuId);
+      found?.click();
+      return found != null;
+    }, item), `the menu has ${item}`).toBe(true);
+
+  // a nudge on the stage, taken back and done again from the menu
+  await page.mouse.click(at(800, 560).x, at(800, 560).y);
+  await expect(tab.locator('[data-overlay] [data-selected="b"]')).toBeVisible();
+  await expect(tab.locator('[data-stage-surface]')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await element('b'))?.style.left).toBe('701px');
+  await fromMenu('edit.undo');
+  await expect.poll(async () => (await element('b'))?.style.left).toBe('700px');
+  await fromMenu('edit.redo');
+  await expect.poll(async () => (await element('b'))?.style.left).toBe('701px');
+
+  // typed into the inspector's Width field, the menu's Undo takes back the typing, not the deck's nudge
+  const width = tab.getByRole('complementary', { name: 'Inspector' }).getByRole('textbox', { name: 'Width' });
+  await expect(width).toHaveValue('200');
+  await width.click();
+  await width.selectText();
+  await page.keyboard.type('999');
+  await expect(width).toHaveValue('999');
+  await fromMenu('edit.undo');
+  await expect(width).toHaveValue('200');
+  expect((await element('b'))?.style).toMatchObject({ left: '701px', width: '200px' });
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

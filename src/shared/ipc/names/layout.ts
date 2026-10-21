@@ -7,6 +7,7 @@ export const commands = [
   'layout.quitWait', 'layout.quitWaitAnswer', // C12
   'layout.unsavedFiles', 'layout.saveAllDone', // E5
   'layout.captureRegion', // P3-G
+  'layout.nativeEdit', // P4-B2 K6
 ] as const;
 
 export const events = [
@@ -14,4 +15,5 @@ export const events = [
   'layout.quitWait', // C12
   'layout.selectAll', // Edit ▸ Select All (sitting finding, 2026-09-30)
   'layout.saveAll', // E5
+  'layout.edit', // P4-B2 K6: Edit ▸ Undo and Redo
 ] as const;
