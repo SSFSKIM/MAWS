@@ -13,8 +13,9 @@
 // is, including on a board another replica moved it to while this one shows another: each board's own pin at its
 // frame's top-right corner and each commented element's at its own, in board order and then the board's reading order.
 // Pins under 32 screen px apart merge into one count at their centroid (`clusterPins`), whose press fits its members
-// (V15). A pin opens C's popover (PinPopover.tsx), which follows its pin through a pan or a zoom and hides while the pin
-// is outside the world's visible rect (V6); the compose card stands at its pin and hides under a popover, as the deck's.
+// (V15); the open popover's pin never merges. A pin opens C's popover (PinPopover.tsx), which follows its pin through a
+// pan or a zoom and hides while the pin is outside the world's visible rect (V6); the compose card stands at its pin and
+// hides under a popover, as the deck's.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { clusterPins } from '../../comments/pin-clusters';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from '../../document/editor/comments/surface';
@@ -23,7 +24,7 @@ import type { Box } from '../../slides/geometry';
 import { resolveAnchor, ROOT } from '../../slides/model';
 import { addThread, discardThread, elementQuote, getThread, newThreadId, reopen, reply, resolve, threadStatus, type DeckThread } from '../../slides/threads';
 import { commentKeys, pinRectOf } from '../../slides/editor/comments/CommentFrame';
-import { COMMENTS_ORIGIN, HUMAN_AUTHOR, useDeckComments, type DeckCommentsApi } from '../../slides/editor/comments/controller';
+import { COMMENTS_ORIGIN, HUMAN_AUTHOR, samePin, useDeckComments, type DeckCommentsApi } from '../../slides/editor/comments/controller';
 import { COMMENTS_COPY } from '../../slides/editor/comments/copy';
 import type { CommentsRailLabels } from '../../slides/editor/comments/CommentsRail';
 import { PinPopover } from '../../slides/editor/comments/PinPopover';
@@ -328,7 +329,14 @@ function WorldPins(props: { api: DeckCommentsApi; threads: readonly DeckThread[]
     return [...board, ...placed];
   });
   if (pins.length === 0) return null;
-  const clusters = clusterPins(pins.map((p, i) => ({ id: String(i), x: p.x, y: p.y })));
+  // the open popover's pin stands alone, never merged, so the popover has its pin at any zoom (a zoom-out while it is
+  // open, the rail's Show of a merged pin's thread); every other pin may merge, each group drawn where its first member
+  // reads in the order
+  const open = pins.findIndex((p) => samePin(api.popover, p));
+  const clusters = [
+    ...(open < 0 ? [] : [{ ids: [String(open)], x: pins[open]!.x, y: pins[open]!.y }]),
+    ...clusterPins(pins.flatMap((p, i) => (i === open ? [] : [{ id: String(i), x: p.x, y: p.y }]))),
+  ].sort((a, b) => Number(a.ids[0]) - Number(b.ids[0]));
   return (
     <div className="design-board-pins">
       {clusters.map((cluster) => {

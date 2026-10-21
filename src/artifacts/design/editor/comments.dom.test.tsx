@@ -410,6 +410,33 @@ describe('the pin popover over the world', () => {
     expect(popover()!.querySelector('[data-thread="tb"]')!.getAttribute('aria-current')).toBe('true');
   });
 
+  // the review's P2: a popover's pin merged into a count would leave the popover nowhere to stand
+  it('the open popover’s pin is never merged: a zoom-out while open, and the rail’s Show of a merged pin’s thread', async () => {
+    const { doc, view, container } = mount();
+    addThread(doc, { threadId: 'a', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'One' }, 'deck-comments');
+    addThread(doc, { threadId: 'b', slideId: 'b1', elementId: 'cta2', quote: 'Also', by: { kind: 'human' }, at: 2, body: 'Two' }, 'deck-comments');
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!);
+    act(() => view.setViewport({ zoom: 0.25, x: 10, y: 20 })); // 25 px apart: they would merge
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')).toBeNull();
+    expect(container.querySelectorAll('[data-comment-pin="cta"], [data-comment-pin="cta2"]')).toHaveLength(2); // the other a pin of its own
+    expect(popover()!.style.visibility).toBe('');
+    // closed: they merge; the rail's Show of one's thread opens its popover on its own pin
+    fireEvent.keyDown(popover()!.querySelector('textarea')!, { key: 'Escape' });
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')).not.toBeNull();
+    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    await settle();
+    fireEvent.click(screen.getByRole('complementary', { name: 'Comments' }).querySelector<HTMLElement>('article[data-thread="b"] .deck-thread-quote')!);
+    await settle();
+    expect(container.querySelector('[data-comment-pin="cta2"]')).not.toBeNull();
+    expect(popover()!.querySelector('[data-thread="b"]')!.getAttribute('aria-current')).toBe('true');
+    expect(popover()!.style.visibility).toBe('');
+  });
+
   it('pins under 32 screen px apart merge into one count at their centroid; its press fits them, and they part (V15)', async () => {
     const { doc, view, container } = mount();
     addThread(doc, { threadId: 'a', slideId: 'b1', elementId: 'cta', quote: '', by: { kind: 'human' }, at: 1, body: 'One' }, 'deck-comments');
