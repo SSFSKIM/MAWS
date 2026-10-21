@@ -119,7 +119,13 @@ describe('a hello whose have the stream does not take (D1)', () => {
     ] as UpFrame[]);
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: 'delivery-failed', frames: 0 });
-    expect(performance.now() - started).toBeLessThan(1000 + 1000);
+    // The stream's own bound answered it: the POST waited the stalled write out, and was answered well before the
+    // deployed bound (WRITE_TIMEOUT_MS, 10 s) would have been. How far past the bound it comes is the box's, since the
+    // POST's round trip (the suite's proxy, the Worker, the Registry, the Machine and the Project) is all in it: on
+    // loaded pool boxes it came 1.2 and 1.4 s past (runs 39608865906, 39607160893), where this allowed one second.
+    const waited = performance.now() - started;
+    expect(waited).toBeGreaterThanOrEqual(1000);
+    expect(waited).toBeLessThan(10_000);
     expect(hub.runtimeLogs.some((l) => l.message.includes('"cause":"write-stalled"') && l.message.includes(`"machine":"${m.name}"`))).toBe(true);
     expect((await hub.projectMachines(project)).filter((row) => row.name === m.name)).toEqual([]);
 
