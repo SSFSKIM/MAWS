@@ -45,13 +45,17 @@ const TIMING_RENDERER_TESTS = [
 // P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md); P3-C M4 shares the
 // project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
+// Their stylesheets read as text: the document editor's sheets and the app's tokens (the theme suite), and the deck,
+// design and comment sheets as `?raw` only (P3-F F3, the toolbar suite; P4-B1), never injected into their DOM suites (the
+// plain `import './chrome.css'` stays blank: the pattern is read against the id's query).
+const ARTIFACTS_DOM_CSS = { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/, /\/(slides|design)\/editor\/.+\.css\?raw$/, /\/artifacts\/comments\/.+\.css\?raw$/] };
 // Every happy-dom project drops KaTeX's one quirks-mode advisory (happy-dom has no `document.compatMode`, so no doctype
 // silences it); every other warning passes through.
 const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts'];
 
 // A project under the React Compiler as electron-vite builds the app, over happy-dom (C8a; the `renderer-compiled`
 // projects), each with its own plugin instance.
-const compiled = (test: { name: string; include: string[]; exclude?: string[]; testTimeout?: number; hookTimeout?: number }) => ({
+const compiled = (test: { name: string; include: string[]; exclude?: string[]; testTimeout?: number; hookTimeout?: number; css?: typeof ARTIFACTS_DOM_CSS }) => ({
   resolve: { alias },
   plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
   test: { environment: 'happy-dom' as const, env: { MAWS_REACT_COMPILER: '1' }, setupFiles: HAPPY_DOM_SETUP, ...test },
@@ -140,9 +144,7 @@ export default defineConfig({
           environment: 'happy-dom',
           include: [ARTIFACTS_DOM_TESTS],
           setupFiles: HAPPY_DOM_SETUP,
-          // P3-F F3: the deck and design editors' sheets as text only (`?raw`, the toolbar suite), never injected into
-          // their DOM suites (the plain `import './chrome.css'` stays blank: the pattern is read against the id's query)
-          css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/, /\/(slides|design)\/editor\/.+\.css\?raw$/, /\/artifacts\/comments\/.+\.css\?raw$/ /* P4-B1 */] },
+          css: ARTIFACTS_DOM_CSS, // P3-F F3, P4-B1
         },
       },
       // P3-B end
@@ -156,6 +158,16 @@ export default defineConfig({
       compiled({ name: 'renderer-compiled', include: [...compiledRendererSuites(__dirname, TIMING_RENDERER_TESTS), 'src/artifacts/design-system/**/*.test.tsx' /* P3-D M4 */], exclude: [...configDefaults.exclude, ...TIMING_RENDERER_TESTS] }),
       compiled({ name: 'renderer-compiled-timing', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS }),
       // C8a end
+      // P4 (the tracker's portable compiled-coverage row): the portable artifact layer's React suites (its `.tsx` DOM
+      // suites; its `.ts` ones render no React) again under the compiler, with artifacts-dom's sheets as text. Three
+      // deck-editor suites fail only here, their fields not re-read after a write (the deck editor's tracker row, P4-B2's
+      // to fix in its rewrite); they leave this exclusion when they pass.
+      compiled({
+        name: 'artifacts-dom-compiled',
+        include: ['src/artifacts/**/*.dom.test.tsx'],
+        exclude: [...configDefaults.exclude, 'src/artifacts/slides/editor/Inspector.dom.test.tsx', 'src/artifacts/slides/editor/inspector/sections.dom.test.tsx', 'src/artifacts/slides/editor/TextBox.dom.test.tsx'],
+        css: ARTIFACTS_DOM_CSS,
+      }),
       // The desk's hub (apps/desk-hub, DC3 of docs/doperpowers/specs/2026-10-15-desk-design.md): its own config, under
       // this vitest, so `pnpm test` and the unit job's `--maxWorkers` reach it as they reach every project above.
       'apps/desk-hub/vitest.config.ts',
