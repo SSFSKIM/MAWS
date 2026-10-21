@@ -1,7 +1,7 @@
 // The DX3 protocol double (the DC5 plan's Decision Log, "Building ahead of the hub"): a local stand-in for the hub's
 // browser side, for the web app's suites while DC3's local hub and fake machine are still to land. It speaks
 // `desk-hub/protocol`'s types and nothing of its own: `/api/me` (an admin, or a member as `role` says), DX7's wrapped
-// keys (./org-keys.ts) and machine records (./machines.ts: listed and revoked; enrollment is not served), the project
+// keys (./org-keys.ts) and machine records (./machines.ts: listed and revoked, and provisioning keys listed, made and revoked; enrollment is not served), the project
 // socket (`ProjectUp` / `ProjectDown`), and the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
 // key the way a machine's daemon would (DX1), serves DX7's Web Push endpoints (./push.ts; it sends no pushes: the browser
 // suites deliver one to the service worker directly), and serves a built app from a directory with the single-page fallback the
@@ -666,7 +666,7 @@ export class HubDouble {
     }
     const body = await readJson(req);
     const method = req.method ?? 'GET';
-    const answer = (await this.orgKeys.handle(member, method, path, body)) ?? (await this.push.handle(member, method, path, body)) ?? this.machineRecords.handle(member, method, path);
+    const answer = (await this.orgKeys.handle(member, method, path, body)) ?? (await this.push.handle(member, method, path, body)) ?? this.machineRecords.handle(member, method, path, body);
     if (answer) {
       json(res, answer.status, answer.body);
       return;

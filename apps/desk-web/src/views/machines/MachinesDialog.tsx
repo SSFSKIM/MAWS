@@ -1,59 +1,84 @@
-// The org's machines, enrolling one, and removing one (§6, DX7; the DC5 plan's M2). The owner names the machine and
-// confirms it with one of the org key's methods; the browser opens the key's copy once more as bytes (the held key
-// cannot be read), checks they are the held key, asks the hub for a one-time token, builds the code, and wipes the
-// bytes; the code is shown once. Closing the dialog discards it: nothing keeps it. Removing a machine is an admin's,
-// confirmed on a step that says what it does (DX7's revocation: disconnected at once, its credential deleted, enrolled
-// again to be used again); it takes no key.
+// The org's machines, enrolling one, and removing one (§6, DX7; the DC5 plan's M2), and the provisioning keys that
+// enroll machines nobody attends (the provisioning-keys spec, §5; ./ProvisioningKeys.tsx). The owner names the machine,
+// or describes the key, and confirms it with one of the org key's methods; the browser opens the key's copy once more as
+// bytes (the held key cannot be read), checks they are the held key, asks the hub for a one-time token or a key, builds
+// the code, and wipes the bytes; the code is shown once (./CodeSteps.tsx). Closing the dialog discards it: nothing
+// keeps it. Removing a machine, and revoking a key, are an admin's, confirmed on a step that says what it does (DX7's
+// revocation: disconnected at once, its credential deleted, enrolled again to be used again); neither takes the key.
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import type { MachineRecord } from 'desk-hub/protocol';
-import { createEnrollment, ENROLL_COMMAND, enrollmentCode, listMachines, machineNameProblem, removeMachine } from '../../enroll/enrollment';
+import { machineNameKey, type MachineRecord, type ProvisioningKeyRecord } from 'desk-hub/protocol';
+import { createEnrollment, ENROLL_COMMAND, enrollmentCode, listMachines, listProvisioningKeys, machineNameProblem, removeMachine } from '../../enroll/enrollment';
 import { HubRequestError } from '../../hub/http';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
-import { openOrgKeyBytes, rememberedMethod, type OrgMethod } from '../../key/unlock';
-import { listWrappedKeys, WRAPPED_KEYS_QUERY } from '../../key/wrapped-keys';
-import { buttonDanger, buttonPrimary, buttonQuiet, buttonSecondary, Dialog, textInput } from '../common/Dialog';
+import { buttonDanger, buttonPrimary, buttonQuiet, Dialog, textInput } from '../common/Dialog';
 import { explainKeyFailure } from '../key/explain';
-import { OrgMethodForm } from '../key/OrgMethodForm';
+import { CodeStep, ConfirmStep, type Confirming, type Issued } from './CodeSteps';
+import { KeyFormStep, keyConfirming, KeySection, PROVISIONING_KEYS_QUERY, RevokeKeyStep } from './ProvisioningKeys';
 
 type Step =
   | { kind: 'list'; notice?: string }
   | { kind: 'name' }
-  | { kind: 'confirm'; machine: string }
-  | { kind: 'code'; machine: string; code: string; expires: string }
-  | { kind: 'remove'; machine: MachineRecord };
+  | { kind: 'key-form' }
+  | { kind: 'confirm'; confirming: Confirming }
+  | { kind: 'code'; issued: Issued }
+  | { kind: 'remove'; machine: MachineRecord }
+  | { kind: 'revoke-key'; provisioningKey: ProvisioningKeyRecord };
 
 export function MachinesDialog({ me, onClose }: { me: Me; onClose: () => void }) {
   const [step, setStep] = useState<Step>({ kind: 'list' });
   const machines = useQuery({ queryKey: ['machines'], queryFn: listMachines });
+  const keys = useQuery({ queryKey: PROVISIONING_KEYS_QUERY, queryFn: listProvisioningKeys });
   const queries = useQueryClient();
+  const refresh = () => {
+    void queries.invalidateQueries({ queryKey: ['machines'] });
+    void queries.invalidateQueries({ queryKey: PROVISIONING_KEYS_QUERY });
+  };
   const back = () => {
     setStep({ kind: 'list' });
-    void queries.invalidateQueries({ queryKey: ['machines'] });
+    refresh();
   };
-  // Gone at the hub: off the list at once, then the list as the hub has it now.
+  // Gone at the hub: off the list at once, then the lists as the hub has them now.
   const removed = (name: string, notice: string) => {
     queries.setQueryData<MachineRecord[]>(['machines'], (list) => list?.filter((m) => m.name !== name));
     setStep({ kind: 'list', notice });
-    void queries.invalidateQueries({ queryKey: ['machines'] });
+    refresh();
+  };
+  const revoked = (id: string, notice: string) => {
+    const at = new Date().toISOString();
+    queries.setQueryData<ProvisioningKeyRecord[]>(PROVISIONING_KEYS_QUERY, (list) => list?.map((k) => (k.id === id ? { ...k, revoked: k.revoked ?? at } : k)));
+    setStep({ kind: 'list', notice });
+    refresh();
   };
   return (
     <Dialog title="Machines" onClose={onClose}>
       {step.kind === 'list' && (
-        <MachineList
-          me={me}
-          machines={machines.data}
-          error={machines.error}
-          notice={step.notice}
-          onEnroll={() => setStep({ kind: 'name' })}
-          onRemove={(machine) => setStep({ kind: 'remove', machine })}
-        />
+        <div className="flex flex-col gap-4">
+          <MachineList
+            me={me}
+            machines={machines.data}
+            keys={keys.data}
+            error={machines.error}
+            notice={step.notice}
+            onEnroll={() => setStep({ kind: 'name' })}
+            onRemove={(machine) => setStep({ kind: 'remove', machine })}
+          />
+          <KeySection
+            me={me}
+            keys={keys.data}
+            error={keys.error}
+            onCreate={() => setStep({ kind: 'key-form' })}
+            onRevoke={(provisioningKey) => setStep({ kind: 'revoke-key', provisioningKey })}
+          />
+        </div>
       )}
-      {step.kind === 'name' && <NameStep machines={machines.data ?? []} onCancel={back} onName={(machine) => setStep({ kind: 'confirm', machine })} />}
-      {step.kind === 'confirm' && <ConfirmStep me={me} machine={step.machine} onCancel={back} onCode={(code, expires) => setStep({ kind: 'code', machine: step.machine, code, expires })} />}
-      {step.kind === 'code' && <CodeStep machine={step.machine} code={step.code} expires={step.expires} onDone={back} />}
+      {step.kind === 'name' && <NameStep machines={machines.data ?? []} onCancel={back} onName={(machine) => setStep({ kind: 'confirm', confirming: enrollConfirming(me, machine) })} />}
+      {step.kind === 'key-form' && <KeyFormStep onCancel={back} onRequest={(request) => setStep({ kind: 'confirm', confirming: keyConfirming(me, request) })} />}
+      {step.kind === 'confirm' && <ConfirmStep me={me} confirming={step.confirming} onCancel={back} onIssued={(issued) => setStep({ kind: 'code', issued })} />}
+      {step.kind === 'code' && <CodeStep issued={step.issued} onDone={back} />}
       {step.kind === 'remove' && <RemoveStep machine={step.machine} onCancel={back} onRemoved={(notice) => removed(step.machine.name, notice)} />}
+      {step.kind === 'revoke-key' && <RevokeKeyStep provisioningKey={step.provisioningKey} onCancel={back} onRevoked={(notice) => revoked(step.provisioningKey.id, notice)} />}
     </Dialog>
   );
 }
@@ -61,14 +86,18 @@ export function MachinesDialog({ me, onClose }: { me: Me; onClose: () => void })
 function MachineList(props: {
   me: Me;
   machines: MachineRecord[] | undefined;
+  keys: ProvisioningKeyRecord[] | undefined;
   error: Error | null;
   notice: string | undefined;
   onEnroll: () => void;
   onRemove: (machine: MachineRecord) => void;
 }) {
-  const { me, machines, error, notice, onEnroll, onRemove } = props;
+  const { me, machines, keys, error, notice, onEnroll, onRemove } = props;
   const keyState = useKeyHolder((s) => s.state);
   const admin = me.member.role === 'admin';
+  // The key each machine was enrolled through, read from the keys' own lists: a machine's record does not say.
+  const via = new Map<string, string>();
+  for (const key of keys ?? []) for (const m of key.machines) via.set(machineNameKey(m.name), key.label);
   return (
     <div className="flex flex-col gap-3">
       {notice && (
@@ -84,17 +113,21 @@ function MachineList(props: {
         <p className="m-0 text-ui-sm text-fg-muted">No machine is enrolled yet.</p>
       ) : (
         <ul className="m-0 flex list-none flex-col p-0" data-testid="machines">
-          {machines.map((m) => (
-            <li key={m.name} className="flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-ui last:border-b-0" data-machine={m.name}>
-              <span className="font-medium">{m.name}</span>
-              <span className={m.state === 'active' ? 'text-ui-sm text-success' : 'text-ui-sm text-warning'}>{m.state === 'active' ? 'enrolled' : 'enrolling — waiting for its first connection'}</span>
-              {admin && (
-                <button type="button" className={`${buttonQuiet} ml-auto`} onClick={() => onRemove(m)} aria-label={`Remove ${m.name}`}>
-                  Remove
-                </button>
-              )}
-            </li>
-          ))}
+          {machines.map((m) => {
+            const through = via.get(machineNameKey(m.name));
+            return (
+              <li key={m.name} className="flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-ui last:border-b-0" data-machine={m.name}>
+                <span className="font-medium">{m.name}</span>
+                <span className={m.state === 'active' ? 'text-ui-sm text-success' : 'text-ui-sm text-warning'}>{m.state === 'active' ? 'enrolled' : 'enrolling — waiting for its first connection'}</span>
+                {through !== undefined && <span className="text-ui-sm text-fg-muted">via {through}</span>}
+                {admin && (
+                  <button type="button" className={`${buttonQuiet} ml-auto`} onClick={() => onRemove(m)} aria-label={`Remove ${m.name}`}>
+                    Remove
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {admin ? (
@@ -145,93 +178,35 @@ function NameStep(props: { machines: MachineRecord[]; onCancel: () => void; onNa
   );
 }
 
-function ConfirmStep(props: { me: Me; machine: string; onCancel: () => void; onCode: (code: string, expires: string) => void }) {
-  const { me, machine, onCancel, onCode } = props;
-  const held = useKeyHolder((s) => s.key);
-  const keys = useQuery({ queryKey: WRAPPED_KEYS_QUERY, queryFn: listWrappedKeys });
-  const [error, setError] = useState<string | null>(null);
-
-  async function confirm(method: OrgMethod) {
-    if (!held || !keys.data) return setError('The org key is locked. Unlock it first.');
-    setError(null);
-    let key: Uint8Array | null = null;
-    try {
-      // The held key cannot be read: its copy is opened once more, checked to be the held key, and wiped once built in.
-      key = await openOrgKeyBytes(me.org.id, keys.data, method, held);
-      // Locked while it opened: the owner took the key out of this browser, so no code carries it out either.
-      if (useKeyHolder.getState().key !== held) return setError('The org key was locked meanwhile. Unlock it to enroll.');
+/** The confirmation of a one-time enrollment: the token asked for, and the code built for the one machine named. */
+function enrollConfirming(me: Me, machine: string): Confirming {
+  return {
+    question: (
+      <>
+        Enroll <strong data-testid="confirm-machine">{machine}</strong>?
+      </>
+    ),
+    meaning: `The code you get next enrolls one machine named ${machine}, works once, and carries your org key: paste it only into that machine's terminal.`,
+    issue: async (key) => {
       const { enrollment, token } = await createEnrollment();
       const code = enrollmentCode({ hub: location.origin, org: me.org.id, token, machine, key });
-      onCode(code, enrollment.expires);
-    } catch (failure) {
-      setError(explainEnrollment(failure));
-    } finally {
-      key?.fill(0);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3" data-testid="enroll-confirm">
-      <p className="m-0 text-ui">
-        Enroll <strong data-testid="confirm-machine">{machine}</strong>?
-      </p>
-      <p className="m-0 text-ui-sm leading-5 text-fg-muted">
-        The code you get next enrolls one machine named {machine}, works once, and carries your org key: paste it only into that machine's terminal. Confirm with one of the org
-        key's methods.
-      </p>
-      {keys.data ? (
-        <OrgMethodForm keys={keys.data} passkeyText="Confirm with passkey" passphraseText="Confirm" preferred={rememberedMethod(me.org.id)} onMethod={confirm} />
-      ) : keys.isError ? (
-        <p className="m-0 text-ui-sm text-danger" role="alert">
-          The hub did not list the org key's methods: {keys.error.message}
-        </p>
-      ) : null}
-      <div>
-        <button type="button" className={buttonQuiet} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-      {error && (
-        <p className="m-0 text-ui-sm text-danger" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function explainEnrollment(failure: unknown): string {
-  if (failure instanceof HubRequestError && failure.code === 'not-admin') return 'Only an admin of the org enrolls machines.';
-  if (failure instanceof HubRequestError) return `The hub refused the enrollment (${failure.code}${failure.message !== failure.code ? `: ${failure.message}` : ''}).`;
-  return explainKeyFailure(failure, 'enroll');
-}
-
-function CodeStep(props: { machine: string; code: string; expires: string; onDone: () => void }) {
-  const { machine, code, expires, onDone } = props;
-  const [copied, setCopied] = useState<boolean | null>(null);
-  const until = new Date(expires).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return (
-    <div className="flex flex-col gap-3" data-testid="enroll-code">
-      <p className="m-0 text-ui">
-        On <strong>{machine}</strong>, run <code className="font-mono">{ENROLL_COMMAND}</code>, then paste this code when it asks, before {until}:
-      </p>
-      <pre className="m-0 max-h-40 overflow-auto rounded-md border border-border bg-bg p-2.5 font-mono text-code break-all whitespace-pre-wrap select-all" data-testid="enrollment-code">
-        {code}
-      </pre>
-      <p className="m-0 text-ui-sm leading-5 text-fg-muted">
-        This is the only time the code is shown: closing this discards it. It holds your org key, so paste it only at that prompt and keep it nowhere else.
-      </p>
-      <div className="flex items-center gap-2">
-        <button type="button" className={buttonSecondary} onClick={() => void navigator.clipboard.writeText(code).then(() => setCopied(true), () => setCopied(false))}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-        <button type="button" className={buttonPrimary} onClick={onDone}>
-          Done
-        </button>
-        {copied === false && <span className="text-ui-sm text-danger">Copying failed; select the text instead.</span>}
-      </div>
-    </div>
-  );
+      const until = new Date(enrollment.expires).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return {
+        code,
+        instructions: (
+          <p className="m-0 text-ui">
+            On <strong>{machine}</strong>, run <code className="font-mono">{ENROLL_COMMAND}</code>, then paste this code when it asks, before {until}:
+          </p>
+        ),
+        keep: 'It holds your org key, so paste it only at that prompt and keep it nowhere else.',
+      };
+    },
+    explain: (failure) => {
+      if (failure instanceof HubRequestError && failure.code === 'not-admin') return 'Only an admin of the org enrolls machines.';
+      if (failure instanceof HubRequestError) return `The hub refused the enrollment (${failure.code}${failure.message !== failure.code ? `: ${failure.message}` : ''}).`;
+      return explainKeyFailure(failure, 'enroll');
+    },
+  };
 }
 
 /** Removing a machine, once the owner confirms what it means. A machine the hub no longer holds is gone either way: the
