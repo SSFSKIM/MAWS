@@ -105,12 +105,11 @@ describe('a message tool’s call in a mounted transcript', () => {
     expect(cards()).toEqual(['MessageStage 1 is done.']);
   });
 
-  it('with the lane off, the message is the turn’s work: drawn once the divider is expanded, as a span', async () => {
+  it('with the lane off, the message stays in view as a span with its turn folded, as the `<message>` span after it does', async () => {
     await mounted(turn(), false);
     const spans = () => [...document.querySelectorAll('[data-owner-span="to-human"]')].map((element) => element.textContent);
-    await waitFor(() => expect(spans()).toEqual(['to humanBoth stages ran.']));
-    fireEvent.click(document.querySelector('[data-kind="divider"] .transcript-divider > .transcript-disclosure')!);
     await waitFor(() => expect(spans()).toEqual(['to humanStage 1 is done.', 'to humanBoth stages ran.']));
+    expect(document.querySelectorAll('[data-kind="cell"]')).toHaveLength(0); // the work folded: the command's cell is out of view
     expect(document.querySelector('[data-owner-card]')).toBeNull();
   });
 });

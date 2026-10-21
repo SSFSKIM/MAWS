@@ -145,9 +145,10 @@ export type Row = RowBase &
     // P2-C end
     // P4-R7: a message tool's call (`@shared/owner/message-call`, both names) as the to-human message it sends, at the
     // call's place among the turn's rows, drawn as a message and never as an MCP row: `pending` until its result is in.
-    // A refused or failed call, or one whose turn closed without a result, is the engine's own cell instead. `forHuman`
-    // as on a marked text: set while the owner channel's lane is on, so it stays in view when the work folds.
-    | { kind: 'to_human'; toolUseId: ToolUseId; text: string; pending: boolean; forHuman?: boolean }
+    // A refused or failed call, or one whose turn closed without a result, is the engine's own cell instead. It stays
+    // in view when its turn's work folds whatever the owner lane says: a message is always addressed to the human, as
+    // a `<message>` span is, which the presenter draws with the lane off and so keeps (derive.ts, `isPersistentRow`).
+    | { kind: 'to_human'; toolUseId: ToolUseId; text: string; pending: boolean }
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it

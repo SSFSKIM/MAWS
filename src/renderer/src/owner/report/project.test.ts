@@ -204,7 +204,7 @@ describe('the report projection (the P2-C document, Design §7)', () => {
       const rows = project(stateOf(b.events));
       expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'to_human']);
       expect(rows[2]).toMatchObject({ kind: 'owner_record', open: false, working: false, toolCalls: 1, messages: 2 }); // the call is the message, not one of the calls
-      expect(rows[3]).toMatchObject({ toolUseId: 'c1', text: 'Stage 1 is done.', forHuman: true });
+      expect(rows[3]).toMatchObject({ toolUseId: 'c1', text: 'Stage 1 is done.' });
       // opened, the turn as the full transcript draws it folded: the message stays in view there too
       expect(kinds(project(stateOf(b.events, () => ({ reportOpenTurns: new Set([T1]) }))))).toEqual(['time', 'user', 'owner_record', 'divider', 'to_human', 'text:All stages ran.']);
     });

@@ -123,11 +123,13 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // question's receipt (W4, the owner's ruling: what the human answered stays in view; T3's receipts outlive the fold
 // too), what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them), fatal
 // API diagnostics (transient retries remain work), and the `maws` server's capsule, delivery row and artifact row (E1,
-// E2: what the agent asked, delivered and registered stays in view, as an answered question does). The divider folds everything else, so a turn of a local command
+// E2: what the agent asked, delivered and registered stays in view, as an answered question does), and a message tool's
+// message (P4-R7: always addressed to the human, whatever the owner lane says, as a `<message>` span is, which the
+// presenter draws and so keeps with the lane off). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  (row.kind === 'to_human' && row.forHuman === true) /* P4-R7: as a marked text */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentMessage(row) // E7
   || row.kind === 'owner_record'; // P2-C (2026-10-09): placed by the report projection, never a work row
 
@@ -817,8 +819,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // P2-C (2026-10-09): while the owner channel's lane is on, a text with a mark is addressed to the human as an inked
   // drawing is, so it stays in view when the work folds (the report module draws it; Rows.tsx)
   const forHuman = (row: Extract<Row, { kind: 'assistant_text' }>) => ui?.assistantInk.has(row.id) || (ui?.ownerLane === true && marksOfText(row.markdown, row.live).marked);
-  // P4-R7: a message tool's message is addressed to the human as a marked text is
-  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => (row.kind === 'assistant_text' && forHuman(row)) || (row.kind === 'to_human' && ui?.ownerLane === true) ? { ...row, forHuman: true } : row);
+  // P4-R7: a message tool's message needs no such flag: it is addressed to the human whatever the lane, as a span the
+  // presenter draws with the lane off is (inked, so kept), and `isPersistentRow` keeps every one
+  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
   const files = changedFiles(cells, turn);

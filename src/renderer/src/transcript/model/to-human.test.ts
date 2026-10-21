@@ -115,9 +115,9 @@ describe('a message tool’s call', () => {
     expect(turnSummary(state.turns.get(T1)!)).toMatchObject({ toolCalls: 2, byCategory: { commands: 1, mcp: 1 } });
   });
 
-  // P2-C's lane: a message is addressed to the human as a marked text is, so it stays in view when the work folds; with
-  // the lane off it is the turn's work, folded with its commentary.
-  it('stays in view when its turn folds while the lane is on; with the lane off it folds with the commentary', () => {
+  // A message is always addressed to the human, as a `<message>` span is (the presenter draws a span with the lane off
+  // and so keeps it), so it stays in view when the work folds whatever the owner lane says.
+  it.each([['on', true], ['off', false]])('stays in view in a closed turn whose work folds, the lane %s', (_, lane) => {
     const b = builder();
     b.turn('u1');
     b.text('a1', 0, 'Looking first.');
@@ -127,19 +127,13 @@ describe('a message tool’s call', () => {
     b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
     b.text('a3', 0, 'Done.');
     b.end(['u1']);
-    const lane = laneOn(reduce(b.events));
-    const on = folded(lane);
-    expect(kinds(on)).toEqual(['user', 'divider', 'to_human', 'assistant_text']);
-    const [message] = ofKind(on, 'to_human');
-    expect(message).toMatchObject({ toolUseId: 'm1', forHuman: true });
+    const state = lane ? laneOn(reduce(b.events)) : reduce(b.events);
+    const rows = folded(state);
+    expect(kinds(rows)).toEqual(['user', 'divider', 'to_human', 'assistant_text']);
+    expect(ofKind(rows, 'divider')[0]).toMatchObject({ state: 'completed', expanded: false });
+    const [message] = ofKind(rows, 'to_human');
+    expect(message).toMatchObject({ toolUseId: 'm1', text: 'Stage 1 is done.', pending: false });
     expect(isPersistentRow(message)).toBe(true);
-    expect(ofKind(expanded(lane), 'to_human')[0]).toMatchObject({ forHuman: true });
-
-    const off = reduce(b.events);
-    expect(kinds(folded(off))).toEqual(['user', 'divider', 'assistant_text']);
-    const [work] = ofKind(expanded(off), 'to_human');
-    expect(work).not.toHaveProperty('forHuman');
-    expect(isPersistentRow(work)).toBe(false);
   });
 
   // A subagent's text draws in its own transcript and never in its parent's (the parent shows the agent's row); its
@@ -166,9 +160,14 @@ describe('a message tool’s call', () => {
     expect(kinds(parentRows)).toEqual(['user', 'divider', 'subagent', 'assistant_text']);
     expect(ofKind(parentRows, 'divider')[0]).toMatchObject({ toolCalls: 0 });
 
-    const childRows = expanded(reduce(events.slice(childFrom, childTo), AGENT));
+    const childState = reduce(events.slice(childFrom, childTo), AGENT);
+    const childRows = expanded(childState);
     expect(ofKind(childRows, 'assistant_text').map((row) => row.markdown)).toEqual(['Child looking.']);
     expect(ofKind(childRows, 'to_human')).toMatchObject([{ toolUseId: 'cm', text: 'Child found it.', pending: false }]);
+    // its running turn collapsed by the reader, the commentary folds and the message stays in view: a child transcript
+    // has no owner lane, and a message is the human's without one
+    const collapsed = withUi(childState, { ...childState.ui, collapsedTurns: new Set(childState.order), version: childState.ui.version + 1, global: childState.ui.global + 1 });
+    expect(kinds(folded(collapsed))).toEqual(['divider', 'to_human']);
   });
 });
 
