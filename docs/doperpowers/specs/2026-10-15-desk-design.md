@@ -106,7 +106,9 @@ the hub deployed, checked by hand and recorded with evidence in Outcomes.
    working/waiting counts match `sminos list` run on each machine (but for
    a session holding an open async question, which `sminos list` reads as
    busy and the grid counts as waiting too: DX3's grid, 2026-10-18), within
-   2 seconds of a change.
+   2 seconds of a change, but for a machine whose stream dropped, which
+   reads offline within two heartbeats, about 15 seconds on the deployed
+   hub (MAWS #57's grace; the owner, 2026-10-21).
 2. **Messages.** A `<message>` span written by a session on machine A is in
    the project's group chat within 2 seconds of the session's turn writing
    it, attributed to the session's alias and machine.
@@ -5286,6 +5288,10 @@ a hub that connects into machines (§2).
   gate set. The same grace means a dropped machine reads offline on the deployed hub after 15 s, not within the 2 s this
   entry claimed for acceptance 1; #57 chose that over a flap at every reconnect, and acceptance 1's reading of it is
   the owner's.
+  Ruled 2026-10-21 by the owner: acceptance 1 reads a dropped machine as offline within two heartbeats, about 15 s on
+  the deployed hub, and the grace stays, so the hub's routine stream ends (every 23–96 minutes) never flash a machine
+  offline. Acceptance 1's text says so. Rejected: back to 2 s (a 1–16 s offline flash at every reconnect); two speeds,
+  a clean close at once and only a drop graced (the hub would first have to tell the two apart; not needed now).
 - Decision: The web names a session by its title (§4): the harness's "Session name" (`/rename`'s `custom-title`,
   else the generated `ai-title`), carried through the log as sminos's `titled` (smns §3, §5, §8), which the session's
   machine writes into its file when the value changes. The owner, working a day from the desk, could not tell sessions
