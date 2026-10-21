@@ -1,0 +1,69 @@
+{
+  "arm": "maws",
+  "task": "B1",
+  "rep": 1,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "document",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T20:44:56.012Z",
+  "prompt": "In the document [Riverside Community Garden: Spring Season Plan](maws-artifact:5dd4c5db-38c7-4f02-9ca3-bc0af24abebc), change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "promptMatch": ", change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "artifactId": "5dd4c5db-38c7-4f02-9ca3-bc0af24abebc",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/6c850cf0-aea6-4e58-a582-fa129490fab3.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/156d6566-dae1-41a1-8e62-8dfe57c656de/wpgmkkb5.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "6c850cf0-aea6-4e58-a582-fa129490fab3",
+  "appSessionId": "156d6566-dae1-41a1-8e62-8dfe57c656de",
+  "load": {
+    "before": [
+      2.78,
+      2.46,
+      2.31
+    ],
+    "after": [
+      2.74,
+      2.46,
+      2.31
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "block 3: Thursday -> Friday, nothing else changed"
+  },
+  "pin": {
+    "model": "sonnet",
+    "effort": "low"
+  },
+  "measurementOnly": true,
+  "variant": "base",
+  "build": {
+    "commit": "7e8dd275",
+    "builtAt": "2026-10-21T20:42:29.110Z",
+    "checkout": "7e8dd275d1c591b505c9b17a2ff47fbe98e678a8"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.1423751,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 21,
+      "toolUseId": "toolu_01L5qgFTT4qWFRKFKQeMRdaS"
+    },
+    {
+      "name": "artifact_edit",
+      "ms": 30,
+      "toolUseId": "toolu_01DZMXvnWZ5w1hPQWE27PBDv"
+    }
+  ]
+}

@@ -33,6 +33,9 @@ const cases = {
   sendCode: '121 버튼 보내기',
   sendCloud: '67 버튼 메시지 보내기',
   stop: '150 버튼 중지',
+  // P4-A3 hold (b), 2026-10-21 21:12Z: the Code tab's New and its folder pop-up before a folder is chosen
+  newSessionNow: '16 버튼 새로 만들기',
+  folderPopupUnset: '129 팝업 버튼 폴더: 폴더 선택…',
   // §7c: the Claude tab's recent list, a row's button and its menu button beside it (read live in Part B)
   recentItem: '58 팝업 버튼 Autumn Workshops 2026 slide deck에 대한 더 많은 옵션',
 };
@@ -48,10 +51,12 @@ const negatives = {
   codeNewItem: ['141 항목 Available tools inventory, Value: 1', '141 항목 새 세션, Value: 0'],
   cloudNewPage: [PROBE_PAGE, '3 HTML 콘텐츠 Claude, URL: claude.ai/newsletter'],
   recentItem: ['141 항목 새 세션, Value: 1', '57 버튼 Autumn Workshops 2026 slide deck', '122 버튼 새로 생성'],
+  newSession: ['23 팝업 버튼 템플릿으로 새로 만들기', '31 버튼 afleet 섹션에서 새 세션'],
 };
 let bad = 0;
 const fail = (...why) => { bad++; console.log(...why); };
-for (const [k, line] of Object.entries(cases)) if (!L[k].some((p) => p.test(line))) fail('MISS', k, line);
+const LABEL_OF = { newSessionNow: 'newSession', folderPopupUnset: 'folderPopup' };
+for (const [k, line] of Object.entries(cases)) if (!L[LABEL_OF[k] ?? k].some((p) => p.test(line))) fail('MISS', k, line);
 for (const [k, ls] of Object.entries(negatives)) for (const line of ls) if (L[k].some((p) => p.test(line))) fail('FALSE', k, line);
 const eq = (what, got, want) => { if (JSON.stringify(got) !== JSON.stringify(want)) fail('WRONG', what, JSON.stringify(got), '!=', JSON.stringify(want)); };
 

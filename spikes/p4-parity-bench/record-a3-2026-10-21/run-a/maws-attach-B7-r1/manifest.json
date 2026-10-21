@@ -1,0 +1,61 @@
+{
+  "arm": "maws",
+  "task": "B7",
+  "rep": 1,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "presentation",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T21:02:33.275Z",
+  "prompt": "In the slide deck [Autumn Workshops 2026](maws-artifact:9ce3be22-1d7d-4dbf-b4df-e428082c28b8), add a slide after slide 2 titled \"Getting there\" with three bullets: \"Bus 14 stops at the gate\", \"Bike racks stand by the tool shed\" and \"Parking is on Mill Lane\". Change nothing else.",
+  "promptMatch": ", add a slide after slide 2 titled \"Getting there\" with three bullets: \"Bus 14 stops at the gate\", \"Bike racks stand by the tool shed\" and \"Parking is on Mill Lane\". Change nothing else.",
+  "artifactId": "9ce3be22-1d7d-4dbf-b4df-e428082c28b8",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/4378b691-7ee3-4594-aed5-aaf10506d36f.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/30d25799-f2c1-420c-ab24-6de96c7eace1/7ppkodod.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "4378b691-7ee3-4594-aed5-aaf10506d36f",
+  "appSessionId": "30d25799-f2c1-420c-ab24-6de96c7eace1",
+  "load": {
+    "before": [
+      3.19,
+      2.82,
+      3.03
+    ],
+    "after": [
+      2.78,
+      2.75,
+      3
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "a slide \"Getting there\" with the three bullets after slide 2, nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "variant": "attach",
+  "build": {
+    "commit": "80e89dd2",
+    "builtAt": "2026-10-21T20:43:57.352Z",
+    "checkout": "80e89dd2365d3016cde0b502dadfe53cf8da4f9b"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.1855486,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_publish",
+      "ms": 33,
+      "toolUseId": "toolu_01K1xnpaobA5x47wCFkVr26x"
+    }
+  ]
+}

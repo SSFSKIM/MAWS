@@ -36,13 +36,13 @@
 const L = {
   modeCode: [/라디오 버튼 Description: Code/],
   modeClaude: [/라디오 버튼 Description: Claude/],
-  newSession: [/버튼 새로 생성/, /button New/],
+  newSession: [/^\s*\d+\s+버튼 새로 만들기$/, /버튼 새로 생성/, /button New/], // P4-A3: 새로 만들기 since the web UI of 2026-10-21 evening
   // the session on screen is a new one: the Code tab's sidebar item for it, selected; the Claude tab's page
   codeNewItem: [/^\s*\d+\s+항목 새 세션, Value: 1(,|$)/],
   pageUrl: [/HTML 콘텐츠 .*, URL: [^\s,]+/],
   cloudNewPage: [/HTML 콘텐츠 .*, URL: (https:\/\/)?claude\.ai\/new\/?([?#][^\s,]*)?(,|$)/],
   recentItem: [/^\s*\d+\s+팝업 버튼 .+에 대한 더 많은 옵션$/], // a recent row's menu button; the row is the button before it
-  folderPopup: [/팝업 버튼 Description: 폴더:/],
+  folderPopup: [/팝업 버튼 (Description: )?폴더:/], // P4-A3: without Description while no folder is chosen
   openFolder: [/^\s*\d+\s+폴더 열기…/, /Open folder…/],
   panelPath: [/텍스트 필드 \(settable\).*ID: PathTextField/],
   panelOpen: [/버튼 열기, ID: OKButton/, /button Open, ID: OKButton/],

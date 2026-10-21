@@ -1,0 +1,66 @@
+{
+  "arm": "maws",
+  "task": "B3",
+  "rep": 8,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "document",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T20:59:49.229Z",
+  "prompt": "In the document [Riverside Community Garden: Spring Season Plan](maws-artifact:d4c11167-c993-4a78-bf50-42e0e75e9731), rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "promptMatch": ", rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "artifactId": "d4c11167-c993-4a78-bf50-42e0e75e9731",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/d787c5a6-cb9b-482f-95af-d10e6cbbb828.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/c09c7b9b-80af-47e5-aa95-28abb64bde98/pamm7p4c.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "d787c5a6-cb9b-482f-95af-d10e6cbbb828",
+  "appSessionId": "c09c7b9b-80af-47e5-aa95-28abb64bde98",
+  "load": {
+    "before": [
+      1.7,
+      2.6,
+      3.03
+    ],
+    "after": [
+      2.15,
+      2.58,
+      2.99
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "the introduction rewritten (128 -> 135 words), nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "variant": "alwaysLoad",
+  "build": {
+    "commit": "646970a5",
+    "builtAt": "2026-10-21T20:43:13.358Z",
+    "checkout": "646970a54a2861582fafd12a34e5ffff94604568"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.31051839999999997,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 21,
+      "toolUseId": "toolu_017ABUm6jYgLxE5hrmVKrvZq"
+    },
+    {
+      "name": "artifact_edit",
+      "ms": 23,
+      "toolUseId": "toolu_01XGjkSzwBeHtYxwhdCCVRTn"
+    }
+  ]
+}

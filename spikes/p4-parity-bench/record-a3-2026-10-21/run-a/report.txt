@@ -1,0 +1,63 @@
+per edit: arm task rep surface | landed first-token turn-end | req ctx0 | first-byte gen hold exec maws | out think | cache | route load1 | check
+maws    B1 r1    maws/attach |    4.3    3.1    7.1 |  2   32124 |   5.0   1.5   0.2   0.0   0.0 |   351    44 | cold | gateway 3.3 | pass
+maws    B1 r2    maws/attach |    5.4    4.1    7.8 |  2   32124 |   5.5   1.7   0.3   0.0   0.0 |   366    43 | cold | gateway 2.9 | pass
+maws    B1 r3    maws/attach |    7.7    5.3   11.6 |  2   32096 |   8.6   1.8   1.0   0.0   0.0 |   366    75 | cold | gateway 1.9 | pass
+maws    B1 r4    maws/attach |    5.4    3.7    8.3 |  2   32096 |   5.9   1.9   0.2   0.0   0.0 |   359    75 | cold | gateway 2 | pass
+maws    B1 r5    maws/attach |    2.9    1.7    4.6 |  2   32098 |   2.4   1.7   0.2   0.0   0.0 |   348    41 | cold | gateway 6.4 | pass
+maws    B3 r1    maws/alwaysLoad |   23.8    1.2   29.3 |  3   29297 |   7.1  21.4   0.4   0.1   0.1 |  3467  2404 | cold | gateway 5.0 | pass
+maws    B3 r1    maws/attach |   39.5    1.4   42.9 |  2   32110 |   3.9  38.3   0.3   0.0   0.0 |  5329  4638 | cold | gateway 4.7 | pass
+maws    B3 r1    maws/base |   37.6    3.8   44.6 |  4   26406 |  16.3  27.1   0.7   0.1   0.1 |  3945  2866 | cold | gateway 4.7 | pass
+maws    B3 r2    maws/alwaysLoad |   19.5    2.1   24.2 |  3   29290 |   7.8  15.2   0.8   0.1   0.0 |  2360  1468 | cold | gateway 4.8 | pass
+maws    B3 r2    maws/attach |   20.6    1.7   24.4 |  2   32108 |   4.7  18.9   0.5   0.0   0.0 |  2854  2091 | cold | gateway 4.5 | pass
+maws    B3 r2    maws/base |   37.6    1.6   42.3 |  4   26422 |   8.2  33.1   0.5   0.1   0.1 |  4819  3820 | cold | gateway 5.1 | pass
+maws    B3 r3    maws/alwaysLoad |   27.2    1.1   30.6 |  4   29298 |   5.3  22.1   0.9   1.9   0.0 |  2976  1688 | cold | gateway 9.1 | pass
+maws    B3 r3    maws/attach |   21.2    1.4   23.9 |  2   32119 |   3.2  19.8   0.5   0.0   0.0 |  2889  2290 | cold | gateway 7.0 | pass
+maws    B3 r3    maws/base |   40.3    1.5   44.8 |  4   26412 |   7.5  36.1   0.6   0.1   0.1 |  5197  4172 | cold | gateway 13.3 | pass
+maws    B3 r4    maws/alwaysLoad |   36.9    4.2   43.4 |  3   29293 |  12.0  28.2   2.8   0.1   0.0 |  4092  3138 | cold | gateway 3.3 | pass
+maws    B3 r4    maws/attach |   19.8    1.6   22.8 |  2   32116 |   3.8  17.7   1.0   0.0   0.0 |  2490  1823 | cold | gateway 2.5 | pass
+maws    B3 r4    maws/base |   31.7    1.7   37.1 |  4   26408 |   9.4  26.6   0.6   0.1   0.1 |  3862  2597 | cold | gateway 5.7 | pass
+maws    B3 r5    maws/alwaysLoad |   27.9    1.1   32.0 |  3   29295 |   5.5  25.4   0.7   0.1   0.1 |  3774  2658 | cold | gateway 1.9 | pass
+maws    B3 r5    maws/attach |   26.7    1.6   29.7 |  2   32110 |   3.7  25.1   0.5   0.0   0.0 |  3771  3122 | cold | gateway 1.7 | pass
+maws    B3 r5    maws/base |   23.3    1.4   28.0 |  4   26411 |   8.0  18.9   0.7   0.1   0.0 |  2990  1959 | cold | gateway 2.8 | pass
+maws    B3 r6    maws/alwaysLoad |   33.0    1.9   40.0 |  4   29290 |   8.7  29.9   0.9   0.1   0.1 |  4530  3555 | cold | gateway 1.7 | pass
+maws    B3 r6    maws/attach |   35.8    2.9   41.0 |  2   32113 |   7.3  33.1   0.3   0.0   0.0 |  4845  4055 | cold | gateway 2.5 | pass
+maws    B3 r6    maws/base |   30.4    2.2   39.7 |  5   26413 |  12.9  25.5   1.0   0.1   0.1 |  3805  2592 | cold | gateway 2.1 | pass
+maws    B3 r7    maws/alwaysLoad |   22.1    0.9   26.6 |  3   29292 |   5.5  20.3   0.4   0.1   0.1 |  2971  2042 | cold | gateway 1.9 | pass
+maws    B3 r7    maws/attach |   21.4    1.8   25.6 |  2   32111 |   5.1  19.9   0.3   0.0   0.0 |  3177  2324 | cold | gateway 1.8 | pass
+maws    B3 r7    maws/base |   37.6    1.9   42.4 |  4   26402 |   8.8  32.6   0.5   0.1   0.1 |  4609  3568 | cold | gateway 1.7 | pass
+maws    B3 r8    maws/alwaysLoad |   39.0    1.2   42.9 |  3   29293 |   5.3  36.7   0.5   0.0   0.0 |  5159  4280 | cold | gateway 1.7 | pass
+maws    B3 r8    maws/attach |   24.7    1.6   28.6 |  2   32108 |   4.5  23.4   0.3   0.0   0.0 |  3414  2733 | cold | gateway 2.1 | pass
+maws    B3 r8    maws/base |   41.0    1.8   45.8 |  4   26406 |   8.4  36.4   0.5   0.1   0.1 |  5334  4121 | cold | gateway 2.1 | pass
+maws    B3 r9    maws/alwaysLoad |   31.0    1.0   35.2 |  3   29289 |   5.3  28.7   0.8   0.0   0.0 |  4040  3099 | cold | gateway 3.8 | pass
+maws    B3 r9    maws/attach |   19.7    2.4   24.1 |  2   32112 |   5.9  17.8   0.1   0.0   0.0 |  2621  2001 | cold | gateway 6.8 | pass
+maws    B3 r9    maws/base |   25.4    2.0   30.1 |  4   26407 |   8.7  20.4   0.5   0.1   0.0 |  2882  1687 | cold | gateway 5.1 | pass
+maws    B3 r10   maws/alwaysLoad |   27.0    0.9   30.8 |  3   29299 |   4.9  24.9   0.6   0.1   0.1 |  3946  3050 | cold | gateway 2.5 | pass
+maws    B3 r10   maws/attach |   19.6    1.3   23.0 |  2   32107 |   3.9  18.3   0.5   0.0   0.0 |  2756  1977 | cold | gateway 2.5 | pass
+maws    B3 r10   maws/base |   31.9    1.8   36.4 |  4   26403 |   8.5  26.2   1.3   0.1   0.1 |  3716  2717 | cold | gateway 3.4 | pass
+maws    B5 r1    maws/attach |    5.8    2.0    7.9 |  2   30979 |   3.3   4.0   0.3   0.0   0.0 |   641    92 | cold | gateway 3.2 | pass
+maws    B5 r2    maws/attach |    5.1    1.4    6.7 |  2   30990 |   2.1   4.0   0.2   0.0   0.0 |   674   114 | cold | gateway 2.2 | pass
+maws    B5 r3    maws/attach |    9.5    5.2   14.7 |  2   30966 |   9.5   4.5   0.4   0.0   0.0 |   713   160 | cold | gateway 2.0 | pass
+maws    B5 r4    maws/attach |    4.5    1.8    6.7 |  2   30980 |   2.8   3.2   0.4   0.0   0.0 |   613    40 | cold | gateway 2.1 | pass
+maws    B5 r5    maws/attach |    7.3    4.6   13.4 |  2   30969 |   9.5   3.3   0.2   0.0   0.0 |   625    45 | cold | gateway 2.9 | pass
+maws    B7 r1    maws/attach |   18.7   12.2   23.5 |  2   31025 |  16.2   6.7   0.3   0.0   0.0 |  1117   289 | cold | gateway 3.2 | pass
+maws    B7 r2    maws/attach |   14.5    8.2   21.8 |  2   31014 |  14.7   6.6   0.2   0.0   0.0 |  1113   285 | cold | gateway 2.7 | pass
+maws    B7 r3    maws/attach |   13.1    2.3   23.3 |  4   31033 |  12.7   9.5   0.8   0.1   0.1 |  1514   411 | cold | gateway 2.3 | pass
+maws    B7 r4    maws/attach |   11.6    1.5   18.7 |  4   31021 |   7.8   9.6   0.9   0.0   0.0 |  1652   470 | cold | gateway 2 | pass
+maws    B7 r5    maws/attach |   12.5    3.2   19.4 |  4   31022 |   9.6   8.7   0.8   0.1   0.1 |  1430   371 | cold | gateway 4.8 | pass
+
+cells (median [min..max], n): send to edit landed | first token | turn end | requests | output tokens
+B1 maws    maws/attach | 5.391 [2.856..7.698] n=5 | 3.653 [1.686..5.289] n=5 | 7.797 [4.645..11.646] n=5 | 2 [2..2] n=5 | 359 [348..366] n=5 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": [], "routes": ["gateway"], "cache": {"cold": 5, "warm": 0}}
+B3 maws    maws/alwaysLoad | 27.541 [19.549..39.03] n=10 | 1.135 [0.91..4.24] n=10 | 31.422 [24.235..43.44] n=10 | 3.0 [3..4] n=10 | 3860.0 [2360..5159] n=10 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": [], "routes": ["gateway"], "cache": {"cold": 10, "warm": 0}}
+B3 maws    maws/attach | 21.321 [19.592..39.472] n=10 | 1.583 [1.255..2.906] n=10 | 25.042 [22.797..42.858] n=10 | 2.0 [2..2] n=10 | 3033.0 [2490..5329] n=10 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": [], "routes": ["gateway"], "cache": {"cold": 10, "warm": 0}}
+B3 maws    maws/base | 34.721 [23.305..41.039] n=10 | 1.78 [1.399..3.827] n=10 | 40.967 [27.979..45.828] n=10 | 4.0 [4..5] n=10 | 3903.5 [2882..5334] n=10 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": [], "routes": ["gateway"], "cache": {"cold": 10, "warm": 0}}
+B5 maws    maws/attach | 5.835 [4.508..9.495] n=5 | 1.972 [1.396..5.15] n=5 | 7.887 [6.71..14.657] n=5 | 2 [2..2] n=5 | 641 [613..713] n=5 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": [], "routes": ["gateway"], "cache": {"cold": 5, "warm": 0}}
+B7 maws    maws/attach | 13.114 [11.63..18.745] n=5 | 3.19 [1.536..12.231] n=5 | 21.814 [18.655..23.515] n=5 | 4 [2..4] n=5 | 1430 [1113..1652] n=5 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": [], "routes": ["gateway"], "cache": {"cold": 5, "warm": 0}}
+
+verdict (threshold 1.2 x, at least 5 repetitions per cell):
+B1: no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)
+B3: no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)
+    beside: MAWS alwaysLoad, not judged: median 27.5 over 10 valid (that/Desktop -)
+    beside: MAWS attach, not judged: median 21.3 over 10 valid (that/Desktop -)
+    beside: MAWS base, not judged: median 34.7 over 10 valid (that/Desktop -)
+B5: no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)
+B7: no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)

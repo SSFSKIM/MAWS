@@ -17,9 +17,9 @@ What A1's breakdown left to explain: both arms make three requests to the landin
 - [x] 2026-10-21 13:50Z Lever 1, `alwaysLoad`, written and tested (e7b08e90f). B4's probe re-recorded on the pinned 2.1.304 against the stub, nothing spent.
 - [x] 2026-10-21 13:50Z The harness: lever arms, the breakdown to the landing, the bootstrap, and A1's three residue items (8be429f2c).
 - [x] 2026-10-21 Lever 2, the linked read, approved by the architect (Decision Log 5), built with its tests and its probe (`p4-a3-linked-read`, nothing spent).
-- [ ] Window (a) on the mini: B3 base against alwaysLoad, then B1, B5 and B7 on the lever.
-- [ ] Window (b) on the mini: the B3 re-measure, Desktop against MAWS on the levers, n of 11 each.
-- [ ] Gates, review, hand-back.
+- [x] 2026-10-21 20:39 to 21:10Z Window (a) on the mini: the three arms built from p4-a3-arms, then B3 base, alwaysLoad and attach x10 each, and B1, B5 and B7 on attach x5 each; every repetition valid (§ Results).
+- [x] 2026-10-21 21:12 to 21:30Z Window (b) on the mini: B3, Desktop's Code tab against MAWS on both levers, n of 11 each, interleaved: parity, 0.756 (§ Results).
+- [ ] Merge master, class 1a on the merge, the Mac groups, hand-back.
 
 ## The residue decided here
 
@@ -94,6 +94,77 @@ What A1's breakdown left to explain: both arms make three requests to the landin
 5. Gates: class 1a on the pool. The Mac groups the change reaches (the tool list's e2e groups), at the architect's go.
 6. Review with doperpowers:reviewer-medium over 7c5248920..head, then the hand-back.
 
+## Results
+
+The record is `spikes/p4-parity-bench/record-a3-2026-10-21/`: run-a, run-b and shakedown, each with its manifests, measured rows and report.json, plus the run log. The transcripts stay on the mini, under `/tmp/maws-parity-bench/a3/run-*/transcripts/`, as the owner's records.
+
+The arms are built from `p4-a3-arms` off 7c5248920:
+- base 7e8dd275d: the harness, with the product as on master.
+- alwaysLoad 646970a54: base plus lever 1.
+- attach 80e89dd23: base plus levers 1 and 2; its tree is p4-a3 at e81638d7e.
+
+Every MAWS repetition checked that the app was built from its arm's commit.
+
+Controls, recorded and none voiding:
+- The mini's engine 2.1.306 for MAWS. Desktop 3.1623.1 as running (its Info.plist read 3.1623.0 at 20:41Z and 3.1623.1 at 21:31Z), on its engine 2.1.304.
+- The served model claude-opus-5-5 at xhigh, adaptive thinking, in both arms. MAWS requests the 1M variant and Desktop the plain one, and Desktop has its advisor model.
+- MAWS through the gateway, Desktop direct.
+- Auto mode in every repetition.
+- The network: the mini has been on Wi-Fi (en1, ResNet) since its reboot at 16:48Z, while A1's record ran wired. Anything compared against A1's record crosses that change.
+- CI-opt's reads at 20:38:28Z: console user new and not locked, input source ABC, Terminal in front, no Electron, cua Engine, SecurityAgent, UNC, Chrome for Testing, TextEdit or `claude auth` process, Screen Sharing 0, display 2560x1440@2x with no remote and no computer use, load 1.96, memory 80 % free.
+- An idle `claude -r` (pid 28318) in a tmux session since 16:56Z, which predates the holds and was left alone.
+- The 1-minute load before a repetition: a median of 2.5 to 4.0 per cell.
+- Desktop's own usage meter read 87 % of the session limit at the start and 90 % at the end, with "weekly limit nearly reached" showing. It was not reached.
+
+**(a), B3 by arm** (n=10 each, all valid). Medians; the breakdown is over the requests up to the landing.
+
+| Arm | Landed s [min..max] | Requests to the landing | First byte s | Generation s | Hold s | Thinking tokens | Context at the first request | Turn end s |
+|---|---|---|---|---|---|---|---|---|
+| base | 34.7 [23.3..41.0] | 3 | 4.06 | 26.8 | 0.61 | 2792 | 26,408 | 41.0 |
+| alwaysLoad | 27.5 [19.5..39.0] | 2 | 1.56 | 25.1 | 0.72 | 2854 | 29,293 | 31.4 |
+| attach | 21.3 [19.6..39.5] | 1 | 0.82 | 19.8 | 0.41 | 2307 | 32,111 | 25.0 |
+
+Each lever moved the breakdown as predicted:
+- alwaysLoad removed the ToolSearch request, with its first byte and generation, and added 2,885 tokens to the first request's context (2,943 from count_tokens, less the four names taken out of the deferred list).
+- attach removed the read request too, so the first request is the edit, and added the read, about 2,800 tokens.
+- The landing moved by 7.2 s for alwaysLoad and a further 6.2 s for attach.
+- Thinking stayed where the replays put it.
+
+**(a), B1, B5 and B7 on attach** (n=5 each, all valid), checked against A1's record (wired, a day earlier; MAWS, then Desktop):
+- B1 5.4 s against 7.4 and 8.4.
+- B5 5.8 s against 11.3 and 16.4.
+- B7 13.1 s against 13.7 and 14.4.
+
+Each makes one request fewer to the landing than base would, and B5 and B7 make two fewer. Nothing regressed. These are not verdicts (the architect's ruling).
+
+**(b), B3, the re-measure** (n=11 each, interleaved, the round's first arm alternating, every repetition valid), verdict by parse.py's rule unchanged:
+
+| Arm | Landed s, median [q1..q3] (min..max) | Requests to the landing | First byte s | Generation s | Thinking tokens | Output tokens | Context at the first request | Last landing s | Turn end s |
+|---|---|---|---|---|---|---|---|---|---|
+| MAWS (attach) | 19.05 [16.19..20.47] (14.13..28.66) | 1 | 0.87 | 16.8 | 1771 | 2146 | 32,107 | 19.05 | 23.3 |
+| Desktop Code | 25.19 [23.87..31.10] (12.95..37.21) | 3 | 6.46 | 15.3 | 1249 | 2444 | 63,405 | 34.45 | 45.0 |
+
+The result:
+- **Parity: MAWS/Desktop 0.756**, with a 95 % bootstrap interval of 0.53 to 0.835 and 0 % of resamples above 1.2.
+- To the turn's last landing, MAWS is at 0.553, and to the turn's end at 0.517.
+- MAWS's thinking still runs above Desktop's on its one request; the levers removed the requests around it.
+- The engine host attaches the reads before it writes the frame, which happens before the engine's send record, so that time is outside the measure. It is the read tool's own time, about 20 ms (A1's artifact_read spans); the journal does not separate it.
+
+**Spend.** MAWS by the engine's cost state:
+- (a) US$11.70 (base B3 US$3.13, alwaysLoad B3 US$2.83, attach B3 US$2.58, B1, B5 and B7 US$3.17).
+- The shakedowns US$0.37.
+- (b) US$2.59.
+
+Desktop's 11 Code repetitions are quota on the owner's plan, and their API equivalent is not computed here. The replays cost US$13.74.
+
+**What the runs made in the owner's account:** 11 Code sessions in Desktop's "MAWS parity bench" folder, all titled by Desktop "Warmer introduction in doc.md". Nothing was deleted (Decision Log 62: the bench items stay). Each repetition also left a backup copy of doc.md that Desktop's model made in /tmp on the mini, such as /tmp/doc.md.orig-c0e66f25.
+
+**What changed in the driver against the live tree (21:12Z):**
+- The Code tab's New now reads "버튼 새로 만들기".
+- The folder pop-up has no "Description:" while no folder is chosen.
+
+Both were patched in the hold and are fixed in the driver with their lines in driver_labels_test.mjs. `bench.probe({save})` could not write under /tmp/maws-parity-bench: the cua agent got EPERM there, so a residue row.
+
 ## Review
 
 Round 1, doperpowers:reviewer-medium over 7c5248920..b96347122: incorrect, with one P1 and five P2s. All six were real and are fixed (b87dab600, 058b8b22e):
@@ -131,4 +202,10 @@ Round 4, the last one for lever 2 (the architect's rule), over a88b5ea82..6c2fc5
 
 ## Outcomes & Retrospective
 
-(At the hand-back.)
+B3, the one task A1 judged Desktop faster on, is at parity on A1's harness: 0.756, against the record's 1.273. P4's close criterion under Decision Log 17 is met for it.
+
+Two levers did it. Both make MAWS faster for the owner on their real path, link an artifact and ask, rather than changing the measure:
+- the edit tools always loaded;
+- the linked artifact's read sent with the message.
+
+The thinking gap is a property of the model's strategy on an artifact it cannot measure with a tool. It stays, and is recorded as a tracker row. Four review rounds took the linked read's lifecycle through the stop, the edit, the exit and the publish base. What they left is in the residue rows.
