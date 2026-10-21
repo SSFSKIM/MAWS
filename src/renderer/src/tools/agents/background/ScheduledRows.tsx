@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { formatClock, formatShortDate, formatWeekdayClock } from '../../../app/date-format';
+import { formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { useTranscriptStore } from '../../../transcript';
 import { cellId } from '../../../transcript/model/keys';
 import { SCHEDULED_COPY } from '../copy';

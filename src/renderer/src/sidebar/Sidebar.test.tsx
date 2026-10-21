@@ -25,7 +25,7 @@ import { useResumeChooser } from '../resume/host'; // P2-D
 import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { revealProject } from './reveal';
 import { Sidebar } from './Sidebar';
-import { formatClock } from '../app/date-format'; // L129
+import { formatClock } from '@shared/app/date-format'; // L129
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;

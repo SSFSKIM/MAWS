@@ -4,7 +4,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { project, record } from '../../../../test/support/builders';
-import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '../app/date-format';
+import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { chooserGroups, chooserRows, folderBadge, groupOf, initialToggles, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput } from './model';
 
 const P = project('p', 0, { name: 'maws' });

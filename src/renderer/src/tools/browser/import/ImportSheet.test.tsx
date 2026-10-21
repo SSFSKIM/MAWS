@@ -16,7 +16,7 @@ import { CHROME, DISABLED_ID, DONE, FAILS_ID, IMPORT_ID, importBridge, INSPECTIO
 import { IMPORT_COPY } from './copy';
 import { ImportSheet } from './ImportSheet';
 import { browserImport, connectBrowserImport, openImport, resetBrowserImport, showReport } from './store';
-import { formatDate } from '../../../app/date-format';
+import { formatDate } from '@shared/app/date-format';
 
 let b: ImportBridge;
 let disconnect = () => {};

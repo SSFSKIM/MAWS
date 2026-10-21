@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Delivery, LogEvent, Raised, Settled } from 'desk-hub/protocol';
-import { dateFormats } from '../../../../../src/renderer/src/app/date-format';
+import { dateFormats } from '@shared/app/date-format';
 import { VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';

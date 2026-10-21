@@ -11,7 +11,7 @@
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '../app/date-format';
+import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { lastActivity } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title';

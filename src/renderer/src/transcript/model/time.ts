@@ -1,7 +1,7 @@
 // Durations and time separators (C6 execution document, Copy and *Time separators* under Derivation). Separator labels
 // depend on "now", the locale and the time zone, so they are configurable: the app leaves the defaults, the snapshot
 // suite pins all three so a snapshot never depends on the machine that took it.
-import { dateFormats } from '../../app/date-format';
+import { dateFormats } from '@shared/app/date-format';
 
 export interface TimeConfig {
   now: string; // ISO-8601

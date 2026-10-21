@@ -6,7 +6,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
-import { dateFormats, formatAgo } from '../app/date-format';
+import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title'; // E3

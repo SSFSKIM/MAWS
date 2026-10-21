@@ -13,7 +13,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
-import { dateFormats, formatClock } from '../../../../../src/renderer/src/app/date-format';
+import { dateFormats, formatClock } from '@shared/app/date-format';
 import { askModAnswers } from '../../../../../src/renderer/src/transcript/model/ask-mod';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
