@@ -22,7 +22,7 @@ MAWS already has a stronger explicit supervision contract than a completion-card
 
 ### Acquisition
 
-`acquire chatgpt --latest` downloaded and extracted 26.1016.51333 into the toolchain’s own tree. `all` completed with **15,743 conversion records and zero failures**. The app was not installed, updated or launched. A subsequent read of `/Applications/ChatGPT.app/Contents/Info.plist` still reported **26.1013.40934**. No GUI was used and no account rollout state was inspected.
+`acquire chatgpt --latest` downloaded and extracted 26.1016.51333 into the toolchain’s own tree. `all` completed with **15,743 conversion records and zero failures**. The app was not installed, updated or launched. A read of `/Applications/ChatGPT.app/Contents/Info.plist` during this pass still reported **26.1013.40934**; the owner's app updated itself to 26.1016.51333 later that day. No GUI was used and no account rollout state was inspected.
 
 The endpoint’s [BUILD.json](/Users/new/codex-app-src/extracted/chatgpt-26.1016.51333/BUILD.json) records runtime `0.0.33/20261020111233-d92591792fee`, publication at **2026-10-21 02:19:19 UTC**, and app.asar SHA-256 `9d0260dd37f9c45546d5a89d9d782b8362c9957b70b992e2c3f91df60a046b07`. Its Electron field is null; this read does not substitute a guessed Electron version.
 
@@ -236,7 +236,7 @@ Evidence: baseline [26.928.40906, presentation-panel-80ed85a47fff.js:9338](/User
 
 **Availability:** conditional on an editable presentation; no new interaction-path gate established.
 
-**MAWS:** preserve B2’s approved Canva/select-first design and real-Mac S-IME proof. Codex’s “armed” variable is a selection bookmark; it is not evidence of MAWS’s already-mounted, focused editable ARMED state or an intact first Hangul syllable. No distinct new design-board interaction model was established; shared inspector code is not proof of one.
+**MAWS:** preserve B2’s approved select-first design and its IME arrangement. Codex’s “armed” variable is a selection bookmark; it is not evidence of MAWS’s already-mounted, focused editable ARMED state or an intact first Hangul syllable. No distinct new design-board interaction model was established; shared inspector code is not proof of one.
 
 ## 7. Settings, onboarding and new browser surfaces
 
@@ -299,7 +299,7 @@ Other latest catalog leads include browser password-manager setup and biometric 
 
 ## 9. Verification and remaining limits
 
-- Latest acquisition and all stages completed; 51333 has zero failed conversions. The installed app remains 40934.
+- Latest acquisition and all stages completed; 51333 has zero failed conversions. The installed app read 40934 during this pass and has since updated itself to 51333.
 - Required point-release digests and complete-endpoint digests exist outside MAWS. No vendor source was added to the repository.
 - Behavioral findings were traced to components/controllers and compared with baseline implementations; catalog strings were only discovery leads. Lower-ranked untraced surfaces are explicitly excluded above.
 - No GUI, native-input, owner-account gate check, live service mutation, engine probe or performance test was performed. Source evidence cannot close LC-3 or B2’s S-IME check.
