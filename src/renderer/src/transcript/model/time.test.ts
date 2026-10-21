@@ -29,7 +29,7 @@ describe('time separators', () => {
   });
 
   it('labels today, yesterday, a weekday within six days, else the date, each followed by the time', () => {
-    configureTime({ now: NOW, locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: NOW, timeZone: 'UTC' });
     expect(separatorLabel('2026-09-28T01:12:00.000Z')).toBe('Today 1:12 AM');
     expect(separatorLabel('2026-09-27T23:45:00.000Z')).toBe('Yesterday 11:45 PM');
     expect(separatorLabel('2026-09-24T09:05:00.000Z')).toBe('Thursday 9:05 AM'); // four days back
@@ -42,7 +42,7 @@ describe('time separators', () => {
   // formatters: building four per label cost about 12 ms per flatten of synthetic/500, several times in one frame when
   // receipts mount (M6 profile).
   it('reuses its formatters across labels', () => {
-    configureTime({ now: NOW, locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: NOW, timeZone: 'UTC' });
     separatorLabel('2026-09-28T01:12:00.000Z'); // warm
     const spy = vi.spyOn(Intl, 'DateTimeFormat');
     for (let i = 0; i < 500; i += 1) separatorLabel(new Date(Date.parse('2026-09-20T00:00:00.000Z') + i * 1_800_000).toISOString());
@@ -50,27 +50,35 @@ describe('time separators', () => {
     spy.mockRestore();
   });
 
-  it('labels afresh when the clock, the zone or the locale changes', () => {
+  it('labels afresh when the clock or the zone changes', () => {
     const at = '2026-09-28T14:30:00.000Z';
-    configureTime({ now: NOW, locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: NOW, timeZone: 'UTC' });
     expect(separatorLabel(at)).toBe('Today 2:30 PM');
-    configureTime({ now: '2026-09-29T15:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-09-29T15:00:00.000Z', timeZone: 'UTC' });
     expect(separatorLabel(at)).toBe('Yesterday 2:30 PM');
-    configureTime({ now: NOW, locale: 'en-US', timeZone: 'Asia/Seoul' });
+    configureTime({ now: NOW, timeZone: 'Asia/Seoul' });
     expect(separatorLabel(at)).toBe('Yesterday 11:30 PM');
-    configureTime({ now: NOW, locale: 'en-GB', timeZone: 'UTC' });
-    expect(separatorLabel(at)).toBe('Today 14:30');
   });
 
-  // D2 widened (P2-F wave S): the day words follow the locale like the weekday and the date beside them.
-  it('writes today and yesterday in the locale', () => {
-    configureTime({ now: NOW, locale: 'ko-KR', timeZone: 'UTC' });
-    expect(separatorLabel('2026-09-28T01:12:00.000Z')).toMatch(/^오늘 \S+ 1:12$/);
-    expect(separatorLabel('2026-09-27T23:45:00.000Z')).toMatch(/^어제 \S+ 11:45$/);
+  // English throughout (P4 Decision Log 4): this suite runs under the owner's Korean system locale (vitest.config.ts),
+  // and the app's own clock and zone, unconfigured, still write the day, the weekday, the date and the time in English.
+  it('writes its words in English under a Korean system locale', () => {
+    expect(new Intl.DateTimeFormat().resolvedOptions().locale).toBe('ko-KR');
+    vi.useFakeTimers({ now: new Date(2026, 8, 28, 15, 0) }); // a Monday, local
+    try {
+      const local = (...parts: [number, number, number, number, number]) => new Date(...parts).toISOString();
+      const plain = (s: string) => s.replace(/\s/g, ' ');
+      expect(plain(separatorLabel(local(2026, 8, 28, 1, 12)))).toBe('Today 1:12 AM');
+      expect(plain(separatorLabel(local(2026, 8, 27, 23, 45)))).toBe('Yesterday 11:45 PM');
+      expect(plain(separatorLabel(local(2026, 8, 25, 9, 5)))).toBe('Friday 9:05 AM');
+      expect(plain(separatorLabel(local(2026, 7, 29, 18, 30)))).toBe('Aug 29, 2026 6:30 PM');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('follows the configured time zone for the day boundary', () => {
-    configureTime({ now: NOW, locale: 'en-US', timeZone: 'Asia/Seoul' }); // 2026-09-29 00:00 KST
+    configureTime({ now: NOW, timeZone: 'Asia/Seoul' }); // 2026-09-29 00:00 KST
     expect(separatorLabel('2026-09-28T15:30:00.000Z')).toBe('Today 12:30 AM');
     expect(separatorLabel('2026-09-28T14:30:00.000Z')).toBe('Yesterday 11:30 PM');
   });

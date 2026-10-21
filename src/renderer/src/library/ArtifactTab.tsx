@@ -18,7 +18,7 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { panelInMain } from '../app/regions';
 import { useNow } from '../app/use-now';
 import { holdArtifactEditorState, releaseArtifactEditorState, useArtifactEditor, useHeldArtifactEditorState, type RegisteredArtifactEditor } from '../artifacts/registry';

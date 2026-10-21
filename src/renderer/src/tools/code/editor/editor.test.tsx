@@ -291,6 +291,161 @@ describe('editor', () => {
       expect(theirsNotice()).toBeNull();
     });
 
+    // P4 W2-C (tracker 2026-10-06, E5): the disk back at the baseline holds no theirs any more, so the merge view's save
+    // sends the baseline's hash and lands, rather than conflicting once more first
+    it('withdraws theirs when the disk returns to the baseline under unsaved edits; the next save lands at once', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      fireEvent.click(await screen.findByRole('button', { name: 'Compare' }));
+      await waitFor(() => expect(entry().theirs?.view).toBe('merge'));
+      disk.files[APP] = 'const a = 1;\n'; // undone on disk
+      changed(disk);
+      await waitFor(() => expect(entry().theirs).toBeNull());
+      expect(theirsNotice()).toBeNull();
+      expect(entry()).toMatchObject({ dirty: true, hash: fakeHash('const a = 1;\n'), diskUnusable: null });
+      expect(doc()).toBe('// mine\nconst a = 1;\n');
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n'));
+      expect(disk.callsOf('files.write').map((input) => input.expectedHash)).toEqual([fakeHash('const a = 1;\n')]);
+      await waitFor(() => expect(entry()).toMatchObject({ theirs: null, dirty: false, saving: false }));
+    });
+
+    it('lands nothing from a save’s conflict read that a newer change read overtook', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 3;\n'; // no event: the save conflicts and reads the file whole
+      const conflictRead = disk.hold('files.read');
+      const reads = disk.callsOf('files.read').length;
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(reads + 1)); // answered with 3 once released
+      disk.files[APP] = 'const a = 1;\n'; // back to the baseline, and its event's read answers first
+      changed(disk);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(reads + 2));
+      await settle();
+      await act(async () => conflictRead.release());
+      await settle();
+      expect(entry()).toMatchObject({ theirs: null, saving: false, dirty: true, hash: fakeHash('const a = 1;\n') });
+      expect(theirsNotice()).toBeNull();
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n'));
+    });
+
+    // the ordering that makes withdrawing theirs safe: a change read issued before a save's conflict read and answered
+    // after it (the baseline, read before the disk moved on) is older than the conflict read and lands nothing
+    it('lands nothing from a change read older than a save’s conflict read, so the conflict’s theirs stands', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      const read = disk.hold('files.read');
+      changed(disk); // spurious, answered with the baseline once released
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+      disk.files[APP] = 'const a = 3;\n'; // no event yet
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(entry().theirs).toEqual({ text: 'const a = 3;\n', hash: fakeHash('const a = 3;\n'), view: 'merge' }));
+      await act(async () => read.release());
+      await settle();
+      expect(entry()).toMatchObject({ theirs: { hash: fakeHash('const a = 3;\n'), view: 'merge' }, saving: false, dirty: true });
+    });
+
+    // the review (P4 W2-C): a conflict answering the theirs already shown reads the disk too, and its read supersedes the
+    // loads in flight, so an older read of the baseline cannot withdraw theirs while the disk still holds it
+    it('lands nothing from a change read older than a save’s conflict with the theirs already shown', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(entry().theirs).toEqual({ text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'notice' }));
+      disk.files[APP] = 'const a = 1;\n'; // back to the baseline: its event's read answers the baseline once released
+      const read = disk.hold('files.read');
+      const reads = disk.callsOf('files.read').length;
+      changed(disk);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(reads + 1));
+      disk.files[APP] = 'const a = 2;\n'; // and theirs again, its event not yet come
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(entry()).toMatchObject({ theirs: { hash: fakeHash('const a = 2;\n'), view: 'merge' }, saving: false }));
+      expect(disk.callsOf('files.read')).toHaveLength(reads + 2); // the conflict's own read, answered with theirs
+      await act(async () => read.release());
+      await settle();
+      expect(entry()).toMatchObject({ theirs: { text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge' }, dirty: true, hash: fakeHash('const a = 1;\n') });
+    });
+
+    // review round 2 (P4 W2-C): a conflict reply can describe an older disk than a change read in flight, so the conflict
+    // reads the disk itself rather than taking the theirs shown as current; this read is the newest and says the disk is
+    // back at the baseline
+    it('withdraws theirs when a save conflicts with the theirs shown but the disk has returned to the baseline meanwhile', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(entry().theirs).toEqual({ text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'notice' }));
+      const write = disk.hold('files.write');
+      fireEvent.click(saveButton()!); // sent with the baseline's hash: the disk answers conflict(2), held
+      await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+      disk.files[APP] = 'const a = 1;\n'; // back to the baseline; its event's read answers the baseline, held
+      const read = disk.hold('files.read');
+      const reads = disk.callsOf('files.read').length;
+      changed(disk);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(reads + 1));
+      await act(async () => write.release());
+      await waitFor(() => expect(entry().saving).toBe(false));
+      await act(async () => read.release());
+      await settle();
+      expect(entry()).toMatchObject({ theirs: null, saving: false, dirty: true, hash: fakeHash('const a = 1;\n') });
+      expect(theirsNotice()).toBeNull();
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n'));
+      expect(disk.callsOf('files.write').map((input) => input.expectedHash)).toEqual([fakeHash('const a = 1;\n'), fakeHash('const a = 1;\n')]);
+    });
+
+    it('reads the disk into the merge view when a save conflicts with the theirs already shown', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      const reads = disk.callsOf('files.read').length;
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(entry()).toMatchObject({ theirs: { text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge' }, saving: false }));
+      expect(disk.callsOf('files.read')).toHaveLength(reads + 1);
+      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
+    });
+
+    it('withdraws theirs when a save’s conflict read finds the disk back at the baseline; the next save lands', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 3;\n'; // no event: the save conflicts with 3, its reply held
+      const write = disk.hold('files.write');
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+      disk.files[APP] = 'const a = 1;\n'; // back to the baseline before the conflict reads the file
+      await act(async () => write.release());
+      await waitFor(() => expect(entry().saving).toBe(false));
+      expect(entry()).toMatchObject({ theirs: null, dirty: true, hash: fakeHash('const a = 1;\n') }); // not the baseline offered as theirs
+      expect(theirsNotice()).toBeNull();
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n'));
+      expect(disk.callsOf('files.write')).toHaveLength(2);
+    });
+
+    // round 3: the disk an earlier read found unusable is the baseline again by the conflict read, so the bar's "cannot
+    // be merged" goes with theirs
+    it('drops the bar’s unusable disk when a save’s conflict read finds the disk back at the baseline', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = { text: 'caf�\n', bytes: 5, utf8: false };
+      changed(disk);
+      await waitFor(() => expect(entry().diskUnusable).toBe('encoding'));
+      const write = disk.hold('files.write'); // the save conflicts with the non-UTF-8 disk, its reply held
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+      disk.files[APP] = 'const a = 1;\n'; // back to the baseline, no event: the conflict read is what answers
+      await act(async () => write.release());
+      await waitFor(() => expect(entry().saving).toBe(false));
+      expect(entry()).toMatchObject({ theirs: null, diskUnusable: null, dirty: true, hash: fakeHash('const a = 1;\n') });
+      expect(document.querySelector('[data-disk-unusable]')).toBeNull();
+    });
+
     it('lands a change read issued while clean and answered after an edit as theirs, the edit standing', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       disk.files[APP] = 'const a = 2;\n';

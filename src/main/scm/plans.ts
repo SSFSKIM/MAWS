@@ -56,7 +56,7 @@ export interface IssuedPlan {
   plan: RemotePlan;
   basis: PlanBasis;
   appSessionId: AppSessionId;
-  key: string; // the checkout's realpath
+  key: string; // the checkout's key: its worktree's top level (ScmService.keysOf)
   expiresAtMs: number;
 }
 

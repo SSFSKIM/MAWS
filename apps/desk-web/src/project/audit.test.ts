@@ -1,7 +1,7 @@
 // The project's audit record as the owner reads it: the hub replays it on every connect, so each line names when and
 // about which machine, and a stream's `not-open` handshake, which its uplink heals by itself, is not shown as a refusal.
 import { describe, expect, it } from 'vitest';
-import { dateFormats } from '../../../../src/renderer/src/app/date-format';
+import { dateFormats } from '@shared/app/date-format';
 import { auditText, auditWhen, shownAudit } from './audit';
 import type { AuditItem } from './connection';
 

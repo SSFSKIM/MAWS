@@ -5,7 +5,7 @@
 // while folded only, as `UserRow` measures it: again whenever the content's size changes (the column narrowing or
 // widening, the text rewrapping), so "Show more" follows the bubble's width.
 import { useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from 'react';
-import { formatClock } from '../../../../../src/renderer/src/app/date-format';
+import { formatClock } from '@shared/app/date-format';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
 
 /** Per-row copy, as MAWS's rows do it: the page may use the clipboard on a user gesture. */

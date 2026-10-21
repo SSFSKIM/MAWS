@@ -7,7 +7,7 @@
 // uplink heals by itself, by sending hello again, about nothing the owner sent and with nothing for them to do. The hub
 // keeps it in its record; the replay brought every one ever recorded back as a fresh failure (the owner's desk,
 // 2026-10-19: three of them read as a Resume's errors).
-import { dateFormats, type DateFormats } from '../../../../src/renderer/src/app/date-format';
+import { dateFormats, type DateFormats } from '@shared/app/date-format';
 import { byWhom } from '../conversation/stream';
 import type { AuditItem } from './connection';
 

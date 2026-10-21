@@ -20,12 +20,17 @@
 // slower there (de71da97a 17.0 on 10-19, 22.4 after a reboot on 10-20; the cause survived restarts, Chrome, System
 // Settings and Docker quit, and renderer accessibility is off), so `1 p95` ≤ 28 ms (clean runs on 10-20 read 20.3 to
 // 26.6) and `2 p95` ≤ 58 ms (Event Timing's 8 ms grain puts it at 48 or 56).
+// Each test's first measured trial waits, after its launch and setup, for the measured specs' shared quiet admission
+// (support/quiet.ts: the 1-minute load under 5 on two reads 30 s apart, at most three minutes; on its expiry the trials
+// run and are judged as above), recorded in its results as `quiet` (`quietHidden` for the margin's control, `quietSigkill`
+// for row 11).
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { prng, seedDocument, type SeedStats } from './support/document-seed';
 import { keystrokes } from './support/hangul';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { quietWait } from './support/quiet';
 import {
   Agent,
   armHistory,
@@ -363,6 +368,7 @@ async function marginWorkload(hidden: boolean): Promise<void> {
   // the streaming layer in a block two sections under the caret (P4-B1: fed alongside the typing below, `streamWhile`)
   const streamBlock = `s${STREAM_SECTION}p3`;
   const layer: { streamed: Streamed | null } = { streamed: null }; // set by the typing step
+  await admitted(rows, hidden ? 'quietHidden' : 'quiet');
 
   await test.step(`${R}: typing in A with the margin ${hidden ? 'hidden' : 'open'}, two agents writing, the layer growing`, async () => {
     const { clientID } = await instrumentTyping(page, id);
@@ -442,6 +448,13 @@ async function marginWorkload(hidden: boolean): Promise<void> {
   judged(rows, hidden ? 'marginalHidden' : 'marginal');
 }
 
+/** A test's first measured trial's admission (support/quiet.ts), after its launch and setup: logged, and kept under `key`. */
+async function admitted(rows: Rows, key: 'quiet' | 'quietHidden' | 'quietSigkill'): Promise<void> {
+  const admission = await quietWait();
+  console.log(`[document scale] the first trial's admission (${key}): ${admission.summary}`);
+  rows.write({ [key]: admission });
+}
+
 // The run passes when no row failed (Decision Log 44's reading of the parent's Decision Log 54): a marginal row is listed
 // for P3-F's re-measure, in the output and in the results' `marginal`, and does not fail the run.
 function judged(rows: Rows, key: 'marginal' | 'marginalSigkill' | 'marginalHidden' /* P4-B1's follow-up */): void {
@@ -471,6 +484,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   await sleep(UNLOAD_WAIT_MS);
   const idle1 = await seam.heap();
   rows.write({ heap: { idle0: MB(idle0.heapUsed), idleWarmAfterUnload: MB(idle1.heapUsed) } });
+  await admitted(rows, 'quiet');
 
   await test.step('6: first sync to interactive, cold and warm, at 20 and at 200 pages', async () => {
     const small20 = small.stats.topBlocks - 5;
@@ -672,6 +686,7 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
   await openTimed(pageB, id, 'Scale 200', large.stats.topBlocks - 20);
   const agents = agentsFor();
   for (const agent of agents) await readAll(seam, agent, id);
+  await admitted(rows, 'quietSigkill');
   await instrumentTyping(page, id);
   await caretAtEnd(page, id, `s${TYPING_SECTION}p2`);
   const before = (await blockText(page, id, `s${TYPING_SECTION}p2`))!;
@@ -809,6 +824,7 @@ test('5r: the first batch after a read, repeated in one launch (MAWS_DOCUMENT_RE
   const sections = [...Array(SECTIONS).keys()].filter((s) => !KEPT_CLEAR(s) && s % 2 === 0); // perf-agent-1's (agentsFor)
   type Round = { round: number; max: number; wallMs: number; readMax: number; load: number; background?: CallBackground; refused?: string };
   const rounds: Round[] = [];
+  await admitted(rows, 'quiet');
   for (let round = 1; round <= REPEAT; round++) {
     await sleep(1_500 + Math.random() * 1_500);
     const agent = new Agent(`perf-repeat-${round}`, sections, prng(100 + round));

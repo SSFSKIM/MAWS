@@ -7,7 +7,7 @@
 import type { KeyboardEvent, MouseEvent } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import type { LibraryRow, LibrarySession } from '@shared/ipc/schema/library';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { PinIcon } from '../app/IconButton';
 import { useNow } from '../app/use-now';
 import { useLayout } from '../stores/layout';

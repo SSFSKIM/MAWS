@@ -51,7 +51,7 @@ describe('elapsed', () => {
   });
 
   it('formats how long ago an agent ended', () => {
-    // compact, in the system locale (3m ago, 3분 전)
+    // compact, in English (3m ago)
     expect(formatAgo(40_000)).toBe(REL.now);
     expect(formatAgo(180_000)).toBe(REL.agoNarrow(3, 'minute'));
     expect(formatAgo(2 * 3_600_000 + 5)).toBe(REL.agoNarrow(2, 'hour'));

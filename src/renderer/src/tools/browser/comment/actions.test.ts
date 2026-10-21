@@ -14,6 +14,9 @@ import { installFakeMain, ok } from '../../../test-support/code';
 import { A, B, C, panelOf, resetPanelStores } from '../../../test-support/panel';
 import { browserTab, T1 } from '../../../test-support/browser';
 import { browserTool } from '../BrowserTool';
+import { noticeText } from '../chrome/Notices';
+import { coverPane, resetCovering } from '../covering';
+import { browser, resetBrowser } from '../store';
 import { browserSessionOf, openBrowserUrl } from './actions';
 import { COMMENT_COPY } from './copy';
 
@@ -85,5 +88,51 @@ describe('openBrowserUrl', () => {
     expect(main.callsOf('browser.tabs.open')).toEqual([]);
     expect(browserTabs(A)).toEqual([]);
     expect(toasts()).toEqual([COMMENT_COPY.cannotOpen(url)]);
+  });
+});
+
+// P4 W2-C (tracker 2026-10-07; E4a Decision Log 28, A-47): an app toast over a browser pane on screen freezes the pane to
+// its placeholder for the toast's life, so while one is on screen the line goes into a browser's chrome instead
+describe('openBrowserUrl beside a browser on screen', () => {
+  const RECT = { x: 0, y: 0, width: 300, height: 200 };
+  const lines = () => browser.getState().notices.map(({ appSessionId, tabId, kind, name }) => ({ appSessionId, tabId, kind, name }));
+  beforeEach(() => {
+    resetCovering();
+    resetBrowser();
+  });
+  afterEach(() => {
+    resetCovering();
+    resetBrowser();
+  });
+
+  it('says a URL the browser refuses in the shown session’s chrome, and raises no toast', () => {
+    coverPane(() => RECT, A);
+    openBrowserUrl(A, 'javascript:alert(1)');
+    expect(main.callsOf('browser.tabs.open')).toEqual([]);
+    expect(lines()).toEqual([{ appSessionId: A, tabId: null, kind: 'commentCannotOpen', name: 'javascript:alert(1)' }]);
+    expect(toasts()).toEqual([]);
+    expect(noticeText({ kind: 'commentCannotOpen', name: 'javascript:alert(1)' })).toBe(COMMENT_COPY.cannotOpen('javascript:alert(1)'));
+  });
+
+  it('says where a page opened in the chrome on screen, the shown session’s before another’s', () => {
+    const other = coverPane(() => RECT, B);
+    const shown = coverPane(() => RECT, A);
+    openBrowserUrl(C, URL);
+    expect(browserTabs(C)).toHaveLength(1);
+    expect(lines()).toEqual([{ appSessionId: A, tabId: null, kind: 'commentOpenedElsewhere', name: C }]);
+    shown.release();
+    openBrowserUrl(C, URL);
+    expect(lines().at(-1)).toEqual({ appSessionId: B, tabId: null, kind: 'commentOpenedElsewhere', name: C }); // another session's main tab
+    other.release();
+    expect(toasts()).toEqual([]);
+    expect(noticeText({ kind: 'commentOpenedElsewhere', name: C })).toBe(COMMENT_COPY.openedElsewhere(C));
+  });
+
+  it('keeps the toast while no pane owns its view, a mounted one in a hidden panel included', () => {
+    coverPane(() => null, A);
+    openBrowserUrl(C, URL);
+    openBrowserUrl(A, 'not a url');
+    expect(lines()).toEqual([]);
+    expect(toasts()).toEqual([COMMENT_COPY.openedElsewhere(C), COMMENT_COPY.cannotOpen('not a url')]);
   });
 });

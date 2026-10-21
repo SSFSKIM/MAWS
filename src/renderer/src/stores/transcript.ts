@@ -489,3 +489,9 @@ export function createTranscriptStore() {
 }
 
 export const useTranscriptStore = createTranscriptStore();
+
+// Development only: a hot update of this module, or of one it imports (transcript/model/ propagates here), would make a
+// second store that the mounted transcript never reads, so the page reloads instead (main's window guard lets the dev
+// server's page reload itself: `guardWindowNavigation`). Keeping the store through `import.meta.hot.data` would not do:
+// the kept store's closures read the old module's imports. Builds drop this line.
+import.meta.hot?.accept(() => location.reload());

@@ -378,7 +378,7 @@ describe('receipts aggregate successful edits only', () => {
 
 describe('time separators', () => {
   it('separate human turns after an hour and engine turns after ten minutes, labelled', () => {
-    configureTime({ now: '2026-09-28T15:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-09-28T15:00:00.000Z', timeZone: 'UTC' });
     const b = builder('2026-09-28T10:00:00.000Z');
     b.turn('u1');
     b.text('m1', 0, 'One');

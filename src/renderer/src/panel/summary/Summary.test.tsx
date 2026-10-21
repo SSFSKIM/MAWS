@@ -127,6 +127,8 @@ describe('summary card', () => {
     const push = section('Push state');
     expect(within(push).getByText('1 ahead of origin/main')).toBeTruthy();
     await waitFor(() => expect(within(push).getByTestId('pr-line').textContent).toBe('No PR for main')); // E6: the row's second line, once main's two reads answer
+    // when the state was read, in English under the Korean system locale the suite runs in (P4 Decision Log 4)
+    expect(within(push).getByRole('button', { name: 'Refresh PR state' }).getAttribute('title')).toMatch(/^Checked \d{1,2}:\d{2}\s[AP]M$/);
     await user.click(within(push).getByRole('button', { name: 'Open on GitHub' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://github.com/o/maws/tree/main' }]);
   });

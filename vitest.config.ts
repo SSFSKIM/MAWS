@@ -53,12 +53,20 @@ const ARTIFACTS_DOM_CSS = { include: [/\/document\/editor\/.+\.css/, /\/renderer
 // silences it); every other warning passes through.
 const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts'];
 
+// P4 Decision Log 4 (English throughout): the suites of the code that writes what the owner reads (the renderer, the
+// artifacts, and main's and the host's display words in DISPLAY_NODE_TESTS) run under the owner's Korean system locale,
+// so every age, date and time they expect in English is shown to be English whatever the machine's locale. Node's Intl
+// default is read from LC_ALL, then LANG, when a worker starts, so it is set in the workers' environment; the rest of
+// the node suites keep the machine's, their child processes (git, the shells) writing as they always have.
+const OWNER_LOCALE = { LC_ALL: 'ko_KR.UTF-8', LANG: 'ko_KR.UTF-8' };
+const DISPLAY_NODE_TESTS = ['src/shared/app/*.test.ts', 'src/engine-host/documents/restore.test.ts'];
+
 // A project under the React Compiler as electron-vite builds the app, over happy-dom (C8a; the `renderer-compiled`
 // projects), each with its own plugin instance.
 const compiled = (test: { name: string; include: string[]; exclude?: string[]; testTimeout?: number; hookTimeout?: number; css?: typeof ARTIFACTS_DOM_CSS }) => ({
   resolve: { alias },
   plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
-  test: { environment: 'happy-dom' as const, env: { MAWS_REACT_COMPILER: '1' }, setupFiles: HAPPY_DOM_SETUP, ...test },
+  test: { environment: 'happy-dom' as const, env: { MAWS_REACT_COMPILER: '1', ...OWNER_LOCALE }, setupFiles: HAPPY_DOM_SETUP, ...test },
 });
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
@@ -106,13 +114,14 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS],
-          exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
+          exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS, ...DISPLAY_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
           // The compile-time suites (`src/**/*.test-d.ts`) are checked by `pnpm typecheck` alone, tsconfig.node.json
           // including them; a second pass here only re-checked them (gate-offload Decision Log 35, P5).
         },
       },
       { resolve: { alias }, test: { name: 'node-timing', environment: 'node', include: TIMING_NODE_TESTS, ...TIMING_TIMEOUTS } },
+      { resolve: { alias }, test: { name: 'node-display', environment: 'node', include: DISPLAY_NODE_TESTS, env: OWNER_LOCALE } }, // P4-W2L
       {
         resolve: { alias },
         test: {
@@ -121,16 +130,17 @@ export default defineConfig({
           include: ['src/renderer/**/*.test.{ts,tsx}', 'src/main/artifacts/*.dom.test.tsx'],
           exclude: [...configDefaults.exclude, RENDERER_NODE_TESTS, ...TIMING_RENDERER_TESTS],
           setupFiles: HAPPY_DOM_SETUP,
+          env: OWNER_LOCALE, // P4-W2L
         },
       },
-      { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, setupFiles: HAPPY_DOM_SETUP, ...TIMING_TIMEOUTS } },
+      { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, setupFiles: HAPPY_DOM_SETUP, env: OWNER_LOCALE, ...TIMING_TIMEOUTS } },
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
       // P3-B M6: `css` reads the editor's stylesheets as text, so the HTML export (run in main, tested here under Node)
       // inlines theme.css rather than the blank vitest gives a `.css?raw` import outside `css.include`.
       // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
-      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/ /* P3-D */] } } }, // P3-B: exclude, css
+      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], env: OWNER_LOCALE /* P4-W2L */, css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/ /* P3-D */] } } }, // P3-B: exclude, css
       // P3-A end
       // P3-B start: the document kind's suites that need a DOM (a real Tiptap editor: UniqueID through split and paste,
       // the editor, comments, history) run under happy-dom; its model, markdown and writer stay in `artifacts` (Node).
@@ -144,6 +154,7 @@ export default defineConfig({
           environment: 'happy-dom',
           include: [ARTIFACTS_DOM_TESTS],
           setupFiles: HAPPY_DOM_SETUP,
+          env: OWNER_LOCALE, // P4-W2L
           css: ARTIFACTS_DOM_CSS, // P3-F F3, P4-B1
         },
       },

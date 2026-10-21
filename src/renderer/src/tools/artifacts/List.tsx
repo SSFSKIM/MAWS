@@ -14,7 +14,7 @@ import { actorDisplay } from '@shared/artifacts/actor';
 import { ARTIFACT_KINDS, type ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
-import { formatAgo } from '../../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { useNow } from '../../app/use-now';
 import { KIND_PLURAL_LABELS, LIBRARY_COPY } from '../../library/copy';
 import { KindIcon } from '../../library/icons';

@@ -1,0 +1,156 @@
+P4-A2P: the launch profile through the launch's own flags
+(docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.2 "The per-session launch profile", acceptance R-7; parent pin blob
+246354256c404b41189c6cbeb67a7c1157a9f0e6 at master 0b7b9eacb; 2026-10-21)
+
+Question (D-1). MAWS applies one launch profile, set in Settings, to every session it launches, and only through that
+launch's own flags: src/shared/engine/launch-profile.ts `profileSettings` puts `enabledPlugins: {<id>: false}` for each
+plugin turned off, `outputStyle: "default"` for style `maws` and `disableAllHooks: true` for hooks `none` into the
+`--settings` JSON beside MAWS's own keys, with `--setting-sources user,project,local` unchanged. Under hooks none MAWS's
+SessionStart group cannot carry its start-time context (contract.ts MESSAGE_TOOL_ALIAS), so the route appends the alias to
+the `--append-system-prompt` text and passes `--system-prompt-snapshot off` whenever a launch reuses a transcript. On the
+engine MAWS launches by default:
+ 1. does a profiled session keep the user scope's model and effort, and load exactly the chosen plugins and style?
+ 2. under hooks none, do the user's hooks and MAWS's group stay silent while the alias still reaches the model at every
+    start (startup, /compact, /clear, a resume, a fork, a resume of a session first recorded under the user scope)? And
+    what does a resume without snapshot off give?
+ 3. does anything under the scratch home change beyond what the engine writes for a session?
+
+Method. scenarios/pass3/p4-a2p-profile.mjs on the owner's installed engine 2.1.306 (PROBE_ENGINE unset), MAWS's launch
+line (engine-host/launch.ts ENGINE_FLAGS, with no `--model`, so the model and the effort come from the user scope) and
+initialize (p1-common). Each arm's `--settings` is `{dialogExpiry, ...profileSettings(profile), env: {MAWS_NATIVE_TO_HUMAN:
+"7"}}`, plus `hooks.SessionStart: [messageToolHookGroup()]` while hooks are kept. The appended text is TO_HUMAN_SUPPLEMENT
+beside the owner's style (doperpowers:to-human, a message-tool style) or TO_HUMAN_CONTRACT under style `maws`, followed by
+"\n\n" + MESSAGE_TOOL_ALIAS under hooks none. Provenance records both whole, and the tests rebuild them from MAWS's own
+modules.
+The scratch config home is seeded from read-only copies, and nothing is written under ~/.claude or ~/.claude.json:
+ - settings.json: the owner's `model` (opus), `effortLevel` (high), the `effortLevel` of each claude-* entry of
+   `modelSettings`, `outputStyle`, `enabledPlugins` limited to the copies, and a probe-owned `hooks` block standing for the
+   user's hooks (exec-form `/usr/bin/printf` of PROBE_USER_HOOK_SessionStart and PROBE_USER_HOOK_UserPromptSubmit as
+   additionalContext);
+ - three of the owner's user-scope plugins copied from ~/.claude/plugins/cache: doperpowers@doperpowers 7.203.0 (the
+   owner's style; a SessionStart, PreCompact and MessageDisplay hook; a hooks module), eli5@claude-community 1.0.0 and
+   designer@designer 2.6.1 (skills only);
+ - installed_plugins.json naming only the copies; known_marketplaces.json with the three marketplaces at the owner's
+   sources without autoUpdate, each marketplace's `.claude-plugin/` copied;
+ - `.claude.json`: p1-common's onboarding and trust, plus the owner's migration flags.
+Every seeded file was made read-only before the first launch. The home was hashed (path, size, sha256, mode) before the
+first launch and after the last. Stub arms ran against stub-api.mjs, where nothing is spent, and recorded every request
+with each place the alias and the two markers appear. Relay arms ran the seeded model through the relay with a recorder
+between. Fixtures fixtures/p4/p4-a2p-*.jsonl, curated: the partial-message stream is dropped and the initialize answer is
+reduced to its keys, names and models. Tests in fixtures.test.mjs ("p4 A2P").
+
+Arms and what each passed (S = TO_HUMAN_SUPPLEMENT, C = TO_HUMAN_CONTRACT, A = MESSAGE_TOOL_ALIAS, G = messageToolHookGroup()):
+  plain        {"dialogExpiry":"never","env":{"MAWS_NATIVE_TO_HUMAN":"7"},"hooks":{"SessionStart":[G]}}            S
+  plugins      {"dialogExpiry":"never","enabledPlugins":{"designer@designer":false,"eli5@claude-community":false},
+                "env":{...},"hooks":{"SessionStart":[G]}}                                                         S
+  style        {"dialogExpiry":"never","outputStyle":"default","env":{...},"hooks":{"SessionStart":[G]}}          C
+  hooks-group  {"dialogExpiry":"never","disableAllHooks":true,"env":{...},"hooks":{"SessionStart":[G]}}         S (the route not taken)
+  hooks        {"dialogExpiry":"never","disableAllHooks":true,"env":{...}}                                       S\n\nA
+               (startup, /compact, a turn, /clear, a turn; then --resume and --fork-session of it with
+               --system-prompt-snapshot off; then --resume of plain's session without "off" (user-kept) and with it (user))
+  full         {"dialogExpiry":"never","enabledPlugins":{...both false},"outputStyle":"default","disableAllHooks":true,
+                "env":{...}}                                                                                      C\n\nA
+  relay-plain, relay-full: plain's and full's flags, one turn asking R7y's QUESTION.
+
+1. The model and the effort are the user scope's under every profile. Every init record of the 12 launches reads model
+   claude-opus-5-5, and get_settings reads `applied` {model: claude-opus-5-5, effort: xhigh}. The effective settings
+   show model opus, effortLevel high and modelSettings["claude-opus-5-5"].effortLevel xhigh. Every main request asked for
+   effort xhigh. The init record has no effort field. A top-level `effortLevel` in the user settings applies to legacy
+   models only (2.1.304 cli.pretty.js:381072, 381132-381139), so this effort is the owner's per-model setting.
+2. The plugins are the user set less the `off` ids. Init `plugins` under the user scope lists doperpowers@doperpowers,
+   eli5@claude-community and designer@designer beside the three built-ins (cc-plugin-agents-md, cc-plugin-telemetry,
+   cc-plugin-plugin-authoring). Under plugins and full it lists doperpowers alone, with the built-ins unchanged.
+   get_settings' effective enabledPlugins reads false for the two, and their skills (eli5:eli5, designer:designer) are
+   absent from every request. `enabledPlugins: false` at flag level removes a plugin the user scope enables.
+3. The style is the chosen one. Init `output_style` reads doperpowers:to-human under the user's style and default under
+   `maws`, as does get_settings' effective outputStyle. The owner's style text reaches the model as the engine's
+   output-style message: an `output_style_instructions` attachment in the messages, not part of the system prompt. It is
+   in every request under the user's style and in none under `maws`, where the appended header is contract 7 instead of
+   supplement 2.
+4. Under the user scope the user's hooks and the plugins' hooks run; under hooks none none does. Under the user scope
+   (plain, plugins, style and relay-plain) the hook frames show three SessionStart:startup responses (the user's printf,
+   MAWS's group, doperpowers' kairos.sh), a UserPromptSubmit and doperpowers' MessageDisplay. The first request carries
+   PROBE_USER_HOOK_SessionStart, PROBE_USER_HOOK_UserPromptSubmit and the alias once each, as hook context in the
+   messages, none of them in the system prompt; doperpowers' hooks module also loads ("tier user"). In all eight hooks-none
+   launches no hook frame arrives at all, including through /compact, so doperpowers' PreCompact hook does not run
+   either. The debug log reads "hooks module doperpowers@doperpowers not loaded: only managed plugins and built-in plugins
+   run (allowManagedHooksOnly / disableAllHooks)" and "Skipping plugin hooks - allowManagedHooksOnly is enabled and no
+   managed plugins". No marker reaches any request of a session begun under hooks none. The plugins' skills, agents and
+   output style still load. get_settings still lists the hooks in effective.hooks.
+5. MAWS's group left in the flag JSON does not run (hooks-group). With `disableAllHooks: true` and
+   `hooks.SessionStart: [G]` in the same `--settings`, no hook frame arrives and the alias is in neither the system
+   prompt nor the messages: the flag JSON's own hooks are dropped with the rest, as the engine code reads.
+6. The route delivers the alias at every start, in the system prompt. Copies of the alias in the system prompt, request
+   by request:
+                     startup  /compact (its own request)  turn after  /clear  turn after
+     hooks              1              1                      1        (none)     1
+     hooks-resume (--resume, snapshot off)      1
+     hooks-fork (--fork-session, snapshot off)  1
+     hooks-user (--resume of plain's user-scope session, snapshot off)  1
+     full, relay-full                           1
+   Each such request carries the exact appended text (the supplement or contract, a blank line, the alias) verbatim, and
+   in a session begun under hooks none the system prompt is the only place the alias appears. The compaction left a
+   boundary; the clear began a new session, which the resume and the fork read. Every prompt snapshot of those sessions
+   carries the alias.
+7. Without snapshot off a resume reuses the recorded system prompt and drops the new append (hooks-user-kept). The
+   request's system prompt is the user-scope session's recorded one: 6,964 characters, as in plain, supplement 2, no
+   alias, and the appended text not present. With "off" (hooks-user) it is 7,153 characters, the difference exactly
+   "\n\n" + the alias (189). In both cases the model still read one copy of the alias from that session's history, its
+   user-scope start's SessionStart context. A launch with snapshot off records no prompt snapshot of its own: after both
+   resumes the session's transcript holds only its first launch's two snapshots, neither with the alias.
+8. On a real model (relay-plain, relay-full; Opus 5.5 at xhigh, the seeded user scope), asked which tool it calls where
+   its instructions name mcp__to-human__message, both answered `<message>mcp__maws__message</message>`. Under the user
+   scope the alias came through MAWS's group, in the messages, with no copy in the system prompt. Under full it came only
+   through the appended prompt: one copy in the system prompt, none in the messages, no hook run.
+9. The scratch home: 1,207 seeded files (26.6 MB), every one read-only, are byte-identical after the last launch; the
+   seeded digest is the same before and after. The 30 changes are all writes the engine makes for a session:
+   - `.claude.json` changed, gaining firstStartTime, firstStartVersion, machineID, pluginUsage and userID;
+   - one `backups/.claude.json.backup.*`;
+   - 10 transcripts and an empty `memory/` under `projects/<cwd>/`;
+   - 4 `session-env/<id>/` and an empty `sessions/`;
+   - one `file-history/<id>/`;
+   - `plugins/data/doperpowers-doperpowers/`;
+   - an `.in_use/` directory in each plugin copy, and `plugins/.last_inuse_sweep`.
+   Nothing was removed, and nothing is unclassified.
+
+Verdict: MAWS's chosen route holds on 2.1.306.
+ - Flag-level `enabledPlugins: false`, `outputStyle: "default"` and `disableAllHooks: true` each do what the profile
+   means, and leave the model and the effort the user scope's.
+ - Under hooks none the user's hooks, the plugins' hooks (their hooks modules included) and MAWS's own group all stay
+   silent, so the group's place is the appended prompt.
+ - The appended alias reaches the model at startup, after /compact and /clear, at a resume and a fork, and at a resume
+   of a user-scope session, provided each launch that reuses a transcript passes `--system-prompt-snapshot off`.
+ - Without "off" the recorded prompt is reused and the alias is dropped (7). Since a snapshot-off launch records no
+   snapshot of its own, every later resume under hooks none needs "off" again: MAWS's rule of passing it on every resume
+   and fork under hooks none is required, not merely safe.
+
+Notes.
+- to-human@doperpowers was meant to be copied too. It declares sminos@doperpowers a dependency, and without sminos (never
+  copied) the engine refuses it: "Dependency "sminos@doperpowers" is not installed". It was left out.
+- Plugins load only when their marketplace is known. Without known_marketplaces.json the engine loaded none of the
+  copies: "its marketplace ... is not known here". The marketplaces are recorded without autoUpdate, and the debug log
+  reads "Plugin autoupdate: skipped (auto-updater disabled)", so nothing was fetched.
+- The read-only bit does not keep the engine out of the user settings. In a first run whose `.claude.json` lacked the
+  owner's migration state, the engine's one-time migration set (migrationVersion behind 14) replaced the read-only
+  settings.json, rewriting `opus` as `opus[1m]` and keeping the file's mode. The owner's home has run that set, so the
+  probe seeds its migration flags, and no seeded file changed afterwards.
+- doperpowers' hooks module (mods/register.tsx) loads under the user scope in 2.1.306 without
+  CLAUDE_CODE_ENABLE_FUNCTION_HOOKS. Its reload and fetch parts run in interactive sessions only and touched nothing
+  here: no `autoreload/` appeared.
+- A new session's title request (a side request of about 4 KB) runs on the main model at effort medium.
+- The probe adds no `--model` and no `--effort`. With an effort chip MAWS adds a flag-level effortLevel
+  (engine-host/launch.ts protectedSettings). By the engine code (2.1.304 cli.pretty.js:381067-381123, read, not probed)
+  a flag-level effortLevel stands for every model ahead of the user's per-model one. That is unchanged by the profile.
+- Spend: US$0.1640 through the relay (relay-plain 0.1135, relay-full 0.0505; the sum of each launch's reported
+  total_cost_usd, each launch capped at --max-budget-usd 0.40). The stub arms spent nothing; they report about US$0.0001
+  each from the stub's one-token usage. An earlier stub-only and a smoke run were replaced and spent nothing.
+- Not covered:
+  - an automatic compaction (the probe sends /compact), and a compaction or a clear on a real model (stub only);
+  - a resume, without "off", of a session whose history lacks the alias (recorded before R7y's group, lane off, or a
+    terminal session): by 7 its model would get no copy at all. This is inferred, not run;
+  - `disableAllHooks` from project or local settings, the engine's personal-config path (MAWS sets it only at flag
+    level);
+  - managed settings, and interactive launches;
+  - the owner's other plugins, and their MCP servers;
+  - the owner's settings env (CLAUDE_CODE_ENABLE_FUNCTION_HOOKS among it), which was not copied;
+  - the pinned 2.1.304: the probe ran the installed 2.1.306, the engine MAWS launches by default.

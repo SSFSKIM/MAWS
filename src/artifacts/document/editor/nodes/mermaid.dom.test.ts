@@ -1,15 +1,21 @@
 // The document's mermaid renderer (happy-dom; P3-F, sitting candidate 20). Mermaid is one module-wide instance, shared
-// with the transcript, which configures it in the app's palette; the page's palette rides in each diagram's own init
-// directive, so it holds whoever configured the instance last. Mermaid cannot lay out in happy-dom: its render is
-// stubbed, and its own parse reads the configuration the directive leaves.
-import mermaid from 'mermaid';
+// with the transcript, which configures it in the app's palette and face; the page's palette and face ride in each
+// diagram's own source, so they hold whoever configured the instance last. Mermaid cannot lay out in happy-dom: its
+// render is faked, and at the fake's start the transcript configures mermaid (as a transcript diagram does while this one
+// waits in mermaid's queue) and mermaid's own parse reads the source over that configuration, as its render starts by
+// doing.
+import mermaid, { type MermaidConfig } from 'mermaid';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderMermaid } from './mermaid';
+import { withPage } from './mermaid-source';
 
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.replaceChildren();
 });
+
+// The page's face: a design system's body font, which holds a `-` as most faces do (`ui-serif`).
+const PAGE_FONT = '"Iowan Old Style", ui-serif, Georgia, serif';
 
 // A diagram's element on a light page.
 function onPage(): HTMLElement {
@@ -17,55 +23,119 @@ function onPage(): HTMLElement {
   page.className = 'ds-doc';
   page.style.color = 'rgb(31, 30, 27)';
   page.style.backgroundColor = 'rgb(250, 249, 246)';
+  page.style.fontFamily = PAGE_FONT;
   return page.appendChild(document.createElement('div'));
 }
 
-// The source mermaid was handed, once renderMermaid has drawn `source` on the page.
-async function rendered(source: string): Promise<string> {
-  const render = vi.spyOn(mermaid, 'render').mockResolvedValue({ svg: '<svg></svg>', diagramType: 'flowchart-v2' } as Awaited<ReturnType<typeof mermaid.render>>);
-  await renderMermaid(source, onPage());
-  expect(render).toHaveBeenCalledTimes(1);
-  return render.mock.calls[0][1];
-}
-
-// The transcript's configuration in the dark app (plugins.ts's `mermaidThemeVariables`).
-const DARK_APP = {
+// The transcript's configuration in the dark app (plugins.ts's `mermaidThemeVariables`, through @streamdown/mermaid's
+// defaults, whose `fontFamily` is `monospace`).
+const TRANSCRIPT = {
   theme: 'base',
-  themeVariables: { background: '#1f1e1b', primaryColor: '#2c2b28', primaryTextColor: '#f5f4f0', primaryBorderColor: '#5a5955', secondaryColor: '#3a2a22', tertiaryColor: '#33322e', lineColor: '#a8a7a2', textColor: '#f5f4f0' },
+  fontFamily: 'monospace',
+  themeVariables: {
+    background: '#1f1e1b',
+    primaryColor: '#2c2b28',
+    primaryTextColor: '#f5f4f0',
+    primaryBorderColor: '#5a5955',
+    secondaryColor: '#3a2a22',
+    tertiaryColor: '#33322e',
+    lineColor: '#a8a7a2',
+    textColor: '#f5f4f0',
+    fontFamily: '-apple-system, "SF Pro Text", Inter, system-ui, sans-serif',
+  },
 } as const;
 
-describe('a document diagram', () => {
-  it('draws in the page’s palette after another caller configured mermaid in the dark app’s', async () => {
-    const source = await rendered('graph TD\n  A[Start] --> B[Finish]');
-    mermaid.initialize(DARK_APP); // the transcript draws a diagram of its own before this one's turn in mermaid's queue
-    await mermaid.parse(source);
-    expect(mermaid.mermaidAPI.getConfig().themeVariables).toMatchObject({
-      background: 'rgb(250, 249, 246)',
-      primaryColor: 'rgb(250, 249, 246)',
-      secondaryColor: 'rgb(250, 249, 246)',
-      tertiaryColor: 'rgb(250, 249, 246)',
-      primaryTextColor: 'rgb(31, 30, 27)',
-      primaryBorderColor: 'rgb(31, 30, 27)',
-      lineColor: 'rgb(31, 30, 27)',
-      textColor: 'rgb(31, 30, 27)',
-    });
+// The source mermaid was handed for `source`, and the configuration in force as its render started.
+async function renderedAfterTranscript(source: string): Promise<{ source: string; config: MermaidConfig }> {
+  let seen: { source: string; config: MermaidConfig } | undefined;
+  vi.spyOn(mermaid, 'render').mockImplementation(async (_id, text) => {
+    mermaid.initialize(TRANSCRIPT);
+    await mermaid.parse(text);
+    seen = { source: text, config: mermaid.mermaidAPI.getConfig() };
+    return { svg: '<svg></svg>', diagramType: 'flowchart-v2' } as Awaited<ReturnType<typeof mermaid.render>>;
+  });
+  await renderMermaid(source, onPage());
+  if (!seen) throw new Error('renderMermaid never rendered');
+  return seen;
+}
+
+const PAGE_PALETTE = {
+  background: 'rgb(250, 249, 246)',
+  primaryColor: 'rgb(250, 249, 246)',
+  secondaryColor: 'rgb(250, 249, 246)',
+  tertiaryColor: 'rgb(250, 249, 246)',
+  primaryTextColor: 'rgb(31, 30, 27)',
+  primaryBorderColor: 'rgb(31, 30, 27)',
+  lineColor: 'rgb(31, 30, 27)',
+  textColor: 'rgb(31, 30, 27)',
+};
+
+describe('a document diagram drawn after the transcript configured mermaid', () => {
+  it('draws in the page’s palette and face', async () => {
+    const { config } = await renderedAfterTranscript('graph TD\n  A[Start] --> B[Finish]');
+    expect(config.theme).toBe('base');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+    expect(config.fontFamily).toBe(PAGE_FONT);
   });
 
-  // P3-F (wave S review of c20): mermaid applies an init directive over a front matter's `config`, so a palette directive
-  // would replace the author's theme there; a front matter that configures the diagram keeps it, as before c20
-  it('leaves a front matter’s own theme configuration to win', async () => {
-    const source = await rendered('---\nconfig:\n  theme: forest\n  themeVariables:\n    primaryColor: "#ffeeaa"\n---\ngraph TD\n  A --> B');
-    expect(await mermaid.parse(source)).toMatchObject({ diagramType: 'flowchart-v2' });
-    const config = mermaid.mermaidAPI.getConfig();
+  // the A1 review of P3-F: a front matter's `config` that sets no colours still gets the page's palette
+  it('draws in the page’s palette and face under a front matter that configures something else', async () => {
+    const { config } = await renderedAfterTranscript('---\nconfig:\n  layout: elk\n---\ngraph TD\n  A --> B');
+    expect(config.layout).toBe('elk');
+    expect(config.theme).toBe('base');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+    expect(config.fontFamily).toBe(PAGE_FONT);
+  });
+
+  it('keeps what a front matter’s config sets as the author wrote it', async () => {
+    const { source, config } = await renderedAfterTranscript(
+      '---\ntitle: Flow\nconfig:\n  theme: forest\n  layout: elk\n  themeVariables:\n    primaryColor: "#ffeeaa"\n---\ngraph TD\n  A --> B',
+    );
+    expect(source.startsWith('---\ntitle: Flow\nconfig:\n  theme: forest\n  layout: elk\n  themeVariables:\n    primaryColor: "#ffeeaa"\n---\n')).toBe(true);
     expect(config.theme).toBe('forest');
-    expect(config.themeVariables).toMatchObject({ primaryColor: '#ffeeaa' });
+    expect(config.layout).toBe('elk');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, primaryColor: '#ffeeaa', fontFamily: PAGE_FONT });
+    expect(config.fontFamily).toBe(PAGE_FONT);
   });
 
   it('keeps a front matter first and lets the source’s own init directive win', async () => {
-    const source = await rendered('---\ntitle: Flow\n---\n%%{init: {"themeVariables": {"primaryColor": "#ffeeaa"}}}%%\ngraph TD\n  A --> B');
+    const { source, config } = await renderedAfterTranscript(
+      '---\ntitle: Flow\n---\n%%{init: {"fontFamily": "Georgia, serif", "themeVariables": {"primaryColor": "#ffeeaa"}}}%%\ngraph TD\n  A --> B',
+    );
     expect(source.startsWith('---\ntitle: Flow\n---\n')).toBe(true);
-    mermaid.initialize(DARK_APP);
-    expect(await mermaid.parse(source)).toMatchObject({ diagramType: 'flowchart-v2' });
-    expect(mermaid.mermaidAPI.getConfig().themeVariables).toMatchObject({ primaryColor: '#ffeeaa', primaryTextColor: 'rgb(31, 30, 27)' });
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, primaryColor: '#ffeeaa', fontFamily: 'Georgia, serif' });
+    expect(config.fontFamily).toBe('Georgia, serif');
   });
+
+  // mermaid reads a front matter only after its own cleanup: an HTML tag's double-quoted attributes single-quoted, every
+  // line ended in `\n`
+  it('keeps what a front matter whose title holds an HTML tag sets', async () => {
+    const { source, config } = await renderedAfterTranscript('---\ntitle: "<b class="label">Title</b>"\nconfig:\n  theme: forest\n---\ngraph TD\n  A --> B');
+    expect(source.startsWith('---\ntitle: "<b class="label">Title</b>"\nconfig:\n  theme: forest\n---\n')).toBe(true);
+    expect(config.theme).toBe('forest');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+  });
+
+  it('keeps what an indented front matter with carriage-return line ends sets', async () => {
+    const { config } = await renderedAfterTranscript('  ---\r  title: Flow\r  config:\r    theme: dark\r  ---\rgraph TD\r  A --> B');
+    expect(config.theme).toBe('dark');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+  });
+});
+
+it('hands mermaid a source whose front matter cannot be read as written, for mermaid to judge', async () => {
+  const source = '---\nconfig:\n  theme: [forest\n---\ngraph TD\n  A --> B';
+  const render = vi.spyOn(mermaid, 'render').mockResolvedValue({ svg: '<svg></svg>', diagramType: 'flowchart-v2' } as Awaited<ReturnType<typeof mermaid.render>>);
+  await renderMermaid(source, onPage());
+  expect(render.mock.calls[0]?.[1]).toBe(source);
+});
+
+// mermaid reads a directive's single quotes as double quotes, so a face named with one must not break the directive (the
+// source is built directly: happy-dom's style parser mangles such a name before the page could hand it over)
+it('hands mermaid a face whose name holds an apostrophe', async () => {
+  const face = '"Bob\'s Grotesk", sans-serif';
+  await mermaid.parse(withPage('graph TD\n  A --> B', { fontFamily: face, themeVariables: { primaryColor: 'rgb(250, 249, 246)' } }));
+  const config = mermaid.mermaidAPI.getConfig();
+  expect(config.fontFamily).toBe(face);
+  expect(config.themeVariables).toMatchObject({ primaryColor: 'rgb(250, 249, 246)', fontFamily: face });
 });

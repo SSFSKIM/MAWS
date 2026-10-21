@@ -68,7 +68,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   const element = useRef<HTMLDivElement>(null);
   const placement = useRef<Placement | null>(null);
   const [mode, setMode] = useState<PlacementMode>('claiming');
-  const { tabId } = tab;
+  const { tabId, appSessionId } = tab;
   const owner = tab.placedIn?.paneId ?? null;
   const [ownerAtMount] = useState(owner);
 
@@ -89,7 +89,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
       onMode: setMode,
     });
     placement.current = control;
-    cover = coverPane(() => control.ownedRect());
+    cover = coverPane(() => control.ownedRect(), appSessionId); // P4 W2-C: whose browser it shows
     control.report();
 
     const report = () => control.report();
@@ -113,7 +113,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
       cover.release();
       placement.current = null;
     };
-  }, [tabId, surface, ownerAtMount]);
+  }, [tabId, appSessionId, surface, ownerAtMount]);
 
   useEffect(() => placement.current?.observe(owner), [owner]);
   // the overflow menu's "Open in tab" or "Show in panel" naming this pane's tab and surface: as "Show here"

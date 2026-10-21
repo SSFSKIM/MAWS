@@ -133,6 +133,18 @@ describe('the renderer’s memory (parent Decision Log 42(5), amended)', () => {
     expect(memoryVerdict([...marks([600, 560, 520, 470]), sample(42_000, 42_040, 471, 12), sample(50_000, 50_040, 471), sample(60_000, 60_040, 472)], 500)).toMatchObject({ verdict: 'hardware-blocked' });
   });
 
+  it('compares the raw samples and rounds only the figure it reports, to 0.1 MB', () => {
+    // 9.96 and 10.54 MB differ by 0.58 MB, over 5 % of 10.54; as 10.0 and 10.5 they would differ by 0.5, within 5 % of
+    // 10.5, and settle the row at 40 s
+    const judged = memoryVerdict(marks([14, 13, 12, 9.96, 10.54, 10.56, 10.58]), 500);
+    expect(judged).toMatchObject({ verdict: 'met', value: 10.6, reason: expect.stringMatching(/40\.0 s and 50\.0 s/) });
+    // the bound too is judged on the raw figure: 500.04 MB is over 500 MB though it reports as 500.0
+    expect(memoryVerdict(marks([600, 560, 520, 500.02, 500.04, 300, 200]), 500)).toMatchObject({ verdict: 'failed', value: 500 });
+    // an excluded sample is named at the report's precision
+    const late = memoryVerdict([...marks([600, 560, 520, 480]), sample(41_200, 41_250, 482.04), ...[490, 492].map((mb, k) => sample((5 + k) * MEMORY_SPACING_MS, (5 + k) * MEMORY_SPACING_MS + 40, mb))], 500);
+    expect(late.excluded).toEqual([{ mark: 40_000, startedAt: 41_200, mb: 482 }]);
+  });
+
   it('takes the renderer’s private kilobytes as MB, refusing what is not a finite non-negative number', () => {
     expect(privateMB({ private: 512_000 })).toBe(500);
     for (const bad of [{ private: -1 }, { private: Number.NaN }, { private: Number.POSITIVE_INFINITY }, {}, null, undefined, { private: '512000' }]) expect(() => privateMB(bad), JSON.stringify(bad)).toThrow(/private/);
