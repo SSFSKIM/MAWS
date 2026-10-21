@@ -1,0 +1,2187 @@
+{
+  "run": "2026-10-21T01:16:45.697Z",
+  "rounds": 40,
+  "repeat": [
+    {
+      "round": 1,
+      "max": 55.08,
+      "wallMs": 71.1,
+      "readMax": 108.41,
+      "load": 12.9,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 55.1,
+          "cpuMs": 50.1,
+          "work": [
+            {
+              "what": "warm",
+              "at": 45.1,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 49.3,
+              "ms": 5.3,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 15.9,
+              "ms": 6.9,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 12.9
+          },
+          "gc": {
+            "count": 2,
+            "ms": 10.6
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.4
+          }
+        }
+      }
+    },
+    {
+      "round": 2,
+      "max": 39.37,
+      "wallMs": 48.5,
+      "readMax": 57.52,
+      "load": 12.9,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 39.4,
+          "cpuMs": 34.3,
+          "work": [
+            {
+              "what": "warm",
+              "at": 29.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 33.8,
+              "ms": 5.2,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 9,
+              "ms": 3.3,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 9.6
+          },
+          "gc": {
+            "count": 2,
+            "ms": 5.1
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.4
+          }
+        }
+      }
+    },
+    {
+      "round": 3,
+      "max": 35.37,
+      "wallMs": 45,
+      "readMax": 57.36,
+      "load": 13.15,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 35.4,
+          "cpuMs": 29.5,
+          "work": [
+            {
+              "what": "warm",
+              "at": 24.9,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 29,
+              "ms": 6,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 4.5,
+              "ms": 3.4,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 11.1
+          },
+          "gc": {
+            "count": 2,
+            "ms": 5.2
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 4,
+      "max": 32.92,
+      "wallMs": 46.1,
+      "readMax": 55.37,
+      "load": 13.15,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 32.9,
+          "cpuMs": 27.8,
+          "work": [
+            {
+              "what": "warm",
+              "at": 23.2,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27.3,
+              "ms": 5.2,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 2.8,
+              "ms": 2.8,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 10.6
+          },
+          "commit": {
+            "count": 2,
+            "ms": 9.8
+          },
+          "gc": {
+            "count": 2,
+            "ms": 5.8
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.3
+          }
+        }
+      }
+    },
+    {
+      "round": 5,
+      "max": 62.79,
+      "wallMs": 72.1,
+      "readMax": 54.67,
+      "load": 12.9,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 62.8,
+          "cpuMs": 57.1,
+          "work": [
+            {
+              "what": "warm",
+              "at": 44.6,
+              "ms": 12.6
+            },
+            {
+              "what": "commit",
+              "at": 57.2,
+              "ms": 5.2,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 45.5,
+              "ms": 11.6,
+              "detail": "major"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 20.6
+          },
+          "commit": {
+            "count": 2,
+            "ms": 9.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          },
+          "gc": {
+            "count": 1,
+            "ms": 11.6
+          }
+        }
+      }
+    },
+    {
+      "round": 6,
+      "max": 33.17,
+      "wallMs": 42.2,
+      "readMax": 84.04,
+      "load": 12.9,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 33.2,
+          "cpuMs": 27.6,
+          "work": [
+            {
+              "what": "warm",
+              "at": 22.9,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27,
+              "ms": 5.8,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 14,
+              "ms": 1.8,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 10.4
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.3
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.8
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 7,
+      "max": 32.6,
+      "wallMs": 43.7,
+      "readMax": 53.89,
+      "load": 12.82,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 32.6,
+          "cpuMs": 27.8,
+          "work": [
+            {
+              "what": "warm",
+              "at": 23.2,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27.3,
+              "ms": 5,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 22.1,
+              "ms": 1.1,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 13.8
+          },
+          "commit": {
+            "count": 2,
+            "ms": 11.6
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.1
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 8,
+      "max": 30.71,
+      "wallMs": 40,
+      "readMax": 53.41,
+      "load": 12.82,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 30.7,
+          "cpuMs": 25.8,
+          "work": [
+            {
+              "what": "warm",
+              "at": 21,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 25.1,
+              "ms": 5.2,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 13.8,
+              "ms": 1.7,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 8.3
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.7
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 9,
+      "max": 31.4,
+      "wallMs": 41.3,
+      "readMax": 60.08,
+      "load": 12.84,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 31.4,
+          "cpuMs": 24.9,
+          "work": [
+            {
+              "what": "warm",
+              "at": 20.1,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 24.2,
+              "ms": 6.8,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 18.6,
+              "ms": 1.4,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 9.2
+          },
+          "commit": {
+            "count": 2,
+            "ms": 11.6
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 10,
+      "max": 32.69,
+      "wallMs": 43.5,
+      "readMax": 54.63,
+      "load": 12.84,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 32.7,
+          "cpuMs": 27.8,
+          "work": [
+            {
+              "what": "warm",
+              "at": 23.1,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27.2,
+              "ms": 5.1,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 4.7,
+              "ms": 2.5,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 10.2
+          },
+          "commit": {
+            "count": 2,
+            "ms": 11.4
+          },
+          "gc": {
+            "count": 2,
+            "ms": 4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 11,
+      "max": 38.8,
+      "wallMs": 48.1,
+      "readMax": 53.07,
+      "load": 12.53,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 38.8,
+          "cpuMs": 29.5,
+          "work": [
+            {
+              "what": "warm",
+              "at": 24.9,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 29,
+              "ms": 9.5,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 11.9,
+              "ms": 2.8,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 14
+          },
+          "commit": {
+            "count": 2,
+            "ms": 14.1
+          },
+          "gc": {
+            "count": 1,
+            "ms": 2.8
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 12,
+      "max": 31.25,
+      "wallMs": 41,
+      "readMax": 73.07,
+      "load": 12.53,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 31.3,
+          "cpuMs": 26.3,
+          "work": [
+            {
+              "what": "warm",
+              "at": 21.6,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 25.8,
+              "ms": 5.2,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 4.7,
+              "ms": 3.2,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 8.3
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.5
+          },
+          "gc": {
+            "count": 2,
+            "ms": 4.7
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 13,
+      "max": 31.72,
+      "wallMs": 41.6,
+      "readMax": 48.62,
+      "load": 12.25,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 31.7,
+          "cpuMs": 26.9,
+          "work": [
+            {
+              "what": "warm",
+              "at": 22.6,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 26.6,
+              "ms": 4.8,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 5.7,
+              "ms": 4,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 9.4
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.2
+          },
+          "gc": {
+            "count": 2,
+            "ms": 6.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 14,
+      "max": 36.15,
+      "wallMs": 45.1,
+      "readMax": 73.98,
+      "load": 12.25,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 36.2,
+          "cpuMs": 30.9,
+          "work": [
+            {
+              "what": "warm",
+              "at": 26.2,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 30.3,
+              "ms": 5.5,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 16.4,
+              "ms": 2.5,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 16
+          },
+          "commit": {
+            "count": 2,
+            "ms": 9.9
+          },
+          "gc": {
+            "count": 1,
+            "ms": 2.5
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 15,
+      "max": 33.72,
+      "wallMs": 43.3,
+      "readMax": 55.8,
+      "load": 13.43,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 33.7,
+          "cpuMs": 28.1,
+          "work": [
+            {
+              "what": "warm",
+              "at": 23.4,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27.6,
+              "ms": 5.8,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 19.7,
+              "ms": 2.3,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 11.3
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.9
+          },
+          "gc": {
+            "count": 1,
+            "ms": 2.3
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 16,
+      "max": 38.64,
+      "wallMs": 47.6,
+      "readMax": 79.2,
+      "load": 13.43,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 38.6,
+          "cpuMs": 32.8,
+          "work": [
+            {
+              "what": "warm",
+              "at": 28.1,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 32.2,
+              "ms": 6.1,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 26.9,
+              "ms": 1,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 15.6
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.5
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 17,
+      "max": 32.66,
+      "wallMs": 43.7,
+      "readMax": 60.52,
+      "load": 13.55,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 32.7,
+          "cpuMs": 27.5,
+          "work": [
+            {
+              "what": "warm",
+              "at": 22.9,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27,
+              "ms": 5.4,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 15.3,
+              "ms": 1.7,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 10.6
+          },
+          "commit": {
+            "count": 2,
+            "ms": 12
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.7
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 18,
+      "max": 34.16,
+      "wallMs": 43.3,
+      "readMax": 56.7,
+      "load": 13.55,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 34.2,
+          "cpuMs": 28.3,
+          "work": [
+            {
+              "what": "warm",
+              "at": 23.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27.7,
+              "ms": 6.1,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 20.6,
+              "ms": 1.4,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 11.5
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.8
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 19,
+      "max": 48.69,
+      "wallMs": 64.9,
+      "readMax": 57.53,
+      "load": 13.43,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 48.7,
+          "cpuMs": 33,
+          "work": [
+            {
+              "what": "warm",
+              "at": 25.3,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 29.4,
+              "ms": 18.9,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 23.6,
+              "ms": 1.5,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 11
+          },
+          "commit": {
+            "count": 2,
+            "ms": 30.4
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.5
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 20,
+      "max": 34.68,
+      "wallMs": 44,
+      "readMax": 56.8,
+      "load": 13.43,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 34.7,
+          "cpuMs": 29,
+          "work": [
+            {
+              "what": "warm",
+              "at": 24.4,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 28.5,
+              "ms": 5.9,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 22.9,
+              "ms": 1.4,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 10.7
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.8
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 21,
+      "max": 28.32,
+      "wallMs": 40.1,
+      "readMax": 58.83,
+      "load": 13.15,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 28.3,
+          "cpuMs": 23.4,
+          "work": [
+            {
+              "what": "warm",
+              "at": 18.8,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 22.9,
+              "ms": 5.1,
+              "detail": "1 document"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 8.6
+          },
+          "commit": {
+            "count": 2,
+            "ms": 9.9
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          },
+          "gc": {
+            "count": 1,
+            "ms": 2.3
+          }
+        }
+      }
+    },
+    {
+      "round": 22,
+      "max": 30.94,
+      "wallMs": 40.7,
+      "readMax": 53.17,
+      "load": 13.15,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 30.9,
+          "cpuMs": 25.8,
+          "work": [
+            {
+              "what": "warm",
+              "at": 21.1,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 25.2,
+              "ms": 5.4,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 3.8,
+              "ms": 2.9,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 8.5
+          },
+          "commit": {
+            "count": 2,
+            "ms": 10.7
+          },
+          "gc": {
+            "count": 2,
+            "ms": 4.3
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 23,
+      "max": 35.72,
+      "wallMs": 45.9,
+      "readMax": 53.68,
+      "load": 13.22,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 35.7,
+          "cpuMs": 30.5,
+          "work": [
+            {
+              "what": "warm",
+              "at": 25.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 29.8,
+              "ms": 5.4,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 9.8,
+              "ms": 4.1,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 11.3
+          },
+          "commit": {
+            "count": 2,
+            "ms": 11.1
+          },
+          "gc": {
+            "count": 1,
+            "ms": 4.1
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 24,
+      "max": 33.38,
+      "wallMs": 42.5,
+      "readMax": 54.48,
+      "load": 13.22,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 33.4,
+          "cpuMs": 28.5,
+          "work": [
+            {
+              "what": "warm",
+              "at": 23.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27.8,
+              "ms": 5.2,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 21.3,
+              "ms": 2.3,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 9.8
+          },
+          "gc": {
+            "count": 1,
+            "ms": 2.3
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 25,
+      "max": 50.56,
+      "wallMs": 60.5,
+      "readMax": 59.97,
+      "load": 12.8,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 50.6,
+          "cpuMs": 27.6,
+          "work": [
+            {
+              "what": "warm",
+              "at": 37.9,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 42.1,
+              "ms": 8,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 36,
+              "ms": 1.8,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 11.4
+          },
+          "commit": {
+            "count": 2,
+            "ms": 13.3
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.8
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 26,
+      "max": 59.83,
+      "wallMs": 70.1,
+      "readMax": 116.04,
+      "load": 12.8,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 59.8,
+          "cpuMs": 50,
+          "work": [
+            {
+              "what": "warm",
+              "at": 45.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 49.9,
+              "ms": 9.6,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 24.1,
+              "ms": 8.4,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 15.3
+          },
+          "gc": {
+            "count": 1,
+            "ms": 8.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 27,
+      "max": 40.9,
+      "wallMs": 51.6,
+      "readMax": 59.61,
+      "load": 12.18,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 40.9,
+          "cpuMs": 33.4,
+          "work": [
+            {
+              "what": "warm",
+              "at": 28.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 32.8,
+              "ms": 7.7,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 11.3,
+              "ms": 3.3,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 13.9
+          },
+          "gc": {
+            "count": 1,
+            "ms": 3.3
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 28,
+      "max": 38.15,
+      "wallMs": 47.7,
+      "readMax": 68.56,
+      "load": 12.18,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 38.2,
+          "cpuMs": 31.2,
+          "work": [
+            {
+              "what": "warm",
+              "at": 26.5,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 30.6,
+              "ms": 7,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 5.6,
+              "ms": 3.6,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 11.8
+          },
+          "commit": {
+            "count": 2,
+            "ms": 12
+          },
+          "gc": {
+            "count": 2,
+            "ms": 6.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 29,
+      "max": 52.79,
+      "wallMs": 64.1,
+      "readMax": 109.73,
+      "load": 11.68,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 52.8,
+          "cpuMs": 45.3,
+          "work": [
+            {
+              "what": "warm",
+              "at": 41.3,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 45.5,
+              "ms": 6.8,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 15.3,
+              "ms": 4.7,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 13.5
+          },
+          "gc": {
+            "count": 1,
+            "ms": 4.7
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 30,
+      "max": 46.92,
+      "wallMs": 57.9,
+      "readMax": 61.66,
+      "load": 11.68,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 46.9,
+          "cpuMs": 36.3,
+          "work": [
+            {
+              "what": "warm",
+              "at": 32.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 36.8,
+              "ms": 9.6,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 13.4,
+              "ms": 5.7,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 13.7
+          },
+          "commit": {
+            "count": 2,
+            "ms": 16
+          },
+          "gc": {
+            "count": 1,
+            "ms": 5.7
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 31,
+      "max": 36.85,
+      "wallMs": 51,
+      "readMax": 83.09,
+      "load": 10.99,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 36.9,
+          "cpuMs": 28,
+          "work": [
+            {
+              "what": "warm",
+              "at": 23.5,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 27.6,
+              "ms": 8.9,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 6.6,
+              "ms": 3.2,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 14.2
+          },
+          "gc": {
+            "count": 1,
+            "ms": 3.2
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 32,
+      "max": 38.65,
+      "wallMs": 51,
+      "readMax": 95.05,
+      "load": 11.07,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 38.6,
+          "cpuMs": 34.3,
+          "work": [
+            {
+              "what": "warm",
+              "at": 29.7,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 33.7,
+              "ms": 4.5,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 10.1,
+              "ms": 5.3,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 12.5
+          },
+          "commit": {
+            "count": 2,
+            "ms": 11.8
+          },
+          "gc": {
+            "count": 2,
+            "ms": 7.3
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 33,
+      "max": 43.74,
+      "wallMs": 54,
+      "readMax": 55.11,
+      "load": 11.07,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 43.7,
+          "cpuMs": 36.3,
+          "work": [
+            {
+              "what": "frame",
+              "at": 31.6,
+              "ms": 0.2,
+              "detail": "awareness, 366 bytes from session:perf-repeat-33"
+            },
+            {
+              "what": "warm",
+              "at": 31.9,
+              "ms": 4.2
+            },
+            {
+              "what": "commit",
+              "at": 36.1,
+              "ms": 7.1,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 16.1,
+              "ms": 5.5,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "frame": {
+            "count": 1,
+            "ms": 0.2
+          },
+          "warm": {
+            "count": 4,
+            "ms": 16.2
+          },
+          "commit": {
+            "count": 2,
+            "ms": 12.9
+          },
+          "gc": {
+            "count": 1,
+            "ms": 5.5
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 34,
+      "max": 126.9,
+      "wallMs": 139.1,
+      "readMax": 125.97,
+      "load": 11.07,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 126.9,
+          "cpuMs": 81,
+          "work": [
+            {
+              "what": "warm",
+              "at": 110.6,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 116.1,
+              "ms": 10.3,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 20,
+              "ms": 5.5,
+              "detail": "minor"
+            },
+            {
+              "what": "gc",
+              "at": 37.9,
+              "ms": 6.4,
+              "detail": "incremental"
+            },
+            {
+              "what": "gc",
+              "at": 46.6,
+              "ms": 63.1,
+              "detail": "major"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 14.6
+          },
+          "gc": {
+            "count": 3,
+            "ms": 75
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "round": 35,
+      "max": 45.89,
+      "wallMs": 60.6,
+      "readMax": 94.49,
+      "load": 10.74,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 45.9,
+          "cpuMs": 38.5,
+          "work": [
+            {
+              "what": "warm",
+              "at": 33.9,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 38.1,
+              "ms": 7.4,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 23.3,
+              "ms": 2.2,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 16
+          },
+          "commit": {
+            "count": 2,
+            "ms": 17.4
+          },
+          "gc": {
+            "count": 1,
+            "ms": 2.2
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 36,
+      "max": 41.36,
+      "wallMs": 53.8,
+      "readMax": 64.27,
+      "load": 10.74,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 41.4,
+          "cpuMs": 35,
+          "work": [
+            {
+              "what": "warm",
+              "at": 30.5,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 34.6,
+              "ms": 6.4,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 27.6,
+              "ms": 2.6,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 4,
+            "ms": 16
+          },
+          "commit": {
+            "count": 2,
+            "ms": 14
+          },
+          "gc": {
+            "count": 1,
+            "ms": 2.6
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 37,
+      "max": 44.78,
+      "wallMs": 56.2,
+      "readMax": 151.61,
+      "load": 11.32,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 44.8,
+          "cpuMs": 35.9,
+          "work": [
+            {
+              "what": "warm",
+              "at": 33.8,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 37.9,
+              "ms": 6.4,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 30.3,
+              "ms": 3.4,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 13
+          },
+          "gc": {
+            "count": 1,
+            "ms": 3.4
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 38,
+      "max": 39.11,
+      "wallMs": 50,
+      "readMax": 84.91,
+      "load": 11.32,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 39.1,
+          "cpuMs": 33,
+          "work": [
+            {
+              "what": "warm",
+              "at": 28.3,
+              "ms": 4.1
+            },
+            {
+              "what": "commit",
+              "at": 32.4,
+              "ms": 6.2,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 26.6,
+              "ms": 1.5,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12.1
+          },
+          "commit": {
+            "count": 2,
+            "ms": 12.6
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.5
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 39,
+      "max": 39.49,
+      "wallMs": 56.8,
+      "readMax": 71.17,
+      "load": 14.1,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 39.5,
+          "cpuMs": 31.3,
+          "work": [
+            {
+              "what": "frame",
+              "at": 26.6,
+              "ms": 0.1,
+              "detail": "awareness, 366 bytes from session:perf-repeat-39"
+            },
+            {
+              "what": "warm",
+              "at": 26.8,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 30.9,
+              "ms": 8.1,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 24.6,
+              "ms": 1.9,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "frame": {
+            "count": 1,
+            "ms": 0.1
+          },
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 20.9
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.9
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    },
+    {
+      "round": 40,
+      "max": 39.74,
+      "wallMs": 52.4,
+      "readMax": 82.37,
+      "load": 13.77,
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 39.7,
+          "cpuMs": 32.5,
+          "work": [
+            {
+              "what": "warm",
+              "at": 28.8,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 32.9,
+              "ms": 6.4,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 27,
+              "ms": 1.7,
+              "detail": "minor"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 14.5
+          },
+          "gc": {
+            "count": 1,
+            "ms": 1.7
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.1
+          }
+        }
+      }
+    }
+  ],
+  "rows": [
+    {
+      "row": "5r p50",
+      "measure": "the first batch after a read, 40 applied of 40 rounds in one launch: host loop max over the call, p50",
+      "bound": "recorded",
+      "limit": null,
+      "value": 38.1,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 13.77
+    },
+    {
+      "row": "5r p95",
+      "measure": "the first batch after a read, repeated: p95",
+      "bound": "recorded",
+      "limit": null,
+      "value": 59.8,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 13.77
+    },
+    {
+      "row": "5r max",
+      "measure": "the first batch after a read, repeated: max (its record beside it)",
+      "bound": "recorded",
+      "limit": null,
+      "value": 126.9,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 13.77,
+      "note": "round 34, wall 139.1 ms",
+      "background": {
+        "longest": {
+          "at": 0,
+          "ms": 126.9,
+          "cpuMs": 81,
+          "work": [
+            {
+              "what": "warm",
+              "at": 110.6,
+              "ms": 4
+            },
+            {
+              "what": "commit",
+              "at": 116.1,
+              "ms": 10.3,
+              "detail": "1 document"
+            },
+            {
+              "what": "gc",
+              "at": 20,
+              "ms": 5.5,
+              "detail": "minor"
+            },
+            {
+              "what": "gc",
+              "at": 37.9,
+              "ms": 6.4,
+              "detail": "incremental"
+            },
+            {
+              "what": "gc",
+              "at": 46.6,
+              "ms": 63.1,
+              "detail": "major"
+            }
+          ]
+        },
+        "call": {
+          "warm": {
+            "count": 3,
+            "ms": 12
+          },
+          "commit": {
+            "count": 2,
+            "ms": 14.6
+          },
+          "gc": {
+            "count": 3,
+            "ms": 75
+          },
+          "replica": {
+            "count": 1,
+            "ms": 0.2
+          }
+        }
+      }
+    },
+    {
+      "row": "5r over 50",
+      "measure": "the first batch after a read, repeated: rounds over row 5’s 50 ms",
+      "bound": "recorded",
+      "limit": null,
+      "value": 6,
+      "unit": "rounds",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 13.77,
+      "note": "round 1 55.08 ms; round 5 62.79 ms; round 25 50.56 ms; round 26 59.83 ms; round 29 52.79 ms; round 34 126.9 ms"
+    },
+    {
+      "row": "5r refused",
+      "measure": "the first batch after a read, repeated: rounds whose batch was refused, left out of the rows above (the test fails past a tenth)",
+      "bound": "recorded",
+      "limit": null,
+      "value": 0,
+      "unit": "rounds",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 13.77
+    }
+  ]
+}
