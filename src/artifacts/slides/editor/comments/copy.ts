@@ -18,6 +18,10 @@ export const COMMENTS_COPY = {
   resolve: 'Resolve',
   reopen: 'Reopen',
   pin: (quote: string, n: number) => (n > 1 ? `${n} comments on “${quote}”` : `Comment on “${quote}”`),
+  /** P4-B2: the pin popover's name. */
+  popover: (quote: string) => `Comments on “${quote}”`,
+  /** P4-B2 (V10): a thumbnail's badge, said in its name. */
+  openOnSlide: (n: number) => (n === 1 ? '1 open comment' : `${n} open comments`),
   /** The tab title a comment's anchor label names after the deck's: the slide's number and title (D9). */
   where: (n: number, title: string) => (title ? `slide ${n}: ${title}` : `slide ${n}`),
 } as const;
