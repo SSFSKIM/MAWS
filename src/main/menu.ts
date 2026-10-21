@@ -8,7 +8,8 @@
 // for the Edit menu's own items) so the smoke can click them by id.
 import { Menu, webContents, type MenuItemConstructorOptions } from 'electron';
 import { appWindows } from './windows'; // E2
-import type { EditOp, Settings, ThemeSetting } from '@shared/ipc/schema';
+import type { Settings, ThemeSetting } from '@shared/ipc/schema';
+import type { EditOp } from '@shared/ipc/schema/layout'; // P4-B2 K6
 import { ACTIONS, ACTION_IDS, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
 import type { emit as emitEvent } from './ipc/events';
 import { emitTo, onEmitted } from './ipc/events';
