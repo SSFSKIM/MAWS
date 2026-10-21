@@ -32,9 +32,11 @@ What A1's breakdown left to explain: both arms make three requests to the landin
    - The Claude tab's recent rows are read as 3.1623.0 shows them: a button, with a menu button for the same title beside it.
 5. **Lever 2, the linked read (Decision Log 5).**
    - Trigger: a human message whose words carry a `maws-artifact:` link, in any form X33's grammar allows (`#v<n>`, `#tab=`, `#block=`, `#slide=`).
-   - Content: the session's own `artifact_read` answer, whole, revision included, read as the engine host writes the message (so it is the artifact at send time). It is called through the server's registered definition with no tool-use id, so it resolves, migrates and answers exactly as the agent's read would. A link naming a tab reads that tab. A version link still reads the live artifact, the one an edit acts on.
+   - When: as the queue submits the message, before the entry becomes `submitting`, with the queue busy meanwhile. A pause, an exit or a removal while the reads are taken leaves the entry queued with nothing written, as a paused queue holds an entry. A steer (a message sent while a turn runs, Send now, an ask's answer) goes as written, without reads: its write must stay ordered with a stop's hold (Decision Log 6).
+   - Content: the session's own `artifact_read` answer, whole, revision included, read as the message is submitted (so it is the artifact at send time). It is called through the server's registered definition with no tool-use id, so it resolves, migrates and answers exactly as the agent's read would. A link naming a tab reads that tab. A version link still reads the live artifact, the one an edit acts on.
    - Form: one text block per read after the human's words in the same user message (`src/shared/maws/linked-read.ts`). A `<system-reminder>`, one line naming the artifact by its link, then the read's JSON. The replay validated this form: with it the model called `artifact_edit` directly in 6 of 6 replays.
-   - Cap: 10,000 tokens over all the reads, counted at three UTF-8 bytes a token, never under the API's count. That holds the bench's document (about 2,600) and deck (about 1,200) and a working document of several thousand words. It bounds what a passing mention costs to about 1 % of a 1M window. Links attach in link order, each once. A read refused, or larger than what the cap has left, is not attached, and the agent reads it as it would have. A later, smaller one still goes.
+   - Cap: 24,000 UTF-8 bytes over all the reads as sent. A token is at least one byte, so the reads cost at most 24,000 tokens however token-dense the artifact (hex, Hangul, minified html), and about a quarter of that for English prose. That holds the bench's document (about 8,000 bytes) and deck (about 4,000) and a working document of some 3,500 words, and stays under the 25,000 tokens the engine allows one tool result, the most a read the agent made itself could cost. Links attach in link order, each once. A read refused, or larger than what the cap has left, is not attached, and the agent reads it as it would have. A later, smaller one still goes.
+   - A read not attached leaves no trace: what it changed in the session's memory of the artifact (an html page's byte base, a file kind's replica base, which a publish merges from) is put back, so the agent's next publish is judged as if that read had not happened. A document's read also records its view, which only validates an edit from that revision. The agent learns a revision only from a read it does see, so that record is left.
    - Staleness: the read carries its revision, so an edit from a read gone stale is refused by the edit's existing `baseRevision` check (the scripted session test shows it).
    - What the human sees: the queue keeps and shows the human's message. The transcript draws each read as a chip ("<title>, read at revision N"), never as text. The recent-turns preview and the rename suggestion read the human's words alone.
    - The guides: no line added. The model edits from the attached read unprompted (the replay), so X33's descriptions are unchanged.
@@ -92,6 +94,16 @@ What A1's breakdown left to explain: both arms make three requests to the landin
 5. Gates: class 1a on the pool. The Mac groups the change reaches (the tool list's e2e groups), at the architect's go.
 6. Review with doperpowers:reviewer-medium over 7c5248920..head, then the hand-back.
 
+## Review
+
+Round 1, doperpowers:reviewer-medium over 7c5248920..b96347122: incorrect, with one P1 and five P2s. All six were real and are fixed (b87dab600, 058b8b22e):
+- P1, the stop race. The read's await sat between a steer's registration and its write, so a stop's hold could find a steer the engine had not received and its interrupt be followed by the message. Fixed: reads are taken before a submission is written, the queue busy and a pause honoured, and steers are never prepared (Decision Log 6).
+- P2, an unattached read changed the session's publish base. Fixed: it is put back, and a test fails without the fix.
+- P2, three bytes a token undercounted token-dense text. Fixed: a byte cap, a true bound.
+- P2, `--maws` did not win over a single cell. Fixed.
+- P2, `build` was the checkout, not the running app. Fixed: the app's own stamp, and a variant refuses to run on a mismatch.
+- P2, the last landing took the last call made, not the latest landing. Fixed.
+
 ## Surprises & Discoveries
 
 - The transcripts carry the whole request. Since engine 2.1.300 the `api-request-shape` (system and tools) and `api-request-blob` records (messages) let a request be rebuilt to the token. Assistant messages and tool results are not blobbed and come from the transcript's own records. This is what made the replay diagnosis possible without a run.
@@ -104,6 +116,7 @@ What A1's breakdown left to explain: both arms make three requests to the landin
 3. 2026-10-21 (executor). No thinking lever is built. The cause is the edit path's lack of a measuring tool. The only lever that moves it games the first-landing measure.
 4. 2026-10-21 (architect, relayed). Driving the owner's Claude Desktop with cua on the mini is inside the brief for a granted GUI hold; the brief's "No GUI automation" covers the MacBook and anything outside a granted hold. B1, B5 and B7 are run on the lever only, x5 each, as a regression check, with no Desktop rerun.
 5. 2026-10-21 (architect, relayed; the owner may overturn it). The linked read, proposed by the executor as `[parent-impact]`, is approved as a request-diet lever. It removes one request from the owner's real path (link an artifact, ask for an edit), as Claude Code attaches an @-mentioned file. The terms are the architect's: the trigger, the read whole with its revision, a justified cap, the chip in the transcript, a probe fixture, the unit tests, and a reviewer-medium review before it runs. It becomes (a)'s third arm if reviewed before the go, else (b)'s MAWS arm. The alwaysLoad cost (2,943 cached tokens a request) is accepted.
+6. 2026-10-21 (executor, at review round 1). Linked reads go with submissions only. A steer's frame is written as it is: it is registered as pending before its write, and a stop's hold withdraws pending steers by uuid, so an await between the two lets a frame follow the stop's interrupt. Holding a steer through its reads would need a held-steer path of its own in the queue. A steer that links an artifact goes without its read, and the agent reads the artifact as before (a residue row). The bench's path, and the owner's usual one (link an artifact and ask), is a submission.
 
 ## Outcomes & Retrospective
 
