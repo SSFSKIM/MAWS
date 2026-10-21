@@ -1,8 +1,8 @@
 // DC3's local hub, as the browser suites meet it: `pnpm --filter desk-hub local` (wrangler dev with the Worker, its
 // Durable Objects, and the web app's built assets, behind the stand-in for Access), started on a free port and stopped
 // with its whole process group. A request with no identity is the org's admin, owner@example.com, as the command's
-// default. Each start keeps its state in a fresh directory of its own (the command's `--state`), removed at stop, so
-// every run meets an org with no key and no machines, and nothing piles up between runs.
+// default. Each start keeps its state in a fresh directory of its own (the command's `--state`), removed at stop or
+// when the start fails, so every run meets an org with no key and no machines, and nothing piles up between runs.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -55,20 +55,27 @@ export class LocalHub {
     for (const stream of [child.stdout!, child.stderr!]) stream.on('data', (chunk: Buffer) => output.push(chunk.toString()));
     const hub = new LocalHub(`http://127.0.0.1:${port}`, child, output, state);
     const deadline = Date.now() + 120_000;
-    for (;;) {
-      if (child.exitCode !== null) throw new Error(`the local hub exited (${child.exitCode}):\n${output.join('')}`);
-      const me = await fetch(`${hub.url}/api/me`).catch(() => null);
-      if (me?.status === 200) return hub;
-      if (Date.now() > deadline) {
-        await hub.stop();
-        throw new Error(`the local hub did not answer /api/me within 120 s:\n${output.join('')}`);
+    try {
+      for (;;) {
+        if (hub.exited) throw new Error(`the local hub exited (${child.exitCode ?? child.signalCode}):\n${output.join('')}`);
+        const me = await fetch(`${hub.url}/api/me`).catch(() => null);
+        if (me?.status === 200) return hub;
+        if (Date.now() > deadline) throw new Error(`the local hub did not answer /api/me within 120 s:\n${output.join('')}`);
+        await new Promise((done) => setTimeout(done, 500));
       }
-      await new Promise((done) => setTimeout(done, 500));
+    } catch (error) {
+      await hub.stop(); // a failed start leaves no process group and no state directory behind
+      throw error;
     }
   }
 
+  /** Whether the command has ended, by its own exit or by a signal (which leaves `exitCode` null). */
+  private get exited(): boolean {
+    return this.child.exitCode !== null || this.child.signalCode !== null;
+  }
+
   async stop(): Promise<void> {
-    if (this.child.exitCode === null && this.child.pid !== undefined) {
+    if (!this.exited && this.child.pid !== undefined) {
       const exited = new Promise((done) => this.child.once('exit', done));
       process.kill(-this.child.pid, 'SIGTERM');
       const timeout = setTimeout(() => this.child.pid !== undefined && process.kill(-this.child.pid, 'SIGKILL'), 10_000);
