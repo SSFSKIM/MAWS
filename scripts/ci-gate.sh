@@ -45,8 +45,8 @@
 #                      graph cannot see (a package.json or the lockfile, a vitest or vite config, test support, gate
 #                      files, a path outside the source and test trees, a deleted or renamed non-test file, a file read
 #                      as data; .github/scripts/gate-affected.mjs). A path under docs/, which no suite reads, counts for
-#                      nothing, so a docs-only change runs no unit suite; docs/doperpowers/evidence, which suites read, is
-#                      data. The change is every path `git diff --name-status -M` lists from the merge base with
+#                      nothing, so a docs-only change runs no unit suite; docs/doperpowers/evidence/p1-e8, which a suite
+#                      reads, is data. The change is every path `git diff --name-status -M` lists from the merge base with
 #                      origin/master, fetched first, to the tested commit. The run's title says `affected` (ci-kit's
 #                      test-history spec, M4). A selected run is NEVER landing evidence, even when it ran the whole
 #                      suite: a landing needs a full class 1a run on the head's tree without --affected, and a red

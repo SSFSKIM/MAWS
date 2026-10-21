@@ -5,8 +5,8 @@
 // new path), none when n passes ci-gate's bound. unit and unit:darwin then run vitest's related mode over the paths
 // that still exist: only the suites whose module graph reaches one. What that graph cannot see runs the full suite
 // instead (the fallbacks below, the first that applies giving the reason), and the suites that read source without
-// importing it join the list (SOURCE_READERS). A path no suite reads (UNREAD: docs/, but for its evidence) counts for
-// nothing.
+// importing it join the list (SOURCE_READERS). A path no suite reads (UNREAD: docs/, but for the evidence one suite
+// reads) counts for nothing.
 // A selected run never counts as landing evidence, even when a fallback ran the full suite, and a red one counts as red:
 // a landing needs a full class 1a on the head's tree, which catches whatever selection missed.
 // The decision alone, for gate-plan.mjs (which reads the trailers and writes the outputs) and gate-plan.test.mjs.
@@ -20,8 +20,8 @@
 // (readFileSync, readdir, import.meta.glob, query imports, in test files and test support); outside the trees the
 // suites also read spikes/protocol-probe/fixtures, spikes/browser-probe, e2e/fixtures, e2e/support,
 // apps/desk-hub/{deploy,fake-machine,local}, apps/desk-hub/wrangler.jsonc and apps/desk-web/public, which the
-// outside-the-trees rule already sends to the full suite, and docs/doperpowers/evidence, listed here since the rest of
-// docs/ is not (UNREAD).
+// outside-the-trees rule already sends to the full suite, and docs/doperpowers/evidence/p1-e8, listed here since the
+// rest of docs/ is not (UNREAD).
 export const READ_AS_DATA = [
   'test/fixtures/', // readFileSync, the harness's import.meta.glob, the document suites' `?raw` imports
   'test/snapshots/', // the transcript model's snapshots
@@ -29,14 +29,15 @@ export const READ_AS_DATA = [
   'src/artifacts/types/design_system/defaults/', // import.meta.glob `?raw`, `?inline` and `?asset`; r3-labelled-set's tokens
   'src/artifacts/slides/fixtures/claude/', // corpus.ts's import.meta.glob `?raw`
   'src/renderer/src/terminal/__fixtures__/', // scroll-up's recorded terminal bytes
-  'docs/doperpowers/evidence/', // src/shared/plugins/cli.test.ts reads p1-e8; test/artifacts/r3-labelled-set.test.ts writes p4-b4
+  'docs/doperpowers/evidence/p1-e8/', // src/shared/plugins/cli.test.ts reads g0-cli-probe.txt
 ];
 
 // What no suite reads: a change there contributes no path, so a change of docs alone runs no suite. Read for it: the
 // suites, their support, the scripts they spawn and the configs (fs reads, globs, query imports, path joins naming
-// docs/), 2026-10-21. The only reads under docs/ are of docs/doperpowers/evidence, a READ_AS_DATA directory, which
-// runs the full suite; elsewhere docs/ appears in suites only as strings (sample paths, provenance). A suite that
-// starts reading under docs/ makes its directory a READ_AS_DATA entry.
+// docs/), 2026-10-21. The one read under docs/ is cli.test.ts's of docs/doperpowers/evidence/p1-e8, a READ_AS_DATA
+// directory, which runs the full suite; test/artifacts/r3-labelled-set.test.ts writes evidence/p4-b4 and reads none of
+// it, and elsewhere docs/ appears in suites only as strings (sample paths, provenance). A suite that starts reading
+// under docs/ makes its directory a READ_AS_DATA entry.
 export const UNREAD = ['docs/'];
 
 // Suites that read source trees without importing them: through fs, a lint, a build of the tree, or a bundle a suite
