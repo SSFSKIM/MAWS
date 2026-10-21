@@ -75,6 +75,18 @@ describe('comments on a design', () => {
     expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
   });
 
+  // fix wave: a board's quote is its title, so a rename (an agent's republish of the manifest) writes nothing to the threads
+  it('a board pin’s name follows the board’s rename', async () => {
+    const { doc, container } = mount();
+    addThread(doc, { threadId: 'tb', slideId: 'b1', elementId: ROOT, quote: 'Phone', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    const pin = () => container.querySelector<HTMLElement>('[data-board-pin="b1"]')!;
+    expect(pin().getAttribute('aria-label')).toBe('Comment on “Phone”');
+    act(() => transact(doc, () => Y.setSlideKey(doc, 'b1', 'title', 'Phone — sign in')));
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    expect(pin().getAttribute('aria-label')).toBe('Comment on “Phone — sign in”');
+  });
+
   it('with nothing selected the active board is the target; ⌥⌘M comments it too', () => {
     const { session, opened, container } = mount();
     act(() => session.show('b2'));
