@@ -45,7 +45,8 @@ Repetitions. At least five valid repetitions per cell, each a fresh session, the
   repetition that waits on a permission);
 - its edit landed, and the checker (check.py, one set of rules for both apps, read from the artifact before and after
   the turn) passed;
-- for a Cowork deck whose seed was rebuilt from its records, that seed is the bench's (`check.py same seed/maws-deck`).
+- for a Cowork deck whose seed was rebuilt from its records, that seed is the bench's (`check.py same seed/maws-deck`),
+  and its timed turn ran in another session than its seed's (§7a; `freshSession` in the manifest).
 An invalid repetition is listed with its reason, never dropped silently; an attempt made again keeps its own directory
 (…-a2, …-a3) and nothing recorded is overwritten. A cell short of five valid repetitions is run again in the same hold,
 never judged short.
@@ -408,12 +409,33 @@ must be recorded in auto (`desktop-prep.py deck`). Cowork's effort is read from 
 at Extra high, the deck cells are measurement-only (§2), with MAWS_BENCH_PIN set to Cowork's recorded setting for B5 and
 B7. If Cowork has no Auto for the account, the decks fall back to (c) and the result says why (Decision Log 25).
 
-Harness additions before the prep hold, made on the MacBook with tests (about 30 minutes, none of it on the mini):
-`desktop-prep.py before --ref <url>`, so a Cowork timed prompt names its seed deck; `desktop-prep.py seed-prompt`, the
-exact untimed prompt that has a Cowork session create the Slides deck from seed/maws-deck and reply with its url, and a
-seeds ledger (the seed's transcript, its url, `same`, the recorded mode) that the timed repetitions draw from;
-spikes/p4-parity-bench/mini/, holding the queue runner, its LaunchAgent template and the request-and-wait wrapper the
-operator calls over ssh.
+Harness additions for the mini, made on the MacBook with tests before any hold (2026-10-21):
+- `desktop-prep.py seed-prompt` prints the untimed prompt that has a Cowork session make the Slides deck from
+  seed/maws-deck, file for file, and reply with its url. `seed-add <transcript> --out RUN` rebuilds that session's deck
+  from its records and enters it in RUN/seeds.json. The entry is good when the deck is `same` as the bench's, every
+  human turn of the seed session ran in auto, and its url is known: from the seed's calls, else the create's result,
+  else the session's reply.
+- `before --seed next` takes the next good seed nobody has used (a seed is used once, even by an attempt then redone),
+  names its deck in the prompt by its url, and keeps its transcript for `after`. `after` refuses another
+  --seed-transcript, stops when the turn edited another Artifact than the seed's, and records `freshSession`, which
+  the parser requires. `before --ref` overrides any handle by hand.
+- spikes/p4-parity-bench/mini/:
+  - `queue-runner.sh`, the serial executor in the console's login session; it takes MAWS_BENCH_* keys only;
+  - `queue.plist.template`, its one-shot LaunchAgent (Interactive, Aqua, under the run directory);
+  - `bench-queue.sh`, the operator's plist, start, run, status and stop over ssh. Its `run` hands over one
+    repetition, waits, prints the log's tail and exits with the repetition's code.
+- The tests: prep_test.py's Seeds and mini_test.py (the runner with a stand-in for the bench's invocation, no
+  launchd).
+
+The operator's commands on the mini (RUN the run directory, the bench's checkout at /tmp/maws-parity-bench/repo):
+- Start: `spikes/p4-parity-bench/mini/bench-queue.sh start RUN`.
+- A MAWS repetition: `… bench-queue.sh run RUN MAWS_BENCH_SCOPE=owner MAWS_BENCH_TASKS=B3 MAWS_BENCH_REP_FROM=1
+  MAWS_BENCH_OUT=RUN MAWS_BENCH_PROFILE=RUN/maws-profile`.
+- A Cowork seed: the driver pastes `desktop-prep.py seed-prompt` into a fresh Cowork session, then `desktop-prep.py
+  seed-add <its transcript> --out RUN`.
+- A Cowork deck repetition: `desktop-prep.py before B5 1 --out RUN --surface cowork --seed next`, the driver, then
+  `after B5 1 --out RUN --permissions-answered N`.
+- When the hold ends: `bench-queue.sh stop RUN`.
 
 The owner's part, asked once:
 1. A sign-in: if Desktop asks for one after its update, the owner signs in to their Claude account on the mini (it goes
@@ -425,15 +447,16 @@ The owner's part, asked once:
 3. cua's app approval in this client ("Allow Computer Use to use Claude?"), once per connection, if it reaches the
    owner.
 4. The mini unlocked for both holds: a locked screen stops cua, and only the owner unlocks it.
-5. Optional, which shortens the prep and removes its main unknown: the owner updates Claude Desktop on the mini and
-   confirms it is signed in, about 5 minutes, any time before the prep hold.
+5. The owner updates Claude Desktop on the mini themselves before Part A (their answer of 2026-10-21); Part A then
+   opens after their done with the version re-read over ssh and recorded, and keeps the sign-in check through cua for
+   a first-run screen the update or the sign-in left.
 Not the owner's: the per-session settings (Opus 5.5, Extra high, Auto in Code sessions and in Cowork), which cua sets
 on every session; the bench's project; the deletions after.
 
 The prep hold (a GUI hold with the quiet flag), about 2 hours 30 minutes, separable into two parts:
-- Part A, about 45 to 60 minutes, everything that may need the owner. It covers re-reading the facts and the posture;
-  `devices_use mini`; launching Desktop and updating it through its own updater; the sign-in check; the new build's
-  first screens; `bench.probe()` with the driver's labels fixed against the live Korean tree; one untimed Code probe
+- Part A, about 45 to 60 minutes, everything that may need the owner. It covers re-reading the facts and the posture
+  (Desktop's version as the owner's update left it, recorded); `devices_use mini`; the sign-in check and any first-run
+  screen the update left; `bench.probe()` with the driver's labels fixed against the live Korean tree; one untimed Code probe
   session and one untimed Cowork probe session read with `kinds` (the tools, the engine, the recorded mode, model and
   effort, whether Cowork offers Auto and Extra high), and any Cowork VM bundle download the new build asks for, which
   is the one open-ended step (5 to 20 minutes).

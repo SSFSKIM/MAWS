@@ -6,12 +6,13 @@
 //
 // One repetition, by the agent holding the GUI:
 //   1. Bash:     python3 -I spikes/p4-parity-bench/desktop-prep.py before <task> <rep> --out <run> [--surface code|cowork]
+//                  [--seed next]   (a Cowork deck of the record: its seed deck, named in the prompt by its url)
 //                (lays the pristine doc.md and deck.html in the arm's folder and prints the exact prompt)
 //   2. cua_repl: this file's text once per kernel (it defines globalThis.bench), then
 //                await bench.rep({ surface: 'code', folder: '<printed folder>', prompt: '<printed prompt>' })
 //                (its result's permissionsAnswered counts the permission cards it had to answer)
 //   3. Bash:     python3 -I spikes/p4-parity-bench/desktop-prep.py after <task> <rep> --out <run>
-//                  --permissions-answered <step 2's permissionsAnswered> [--seed-transcript <a Cowork deck's seed transcript>]
+//                  --permissions-answered <step 2's permissionsAnswered>   (a seed taken in step 1 is followed by itself)
 //                (finds the session's records, copies or rebuilds the edited artifact, runs the checker, writes the
 //                manifest and prints whether the attempt is valid)
 // Interleave with the MAWS arm per findings.txt's order; never run two repetitions at once.

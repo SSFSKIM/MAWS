@@ -62,12 +62,17 @@ class Recorder:
     def human(self, text):
         self.recs.append(dict(type='user', timestamp=self.at(), turnOrigin='human', permissionMode='auto', cwd=self.cwd, sessionId='s', message={'role': 'user', 'content': text}))
 
-    def call(self, name, inp, ok=True):
+    def call(self, name, inp, ok=True, result='ok'):
         self.n += 1
         tid = 'toolu_%d' % self.n
         self.recs.append(dict(type='assistant', timestamp=self.at(), cwd=self.cwd, sessionId='s', requestId='q%d' % self.n,
                               message={'id': 'm%d' % self.n, 'model': 'claude-opus-5-5', 'content': [{'type': 'tool_use', 'id': tid, 'name': name, 'input': inp}], 'usage': {'output_tokens': 5}}))
-        self.recs.append(dict(type='user', timestamp=self.at(), cwd=self.cwd, sessionId='s', message={'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': tid, 'content': 'ok', 'is_error': not ok}]}))
+        self.recs.append(dict(type='user', timestamp=self.at(), cwd=self.cwd, sessionId='s', message={'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': tid, 'content': result, 'is_error': not ok}]}))
+
+    def reply(self, text):
+        self.n += 1
+        self.recs.append(dict(type='assistant', timestamp=self.at(), cwd=self.cwd, sessionId='s', requestId='q%d' % self.n,
+                              message={'id': 'm%d' % self.n, 'model': 'claude-opus-5-5', 'content': [{'type': 'text', 'text': text}], 'usage': {'output_tokens': 5}}))
 
 
 class Prep(unittest.TestCase):
@@ -428,6 +433,104 @@ class CoworkDeck(Prep):
             r.apply(call('Artifact', {'url': 'u', 'file_path': '/w/p.html', 'edits': [{'old_str': 'Z', 'new_str': 'B'}]}))
         r.apply(call('Artifact', {'url': 'u', 'file_path': '/w/p.html', 'edits': [{'old_str': '>A<', 'new_str': '>B<'}]}))
         self.assertEqual(r.published, {'p.html': '<section><h2>B</h2></section>'})
+
+
+class Seeds(CoworkDeck):
+    """§7a: a Cowork deck's timed turn runs in a fresh session on a seed deck an untimed session made beforehand; the
+    seeds ledger checks each seed, hands each out once, and the timed prompt names the deck by its url."""
+
+    def ledger(self):
+        return json.loads(read(os.path.join(self.run_dir, 'seeds.json')))
+
+    def test_the_seed_prompt_carries_every_seed_file(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            prep.main(['seed-prompt'])
+        text = out.getvalue()
+        self.assertIn('"Autumn Workshops 2026"', text)
+        for root, _, names in os.walk(DECK):
+            for n in names:
+                rel = os.path.relpath(os.path.join(root, n), DECK)
+                self.assertIn('----- %s -----\n%s' % (rel, read(os.path.join(root, n)).strip()), text)
+
+    def test_a_seed_is_checked_handed_out_once_and_named_by_its_url(self):
+        entry = self.main('seed-add', self.seed_slides(), '--out', self.run_dir)
+        self.assertEqual((entry['id'], entry['ok'], entry['url'], entry['urlFrom'], entry['permissionModes']), ('seed-01', True, URL, "the seed's calls", ['auto']))
+        self.assertTrue(entry['same']['pass'], entry['same'])
+        out = self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        self.assertEqual(out['seed'], 'seed-01')
+        self.assertIn('In the slide deck %s, on slide 2' % URL, out['prompt'])
+        self.assertEqual(self.ledger()['seeds'][0]['usedBy']['task'], 'B5')
+        self.cowork_session(self.timed_b5())
+        after = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0')  # the seed's transcript from before
+        self.assertEqual((after['valid'], after['freshSession'], after['deckUrl']), ('yes', True, URL), after)
+        with self.assertRaises(SystemExit) as none_left:
+            self.main('before', 'B7', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        self.assertIn('no good unused seed', str(none_left.exception))
+
+    def test_a_timed_turn_in_its_seeds_session_is_invalid(self):
+        session = self.cowork_session(Recorder(self.SEED_MNT))  # the session's transcript, the seed's records first
+        shutil.copyfile(self.seed_slides(), session)
+        self.assertTrue(self.main('seed-add', session, '--out', self.run_dir)['ok'])
+        self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        timed = self.timed_b5()
+        with open(session, 'a', encoding='utf-8') as f:  # the same session carries on with the timed turn
+            f.write(''.join(json.dumps(r) + '\n' for r in timed.recs))
+        after = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0')
+        self.assertTrue(after['check']['pass'], after['check'])
+        self.assertFalse(after['freshSession'])
+        self.assertIn("the timed turn ran in its seed's session, not a fresh one", after['valid'])
+
+    def test_a_seed_off_the_bench_or_out_of_auto_is_never_handed_out(self):
+        seed = self.seed_slides()
+        recs = [json.loads(line) for line in read(seed).splitlines()]
+        for r in recs:
+            if r.get('turnOrigin') == 'human':
+                r['permissionMode'] = 'default'
+        entry = self.main('seed-add', records(os.path.join(self.dir, 'default.jsonl'), recs), '--out', self.run_dir)
+        self.assertFalse(entry['ok'])
+        self.assertIn('a turn not in auto', entry['why'])
+        off = Recorder(self.SEED_MNT)
+        off.human('Make the deck.')
+        off.call('Artifact', {'type_url': SLIDES, 'title': 'Autumn Workshops 2026', 'file_path': '/s/project/deck.json'})
+        off.call('Write', {'file_path': '/s/project/deck.json', 'content': '{"order": []}'})
+        self.assertFalse(self.main('seed-add', records(os.path.join(self.dir, 'off.jsonl'), off.recs), '--out', self.run_dir)['ok'])
+        with self.assertRaises(SystemExit) as refused:
+            self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        self.assertIn('no good unused seed', str(refused.exception))
+        with self.assertRaises(SystemExit) as again:  # one transcript is entered once
+            self.main('seed-add', seed, '--out', self.run_dir)
+            self.main('seed-add', seed, '--out', self.run_dir)
+        self.assertIn('already in', str(again.exception))
+
+    def test_a_seed_whose_calls_name_no_url_takes_the_creates_result(self):
+        r = Recorder(self.SEED_MNT)
+        r.human('Make the deck.')
+        rels = []
+        for root, _, names in os.walk(DECK):
+            for n in sorted(names):
+                rels.append(os.path.relpath(os.path.join(root, n), DECK))
+                r.call('Write', {'file_path': os.path.join('/s', rels[-1]), 'content': read(os.path.join(root, n))})
+        # a create that publishes its files at once: the new deck's url is only in the call's result
+        r.call('Artifact', {'type_url': SLIDES, 'title': 'Autumn Workshops 2026', 'root': '/s', 'file_path': '/s/project/deck.json',
+                            'files': [{'path': rel} for rel in rels if rel != 'project/deck.json']}, result='Created %s' % URL_UUID)
+        r.reply('Done: %s' % OTHER)
+        entry = self.main('seed-add', records(os.path.join(self.dir, 'url.jsonl'), r.recs), '--out', self.run_dir)
+        self.assertEqual((entry['url'], entry['urlFrom']), (URL_UUID, "the create's result"))
+
+    def test_after_refuses_another_seed_than_the_one_before_took(self):
+        self.main('seed-add', self.seed_slides(), '--out', self.run_dir)
+        self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        self.cowork_session(self.timed_b5())
+        with self.assertRaises(SystemExit) as refused:
+            self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--seed-transcript', DESKTOP_T)
+        self.assertIn('is not the seed seed-01 took', str(refused.exception))
+
+    def test_a_seed_is_only_for_a_cowork_deck(self):
+        self.main('seed-add', self.seed_slides(), '--out', self.run_dir)
+        with self.assertRaises(SystemExit) as refused:
+            self.main('before', 'B1', '1', '--out', self.run_dir, '--seed', 'next')
+        self.assertIn('--seed is for a Cowork deck', str(refused.exception))
+        self.assertIsNone(self.ledger()['seeds'][0]['usedBy'])
 
 
 if __name__ == '__main__':
