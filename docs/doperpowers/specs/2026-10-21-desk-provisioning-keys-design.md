@@ -1157,6 +1157,25 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   fails: pnpm passes the `--` through and `run.ts`'s `parseArgs` refuses it; flags follow `local` directly
   (Concrete Steps passes none).
   Date/Author: 2026-10-21, M4's executor; folded by the controller.
+- Decision: The whole-branch xhigh panels' fix wave (2026-10-21), one confirmed P2 per repository, both accepted by
+  the orchestrator:
+  1. **MAWS: a fenced offline revocation completes.** The sweep's revocation could place the `Machine` object's fence
+     and lose its answer; a reconnect's lease report then made the next sweep drop or defer the retry (it read the
+     machine online, or a new offline deadline), leaving a fenced credential whose name and token stayed held and
+     which `GET /machine/enrollment` still called active — against §4's "once the fence is placed the revocation
+     completes". Now a started revocation is recorded as unfinished (per enrollment, in memory) before its first
+     await and retried after its minute until it completes, whatever the machine reads, with the alarm scheduled for
+     it (`44a1909e4`); the sweep re-reads that record at dispatch, so overlapping sweeps keep the per-enrollment wait
+     (`f992aeb81`, a reviewer-medium finding on the first fix). Accepted limit: a Registry restart between the lost
+     answer and the retry forgets the record; the machine then takes the ordinary path, bounded because the fence
+     refuses new streams — its lease lapses and the sweep completes the revocation one `offline_revoke_s` later.
+     Rejected: a durable record (a kv key or column, storage the owner has not approved, for a window this rare).
+  2. **doperpowers: only a complete answer is a rejection.** `ask()` took `bool(resp.length)` as proof of a whole
+     body, which a chunked or close-delimited answer cannot give: a chunked `403 not-enrolled` missing its last chunk
+     read as complete, and `leave` deleted the credential (`check` exited 3). Now an answer authorizes *rejected* only
+     once its body is known complete (read to EOF or to a declared length without `IncompleteRead`); anything less is
+     *other* — `check` 4, `leave` 1, the credential kept.
+  Date/Author: 2026-10-21, the orchestrator (rulings); recorded by the controller.
 
 ## Outcomes & Retrospective
 
@@ -1188,7 +1207,13 @@ propagation behaviour, not only its steady state — the deploy probe already he
 The worktree guard cost every worker in this run a re-plan (friction tracker entry 11); script files run as
 `zsh <file>` were the reliable route into a second worktree.
 
-**Left open** (in the PR bodies): no suite starts from a Registry stored before M1 (`ADDED_COLUMNS` for
+**After the panels.** Each repository's xhigh panel confirmed one P2 — a fenced offline revocation that a
+reconnect could strand, and an incomplete body read as a rejection — both fixed and reviewed (Decision Log). Both are
+the same lesson as the milestone reviews': a state read across an await, or a byte stream read as whole, decides
+something irreversible.
+
+**Left open** (in the PR bodies): a Registry restart between a lost revocation answer and its retry (bounded by the
+key's `offline_revoke_s`); no suite starts from a Registry stored before M1 (`ADDED_COLUMNS` for
 `enrollments.key`, checked at deploy); five `e2e-hub/session-plane.spec.ts` cases fail on master too (not this branch);
 the one-time code's padding vector does not refuse on padding alone; the key row's `expired` label follows the day
 clock, not the second.
