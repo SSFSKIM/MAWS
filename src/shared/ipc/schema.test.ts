@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V16 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -341,7 +341,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V16, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V17, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -376,7 +376,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V16, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V17, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -608,8 +608,8 @@ describe('ipc schema validates both directions', () => {
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
-    it('settings.get and settings.changed carry the whole version 16 state', () => { // P4-R8: the app MCP servers
-      const state = { settings: { ...SETTINGS_DEFAULTS_V16, engine: { ...SETTINGS_DEFAULTS_V16.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+    it('settings.get and settings.changed carry the whole version 17 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
+      const state = { settings: { ...SETTINGS_DEFAULTS_V17, engine: { ...SETTINGS_DEFAULTS_V17.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -618,6 +618,11 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('settings.get', withoutServers).ok).toBe(false);
       expect(validateEventPayload('settings.changed', withoutServers).ok).toBe(false);
       expect(validateCommandOutput('settings.get', { ...state, settings: { ...state.settings, version: 15 } }).ok).toBe(false);
+      // P4-A2 (2026-10-21): and the launch profile, and a version 16 state cannot cross either.
+      const withoutProfile = { ...state, settings: { ...state.settings, engine: { ...state.settings.engine, launchProfile: undefined } } };
+      expect(validateCommandOutput('settings.get', withoutProfile).ok).toBe(false);
+      expect(validateEventPayload('settings.changed', withoutProfile).ok).toBe(false);
+      expect(validateCommandOutput('settings.get', { ...state, settings: { ...state.settings, version: 16 } }).ok).toBe(false);
     });
 
     it('settings.set takes a section by field and one notification kind alone', () => {
@@ -626,6 +631,8 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('settings.set', { engine: { binaryPath: null } }).ok).toBe(true);
       expect(validateCommandInput('settings.set', { engine: { mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } }).ok).toBe(true); // P4-R8
       expect(validateCommandInput('settings.set', { engine: { mcpServers: [{ name: 'maws', type: 'http', url: 'http://127.0.0.1/mcp' }] } }).ok).toBe(false); // P4-R8
+      expect(validateCommandInput('settings.set', { engine: { launchProfile: { plugins: { off: ['cc-plugin-diff@builtin'] }, outputStyle: 'maws', hooks: 'none' } } }).ok).toBe(true); // P4-A2
+      expect(validateCommandInput('settings.set', { engine: { launchProfile: { plugins: { off: ['__proto__'] }, outputStyle: 'user', hooks: 'user' } } }).ok).toBe(false); // P4-A2
       expect(validateCommandInput('settings.set', { engine: { binaryPath: 'bin/claude' } }).ok).toBe(false);
       expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 95 } }).ok).toBe(true);
       expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 40 } }).ok).toBe(false);
