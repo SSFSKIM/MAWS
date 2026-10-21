@@ -68,7 +68,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await advanceTo(app, 2000);
     const mark = row.getByText('released', { exact: true });
     await expect(mark).toBeVisible();
-    await expect(mark).toHaveAttribute('title', new RegExp(`^Released at ${CLOCK} to stay under the 2 GB memory budget · Send resumes it$`));
+    await expect(mark).toHaveAttribute('title', new RegExp(`^Released at ${CLOCK} to stay under the 2 GB memory budget · Send resumes it$`, 'u'));
     await expect(row.getByRole('img', { name: 'Idle' })).toBeVisible(); // the idle glyph: no failed or exited glyph
     await expect(row.getByLabel('Unread')).toHaveCount(0);
     // W5: the Overview floats over the main area from the toolbar's button rather than showing as the first tab.
@@ -101,7 +101,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await page.getByRole('menuitem', { name: 'Session info' }).click();
     const info = page.locator(`[data-session-info="${RELEASED}"]`);
     await expect(dd(info, 'Memory budget')).toHaveText('2.6 GB of 2 GB · 3 sessions');
-    await expect(dd(info, 'Process')).toHaveText(new RegExp(`^Released at ${CLOCK} to stay under 2 GB$`));
+    await expect(dd(info, 'Process')).toHaveText(new RegExp(`^Released at ${CLOCK} to stay under 2 GB$`, 'u'));
     await shoot(page, testInfo, 'session-info');
 
     // The host's second sample over budget with no candidate: one banner.
