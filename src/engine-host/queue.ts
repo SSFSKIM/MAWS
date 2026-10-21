@@ -60,7 +60,14 @@ export interface MessageQueueDeps {
   unsettled?: () => Promise<MessageUuid[]>;
   // P4-A3: the content a submission's frame carries, made from the entry's (the linked reads); the entry keeps its own.
   // A steer's frame is written as it is: its write must stay ordered with a stop's hold.
-  prepare?: (content: SendContent) => Promise<SendContent>;
+  prepare?: (content: SendContent) => Promise<Prepared>;
+}
+
+// P4-A3: a submission's prepared content, and what keeps or undoes the preparation's effects: `settle(true)` once that
+// content reached the pipe, `settle(false)` when it did not (paused, removed, edited, exited or not written).
+export interface Prepared {
+  content: SendContent;
+  settle(written: boolean): void;
 }
 
 export class QueueEntryError extends Error {
@@ -620,29 +627,40 @@ export class MessageQueue {
     if (head) await this.submit(head, trigger);
   }
 
-  // queued → submitting (persisted) → the frame written; true when it reached the pipe. A failed write reverts the entry
-  // and pauses the queue with `failReason` (`engine_turn` after an engine-initiated turn, with its held notice).
+  // queued → (prepared) → submitting (persisted) → the frame written; true when it reached the pipe. A failed write reverts
+  // the entry and pauses the queue with `failReason` (`engine_turn` after an engine-initiated turn, with its held notice).
   private async submit(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn' = 'write_failed'): Promise<boolean> {
-    // P4-A3: the frame's content first, the entry still queued and the queue busy; a pause, an exit or the entry's removal
-    // meanwhile leaves it as it is (queued, or gone) with nothing written, as a paused queue holds an entry. An entry edited
-    // meanwhile goes with its new content, unprepared.
-    let content = entry.content;
-    if (this.deps.prepare) {
-      const from = entry.content;
-      this.preparing = entry;
-      try {
-        content = await this.deps.prepare(from);
-      } catch (error) {
-        this.log(`submission ${entry.queueId} not prepared: ${messageOf(error)}`);
-      } finally {
-        this.preparing = null;
-      }
-      if (this.releasePaused || !this.deps.canWrite() || entry.state !== 'queued' || !this.entries.includes(entry)) {
-        await this.persist().catch((error: unknown) => this.log(`held submission not saved: ${messageOf(error)}`));
+    if (!this.deps.prepare) return this.write(entry, trigger, failReason, entry.content);
+    // P4-A3: the frame's content first, the entry still queued and the queue busy. A pause, an exit or the entry's removal
+    // meanwhile leaves it as it is (queued, or gone; the pause, the exit or the removal saved it) with nothing written and
+    // nothing saved here, and a removal lets the next head go; an entry edited meanwhile goes with its new content,
+    // unprepared. Whatever the preparation did is kept only if its content reached the pipe (`settle`).
+    const from = entry.content;
+    let prepared: Prepared = { content: from, settle: () => {} };
+    this.preparing = entry;
+    try {
+      prepared = await this.deps.prepare(from);
+    } catch (error) {
+      this.log(`submission ${entry.queueId} not prepared: ${messageOf(error)}`);
+    } finally {
+      this.preparing = null;
+    }
+    let written = false;
+    try {
+      if (!this.deps.canWrite() || this.releasePaused) return false;
+      if (entry.state !== 'queued' || !this.entries.includes(entry)) {
+        await this.releaseHead(trigger);
         return false;
       }
-      if (entry.content !== from) content = entry.content;
+      written = await this.write(entry, trigger, failReason, entry.content === from ? prepared.content : entry.content);
+      return written;
+    } finally {
+      prepared.settle(written && entry.content === from);
     }
+  }
+
+  // queued → submitting (persisted) → the frame, `content`, written; true when it reached the pipe.
+  private async write(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn', content: SendContent): Promise<boolean> {
     const uuid = randomUUID() as MessageUuid;
     Object.assign(entry, { state: 'submitting', messageUuid: uuid, submittedAt: new Date().toISOString(), uncertain: false });
     const current = () => entry.state === 'submitting' && entry.messageUuid === uuid && this.entries.includes(entry);

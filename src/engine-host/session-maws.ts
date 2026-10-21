@@ -21,7 +21,7 @@ import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { LinkedArtifact } from '@shared/maws/linked-read'; // P4-A3
 import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
 import type { WriteOptions } from './outbound-writer';
-import type { MessageQueue } from './queue';
+import type { MessageQueue, Prepared } from './queue'; // P4-A3: Prepared
 import { AskAnswerMismatch } from './tool-server/ask';
 import type { ArtifactCaptureRequest, CaptureBridge } from './tool-server/artifacts';
 import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
@@ -34,7 +34,7 @@ import type { ArtifactExportAnswer, ArtifactExportRequest, ExportBridge } from '
 import type { ArtifactStore } from './documents/store'; // P3-A
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 import { ProvisionalEmitter } from './tool-server/provisional'; // P4-A2 (X35)
-import { withLinkedReads, type Admission } from './linked-reads'; // P4-A3
+import { withLinkedReads, type Admission, type ReadAnswer } from './linked-reads'; // P4-A3
 import type { SendContent } from '@shared/engine/session-state-store'; // P4-A3
 import type { McpToolDefinition } from './tool-server/server';
 
@@ -116,46 +116,54 @@ export class SessionMaws {
   }
 
   // P4-A3: a human message the queue submits, with the reads of the artifacts its words link (link order, within the
-  // cap; `../linked-reads`); content linking nothing readable comes back as it was, and so does any content when the
-  // reads fail. A read is the session's own `artifact_read` answer at this moment (no tool-use id: it joins no call's
-  // operation), so it resolves, migrates and answers exactly as the agent's read would.
-  async withLinkedReads(content: SendContent): Promise<SendContent> {
+  // cap; `../linked-reads`), and what keeps or undoes those reads once the queue knows whether the frame was written;
+  // content linking nothing readable comes back as it was, and so does any content when the reads fail. A read is the
+  // session's own `artifact_read` answer at this moment (no tool-use id: it joins no call's operation), so it resolves,
+  // migrates and answers exactly as the agent's read would.
+  async withLinkedReads(content: SendContent): Promise<Prepared> {
     try {
-      return (await withLinkedReads(content, (link, admit) => this.readLinked(link, admit))).content;
+      const outcome = await withLinkedReads(content, (link, admit) => this.readLinked(link, admit));
+      return { content: outcome.content, settle: (written) => outcome.settle(written) };
     } catch (error) {
       this.host.log(`linked reads not attached: ${error instanceof Error ? error.message : String(error)}`); // the message goes as written
-      return content;
+      return { content, settle: () => {} };
     }
   }
 
   // A read changes the session's memory of the artifact: an html page's byte base, a file kind's replica base (what its
-  // publish merges from). A read not attached must not, since the agent never saw it: both are put back as they were.
-  // A document's read records its view too, which only validates an edit from that revision; the agent learns the
-  // revision only from a read it does see, so that record is left. A read that throws is one not attached.
-  private async readLinked(link: LinkedArtifact, admit: (text: string | null) => Admission): Promise<Admission> {
+  // publish merges from). The agent must hold every read its memory reflects, so a read not attached puts both back at
+  // once, and an attached one hands back `undo`, for a frame that is then not written; either puts back only what the
+  // read itself left, never a later change. A document's read records its view too, which only validates an edit from
+  // that revision; the agent learns a revision only from a read it does see, so that record is left. A read that throws
+  // is one not attached.
+  private async readLinked(link: LinkedArtifact, admit: (text: string | null) => Admission): Promise<ReadAnswer> {
     const { artifactId } = link;
-    const service = this.host.artifacts?.()?.service ?? null;
-    const byteBase = this.artifactSession.byteBases.get(artifactId);
-    const base = service?.existingReplica(this.host.appSessionId, artifactId)?.base ?? null;
+    const sessionId = this.host.appSessionId;
+    const service = () => this.host.artifacts?.()?.service ?? null;
+    const before = { byteBase: this.artifactSession.byteBases.get(artifactId), base: service()?.existingReplica(sessionId, artifactId)?.base ?? null };
     let text: string | null = null;
     try {
       const result = await this.read.call(
         { artifact: artifactId, ...(link.tab !== undefined && { tab: link.tab }) },
-        { appSessionId: this.host.appSessionId, cwd: this.host.cwd(), toolUseId: null, requestId: `linked-read-${randomUUID()}` as RequestId, signal: new AbortController().signal, fromSubagent: false },
+        { appSessionId: sessionId, cwd: this.host.cwd(), toolUseId: null, requestId: `linked-read-${randomUUID()}` as RequestId, signal: new AbortController().signal, fromSubagent: false },
       );
       const block = result.content.find((b) => b.type === 'text');
       text = result.isError || !block || block.type !== 'text' ? null : block.text;
     } catch (error) {
       this.host.log(`linked read of ${artifactId} not attached: ${error instanceof Error ? error.message : String(error)}`);
     }
+    const after = { byteBase: this.artifactSession.byteBases.get(artifactId), base: service()?.existingReplica(sessionId, artifactId)?.base ?? null };
+    const undo = () => {
+      if (this.artifactSession.byteBases.get(artifactId) === after.byteBase) {
+        if (before.byteBase === undefined) this.artifactSession.byteBases.delete(artifactId);
+        else this.artifactSession.byteBases.set(artifactId, before.byteBase);
+      }
+      const replica = service()?.existingReplica(sessionId, artifactId);
+      if (replica && replica.base === after.base) replica.base = before.base;
+    };
     const admitted = admit(text);
-    if (!admitted.ok) {
-      if (byteBase === undefined) this.artifactSession.byteBases.delete(artifactId);
-      else this.artifactSession.byteBases.set(artifactId, byteBase);
-      const replica = service?.existingReplica(this.host.appSessionId, artifactId);
-      if (replica) replica.base = base;
-    }
-    return admitted;
+    if (!admitted.ok) undo();
+    return admitted.ok ? { ...admitted, undo } : admitted;
   }
 
   // The `maws` server's JSON-RPC traffic (the server answers another server's name itself).

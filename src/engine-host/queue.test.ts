@@ -3,7 +3,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { QueueEntry, QueueState, SendContent } from '@shared/engine/session-state-store';
 import type { UserInputFrame } from '@shared/wire/frames';
-import { MessageQueue } from './queue';
+import { MessageQueue, type Prepared } from './queue';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionEventSchema } from '@shared/graph/events'; // P2-C
 import { Normalizer } from './normalizer'; // P2-C
@@ -26,7 +26,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 // `turn` stands in for the normaliser's open turn (a write opens one, as the out row does). `onWrite` runs when a frame
 // reached the pipe, before the write resolves (where the real writer's settle drains the inbound frames it held);
 // `cancelAnswer`, when set, is what the engine's answer to a cancel waits on.
-async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<SendContent> /* P4-A3 */ } = {}) {
+async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<Prepared> /* P4-A3 */ } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
   const rows: Record<string, unknown>[] = [];
@@ -1455,7 +1455,8 @@ describe('cancelSteer (P2-C)', () => {
 
 // P4-A3 (lever 2): a submission's frame is prepared first (the linked reads), the entry keeping the human's content. The
 // preparation runs while the entry is still queued and the queue busy, so a stop or pause meanwhile keeps the entry
-// queued and writes nothing; a steer is written as it is, never prepared, so its write stays ordered with a stop's hold.
+// queued and writes nothing; its effects are kept only when its content reached the pipe; a steer is written as it is,
+// never prepared, so its write stays ordered with a stop's hold.
 describe('a prepared submission', () => {
   const READ = { type: 'text', text: '<the linked read>' };
   const gate = () => {
@@ -1463,20 +1464,31 @@ describe('a prepared submission', () => {
     const opened = new Promise<void>((r) => (open = r));
     return { opened, open };
   };
+  // A preparation that appends the read, waiting on `gates[content]` when there is one; each settle is recorded.
+  const preparer = (gates: Record<string, Promise<void>> = {}) => {
+    const settled: [string, boolean][] = [];
+    const prepare = async (content: SendContent): Promise<Prepared> => {
+      await gates[content as string];
+      return { content: [{ type: 'text', text: content as string }, READ], settle: (written) => settled.push([content as string, written]) };
+    };
+    return { prepare, settled };
+  };
 
-  it('writes the prepared content and keeps the human’s in the entry', async () => {
-    const { queue, writes } = await harness({ prepare: async (content) => [{ type: 'text', text: content as string }, READ] });
+  it('writes the prepared content, keeps the human’s in the entry and keeps the preparation', async () => {
+    const p = preparer();
+    const { queue, writes } = await harness({ prepare: p.prepare });
     const { entry, disposition } = await queue.send('fix it');
     expect(disposition).toBe('sent');
     expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fix it' }, READ]]);
     expect(entry.content).toBe('fix it');
     expect(queue.state.entries.map((e) => e.content)).toEqual(['fix it']);
+    expect(p.settled).toEqual([['fix it', true]]);
   });
 
-  it('holds the entry, unwritten, when the queue is paused while it is prepared, and sends it on resume', async () => {
+  it('holds the entry, unwritten, when the queue is paused while it is prepared, undoes the preparation and sends it on resume', async () => {
     const g = gate();
-    let calls = 0;
-    const { queue, writes } = await harness({ prepare: async (content) => (calls++ === 0 ? (await g.opened, content) : content) });
+    const p = preparer({ 'fix it': g.opened });
+    const { queue, writes } = await harness({ prepare: p.prepare });
     const sending = queue.send('fix it');
     await flush();
     await queue.pause('interrupt');
@@ -1484,33 +1496,83 @@ describe('a prepared submission', () => {
     expect((await sending).disposition).toBe('queued');
     expect(writes).toEqual([]);
     expect(queue.state.entries.map((e) => [e.content, e.state])).toEqual([['fix it', 'queued']]);
+    expect(p.settled).toEqual([['fix it', false]]);
     await queue.setPaused(false);
     await queue.settled();
-    expect(writes.map((w) => w.message.content)).toEqual(['fix it']);
+    expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fix it' }, READ]]);
+    expect(p.settled).toEqual([['fix it', false], ['fix it', true]]);
   });
 
   it('is busy while it prepares: a send meanwhile waits behind it, in order', async () => {
     const g = gate();
-    const { queue, writes, h } = await harness({ prepare: async (content) => (content === 'first' ? (await g.opened, content) : content) });
+    const p = preparer({ first: g.opened });
+    const { queue, writes, h } = await harness({ prepare: p.prepare });
     const first = queue.send('first');
     await flush();
     expect(queue.busy).toBe(true);
-    const second = await queue.send('second');
-    expect(second.disposition).toBe('queued');
+    expect((await queue.send('second')).disposition).toBe('queued');
     g.open();
     await first;
-    expect(writes.map((w) => w.message.content)).toEqual(['first']);
+    expect(writes.map((w) => (w.message.content as unknown as { text: string }[])[0]!.text)).toEqual(['first']);
     h.turn = false;
     await queue.onTurnEnded(turnEnded({ userMessageUuids: [writes[0]!.uuid as MessageUuid] }));
     await queue.settled();
-    expect(writes.map((w) => w.message.content)).toEqual(['first', 'second']);
+    expect(writes.map((w) => (w.message.content as unknown as { text: string }[])[0]!.text)).toEqual(['first', 'second']);
+  });
+
+  it('lets the next head go when the one being prepared is removed meanwhile', async () => {
+    const g = gate();
+    const p = preparer({ first: g.opened });
+    const { queue, writes } = await harness({ prepare: p.prepare });
+    const first = queue.send('first');
+    await flush();
+    await queue.send('second');
+    await queue.remove(queue.state.entries[0]!.queueId);
+    g.open();
+    await first;
+    await queue.settled();
+    expect(writes.map((w) => (w.message.content as unknown as { text: string }[])[0]!.text)).toEqual(['second']);
+    expect(p.settled).toEqual([['second', true], ['first', false]]);
+  });
+
+  it('sends an entry edited meanwhile with its new content, unprepared, and undoes the preparation', async () => {
+    const g = gate();
+    const p = preparer({ first: g.opened });
+    const { queue, writes } = await harness({ prepare: p.prepare });
+    const first = queue.send('first');
+    await flush();
+    await queue.edit(queue.state.entries[0]!.queueId, 'edited');
+    g.open();
+    await first;
+    expect(writes.map((w) => w.message.content)).toEqual(['edited']);
+    expect(p.settled).toEqual([['first', false]]);
+  });
+
+  it('saves nothing when the process exits while it prepares: what the exit saved stays', async () => {
+    const g = gate();
+    const p = preparer({ first: g.opened });
+    const { queue, writes, store, h } = await harness({ prepare: p.prepare });
+    const first = queue.send('first');
+    await flush();
+    h.ready = false;
+    await queue.onProcessExited('crash');
+    await queue.settled();
+    const saved = await store.loadQueue(ID);
+    await store.saveQueue(ID, { entries: [], paused: false, pauseReason: null }); // a relaunch's own queue since
+    g.open();
+    expect((await first).disposition).toBe('queued');
+    await queue.settled();
+    expect(writes).toEqual([]);
+    expect((await store.loadQueue(ID)).entries).toEqual([]); // the late preparation wrote no stale snapshot over it
+    expect(saved.entries.map((e) => e.content)).toEqual(['first']);
+    expect(p.settled).toEqual([['first', false]]);
   });
 
   it('never prepares a steer', async () => {
-    let calls = 0;
-    const { queue, writes } = await harness({ prepare: async (content) => (calls++, content) });
+    const p = preparer();
+    const { queue, writes } = await harness({ prepare: p.prepare });
     await queue.steer('now this', { priority: 'next' });
-    expect(calls).toBe(0);
+    expect(p.settled).toEqual([]);
     expect(writes.map((w) => w.message.content)).toEqual(['now this']);
   });
 });

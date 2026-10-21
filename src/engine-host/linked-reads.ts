@@ -3,25 +3,36 @@
 // the artifact as it is at send time. Each linked artifact is read once through the session's own `artifact_read` (its
 // answer, whole), in link order, and attached while the reads' total stays within the cap; a read refused or above what
 // is left is not attached, the session's memory of the artifact put back as it was (`read`'s side), and the agent reads
-// it as it would have. The message the queue keeps and shows is the human's: the reads go only into the frame.
+// it as it would have. The reads attached keep their effects only if the frame carrying them is written (`settle`). The
+// message the queue keeps and shows is the human's: the reads go only into the frame.
 import { LINKED_READ_CAP_BYTES, linkedArtifacts, linkedReadBlock, utf8Bytes, type LinkedArtifact } from '@shared/maws/linked-read';
 import type { SendContent } from '@shared/engine/session-state-store';
 
 export type Admission = { ok: true; block: string; revision: number; bytes: number } | { ok: false; why: 'refused' | 'over the cap' };
+// What the reader answers: the admission, and for a read admitted, what undoes its effects if its frame is not written.
+export type ReadAnswer = Admission & { undo?: () => void };
 
 export interface LinkedReadOutcome {
   content: SendContent;
   attached: { artifactId: string; revision: number; bytes: number }[];
   skipped: { artifactId: string; why: 'refused' | 'over the cap' }[];
+  // the attached reads' effects kept (the frame carrying them was written) or undone, latest first (it was not)
+  settle(written: boolean): void;
 }
 
 // `read` reads the link and asks `admit` of its answer (the read tool's result text, or null when the tool refused it)
 // before keeping what the read changed: a read `admit` refuses must leave the session as it found it.
-export type LinkedReader = (link: LinkedArtifact, admit: (text: string | null) => Admission) => Promise<Admission>;
+export type LinkedReader = (link: LinkedArtifact, admit: (text: string | null) => Admission) => Promise<ReadAnswer>;
 
 export async function withLinkedReads(content: SendContent, read: LinkedReader, cap = LINKED_READ_CAP_BYTES): Promise<LinkedReadOutcome> {
   const links = linkedArtifacts(content);
-  const outcome: LinkedReadOutcome = { content, attached: [], skipped: [] };
+  const undos: (() => void)[] = [];
+  const outcome: LinkedReadOutcome = {
+    content, attached: [], skipped: [],
+    settle: (written) => {
+      if (!written) for (const undo of undos.reverse()) undo();
+    },
+  };
   if (links.length === 0) return outcome;
   const blocks: string[] = [];
   let used = 0;
@@ -37,6 +48,7 @@ export async function withLinkedReads(content: SendContent, read: LinkedReader, 
       continue;
     }
     used += admitted.bytes;
+    if (admitted.undo) undos.push(admitted.undo);
     blocks.push(admitted.block);
     outcome.attached.push({ artifactId: link.artifactId, revision: admitted.revision, bytes: admitted.bytes });
   }

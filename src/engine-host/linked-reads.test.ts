@@ -58,6 +58,16 @@ describe('withLinkedReads', () => {
     expect((out.content as { type: string }[]).map((b) => b.type)).toEqual(['image', 'text', 'text', 'text']);
   });
 
+  it('keeps the attached reads’ effects when their frame is written, and undoes them, latest first, when it is not', async () => {
+    const undone: string[] = [];
+    const read: LinkedReader = async (link, admit) => ({ ...admit(readOf(link.artifactId, 1)), undo: () => undone.push(link.artifactId) });
+    const words = `[a](maws-artifact:${A}) [c](maws-artifact:${C})`;
+    (await withLinkedReads(words, read)).settle(true);
+    expect(undone).toEqual([]);
+    (await withLinkedReads(words, read)).settle(false);
+    expect(undone).toEqual([C, A]);
+  });
+
   it('attaches nothing a cap cannot hold, and leaves the message as it is', async () => {
     const out = await withLinkedReads(`[a](maws-artifact:${A})`, reader(() => readOf(A, 1)), 10);
     expect(out.content).toBe(`[a](maws-artifact:${A})`);
