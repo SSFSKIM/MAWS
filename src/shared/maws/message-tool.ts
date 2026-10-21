@@ -31,7 +31,7 @@ export const MESSAGE_TOOLS = {
   message: {
     title: 'Send message',
     description:
-      "Send the user a message now, word for word: MAWS shows it in the session's report where this call sits. Without this tool, write the message inside <message>…</message>. Use it for a message you send before another tool call, called in the same response as that call: text written there comes back as a paraphrase that never reaches the user. A message at the end of your turn stays a <message> span.",
+      "Send the user a message now, word for word, shown in the session's report in MAWS where this call sits; without this tool, write the message inside <message>…</message>. Use it for a message you send before another tool call, called in the same response as that call: text written there comes back as a paraphrase that never reaches the user. A message at the end of your turn stays a <message> span.",
     input: MessageInputSchema,
     annotations: { readOnlyHint: true, openWorldHint: false },
     meta: ALWAYS_LOAD,

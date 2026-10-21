@@ -1,0 +1,65 @@
+P4-R7: mid-turn messages to the human on MAWS's own wire, and the message tool
+(docs/doperpowers/plans/2026-10-19-p4-smoothing.md, Decision Log 46; parent pin 08a31f8df08ed97911398057380acd9d3cd7e687
+at master 44e4a3c5a; 2026-10-21)
+
+Question (D-1). On the pinned engine over MAWS's own wire, with MAWS's launch, what does a message the model writes
+before a tool call become: text, or a thinking block, and what does that block carry? Then: does `mcp__maws__message`
+carry the message whole, where, and at what cost?
+
+Method. scenarios/pass3/p4-r7-message-tool.mjs: MAWS's launch line and initialize (p1-common), the `maws` SDK server,
+`--disallowedTools AskUserQuestion`, the to-human text through `--append-system-prompt`, engine 2.1.304 (PROBE_ENGINE),
+claude-opus-5-5 at `--effort high`, through the ClaudeUsage relay with a recorder between engine and relay, so each
+fixture holds what the engine asked the API for and every block the API streamed back, in order, beside the engine's
+frames and the transcript's records. Fixtures fixtures/p4/p4-r7-*.jsonl; tests in fixtures.test.mjs ("p4 R7").
+
+1. MAWS's wire asks for the notes. Every main request carries `thinking: {type: "adaptive", display: "updates"}` and
+   the beta `thinking-display-updates-2026-08-18` (the engine sets it; MAWS passes nothing). So a progress note
+   arrives as a thinking block holding the API's paraphrase, as in the owner's terminal transcripts.
+2. The loss shows where the owner's sessions show it: the model's own words between pieces of work. loss-stages (a
+   status after each of four stages, contract 5): the stage 1 and stage 3 statuses came back as `<message>` text; the
+   stage 2 status, the one asking for a person to label three calls, came back as a non-empty thinking block, "Stage
+   2/4 complete: 34 of 37 missing labels restored from audio, though calls 0412, 0977, and 1203 need manual labeling.
+   …", no tags, right before the stage 3 Bash call in the same response. The transcript keeps it as a thinking block:
+   every reader of text blocks (MAWS's parser, the report, previews, summaries) misses it.
+3. A note the prompt asks for stayed text in every case: two sentences or six, first in the turn or between two calls
+   (loss-short, loss, loss-mid). No non-empty thinking block appeared in those runs. loss-notice and loss-dialog,
+   where the model chose its message itself, sent nothing mid-turn: the notice waited for the final message, and the
+   dialog went through `mcp__maws__ask` (blocking) and a final span.
+4. The tool. `mcp__maws__message` listed with `_meta["anthropic/alwaysLoad"]: true` is the one maws tool in the
+   request's tools under tool search (`defer_loading` absent); the model called it in the same response as the next
+   Bash call each time, its `text` whole in the stream, the frames, the `tools/call` (carrying
+   `_meta["claudecode/toolUseId"]`) and on disk, answered `sent`; the final message stayed a span (tool,
+   tool-stages). On disk the call's tool_result is written before the next call's tool_use record of the same
+   response (the engine runs a call as soon as its block closes).
+5. Permission. In default mode the engine asked `can_use_tool` for `mcp__maws__message` (tool); with
+   `--allowedTools mcp__maws__message`, as MAWS now launches when it offers the server, it asked none (tool-stages).
+6. The real MAWS sessions on this Mac (read-only survey of ~/.claude/projects, entrypoint sdk-ts, engine 2.1.303, the
+   last ten days: 6 lane-on sessions, 220 responses with a tool call) held no visible progress note and no span before
+   a call: 149 of those responses opened with an empty thinking block. The owner's interactive sessions of the last day
+   held 540 non-empty progress notes before a call, 534 of them after a tool result, 44 in the second person, many of
+   them messages ("I'll ping you right before the codesign prompt appears so you can enter your password").
+
+The eval of the wording (scenarios/pass3/p4-r7-eval.mjs; counts in fixtures/p4/p4-r7-eval.json). Two tasks whose
+work has the model message the human between two calls ("stages", 3 repetitions: status after each of four stages;
+"deploy", 2 repetitions: tell me as soon as anything needs my attention, keep going), each under two arms: before
+(contract 5, no tool) and after (contract 7, the tool listed and allowed). Counted per message, as doperpowers'
+acceptance 6 counts: a mid-turn message is a span before a call (delivered), a tool call (delivered) or a non-empty
+progress note the judge rules addressed to the human (lost; doperpowers-f7's prompt word for word, claude-opus-5-5 at
+low effort through the relay).
+                       mid-turn   as span   through tool   lost (needing action)   final spans   message calls
+  before (contract 5)      11         7          0               4 (4)                5 of 5           0
+  after  (contract 7)      11         0         11               0                    5 of 5          11
+Every lost note asked the human to act: the three calls to label (stages, 2 of 3 repetitions) and the TLS
+certificate only the account owner can renew (deploy, 2 of 2). Under contract 7 no progress note appeared at all.
+
+Spend through the relay: the probe's launches US$0.69 (US$0.60 in the kept fixtures and a first loss run of US$0.095
+whose fixture the re-run replaced), the eval's launches US$0.52 and its judge under US$0.01.
+
+Notes.
+- The tool's description changed after tool and tool-stages and the eval were recorded: the fallback clause moved
+  into the first sentence (A-18, which tools.test.ts holds every description to). The wire shape and the rule it
+  states are unchanged.
+- The relay answers a bare Messages API request 429 (`rate_limit_error`); it serves one shaped as Claude Code's (the
+  `claude-code-20250219` beta and its system line), which the eval's judge sends.
+- Not covered: claude-fable-5-1 (the API documents the same shape; not run, to keep the eval under its budget), auto
+  and plan modes with the allow (default mode only), and a resumed session's first launch after the tool appears.

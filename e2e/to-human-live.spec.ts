@@ -42,7 +42,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import type { JournalRow } from '@shared/wire/journal';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../src/engine-host/binary-info';
 import { RELAY_URL } from '../src/engine-host/launch';
@@ -77,9 +77,9 @@ function capUsd(): number {
 const OUT = resolve(REPO_ROOT, process.env.MAWS_C_LIVE_OUT ?? 'docs/doperpowers/evidence/p2-c');
 const OWNER_PLUGIN = 'doperpowers@doperpowers';
 const STYLE = 'doperpowers:to-human';
-const HEADER = CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION); // P2-C2: contract 5
+const HEADER = CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION); // P2-C2: contract 5; P4-R7: 7
 const OLD_HEADER = CONTRACT_HEADER(1); // what sessions recorded before contract 5
-const SUPPLEMENT = SUPPLEMENT_HEADER(1); // P2-C2
+const SUPPLEMENT = SUPPLEMENT_HEADER(TO_HUMAN_SUPPLEMENT_VERSION); // P2-C2; P4-R7: supplement 2
 const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION); // MAWS_NATIVE_TO_HUMAN's value
 const HAIKU = /^(Haiku|claude-haiku)/;
 const DRAFT = 'my own draft, not for sending';
@@ -234,7 +234,7 @@ function spawns(id: string): Spawn[] {
     });
 }
 const spawnWords = (s: Spawn) =>
-  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? `contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte` : s.append === TO_HUMAN_SUPPLEMENT ? 'supplement 1, byte for byte' : s.append.startsWith(HEADER) ? 'the contract header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
+  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? `contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte` : s.append === TO_HUMAN_SUPPLEMENT ? `supplement ${TO_HUMAN_SUPPLEMENT_VERSION}, byte for byte` : s.append.startsWith(HEADER) ? 'the contract header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
 
 interface OwnerRow { launch_id: string | null; desired: string | null; recorded: string | null; appended: number; snapshot_off: number; off_unavailable: number; applied: string | null; style: string | null; observed_style: string | null; style_mismatch: number; override: string; enabled_at: string | null }
 function ownerRow(id: string): OwnerRow | null {
@@ -833,7 +833,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
       expect(probe).toBe('<unset>');
       expect(row.applied).toBe('off');
-      expect(row.recorded, 'the supplement the session recorded (P2-C2)').toBe('supplement:1');
+      expect(row.recorded, 'the supplement the session recorded (P2-C2)').toBe(`supplement:${TO_HUMAN_SUPPLEMENT_VERSION}`);
       expect(spawn.snapshotOff, 'the recorded supplement dropped at once where the binary declares the flag').toBe(declares);
       line(`style arm, lane off: ${spawnWords(spawn)}; ${decisionWords(row)}; ${NATIVE_TO_HUMAN_ENV}=<unset> logged; the mod draws its band "${bandText.slice(0, 60)}"`);
       await stop(page, s2);

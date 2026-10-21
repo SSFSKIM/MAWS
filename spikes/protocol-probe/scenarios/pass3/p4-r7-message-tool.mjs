@@ -5,16 +5,23 @@
 // through `--append-system-prompt`) on a real model through the relay, with a recorder between the engine and the
 // relay (the engine's ANTHROPIC_BASE_URL points at it), so the fixture also holds what the engine asked the API for
 // (`thinking`, `output_config`, the beta header, which maws tools are deferred) and every block the API streamed back,
-// in order, with its text. Each passes `--effort high`. Fixtures under fixtures/p4/:
-//   p4-r7-loss-short  contract 5 appended (MAWS's full contract before P4-R7) and no message tool: the prompt asks for a
-//                     two-sentence note before a Bash call. Does it arrive as text, or as a thinking block?
-//   p4-r7-loss        the same with a note of four or five sentences, and what the thinking block carries.
-//   p4-r7-tool        contract 7 appended and the `maws` server listing `message` as MAWS lists it
-//                     (p4-maws-tools.json, pinned to src/shared/maws/tools.ts), the long note. Is `mcp__maws__message`
-//                     loaded (not deferred), is it called in the same response as the Bash call, is its text whole in
-//                     the frames and on disk, does its call reach the server with the tool-use id, is a permission
-//                     asked for it, and what is its result?
-// Run: PROBE_ENGINE=~/.local/share/claude/versions/<pinned> [R7_ARM=loss|tool] [R7_MODEL=…] node run-pass3.mjs p4-r7-message-tool
+// in order, with its text. Each passes `--effort high`. The arms share one scratch repository (`seedCheck`'s scripts
+// committed) and are reset after each. Fixtures under fixtures/p4/, one per arm (findings-p4-r7-message-tool.txt):
+//   loss-short, loss, loss-mid  contract 5 appended (MAWS's full contract before P4-R7), no message tool: a note the prompt
+//                     asks for, two sentences or five, first in the turn or between two calls. Text, or a thinking block?
+//   loss-notice, loss-dialog    the same with a message the model decides on itself (a check's notice for the human; a
+//                     step that raises a dialog only the human can answer)
+//   loss-stages       a status after each of four stages, the model's own words between calls: the owner's sessions'
+//                     shape, where the loss shows
+//   tool              contract 7 appended and the `maws` server listing `message` as MAWS lists it (p4-maws-tools.json,
+//                     pinned to src/shared/maws/tools.ts), the long note, no allow: is `mcp__maws__message` loaded under
+//                     tool search, called beside the Bash call, whole in the frames and on disk, its tools/call carrying
+//                     the tool-use id, answered `sent`, and is a permission asked for it
+//   tool-stages       contract 7 and the tool allowed as MAWS launches it (`--allowedTools mcp__maws__message`), the four
+//                     stages
+// The tool's description changed after tool and tool-stages were recorded (the fallback clause moved into the first
+// sentence, A-18); the wire shape they show is unchanged.
+// Run: PROBE_ENGINE=~/.local/share/claude/versions/<pinned> [R7_ARM=<arm>,…] [R7_MODEL=…] node run-pass3.mjs p4-r7-message-tool
 import {launch,scratchRun,removeRun,initPayload,success,check,endAsStop,resultSummary,transcriptPath,delay} from './p1-common.mjs';
 import {SdkServer} from '../../sdk-mcp.mjs';
 import {createServer,request} from 'node:http';
@@ -232,18 +239,15 @@ const ARMS={
  loss:{appended:contract.LEGACY_CONTRACT_5,tools:['ask'],prompt:PROMPTS.long,question:'contract 5, no message tool, a note of four or five sentences before a Bash call: does it arrive as text or as a thinking block, and what does that block carry'},
  tool:{appended:contract.FULL_CONTRACT,tools:['ask','message'],prompt:PROMPTS.long,question:'contract 7 with mcp__maws__message listed as MAWS lists it, the long note: loaded or deferred, called beside the Bash call, its text whole in the frames and on disk, its tools/call, any permission asked, its result'},
  'loss-mid':{appended:contract.LEGACY_CONTRACT_5,tools:['ask'],prompt:PROMPTS.mid,question:'contract 5, no message tool, a note asked for between two pieces of work: does it arrive as text or as a thinking block, and what does that block carry'},
- 'tool-mid':{appended:contract.FULL_CONTRACT,tools:['ask','message'],prompt:PROMPTS.mid,question:'contract 7 with mcp__maws__message, the note between two pieces of work: called beside the next call, its text whole'},
  'loss-notice':{appended:contract.LEGACY_CONTRACT_5,tools:['ask'],prompt:PROMPTS.notice,question:'contract 5, no message tool, a message the model decides on itself between two pieces of work (a check reports what only the human can do): text, or a thinking block, and what that block carries'},
- 'tool-notice':{appended:contract.FULL_CONTRACT,tools:['ask','message'],prompt:PROMPTS.notice,question:'contract 7 with mcp__maws__message, the message the model decides on itself between two pieces of work'},
  'loss-dialog':{appended:contract.LEGACY_CONTRACT_5,tools:['ask'],prompt:PROMPTS.dialog,question:'contract 5, no message tool, a message due before the next call (the step it starts raises a dialog only the human can answer): text, or a thinking block, and what that block carries'},
- 'tool-dialog':{appended:contract.FULL_CONTRACT,tools:['ask','message'],prompt:PROMPTS.dialog,question:'contract 7 with mcp__maws__message, the message due before the next call'},
  'loss-stages':{appended:contract.LEGACY_CONTRACT_5,tools:['ask'],prompt:PROMPTS.stages,question:'contract 5, no message tool, a status after each of four stages, each before the next stage\'s call: text, or a thinking block, and what that block carries'},
  // MAWS's launch allows its own message tool (src/engine-host/launch.ts): p4-r7-tool shows the engine asking otherwise
  'tool-stages':{appended:contract.FULL_CONTRACT,tools:['ask','message'],allowed:['mcp__maws__message'],prompt:PROMPTS.stages,question:'contract 7 with mcp__maws__message allowed as MAWS launches it, a status after each of four stages: called beside the next stage\'s call, its text whole, no permission asked'},
 };
 
 export default async()=>{
- const names=(process.env.R7_ARM??'loss-short,loss,tool,loss-notice,tool-notice').split(',');
+ const names=(process.env.R7_ARM??Object.keys(ARMS).join(',')).split(',');
  const run=scratchRun('r7');
  seedCheck(run.cwd);
  try{
