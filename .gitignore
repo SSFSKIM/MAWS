@@ -9,6 +9,7 @@ spikes/**/fixtures/private/
 .env
 .doperpowers/sde/
 test-results/
+ci-results/
 playwright-report/
 .claude/worktrees/
 
