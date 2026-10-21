@@ -59,6 +59,7 @@ export function trimDescription(description: ElementDescription): { description:
       name: anchorField(description.name, REPORT_NAME_MAX),
       a11y: anchorField(description.a11y, REPORT_A11Y_MAX, { keep: 'tail' }),
       tag: anchorField(description.tag, REPORT_TOKEN_MAX),
+      ...(description.displayName !== undefined && { displayName: anchorField(description.displayName, REPORT_NAME_MAX) }), // P4 W2-C
     },
     nameOverLong,
   };
@@ -66,12 +67,13 @@ export function trimDescription(description: ElementDescription): { description:
 
 // `<role> “<name>”`, the tag standing in for a missing role and the name cut to fit `max`; the role or tag alone when
 // the name is empty. Curly quotes, so E3's lead (`Comment on "<label>"`) reads cleanly (Decision Log 7). The badge uses
-// it at 40, the anchor's label at 200.
-export function elementLabel(description: Pick<ElementDescription, 'role' | 'name' | 'tag'>, max: number): string {
+// it at 40, the anchor's label at 200. P4 W2-C (tracker 2026-10-07): an empty name gives way to the display label.
+export function elementLabel(description: Pick<ElementDescription, 'role' | 'name' | 'displayName' | 'tag'>, max: number): string {
   const head = description.role ?? description.tag;
+  const name = description.name !== '' ? description.name : (description.displayName ?? '');
   const room = max - head.length - 3; // the space and the two quotes
-  if (description.name === '' || room < 2) return anchorField(head, max);
-  return `${head} “${anchorField(description.name, room)}”`;
+  if (name === '' || room < 2) return anchorField(head, max);
+  return `${head} “${anchorField(name, room)}”`;
 }
 
 // MAWS's own nodes in the page, each carrying the marker attribute so a hit test can skip them.
