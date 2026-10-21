@@ -417,6 +417,20 @@ const p3gCommands = {
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // P3-G end
 
+// P4-B2 start (K6; docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D10): Edit ▸ Undo and Redo, the application
+// menu's own items (src/main/menu.ts). `layout.edit` tells the app page holding the focus which was chosen; an editor that
+// claims the page's focused element (a deck's or a design's stage, a slide text box on it, the deck's notes) runs it on
+// its own stack, and otherwise the page asks main for the native command in itself (`layout.nativeEdit`), as the role
+// items ran it.
+export const EditOpSchema = z.enum(['undo', 'redo']);
+export type EditOp = z.infer<typeof EditOpSchema>;
+export const MenuEditSchema = z.strictObject({ op: EditOpSchema });
+export type MenuEdit = z.infer<typeof MenuEditSchema>;
+const p4b2Commands = {
+  'layout.nativeEdit': { input: MenuEditSchema, output: z.void(), owner: 'main' },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// P4-B2 end
+
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
   'layout.set':          { input: z.strictObject({ key: LayoutKeySchema, value: z.unknown() }), output: z.void(), owner: 'main' },
@@ -430,6 +444,7 @@ export const commands = {
   ...c12Commands, // C12
   ...e5Commands, // E5
   ...p3gCommands, // P3-G
+  ...p4b2Commands, // P4-B2 K6
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -441,4 +456,5 @@ export const events = {
   // E5 start: main asks every window to save its dirty file tabs (the quit question's Save all)
   'layout.saveAll': z.strictObject({ requestId: z.string() }),
   // E5 end
+  'layout.edit': MenuEditSchema, // P4-B2 K6: Edit ▸ Undo or Redo, to the focused app page alone
 } as const satisfies Record<`layout.${string}`, z.ZodType>;

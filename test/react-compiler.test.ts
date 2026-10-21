@@ -17,6 +17,11 @@ const FILES: Record<string, string[]> = {
   'src/renderer/src/tools/presentation/DeckBody.tsx': ['DeckBody'],
   'src/artifacts/slides/editor/Filmstrip.tsx': ['Filmstrip'],
   'src/artifacts/design/editor/BoardList.tsx': ['BoardList'],
+  'src/artifacts/comments/ThreadPopover.tsx': ['ThreadPopover'], // P4-B2 M5
+  'src/artifacts/slides/editor/comments/PinPopover.tsx': ['PinPopover', 'Open'], // P4-B2 M5
+  'src/artifacts/slides/editor/comments/Pins.tsx': ['CommentPins', 'Pins', 'PinButton'], // P4-B2 M5
+  'src/artifacts/slides/editor/TextBox.tsx': ['TextBox', 'MarkBar'], // P4-B2 M1
+  'src/artifacts/slides/editor/transform/Overlay.tsx': ['Overlay'], // P4-B2 M1
 };
 
 /** The compiler's events for one file, compiled as plugin-react's transform does (its parser plugins for a .tsx). */

@@ -4,12 +4,15 @@
 // the system's colours and faces (`dsOverrides`, X28's `TokenOverrides`, one transaction each), which the deck's scope
 // sets after the system's, so a switch or an override restyles every slide by reference. Each system is offered with
 // its own ground, text and accent; each colour and face shows the value the slides draw now, the system's or the deck's.
+// P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): Faces lists each of the deck's own faces with
+// its state, so the owner sees what the engine host fetched from Google Fonts, what waits for it and what it refused by
+// name (the same panel serves the design workbench).
 import { useId, useState, type ReactNode } from 'react';
 import { useDesignSystem, type DesignSystemRef, type TokenOverrides } from '../../../design-system/apply';
 import { toSrgb, rgbToHex } from '../../../design-system/color';
 import { parseCssColor, parseFontStack } from '../../../design-system/css-read';
 import { literalValues } from '../../../design-system/resolve-vars';
-import type { DeckFace } from '../../deck';
+import { faceFiles, googleFaceState, type DeckFace } from '../../deck';
 import { setDeckOverride } from '../../writers';
 import type { DeckSession } from '../session';
 import { THEME_COPY as C } from './copy';
@@ -100,6 +103,7 @@ export function ThemePanel({ session, system, theme, overrides, faces, readOnly 
         {THEME_FONTS.map(([name, label]) => (
           <FaceOverride key={name} name={name} label={label} value={values.get(name)} own={overrides[name]} faces={faces} readOnly={readOnly} onWrite={write} />
         ))}
+        <DeckFaces faces={faces} />
       </Section>
       {overridden.length > 0 && (
         <div className="deck-inspector-section">
@@ -265,6 +269,43 @@ function FaceOverride({ name, label, value, own, faces, readOnly, onWrite }: Ove
           })}
         </select>
       </div>
+    </div>
+  );
+}
+
+type FaceState = 'uploaded' | 'missing' | 'saved' | 'pending' | 'refused';
+
+/** What a face draws from (D19): its uploaded file, the files MAWS saved from Google Fonts, or its fallback, and why. */
+function faceState(face: DeckFace): { state: FaceState; text: string } {
+  const google = googleFaceState(face);
+  if (google === null) return faceFiles(face).length > 0 ? { state: 'uploaded', text: C.faceUploaded } : { state: 'missing', text: C.faceMissing };
+  if (google.state === 'refused') return { state: 'refused', text: google.message };
+  return google.state === 'saved' ? { state: 'saved', text: C.faceSaved } : { state: 'pending', text: C.facePending };
+}
+
+/** The deck's own faces by family, each with its state (D19). */
+function DeckFaces({ faces }: { faces: Readonly<Record<string, DeckFace>> }) {
+  const id = useId();
+  const entries = Object.entries(faces)
+    .filter(([, face]) => typeof face.family === 'string')
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (entries.length === 0) return null;
+  return (
+    <div className="deck-inspector-row">
+      <span id={`${id}-faces`} className="deck-inspector-caption">
+        {C.faceList}
+      </span>
+      <ul className="deck-theme-faces" aria-labelledby={`${id}-faces`}>
+        {entries.map(([key, face]) => {
+          const { state, text } = faceState(face);
+          return (
+            <li key={key} className="deck-theme-face" data-face={key} data-face-state={state}>
+              <span className="deck-theme-face-family">{face.family}</span>{' '}
+              <span className="deck-theme-face-state">{text}</span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

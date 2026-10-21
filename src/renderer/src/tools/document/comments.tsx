@@ -231,10 +231,15 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
       const { open } = useCommentCard.getState();
       return entry !== null && entry.hostId === hostId && open?.serial === entry.serial && open.hostId === hostId && open.phase.kind === 'composing' ? entry.threadId : null;
     };
+    // P4-B2: or, with nothing typed yet, the card this host draws (a deck's pin whose only thread is the card's reveals it)
     const focusDraft = () => {
       const entry = commentDraftEntry(artifactId);
-      const field = entry?.hostId === hostId ? document.querySelector<HTMLTextAreaElement>(`[data-comment-card][data-card-serial="${entry.serial}"] textarea`) : null;
+      const { open } = useCommentCard.getState();
+      const serial = entry?.hostId === hostId ? entry.serial : open?.hostId === hostId ? open.serial : null;
+      const card = serial === null ? null : document.querySelector<HTMLElement>(`[data-comment-card][data-card-serial="${serial}"]`);
+      const field = card?.querySelector<HTMLTextAreaElement>('textarea');
       if (field) focusAtEnd(field);
+      else card?.focus({ preventScroll: true });
     };
     return {
       opened,

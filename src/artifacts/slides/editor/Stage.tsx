@@ -76,7 +76,7 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
                     onNotice={onNotice}
                     artifactId={artifactId}
                     importAsset={importAsset}
-                    renderText={(elementId, stageCanvas) => <TextBox session={session} canvas={stageCanvas} slideId={slide.id} elementId={elementId} readOnly={readOnly || slide.held !== null} />}
+                    renderText={(elementId, stageCanvas, armed) => <TextBox session={session} canvas={stageCanvas} slideId={slide.id} elementId={elementId} readOnly={readOnly || slide.held !== null} armed={armed} />}
                   />,
                 )}
               </div>

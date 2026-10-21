@@ -13,6 +13,18 @@
   cursor: text;
 }
 
+/* P4-B2 (armed.ts; the plan's D3): an armed box is focused and editable with its caret and its selection drawn
+   transparent, the stage's frame saying the element is selected; it takes no presses, which are the stage's (a drag
+   moves the element, a click edits at the point). On the deck's stage and a design board's alike. */
+[data-armed] .deck-textbox {
+  pointer-events: none;
+  caret-color: transparent;
+}
+[data-armed] .deck-textbox::selection,
+[data-armed] .deck-textbox *::selection {
+  background: transparent;
+}
+
 .deck-markbar {
   position: absolute;
   z-index: 10;

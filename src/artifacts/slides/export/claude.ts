@@ -6,9 +6,12 @@
 // `project/ds/maws/<name>`, the slides and the index pointing there; MAWS's pinned groups lowered into their hosts
 // (lower.ts: Claude would flatten them and lose their transforms). A held slide has no Claude-readable form (its source
 // failed the loader; its model is only its last good state): the export is refused, naming each held slide and its
-// reasons (fix wave 1). Portable: the caller gives the token values and the assets' bytes.
+// reasons (fix wave 1). P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): a Google Fonts face is
+// written without the engine host's record of its fetch, which is MAWS's: Claude's format names the face by its `href`
+// and fetches it itself, so the files MAWS saved for it stay out of the zip. Portable: the caller gives the token values
+// and the assets' bytes.
 import { mapStyleMapAssets, slideAssetRefs } from '../asset-refs';
-import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace } from '../deck';
+import { DECK_PATH, serializeDeckJson, slidePath, withoutRecord, type DeckFace } from '../deck';
 import type { ElementIR } from '../ir';
 import { heldOf, readDeckJson, readSlide, slideOrder } from '../model';
 import { loadSlide } from '../parse';
@@ -59,7 +62,8 @@ export function claudeDeckFiles(doc: Doc, { resolveVar, assets, measured }: Clau
     const faces: Record<string, DeckFace> = {};
     for (const [key, face] of Object.entries(deck.faces)) {
       if (typeof face.src === 'string' && face.src.startsWith('assets/')) used.add(face.src);
-      faces[key] = typeof face.src === 'string' ? { ...face, src: moved(face.src) } : face;
+      const own = withoutRecord(face); // D19: the host's record stays MAWS's
+      faces[key] = typeof own.src === 'string' ? { ...own, src: moved(own.src) } : own;
     }
     deck.faces = faces;
   }

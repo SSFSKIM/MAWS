@@ -102,6 +102,51 @@
   border: 0;
   border-radius: 2px;
 }
+/* the deck's own faces (P4-B2 D19): the family, then what it draws from; the dot repeats the state for the eye only */
+.deck-theme-faces {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.deck-theme-face {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 1px;
+}
+.deck-theme-face::before {
+  content: '';
+  grid-row: 1;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+.deck-theme-face[data-face-state='pending']::before,
+.deck-theme-face[data-face-state='missing']::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--fg-faint);
+}
+.deck-theme-face[data-face-state='refused']::before {
+  background: var(--warning);
+}
+.deck-theme-face-family {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-theme-face-state {
+  grid-column: 2;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
 
 /* Check */
 .deck-check-body {

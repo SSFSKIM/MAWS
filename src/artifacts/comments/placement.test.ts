@@ -3,7 +3,7 @@
 // flipped above the element near the bottom, capped at 60 % of the host, docked when the host is too small, and the
 // top-right corner when there is no pin. P4-B1: moved here from the renderer's side/card/ with its module.
 import { describe, expect, it } from 'vitest';
-import { CARD_MIN_HEIGHT, caretOf, dockCard, marginCard, pinOf, placeCard, stripCard } from './placement';
+import { CARD_MIN_HEIGHT, cardPosition, caretOf, dockCard, marginCard, pinOf, placeCard, stripCard } from './placement';
 
 const BOX = { width: 600, height: 800 };
 const IDENTITY = { scale: 1, offset: { x: 0, y: 0 } };
@@ -129,5 +129,17 @@ describe('marginCard', () => {
   it('a box not laid out yet gives a zero-width card with the floor, never a negative value', () => {
     expect(marginCard({ width: 0, height: 0 })).toEqual({ mode: 'margin', width: 0, maxHeight: 320 });
     expect(marginCard({ width: -5, height: -5 })).toEqual({ mode: 'margin', width: 0, maxHeight: 320 });
+  });
+});
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): where each mode puts the card in its host's box,
+// moved here from the renderer's CommentCard so the pin popover (portable) draws the same placement.
+describe('cardPosition', () => {
+  it('pins below and above by the edge the mode names, docks 8 px in at the bottom-left, keeps the strip’s margin, leaves the margin card in flow', () => {
+    expect(cardPosition({ mode: 'below', left: 24, top: 94, width: 300, maxHeight: 480 })).toEqual({ left: 24, top: 94, width: 300, maxHeight: 480 });
+    expect(cardPosition({ mode: 'above', left: 24, bottom: 120, width: 300, maxHeight: 200 })).toEqual({ left: 24, bottom: 120, width: 300, maxHeight: 200 });
+    expect(cardPosition(dockCard({ width: 180, height: 400 }))).toEqual({ left: 8, bottom: 8, width: 164, maxHeight: 320 });
+    expect(cardPosition(stripCard({ width: 600, height: 800 }))).toEqual({ margin: 8, width: 584, maxHeight: 320 });
+    expect(cardPosition(marginCard({ width: 260, height: 1000 }))).toEqual({ width: 260, maxHeight: 600 });
   });
 });

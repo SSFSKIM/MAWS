@@ -1,0 +1,323 @@
+P4-B2's spike S-IME: findings. Phase 1 (everything that needs no GUI), 2026-10-19; the first GUI hold, 2026-10-20; closed 2026-10-21
+(§4: L8 passed, Q3 on the real Mac; the L0 gate failed, the relay route's keys never reaching the input method).
+
+Spec: docs/doperpowers/plans/2026-10-19-p4-smoothing.md, child P4-B2 (the spike half), parent pin blob
+1d9ca046870cf1606db19fa792d515f13809caef at master 48fec4bd1. §4.4 is binding on the states and on the armed editor as
+the IME arrangement; §4.10 names S-IME; Decision Logs 6, 16 and 20. Advisory: research/p4-ux-prior-art.md §2 (the
+click-model prior art, I1 to I5, L1 to L8, §2.5's live checks). Platform: Electron 44.4.5, Chromium 152.0.7977.130;
+the source lines below are read at those tags.
+
+
+1. WHAT THIS PHASE ESTABLISHED
+
+The prototype. With the prototype on (the e2e seam's `armed(mode)`; off otherwise, every path P3's), one selected text
+element's text box mounts ARMED: focused, editable, its caret drawn transparent, no mark bar, the solid selection frame
+with handles. The stage's keys reach the armed box first, in the capture phase: the first printable or keyCode-229
+keydown clears the content and flips the box to the edit with no remount and no focus change, its default left to
+insert the key or let the input method compose (T10 and T11 as one rule); Enter edits with everything selected (T12);
+the element keys (Escape, Delete, arrows, Tab, ⌘D, ⌘G, ⌘A) are the stage's; ⌘Z stays the box's (the deck's stack); ⌘C,
+⌘X and ⌘V stay the Edit menu's, whose clipboard events the stage takes before the editor. Two modes: `clear` (the
+caret hidden at the start, the content cleared at the first key) and `select` (the whole text selected and drawn
+transparent, the key or the composition replacing it natively). Files: src/artifacts/slides/editor/armed.ts,
+TextBox.tsx, transform/Overlay.tsx, Stage.tsx, textbox.css; src/renderer/src/tools/presentation/e2e-seam.ts.
+
+The simulated cases: e2e/presentations-ime.spec.ts, eight cases, all green on the MacBook (quiet, 2026-10-19 23:32Z;
+part of `pnpm e2e:presentations`). They drive the renderer's IME entry points over a CDP session (e2e/support/ime.ts)
+in the order Chromium's macOS view sends a key the input method took: a keydown with keyCode 229, then the commit
+(Input.insertText, the browser's ImeCommitText) and the new marked text (Input.imeSetComposition).
+
+Q1. Does an ARMED editor keep a first Hangul syllable intact?
+  In the renderer, yes, in both modes (I2): 한글 typed on an armed "Hello" leaves exactly 한글 (NFC) in the model; the
+  editor's root is the same node object from the first key to the last; compositionstart and compositionend fire twice
+  each, all on that root; no focusin or focusout during the typing; no text box mounts during it; ARMED flips to EDIT
+  once. 하나 carries its ㄴ into the second syllable (L2's shape). A first jamo arriving bare (keyCode 71, no input
+  method) and then re-composed through a replacement range ends as 한글, with nothing written to the box between the two
+  keys (I3).
+  On the real Mac: not yet answered. What a simulation cannot stand in for is exactly what Q1 turns on: whether AppKit
+  routes the first key to the input method at all. Chromium gives a non-editable focus no input context
+  (render_widget_host_view_cocoa.mm L2508-2509) and lets AppKit fetch a new one only 100 ms after the text-input state
+  changes (render_widget_host_view_mac.mm L835-836, kDelayUpdateWindowsAfterTextInputStateChanged, on by default).
+  The trace shows the armed editor focused 22 ms after the press that selects it (pointerdown at 6.6 ms, focusin of the
+  text box at 28.4 ms, e2e/fixtures/ime/l1-hangul.json). So, predicted: a first key more than about 125 ms after that
+  press composes in place (L1, L3); a first key inside that window, from a stage that held a non-editable focus before
+  the press, may reach no input method and arrive as a bare jamo (L4). Between two text boxes the window should not
+  open, because the view's input context is one object and AppKit's cached copy stays set while focus passes through
+  the stage for a few milliseconds (L5 checks it). If L4 fails, the remedy is the one Google Docs and Handsontable use:
+  an editable focus target under the stage whenever the deck has focus, so the text-input type never drops to none.
+
+Q2. Can the content be cleared on the first keyCode-229 keydown, before the composition starts?
+  In the renderer, yes. The trace of I2 in mode clear: the first keydown (keyCode 229, key ㅎ, isComposing false, not
+  cancelled) sees "Hello" before the page's handlers and "" after them; compositionstart then fires on the empty box
+  and the first input leaves ㅎ as its whole text. Chromium's macOS view forwards that keydown before the commit and
+  the marked text of the same key (render_widget_host_view_cocoa.mm L1608 before L1638 and L1650), all on the widget's
+  one ordered input channel, so the page's keydown handlers finish before the composition message arrives; nothing in
+  the page can be late for it. On unmarked text the clear writes nothing near a composition (none exists yet) and the
+  flip to EDIT writes only outside the editor (the stage's data-armed attribute, the overlay's frame, the mark bar).
+  On text that is one marked run (bold all over), the clear sets those marks as stored marks so the new text keeps
+  them, and ProseMirror then redraws the cursor's mark wrapper at compositionstart (prosemirror-view 1.42.6
+  dist/index.js L3591-3597, its own path for typing a composition after ⌘B): a DOM write at the composition's start,
+  before any marked text exists. CDP shows it harmless (I2's bold "World" ends as a bold 하나 in both modes); the live
+  L2 types into the bold box to show it under the real input method.
+  What is left for the real Mac: the input method keeps its own marked text in the browser process, so a cleared DOM
+  does not disturb the syllable it is composing; the one way the clear could still fail is the input method asking
+  the document for its text or selection between keys and seeing it stale for one round trip. L1's trace settles it.
+  If it does fail, replace need not degrade to append: mode select keeps replace with no clear at all. The same I2
+  case passes in mode select, where compositionstart carries "Hello" (the selection it replaces) and the first input
+  leaves ㅎ alone. So the fallback order is clear, then select, then append. Both keep the marks a text carried all
+  over (a bold "World" typed over stays bold: mode clear sets them as the clearing transaction's stored marks, mode
+  select inherits them natively; I2 checks it in both modes).
+
+Q3. Does preventDefault suppress Electron's menu accelerators while armed?
+  Yes. Chromium sends a ⌘ key equivalent to the page first (render_widget_host_view_cocoa.mm performKeyEquivalent:,
+  L1344-1375, through keyEvent:wasKeyEquivalent:YES) and passes on only an event the page did not consume
+  (render_widget_host_impl.cc L2701-2709: `!processed && !skip_if_unhandled`) to Electron, whose
+  PlatformHandleKeyboardEvent offers it to the main menu (electron_api_web_contents_mac.mm L37-65 at v44.4.5). The
+  exceptions are a hotkey the system reserves (it never reaches the page; ⌃Space, the input-source switch, is one) and
+  a Fn/Globe shortcut (the menu first).
+  The Q3 case shows it through a probe menu whose Edit items count their accelerators: on the stage an unhandled ⌘C
+  reached the probe's Copy and the ⌘Z the deck cancels did not reach its Undo; while armed, ⌘Z (the box's own Mod-z,
+  cancelled) undid the element's nudge in the deck's stack and never reached the menu; ⌘C, left alone, reached Copy;
+  a page listener
+  cancelling ⌘C kept it from the menu. A CDP key enters that path at the unhandled-event step (with a native key code
+  and its characters set; see finding 2), not at AppKit's performKeyEquivalent:, and the quiet e2e window is never key;
+  L8 ran the same keys on the real Mac with a key window at the app's event-queue level and passed (§4).
+  The Edit menu by the mouse (webContents' copy, paste and undo, which the role items' selectors reach): Copy and
+  Paste act on the armed element (the stage's handlers take the events before the editor; a cancelled beforecopy
+  enables Copy on a collapsed caret), never on its text. Undo does not: see finding 1.
+
+Further findings
+  1. The Edit menu's Undo and Redo do not reach the deck's stack. Observed (the Q3 case, nothing typed natively in
+     the page): Edit › Undo while armed dispatches no event at all, and on the stage it leaves a nudge in place; ⌘Z and
+     the toolbar's Undo work. Read from the source: Blink runs Undo only when its own undo stack can undo
+     (editor_command.cc L1320 EnabledUndo = CanUndo, L1968-1970 CanNotExecuteWhenDisabled, L2123-2127), and when it
+     can, its beforeinput goes to the root editable of Blink's newest undo step, not to the focused element
+     (L2133-2149, UseUndoStepElementDispatchBeforeInput, stable at 152). So after native typing somewhere (the notes
+     field, a text box typed in), the menu's Undo is enabled and lands on that element, which may be neither the
+     selection nor the deck. K6's "each also works from the Edit menu with the mouse" therefore needs the Edit menu's
+     Undo and Redo to be app actions the focused editor answers, in the shell's menu (src/main/menu.ts), not role
+     items; see [parent-impact] in the hand-back.
+  2. Playwright's keyboard never reaches Electron's menu: its CDP keys carry no native key code, and a key without one
+     is marked skip_if_unhandled (input_handler.cc L1271-1272); with one, devtools builds the NSEvent's characters
+     from `text` alone (native_input_event_builder_mac.mm), so the key matches no menu item unless `text` is set too.
+     No e2e case has exercised a menu accelerator by key until this one (e2e/support/ime.ts `Ime.command`).
+  3. L5's renderer half: a press on box B while box A composes 하 finishes A's composition as the stage takes the
+     focus (compositionend 하 on A), A keeps 하 and B gets a fresh composition. The prototype needed one change for it:
+     the text box no longer ends the edit itself on a plain press elsewhere on the stage (that armed A again for a
+     moment, writing its selection while the composition was still ending); the stage's new selection ends it. A
+     modified press (shift or ⌘, which may keep A selected) and a press on a comment pin still end it from the box.
+  4. The e2e deck stage is small: in a 1600 × 1000 window (the presentations specs' size; 1512 × 900 inner) the main
+     region is 832 px between the sidebar (300) and the panel (380), and the slide draws 256 × 144 px, a scale of
+     0.133, where a 9 px handle covers about 70 slide px and a 64 px heading is 8.5 px tall (measured 2026-10-20 with a
+     throwaway spec). B2's pointer cases (P2's caret at character 3, P5's grouped heading, P8's cell drag) need a
+     bigger stage: the live harness fills the work area with the sidebar and the panel collapsed (0.49 on the MacBook).
+  5. Known gaps of the prototype, for the plan rather than the spike: a press on the armed box begins the edit there,
+     so the armed text cannot be dragged (T2 needs the stage to keep the press: the armed root without pointer events,
+     the caret placed by posAtCoords on release); arming binds the text, and the binding writes an empty text node into
+     an element that has none (ENSURE_ORIGIN): a model write on a selection; a press the stage keeps while a box is
+     armed (a handle, a drag of the frame) gives the focus back to the box at its release, which the plan's PRESS and
+     DRAG states must keep doing; ⌘B, ⌘I and ⌘U act on the armed box's text
+     (all of it in mode select, as Slides does for an object-selected box: a choice for the plan); boards are not
+     armable yet (`armable` is the deck's stage only); F9's typed-key path and its Hangul exclusion stay for the
+     prototype-off path.
+
+
+2. THE REAL RUN (L1 to L8, NOT RUN) AND LC-2 (NOT RUN)
+
+Host: the Mac mini (Mac-mini.local; user `new`, the runner's user; macOS 27.0; 5K display) in a CI-opt GUI hold
+(§7's calendar rule; gate-offload Decision Log 78's procedure and 79's rule for anything that can raise a prompt). The
+MacBook (SK, macOS 26.6.2) only with the owner's go.
+
+The 2-Set input source, read without the GUI on 2026-10-19 about 23:00Z (`defaults read com.apple.HIToolbox`; over
+ssh as `new` on the mini):
+  mini: AppleEnabledInputSources = ABC, com.apple.inputmethod.Korean (the 2SetKorean input mode and the Korean keyboard
+        input method), CharacterPaletteIM, PressAndHold, ironwood; selected: ABC; AppleLanguages ko-KR; ⌃Space
+        (AppleSymbolicHotKeys 60, "select the previous input source") and ⌃⌥Space (61) enabled; TISRomanSwitchState 0
+        (Caps Lock does not switch).
+  MacBook: the same enabled set, ABC selected, ⌃Space enabled.
+  So 2-Set is enabled on both; the run switches to it with ⌃Space and checks with
+  `defaults read com.apple.HIToolbox AppleSelectedInputSources`.
+
+Preconditions
+  a. The hold: CI-opt's quiet flag up, the mini's runner offline while idle with nothing queued, a hard end set.
+  b. The executor: a session in the mini's GUI session (as maws-3f ran cua #117's sittings), using the mini's own
+     cua_repl and shell. The mini's cua plugin cache holds 0.6.0 and 0.9.0 (this MacBook's is 0.16.0); the cells use
+     only getApp, click, pressKey, getScreenshot and getAXState: confirm them on the first call and update the plugin
+     if they differ. cua's Accessibility and Screen Recording grants there date from cua #117: confirm, never click
+     through a TCC prompt.
+  c. The branch on the mini: a worktree of ~/Developer/GitHub/MAWS at the branch's head, `pnpm install
+     --frozen-lockfile`, `scripts/e2e-build.sh plain`. No GUI: at the hold's start, or before it.
+  d. The e2e launch is the one the runner makes daily (a scratch profile); nothing else in the run can raise a keychain
+     or signing prompt. L8 uses the mini's clipboard and the spec puts it back.
+
+Steps (spikes/p4-click-model/cua-live.js holds them as cells; e2e/presentations-ime-live.spec.ts is the harness)
+  0. Before the hold, no GUI: `MAWS_IME_LIVE=1 MAWS_IME_LIVE_DRY=1 node_modules/.bin/playwright test
+     e2e/presentations-ime-live.spec.ts` checks the harness (a quiet window, no driver, nothing judged) and writes every
+     case's ready.json, with the slide's scale on that display.
+  1. In the GUI session's shell, in the background: `MAWS_IME_LIVE=1 node_modules/.bin/playwright test
+     e2e/presentations-ime-live.spec.ts` (or `pnpm e2e:ime-live`, which builds first). MAWS comes up foreground, its
+     window filling the display's work area with the sidebar and the panel collapsed (the slide drawn at least 800 px
+     wide, or the spec stops); the spec writes /tmp/maws-ime-live/L8.ready.json.
+  2. The setup cell, then L8 first (it types nothing natively, so it runs while the page's own undo stack is empty, which
+     the Edit menu's Undo turns on: finding 1; its first cell, one press, checks the coordinate mapping and may be
+     repeated; once its keys cell has run, a clean rerun restarts the spec), then L0: the
+     instrument check (cua's keys reach the input method: the notes field ends in 한, the trace holds keyCode-229
+     keydowns). Stop if L0 fails: the L cases then need the owner's hands.
+  3. L1 to L7, each: read <case>.ready.json, run its cell, write <case>.done with one line of what was seen, read
+     <case>.result.json's checks and facts. A failed check is a finding, not a stop. L3 starts from ABC. L4's
+     facts.pressToFirstKeyMs says whether cua reached the 100 ms window. L7's verdict is the screenshot's. L8's Edit menu
+     is a probe for the case (each item notes itself, then does what the role item does: webContents' undo, copy and
+     paste, which the role selectors reach), so facts.menu shows whether the ⌘Z the box cancelled reached the menu.
+  4. If L1 or L2 fails in mode clear, and for the comparison either way: MAWS_IME_LIVE_MODE=select
+     MAWS_IME_LIVE_CASES=L1,L2,L4.
+  5. Collect /tmp/maws-ime-live/*.result.json and l1-hangul.json; select ABC again; end_task; release the hold.
+  6. After the hold, without the GUI: copy l1-hangul.json to e2e/fixtures/ime/ on the branch and run the replay case.
+     Where the live trace's signature differs from what CDP can reproduce, the difference is a finding (which events
+     the input method sent that the simulation lacks), not something to paper over in the loader. Then complete
+     section 4 below.
+
+Estimated length: setup 10 minutes (the worktree, the install, the build, if not done before the hold), L0 with the
+mapping 5 to 10, L1 to L8 25 to 35 (three tool calls a case; L8's Edit-menu steps the longest), the select-mode rerun
+10, teardown 5: about 60 minutes, 75 with the rerun. Ask for a 90-minute hard end.
+
+LC-2 (spikes/p4-click-model/lc2-steps.txt): Slides and Canva, a printable key and 한글 on an object-selected text box,
+on the MacBook in the owner's Chrome, navigation through the Playwright extension and every key through cua at the
+HID level. What the owner must do:
+  - give the go for about 30 to 40 minutes of the MacBook's GUI, away from the keyboard and the mouse meanwhile (or
+    watching without touching);
+  - name the Chrome profile that holds both their Google and their Canva sessions (Default unless they say otherwise);
+  - agree to the folder "MAWS UX check" being made and deleted in Drive and in Canva (X39), and say whether to empty
+    it from each Trash afterwards (otherwise both purge it after 30 days);
+  - answer any sign-in or 2FA prompt themselves;
+  - optionally, type the fast variant (a click and 한글 at once) by hand if cua cannot reach the 100 ms window.
+
+
+3. FILES: WHAT THE PLAN KEEPS AND WHAT IS THROWAWAY
+
+Keep
+  - e2e/support/ime.ts: the CDP harness, the trace recorder and the fixture loader. The plan's I1 to I5 replay through
+    it.
+  - e2e/presentations-ime.spec.ts: I1 to I5, Q2, Q3, L5's renderer half and the replay. The plan rewrites them against
+    the state machine (ARMED unconditional, the `armed(mode)` calls gone) and may fold them into
+    e2e/presentations.spec.ts, the file B2's acceptance names. The Q3 case can shrink to its armed ⌘Z and ⌘C
+    assertions; its Edit › Undo assertion flips once the menu reaches the deck (finding 1).
+  - e2e/fixtures/ime/l1-hangul.json, replaced by the live trace after the hold.
+  - e2e/presentations-ime-live.spec.ts, the e2e:ime-live script and spikes/p4-click-model/cua-live.js: the live
+    harness. Run L1 to L8 again on the plan's state machine before B2 lands, by the same hold procedure.
+  - The mechanism in TextBox.tsx (mounting ARMED: focus, hidden caret, no mark bar; replace and editAll; the re-arm's
+    selection) and in Overlay.tsx (the capture-phase routing of the armed box's keys through stageKey, the
+    capture-phase clipboard, `takes()`, the stage's data-armed attribute, textId): the seed of T10 to T12 and of the
+    element shortcuts' priority.
+Throwaway
+  - armed.ts's switch (setArmedPrototype, useArmedMode) and the seam's `armed()`: the plan arms unconditionally in the
+    mode the real run picks. The registry (registerArmed, armedBox) may stay or move onto the session.
+  - The mode the real run does not pick, and the `armable` prop once boards arm too.
+  - The Q3 case's probe menu and its patch of Menu.setApplicationMenu.
+  - spikes/p4-click-model/lc2-steps.txt once LC-2 has run and its results are recorded in it.
+
+
+4. RESULTS OF THE REAL RUN: the first hold, 2026-10-20 11:56Z to 12:02:30Z (released), stopped at the gate
+
+Host: the Mac mini (macOS 27.0, display 2560 × 1440 points at 2x, Korean UI), held by CI-opt from 11:56:01Z, the runner
+drained. Route (the coordinator's): cua driven from the MacBook through the relay device `mini`, whose GUI surface is the
+vendor SkyComputerUseService helper; its pressKey posts each key with CGEventPostToPid into the app's own event queue,
+not at the HID level. The shell work went over ssh, and the spec ran as a LaunchAgent bootstrapped into gui/501, so it sat
+in the Aqua session (`launchctl managername` there: Aqua; over ssh: Background). Evidence in
+spikes/p4-click-model/hold-2026-10-20/ (L8.ready.json, L8.result.json, L0.result.json, each with its full trace).
+
+Prep: a detached worktree at a0bfae279, install and the plain build in about a minute; the dry run green, the slide drawn
+at scale 0.975 (outerW 2560, outerY 30); the per-document input source preference read 0 (off) and stayed so.
+
+L8 (shortcuts while armed; ABC selected; it types nothing natively): passed every check.
+  - The first press armed `a` (solid frame, handles, no caret: the screenshot).
+  - The menu, a probe for the case, saw exactly copy, paste, undo, copy, paste, undo: ⌘C and ⌘V reached it, the ⌘Z the box
+    cancelled did not (it undid one nudge in the deck's stack: left 201px), then the mouse's Undo, Copy, Paste and Undo.
+    This is Q3 on the real Mac with a key window, the keys entering at the app's event queue (NSApp sendEvent and
+    performKeyEquivalent:), one level above CDP's entry and one below the HID.
+  - Every clipboard event went to the armed box's root and was cancelled by the stage's handlers; the two pastes are
+    copies of a (left 224px and 225px); a keeps Hello.
+  - Edit › Undo by the mouse left both pastes (5 elements, no historyUndo): finding 1's gap, now on the real Mac.
+
+L0 (the gate: 2-Set selected through TIS in the Aqua session, confirmed by TIS and by HIToolbox's
+AppleSelectedInputSources before and after; the notes field focused; pressKey r then k): FAILED. The field read
+"Notesrk". The trace: keydown key r code KeyR keyCode 82, keypress, beforeinput and input insertText "r"; the same for k
+(keyCode 75); no keyCode 229, no composition event. So the relay route's keys do not pass through the input method: the
+posted events carry their characters, or skip TSM's routing (which of the two was not read). Under the gate rule the run
+stopped: L1 to L7 were not run, and the L1 fixture was not recorded (e2e/fixtures/ime/l1-hangul.json stays the
+cdp-synthetic stand-in).
+
+Side effects, all undone before the release: ABC selected again (confirmed in AppleSelectedInputSources); the spec, its
+app, the four launchd jobs, the scratch files and the worktree removed. cua's `getApp("Electron")` launched the runner
+checkout's default Electron app (the name resolved to another Electron.app on disk) at 11:58:48Z; it was killed at about
+11:59Z, nothing having run in it. Bind the e2e app by its path (cua-live.js now does).
+
+What the three questions read now
+  Q1: unanswered on the real input method; no route this hold had delivers keys through it. Everything short of the
+      input method holds (the renderer cases, and the armed box focused before the first key, seen on the real Mac).
+  Q2: unchanged: proven in the renderer and by Chromium's message order; the real input method's view of a cleared
+      document still untested.
+  Q3: answered on the real Mac at the app-event-queue level (L8), as above.
+
+What a second hold needs: keys that reach the input method.
+  (a) The owner's hands, preferred: about 15 minutes. The harness already waits for a done file per case; the owner
+      follows each case's steps (ready.json's `steps`, read aloud or shown) and the session writes the done file and
+      reads the result. L4 (a key within 100 ms of the press) is natural for a person. Either Mac; on the MacBook, with
+      the owner's go.
+  (b) A HID-level poster (CGEventPost at kCGHIDEventTap from a helper in the Aqua session), which the input method
+      cannot tell from a keyboard. It needs Accessibility granted to that helper, which only the owner may approve; and
+      it would bypass cua (its docs rule CGEvent synthesis out unless asked).
+  (c) cua's own engine (#117) once M1b adds the switch, if its pressKey composes: maws-3f's reading says neither cua route
+      posts at the HID level, so this needs the same r, k gate first.
+  Whatever the route, L8 need not run again; run L0 (the gate), then L1 to L7, then the mode `select` comparison for
+      L1, L2 and L4.
+
+
+5. THE SPIKE'S CLOSE (2026-10-21)
+
+The owner's ruling (2026-10-21, about 17:35Z, relayed by the architect): "skip L0–L7, LC-2 and LC-3 now". No real-Mac
+Hangul run by the owner's hands, and no Slides or Canva live check. The spike closes on what exists.
+
+The IME verdict: intact under simulation, the real input method unverified.
+  - Intact under simulation: I1 to I5 over CDP (e2e/presentations-ime.spec.ts) pass in both modes on Electron 44.4.5 and
+    Chromium 152; the L1 replay runs on the synthetic trace e2e/fixtures/ime/l1-hangul.json (source cdp-synthetic). The
+    armed box is focused with its caret hidden before the first key on the real Mac (L8's first press, §4).
+  - Unverified: the first syllable through the real 2-Set input method (L1 to L7 not run, by the owner's ruling; the
+    relay route's keys never reach the input method, §4). It is a residue row: the decks round of P4-L, or cua's
+    HID-level composition probe in its own mini hold, covers real typing.
+  - Q2's clear stands as the platform orders it (§1, Q2); the input method's view of a cleared document is unverified
+    with Q1.
+  - Q3: answered on the real Mac (L8, §4).
+
+What stands for the plan
+  - The armed arrangement and T11 (the clear on the first keyCode-229 keydown) as §4.4 binds them. The plan arms in mode
+    `clear` (§4.4's words: the key clears the content), the marks of a text that is one marked run carried as stored
+    marks; Decision Log 24's ruling (2) had a marked run fall back to mode `select` if L2 failed live, and with L2 not run
+    the plan keeps one mode and names the switch (a uniformly marked run arms in `select`) as the residue row's remedy.
+    Both modes reach ProseMirror's own `compositionstart` path that re-renders the selection (endComposition with
+    `restarting`: over a selection in `select`, with stored marks in `clear`), the path every ProseMirror editor takes
+    for a composition over a selection or after ⌘B.
+  - T10 as §4.4 writes it (the architect's ruling at LC-2, below): a printable key on ARMED clears and inserts, one
+    transition the plan keeps swappable.
+  - The fixture stays cdp-synthetic; the acceptance's replay reads I2 replaying it (Decision Log 24's ruling 4).
+
+LC-2 (the owner's correction, relayed 2026-10-21: L0 to L7 stay skipped and LC-2 runs; run 17:35Z to 17:41Z, its record in
+lc2-steps.txt's Results): Google Slides appends a printable key typed on an object-selected text box at the end of its
+text and enters editing, it does not replace; the first syllable there could not be measured through cua, whose keys
+skip the input method's composition on the MacBook too (the control in Chrome's address bar gave ㅎㅏㄴ); Canva was not run,
+the profile being signed out of Canva. Canva's half ran once the owner signed in (18:44Z to 18:50Z): a first click
+selects the box with no caret and moves the focus to a hidden editable input (`<input role="application"
+aria-label="Canvas">`), Canva's own armed arrangement for an input context; a printable key typed then is swallowed by
+that input and ignored (the box's text unchanged, no edit entered); Enter enters editing with a caret; a second single
+click on the selected box gives a caret (MAWS's T3). So the three references split three ways on T10: PowerPoint and
+Keynote replace, Slides appends, Canva ignores. The architect's ruling (2026-10-21, at LC-2's acceptance): T10 stays as §4.4
+writes it, a printable key on ARMED clears and inserts. "Typing replaces" is a design item the owner approved and the
+rule of PowerPoint and Keynote; Slides' append at the end is one host's divergence, recorded here with research check
+1's evidence (Slides' first click on a box's text gives a caret, so Slides has no object-selected state reached by one
+click on text, and a key from the object selection Escape reaches goes to the text's end). The owner is asked, without
+blocking the plan, whether Canva is to be read or Slides followed; so T10 is one transition, swappable without touching
+the others. H (the first syllable on an object-selected box) is not measurable through cua on either Mac: on the
+MacBook its posted keys carry 2-Set's jamo uncomposed, on the mini they carry ASCII. It joins the residue row of the
+real input method unverified. The two Drive items stay until the owner answers.
+
+What is throwaway now: the live harness's role as the proof
+route; e2e/presentations-ime-live.spec.ts and cua-live.js stay for whoever runs real typing later (the decks round, or
+cua's probe once it composes).

@@ -20,7 +20,8 @@
 //   bounds are read.
 // - P3-F wave S F3: the design in the panel at its 280 px minimum, its toolbar wrapped by whole controls (C's
 //   `.deck-toolbar` rules, no longer the workbench's own).
-// - P3-F wave S F9: words typed on a board's selected text element enter its edit typed over its text (C's overlay).
+// - P4-B2 (D1 to D9, D12; F9's c43 rewritten): a board's text element ARMED on its first click, words typed replacing its
+//   text (C's overlay); a double-click on an inactive board's heading edits it in one gesture (T22).
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -548,14 +549,15 @@ test('elements on boards: an inactive board’s press activates and selects with
   await tab.getByRole('button', { name: /^Desktop, / }).click();
   const note = (await tab.locator('[data-board-id="desktop"] [data-eid="note"]').boundingBox())!;
   const box = tab.locator('.deck-textbox');
-  // P3-F F9 (c43, obs 5a): words typed on the board's selected element enter its edit, typed over its text (C's overlay)
+  // P4-B2 (T1, T10; F9's c43, obs 5a): a first click selects the board's text element ARMED, its box focused, and words
+  // typed replace its text (C's overlay); Escape from the edit is ARMED again
   await page.mouse.click(note.x + 20, note.y + note.height / 2);
   await expect.poll(async () => (await tabView()).selection).toEqual(['note']);
-  await page.keyboard.type('Hi there');
   await expect(box).toBeFocused();
+  await page.keyboard.type('Hi there');
   await expect.poll(async () => plain(await element('note'))).toBe('Hi there');
   await page.keyboard.press('Escape');
-  await expect(box).toHaveCount(0);
+  await expect(tab.locator('[data-design-world][data-armed]')).toHaveCount(1);
   await page.mouse.dblclick(note.x + 20, note.y + note.height / 2);
   await expect(box).toBeFocused();
   await page.keyboard.press('Meta+a');
@@ -576,9 +578,39 @@ test('elements on boards: an inactive board’s press activates and selects with
   await expect.poll(async () => plain(await element('note'))).toBe('Remote Hello한글');
   await expect(box).toHaveText('Remote Hello한글');
   await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape'); // ARMED, then nothing selected
   await expect(box).toHaveCount(0);
   await expect(tab.locator('[data-board-id="desktop"] [data-eid="note"]')).toHaveText('Remote Hello한글');
 
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// P4-B2 (T22 and T5, D12; docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D5): a double-click on an inactive
+// board's heading activates the board (the world's press) and edits the heading with the word under the pointer
+// selected, in one gesture (the newly active board's overlay takes the double-click)
+test('a double-click on an inactive board’s heading activates the board and edits the heading in one gesture (T22)', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const id = await createDesign(page, 'Launch screens', DESIGN_FILES);
+  const tab = await openFromLibrary(page, 'Launch screens', id);
+  const tabView = () => viewOf(page, id, 'main');
+  await tab.getByRole('button', { name: 'Board Desktop options' }).click();
+  await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
+  await tab.getByRole('button', { name: /^Phone, / }).click();
+  await expect.poll(async () => (await tabView()).currentBoard).toBe('phone');
+  const head = (await tab.locator('[data-board-id="desktop"] [data-eid="head"]').boundingBox())!;
+  await page.mouse.dblclick(head.x + 20, head.y + head.height / 2);
+  await expect.poll(async () => {
+    const t = await tabView();
+    return [t.currentBoard, t.selection];
+  }).toEqual(['desktop', ['head']]);
+  const box = tab.locator('[data-board-id="desktop"] [data-eid="head"] .deck-textbox');
+  await expect(box).toBeFocused();
+  // the word selected, not a caret: the first key replaces it ("Overview", one word)
+  await page.keyboard.type('Summary');
+  await expect.poll(async () => plain(await elementOf(page, id, 'desktop', 'head'))).toBe('Summary');
+  await page.keyboard.press('Escape');
+  await expect(tab.locator('[data-design-world][data-armed]')).toHaveCount(1);
   expect(launch!.consoleErrors()).toEqual([]);
 });
 

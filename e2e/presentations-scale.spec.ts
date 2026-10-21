@@ -3,11 +3,15 @@
 // `e2e/document-scale.spec.ts` pattern): the product build with S7b's 100-slide deck (S6's bench shapes,
 // `benchDeckFiles(100)`) seeded through the renderer's presentations seam, an agent session driven by the host's own
 // tools through the deck's scale seam (`src/engine-host/presentations/scale-seam.ts`: A's real `artifact_read` and
-// `artifact_publish`, so every publish is A's `publishDoc` over the deck's three-way publish), and the editor measured
+// `artifact_publish`, so every publish is A's `publishDoc` over the deck's three-way publish; the agent is
+// `e2e/support/deck-agent.ts`, which the drag spec shares since P4-B2 M0), and the editor measured
 // through the renderer seam's timings and drag probe. Rows, each with the 1-minute load at its trials:
 //   1 open     cold to interactive with 100 live thumbnails ≤ 1,000 ms (the host's copy unloaded first; S7b 116 ms)
 //   2 drag     move to frame p95 ≤ 24 ms while the agent republishes a slide every 0.7 s (the parent's Decision Log 108;
 //              calibration: host-faithful 18.2 to 20.5 ms on the mini; S7b 8.9 ms in the spike; the stand-in 15.4 ms)
+//   2c drag    the same drag with no agent, a trial before each of row 2's: recorded, no bound (P4-B2 D17's control);
+//              rows 2 and 2c are each read against the 16 ms target (`dragTarget`, recorded), and every drag trial keeps
+//              the probe's whole split (queue, handler, paint; the remote applies and the moves they touched)
 //   3 renderer working set ≤ 500 MB (read after a forced collection, B's Decision Log 44; the figure before it kept)
 //   4 publish  one slide occupies the host loop ≤ 50 ms; the whole deck ≤ 200 ms (the loop's busy time over the call;
 //              the longest single stretch kept beside it)
@@ -30,8 +34,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
+import type { DragStats } from '../src/renderer/src/tools/presentation/drag-stats';
 import { checkDeckHistory, generateDeckHistory } from './support/deck-history';
-import { collectGarbage, load1, MARGINAL_LOAD, MARGINAL_MISS, PerfSeam, processMemory, stats, verdictOf, type LoopStats, type Verdict } from './support/document-scale';
+import { DeckAgent, republishing, type DeckCall, type PublishResult } from './support/deck-agent';
+import { collectGarbage, load1, MARGINAL_LOAD, MARGINAL_MISS, PerfSeam, processMemory, stats, verdictOf, type Verdict } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { quietWait } from './support/quiet';
 
@@ -42,7 +48,6 @@ const RESULTS = join(REPO_ROOT, 'test-results', 'presentations-scale.json');
 const UNLOAD_WAIT_MS = 66_000; // the host's idle unload (A's IDLE_UNLOAD_MS, 60 s) and a margin
 const TRIALS = 3;
 const TITLE = 'Scale 100';
-const AGENT = 'deck-agent';
 const HEAVY = process.env.MAWS_DECK_HISTORY ?? '';
 const HEAVY_GENERATION_MS = 360_000; // the soak's budget in the job: the ruling's about five minutes, and a margin
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,13 +60,12 @@ async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
   return result.value;
 }
 
-type Stat = { p50: number; p95: number; max: number };
 interface DeckSeam {
   __maws_presentations: {
     seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>;
     order(artifactId: string): Promise<string[]>;
     timings(artifactId: string): { surface: string; timings: { openedAt: number; syncedAt?: number; drawnAt?: number; thumbnails?: number; previewMs?: number[] } }[];
-    dragProbe: { start(artifactId: string): void; stop(): { moves: number; withTransaction: number; inputToTxMs: Stat; inputToFrameMs: Stat; longTasks: number } };
+    dragProbe: { start(artifactId: string): void; remotes(): number; stop(): DragStats };
   };
   __maws_documents: { open(artifactId: string): Promise<number>; applyState(id: number, state: Uint8Array): void; state(id: number): { unsaved: number }; close(id: number): void };
 }
@@ -74,6 +78,7 @@ interface Trial {
   value: number;
   load: number;
   note?: string;
+  drag?: DragStats; // a drag trial's whole split (P4-B2 M0)
 }
 interface Row {
   row: string;
@@ -168,67 +173,6 @@ async function headerAction(page: Page, label: string): Promise<void> {
   await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
 }
 
-// ---- the agent, through the host's scale seam -----------------------------------------------------------------------
-
-interface DeckCall<R> {
-  ok: true;
-  isError: boolean;
-  result?: R;
-  text: string;
-  wallMs: number;
-  loop: LoopStats;
-  busyMs: number;
-}
-type ReadResult = { revision: number; files: Record<string, string> };
-type PublishResult = { revision: number; changed: string[] };
-
-/** The agent's view of the deck: its last read's files, updated by what it publishes. */
-class DeckAgent {
-  files: Record<string, string> = {};
-  private turn = 0;
-  constructor(private readonly seam: PerfSeam, readonly artifactId: string) {}
-
-  async read(): Promise<DeckCall<ReadResult>> {
-    const answer = await this.seam.send<DeckCall<ReadResult>>({ cmd: 'call', session: AGENT, tool: 'artifact_read', args: { artifact: this.artifactId } });
-    if (answer.isError) throw new Error(`the agent's read was refused: ${answer.text}`);
-    this.files = { ...answer.result!.files };
-    return answer;
-  }
-
-  /** One publish of `paths`, each slide's first font size stepped (64 → 65 → 64 …), from the revision it last saw. */
-  async publish(paths: string[]): Promise<DeckCall<PublishResult>> {
-    this.turn += 1;
-    const sent: Record<string, string> = {};
-    for (const path of paths) {
-      sent[path] = this.files[path]!.replace(/font-size:(\d+)px/, (_m, size: string) => `font-size:${this.turn % 2 === 1 ? Number(size) + 1 : Number(size) - 1}px`);
-      if (sent[path] === this.files[path]) throw new Error(`${path} has no font size to step`);
-    }
-    const answer = await this.seam.send<DeckCall<PublishResult>>({ cmd: 'call', session: AGENT, tool: 'artifact_publish', args: { artifact: this.artifactId, baseRevision: 'last', files: sent } });
-    if (answer.isError) throw new Error(`the agent's publish was refused: ${answer.text}`);
-    expect(answer.result!.changed.sort()).toEqual([...paths].sort());
-    Object.assign(this.files, sent);
-    return answer;
-  }
-
-  slidePaths(): string[] {
-    return Object.keys(this.files).filter((path) => path.startsWith('project/slides/')).sort();
-  }
-}
-
-/** The agent republishing one slide every `everyMs` (the second slide on, round robin) until `until` settles. */
-async function republishing(agent: DeckAgent, until: Promise<unknown>, everyMs: number): Promise<DeckCall<PublishResult>[]> {
-  let done = false;
-  void until.finally(() => (done = true));
-  const slides = agent.slidePaths().slice(1);
-  const answers: DeckCall<PublishResult>[] = [];
-  for (let k = 0; !done; k++) {
-    await sleep(everyMs);
-    if (done) break;
-    answers.push(await agent.publish([slides[k % slides.length]!]));
-  }
-  return answers;
-}
-
 test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an agent republishing, the renderer, the publishes, the history preview', async () => {
   const loads: Record<string, number> = { start: load1() };
   userData = mkdtempSync('/tmp/maws-e2e-presentations-scale-');
@@ -303,9 +247,9 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
     rows.add('4 publish whole deck', 'a whole-deck publish (100 slide files, each changed) through A’s publishDoc: the host loop’s busy time over the call, median of 5', 'ms', 200, '≤ 200 ms', whole, `longest stretch max ${Math.max(...wholeLoop).toFixed(1)} ms`, 'median');
   });
 
-  await test.step('2: drag move to frame on the cover’s pinned picture while the agent republishes a slide every 0.7 s, three times', async () => {
-    const trials: Trial[] = [];
-    for (let k = 0; k < TRIALS; k++) {
+  await test.step('2: drag move to frame on the cover’s pinned picture while the agent republishes a slide every 0.7 s, three times, each after a drag with no agent (2c)', async () => {
+    /** One drag, with the agent republishing or (the control) with no agent; both kinds of trial k drag the same way. */
+    const dragTrial = async (withAgent: boolean, k: number): Promise<Trial> => {
       const target = tab.locator('[data-stage-slide] img[data-eid]').first();
       const box = (await target.boundingBox())!;
       const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -313,7 +257,7 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       await page.evaluate((a) => (window as unknown as DeckSeam).__maws_presentations.dragProbe.start(a), id);
       let release!: () => void;
       const dragged = new Promise<void>((resolve) => (release = resolve));
-      const publishes = republishing(agent, dragged, 700);
+      const publishes = withAgent ? republishing(agent, dragged, 700) : Promise.resolve<DeckCall<PublishResult>[]>([]);
       publishes.catch(() => {}); // settled in the finally below
       let publishing: PromiseSettledResult<DeckCall<PublishResult>[]>;
       try {
@@ -331,13 +275,28 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       }
       if (publishing.status === 'rejected') throw publishing.reason;
       const published = publishing.value;
+      // the last publish reaches the tab after the host answered it: the probe counts it after the drop (at most 10 s)
+      const remotes = () => page.evaluate(() => (window as unknown as DeckSeam).__maws_presentations.dragProbe.remotes());
+      for (const deadline = Date.now() + 10_000; published.length > 0 && Date.now() < deadline && (await remotes()) < published.length; ) await sleep(50);
       const drag = await page.evaluate(() => (window as unknown as DeckSeam).__maws_presentations.dragProbe.stop());
-      expect(published.length, 'the agent republished during the drag').toBeGreaterThan(2);
+      if (withAgent) expect(published.length, 'the agent republished during the drag').toBeGreaterThan(2);
       expect(drag.withTransaction, 'the drag wrote on its moves').toBeGreaterThan(100);
-      trials.push({ value: drag.inputToFrameMs.p95, load: Math.max(load, load1()), note: `${drag.withTransaction}/${drag.moves} moves wrote; move → transaction p95 ${drag.inputToTxMs.p95} ms; move → frame p50 ${drag.inputToFrameMs.p50}, max ${drag.inputToFrameMs.max} ms; ${drag.longTasks} long tasks; the agent published ${published.length} slides (busy p95 ${stats(published.map((p) => p.busyMs)).p95} ms)` });
+      const split = `queue p95 ${drag.queueMs.p95}, handler p95 ${drag.handlerMs.p95}, paint p95 ${drag.paintMs.p95} ms; remote applies ${drag.remote.duringMoves} during the moves, ${drag.remote.afterDrop} after the drop, ${drag.touched} moves touched (the untouched moves' move → frame p95 ${drag.untouchedToFrameMs.p95} ms)`;
+      const agentNote = withAgent ? `; the agent published ${published.length} slides (busy p95 ${stats(published.map((p) => p.busyMs)).p95} ms)` : '; no agent';
       await sleep(1_000);
+      return { value: drag.inputToFrameMs.p95, load: Math.max(load, load1()), note: `${drag.withTransaction}/${drag.moves} moves wrote over ${drag.durationMs} ms; move → transaction p95 ${drag.inputToTxMs.p95} ms; move → frame p50 ${drag.inputToFrameMs.p50}, max ${drag.inputToFrameMs.max} ms; ${split}; ${drag.longTasks} long tasks${agentNote}`, drag };
+    };
+    const trials: Trial[] = [];
+    const controls: Trial[] = [];
+    for (let k = 0; k < TRIALS; k++) {
+      controls.push(await dragTrial(false, k));
+      trials.push(await dragTrial(true, k));
     }
-    rows.add('2 drag p95', 'drag move to frame, p95 over 200 pointer moves, while the agent republishes one slide every 0.7 s through publishDoc', 'ms', 24, 'p95 ≤ 24 ms (host-faithful 18.2 to 20.5 ms on the mini; S7b 8.9 ms in the spike; the stand-in 15.4 ms)', trials);
+    const drag = rows.add('2 drag p95', 'drag move to frame, p95 over 200 pointer moves, while the agent republishes one slide every 0.7 s through publishDoc', 'ms', 24, 'p95 ≤ 24 ms (host-faithful 18.2 to 20.5 ms on the mini; S7b 8.9 ms in the spike; the stand-in 15.4 ms)', trials);
+    const control = rows.add('2c drag p95 no agent', 'the same drag with no agent publishing (P4-B2 D17’s control), a trial before each of row 2’s', 'ms', null, 'recorded, no bound', controls);
+    const target = { ms: 16, rule: 'P4-B2 D17: a target recorded beside row 2’s bound, read on each row’s best trial', agent: { best: drag.value, met: drag.value <= 16 }, control: { best: control.value, met: control.value <= 16 } };
+    rows.write({ dragTarget: target });
+    console.log(`[deck scale] 2 the 16 ms target (recorded): with the agent, best ${target.agent.best} ms (${target.agent.met ? 'met' : 'not met'}); with no agent (2c), best ${target.control.best} ms (${target.control.met ? 'met' : 'not met'})`);
   });
 
   await test.step('5: the history preview of the seeded version, three times', async () => {
@@ -449,7 +408,7 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
   });
 
   loads.end = load1();
-  await seam.send({ cmd: 'release', session: AGENT });
+  await agent.release();
   const marginal = rows.rows.filter((r) => r.verdict === 'marginal');
   rows.write({ loads, marginal: marginal.map((r) => ({ row: r.row, value: r.value, limit: r.limit, unit: r.unit, load: r.load })) });
   if (marginal.length > 0) console.log(`marginal rows (P3-F re-measures below load 10):\n${marginal.map((r) => `  ${r.row}: ${r.value} ${r.unit} against ${r.limit} at load ${r.load}`).join('\n')}`);

@@ -139,3 +139,98 @@ export function allPinned(tree: SlideTree, selection: readonly string[]): boolea
 }
 
 export const isText = (tag: Tag | undefined): boolean => tag !== undefined && TEXT_TAGS.has(tag);
+
+// ---- P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D1 to D8): the state machine's pure reads
+
+/**
+ * A text target (D2): an element whose own text the text box edits (a heading, a paragraph, a list, a table cell),
+ * never a container's single text descendant, so a group's first click selects and moves the group (P7).
+ */
+export function isTextTarget(tree: SlideTree, id: string): boolean {
+  const tag = tree.element(id)?.tag;
+  return tag !== undefined && TEXT_TAGS.has(tag) && !CONTAINER_TAGS.has(tag);
+}
+
+/**
+ * The frontmost element under a press and its ancestors, deepest first. A press's hits are the whole painted stack, so
+ * an element covered by another is among them; whatever a press reaches past the scope it reaches through this chain,
+ * never past what is drawn in front (the M1 review's P2).
+ */
+function frontChain(tree: SlideTree, hits: readonly string[]): string[] {
+  const hit = hits.find((h) => tree.has(h));
+  return hit === undefined ? [] : chainOf(tree, hit);
+}
+
+/** T5: the deepest text target under the press (the frontmost element or its ancestors), whatever the scope; or null. */
+export function deepestText(tree: SlideTree, hits: readonly string[]): string | null {
+  return frontChain(tree, hits).find((id) => isTextTarget(tree, id)) ?? null;
+}
+
+/** T3 into a selected container: the element under the press one level inside `parent`, or null. */
+export function childAt(tree: SlideTree, hits: readonly string[], parent: string): string | null {
+  return frontChain(tree, hits).find((id) => tree.parentOf(id) === parent) ?? null;
+}
+
+/** T3 and D8 on a table: the cell of `table` under the press (in the frontmost element's chain), or null. */
+export function cellAt(tree: SlideTree, hits: readonly string[], table: string): string | null {
+  return frontChain(tree, hits).find((id) => tableOf(tree, id) === table) ?? null;
+}
+
+/** Whether the element is a table cell. */
+export const isCell = (tree: SlideTree, id: string): boolean => {
+  const tag = tree.element(id)?.tag;
+  return tag === 'th' || tag === 'td';
+};
+
+/** The table a cell sits in (cell → row → table), or null. */
+export function tableOf(tree: SlideTree, cellId: string): string | null {
+  if (!isCell(tree, cellId)) return null;
+  const table = tree.parentOf(tree.parentOf(cellId));
+  return tree.element(table)?.tag === 'table' ? table : null;
+}
+
+/** A table's cells by row, in order. */
+export function cellGrid(tree: SlideTree, tableId: string): string[][] {
+  return tree
+    .childrenOf(tableId)
+    .filter((r) => tree.element(r)?.tag === 'tr')
+    .map((r) => tree.childrenOf(r).filter((c) => isCell(tree, c)));
+}
+
+function cellPosition(grid: readonly (readonly string[])[], cellId: string): [number, number] | null {
+  for (let r = 0; r < grid.length; r++) {
+    const c = grid[r]!.indexOf(cellId);
+    if (c >= 0) return [r, c];
+  }
+  return null;
+}
+
+/** D8: the rectangle of cells between two cells of one table, in reading order (empty when they are not both in it). */
+export function cellRange(tree: SlideTree, tableId: string, a: string, b: string): string[] {
+  const grid = cellGrid(tree, tableId);
+  const pa = cellPosition(grid, a);
+  const pb = cellPosition(grid, b);
+  if (!pa || !pb) return [];
+  const [r0, r1] = [Math.min(pa[0], pb[0]), Math.max(pa[0], pb[0])];
+  const [c0, c1] = [Math.min(pa[1], pb[1]), Math.max(pa[1], pb[1])];
+  const out: string[] = [];
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) if (grid[r]![c] !== undefined) out.push(grid[r]![c]!);
+  return out;
+}
+
+/** T16: the next (or previous) cell in reading order, or null past the last (before the first). */
+export function nextCell(tree: SlideTree, cellId: string, back: boolean): string | null {
+  const table = tableOf(tree, cellId);
+  if (!table) return null;
+  const flat = cellGrid(tree, table).flat();
+  const at = flat.indexOf(cellId);
+  const next = at + (back ? -1 : 1);
+  return at < 0 || next < 0 || next >= flat.length ? null : flat[next]!;
+}
+
+/** CELLS (D8): the table when the selection is two or more cells of one table, else null. */
+export function cellsTable(tree: SlideTree, selection: readonly string[]): string | null {
+  if (selection.length < 2) return null;
+  const table = tableOf(tree, selection[0]!);
+  return table !== null && selection.every((id) => tableOf(tree, id) === table) ? table : null;
+}

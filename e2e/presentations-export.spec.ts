@@ -17,14 +17,21 @@
 // the corpus as one deck exported to PPTX (`named`), converted by LibreOffice to PDF, both that and the app's own PDF
 // rasterized by `pdftoppm` at 480×270, compared per slide (mean absolute difference per channel ≤ 0.08) and per text
 // element (its words' bounding box in each, from `pdftotext -bbox`, within 24 slide px).
+// P4-B2 D19 (Acceptance 7): a deck naming Google Fonts faces, with no network (MAWS_GOOGLE_FONTS_FIXTURES answers the
+// host's egress from the grounding's recorded answers, any other URL failing as offline): Lora is fetched into the deck
+// and draws from its assets in the editor and the presenter (`document.fonts` holds it loaded; its text sets apart from
+// the fallback) and in the HTML export's `data:font/woff2` face, the PDF's `/BaseFont` and the PPTX's `typeface`;
+// Roboto Slab (Apache-2.0) is refused by name in Theme ▸ Faces and in the agent's read (the deck scale seam's
+// `artifact_read`, MAWS_PRESENTATIONS_SCALE=1).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { benchDeckFiles, benchShapes } from '../src/artifacts/slides/fixtures/bench';
+import { PerfSeam } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { normalized, wordsAlong, wordsOfBox, type Extent, type Word } from './support/text-run';
 
@@ -37,7 +44,7 @@ async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
   return result.value;
 }
 interface Seam {
-  __maws_presentations: { seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }> };
+  __maws_presentations: { seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>; files(artifactId: string): Promise<Record<string, string>> };
 }
 
 const SOFFICE = ['/opt/homebrew/bin/soffice', '/Applications/LibreOffice.app/Contents/MacOS/soffice'].find((path) => existsSync(path)) ?? null;
@@ -536,6 +543,117 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
   await appears('Quarterly.zip', isZip);
   await pick('PNG (cover slide)');
   await appears('Quarterly.png', (bytes) => bytes.length > 24 && pngSize(bytes).join('x') === '1920x1080');
+});
+
+// ---- P4-B2 D19: a named Google Fonts face, fetched once and drawn offline ----
+
+const GOOGLE_FONTS = join(REPO_ROOT, 'e2e/fixtures/google-fonts');
+const SLAB_REQUEST = 'https://fonts.googleapis.com/css2?family=Roboto+Slab';
+const SLAB_REFUSAL = 'Roboto Slab is Apache-2.0 on Google Fonts; MAWS fetches only OFL faces, so it draws as its fallback; upload a font file to use it';
+const FACES_DECK: Record<string, string> = {
+  'project/deck.json': JSON.stringify({
+    v: 4,
+    title: 'Faces',
+    cover: 'cover',
+    order: ['cover'],
+    faces: { lora: { family: 'Lora', href: 'https://fonts.googleapis.com/css2?family=Lora&display=swap' }, 'roboto-slab': { family: 'Roboto Slab', href: SLAB_REQUEST } },
+  }),
+  'project/slides/cover.html': `<section id="cover" style="background:#ffffff; color:#1a1a1a; padding:128px; gap:40px">
+<h1 id="title" style="font-size:120px; font-family:Lora, serif">Handgloves, quickly</h1>
+<p id="slab" style="font-size:60px; font-family:'Roboto Slab', serif">A refused face</p></section>`,
+};
+
+/** How a drawn text element sets: its first family, whether `document.fonts` holds that family loaded, and the width of
+ * its text in its own stack and in the bare fallback. */
+const setting = (node: Locator) =>
+  node.evaluate(async (el) => {
+    const stack = getComputedStyle(el).fontFamily;
+    const first = stack.split(',')[0]!.trim().replace(/^["']|["']$/g, '');
+    await document.fonts.load(`120px "${first}"`, el.textContent ?? '');
+    const width = (family: string) => {
+      const probe = document.createElement('span');
+      probe.style.cssText = `position:absolute; visibility:hidden; white-space:nowrap; font-size:120px; font-family:${family}`;
+      probe.textContent = el.textContent;
+      document.body.appendChild(probe);
+      const w = probe.getBoundingClientRect().width;
+      probe.remove();
+      return w;
+    };
+    let loaded = false;
+    document.fonts.forEach((face) => void (loaded ||= face.family.replace(/["']/g, '') === first && face.status === 'loaded'));
+    return { first, loaded, drawn: width(stack), fallback: width('serif') };
+  });
+
+test('a named Google Fonts face with no network: Lora fetched once and drawn offline in the editor, the presenter and the three exports; Roboto Slab refused by name', async () => {
+  test.setTimeout(240_000);
+  const page = await ready({ MAWS_GOOGLE_FONTS_FIXTURES: GOOGLE_FONTS, MAWS_PRESENTATIONS_SCALE: '1' });
+  const app = launch!.app;
+  const { id, held } = await seedDeck(page, 'Faces', FACES_DECK);
+  expect(held).toEqual([]);
+
+  // the host's record lands after the seed's commit: Lora saved under OFL with its licence, Roboto Slab refused by its own
+  const deckJson = async () => JSON.parse((await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.files(a), id))['project/deck.json']!) as { faces: Record<string, { google?: Record<string, unknown> }> };
+  await expect.poll(async () => (await deckJson()).faces.lora!.google?.licence, { timeout: 20_000, message: 'the host saved Lora into the deck' }).toBe('OFL');
+  const { faces } = await deckJson();
+  expect(faces.lora!.google).toEqual({ request: 'https://fonts.googleapis.com/css2?family=Lora', licence: 'OFL', licenceSrc: 'assets/gf-lora-OFL.txt', files: [{ src: 'assets/gf-lora-400.woff2', weight: '400', style: 'normal' }] });
+  await expect.poll(async () => (await deckJson()).faces['roboto-slab']!.google, { timeout: 20_000 }).toEqual({ request: SLAB_REQUEST, refused: 'Apache-2.0' });
+
+  // the agent's read names the refusal, and says nothing of the saved face
+  const seam = new PerfSeam(join(launch!.userData, 'presentations-scale'));
+  await expect.poll(() => existsSync(join(seam.dir, 'in')), { timeout: 10_000, message: 'the host started the deck scale seam' }).toBe(true);
+  const read = await seam.call<{ warnings?: { property?: string; message: string }[] }>('e2e-agent', 'artifact_read', { artifact: id });
+  expect(read.isError).toBe(false);
+  const faceWarnings = (read.result?.warnings ?? []).filter((w) => w.property?.startsWith('faces.'));
+  expect(faceWarnings).toEqual([expect.objectContaining({ property: 'faces.roboto-slab', message: SLAB_REFUSAL })]);
+
+  // the editor: the face from the deck's assets under its private name, loaded, setting the text apart from the fallback
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await page.locator('[data-library]').getByRole('article', { name: 'Faces', exact: true }).click();
+  const tab = page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
+  await expect(tab.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  const inEditor = await setting(tab.locator('[data-stage-slide] [data-eid="title"]'));
+  expect(inEditor.first).toMatch(/^deck-face-/);
+  expect(inEditor.loaded).toBe(true);
+  expect(Math.abs(inEditor.drawn - inEditor.fallback)).toBeGreaterThan(2);
+
+  // Theme ▸ Faces: each face with its state, Roboto Slab refused by name
+  const header = page.locator('[data-region="main"] [data-editor-header]');
+  const headerAction = async (label: string) => {
+    const button = header.getByRole('button', { name: label, exact: true });
+    if (await button.isVisible()) return button.click();
+    await header.getByRole('button', { name: 'More actions', exact: true }).click();
+    await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
+  };
+  await headerAction('Theme');
+  const theme = tab.locator('[data-deck-rail="theme"]');
+  await expect(theme.locator('[data-face="lora"]')).toHaveAttribute('data-face-state', 'saved');
+  await expect(theme.locator('[data-face="lora"]')).toContainText('Lora');
+  await expect(theme.locator('[data-face="roboto-slab"]')).toHaveAttribute('data-face-state', 'refused');
+  await expect(theme.locator('[data-face="roboto-slab"]')).toContainText(SLAB_REFUSAL);
+
+  // the presenter: the audience window declares the face under its own name, loaded from the deck's assets
+  await headerAction('Present');
+  const audiencePage = () => app.windows().find((w) => w.url().includes('present=1') && w.url().includes('role=audience'));
+  await expect.poll(() => audiencePage() !== undefined, { timeout: 15_000, message: 'the audience window opened' }).toBe(true);
+  const audience = audiencePage()!;
+  const shown = audience.locator('[data-present-view="audience"] .present-layer:last-of-type [data-eid="title"]');
+  await expect(shown).toBeVisible({ timeout: 15_000 });
+  const presented = await setting(shown);
+  expect(presented.first).toBe('Lora');
+  expect(presented.loaded).toBe(true);
+  expect(Math.abs(presented.drawn - presented.fallback)).toBeGreaterThan(2);
+  await audience.keyboard.press('Escape');
+  await expect.poll(() => app.windows().filter((w) => w.url().includes('present=1')).length, { timeout: 10_000 }).toBe(0);
+
+  // the exports: the HTML inlines the fetched file as its face, the PDF embeds Lora, the PPTX names it
+  const html = readFileSync((await exportAs(page, id, 'html')).path, 'utf8');
+  const woff2 = readFileSync(join(GOOGLE_FONTS, 'lora-400.woff2')).toString('base64');
+  expect(html).toContain(`data:font/woff2;base64,${woff2}`);
+  expect(html).toMatch(/@font-face\s*\{[^}]*font-family:\s*"Lora"[^}]*data:font\/woff2/);
+  const pdf = readFileSync((await exportAs(page, id, 'pdf')).path).toString('latin1');
+  expect(pdf).toMatch(/\/BaseFont\s*\/(?:[A-Z]{6}\+)?Lora/);
+  const pptx = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
+  expect(typefaces(await slideXml(pptx, 1))).toContain('Lora');
 });
 
 // ---- the LibreOffice render-and-compare ----

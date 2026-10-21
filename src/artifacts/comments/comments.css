@@ -118,3 +118,21 @@
 .thread-card-button:disabled {
   color: var(--fg-faint);
 }
+
+/* P4-B2 (D16): the pin popover (ThreadPopover.tsx), a floating card holding one pin's thread cards, placed by the card's
+   placement in its host (the comment frame); the cards inside keep their own surface */
+.thread-popover {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+  box-sizing: border-box;
+  padding: calc(var(--space) * 2);
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: var(--shadow-float);
+  pointer-events: auto;
+}

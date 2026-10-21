@@ -17,7 +17,7 @@ import diff from 'fast-diff';
 import { FilesError, type FileProblem, type PublishOutcome } from '../files';
 import { newDoc, transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
-import { DECK_LIMITS, DECK_PATH, parseDeckJson, serializeDeckJson, slideIdOf, slidePath, type DeckJson } from './deck';
+import { carryRecord, DECK_LIMITS, DECK_PATH, parseDeckJson, serializeDeckJson, slideIdOf, slidePath, withoutRecord, type DeckJson } from './deck';
 import { parseHtml } from './html';
 import { CONTAINER_TAGS, MARK_ORDER, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type Marks, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { cellMinter, childLists, groupsOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, toScalars, type Group } from './model';
@@ -42,8 +42,6 @@ export interface DeckPublishOutcome extends PublishOutcome {
   /** Sent slides that failed structurally: held with their reasons, the last good content kept. */
   held: { path: string; reasons: string[] }[];
 }
-
-export const GOOGLE_FONTS_WARNING = 'Google Fonts are not fetched in MAWS: upload the font file, or use the design system’s faces';
 
 // ---------------------------------------------------------------- the compared form of a slide
 
@@ -505,7 +503,6 @@ export function publishDeck(live: Doc, base: Readonly<Record<string, string>>, s
         if (d.severity === 'note') notes++;
         else warnings.push({ path: DECK_PATH, property: d.property, message: d.message });
       }
-      if (Object.values(sentDeck.faces ?? {}).some((face) => face.href !== undefined)) warnings.push({ path: DECK_PATH, property: 'faces', message: GOOGLE_FONTS_WARNING });
     }
   }
 
@@ -913,13 +910,16 @@ function planDeck(
       // is not the agent's to remove, even under force, and keeps the map
       const removed = new Set<string>();
       for (const entry of new Set([...Object.keys(mb ?? {}), ...Object.keys(ma ?? {})])) {
-        const [vb, va, vl] = [stable(own(mb, entry)), stable(own(ma, entry)), stable(own(ml, entry))];
+        // P4-B2 D19: a face is compared without the host's record (the loader dropped it from the sent and the base), and
+        // a face the agent writes carries the live record forward while it answers the face's request
+        const liveEntry = name === 'faces' ? withoutRecord(own(ml, entry)) : own(ml, entry);
+        const [vb, va, vl] = [stable(own(mb, entry)), stable(own(ma, entry)), stable(liveEntry)];
         if (va === vb || va === vl) continue;
         if (vl !== vb && !force) {
           conflict(`deck.json key ${name}.${entry}: changed since your read`);
           continue;
         }
-        const value = own(ma, entry);
+        const value = name === 'faces' ? carryRecord(own(ma, entry), own(ml, entry)) : own(ma, entry);
         if (value === undefined) removed.add(entry);
         if (value === undefined) delete mapOf(name)[entry];
         else mapOf(name)[entry] = value;

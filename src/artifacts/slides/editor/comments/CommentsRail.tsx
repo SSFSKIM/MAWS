@@ -5,12 +5,16 @@
 // apart, each reopenable. Showing a thread shows its slide and selects its element. A reply, resolve and reopen write
 // the thread only, under the comments' origin (outside undo); the active thread (its card's, a clicked pin's) is the
 // rail's selected one, scrolled into view. App chrome, so it reads the app's tokens.
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; V5): a thread's reply field reads and writes the
+// editor's reply drafts, the pin popover's too, so a reply typed in either is there in the other. Show opens the
+// thread's pin popover (the controller's, V11) and the rail stays open.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { newThreadId, reopen, reply, resolve, type DeckThreadState } from '../../threads';
 import { useDeckView } from '../deck-view';
 import { COMMENTS_ORIGIN, type DeckCommentsApi } from './controller';
 import { COMMENTS_COPY as C } from './copy';
+import { useReplyDrafts } from './drafts';
 import { useDeckThreadStates } from './use-threads';
 import './comments.css';
 
@@ -28,6 +32,7 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
   const { session, author, readOnly, active } = api;
   const doc = session.doc;
   const threads = useDeckThreadStates(doc);
+  const drafts = useReplyDrafts(api.drafts); // P4-B2
   const [showResolved, setShowResolved] = useState(true);
   // the slides' numbers follow the deck at once, as the filmstrip's do (the thread list waits for a quiet moment)
   const slides = useDeckView(doc).slides;
@@ -42,6 +47,8 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
       copy={labels?.target(thread, numbers.get(thread.slideId) ?? null)} // P3-E
       selected={thread.id === active}
       readOnly={readOnly}
+      draft={drafts.get(thread.id) ?? ''} // P4-B2
+      onDraftChange={(text) => api.drafts.set(thread.id, text)}
       onShow={() => api.show(thread)}
       onReply={(body) => !readOnly && reply(doc, thread.id, { id: `${thread.id}:${newThreadId()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN)}
       onResolve={() => !readOnly && resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
@@ -78,13 +85,16 @@ interface ItemProps {
   copy?: { location: string; show: string; orphan: string };
   selected: boolean;
   readOnly: boolean;
+  /** P4-B2: the thread's reply draft, the editor's. */
+  draft: string;
+  onDraftChange(text: string): void;
   onShow(): void;
   onReply(body: string): void;
   onResolve(): void;
   onReopen(): void;
 }
 
-function ThreadItem({ thread, slide, copy, selected, readOnly, onShow, onReply, onResolve, onReopen }: ItemProps) {
+function ThreadItem({ thread, slide, copy, selected, readOnly, draft, onDraftChange, onShow, onReply, onResolve, onReopen }: ItemProps) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
@@ -121,7 +131,7 @@ function ThreadItem({ thread, slide, copy, selected, readOnly, onShow, onReply, 
           })}
         </ol>
       )}
-      {thread.status === 'open' && !readOnly && <ReplyField onReply={onReply} />}
+      {thread.status === 'open' && !readOnly && <ReplyField text={draft} setText={onDraftChange} onReply={onReply} />}
       <div className="deck-thread-actions">
         {thread.status === 'open' ? (
           <button type="button" className="deck-button" disabled={readOnly} onClick={onResolve}>
@@ -138,8 +148,8 @@ function ThreadItem({ thread, slide, copy, selected, readOnly, onShow, onReply, 
 }
 
 // The thread's reply field: Enter posts (Shift+Enter breaks a line; an input method's composition keeps its Enter).
-function ReplyField({ onReply }: { onReply(body: string): void }) {
-  const [text, setText] = useState('');
+// P4-B2: its text the editor's draft.
+function ReplyField({ text, setText, onReply }: { text: string; setText(text: string): void; onReply(body: string): void }) {
   const body = text.trim();
   const post = () => {
     if (body === '') return;

@@ -426,6 +426,22 @@ describe('PortProvider', () => {
       expect(log).not.toHaveBeenCalled(); // cleared by the editor, not the cap
     });
 
+    it('counts the frames received and those held (row 256): held while the hold stands, none once it is cleared', () => {
+      const { provider, replicaEnd, hostEnd, write } = heldReplica();
+      const before = provider.counts();
+      expect(before.held).toBe(0);
+      provider.holdRemote(true);
+      write(0, 'one ');
+      write(4, 'two');
+      pump(replicaEnd, hostEnd);
+      expect(provider.counts()).toEqual({ received: before.received + 2, held: 2 });
+      provider.holdRemote(false);
+      expect(provider.counts()).toEqual({ received: before.received + 2, held: 0 });
+      write(7, ' three');
+      pump(replicaEnd, hostEnd);
+      expect(provider.counts()).toEqual({ received: before.received + 3, held: 0 });
+    });
+
     it('splits the merged runs at a buffered restored frame', () => {
       const { host, provider, doc, applies, replicaEnd, hostEnd, write } = heldReplica();
       const events: string[] = [];

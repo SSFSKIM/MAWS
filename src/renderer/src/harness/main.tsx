@@ -5,6 +5,7 @@ import { StrictMode, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/app.css';
 import { Harness } from './Harness';
+import { connectEditClaimants } from '../keymap/edit-claimants'; // P4-B2 K6
 // C8a start
 import { PanelHarness } from './panel/PanelHarness';
 // C8a end
@@ -51,6 +52,7 @@ function Router() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+  useEffect(() => connectEditClaimants(), []); // P4-B2 K6: the harness pages are app windows, so Edit ▸ Undo and Redo reach them
   const page = ROUTES[route] ?? ROUTES.transcript;
   return <div key={route} className="h-full">{page()}</div>;
 }

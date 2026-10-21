@@ -47,6 +47,7 @@ import { ZOOM_STEPS, type DeckSession, type Zoom } from './session';
 import { SLIDE_H, SLIDE_W } from './SlideView';
 import { Stage } from './Stage';
 import { useDeckReveal, type DeckRevealProps } from './reveal'; // P4-B4
+import { useEditClaim, type RegisterEditClaimant } from './edit-claim'; // P4-B2 K6
 import './chrome.css';
 import './deck.css';
 
@@ -83,6 +84,8 @@ export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked
   assetUrlAt?: (ref: string, revision: number) => string | null;
   /** M8: once a version's preview has drawn its slide and its marks: ms since it was asked for (the e2e seam's). */
   onPreviewDrawn?: (ms: number) => void;
+  /** P4-B2 K6: the host's registration of the Edit menu's Undo and Redo claimant; without it the menu stays native. */
+  registerEditClaimant?: RegisterEditClaimant;
 }
 
 const NOTICE_MS = 6_000;
@@ -90,7 +93,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */ }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -212,6 +215,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       session.redoStep();
     }
   };
+  const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
+  useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
   // M5: what the slide's limits refused, an upload in progress: shown in the toolbar for a while
   const [notice, setNotice] = useState('');
@@ -321,7 +326,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     </>
   );
   const editor = (
-    <div className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
+    <div ref={root /* P4-B2 K6 */} className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
       {faces && <style data-deck-faces>{faces}</style>}
       {!preview &&
         historySnapshot?.banner && (

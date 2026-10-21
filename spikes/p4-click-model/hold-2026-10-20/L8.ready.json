@@ -1,0 +1,38 @@
+{
+ "case": "L8",
+ "mode": "clear",
+ "steps": "Click `a`; wait 300 ms; screenshot (a selected: the mapping holds); then cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; Escape, then Tab (back from the pasted copy to `a`, the first element of the slide, which a press could not reach: the copy covers it); Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.",
+ "page": {
+  "a": {
+   "x": 614,
+   "y": 428
+  },
+  "b": {
+   "x": 1394,
+   "y": 428
+  },
+  "empty": {
+   "x": 458,
+   "y": 1159
+  },
+  "shape": {
+   "x": 1481,
+   "y": 769
+  },
+  "notes": {
+   "x": 320,
+   "y": 1310
+  }
+ },
+ "scale": 0.975,
+ "window": {
+  "outerX": 0,
+  "outerY": 30,
+  "outerW": 2560,
+  "outerH": 1358,
+  "innerW": 2560,
+  "innerH": 1358,
+  "dpr": 2
+ },
+ "note": "page px are CSS px from the content’s top-left; on macOS the content sits at the window’s top-left (MAWS hides the title bar), so window points = page px at zoom 1. Calibrate cua’s coordinate space with the L0 step before L1."
+}

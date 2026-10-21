@@ -56,6 +56,8 @@ export const DESIGN_COPY = {
   // M4: comments and the move across boards
   commentTitle: 'Comment on the selected element, or on the board when no element is selected (⌥⌘M)',
   commentBoard: (label: string) => `Comment on board ${label} (⌥⌘M)`,
+  /** P4-B2 (V15): pins merged on a zoomed-out world; the press zooms to them. */
+  pinCluster: (n: number) => `${n} comments here; zoom to them`,
   moveToBoard: 'Move to board…',
   moveToBoardTitle: 'Move the selected elements to another board (they take new ids there; their comments go with them)',
   movedTo: (label: string) => `Moved to ${label}.`,
