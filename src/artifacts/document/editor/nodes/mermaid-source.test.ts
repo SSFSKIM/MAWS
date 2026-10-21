@@ -1,9 +1,10 @@
 // The source a document diagram hands mermaid (mermaid-source.ts): the page's palette and face go in where the author's
 // front matter config leaves them unset, the front matter read as mermaid reads it and kept as written.
 import { describe, expect, it } from 'vitest';
-import { withPage } from './mermaid-source';
+import { besideInit, namedTheme, pinnable, withPage, type Page } from './mermaid-source';
 
-const PAGE = {
+const PAGE: Page = {
+  theme: 'base',
   fontFamily: '"Iowan Old Style", ui-serif, Georgia, serif',
   themeVariables: { background: 'rgb(250, 249, 246)', primaryColor: 'rgb(250, 249, 246)', textColor: 'rgb(31, 30, 27)' },
 };
@@ -57,5 +58,32 @@ describe('a document diagram’s source', () => {
   it('is left as written, for mermaid to judge, when its front matter cannot be read', () => {
     const source = `---\nconfig:\n  theme: [forest\n---\n${BODY}`;
     expect(withPage(source, PAGE)).toBe(source);
+  });
+});
+
+// The owner's ruling (2026-10-21): a diagram that names a theme keeps that theme's colours. Mermaid's own parse reads which
+// theme a source names (mermaid.dom.test.ts); these are what this module adds to it.
+describe('the theme a configuration mermaid read names', () => {
+  // base has no colours of its own; a name mermaid's themes lack draws in whatever palette mermaid was configured with
+  it('is a theme mermaid knows, other than base', () => {
+    expect(namedTheme({ theme: 'forest' })).toBe('forest');
+    expect(namedTheme({ theme: 'redux-dark-color' })).toBe('redux-dark-color');
+    expect(namedTheme({ theme: 'base' })).toBeNull();
+    expect(namedTheme({ theme: 'solarized' })).toBeNull();
+    expect(namedTheme({})).toBeNull();
+  });
+});
+
+// mermaid merges two or more init directives each checked first, one alone unchecked over the front matter; this
+// render's own directive makes it two or more, so mermaid's parse reads the author's beside an empty one
+it('reads a source for mermaid’s parse beside an empty init directive, after its front matter', () => {
+  expect(besideInit(`---\ntitle: Flow\n---\n${BODY}`)).toBe(`---\ntitle: Flow\n---\n%%{init: {}}%%\n${BODY}`);
+  expect(besideInit(BODY)).toBe(`%%{init: {}}%%\n${BODY}`);
+});
+
+describe('a named theme’s own variables, as a directive carries them', () => {
+  it('are its strings but the face, a hue below zero written in [0, 360), and none the directive check would blank', () => {
+    const own = { primaryColor: '#cde498', tertiaryColor: 'hsl(-160, 0%, 93.3%)', fontFamily: 'trebuchet ms', dropShadow: 'drop-shadow(1px 2px 2px rgba(0, 0, 0, 1))', strokeWidth: 1, darkMode: false };
+    expect(pinnable(own)).toEqual({ primaryColor: '#cde498', tertiaryColor: 'hsl(200, 0%, 93.3%)' });
   });
 });
