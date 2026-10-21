@@ -318,6 +318,47 @@ describe('the streaming layer', () => {
     layer.settle('r-n');
     expect(drawn(layer)).toEqual([]);
   });
+
+  describe('a block past the producer’s bound, streaming across a reconnect', () => {
+    // A tool call's long input, its lines alike but for their numbers; the producer's catch-up copy is its last 65,536
+    // characters, marked `truncated`.
+    const TAIL = 65_536;
+    const whole = Array.from({ length: 4000 }, (_, i) => `line ${i} of a long tool input\n`).join('');
+    const tailOf = (text: string, upTo: number): Streaming[] => [{ turnId: 't1', agentId: null, step: 0, upTo, blocks: [{ index: 0, kind: 'text', text: text.slice(-TAIL), upTo, truncated: true }] }];
+    const streamed = (...pieces: string[]) => {
+      const layer = new StreamingLayer();
+      pieces.forEach((piece, at) => layer.chunk(text(0, at, 0, piece)));
+      return layer;
+    };
+
+    it('splices the fresh snapshot’s tail onto the text it drew, so the block stays whole and goes on from there', () => {
+      expect(whole.length).toBeGreaterThan(TAIL + 40_000);
+      const layer = streamed(whole.slice(0, 50_000), whole.slice(50_000, 90_000));
+      const block = layer.blocks(null)[0];
+      // The gap streamed chunk 2, less than the tail holds: the tail starts inside the text drawn.
+      layer.resume(tailOf(whole.slice(0, 95_000), 2), null, () => false);
+      expect(layer.blocks(null)[0]).toBe(block);
+      expect(layer.blocks(null)[0].text).toBe(whole.slice(0, 95_000));
+      expect(layer.chunk(text(0, 2, 0, whole.slice(90_000, 95_000)))).toBe(false); // sent again: at the watermark
+      layer.chunk(text(0, 3, 0, whole.slice(95_000)));
+      expect(layer.blocks(null)[0].text).toBe(whole);
+    });
+
+    it('keeps the text it drew when nothing streamed in the gap, the tail all of it already', () => {
+      const layer = streamed(whole.slice(0, 50_000), whole.slice(50_000, 90_000));
+      layer.resume(tailOf(whole.slice(0, 90_000), 1), null, () => false);
+      expect(layer.blocks(null)[0].text).toBe(whole.slice(0, 90_000));
+    });
+
+    it('draws the tail alone when the gap streamed more than it holds, though its first characters repeat the end drawn', () => {
+      // The text drawn ends with a line's end, and the tail starts with that line's end again: an overlap of chance.
+      const drawnTo = whole.indexOf('line 100 ');
+      const tailFrom = whole.indexOf(' of a long tool input\nline 1000 ');
+      const layer = streamed(whole.slice(0, drawnTo));
+      layer.resume(tailOf(whole.slice(0, tailFrom + TAIL), 1), null, () => false);
+      expect(layer.blocks(null)[0].text).toBe(whole.slice(tailFrom, tailFrom + TAIL));
+    });
+  });
 });
 
 /**

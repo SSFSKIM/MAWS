@@ -2,9 +2,10 @@
 // copied and adapted from MAWS's `transcript/source/ipc.ts` (the renderer survey's copy-and-adapt), and the streaming
 // layer beside it.
 //
-// The rows. The subscription's rows are kept in transcript order, by uuid (a row seen twice is one), and mapped to X1
-// events by MAWS's backfill (`recordToEvents`), whose ids are deterministic, so MAWS's store deduplicates them as it
-// does a disk transcript. The backfill's context carries turn and tool-loop state from row to row, so the rows always
+// The rows. The subscription's rows are kept in transcript order, by uuid (a row seen twice is one, whether two messages
+// carry it or one snapshot or page carries it twice), and mapped to X1 events by MAWS's backfill (`recordToEvents`),
+// whose ids are deterministic, so MAWS's store deduplicates them as it does a disk transcript. The backfill's context
+// carries turn and tool-loop state from row to row, so the rows always
 // pass through it in order: a source's snapshot maps every held row with a fresh context, and the rows that arrive
 // after it continue that context. Older rows (a `rows` page) go before the oldest held one, and the transcript is
 // rebuilt from all of them under a new source, which MAWS's store installs staged — the old rows stay drawn until the
@@ -146,6 +147,20 @@ type Row = JsonObject & { uuid: string };
 /** The row types the machine marks on or off the session's chain; it never marks another (a progress row). */
 const CHAIN_TYPES: ReadonlySet<string> = new Set(['user', 'assistant', 'system', 'attachment']);
 const hasUuid = (row: JsonObject): row is Row => typeof row.uuid === 'string' && row.uuid !== '';
+/**
+ * A snapshot's or a page's rows (newest first, as the plane sends them) oldest first, each uuid once: a row the message
+ * carries twice is held at its oldest place, as a row that arrives live again is the one already held.
+ */
+function oldestFirst(rows: readonly JsonObject[]): Row[] {
+  const seen = new Set<string>();
+  const out: Row[] = [];
+  for (const row of rows.toReversed()) {
+    if (!hasUuid(row) || seen.has(row.uuid)) continue;
+    seen.add(row.uuid);
+    out.push(row);
+  }
+  return out;
+}
 /** The model a response row was answered by; the engine's own rows (`<synthetic>`) name none. */
 const modelOf = (row: JsonObject): string | null => {
   const model = row.type === 'assistant' ? (row.message as JsonObject | undefined)?.model : undefined;
@@ -453,7 +468,7 @@ export class DeskTranscript {
     this.metas = body.subagents;
     this.subagents = subagentLookupOf(body.subagents);
     this.unresolved.clear();
-    const fresh = [...body.rows].reverse().filter(hasUuid);
+    const fresh = oldestFirst(body.rows);
     let more = body.more;
     if (this.held) {
       // A snapshot after a disruption: merged into the held rows, or replacing them (the module's header says when).
@@ -588,7 +603,7 @@ export class DeskTranscript {
   }
 
   private older(body: SessionBodies['rows']): void {
-    const older = [...body.rows].reverse().filter((row): row is Row => hasUuid(row) && !this.uuids.has(row.uuid));
+    const older = oldestFirst(body.rows).filter((row) => !this.uuids.has(row.uuid));
     // The rebuilt source first: whoever reads the page answered (loadingOlder false) reads the source that holds it.
     if (older.length > 0) {
       this.mark(older, body.offChain);
