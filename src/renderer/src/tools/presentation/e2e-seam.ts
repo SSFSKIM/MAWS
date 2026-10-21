@@ -8,6 +8,7 @@
 // model's writers on a replica of its own (what an agent's or another replica's edit looks like to the editor), reads
 // the deck's files back, and reports each open tab's open-to-drawn timings (Acceptance 7's cold open).
 import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
+import { PortProvider } from '@artifacts/provider/port';
 import { DECK_PATH, slideIdOf } from '@artifacts/slides/deck';
 import { deckFiles, readFlat, setAttrs, setNotes, setStyle, setText, slideFile, slideOrder, zOrder } from '@artifacts/slides/model';
 import { publishDeck } from '@artifacts/slides/publish';
@@ -51,6 +52,11 @@ export interface PresentationsSeam {
   presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
   /** P4-B2: each open tab's selection, the text element edited if any, and whether its stage owns the keyboard. */
   editorState(artifactId: string): { surface: string; selection: string[]; editingText: string | null; keyboard: 'stage' | 'away' }[];
+  /**
+   * P4-B2 (tracker row 256): each open tab's replica, the remote content frames it has received and those its composition
+   * hold buffers now (`PortProvider.counts`).
+   */
+  frames(artifactId: string): { surface: string; received: number; held: number }[];
 }
 
 declare global {
@@ -127,6 +133,14 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
         .flatMap((tab) => {
           const state = tab.snapshot().session?.snapshot();
           return state ? [{ surface: tab.surface, selection: [...state.selection], editingText: state.editingText, keyboard: state.keyboard }] : [];
+        }),
+    frames: (artifactId) =>
+      openDeckTabs()
+        .filter((tab) => tab.artifactId === artifactId)
+        .flatMap((tab) => {
+          // the window's replica carries its provider (the renderer host's); the interface does not, being any host's
+          const handle = tab.snapshot().handle as (DocumentHandle & { provider?: unknown }) | null;
+          return handle?.provider instanceof PortProvider ? [{ surface: tab.surface, ...handle.provider.counts() }] : [];
         }),
   };
 }

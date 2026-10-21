@@ -89,6 +89,7 @@ export class PortProvider {
   private held = false;
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private buffered: Frame[] = []; // inbound frames waiting out a hold, in arrival order
+  private received = 0; // P4-B2 (row 256): the remote content frames received, held or not
   private readonly awarenessThrottleMs: number;
   private awarenessTimer: ReturnType<typeof setTimeout> | null = null; // the open throttle window
   private awarenessPending = new Set<number>(); // clients whose awareness changed inside it
@@ -114,6 +115,14 @@ export class PortProvider {
 
   get state(): SaveState {
     return { phase: this.phase, synced: this.synced, unsaved: this.carried + this.unacked.length, revision: this.revision, integrated: this.integrated };
+  }
+
+  /**
+   * P4-B2 (tracker row 256): the remote content frames (step 2, update, restored) this replica has received since it was
+   * made, and how many the composition hold buffers now, so an e2e can see a frame arrive and wait out the hold.
+   */
+  counts(): { received: number; held: number } {
+    return { received: this.received, held: this.buffered.length };
   }
 
   subscribe(listener: (state: SaveState) => void): () => void {
@@ -264,6 +273,7 @@ export class PortProvider {
     } catch (error) {
       return this.broken(error);
     }
+    if (frame.type === 'step2' || frame.type === 'update' || frame.type === 'restored') this.received += 1;
     const remoteContent = frame.type === 'step2' || frame.type === 'update' || (frame.type === 'restored' && this.buffered.length > 0);
     if (this.held && remoteContent) {
       this.buffered.push(frame);

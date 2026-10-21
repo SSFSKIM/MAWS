@@ -21,8 +21,9 @@
 //   through the host's `artifact_publish` (this group runs it too).
 // - P3-F wave S F3: the deck in the panel at its 280 px minimum, its toolbar wrapped by whole controls (the owner's
 //   obs 9: labels one letter a line over the canvas).
-// - P3-F wave S F9: words typed on a selected text element, and on a grouped heading after the first double-click, enter
-//   its edit typed over its text (c43: they were dropped).
+// - P4-B2 (D1 to D9, D12; F9's c43 rewritten): words typed on a selected text element replace its text (ARMED, T10);
+//   Escape from an edit is ARMED again; a double-click edits the deepest text whatever the scope, a grouped heading in
+//   one gesture; a table's cell edited by a double-click, Tab to the next; single clicks through a group (P7).
 // - P4-B2 K6: the Edit menu's Undo and Redo, clicked by id, undo and redo a nudge on the stage and only the field's own
 //   typing in the inspector.
 import { loadavg } from 'node:os';
@@ -60,6 +61,8 @@ interface Seam {
     files(artifactId: string): Promise<Record<string, string>>;
     slide(artifactId: string, slideId: string): Promise<SlideIR>;
     timings(artifactId: string): { surface: string; timings: { openedAt: number; syncedAt?: number; drawnAt?: number; thumbnails?: number } }[];
+    frames(artifactId: string): { surface: string; received: number; held: number }[];
+    editorState(artifactId: string): { surface: string; selection: string[]; editingText: string | null; keyboard: 'stage' | 'away' }[];
   };
 }
 type DeckSeam = Seam['__maws_presentations'];
@@ -67,6 +70,7 @@ const order = (page: Page, id: string) => page.evaluate((a) => (window as unknow
 const seed = (page: Page, id: string, files: Record<string, string>) => page.evaluate(([a, f]) => (window as unknown as Seam).__maws_presentations.seed(a, f), [id, files] as const);
 const editDeck = (page: Page, id: string, edit: Parameters<DeckSeam['edit']>[1]) => page.evaluate(([a, e]) => (window as unknown as Seam).__maws_presentations.edit(a, e), [id, edit] as const);
 const timingsOf = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_presentations.timings(a), id);
+const editorState = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_presentations.editorState(a), id);
 /** A slide of the deck as the loader reads its file now (M5's checks read the model through its files). */
 const slideOf = (page: Page, id: string, slideId: string) => page.evaluate(([a, s]) => (window as unknown as Seam).__maws_presentations.slide(a!, s!), [id, slideId] as const);
 // The slide IR as the seam answers it (plain data; src/artifacts/slides/ir.ts)
@@ -399,8 +403,8 @@ const LAB: Record<string, string> = {
 <div id="b" style="position:absolute; left:700px; top:500px; width:200px; height:120px; background:#00aa00"></div>
 <x-shape id="c" kind="ellipse" style="position:absolute; left:1300px; top:640px; width:200px; height:200px; background:#0000ff"></x-shape>
 </section>`,
-  // P3-F F9: a heading inside a group (c43: the owner's head group)
-  'project/slides/text.html': `<section id="text" style="background:#ffffff; padding:128px"><p id="note" style="position:absolute; left:300px; top:300px; width:1000px; font-size:48px">Edit me</p><div id="hg" data-group="" style="position:absolute; left:300px; top:600px; width:1000px; height:200px"><h2 id="gh" style="position:absolute; left:0px; top:0px; width:1000px; font-size:64px">Grouped heading</h2></div></section>`,
+  // P3-F F9: a heading inside a group (c43: the owner's head group); P4-B2 (D12): a table whose cells a double-click edits
+  'project/slides/text.html': `<section id="text" style="background:#ffffff; padding:128px"><p id="note" style="position:absolute; left:300px; top:300px; width:1000px; font-size:48px">Edit me</p><div id="hg" data-group="" style="position:absolute; left:300px; top:600px; width:1000px; height:200px"><h2 id="gh" style="position:absolute; left:0px; top:0px; width:1000px; font-size:64px">Grouped heading</h2></div><table id="tb" style="position:absolute; left:1400px; top:300px; width:400px; font-size:32px"><tr id="tr1"><td>Aa</td><td>Bb</td></tr><tr id="tr2"><td>Cc</td><td>Dd</td></tr></table></section>`,
   // fix wave 1: an element drawn scaled, and a group drawn turned (its children measured as drawn)
   'project/slides/xf.html': `<section id="xf" style="background:#ffffff">
 <div id="sc" style="position:absolute; left:300px; top:300px; width:200px; height:100px; transform:scale(2); background:#ff00ff"></div>
@@ -672,8 +676,8 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   const tags = async () => (await slideOf(page, id, 'lab')).children.map((c) => c.tag);
   await insert('Text box');
   await expect(tab.locator('.deck-textbox')).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(tab.locator('.deck-textbox')).toHaveCount(0);
+  await page.keyboard.press('Escape'); // T17: the new text box ARMED, selected
+  await expect(tab.locator('[data-stage-surface][data-armed]')).toHaveCount(1);
   for (const item of ['Heading', 'Bulleted list', 'Numbered list']) {
     await insert(item);
     await expect(tab.locator('.deck-textbox')).toBeFocused();
@@ -714,17 +718,20 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await tab.locator('[data-slide-thumb="text"] .deck-thumb-button').click();
   const note = (await tab.locator('[data-stage-slide="text"] [data-eid="note"]').boundingBox())!;
   const box = tab.locator('.deck-textbox');
-  // P3-F F9 (c43, obs 5a): words typed on the selected element enter its edit, typed over its text (they were dropped)
+  // P4-B2 (T1, T10; F9's c43, obs 5a): a first click selects the element ARMED, its box focused with the caret hidden,
+  // and words typed replace its text
   await page.mouse.click(note.x + 40, note.y + note.height / 2);
   await expect(tab.locator('[data-overlay] [data-selected="note"]')).toHaveCount(1);
+  await expect(box).toBeFocused();
+  await expect(tab.locator('[data-stage-surface][data-armed]')).toHaveCount(1);
   await page.keyboard.type('Hi there');
-  await expect(box).toBeFocused();
   await expect.poll(async () => plain(await element('note', 'text'))).toBe('Hi there');
-  await page.keyboard.press('Escape');
-  await expect(box).toHaveCount(0);
-  await expect(tab.locator('[data-overlay] [data-selected="note"]')).toHaveCount(1); // back to the element selected
-  await page.mouse.dblclick(note.x + 40, note.y + note.height / 2);
+  await page.keyboard.press('Escape'); // T17: ARMED again, the same box, the element selected
+  await expect(tab.locator('[data-stage-surface][data-armed]')).toHaveCount(1);
+  await expect(tab.locator('[data-overlay] [data-selected="note"]')).toHaveCount(1);
   await expect(box).toBeFocused();
+  await page.keyboard.press('Enter'); // T12: the edit with everything selected
+  await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBe('note');
   await page.keyboard.type('Hello world');
   // the word picked by a double-click on it (the text box's own: the stage leaves it alone)
   const word = await box.evaluate((root) => {
@@ -755,12 +762,9 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await compose('하');
   await compose('한');
   await editDeck(page, id, { op: 'prependText', slideId: 'text', elementId: 'note', text: 'Remote ' }); // lands while composing
-  // P3-F (editor-proof scalpel-1#4), a known gap: nothing here proves the tab's replica has received the remote update
-  // before the check below. editDeck answers once the host holds the edit; the tab's held frame waits in its provider,
-  // which no seam reaches (__maws_presentations answers an open tab's timings only), so the wait stays a fixed 300 ms.
-  // A hold that regressed and a broadcast later than that both pass it, and the merged text checked after the
-  // composition proves the merge, not the hold. It closes when the seam answers the tab replica's held frames.
-  await page.waitForTimeout(300);
+  // P4-B2 (tracker row 256, closing P3-F's editor-proof scalpel-1#4): the tab's replica holds the remote frame before the
+  // negative check below, read from its provider, so a hold that regressed fails here rather than passing a fixed wait
+  await expect.poll(async () => (await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.frames(a), id))[0]?.held ?? 0).toBeGreaterThan(0);
   await expect(box).not.toContainText('Remote'); // held by the replica until the composition ends (the hold)
   await compose('한ㄱ');
   await compose('한그');
@@ -769,19 +773,66 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await expect.poll(async () => plain(await element('note', 'text'))).toBe('Remote Hello world한글');
   await expect(box).toHaveText('Remote Hello world한글');
   await page.keyboard.press('Escape');
+  await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBeNull();
+  await page.keyboard.press('Escape'); // from ARMED: nothing selected, the box gone
   await expect(box).toHaveCount(0);
   await expect(tab.locator('[data-stage-slide="text"] [data-eid="note"]')).toHaveText('Remote Hello world한글');
 
-  // P3-F F9 (c43): the owner's grouped heading: the first double-click goes into the group and selects the heading, and
-  // the words typed then enter its edit (the first double-click plus typing dropped them)
+  // P4-B2 (T5, D12; F9's c43): the owner's grouped heading, from nothing selected: one double-click edits it with the word
+  // under the pointer selected, whatever the scope, and the words typed replace it (its text one word less: the rest kept)
   const grouped = (await tab.locator('[data-stage-slide="text"] [data-eid="gh"]').boundingBox())!;
   await page.mouse.dblclick(grouped.x + 40, grouped.y + grouped.height / 2);
   await expect(tab.locator('[data-overlay] [data-selected="gh"]')).toHaveCount(1);
-  await page.keyboard.type('Owners first');
+  await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBe('gh');
   await expect(box).toBeFocused();
-  await expect.poll(async () => plain(await element('gh', 'text'))).toBe('Owners first');
+  await page.keyboard.type('Owners');
+  await expect.poll(async () => plain(await element('gh', 'text'))).toBe('Owners heading');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape'); // ARMED, then the group (T18)
+  await expect(tab.locator('[data-overlay] [data-selected="hg"]')).toHaveCount(1);
+  await expect(box).toHaveCount(0);
+
+  // P4-B2 (P7, D12): single clicks on the grouped heading: the group, then the heading ARMED, then a caret; a drag of
+  // the group's first click moves the group
+  await page.keyboard.press('Escape'); // from the group: nothing selected
+  await expect(tab.locator('[data-overlay] [data-selected]')).toHaveCount(0);
+  const groupLeft = async () => (await element('hg', 'text'))?.style.left;
+  await page.mouse.click(grouped.x + 40, grouped.y + grouped.height / 2);
+  await expect(tab.locator('[data-overlay] [data-selected="hg"]')).toHaveCount(1);
+  await page.mouse.move(grouped.x + 40, grouped.y + grouped.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 5; i++) await page.mouse.move(grouped.x + 40 + i * 4, grouped.y + grouped.height / 2, { steps: 1 });
+  await page.mouse.up();
+  await expect.poll(groupLeft).not.toBe('300px');
+  const movedGroup = (await tab.locator('[data-stage-slide="text"] [data-eid="gh"]').boundingBox())!;
+  await page.mouse.click(movedGroup.x + 40, movedGroup.y + movedGroup.height / 2);
+  await expect(tab.locator('[data-overlay] [data-selected="gh"]')).toHaveCount(1);
+  await expect.poll(async () => (await editorState(page, id))[0]).toEqual(expect.objectContaining({ selection: ['gh'], editingText: null }));
+  await expect(box).toBeFocused();
+  await page.mouse.click(movedGroup.x + 40, movedGroup.y + movedGroup.height / 2);
+  await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBe('gh');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect(box).toHaveCount(0);
+
+  // P4-B2 (T5 and T16, D12; P6 and K5): a table's cell edited in one double-click from nothing selected, its word
+  // selected; Tab to the next cell with its content selected; Escape from a cell selects the table (T17)
+  const cells = tab.locator('[data-stage-slide="text"] [data-eid="tb"] td');
+  const cellIds = await cells.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-eid')));
+  const firstCell = (await cells.nth(0).boundingBox())!;
+  await page.mouse.dblclick(firstCell.x + 20, firstCell.y + firstCell.height / 2);
+  await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBe(cellIds[0]);
+  await page.keyboard.type('North');
+  await page.keyboard.press('Tab');
+  await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBe(cellIds[1]);
+  await page.keyboard.type('East');
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await editorState(page, id))[0]).toEqual(expect.objectContaining({ selection: ['tb'], editingText: null }));
+  const cellTexts = async () => ((await element('tb', 'text'))?.children ?? []).flatMap((row) => row.children.map((cell) => plain(cell)));
+  await expect.poll(cellTexts).toEqual(['North', 'East', 'Cc', 'Dd']);
+  await page.keyboard.press('Escape');
+  await expect(tab.locator('[data-overlay] [data-selected]')).toHaveCount(0);
 
   // copy in one deck, paste into another: the dialect on the Mac's pasteboard, loaded on the way in
   await tab.locator('[data-slide-thumb="lab"] .deck-thumb-button').click();

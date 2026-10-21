@@ -10,9 +10,9 @@
 // One case, two runs:
 // - class 1 (`pnpm e2e:presentations`, MAWS_PRESENTATIONS_PERF unset): one drag with the agent, its fidelity regression
 //   (each publish answered by the host with a rising revision, the tab's replica applying at least one remote update per
-//   publish, the deck reading back the agent's last font size after the drop), and the bound move-to-frame p95 ≤ 24 ms
-//   judged by Decision Log 24's verdict (any miss below load 10 fails; a miss under 20 % at load 10 or more is marginal,
-//   logged); the 16 ms target logged.
+//   publish, the deck reading back the agent's last font size after the drop); its move-to-frame p95 and the 16 ms target
+//   logged as evidence, with no bound (the architect's ruling at P4-B2 M0's merge: a class-1 group runs beside other
+//   jobs, and every measured bound is the load rule's, asserted in the measured group alone).
 // - measured (`pnpm e2e:presentations-drag`, MAWS_PRESENTATIONS_PERF=1, a MEASURED_E2E group): after the measured specs'
 //   quiet admission (support/quiet.ts), four no-agent control trials alternating with four agent trials, the drag's
 //   direction turning with each pair so both kinds drag both ways; the agent trials judged on their best (the parent's
@@ -191,7 +191,7 @@ function summarize(trials: Trial[]) {
   };
 }
 
-test('the drag on the 100-slide deck while an agent republishes through the host: move to frame p95 within 24 ms and the publishes faithful (measured: beside no-agent control trials)', async () => {
+test('the drag on the 100-slide deck while an agent republishes through the host: the publishes faithful, and (measured, beside no-agent control trials) move to frame p95 within 24 ms', async () => {
   test.setTimeout(MEASURED ? 600_000 : 180_000);
   const loads: Record<string, number> = { start: load1() };
   const { page, seam } = await ready();
@@ -206,7 +206,9 @@ test('the drag on the 100-slide deck while an agent republishes through the host
     mode: MEASURED ? 'measured: no-agent control trials alternating with agent trials' : 'class 1: one agent trial',
     deck: 'benchDeckFiles(100): S6’s seven bench shapes cycled, S7b’s 100-slide deck; the cover’s pinned picture dragged',
     workload: { moves: MOVES, moveEveryMs: MOVE_EVERY_MS, stepPx: 0.8, publishEveryMs: PUBLISH_EVERY_MS, publish: 'one slide (the second on, in turn), its first font size stepped, through artifact_publish in the host (e2e/support/deck-agent.ts)' },
-    judging: { boundMs: BOUND_MS, targetMs: TARGET_MS, rule: 'Decision Log 24 over the agent trials’ best (the parent’s Decision Log 54): marginal under a 20 % miss at load ≥ 10, failed otherwise; the control trials recorded, no bound' },
+    judging: MEASURED
+      ? { boundMs: BOUND_MS, targetMs: TARGET_MS, rule: 'Decision Log 24 over the agent trials’ best (the parent’s Decision Log 54): marginal under a 20 % miss at load ≥ 10, failed otherwise; the control trials recorded, no bound' }
+      : { boundMs: null, targetMs: TARGET_MS, rule: 'class 1: the p95 logged as evidence, no bound (the bound is the measured group’s)' },
     loads,
     quiet: null as QuietAdmission | null,
     trials: [] as Trial[],
@@ -234,10 +236,10 @@ test('the drag on the 100-slide deck while an agent republishes through the host
 
   const summary = summarize(record.trials);
   write({ summary });
-  console.log(`[deck drag] the bound: the agent trials' best move → frame p95 ${summary.bound.value} ms against ${BOUND_MS} ms at load ${summary.bound.load}: ${summary.bound.verdict}`);
+  console.log(`[deck drag] the bound: the agent trials' best move → frame p95 ${summary.bound.value} ms against ${BOUND_MS} ms at load ${summary.bound.load}: ${summary.bound.verdict}${MEASURED ? '' : ' (class 1: logged, not asserted)'}`);
   console.log(`[deck drag] the ${TARGET_MS} ms target: the agent trials' best ${summary.target.agent.best} ms (${summary.target.agent.met ? 'met' : 'not met'})${summary.target.control ? `; the no-agent control's best ${summary.target.control.best} ms (${summary.target.control.met ? 'met' : 'not met'})` : ''}`);
   console.log(`PRESENTATIONS_DRAG_RESULT_BEGIN\n${JSON.stringify({ ...record, summary })}\nPRESENTATIONS_DRAG_RESULT_END`);
   expect(record.trials.flatMap((t) => t.problems.map((problem) => `${t.kind} trial ${t.order + 1}: ${problem}`)), 'every trial faithful').toEqual([]);
-  expect(summary.bound.verdict, `the drag's p95 within ${BOUND_MS} ms (Decision Log 24; the figures are in ${RESULTS})`).not.toBe('failed');
+  if (MEASURED) expect(summary.bound.verdict, `the drag's p95 within ${BOUND_MS} ms (Decision Log 24; the figures are in ${RESULTS})`).not.toBe('failed');
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
