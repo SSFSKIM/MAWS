@@ -25,8 +25,40 @@ import { MachinesDialog } from './MachinesDialog';
 
 vi.mock('../../key/derive', async (original) => ({ ...(await original<typeof import('../../key/derive')>()), PASSPHRASE_COST: { t: 1, m: 64, p: 1 } }));
 
+/** A gate a test can hold: `reached` settles once something waits at it, `open` lets it through. */
+function gate() {
+  let reach!: () => void;
+  let open!: () => void;
+  const reached = new Promise<void>((resolve) => (reach = resolve));
+  const opened = new Promise<void>((resolve) => (open = resolve));
+  return { reached, opened, reach, open };
+}
+type Gate = ReturnType<typeof gate>;
+
+// The org key's bytes, each time they are opened (to see them wiped), and held at the moment they open when a test asks.
+const opening = vi.hoisted(() => ({ gate: null as { reach: () => void; opened: Promise<void> } | null, bytes: [] as Uint8Array[] }));
+vi.mock('../../key/wrap', async (original) => {
+  const actual = await original<typeof import('../../key/wrap')>();
+  return {
+    ...actual,
+    unwrapKeyBytes: async (...args: Parameters<typeof actual.unwrapKeyBytes>) => {
+      const raw = await actual.unwrapKeyBytes(...args);
+      opening.bytes.push(raw);
+      if (opening.gate) {
+        opening.gate.reach();
+        await opening.gate.opened;
+      }
+      return raw;
+    },
+  };
+});
+
 let hub: MachinesDouble;
 let orgKeys: OrgKeysDouble;
+/** Every request the dialog made, as `METHOD path`. */
+let calls: string[];
+/** Holds the hub's answer to requests of `METHOD path` until the test opens it. */
+let held: Map<string, Gate>;
 /** The machines' endpoints and the org key's, as `member`. */
 const serve =
   (member: MemberRecord): typeof fetch =>
@@ -34,12 +66,22 @@ const serve =
     const path = new URL(String(input), 'http://double').pathname;
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined;
     const method = init?.method ?? 'GET';
+    calls.push(`${method} ${path}`);
+    const hold = held.get(`${method} ${path}`);
+    if (hold) {
+      hold.reach();
+      await hold.opened;
+    }
     const answer = (await orgKeys.handle(member, method, path, body)) ?? hub.handle(member, method, path, body) ?? { status: 404, body: { error: 'not-found' } };
     return Response.json(answer.body, { status: answer.status });
   };
 beforeEach(() => {
   hub = new MachinesDouble();
   orgKeys = new OrgKeysDouble();
+  calls = [];
+  held = new Map();
+  opening.gate = null;
+  opening.bytes = [];
   vi.stubGlobal('fetch', serve(ME.member));
   useKeyHolder.setState({ state: 'locked', key: null, kept: null, fingerprint: null, forgetError: null });
 });
@@ -282,5 +324,96 @@ describe('MachinesDialog: provisioning keys', () => {
     fireEvent.click(within(screen.getByTestId('revoke-key-confirm')).getByRole('button', { name: 'Revoke devcloud' }));
     expect((await screen.findByRole('alert')).textContent).toBe('Only an admin of the org revokes provisioning keys.');
     expect(hub.keys[0].revoked).toBeNull();
+  });
+});
+
+/** From the list to a key's confirmation, the passphrase typed: the form filled with `devcloud`, `dc-`. */
+async function toKeyConfirm(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole('button', { name: 'Create a key' }));
+  const form = screen.getByTestId('key-form');
+  fireEvent.change(within(form).getByLabelText('Label'), { target: { value: 'devcloud' } });
+  fireEvent.change(within(form).getByLabelText('Prefix'), { target: { value: 'dc-' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Continue' }));
+  const confirm = screen.getByTestId('enroll-confirm');
+  fireEvent.change(await within(confirm).findByLabelText('The passphrase'), { target: { value: PASSPHRASE } });
+  return confirm;
+}
+
+/** From the list to a one-time enrollment's confirmation for `studio`, the passphrase typed. */
+async function toEnrollConfirm(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole('button', { name: 'Enroll a machine' }));
+  fireEvent.change(screen.getByLabelText(/machine's name/), { target: { value: 'studio' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  const confirm = screen.getByTestId('enroll-confirm');
+  fireEvent.change(await within(confirm).findByLabelText('The passphrase'), { target: { value: PASSPHRASE } });
+  return confirm;
+}
+
+const wiped = () => opening.bytes.length > 0 && opening.bytes.every((bytes) => bytes.every((b) => b === 0));
+const posts = () => calls.filter((call) => call.startsWith('POST '));
+
+describe('MachinesDialog: a confirmation left before its code arrives', () => {
+  it.each([
+    ['a provisioning key', toKeyConfirm],
+    ['a one-time enrollment', toEnrollConfirm],
+  ])('cancelled while the org key opens, %s asks the hub for nothing and draws no code; the bytes are wiped', async (_, toConfirm) => {
+    await unlocked();
+    open();
+    const confirm = await toConfirm();
+    const opened = gate();
+    opening.gate = opened;
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+    await opened.reached;
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    await screen.findByTestId('provisioning-keys'); // back on the list
+    opened.open();
+
+    // The bytes are wiped as the abandoned confirmation ends, after anything it would have asked the hub.
+    await waitFor(() => expect(wiped()).toBe(true));
+    expect(posts()).toEqual([]);
+    expect(screen.queryByTestId('enroll-code')).toBeNull();
+    expect(screen.getByTestId('provisioning-keys')).toBeTruthy();
+  });
+
+  it('once the hub is asked for the key, Cancel is off — a made key cannot be unmade — and the code it answers is shown', async () => {
+    await unlocked();
+    open();
+    const confirm = await toKeyConfirm();
+    const answered = gate();
+    held.set('POST /api/provisioning-keys', answered);
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+    await answered.reached;
+
+    const cancel = within(confirm).getByRole('button', { name: 'Cancel' });
+    await waitFor(() => expect(cancel).toHaveProperty('disabled', true));
+    expect(within(confirm).getByTestId('code-coming').textContent).toContain('shown once');
+    fireEvent.click(cancel);
+    expect(screen.getByTestId('enroll-confirm')).toBe(confirm);
+
+    answered.open();
+    const shown = await screen.findByTestId('enroll-code');
+    expect(decodeCode(within(shown).getByTestId('enrollment-code').textContent!)).toMatchObject({ kind: 'provision', prefix: 'dc-' });
+    expect(wiped()).toBe(true);
+  });
+
+  it('closed while the hub makes the key, draws its answer nowhere and wipes the bytes', async () => {
+    await unlocked();
+    const view = open();
+    const confirm = await toKeyConfirm();
+    const answered = gate();
+    held.set('POST /api/provisioning-keys', answered);
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+    await answered.reached;
+    const errors = vi.spyOn(console, 'error');
+    try {
+      view.unmount();
+      answered.open();
+      await waitFor(() => expect(wiped()).toBe(true));
+      expect(hub.keys).toHaveLength(1); // made at the hub before the dialog closed; revocable from the list
+      expect(document.body.textContent).not.toContain('smns-provision-v1.');
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

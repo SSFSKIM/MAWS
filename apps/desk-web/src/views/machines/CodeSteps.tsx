@@ -3,8 +3,12 @@
 // more as bytes (the held key cannot be read), checks they are the held key, and hands them to what it confirms — a
 // one-time enrollment, a provisioning key — which asks the hub for its token, builds the code around the bytes, and
 // wipes them. The code step shows the code with what to do with it; closing it discards the code: nothing keeps it.
+//
+// A confirmation the owner left (Cancel, or the dialog closed) while the key was opening asks the hub for nothing; once
+// the hub has been asked it cannot be taken back (a key it made stays made), so Cancel is off from then on, and an
+// answer that arrives after the dialog closed is not drawn anywhere. The key's bytes are wiped on every path.
 import { useQuery } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
 import { openOrgKeyBytes, rememberedMethod, type OrgMethod } from '../../key/unlock';
@@ -38,6 +42,21 @@ export function ConfirmStep(props: { me: Me; confirming: Confirming; onCancel: (
   const held = useKeyHolder((s) => s.key);
   const keys = useQuery({ queryKey: WRAPPED_KEYS_QUERY, queryFn: listWrappedKeys });
   const [error, setError] = useState<string | null>(null);
+  /** Whether the hub has been asked: from then the code is on its way and Cancel cannot take it back. */
+  const [asked, setAsked] = useState(false);
+  /** Whether the owner is still on this step: false once it was cancelled or the dialog closed. */
+  const current = useRef(true);
+  useEffect(() => {
+    current.current = true;
+    return () => {
+      current.current = false;
+    };
+  }, []);
+
+  const cancel = () => {
+    current.current = false;
+    onCancel();
+  };
 
   async function confirm(method: OrgMethod) {
     if (!held || !keys.data) return setError('The org key is locked. Unlock it first.');
@@ -46,11 +65,18 @@ export function ConfirmStep(props: { me: Me; confirming: Confirming; onCancel: (
     try {
       // The held key cannot be read: its copy is opened once more, checked to be the held key, and wiped once built in.
       key = await openOrgKeyBytes(me.org.id, keys.data, method, held);
+      // Left while it opened: nothing is asked of the hub.
+      if (!current.current) return;
       // Locked while it opened: the owner took the key out of this browser, so no code carries it out either.
       if (useKeyHolder.getState().key !== held) return setError('The org key was locked meanwhile, so no code was made. Unlock it and try again.');
-      onIssued(await confirming.issue(key));
+      setAsked(true);
+      const issued = await confirming.issue(key);
+      // The dialog closed while the hub answered: the code is shown nowhere.
+      if (current.current) onIssued(issued);
     } catch (failure) {
+      if (!current.current) return;
       setError(confirming.explain(failure));
+      setAsked(false);
     } finally {
       key?.fill(0);
     }
@@ -69,10 +95,15 @@ export function ConfirmStep(props: { me: Me; confirming: Confirming; onCancel: (
           The hub did not list the org key's methods: {keys.error.message}
         </p>
       ) : null}
-      <div>
-        <button type="button" className={buttonQuiet} onClick={onCancel}>
+      <div className="flex items-center gap-3">
+        <button type="button" className={buttonQuiet} onClick={cancel} disabled={asked}>
           Cancel
         </button>
+        {asked && (
+          <span className="text-ui-sm text-fg-muted" role="status" data-testid="code-coming">
+            The hub was asked: the code is on its way, shown once.
+          </span>
+        )}
       </div>
       {error && (
         <p className="m-0 text-ui-sm text-danger" role="alert">
