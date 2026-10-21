@@ -51,14 +51,15 @@ export const ENGINE = {
 // P4-R8 start: Settings › Engine › MCP servers (settings version 16)
 export const MCP_SERVERS = {
   label: 'MCP servers',
-  note: "Loaded by every session MAWS starts, forks or resumes, never by a terminal session. An entry wins over a server of the same name in your own or a project's config, and a sign-in Claude Code made for the same name and URL carries over. A change applies at each session's next launch.",
+  note: "Loaded by every session MAWS starts, forks or resumes, never by a terminal session. An entry wins over a server of the same name in your own or a project's config, and a Claude Code sign-in for an HTTP server of the same name and URL without custom headers carries over. A change applies at each session's next launch.",
   name: 'Server name',
   url: 'Server URL',
   namePlaceholder: 'name',
   urlPlaceholder: 'https://…/mcp',
   add: 'Add',
   remove: (name: string) => `Remove ${name}`,
-  badName: "A name takes letters, digits, hyphens and underscores, up to 64 of them; maws is MAWS's own server.",
+  badName: 'A name takes letters, digits, hyphens and underscores, up to 64 of them.',
+  reservedName: 'That name is reserved by Claude Code or MAWS.',
   badUrl: "Enter the server's http or https URL.",
   duplicate: (name: string) => `${name} is already in the list.`,
   full: `The list holds at most ${MAX_APP_MCP_SERVERS} servers.`,

@@ -13,7 +13,11 @@ import { MCP_SERVERS } from './copy';
 // surrounding whitespace rather than trimming it.
 export function entryProblem(entry: AppMcpServer, servers: readonly AppMcpServer[]): string | null {
   const parsed = AppMcpServerSchema.safeParse(entry);
-  if (!parsed.success) return parsed.error.issues[0]?.path[0] === 'name' ? MCP_SERVERS.badName : MCP_SERVERS.badUrl;
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    if (issue?.path[0] !== 'name') return MCP_SERVERS.badUrl;
+    return issue.code === 'custom' ? MCP_SERVERS.reservedName : MCP_SERVERS.badName;
+  }
   if (servers.some((s) => s.name === entry.name)) return MCP_SERVERS.duplicate(entry.name);
   if (servers.length >= MAX_APP_MCP_SERVERS) return MCP_SERVERS.full;
   return null;
@@ -24,8 +28,17 @@ export function McpServers({ settings }: { settings: Settings }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
-  const write = (next: AppMcpServer[]) => writeSettings({ engine: { mcpServers: next } });
+  const [pending, setPending] = useState<AppMcpServer[] | null>(null);
+  if (pending !== null && servers.length === pending.length && servers.every((s, i) => s.name === pending[i].name && s.url === pending[i].url)) setPending(null);
+  const write = async (next: AppMcpServer[]) => {
+    if (pending !== null) return false;
+    setPending(next); // the store's matching list, not the write's answer, enables the controls again
+    const ok = await writeSettings({ engine: { mcpServers: next } });
+    if (!ok) setPending(null);
+    return ok;
+  };
   const add = () => {
+    if (pending !== null) return;
     const entry: AppMcpServer = { name: name.trim(), type: 'http', url: url.trim() };
     const refused = entryProblem(entry, servers);
     setProblem(refused);
@@ -52,7 +65,7 @@ export function McpServers({ settings }: { settings: Settings }) {
           <span className="min-w-0 flex-1 truncate font-mono text-ui-sm text-fg-muted" title={server.url}>
             {server.url}
           </span>
-          <button type="button" aria-label={MCP_SERVERS.remove(server.name)} className={TEXT_ACTION} onClick={() => void write(servers.filter((s) => s.name !== server.name))}>
+          <button type="button" aria-label={MCP_SERVERS.remove(server.name)} className={TEXT_ACTION} disabled={pending !== null} onClick={() => void write(servers.filter((s) => s.name !== server.name))}>
             ×
           </button>
         </div>
@@ -60,7 +73,7 @@ export function McpServers({ settings }: { settings: Settings }) {
       <div className="flex min-w-0 basis-full items-center gap-2">
         <input aria-label={MCP_SERVERS.name} placeholder={MCP_SERVERS.namePlaceholder} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={keys} className={`${INPUT} max-w-[140px] font-mono`} />
         <input aria-label={MCP_SERVERS.url} placeholder={MCP_SERVERS.urlPlaceholder} value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={keys} className={`${INPUT} flex-1 font-mono`} />
-        <button type="button" className={TEXT_ACTION} disabled={name.trim() === '' || url.trim() === ''} onClick={add}>
+        <button type="button" className={TEXT_ACTION} disabled={pending !== null || name.trim() === '' || url.trim() === ''} onClick={add}>
           {MCP_SERVERS.add}
         </button>
       </div>

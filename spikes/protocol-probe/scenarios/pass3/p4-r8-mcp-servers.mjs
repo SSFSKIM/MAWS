@@ -5,8 +5,8 @@
 //            binary MAWS's sessions run (the realpath of ~/.local/bin/claude; MAWS's Settings name no other), MAWS's
 //            launch line, environment and initialize with its `maws` server, plus `--mcp-config` naming `notion` as
 //            the owner's user scope named it until 2026-10-21. What mcp_status reports for it, and so whether the login
-//            made under the user-scope entry is reused. The raw recording stays under /tmp; the fixture keeps the
-//            control exchanges with every other server reduced to its name, status, scope and type, and the
+//            made under the user-scope entry is reused. The raw recording is private and deleted after curation or
+//            failure; the fixture keeps control exchanges with every other server reduced to its name, status, scope and type, and the
 //            initialize answer to its keys (the account, the owner's commands and plugins are not kept).
 //   scratch  a scratch config home naming `notion` in user, local and project scope at a local server's three
 //            distinct paths, and the same `--mcp-config` plus `probe-oauth`, an OAuth-protected local server: whose
@@ -19,9 +19,9 @@ import {run as harnessRun} from '../../harness.mjs';
 import {SdkServer} from '../../sdk-mcp.mjs';
 import {clearEngineEnvironment} from './mods-environment.mjs';
 import {createServer} from 'node:http';
-import {readFileSync,writeFileSync,existsSync,realpathSync,mkdirSync} from 'node:fs';
+import {readFileSync,writeFileSync,existsSync,realpathSync,mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
-import {homedir} from 'node:os';
+import {homedir,tmpdir} from 'node:os';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -76,7 +76,7 @@ function curate(rawRows,sessionId){
   if(keep===null){const k=row.direction+':'+(f.type??'?')+(f.subtype?'/'+f.subtype:'');dropped[k]=(dropped[k]??0)+1;continue;}
   out.push({...row,frame:keep});
  }
- out.push({direction:'meta',at:new Date().toISOString(),frame:{event:'curated',from:'the raw recording under /tmp, not kept',dropped,sessionId}});
+ out.push({direction:'meta',at:new Date().toISOString(),frame:{event:'curated',from:'a temporary raw recording, deleted after curation',dropped,sessionId}});
  return out.map((r,i)=>({seq:i+1,direction:r.direction,at:r.at,frame:r.frame}));
 }
 
@@ -93,41 +93,45 @@ async function owner(){
  const cwd=realpathSync(fileURLToPath(new URL('../../../../',import.meta.url))); // this worktree, whose project key (its repository root) the owner's config already trusts
  const trustKey=execFileSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{cwd,encoding:'utf8'}).trim().replace(/\/\.git$/,'');
  const sessionId=randomUUID();
- const rawDir='/tmp/maws-p4-r8-raw/';mkdirSync(rawDir,{recursive:true});
- const debugFile=join(rawDir,'owner-debug.log');
- clearEngineEnvironment();
- // buildEnvironment's constants and the gateway route (D-19's default); SMNS_MEMBER is left out, so sminos never admits
- // the probe as a member of the project (the one difference from a MAWS session's environment)
- const env={ANTHROPIC_BASE_URL:'http://127.0.0.1:8641',ANTHROPIC_AUTH_TOKEN:'claudeusage-local-gateway',ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',TERM:'dumb',DISABLE_AUTOUPDATER:'1'};
- if(process.env.CLAUDE_CONFIG_DIR)throw new Error('refused: CLAUDE_CONFIG_DIR is set; the owner arm reads the default config home');
- await relayReady();
- const before=ownerSnapshot(cwd,trustKey,sessionId);
- const mcpConfig={mcpServers:{notion:NOTION}};
- const maws=new SdkServer('maws',served.tools);
- const name='p4-r8-owner';
- const p=await harnessRun(name,async p=>{
-  p.note({event:'provenance',...PROVENANCE,arm:'owner',engine:BIN,engineVersion:ENGINE_VERSION,configHome:'~/.claude (the owner\'s; CLAUDE_CONFIG_DIR unset)',cwd,trustKey,pinnedSessionId:sessionId,envKeys:Object.keys(env).sort(),mcpConfig,settings:MAWS_SETTINGS});
-  p.note({event:'owner_snapshot',phase:'before',...before});
-  p.serve('maws',maws);
-  p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
-  p.on('elicitation',r=>{p.note({event:'elicitation_seen',server:r.mcp_server_name??null});return {action:'decline'};});
-  success(await p.init({...initPayload(trustKey),sdkMcpServers:['maws']}),'initialize');
-  const status=await settled(p,['notion','maws']);
-  const notion=status.mcpServers.find(s=>s.name==='notion');
-  p.note({event:'notion',status:notion?.status??null,scope:notion?.scope??null,url:notion?.config?.url??null,tools:(notion?.tools??[]).length,others:status.mcpServers.filter(s=>s.name!=='notion').map(s=>({name:s.name,status:s.status,scope:s.scope}))});
-  await endAsStop(p);
- },{cwd,env,bin:BIN,dir:'../../../../../../../../../../../..'+rawDir,noModel:true,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...MAWS_FLAGS,'--session-id',sessionId,'--mcp-config',JSON.stringify(mcpConfig),'--settings',JSON.stringify(MAWS_SETTINGS),'--debug-file',debugFile]});
- const exit=await p.closed;
- const after=ownerSnapshot(cwd,trustKey,sessionId);
- const rows=readFileSync(p.file,'utf8').trim().split('\n').map(JSON.parse);
- const curated=curate(rows,sessionId);
- // the engine's debug lines about the server, its auth and its tokens' storage, with anything token-shaped removed
- const debug=existsSync(debugFile)?readFileSync(debugFile,'utf8').split('\n').filter(l=>/notion/i.test(l)).map(l=>l.replace(/[A-Za-z0-9_\-.]{32,}/g,'[REDACTED]').slice(0,300)):[];
- curated.push({seq:curated.length+1,direction:'meta',at:new Date().toISOString(),frame:{event:'debug_lines',count:debug.length,lines:debug.slice(0,60)}});
- curated.push({seq:curated.length+1,direction:'meta',at:new Date().toISOString(),frame:{event:'owner_snapshot',phase:'after',...after,userServersSame:JSON.stringify(after.userServers)===JSON.stringify(before.userServers),projectKeysSame:JSON.stringify(after.projectKeys)===JSON.stringify(before.projectKeys),projectCountSame:after.projectCount===before.projectCount}});
- writeFileSync(FIXTURES+name+'.jsonl',curated.map(r=>JSON.stringify(r)).join('\n')+'\n');
- console.log(name,JSON.stringify({exit,notion:curated.find(r=>r.frame.event==='notion')?.frame,before,after}));
- if(exit.code!==0)throw new Error(name+' exited with '+JSON.stringify(exit));
+ const rawDir=mkdtempSync(join(tmpdir(),'maws-p4-r8-raw-'))+'/'; // fresh and owner-only (0700)
+ try{
+  const debugFile=join(rawDir,'owner-debug.log');
+  clearEngineEnvironment();
+  // buildEnvironment's constants and the gateway route (D-19's default); SMNS_MEMBER is left out, so sminos never admits
+  // the probe as a member of the project (the one difference from a MAWS session's environment)
+  const env={ANTHROPIC_BASE_URL:'http://127.0.0.1:8641',ANTHROPIC_AUTH_TOKEN:'claudeusage-local-gateway',ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',TERM:'dumb',DISABLE_AUTOUPDATER:'1'};
+  if(process.env.CLAUDE_CONFIG_DIR)throw new Error('refused: CLAUDE_CONFIG_DIR is set; the owner arm reads the default config home');
+  await relayReady();
+  const before=ownerSnapshot(cwd,trustKey,sessionId);
+  const mcpConfig={mcpServers:{notion:NOTION}};
+  const maws=new SdkServer('maws',served.tools);
+  const name='p4-r8-owner';
+  const p=await harnessRun(name,async p=>{
+   p.note({event:'provenance',...PROVENANCE,arm:'owner',engine:BIN,engineVersion:ENGINE_VERSION,configHome:'~/.claude (the owner\'s; CLAUDE_CONFIG_DIR unset)',cwd,trustKey,pinnedSessionId:sessionId,envKeys:Object.keys(env).sort(),mcpConfig,settings:MAWS_SETTINGS});
+   p.note({event:'owner_snapshot',phase:'before',...before});
+   p.serve('maws',maws);
+   p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
+   p.on('elicitation',r=>{p.note({event:'elicitation_seen',server:r.mcp_server_name??null});return {action:'decline'};});
+   success(await p.init({...initPayload(trustKey),sdkMcpServers:['maws']}),'initialize');
+   const status=await settled(p,['notion','maws']);
+   const notion=status.mcpServers.find(s=>s.name==='notion');
+   p.note({event:'notion',status:notion?.status??null,scope:notion?.scope??null,url:notion?.config?.url??null,tools:(notion?.tools??[]).length,others:status.mcpServers.filter(s=>s.name!=='notion').map(s=>({name:s.name,status:s.status,scope:s.scope}))});
+   await endAsStop(p);
+  },{cwd,env,bin:BIN,dir:'../../../../../../../../../../../..'+rawDir,noModel:true,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...MAWS_FLAGS,'--session-id',sessionId,'--mcp-config',JSON.stringify(mcpConfig),'--settings',JSON.stringify(MAWS_SETTINGS),'--debug-file',debugFile]});
+  const exit=await p.closed;
+  const after=ownerSnapshot(cwd,trustKey,sessionId);
+  const rows=readFileSync(p.file,'utf8').trim().split('\n').map(JSON.parse);
+  const curated=curate(rows,sessionId);
+  // the engine's debug lines about the server, its auth and its tokens' storage, with anything token-shaped removed
+  const debug=existsSync(debugFile)?readFileSync(debugFile,'utf8').split('\n').filter(l=>/notion/i.test(l)).map(l=>l.replace(/[A-Za-z0-9_\-.]{32,}/g,'[REDACTED]').slice(0,300)):[];
+  curated.push({seq:curated.length+1,direction:'meta',at:new Date().toISOString(),frame:{event:'debug_lines',count:debug.length,lines:debug.slice(0,60)}});
+  curated.push({seq:curated.length+1,direction:'meta',at:new Date().toISOString(),frame:{event:'owner_snapshot',phase:'after',...after,userServersSame:JSON.stringify(after.userServers)===JSON.stringify(before.userServers),projectKeysSame:JSON.stringify(after.projectKeys)===JSON.stringify(before.projectKeys),projectCountSame:after.projectCount===before.projectCount}});
+  writeFileSync(FIXTURES+name+'.jsonl',curated.map(r=>JSON.stringify(r)).join('\n')+'\n');
+  console.log(name,JSON.stringify({exit,notion:curated.find(r=>r.frame.event==='notion')?.frame,before,after}));
+  if(exit.code!==0)throw new Error(name+' exited with '+JSON.stringify(exit));
+ }finally{
+  rmSync(rawDir,{recursive:true,force:true});
+ }
 }
 
 // ---- scratch ---------------------------------------------------------------------------------------------------

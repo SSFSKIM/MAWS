@@ -18,6 +18,16 @@ describe('the app MCP servers', () => {
     expect(AppMcpServerSchema.safeParse({ ...notion, name }).success).toBe(false);
   });
 
+  it.each([
+    ...Object.getOwnPropertyNames(Object.prototype),
+    'hearthbot', 'remote-devices', 'claude_ai', 'widgets', 'Claude_Pages', 'Claude_Docs',
+    'claude-in-chrome', 'computer-use', 'workspace', 'webagent', 'claude-code-remote', 'remote-browser', 'claude-device',
+  ])('refuses %j as reserved by Claude Code', (name) => {
+    const parsed = AppMcpServerSchema.safeParse({ ...notion, name });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) expect(parsed.error.issues[0]?.message).toBe('reserved by Claude Code');
+  });
+
   it('accepts a name at the 64-character bound', () => {
     expect(AppMcpServerSchema.safeParse({ ...notion, name: 'x'.repeat(64) }).success).toBe(true);
   });

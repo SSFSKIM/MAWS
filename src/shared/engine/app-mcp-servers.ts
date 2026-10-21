@@ -6,8 +6,8 @@
 // What the engine does with it (spikes/protocol-probe/findings-p4-r8-mcp-servers.txt): the server reads as scope
 // `dynamic`; an entry wins over the user's, a project's or the local scope's server of the same name, and only it is
 // connected (the engine's own precedence, kept: MAWS passes its list and resolves nothing); and the engine keys a
-// server's OAuth login by its name, type, URL and headers, never its scope, so an entry with the name and URL a terminal
-// login used finds that login.
+// server's OAuth login by its name, type, URL and headers, never its scope, so an HTTP entry finds a terminal login
+// made for the same name and URL without custom headers.
 import * as z from 'zod';
 
 // MAWS's own server, which the engine host answers (`sdkMcpServers`, src/shared/engine/initialize.ts); an entry under
@@ -17,6 +17,12 @@ export const MAX_APP_MCP_SERVERS = 32;
 export const MAX_SERVER_URL = 2048;
 // The engine's own rule for a server's name (`claude mcp add`: letters, digits, hyphens and underscores).
 const NAME = /^[A-Za-z0-9_-]{1,64}$/;
+// Claude Code is the authority (2.1.304: m6, X3s/T0e); a name a later engine reserves is simply not loaded.
+const ENGINE_RESERVED_SERVER_NAMES = new Set([
+  ...Object.getOwnPropertyNames(Object.prototype),
+  'hearthbot', 'remote-devices', 'claude_ai', 'widgets', 'Claude_Pages', 'Claude_Docs',
+  'claude-in-chrome', 'computer-use', 'workspace', 'webagent', 'claude-code-remote', 'remote-browser', 'claude-device',
+]);
 
 const isServerUrl = (url: string): boolean => {
   if (!URL.canParse(url) || url.trim() !== url) return false; // refused rather than trimmed: validators never transform
@@ -25,7 +31,10 @@ const isServerUrl = (url: string): boolean => {
 };
 
 export const AppMcpServerSchema = z.strictObject({
-  name: z.string().regex(NAME, { message: 'letters, digits, hyphens and underscores, at most 64' }).refine((name) => name !== RESERVED_SERVER_NAME, { message: `${RESERVED_SERVER_NAME} is MAWS's own server` }),
+  name: z.string()
+    .regex(NAME, { message: 'letters, digits, hyphens and underscores, at most 64' })
+    .refine((name) => name !== RESERVED_SERVER_NAME, { message: `${RESERVED_SERVER_NAME} is MAWS's own server` })
+    .refine((name) => !ENGINE_RESERVED_SERVER_NAMES.has(name), { message: 'reserved by Claude Code' }),
   type: z.literal('http'),
   url: z.string().max(MAX_SERVER_URL).refine(isServerUrl, { message: 'not an http or https URL' }),
 });
