@@ -219,11 +219,19 @@ test('comments on a design’s boards and elements: the card, the pins through m
     // the move left it selected, and a press on the element selected alone edits it at the press (P4-B2's T3), so the
     // Delete would take a character: a press on the phone's empty ground (right of the squatter, above the element)
     // first selects nothing, then the press on it selects it ARMED, where Delete removes it (T14)
-    const phone = (await ws.locator('[data-board-id="phone"]').boundingBox())!;
-    const zoom = phone.width / FRAMES.phone!.w;
-    await page.mouse.click(phone.x + 300 * zoom, phone.y + 600 * zoom);
+    const phone = ws.locator('[data-board-id="phone"]');
+    const ground = (await phone.boundingBox())!;
+    const zoom = ground.width / FRAMES.phone!.w;
+    await page.mouse.click(ground.x + 300 * zoom, ground.y + 600 * zoom);
     await expect.poll(async () => (await viewOf(page, id, 'panel')).selection).toEqual([]);
-    await pressOn(page, ws.locator(`[data-board-id="phone"] [data-eid="${onPhone}"]`)); // the world takes the keys
+    // the press on what the phone draws of it, the whole board in view: the move kept it 800 px wide on the 390 px phone,
+    // whose canvas clips it, so its box's middle lies past the board's right edge, on the empty world (which takes the
+    // press, selects nothing and pans)
+    await zoomTo('Phone — sign in');
+    const board = (await phone.boundingBox())!;
+    const drawn = (await ws.locator(`[data-board-id="phone"] [data-eid="${onPhone}"]`).boundingBox())!;
+    const right = Math.min(drawn.x + drawn.width, board.x + board.width);
+    await page.mouse.click((Math.max(drawn.x, board.x) + right) / 2, drawn.y + drawn.height / 2); // the world takes the keys
     await expect.poll(async () => (await viewOf(page, id, 'panel')).selection).toEqual([onPhone]);
     await expect(ws.locator('[data-design-world][data-armed]')).toHaveCount(1);
     await page.keyboard.press('Delete');
