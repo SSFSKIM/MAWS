@@ -77,7 +77,8 @@
     "e2e/support/dashboard-final-reporter.ts",
     "e2e/support/dashboard-acceptance.ts",
     "e2e/support/dashboard-scale.ts", // P3-E (E2 M6): test/support/dashboard-scale.test.ts runs the scale gate's judging
-    "e2e/support/live-data-bounds.ts" // E3 M4: test/support/live-data-bounds.test.ts runs the live block's on-screen judgement
+    "e2e/support/live-data-bounds.ts", // E3 M4: test/support/live-data-bounds.test.ts runs the live block's on-screen judgement
+    "e2e/support/quiet.ts" // P4-W: test/support/quiet.test.ts runs the measured specs' quiet admission
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:

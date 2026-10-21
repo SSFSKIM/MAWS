@@ -25,7 +25,9 @@
 //               both started at or after 30 s and within 5 %, else the sample of the 60 s mark, ≤ 500 MB; a sample
 //               started more than 1 s after its mark is kept and named but decides no pair (P3-F L249); a forced
 //               collection's figures, taken after the binding samples, are a diagnostic only
-// Admission (parent Decision Log 42): every trial follows a bounded settle toward a 1-minute load below 10; a timing row
+// Admission (parent Decision Log 42): the first trial follows the measured specs' shared quiet admission (support/quiet.ts:
+// the 1-minute load under 5 on two reads 30 s apart, at most five minutes here, recorded as the results' `quiet`; on its
+// expiry the trials run as below), and every trial a bounded settle toward a 1-minute load below 10; a timing row
 // (1 to 4) needs three admitted trials (started below 10), every one within its bound, at most five attempts; a trial at
 // 10 or more is excluded, and fewer than three admitted is `hardware-blocked`, never met; the median and the best are
 // description. Recorded beside them, with no bound: a bind at the parser's 200,000-row limit, a warm reopen, the sheet's
@@ -41,6 +43,7 @@ import { BENCH_DATASET, BENCH_ROWS, BENCH_SCATTER_POINTS, BENCH_VIEWS, benchCsv,
 import { LOAD_BELOW, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS, MEMORY_LATE_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, REQUIRED_TRIALS, scrollVerdict, timingVerdict, type Verdict } from './support/dashboard-scale';
 import { collectGarbage, jsHeapMB, load1, processMemory } from './support/document-scale';
 import { REPO_ROOT } from './support/launch';
+import { quietWait } from './support/quiet';
 import { startApp, type AgentCall, type DashboardApp } from './support/dashboards';
 
 test.skip(process.env.MAWS_DASHBOARD_SCALE !== '1', 'the dashboard scale gate runs only under MAWS_DASHBOARD_SCALE=1');
@@ -52,9 +55,9 @@ const TITLE = '판매 원장 대시보드';
 const AGENT = 'A';
 const MAX_ATTEMPTS = 5; // three admitted trials at most this many attempts, never retried without end
 const UNLOAD_MS = 90_000; // the bound on the host's unload of the released dashboard (its idle minute and a margin)
-const FIRST_SETTLE_MS = 5 * 60_000; // after the build's CPU burst, which the 1-minute load trails
+const FIRST_SETTLE_MS = 5 * 60_000; // the quiet admission's budget: after the build's CPU burst, which the 1-minute load trails
 const TRIAL_SETTLE_MS = 90_000;
-const SETTLE_BUDGET_MS = 6 * 60_000; // every settle after the first, together
+const SETTLE_BUDGET_MS = 6 * 60_000; // every trial's settle, together
 const VIEWS = BENCH_VIEWS.length;
 const SCATTER = String(BENCH_VIEWS.find((spec) => spec.view === 'scatter')!.title);
 const RAW_TABLE = BENCH_VIEWS.findIndex((spec) => spec.view === 'table' && spec.columns === undefined && spec.agg === undefined);
@@ -133,7 +136,7 @@ class Rows {
   write(extra: Record<string, unknown> = {}): void {
     Object.assign(this.extra, extra);
     mkdirSync(join(RESULTS, '..'), { recursive: true });
-    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: `parent Decision Log 42: every trial after a bounded settle toward a 1-minute load below ${LOAD_BELOW}; a timing row needs ${REQUIRED_TRIALS} admitted trials (started below ${LOAD_BELOW}) each within its bound, at most ${MAX_ATTEMPTS} attempts, fewer admitted hardware-blocked; the scroll row the p95 of every admitted event pooled, a long task over 50 ms failing it; the renderer's private memory (process.getProcessMemoryInfo, samples on the 10 s marks 0 through 60, every one below load ${LOAD_BELOW}: the first pair from 30 s within 5 %, else the 60 s sample); median and best descriptive`, rows: this.rows }, null, 2)}\n`);
+    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: `parent Decision Log 42: the first trial after the shared quiet admission (\`quiet\`), every trial after a bounded settle toward a 1-minute load below ${LOAD_BELOW}; a timing row needs ${REQUIRED_TRIALS} admitted trials (started below ${LOAD_BELOW}) each within its bound, at most ${MAX_ATTEMPTS} attempts, fewer admitted hardware-blocked; the scroll row the p95 of every admitted event pooled, a long task over 50 ms failing it; the renderer's private memory (process.getProcessMemoryInfo, samples on the 10 s marks 0 through 60, every one below load ${LOAD_BELOW}: the first pair from 30 s within 5 %, else the 60 s sample); median and best descriptive`, rows: this.rows }, null, 2)}\n`);
   }
 }
 
@@ -239,9 +242,9 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
       bench: `benchCsv(${BENCH_ROWS}) and BENCH_VIEWS (${VIEWS} views, the scatter ${BENCH_SCATTER_POINTS} points): src/artifacts/dashboard/fixtures/bench.ts`,
     };
     const rows = new Rows(meta);
-    const settled = await settle(FIRST_SETTLE_MS);
-    rows.write({ settle: { start: first.readings, afterBuild: settled.readings, settled: settled.settled } });
-    settleSpent = 0;
+    const quiet = await quietWait({ budgetMs: FIRST_SETTLE_MS });
+    console.log(`[dashboard scale] the first trial's admission: ${quiet.summary}`);
+    rows.write({ settle: { start: first.readings }, quiet });
 
     const { artifactId: id } = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'dashboard', title: TITLE, content: benchMarkdown() });
     let variant = 0;
