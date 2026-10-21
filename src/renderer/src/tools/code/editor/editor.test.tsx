@@ -428,6 +428,24 @@ describe('editor', () => {
       expect(disk.callsOf('files.write')).toHaveLength(2);
     });
 
+    // round 3: the disk an earlier read found unusable is the baseline again by the conflict read, so the bar's "cannot
+    // be merged" goes with theirs
+    it('drops the bar’s unusable disk when a save’s conflict read finds the disk back at the baseline', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = { text: 'caf�\n', bytes: 5, utf8: false };
+      changed(disk);
+      await waitFor(() => expect(entry().diskUnusable).toBe('encoding'));
+      const write = disk.hold('files.write'); // the save conflicts with the non-UTF-8 disk, its reply held
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+      disk.files[APP] = 'const a = 1;\n'; // back to the baseline, no event: the conflict read is what answers
+      await act(async () => write.release());
+      await waitFor(() => expect(entry().saving).toBe(false));
+      expect(entry()).toMatchObject({ theirs: null, diskUnusable: null, dirty: true, hash: fakeHash('const a = 1;\n') });
+      expect(document.querySelector('[data-disk-unusable]')).toBeNull();
+    });
+
     it('lands a change read issued while clean and answered after an edit as theirs, the edit standing', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       disk.files[APP] = 'const a = 2;\n';

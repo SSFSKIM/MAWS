@@ -435,7 +435,8 @@ export function createViewerStore(client: MawsBridge) {
     // superseded by a newer one, whose read then says what the disk holds. Issued after the conflict's reply, it sees the
     // disk at or after the conflict, which a reply alone does not (the reply may describe a disk older than a change read
     // in flight), so superseding the older loads is sound only through it (the reviews). A read answering the baseline's
-    // own hash withdraws theirs: the disk is back where the document started, and the next save lands.
+    // own hash withdraws theirs, and an unusable disk an earlier read reported: the disk is back where the document
+    // started, and the next save lands.
     const conflicted = async (tabId: string, entry: ViewerEntry, current: () => boolean): Promise<boolean> => {
       const generation = ++lastGeneration;
       generations.set(tabId, generation);
@@ -455,7 +456,7 @@ export function createViewerStore(client: MawsBridge) {
         text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8,
       };
       if (file.hash !== null && file.hash === get().entries.get(tabId)?.hash) {
-        patch(tabId, { saving: false, theirs: null });
+        patch(tabId, { saving: false, theirs: null, diskUnusable: null });
         return true;
       }
       // A file that is no longer a text the editor could take (grown past its cap, binary, not UTF-8) is not offered;
