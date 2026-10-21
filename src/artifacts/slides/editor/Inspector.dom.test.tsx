@@ -9,8 +9,11 @@ import { newDoc, onUpdate, transact, type Doc } from '../../yjs';
 import { importSlide, readSlide, slideFile, writeDeckKeys, ROOT } from '../model';
 import { loadSlide } from '../parse';
 import { restyle, siteOf } from '../writers-elements';
+import { SlideCanvas } from '../canvas';
 import { Inspector } from './Inspector';
 import { DeckSession } from './session';
+import { startMove, startResize, type GestureContext } from './transform/gestures';
+import { measureInHost } from './transform/Overlay';
 
 const SLIDE = `<section id="a" style="background:#ffffff">
 <h2 id="title" style="font-size:64px">Title</h2>
@@ -439,5 +442,101 @@ describe('final fix wave B4: a replacement finishing after the tab closed', () =
     session.dispose();
     await act(async () => finish('assets/b.png'));
     expect(attrsOf(doc, 'pic').src).toBe('assets/a.png');
+  });
+});
+
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D13; tracker row 280): the inspector follows every
+// gesture's end, not its frames, and shows X, Y, W and H in whole pixels while the model keeps its fractions. The
+// gestures are the stage's own (gestures.ts), over a canvas laid out as each node's px style says (happy-dom lays
+// nothing out); both artifacts DOM projects run these, the compiled one as the app ships.
+describe('P4-B2 (D13): the inspector settles at each gesture’s end, in whole pixels', () => {
+  const canvases: SlideCanvas[] = [];
+  afterEach(() => {
+    canvases.splice(0).forEach((c) => c.dispose());
+    document.body.replaceChildren();
+  });
+  /** Each node's box as its own px style says it, read live (a flow node's from `flow`, which a test may change). */
+  function fakeLayout(root: HTMLElement, flow: Record<string, { x: number; y: number; w: number; h: number }>) {
+    for (const n of root.querySelectorAll<HTMLElement>('[data-eid]')) {
+      const id = n.dataset.eid!;
+      const v = (k: string) => Number.parseFloat(n.style.getPropertyValue(k)) || 0;
+      const box = () => flow[id] ?? { x: v('left'), y: v('top'), w: v('width'), h: v('height') };
+      for (const [k, read] of [['offsetLeft', () => box().x], ['offsetTop', () => box().y], ['offsetWidth', () => box().w], ['offsetHeight', () => box().h]] as const)
+        Object.defineProperty(n, k, { configurable: true, get: read });
+      Object.defineProperty(n, 'offsetParent', { configurable: true, get: () => root });
+    }
+  }
+  function mountLive(selection: string[], slide?: string) {
+    const doc = deck(slide);
+    const session = new DeckSession(doc);
+    session.select(selection);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const canvas = new SlideCanvas(doc, 'a', host);
+    canvases.push(canvas);
+    const flow = { title: { x: 128, y: 96, w: 1664, h: 74 } };
+    fakeLayout(canvas.root, flow);
+    render(<Inspector session={session} slideId="a" readOnly={false} faces={{}} canvas={canvas} measure={(id) => measureInHost(canvas, id, 1)} />);
+    const ctx: GestureContext = { session, slideId: 'a', canvas, scale: 1 };
+    return { doc, session, canvas, ctx, flow };
+  }
+  const NO = { shift: false, alt: false, meta: true }; // ⌘: no snapping
+
+  it('a move: X holds during its frames and shows the new whole number at its end; a cancel shows the model’s value then', () => {
+    const { doc, ctx } = mountLive(['box']);
+    expect(box('X').value).toBe('600');
+    const g = startMove(ctx, ['box'], { x: 700, y: 200 });
+    act(() => void g.frame({ x: 712, y: 200 }, NO));
+    act(() => void g.frame({ x: 745, y: 207 }, NO));
+    expect(styleOf(doc, 'box').left).toBe('645px'); // written each frame
+    expect([box('X').value, box('Y').value]).toEqual(['600', '100']); // the inspector holds
+    act(() => g.end());
+    expect([box('X').value, box('Y').value]).toEqual(['645', '107']);
+    const cancelled = startMove(ctx, ['box'], { x: 700, y: 200 });
+    act(() => void cancelled.frame({ x: 690, y: 200 }, NO));
+    expect(box('X').value).toBe('645');
+    act(() => cancelled.end(false)); // P3's cancel keeps what its frames wrote (no rollback): the model's value at the cancel
+    expect(box('X').value).toBe('635');
+  });
+
+  it('a resize: W holds during its frames and shows the whole width at its end, the model keeping the fraction', () => {
+    const { doc, ctx } = mountLive(['box']);
+    const g = startResize(ctx, 'box', 'e', { x: 900, y: 200 });
+    act(() => void g.frame({ x: 934.73, y: 200 }, NO));
+    expect(styleOf(doc, 'box').width).toBe('334.73px');
+    expect(box('Width').value).toBe('300');
+    act(() => g.end());
+    expect(box('Width').value).toBe('335');
+    expect(styleOf(doc, 'box').width).toBe('334.73px');
+  });
+
+  it('1334.73 reads 1335; an untouched Enter writes nothing; the arrows step from the model’s value', () => {
+    const { doc } = mountLive(['box']);
+    act(() => void restyle(doc, 'a', 'box', { left: '1334.73px' }, 'remote'));
+    expect(box('X').value).toBe('1335');
+    let updates = 0;
+    const off = onUpdate(doc, () => updates++);
+    fireEvent.keyDown(box('X'), { key: 'Enter' });
+    expect(updates).toBe(0);
+    off();
+    fireEvent.keyDown(box('X'), { key: 'ArrowUp' });
+    expect(styleOf(doc, 'box').left).toBe('1335.73px');
+    expect(box('X').value).toBe('1336');
+  });
+
+  it('“Mixed” compares the whole values shown', () => {
+    const { doc } = mountLive(['box', 'box2']);
+    act(() => void restyle(doc, 'a', 'box2', { top: '100.3px' }, 'remote'));
+    expect([box('Y').value, box('Y').placeholder]).toEqual(['100', '']);
+    act(() => void restyle(doc, 'a', 'box2', { top: '100.6px' }, 'remote'));
+    expect([box('Y').value, box('Y').placeholder]).toEqual(['', 'Mixed']);
+  });
+
+  it('a layout pass alone (no update of the replica) updates a laid-out width', () => {
+    const { canvas, flow } = mountLive(['title']);
+    expect(box('Width').value).toBe('1664');
+    flow.title = { ...flow.title, w: 1500.4 }; // a face arrived: the heading lays out narrower, nothing written
+    act(() => canvas.layoutNow());
+    expect(box('Width').value).toBe('1500');
   });
 });

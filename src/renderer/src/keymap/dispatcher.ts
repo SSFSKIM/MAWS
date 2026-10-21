@@ -174,6 +174,20 @@ export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides): bool
   return false;
 }
 
+/**
+ * P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D14): whether the owner's keymap binds the key an
+ * event carries, to an action of either sink (the menu's nine tab items as the menu numbers them), so a surface's own
+ * key (the deck and design editors' F6) steps aside for it.
+ */
+export function keymapBinds(event: KeyboardEvent, keymap: KeymapOverrides = useSettings.getState().state?.settings.keymap ?? {}): boolean {
+  return ACTION_IDS.some((id) => {
+    const chord = effectiveChord(id, keymap);
+    if (chord === null) return false;
+    const chords = id === 'tab.select' && chord.endsWith('1') ? Array.from({ length: 9 }, (_, i) => `${chord.slice(0, -1)}${i + 1}`) : [chord];
+    return chords.some((c) => matchesChord(event, parseChord(c)));
+  });
+}
+
 export function connectKeys(target: Window = window, keymap: () => KeymapOverrides = () => useSettings.getState().state?.settings.keymap ?? {}): () => void {
   const onKeyDown = (event: KeyboardEvent) => void dispatchKey(event, keymap());
   // E9: a hold's end (Design §5)

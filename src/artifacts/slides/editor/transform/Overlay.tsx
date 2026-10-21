@@ -12,6 +12,9 @@
 // a 3 px move makes it DRAG (T2); the `click` after a still press on an already selected element is T3 (pointer events
 // carry no click count); a double-click edits the deepest text under the pointer whatever the scope, with the word there
 // selected (T5); a drag from a cell of the selected table selects a range of cells (CELLS, D8).
+// P4-B2 (D15 A2, A3, A5): the focus follows the selection while the stage owns the keyboard (the armed box, one other
+// element's node, else the stage; never the page's body), a focus brought to a node selects it, a polite status says a
+// multi-selection's count, and a single selection's place among its siblings rides on what the focus reads.
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { SlideCanvas } from '../../canvas';
 import { apply, applyLinear, HANDLES, union, type Box, type Guide, type Handle, type Pt } from '../../geometry';
@@ -30,6 +33,7 @@ import { handlesOf, nudge, startEndpoint, startFlowMove, startMarquee, startMove
 import { hitIds, measure, measureAll, type Measured } from './measure';
 import { allPinned, cellAt, cellRange, cellsTable, childAt, deepestText, drill, escapeUp, isTextTarget, pick, selectAll, slideTree, tabNext } from './selection';
 import { useDocVersion } from './use-doc-version';
+import { selectionStatus, stageFocus } from '../a11y';
 
 export interface OverlayProps {
   session: DeckSession;
@@ -136,6 +140,18 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     setMeasured(canvas ? measureAll(canvas, new Set([...selection, ...remote.flatMap((r) => r.elementIds)]), scale) : new Map());
   }, [canvas, selection, remote, scale, version, slideId, session, laidOut]);
 
+  // P4-B2 (D13): a gesture still running when the overlay goes (the editor unmounted mid-drag) ends as a cancel, so the
+  // session's drag ends with it (the inspector's settled version and the gesture hold read it)
+  useEffect(
+    () => () => {
+      const g = gesture.current;
+      gesture.current = null;
+      pending.current = null;
+      g?.end(false);
+    },
+    [],
+  );
+
   const ctx = useCallback((): ClipboardContext | null => (canvas ? { session, slideId, canvas, scale, artifactId, importAsset } : null), [canvas, session, slideId, scale, artifactId, importAsset]);
 
   const slidePoint = useCallback(
@@ -146,15 +162,57 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     [frame, scale],
   );
 
-  // a text edit ended (Escape, a click elsewhere): the keys come back to the stage (P4-B2 spike: unless the box stays,
-  // armed again; an armed box gone, its keys come back too)
-  const wasText = useRef<string | null>(null);
+  // P4-B2 (D15 A3, A5): the focus follows the selection while the stage owns the keyboard and the focus is the stage's
+  // own (the surface, a node, the box, or nothing once what held it went): the armed box for one text target (it takes
+  // the focus as it mounts), the element's node for one other element (any one element where nothing is edited), the
+  // stage for several or none. A text edit ending (Escape, a click elsewhere) brings the keys back this way too.
+  const lastOwn = useRef<Element | null>(null); // what last held the stage's own focus, while nothing took it since (null after a departure)
+  const pressing = useRef(false); // the overlay focusing the stage for a press, whose selection then takes the focus
+  const follow = useCallback(
+    (el: HTMLElement | null) => {
+      if (!el || !canvas) return;
+      const s = session.snapshot();
+      if (s.keyboard !== 'stage' || s.editingText !== null) return;
+      const doc = el.ownerDocument;
+      const active = doc.activeElement;
+      if (active !== null && active !== doc.body && !el.contains(active)) return;
+      const one = s.selection.length === 1 && canvas.node(s.selection[0]!) ? s.selection[0]! : null;
+      const box = armedBox(session);
+      if (one !== null && box?.elementId === one) {
+        if (!box.root.contains(active)) box.focus();
+        return;
+      }
+      if (one !== null && !readOnly && isTextTarget(slideTree(session.doc, slideId), one)) return; // its box mounts armed and takes the focus
+      const node = one !== null ? canvas.node(one) : undefined;
+      const target = node?.hasAttribute('tabindex') ? node : el; // a node the canvas made focusable (its `describe`), else the stage
+      if (active !== target) target.focus({ preventScroll: true });
+    },
+    [canvas, session, slideId, readOnly],
+  );
+  useEffect(() => follow(surface.current), [follow, surface, selection, state.keyboard, editing, armedId]);
+  // A5: the stage's own focus fallen to the body with the selection unchanged gives it back: its node made anew or gone
+  // (an agent's change), or moved (Chromium drops the focus of a node `insertBefore` moves, as the canvas reorders them
+  // for ⌘]). A departure (a focus elsewhere, a press outside the stage) clears `lastOwn`, so it is never undone.
   useEffect(() => {
+    const own = lastOwn.current;
     const el = surface.current;
-    const active = el?.ownerDocument.activeElement;
-    if (wasText.current !== null && textId === null && el && (!active || active === el.ownerDocument.body || canvas?.root.contains(active))) el.focus({ preventScroll: true });
-    wasText.current = textId;
-  }, [textId, surface, canvas]);
+    const doc = el?.ownerDocument;
+    if (own && doc && (doc.activeElement === null || doc.activeElement === doc.body)) follow(el);
+  }, [follow, surface, version, laidOut]);
+  // A2: a single selection's place among its siblings ("2 of 5"), on the node or the text box the focus reads
+  const described = useRef<Element | null>(null);
+  useEffect(() => {
+    const one = selection.length === 1 ? selection[0]! : null;
+    const node = one !== null ? canvas?.node(one) : undefined;
+    const target = node && one === textId ? (node.querySelector('.deck-textbox') ?? node) : (node ?? null);
+    if (described.current && described.current !== target) described.current.removeAttribute('aria-description');
+    described.current = target;
+    if (!target || one === null) return;
+    const tree = slideTree(session.doc, slideId);
+    const siblings = tree.childrenOf(tree.parentOf(one));
+    const text = C.position(siblings.indexOf(one) + 1, siblings.length);
+    if (target.getAttribute('aria-description') !== text) target.setAttribute('aria-description', text);
+  }, [selection, textId, canvas, session, slideId, version]);
   // P4-B2: the armed box's caret drawn transparent and its root taking no presses (textbox.css), set before it first paints
   useLayoutEffect(() => {
     const el = surface.current;
@@ -178,10 +236,15 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (editing !== null && c.canvas.node(editing)?.contains(target)) return;
       clickCandidate.current = null;
       session.setKeyboard('stage'); // P4-B2 (D1): a press on the stage's content gives it the keyboard
-      // P4-B2 (D3): a press on the armed element keeps the focus in its editor (the gesture's end gives it back if the
-      // browser moved it anyway); any other press focuses the stage, as before
+      // P4-B2 (D3, A3): a focus that is the stage's own (the surface, a node, the armed box: a press on the armed element
+      // moves no focus) stays for the press's selection to take; any other focus comes to the stage first
       const armed = armedBox(session);
-      if (!armed || !c.canvas.node(armed.elementId)?.contains(target)) el.focus({ preventScroll: true });
+      const active = el.ownerDocument.activeElement;
+      if (!stageFocus(el, active) && !(armed && active && armed.root.contains(active))) {
+        pressing.current = true;
+        el.focus({ preventScroll: true });
+        pressing.current = false;
+      }
       const client = { x: e.clientX, y: e.clientY };
       const p = slidePoint(client);
       const handle = target.closest<HTMLElement>('[data-handle]')?.dataset.handle;
@@ -206,6 +269,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       const hits = hitIds(c.canvas, client, p, HIT_SLACK_PX / scale, connectors);
       const picked = pick(tree, hits, current, { deep: e.metaKey || e.ctrlKey, toggle: e.shiftKey });
       session.select(picked.selection);
+      follow(el); // P4-B2 (A3)
       const base = e.shiftKey ? current : [];
       let make: () => Gesture | null = () => null;
       // P4-B2 (D8): a press in a cell of the table already selected, dragged, selects the range of cells it crosses
@@ -258,19 +322,14 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       setShown(g.frame(slidePoint({ x: e.clientX, y: e.clientY }), mods(e)));
     };
 
-    // P4-B2 (D3): a press the stage kept while a box is armed (a handle, the frame, a drag) leaves the selection as it
-    // was, so the box stays armed: the focus goes back to it, or its keys would reach the stage, with no input method
-    const rearm = () => {
-      const box = armedBox(session);
-      if (box && el.ownerDocument.activeElement !== box.root) box.focus();
-    };
-
+    // P4-B2 (D3, A3): a gesture's end gives the focus back to the selection's target (`follow`): an armed box's keys
+    // would otherwise reach the stage, with no input method
     // the gesture ends written, its step closed, and the layout passes it saw caught up
     const finish = (g: Gesture) => {
       g.end(true);
       setShown(null);
       catchUpLayout();
-      rearm();
+      follow(el);
     };
 
     const onUp = (e: PointerEvent) => {
@@ -284,7 +343,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (pend && pend.target !== null && !pend.toggle && session.snapshot().selection.length > 1) session.select([pend.target]);
       // P4-B2 (T3): a still press on an element already selected alone; the `click` after it decides (its count)
       clickCandidate.current = pend && pend.target !== null && !pend.toggle ? { target: pend.target, hits: pend.hits, wasSelected: pend.wasSelected, single: pend.single } : null;
-      rearm();
+      follow(el);
     };
 
     // P4-B2 (T3): a single click on the element that was the whole selection before the press: a text target edits with
@@ -315,7 +374,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       gesture.current = null;
       pending.current = null;
       if (g) finish(g);
-      else rearm();
+      else follow(el);
     };
 
     // P4-B2 (T5): a double-click from any state edits the deepest text element or cell under the pointer, whatever the
@@ -353,7 +412,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       pending.current = null;
       setShown(null);
       catchUpLayout();
-      rearm();
+      follow(el);
     };
 
     el.addEventListener('pointerdown', onDown);
@@ -372,13 +431,13 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       el.removeEventListener('pointercancel', onCancel);
       el.removeEventListener('lostpointercapture', onLost);
     };
-  }, [surface, ctx, slidePoint, session, slideId, scale, readOnly, editing, catchUpLayout]);
+  }, [surface, ctx, slidePoint, session, slideId, scale, readOnly, editing, catchUpLayout, follow]);
 
   // ---- keys and the clipboard, while the stage has focus
   useEffect(() => {
     const el = surface.current;
     if (!el) return;
-    const fromStage = (e: Event) => e.target === el;
+    const fromStage = (e: Event) => stageFocus(el, e.target); // P4-B2 (A3): the surface or a node holding the focus
     const notice = (reason: string | null) => reason && onNotice?.(reason);
 
     // the element keys, from the stage or (P4-B2) the armed box; true when a key was taken
@@ -497,13 +556,30 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     // nothing takes the focus back. Focus falling to the page's body (a box unmounting) changes nothing.
     const onFocusIn = (e: FocusEvent) => {
       const at = e.target;
-      const ours = at === el || (at instanceof Element && el.contains(at) && at.closest('.deck-textbox') !== null);
+      const ours = stageFocus(el, at) || (at instanceof Element && el.contains(at) && at.closest('.deck-textbox') !== null);
       session.setKeyboard(ours ? 'stage' : 'away');
+      if (!ours) lastOwn.current = null; // A5: a departure, never undone
+      if (!ours || !(at instanceof Element)) return;
+      lastOwn.current = at;
+      // P4-B2 (A3): a focus brought to an element's node (assistive technology's) selects it, so its focus and Delete agree
+      const id = at === el ? null : at.getAttribute('data-eid');
+      if (id !== null && ctx()?.canvas.root.contains(at)) {
+        const sel = session.snapshot().selection;
+        if (sel.length !== 1 || sel[0] !== id) session.select([id]);
+      }
+      // the stage entered from outside it (Tab, F6): the focus goes on to the selection's target
+      const from = e.relatedTarget;
+      if (at === el && !pressing.current && !(from instanceof Node && el.contains(from))) follow(el);
+    };
+    // A5: a press outside the stage is a departure too: on chrome that takes no focus it leaves the focus on the body with
+    // no focusin
+    const onPressAway = (e: PointerEvent) => {
+      if (!(e.target instanceof Node && el.contains(e.target))) lastOwn.current = null;
     };
 
     const doc = el.ownerDocument;
     // the stage's clipboard takes the Edit menu's commands while the stage, or (P4-B2) an armed box, has focus
-    const takes = () => doc.activeElement === el || (doc.activeElement !== null && armedBox(session)?.root === doc.activeElement);
+    const takes = () => stageFocus(el, doc.activeElement) || (doc.activeElement !== null && armedBox(session)?.root === doc.activeElement);
     const onCopy = (cut: boolean) => (e: ClipboardEvent) => {
       if (!takes()) return;
       const c = ctx();
@@ -541,6 +617,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     const armedPaste = armedClip(paste);
     el.addEventListener('keydown', onArmedKey, true);
     doc.addEventListener('focusin', onFocusIn);
+    doc.addEventListener('pointerdown', onPressAway, true);
     el.addEventListener('copy', armedCopy, true);
     el.addEventListener('cut', armedCut, true);
     el.addEventListener('paste', armedPaste, true);
@@ -554,6 +631,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     return () => {
       el.removeEventListener('keydown', onArmedKey, true);
       doc.removeEventListener('focusin', onFocusIn);
+      doc.removeEventListener('pointerdown', onPressAway, true);
       el.removeEventListener('copy', armedCopy, true);
       el.removeEventListener('cut', armedCut, true);
       el.removeEventListener('paste', armedPaste, true);
@@ -565,7 +643,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       doc.removeEventListener('beforecut', beforeCopy);
       doc.removeEventListener('beforepaste', beforePaste);
     };
-  }, [surface, ctx, session, slideId, readOnly, onNotice]);
+  }, [surface, ctx, session, slideId, readOnly, onNotice, follow]);
 
   // ---- drawing
   const tree = canvas ? slideTree(session.doc, slideId) : null;
@@ -632,6 +710,9 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       {shown?.insertion && <div className="deck-insertion" data-insertion style={boxStyle(shown.insertion)} />}
       {textId !== null && canvas && renderText && <Fragment key={keyOf(canvas.node(textId))}>{renderText(textId, canvas, editing === null)}</Fragment>}
       {pins && canvas && <CommentPins canvas={canvas} slideId={slideId} scale={scale} version={version} />}
+      <span role="status" className="deck-overlay-status" data-stage-status>
+        {selectionStatus(selection.length, editing !== null)}
+      </span>
     </div>
   );
 }

@@ -34,15 +34,20 @@ export function Arrange() {
   /** A side in px: the style's, else the laid-out box's (a % or a right pin shows where it is). */
   const at = (p: Picked, side: Side) => pxOf(p.style[side]) ?? measure?.(p.id)?.[BOX_KEY[side]] ?? null;
   const field = (side: Side, label: string) => {
-    const v = common(picked, (p) => at(p, side));
+    // P4-B2 (D13): shown whole, so "Mixed" only where the whole numbers shown differ; the first's own value is stepped from
+    const v = common(picked, (p) => {
+      const n = at(p, side);
+      return n === null ? null : Math.round(n);
+    });
     const hint = common(picked, (p) => p.style[side]);
     return (
       <NumberField
         key={side}
         label={label}
         caption={label}
-        value={v.value ?? null}
+        value={v.mixed ? null : at(picked[0]!, side)}
         mixed={v.mixed}
+        whole
         hint={rawHint(hint.value)}
         onCommit={(n, how) => {
           if (side === 'width' || side === 'height') return style(() => ({ [side]: pxOrNull(n) }), how);
