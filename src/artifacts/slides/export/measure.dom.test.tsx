@@ -128,4 +128,44 @@ describe('measureDeckPage: the final review', () => {
     const slide = await measuredSlide('<div id="g" data-group="" style="position:absolute; left:0px; top:0px; width:100px; height:100px; display:none"><p id="in" style="position:absolute; left:0px; top:0px">Hidden</p></div><p id="out">Shown</p>');
     expect(slide.elements.map((e) => e.id)).toEqual(['out']);
   });
+
+  // P4 (the skewed-element row): a skew, its own or an ancestor's, draws the box as a parallelogram no box and turn
+  // describe, so the element carries its drawn box (the export takes the window's picture of it there); a turn and a
+  // scale keep the box and turn they had
+  it('marks an element its own or an ancestor’s skew draws with its drawn box, and a turned or scaled one not', async () => {
+    // the page writes transform functions lowercase, which CSS (and Chromium) reads as any case; happy-dom's matrix only
+    // as written in the spec
+    const Native = globalThis.DOMMatrixReadOnly;
+    globalThis.DOMMatrixReadOnly = class extends Native {
+      constructor(init?: string | number[]) {
+        super(typeof init === 'string' ? init.replace(/\bskew([xy])\(/g, (_, axis: string) => `skew${axis.toUpperCase()}(`) : init);
+      }
+    };
+    try {
+      const slide = await measuredSlide(
+        '<p id="lean" style="position:absolute; left:100px; top:100px; width:200px; transform:skewX(20deg)">Lean</p>' +
+          '<div id="grp" data-group="" style="position:absolute; left:400px; top:100px; width:300px; height:200px; transform:rotate(10deg) skewY(15deg)"><x-connector id="wire" x1="0" y1="0" x2="300" y2="200"></x-connector><p id="member" style="position:absolute; left:10px; top:10px">In</p></div>' +
+          '<p id="turned" style="position:absolute; left:100px; top:400px; transform:rotate(30deg) scale(1.5)">Turned</p>',
+      );
+      const drawn = (id: string) => slide.elements.find((e) => e.id === id)!.drawn !== undefined;
+      expect(['lean', 'grp', 'wire', 'member', 'turned'].map(drawn)).toEqual([true, true, true, true, false]);
+      // the review's second finding: the drawn box holds what the element paints past its border box (a shadow 40 px
+      // down, carried by the lean), within the slide; happy-dom lays nothing out, so every box is empty at the corner,
+      // and the slide is given its own 1920 × 1080
+      const box = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        return this.classList.contains('maws-slide') ? ({ left: 0, top: 0, right: 1920, bottom: 1080, width: 1920, height: 1080, x: 0, y: 0 } as DOMRect) : box.call(this);
+      };
+      try {
+        const cast = await measuredSlide('<p id="plain" style="position:absolute; left:0px; top:0px; width:200px; transform:skewX(30deg)">Lean</p><p id="cast" style="position:absolute; left:0px; top:0px; width:200px; box-shadow:0px 40px 0px #0000ff; transform:skewX(30deg)">Lean</p>');
+        const of = (id: string) => cast.elements.find((e) => e.id === id)!.drawn!;
+        expect([of('plain').w, of('plain').h]).toEqual([0, 0]);
+        expect([of('cast').w >= 40, of('cast').h >= 40, of('cast').x, of('cast').y]).toEqual([true, true, 0, 0]);
+      } finally {
+        Element.prototype.getBoundingClientRect = box;
+      }
+    } finally {
+      globalThis.DOMMatrixReadOnly = Native;
+    }
+  });
 });
