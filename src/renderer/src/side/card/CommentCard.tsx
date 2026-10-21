@@ -16,7 +16,7 @@
 // (`onDiscard`: the focus is where the person put it). A click on the composing card's body, off its controls, puts the
 // caret at the end of the field. The field's text is told to the frame as it changes (`onDraft`), and a remounted card
 // starts from the frame's (`draftOf`).
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { GlyphMark } from '../../attention/GlyphMark';
 import { glyphFor } from '../../attention/glyph';
@@ -29,28 +29,13 @@ import { CommentRefusal, DestinationControl, ScreenshotThumbnail } from '../Comm
 import { SIDE_COPY } from '../copy';
 import type { CardFrame } from './CardHost';
 import { CardThread, openThreadAsTab } from './CardThread';
-import type { CardStyle } from './placement';
+import { cardPosition, type CardStyle } from './placement';
 import { cardGone, enterThread, type OpenCard } from './store';
 
 const COPY = SIDE_COPY.card;
 const FORM = SIDE_COPY.composer;
-const DOCK_INSET = 8;
-
-// Where the host's layout puts the card, in the host's box.
-function positionOf(style: CardStyle): CSSProperties {
-  switch (style.mode) {
-    case 'below':
-      return { left: style.left, top: style.top, width: style.width, maxHeight: style.maxHeight };
-    case 'above':
-      return { left: style.left, bottom: style.bottom, width: style.width, maxHeight: style.maxHeight };
-    case 'docked':
-      return { left: DOCK_INSET, bottom: DOCK_INSET, width: style.width, maxHeight: style.maxHeight };
-    case 'strip': // P2-E2: in flow in its host's strip, the margin its inset
-      return { margin: DOCK_INSET, width: style.width, maxHeight: style.maxHeight };
-    case 'margin': // P4-B1: in flow in the document margin's stack, at the column's width (M4 hosts it)
-      return { width: style.width, maxHeight: style.maxHeight };
-  }
-}
+// Where the host's layout puts the card, in the host's box: `cardPosition` (P4-B2: moved to the portable placement, where
+// the pin popover places itself the same way).
 
 // The corner touching the pin is squared (Desktop's card at its click point).
 // P2-F L148: in the browser's strip the card is in flow under the page, with 8 px of margin the strip clips at (its
@@ -128,7 +113,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss, on
       data-card-serial={serial} // P4-B1: the document's focusDraft finds its field by it
       // P4-B1: in the margin a thread takes its content's height up to the cap (the entry is measured, and the stack would
       // hold room for a mostly empty card)
-      style={{ ...positionOf(style), ...(thread && style.mode !== 'margin' && { height: style.maxHeight }) }}
+      style={{ ...cardPosition(style), ...(thread && style.mode !== 'margin' && { height: style.maxHeight }) }}
       onKeyDown={onKeyDown}
       onBlur={onBlur} // P4-B1
       onClick={onClick} // P4-B1
