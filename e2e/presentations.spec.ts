@@ -149,6 +149,21 @@ const centre = async (locator: Locator) => {
   const box = (await locator.boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 };
+/** The centre of `word` where it is drawn in the element, read from its text node's range (it holds at any zoom). */
+const wordCentre = (locator: Locator, word: string) =>
+  locator.evaluate((root, w) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const at = n.textContent!.indexOf(w);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(n, at);
+      range.setEnd(n, at + w.length);
+      const r = range.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }
+    throw new Error(`no text node holds ${w}`);
+  }, word);
 
 const DECK_JSON = JSON.stringify({
   v: 4,
@@ -779,9 +794,12 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await expect(tab.locator('[data-stage-slide="text"] [data-eid="note"]')).toHaveText('Remote Hello world한글');
 
   // P4-B2 (T5, D12; F9's c43): the owner's grouped heading, from nothing selected: one double-click edits it with the word
-  // under the pointer selected, whatever the scope, and the words typed replace it (its text one word less: the rest kept)
-  const grouped = (await tab.locator('[data-stage-slide="text"] [data-eid="gh"]').boundingBox())!;
-  await page.mouse.dblclick(grouped.x + 40, grouped.y + grouped.height / 2);
+  // under the pointer selected, whatever the scope, and the words typed replace it (its text one word less: the rest kept).
+  // Aimed at the word's own text: at the default chrome the slide draws about 256 px wide, "Grouped" some 33 px of it
+  const heading = tab.locator('[data-stage-slide="text"] [data-eid="gh"]');
+  const grouped = (await heading.boundingBox())!;
+  const groupedWord = await wordCentre(heading, 'Grouped');
+  await page.mouse.dblclick(groupedWord.x, groupedWord.y);
   await expect(tab.locator('[data-overlay] [data-selected="gh"]')).toHaveCount(1);
   await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBe('gh');
   await expect(box).toBeFocused();
@@ -817,11 +835,12 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await expect(box).toHaveCount(0);
 
   // P4-B2 (T5 and T16, D12; P6 and K5): a table's cell edited in one double-click from nothing selected, its word
-  // selected; Tab to the next cell with its content selected; Escape from a cell selects the table (T17)
+  // selected (aimed at the cell's word "Aa", a few px wide at this scale); Tab to the next cell with its content selected;
+  // Escape from a cell selects the table (T17)
   const cells = tab.locator('[data-stage-slide="text"] [data-eid="tb"] td');
   const cellIds = await cells.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-eid')));
-  const firstCell = (await cells.nth(0).boundingBox())!;
-  await page.mouse.dblclick(firstCell.x + 20, firstCell.y + firstCell.height / 2);
+  const firstWord = await wordCentre(cells.nth(0), 'Aa');
+  await page.mouse.dblclick(firstWord.x, firstWord.y);
   await expect.poll(async () => (await editorState(page, id))[0]?.editingText).toBe(cellIds[0]);
   await page.keyboard.type('North');
   await page.keyboard.press('Tab');
