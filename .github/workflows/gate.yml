@@ -177,9 +177,25 @@ jobs:
       - run: .github/scripts/gate-run.sh 'built in|error' pnpm build:main-preload
       # vitest's workers at the job's cores: on Linux `nproc`, a container's cpuset (`getconf` reports the host's cores
       # there and over-forks; Decision Log 35); macOS has no stock `nproc`.
-      - run: |
+      # MAWS_TEST_JUNIT: the run's JUnit report beside vitest's own output (vitest.config.ts), uploaded below for ci-kit's
+      # test history (ci-kit docs/doperpowers/specs/2026-10-21-test-history-design.md). It never decides the job: the
+      # upload runs only after this step ran (so never another job's report from a persistent checkout), and its
+      # failure is not the job's.
+      - id: test
+        env:
+          MAWS_TEST_JUNIT: ci-results/unit.xml
+        run: |
           cores=$(if [[ $RUNNER_OS == Linux ]]; then nproc; else getconf _NPROCESSORS_ONLN; fi)
+          rm -rf ci-results
           .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$cores"
+      - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-unit-${{ github.run_attempt }}
+          path: ci-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   unit-darwin:
     name: unit:darwin
@@ -192,7 +208,21 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shared setup skips apt on macOS
-      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+      # The unit job's JUnit report, as there.
+      - id: test
+        env:
+          MAWS_TEST_JUNIT: ci-results/unit-darwin.xml
+        run: |
+          rm -rf ci-results
+          .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+      - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-unit-darwin-${{ github.run_attempt }}
+          path: ci-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   probes:
     needs: plan

@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { configDefaults, defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig, type TestUserConfig } from 'vitest/config';
 // C8a start
 import react from '@vitejs/plugin-react';
 // C8a end
@@ -78,9 +78,23 @@ const liveProjects =
     : [];
 // C3 end
 
+// ci-kit's test history (ci-kit docs/doperpowers/specs/2026-10-21-test-history-design.md): the gate's unit jobs set
+// MAWS_TEST_JUNIT to a path, and the run also writes a JUnit report there, each case's classname `<project>:<file>`
+// since the compiled projects run the renderer's files a second time. Vitest's own reporters stay what they are under
+// GitHub Actions (default, github-actions); with the variable unset the config names no reporter at all.
+const junit = process.env.MAWS_TEST_JUNIT;
+const reporters: TestUserConfig['reporters'] = junit
+  ? [
+      'default',
+      ...(process.env.GITHUB_ACTIONS === 'true' ? ['github-actions' as const] : []),
+      ['junit', { outputFile: junit, classnameTemplate: '{displayName}:{filename}', includeConsoleOutput: false }],
+    ]
+  : undefined;
+
 // Two projects: shared, main, preload and the hosts run under Node; the renderer runs under happy-dom.
 export default defineConfig({
   test: {
+    ...(reporters ? { reporters } : {}),
     projects: [
       {
         resolve: { alias },
