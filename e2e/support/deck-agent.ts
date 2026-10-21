@@ -36,9 +36,12 @@ export interface DeckChannel {
   send<T>(command: Record<string, unknown>, timeoutMs?: number): Promise<T>;
 }
 
-/** A file's first font size in px, or null when it has none. */
+// The font size the agent steps: a file's first whole px size, as the kind writes a style (`name:value`, no space).
+const STEPPED = /font-size:(\d+)px/;
+
+/** The font size the agent steps in a file (its first whole px size), or null when it has none. */
 export function firstFontSize(file: string): number | null {
-  const size = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(file);
+  const size = STEPPED.exec(file);
   return size ? Number(size[1]) : null;
 }
 
@@ -67,7 +70,7 @@ export class DeckAgent {
     const sent: Record<string, string> = {};
     for (const path of paths) {
       const file = this.files[path];
-      const stepped = file?.replace(/font-size:(\d+)px/, (_m, size: string) => `font-size:${this.turn % 2 === 1 ? Number(size) + 1 : Number(size) - 1}px`);
+      const stepped = file?.replace(STEPPED, (_m, size: string) => `font-size:${this.turn % 2 === 1 ? Number(size) + 1 : Number(size) - 1}px`);
       if (file === undefined || stepped === undefined || stepped === file) throw new Error(`${path} has no font size to step`);
       sent[path] = stepped;
     }

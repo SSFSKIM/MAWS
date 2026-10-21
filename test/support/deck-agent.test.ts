@@ -115,7 +115,7 @@ describe('republishing', () => {
 
 describe('fidelityProblems', () => {
   const agentFiles = { 'project/slides/b.html': '<p style="font-size:65px">B</p>', 'project/slides/c.html': '<p style="font-size:41px">C</p>' };
-  const readBack = { 'project/slides/b.html': '<section id="b"><p id="p" style="font-size: 65px">B</p></section>', 'project/slides/c.html': '<p style="font-size:41px">C</p>' };
+  const readBack = { 'project/slides/b.html': '<section id="b"><p id="p" style="color:red; font-size:65px">B</p></section>', 'project/slides/c.html': '<p style="font-size:41px">C</p>' };
   const faithful = { revisionBefore: 7, published: [published(9, ['project/slides/b.html']), published(11, ['project/slides/c.html'])], remoteApplies: 2, agentFiles, readBack };
 
   it('finds none when every publish rose in revision, reached the tab as a remote apply and reads back with its font size', () => {
