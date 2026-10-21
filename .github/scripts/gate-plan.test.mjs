@@ -253,6 +253,7 @@ test('a run without the Selection: trailer writes the outputs and the summary it
     'static=true', 'unit=true', 'unit_darwin=false', 'probes=true', 'e2e=[]',
     `static_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-16'])}`, `unit_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-8'])}`, `probes_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-2'])}`, 'pool=true',
     'packaged=false', 'evidence=false', 'live=false', 'default_beside=[]',
+    `unit_shards=${JSON.stringify([{ shard: '1/4', slug: '-1of4' }, { shard: '2/4', slug: '-2of4' }, { shard: '3/4', slug: '-3of4' }, { shard: '4/4', slug: '-4of4' }])}`,
   ];
   assert.equal(pushed.raw, `${outputs.join('\n')}\n`);
   assert.equal(pushed.summary, '### Gates\n\n- `static`\n- `unit`\n- `probes`\n\nFrom: the `Gates:` trailer. Class 1a: pool. E2e lane: linux.\n');
@@ -403,4 +404,30 @@ test("a path under docs/ but evidence/p1-e8 counts for nothing: docs alone run n
   const evidence = plan({ HEAD_MESSAGE: selected([...docs, 'M\tdocs/doperpowers/evidence/p1-e8/g0-cli-probe.txt']) });
   assert.equal(evidence.outputs.related, '');
   assert.match(evidence.summary, /\nSelection: affected — full suite: read through fs, a glob or a query import \(docs\/doperpowers\/evidence\/p1-e8\/g0-cli-probe.txt\)\n$/);
+});
+
+// The pool runs the whole unit suite as UNIT_SHARDS jobs, each with its --shard and its JUnit artifact's suffix, which
+// ci-kit's collector reads as one `unit` report; vitest's related mode, and a runner off the pool, keep the one job.
+test('on the pool the whole unit suite runs in shards; related mode and the other runners keep one unit job', () => {
+  const shards = (env) => JSON.parse(plan(env).outputs.unit_shards);
+  const sharded = shards({ HEAD_MESSAGE: 'ci-gate: 0123abcd\n\nGates: static,unit,probes\nClass1a: pool' });
+  const n = sharded.length;
+  assert.ok(n > 1);
+  assert.deepEqual(sharded, Array.from({ length: n }, (_, i) => ({ shard: `${i + 1}/${n}`, slug: `-${i + 1}of${n}` })));
+  const one = [{ shard: '', slug: '' }];
+  for (const class1a of ['linux', 'macos']) assert.deepEqual(shards({ HEAD_MESSAGE: `ci-gate: 0123abcd\n\nGates: unit\nClass1a: ${class1a}` }), one, class1a);
+  assert.deepEqual(shards({ HEAD_MESSAGE: selected(['M\tsrc/shared/a.ts']) }), one);
+  // A selected run that falls back to the whole suite runs it in shards, as any whole-suite run on the pool does.
+  assert.deepEqual(shards({ HEAD_MESSAGE: selected(['M\tpnpm-lock.yaml']) }), sharded);
+});
+
+test("gate.yml runs the unit job over the plan's shards: its name, its --shard and its artifact's name", () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  assert.match(workflow, /\n {6}unit_shards: \$\{\{ steps\.plan\.outputs\.unit_shards \}\}\n/);
+  const body = /\n {2}unit:\n((?: {4}.*\n|\n)*?)(?= {2}\S|$)/.exec(workflow)[1];
+  assert.match(body, /^ {4}name: \$\{\{ matrix\.shard && format\('unit \{0\}', matrix\.shard\) \|\| 'unit' \}\}\n/);
+  assert.match(body, /\n {8}include: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_shards\) \}\}\n/);
+  assert.match(body, /\n {10}SHARD: \$\{\{ matrix\.shard \}\}\n/);
+  assert.match(body, /pnpm test --maxWorkers="\$cores" \$\{SHARD:\+--shard="\$SHARD"\}\n/);
+  assert.match(body, /\n {10}name: test-results-unit\$\{\{ matrix\.slug \}\}-\$\{\{ github\.run_attempt \}\}\n/);
 });
