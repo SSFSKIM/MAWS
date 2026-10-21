@@ -20,6 +20,7 @@ import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { sendToSubject, useSendToAction } from '../../delivery/header'; // P4-B5
 import { useEditorHost } from '../../panel/editor-host';
+import { keymapBinds } from '../../keymap/dispatcher'; // P4-B2 (D14)
 import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F (L230)
 import { useDocumentComments } from '../document/comments';
@@ -134,6 +135,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
         assetUrlAt={assetUrlAt}
         reveal={reveal} /* P4-B4 */
         onRevealed={takeOpenRequest}
+        bindsKey={keymapBinds} /* P4-B2 (D14): the workbench's F6 steps aside for a key the owner bound */
       />
     </div>
   );
