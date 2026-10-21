@@ -331,62 +331,156 @@ test("gate.yml times every job that can take the exclusive Mac instance by the p
 });
 
 // ci-kit's job-started hook refuses a job by failing its start, which does not abort it: a later step whose condition
-// holds after a failure (failure(), always(), cancelled(), !cancelled()) still runs, beside whatever the hook would not
-// admit it beside. ci-kit's contract (its mac-lane concurrency spec): such a step of a Mac job leaves the desktop alone.
-// Here that means an artifact upload, or a step that waits on the outcome of a step only an admitted job runs.
-test('a step of a Mac job that can run after its start was refused is an upload, or waits on a step only an admitted job runs', () => {
-  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
-  // Every label set a job's runs-on can resolve to: a literal list, a fromJSON('…') literal, a plan output or the e2e
-  // matrix's runner, read from plans that put every gate on a Mac, exclusive and shared.
-  const everyMacGate = 'ci-gate: test\n\nGates: static,unit,unit:darwin,probes,e2e:library\nRunner: macos\nClass1a: macos';
-  const plans = [{}, { MAC_SHARED_E2E: 'library unit:darwin' }].map((shared) => plan({ CLASS1_E2E: 'library', ...shared, HEAD_MESSAGE: everyMacGate }).outputs);
-  const runsOn = (spec) => {
-    const sets = [...spec.matchAll(/fromJSON\('([^']*)'\)/g)].map((match) => JSON.parse(match[1]));
-    for (const [, output] of spec.matchAll(/needs\.plan\.outputs\.(\w+)/g)) sets.push(...plans.map((outputs) => JSON.parse(outputs[output])));
-    if (/\bmatrix\.runner\b/.test(spec)) sets.push(...plans.flatMap((outputs) => JSON.parse(outputs.e2e).map((entry) => JSON.parse(entry.runner))));
-    if (/^\[.*\]$/.test(spec)) sets.push(spec.slice(1, -1).split(',').map((label) => label.trim()));
-    if (sets.length === 0) sets.push(spec.replace(/^\$\{\{ (.*) \}\}$/, '$1').match(/'[^']*'/g)?.map((quoted) => quoted.slice(1, -1)) ?? [spec]);
-    return sets.map((set) => [set].flat());
-  };
-  const onMac = (labels) => labels.includes('macOS') || labels.includes('ci-kit-mac-shared');
-  const condition = (step) => /^ {6}- if: (.*)$|^ {8}if: (.*)$/m.exec(step)?.slice(1).find(Boolean)?.replace(/^\$\{\{ (.*) \}\}$/, '$1') ?? '';
-  const afterFailure = (cond) => /\b(?:failure|always|cancelled)\(\)/.test(cond);
-  // The condition's top-level `op` operands, outer parentheses dropped.
-  const split = (text, op) => {
-    const parts = [];
-    let depth = 0;
-    let start = 0;
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] === '(') depth++;
-      else if (text[i] === ')') depth--;
-      else if (depth === 0 && text.startsWith(op, i)) {
-        parts.push(text.slice(start, i).trim());
-        start = i + op.length;
-      }
-    }
-    parts.push(text.slice(start).trim());
-    return parts.map((part) => (/^\(.*\)$/.test(part) && split(part.slice(1, -1), op).length === 1 ? part.slice(1, -1).trim() : part));
-  };
-
-  const macJobs = [];
-  const unsafe = [];
-  for (const [, job, body] of workflow.slice(workflow.indexOf('\njobs:\n')).matchAll(/^ {2}([\w-]+):\n((?: {4}.*\n|\n)*)/gm)) {
-    const spec = /^ {4}runs-on: (.*)$/m.exec(body)[1];
-    if (!runsOn(spec).some(onMac)) continue;
-    macJobs.push(job);
-    const steps = body.slice(body.indexOf('    steps:\n')).split(/\n(?= {6}- )/).slice(1);
-    // The steps that run only after a start that succeeded: their outcome is success or failure only in an admitted job.
-    const admitted = steps.filter((step) => !afterFailure(condition(step))).map((step) => /^ {6}- id: (\S+)$|^ {8}id: (\S+)$/m.exec(step)?.slice(1).find(Boolean)).filter(Boolean);
-    const waitsOnAdmitted = (cond) =>
-      split(cond, '&&').some((clause) => split(clause, '||').every((operand) => admitted.includes(/^steps\.([\w-]+)\.outcome == '(?:success|failure)'$/.exec(operand)?.[1])));
-    for (const step of steps) {
-      const cond = condition(step);
-      if (!afterFailure(cond) || /^ {6}- uses: actions\/upload-artifact@|^ {8}uses: actions\/upload-artifact@/m.test(step) || waitsOnAdmitted(cond)) continue;
-      unsafe.push(`${job}: ${/^ {8}run: (.*)$|^ {6}- run: (.*)$|^ {8}uses: (.*)$/m.exec(step)?.slice(1).find(Boolean) ?? step.trim().split('\n')[0]} (if: ${cond})`);
+// can hold after a failure still runs, beside whatever the hook would not admit it beside. ci-kit's contract (its
+// mac-lane concurrency spec): such a step of a Mac job leaves the desktop alone. Here that means an artifact upload, or a
+// step that waits on the outcome of a step only an admitted job runs. The walk reads the workflow's text as gate.yml
+// writes it, and fails closed: a job, a step, a condition or a runs-on it cannot read counts against the workflow.
+let macPlans;
+// The plans a runs-on is read from, run once: every gate on a Mac, exclusive and shared.
+const everyMacPlan = () => {
+  const message = 'ci-gate: test\n\nGates: static,unit,unit:darwin,probes,e2e:library\nRunner: macos\nClass1a: macos';
+  macPlans ??= [{}, { MAC_SHARED_E2E: 'library unit:darwin' }].map((shared) => plan({ CLASS1_E2E: 'library', ...shared, HEAD_MESSAGE: message }).outputs);
+  return macPlans;
+};
+// The label sets a runs-on can resolve to: a literal list or label, or fromJSON over a plan output or the e2e matrix's
+// runner. null for any other form (an expression over a variable, a block sequence), which counts as a Mac.
+const labelSets = (spec) => {
+  if (/^\[[^\]$]*\]$/.test(spec)) return [spec.slice(1, -1).split(',').map((label) => label.trim().replace(/^(['"])(.*)\1$/, '$2'))];
+  if (/^[\w.-]+$/.test(spec)) return [[spec]];
+  const [, output, matrix] = /^\$\{\{\s*fromJSON\((?:needs\.plan\.outputs\.(\w+)|(matrix\.runner))\)\s*\}\}$/.exec(spec) ?? [];
+  if (output) return everyMacPlan().map((outputs) => [JSON.parse(outputs[output])].flat());
+  if (matrix) return everyMacPlan().flatMap((outputs) => JSON.parse(outputs.e2e).map((entry) => [JSON.parse(entry.runner)].flat()));
+  return null;
+};
+// A runner takes a job when it carries every label the job asks for, case aside; the Mac's instances are known by the
+// labels the plan asks for: today's three for the exclusive one, theirs for the shared ones.
+const onMac = (labels) => [mac, sharedMac].some((carried) => labels.every((label) => carried.some((own) => own.toLowerCase() === label.toLowerCase())));
+// A step's keys, each with the lines of its value: the rest of the key's line, then the lines indented under it. null
+// when a line at the keys' indent is no plain `key:` (a flow mapping, a merge key, a quoted key) or a key repeats.
+const stepKeys = (step) => {
+  const keys = new Map();
+  let key = null;
+  for (const line of step.replace(/^ {6}- /, ' '.repeat(8)).split('\n')) {
+    if (/^\s*$/.test(line)) continue;
+    if (key && /^ {9}/.test(line)) keys.get(key).push(line.trim());
+    else if (/^ {0,8}#/.test(line)) key = null;
+    else {
+      [, key] = /^ {8}([\w-]+):(?: |$)/.exec(line) ?? [];
+      if (!key || keys.has(key)) return null;
+      keys.set(key, [line.slice(line.indexOf(':') + 1).trim()]);
     }
   }
-  assert.deepEqual(macJobs.sort(), ['e2e', 'packaged', 'plan', 'probes', 'static', 'unit', 'unit-darwin']);
-  assert.deepEqual(unsafe, []);
+  return keys;
+};
+// A value as YAML reads it, line breaks as spaces: a block scalar's lines under its indicator, a plain one's all.
+const scalar = ([first, ...rest]) => (/^[|>][1-9+-]*$/.test(first) ? rest : [first, ...rest]).filter(Boolean).join(' ');
+// A step's condition, its `${{ }}` dropped: '' when it has none, null when the walk cannot read it (a quoted, tagged or
+// interpolated value, or an unreadable step).
+const condition = (keys) => {
+  if (!keys?.has('if')) return keys ? '' : null;
+  const value = scalar(keys.get('if'));
+  const text = value.replace(/^\$\{\{(.*)\}\}$/, '$1').trim();
+  return /^[!&*'"[{%@`]/.test(value) || /\$\{\{|\}\}/.test(text) || !text ? null : text;
+};
+// Any status check drops GitHub's implicit `success() &&`, so the step can run after a failed start: success() too
+// (`!success()`), which a step that means `success() && x` can leave out.
+const afterFailure = (cond) => cond === null || /\b(?:success|failure|always|cancelled)\s*\(/i.test(cond);
+// An expression's operands of `op` (&& or ||) outside its parentheses and string literals; null when those do not
+// balance.
+const operands = (text, op) => {
+  const parts = [];
+  let depth = 0;
+  let quoted = false;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "'") quoted = !quoted;
+    else if (quoted) continue;
+    else if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth--;
+    else if (depth === 0 && text.startsWith(op, i)) {
+      parts.push(text.slice(start, i).trim());
+      start = i + op.length;
+    }
+    if (depth < 0) return null;
+  }
+  return depth === 0 && !quoted ? [...parts, text.slice(start).trim()] : null;
+};
+// An expression wholly in parentheses, the opening one closing at its very end, without them.
+const unwrap = (text) => (/^\(.*\)$/.test(text) && operands(text.slice(1, -1), '||') ? unwrap(text.slice(1, -1).trim()) : text);
+// A guard: an admitted-only step's outcome compared with success or failure, or a parenthesized || of such alone.
+const guard = (conjunct, admitted) =>
+  operands(unwrap(conjunct), '||')?.every((comparison) => admitted.includes(/^steps\.([\w-]+)\.outcome\s*==\s*'(?:success|failure)'$/.exec(unwrap(comparison))?.[1])) === true;
+// Every top-level || alternative of the condition has a top-level && conjunct that is a guard (&& binds tighter).
+const waits = (cond, admitted) => operands(unwrap(cond), '||')?.every((alternative) => operands(unwrap(alternative), '&&')?.some((conjunct) => guard(conjunct, admitted))) === true;
+
+// The workflow's Mac jobs, and each of their steps that can run after a refused start yet is no upload and waits on no
+// admitted step.
+const refusedStartWalk = (workflow) => {
+  const macJobs = [];
+  const unsafe = [];
+  const jobs = /^jobs:\n((?:[ #].*\n|\n)*)/m.exec(workflow)[1];
+  const jobPattern = /^ {2}([\w-]+):\n((?: {4}.*\n| *#.*\n|\n)*)/gm;
+  // A line no job takes in starts a job the walk cannot read.
+  const unread = jobs.replace(jobPattern, '').split('\n').find((line) => !/^\s*(?:#|$)/.test(line));
+  if (unread) unsafe.push({ job: null, step: unread.trim(), condition: null });
+  for (const [, job, body] of jobs.matchAll(jobPattern)) {
+    if (labelSets(/^ {4}runs-on:(.*)$/m.exec(body)?.[1].trim() ?? '')?.some(onMac) === false) continue;
+    macJobs.push(job);
+    const [head, ...chunks] = body.slice(body.indexOf('    steps:\n')).split(/\n(?= {6}- )/);
+    if (!/^ {4}steps:(?:\n *(?:#.*)?)*$/.test(head)) unsafe.push({ job, step: 'steps:', condition: null });
+    const steps = chunks.map((chunk) => ({ chunk, keys: stepKeys(chunk) }));
+    // The steps that run only after a start that succeeded: their outcome is success or failure only in an admitted job.
+    const admitted = steps.filter(({ keys }) => !afterFailure(condition(keys))).map(({ keys }) => scalar(keys.get('id') ?? [''])).filter(Boolean);
+    for (const { chunk, keys } of steps) {
+      const cond = condition(keys);
+      if (!afterFailure(cond) || scalar(keys?.get('uses') ?? ['']).startsWith('actions/upload-artifact@') || (cond !== null && waits(cond, admitted))) continue;
+      unsafe.push({ job, step: keys ? scalar(keys.get('run') ?? keys.get('uses') ?? ['']) : chunk.trim().split('\n')[0], condition: cond });
+    }
+  }
+  return { macJobs: macJobs.sort(), unsafe };
+};
+const gateMacJobs = ['e2e', 'packaged', 'plan', 'probes', 'static', 'unit', 'unit-darwin'];
+
+test('a step of a Mac job that can run after its start was refused is an upload, or waits on a step only an admitted job runs', () => {
+  assert.deepEqual(refusedStartWalk(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8')), { macJobs: gateMacJobs, unsafe: [] });
+});
+
+// Each mutation rewrites a few of today's lines, matched once, into a form the walk must not pass.
+test('the walk fails closed: a rewrite that lets a step run after a refused start comes back unsafe, and a runs-on it cannot read counts as a Mac', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  // static's wait steps (gate-bg.sh), each `- name:` first, then its condition.
+  const waitStep = (check, name) => [`      - name: ${name}\n`, "        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}\n", `        run: .github/scripts/gate-bg.sh wait ${check}\n`];
+  const [lintName, lintIf, lint] = waitStep('lint', 'pnpm lint');
+  const [typecheckName, typecheckIf, typecheck] = waitStep('typecheck', 'pnpm typecheck');
+  const fuses = "        run: .github/scripts/gate-run.sh 'RunAsNode|verify:fuses' pnpm verify:fuses\n";
+  const mutations = [
+    // The guard dropped: a bare !cancelled() runs the step after a refused start.
+    [typecheckName + typecheckIf + typecheck, typecheckName + '        if: ${{ !cancelled() }}\n' + typecheck, ['static: typecheck']],
+    // A folded condition is the lines under its indicator.
+    [lintName + lintIf + lint, lintName + '        if: >-\n          ${{ always() }}\n' + lint, ['static: lint']],
+    // success() is a status check too: the implicit `success() &&` is gone.
+    [lintName + lintIf + lint, lintName + '        if: ${{ !success() }}\n' + lint, ['static: lint']],
+    // && binds tighter than ||: the outcome guards one alternative, and failure() alone runs the step.
+    [lintName + lintIf + lint, lintName + "        if: ${{ failure() || needs.plan.outputs.evidence == 'true' && steps.checkout.outcome == 'success' }}\n" + lint, ['static: lint']],
+    // A step a refused start skips has the outcome skipped.
+    [
+      "      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}\n" + fuses,
+      "      - if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}\n" + fuses,
+      ['packaged: verify:fuses'],
+    ],
+    ['      - if: matrix.build\n', '      - if: always() && matrix.build\n', ['e2e: build']],
+    // A checkout that can run after a refused start guards nothing.
+    ['    steps:\n      - id: checkout\n', '    steps:\n      - id: checkout\n        if: always()\n', ['static: actions/checkout@v7', 'static: typecheck', 'static: lint', 'static: build', 'static: gate-scripts']],
+    // An expression over a variable can name the Mac.
+    ['    runs-on: [self-hosted, macOS, ARM64]\n', "    runs-on: ${{ vars.PACKAGED_RUNNER || 'ubuntu-24.04' }}\n", []],
+  ];
+  for (const [before, after, expected] of mutations) {
+    const parts = workflow.split(before);
+    assert.equal(parts.length, 2, before);
+    const { macJobs, unsafe } = refusedStartWalk(parts.join(after));
+    assert.deepEqual(macJobs, gateMacJobs, after);
+    assert.deepEqual(unsafe.map(({ job, step }) => `${job}: ${step.split(' ').at(-1)}`), expected, after);
+  }
 });
 
 // Selection for iteration runs (ci-kit's test-history spec, M4; gate-affected.mjs): a push whose commit says
