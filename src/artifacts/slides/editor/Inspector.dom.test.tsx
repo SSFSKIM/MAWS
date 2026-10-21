@@ -322,6 +322,18 @@ describe('the inspector', () => {
     act(() => void restyle(doc, 'a', 'box', { background: '#123456' }, 'remote'));
     expect(box('Fill colour').value).toBe('#123456');
   });
+
+  // P4-R9: as the app ships, under the React Compiler (the artifacts-dom-compiled project), the fields once kept the
+  // values they opened with, whoever wrote: the panel itself, the stage, an undo or an agent
+  it('the fields follow every write: the panel’s own, the stage’s, an undo', () => {
+    const { doc, session } = mount(['note']);
+    enter('X', '150');
+    expect(box('X').value).toBe('150');
+    act(() => session.edit((origin) => void restyle(doc, 'a', 'note', { left: '300px' }, origin))); // a drag on the stage
+    expect(box('X').value).toBe('300');
+    act(() => session.undoStep());
+    expect(box('X').value).toBe('150');
+  });
 });
 
 // W1 (tech debt, 2026-10-19): the panel names what it edits as the toolbar does, and a token by its friendly name

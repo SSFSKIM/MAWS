@@ -159,15 +159,8 @@ export default defineConfig({
       compiled({ name: 'renderer-compiled-timing', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS }),
       // C8a end
       // P4 (the tracker's portable compiled-coverage row): the portable artifact layer's React suites (its `.tsx` DOM
-      // suites; its `.ts` ones render no React) again under the compiler, with artifacts-dom's sheets as text. Three
-      // deck-editor suites fail only here, their fields not re-read after a write (the deck editor's tracker row, P4-B2's
-      // to fix in its rewrite); they leave this exclusion when they pass.
-      compiled({
-        name: 'artifacts-dom-compiled',
-        include: ['src/artifacts/**/*.dom.test.tsx'],
-        exclude: [...configDefaults.exclude, 'src/artifacts/slides/editor/Inspector.dom.test.tsx', 'src/artifacts/slides/editor/inspector/sections.dom.test.tsx', 'src/artifacts/slides/editor/TextBox.dom.test.tsx'],
-        css: ARTIFACTS_DOM_CSS,
-      }),
+      // suites; its `.ts` ones render no React) again under the compiler, with artifacts-dom's sheets as text.
+      compiled({ name: 'artifacts-dom-compiled', include: ['src/artifacts/**/*.dom.test.tsx'], css: ARTIFACTS_DOM_CSS }),
       // The desk's hub (apps/desk-hub, DC3 of docs/doperpowers/specs/2026-10-15-desk-design.md): its own config, under
       // this vitest, so `pnpm test` and the unit job's `--maxWorkers` reach it as they reach every project above.
       'apps/desk-hub/vitest.config.ts',

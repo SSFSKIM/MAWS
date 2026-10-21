@@ -278,6 +278,28 @@ describe('the text box', () => {
     expect(text(doc, 'title')[0]!.inline[0]).toEqual({ text: 'Plan', marks: { span: { color: '#1a2b3c' }, b: {} } });
     expect(loadSlide(slideFile(doc, 's1')).diagnostics).toEqual([]);
   });
+
+  // P4-R9: as the app ships, under the React Compiler (the artifacts-dom-compiled project), the bar's pressed states once
+  // stayed as the box opened with them, the editor they were read from being the same object at every transaction
+  it('the mark bar follows the marks at the selection: a caret move, a key, another replica’s change', () => {
+    const { doc, editor, root } = mount('title');
+    const button = (name: string) => screen.getByRole('button', { name });
+    act(() => void editor.commands.setTextSelection(7)); // inside "now"
+    expect(button('Bold').getAttribute('aria-pressed')).toBe('true');
+    act(() => void editor.commands.setTextSelection({ from: 1, to: 5 })); // "Plan"
+    expect(button('Bold').getAttribute('aria-pressed')).toBe('false');
+    act(() => void fireEvent.keyDown(root!, { key: 'i', ...MOD }));
+    expect(button('Italic').getAttribute('aria-pressed')).toBe('true');
+
+    const remote = newDoc();
+    applyV1(remote, diffV1(doc));
+    transact(remote, () => Y.patchText(remote, 's1', 'title', [{ type: 'p', inline: [{ text: 'Plan', marks: { span: { color: '#cc0000' } } }, { text: ' ', marks: {} }, { text: 'now', marks: { b: {} } }, { text: '.', marks: {} }] }]));
+    act(() => applyV1(doc, diffV1(remote, stateVector(doc)), 'remote'));
+    expect(editor.state.selection).toMatchObject({ from: 1, to: 5 });
+    expect(button('Italic').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Colour').getAttribute('aria-pressed')).toBe('true');
+    expect((button('Colour').firstElementChild as HTMLElement).style.background).toBe('#cc0000');
+  });
 });
 
 describe('fix wave 1: the text box stays within the slide’s text budget', () => {
