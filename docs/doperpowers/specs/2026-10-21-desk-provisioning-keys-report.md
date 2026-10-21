@@ -16,6 +16,10 @@ the authoritative state; this file adds the run's mechanics and M4's walk (appen
   commits:
   - M3: `f3ea1a0e`, with the fix `7831e8ac`.
   - A merge of origin/main as `d358c760`, which took main's sminos 1.3.1 and bumped to 1.3.2.
+  - The whole-branch panel's fix `c30601c8` (decide only on a whole answer), then a merge of origin/main as
+    `0b0b324c`, which took main's sminos 1.4.0 and bumped to **1.4.1**, the boot's version floor.
+- The MAWS panel fix: `44a1909e4` and `f992aeb81` (a fenced offline revocation completes), final head `ce0b8407a`
+  plus this record.
 
 ## Milestones and reviews
 

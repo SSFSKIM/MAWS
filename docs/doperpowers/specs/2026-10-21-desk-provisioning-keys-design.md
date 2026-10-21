@@ -45,7 +45,7 @@ and see a third enrollment refused while the two stay, run `sminos hub leave` on
 - [x] (2026-10-21) M1 — reviewed clean (task-reviewer and reviewer-high; commits `ccbb539b0`, fix `0602580be`). The hub: the key, its code, redemption through it, `uses`, revocation of a key, a machine's own record
       and self-revoke bound to its enrollment, the offline sweep, the stand-in's 401 (MAWS).
 - [x] (2026-10-21) M2 — reviewed clean (task-reviewer; commits `be133c3a3`, fix `d6195c5ce`). The web: provisioning keys on the Machines page (MAWS).
-- [x] (2026-10-21) M3 — reviewed clean (task-reviewer and reviewer-high; doperpowers commits `f3ea1a0e`, fix `7831e8ac`, sminos 1.3.2). sminos: both codes decoded, `hub enroll` through a key, `hub check`, `hub leave`, `hub show`'s exit code,
+- [x] (2026-10-21) M3 — reviewed clean (task-reviewer and reviewer-high; doperpowers commits `f3ea1a0e`, fix `7831e8ac`, the panel's fix `c30601c8`; sminos 1.4.1 after main's 1.4.0 merged in). sminos: both codes decoded, `hub enroll` through a key, `hub check`, `hub leave`, `hub show`'s exit code,
       the parity vectors regenerated (doperpowers).
 - [x] (2026-10-21) M4 — Acceptance across both repositories against the local hub; the record completed: items 1–8, 10
       and 11 pass as written, no fix needed (the walk is the appendix of `2026-10-21-desk-provisioning-keys-report.md`
@@ -973,7 +973,8 @@ export const BOOT_COMMAND = (prefix: string) => `printf %s "$CODE" | sminos hub 
   confirmed); the boot's rule above re-enrolls it at the next start. The boot side chooses the value (6–24 h
   suggested) when it creates the key on the web.
 - **The secret's reader** is the boot's own concern and exposure (§7): a project owner can read the org key.
-- **sminos version floor:** the sminos plugin version M3 bumps; an older sminos exits 2 with `enrollment code: not
+- **sminos version floor:** **1.4.1**, the sminos plugin version M3 ships (doperpowers branch `desk-provisioning-keys`,
+  head `0b0b324c`); an older sminos exits 2 with `enrollment code: not
   smns-enroll-v1`.
 
 ### Dependencies
@@ -1179,7 +1180,7 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
 
 ## Outcomes & Retrospective
 
-**What shipped** (MAWS branch `desk-provisioning-keys`, doperpowers branch `desk-provisioning-keys`, sminos 1.3.2).
+**What shipped** (MAWS branch `desk-provisioning-keys`, doperpowers branch `desk-provisioning-keys`, sminos 1.4.1).
 An admin creates a provisioning key on the web (label, `dc-` prefix, expiry, optional cap, optional offline
 auto-revoke) and sees its `smns-provision-v1.` code once; a VM pipes it into `sminos hub enroll --name dc-…` and is an
 ordinary enrolled machine. The hub counts uses under a race, refuses a revoked, expired, exhausted or off-prefix
