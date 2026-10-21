@@ -42,7 +42,7 @@ and see a third enrollment refused while the two stay, run `sminos hub leave` on
 - [x] (2026-10-21) The fix wave's re-review: two findings ruled by the orchestrator and folded in by the executing
       session (Decision Log, the re-review entry): Access's 401 read through a propagation grace and a recheck; exit 4
       of `hub check` is the boot's to retry.
-- [ ] M1 — The hub: the key, its code, redemption through it, `uses`, revocation of a key, a machine's own record
+- [x] (2026-10-21) M1 — reviewed clean (task-reviewer and reviewer-high; commits `ccbb539b0`, fix `0602580be`). The hub: the key, its code, redemption through it, `uses`, revocation of a key, a machine's own record
       and self-revoke bound to its enrollment, the offline sweep, the stand-in's 401 (MAWS).
 - [ ] M2 — The web: provisioning keys on the Machines page (MAWS).
 - [ ] M3 — sminos: both codes decoded, `hub enroll` through a key, `hub check`, `hub leave`, `hub show`'s exit code,
@@ -1098,6 +1098,12 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   `local/helpers.ts`, served by `run.ts` and the suites' proxy, and the provisioning helper also takes `label`; the
   stand-in's 401 page is small HTML whose contract is the status and the words `Cloudflare Access`.
   Date/Author: 2026-10-21, M1's executor; folded by the controller.
+- Decision: M1's review fixes (`0602580be`): `mint` marks the enrollment busy, then persists its alarm, then calls
+  Cloudflare, on both redemption paths, so a key-made pending row (which no `createEnrollment` scheduled) has a wakeup
+  even if the object resets mid-mint; the offline revocation's retry wait is kept per enrollment and enforced in
+  `sweepOffline` (one failing candidate does not hold back the others); one `reserve()` helper inserts the pending
+  machine and clears its orphan for both paths, each inside its own transaction.
+  Date/Author: 2026-10-21, M1's executor on review findings; folded by the controller.
 
 ## Outcomes & Retrospective
 
