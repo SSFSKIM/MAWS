@@ -10,12 +10,11 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-// The countdown's numbers and units are the locale's, compact (2h 37m; 2시간 37분: `app/date-format.ts`); the words
-// around them stay English. Under a minute it reads as the locale's other sub-minute forms do (<1m; <1분), never in
-// English words (P3-F L125). `locale` pins one (tests); the app passes none, the system's.
-function parts(ms: number, locale: string | undefined): [string, string] | [string] | null {
+// The countdown's numbers and units are the display locale's, compact (2h 37m; `@shared/app/date-format`). Under a
+// minute it reads as the other sub-minute forms do (<1m), never in words (P3-F L125).
+function parts(ms: number): [string, string] | [string] | null {
   if (ms < MINUTE) return null;
-  const { amount } = dateFormats(locale);
+  const { amount } = dateFormats();
   const days = Math.floor(ms / DAY);
   const hours = Math.floor((ms % DAY) / HOUR);
   const minutes = Math.floor((ms % HOUR) / MINUTE);
@@ -24,11 +23,11 @@ function parts(ms: number, locale: string | undefined): [string, string] | [stri
   return [amount(minutes, 'minute')];
 }
 
-const underAMinute = (locale: string | undefined) => `<${dateFormats(locale).amount(1, 'minute')}`;
-export const resetsIn = (ms: number, locale?: string): string => parts(ms, locale)?.join(' ') ?? underAMinute(locale);
-export const resetsInCompact = (ms: number, locale?: string): string => parts(ms, locale)?.join('') ?? underAMinute(locale);
+const underAMinute = () => `<${dateFormats().amount(1, 'minute')}`;
+export const resetsIn = (ms: number): string => parts(ms)?.join(' ') ?? underAMinute();
+export const resetsInCompact = (ms: number): string => parts(ms)?.join('') ?? underAMinute();
 
-// A reading's age, compact and in the system locale (`app/date-format.ts`): "3m ago", "3분 전"; "now" under a minute.
+// A reading's age, compact and in the display locale (`@shared/app/date-format`): "3m ago"; "now" under a minute.
 export const ago = (ms: number): string => formatAgo(ms, { narrow: true });
 
 // What a window shows at `now`: once its reset time has passed, ClaudeUsage has not recorded the new window yet, so

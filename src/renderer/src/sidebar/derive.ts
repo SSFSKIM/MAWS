@@ -191,8 +191,8 @@ export function rowBranch(record: SessionRecord): string | null {
   return branchLabel(recordBranch(record));
 }
 
-// A row's age, compact in the system locale (`app/date-format.ts`): now, 2m, 2h, 3d, 1w (지금, 2시간); `locale` pins one.
-export const formatAge = (ms: number, locale?: string): string => dateFormats(locale).age(ms);
+// A row's age, compact in the display locale (`@shared/app/date-format`): now, 2m, 2h, 3d, 1w.
+export const formatAge = (ms: number): string => dateFormats().age(ms);
 
 // A working session is "now"; otherwise the age of its last activity.
 export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number): string {

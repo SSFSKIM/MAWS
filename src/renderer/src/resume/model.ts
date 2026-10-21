@@ -102,10 +102,9 @@ const weekStart = (ms: number): number => {
 
 // The group a time falls in, by local calendar: Today, Yesterday, the earlier days of this week, last week, then one
 // group per week ("Week of Sep 14"). A time in the future (a clock moved back) counts as today. The days and weeks are
-// named in the system locale, as the transcript's day separators are (오늘, 어제, 이번 주, 지난주); "Week of" stays English
-// around the locale's date. `locale` pins one (tests).
-export function groupOf(at: number, now: number, locale?: string): { key: string; kind: GroupKind; label: string } {
-  const words = dateFormats(locale);
+// named in the display locale, as the transcript's day separators are (`@shared/app/date-format`).
+export function groupOf(at: number, now: number): { key: string; kind: GroupKind; label: string } {
+  const words = dateFormats();
   const today = midnight(now);
   if (at >= today) return { key: 'today', kind: 'today', label: words.day(0) };
   // a day's length moves at a time change: yesterday is the calendar day before today, whatever its length
@@ -120,10 +119,10 @@ export function groupOf(at: number, now: number, locale?: string): { key: string
 }
 
 // Rows (already newest first) in their groups, newest group first.
-export function chooserGroups(rows: readonly ChooserRow[], now: number, locale?: string): ChooserGroup[] {
+export function chooserGroups(rows: readonly ChooserRow[], now: number): ChooserGroup[] {
   const groups: ChooserGroup[] = [];
   for (const row of rows) {
-    const group = groupOf(row.at, now, locale);
+    const group = groupOf(row.at, now);
     const last = groups.at(-1);
     if (last?.key === group.key) last.rows.push(row);
     else groups.push({ ...group, rows: [row] });
@@ -132,7 +131,7 @@ export function chooserGroups(rows: readonly ChooserRow[], now: number, locale?:
 }
 
 // What a row says of its time inside its group: the clock time for Today and Yesterday, the weekday and the clock for
-// the rest of this week, the date for the weeks before; in the system locale, as the rest of MAWS (`app/date-format.ts`).
+// the rest of this week, the date for the weeks before; in the display locale, as the rest of MAWS (`@shared/app/date-format`).
 export function rowTime(at: number, kind: GroupKind, now: number): string {
   if (kind === 'today' || kind === 'yesterday') return formatClock(at);
   if (kind === 'thisWeek') return formatWeekdayClock(at);
