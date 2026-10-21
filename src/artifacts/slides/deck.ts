@@ -97,6 +97,9 @@ const FAMILY_RE = /^[A-Za-z][A-Za-z0-9 _-]{0,39}$/;
 const GOOGLE_FONTS_RE = /^https:\/\/fonts\.googleapis\.com\/css2\?\S+$/;
 const DS_OVERRIDE_RE = /^--ds-[a-z0-9-]+$/;
 const UPLOAD_RE = /^assets\/[^/?#\s]+$/;
+// A ref the store answers (`assets/<name>`, its name any the store keeps: no separator, no control character, not `.` or
+// `..`): the host's record holds the refs its write got, and an upload of the same bytes answers the upload's own name.
+const STORE_REF_RE = /^assets\/(?!\.\.?$)[^/\\\u0000-\u001f\u007f]{1,255}$/;
 const WEIGHT_RE = /^\d{1,4}$/;
 const RECORD_MAX_FILES = 18;
 const REFUSED_RE = /^[\w .+-]{1,40}$/;
@@ -218,14 +221,14 @@ export function googleRecord(face: DeckFace): GoogleRecord | null {
   if (!asked.ok || asked.request.url !== record.request) return null;
   if ('refused' in record) return onlyKeys(record, ['request', 'refused']) && typeof record.refused === 'string' && REFUSED_RE.test(record.refused) ? { request: record.request, refused: record.refused } : null;
   const { licence, licenceSrc, files } = record;
-  if (!onlyKeys(record, ['request', 'licence', 'licenceSrc', 'files']) || licence !== 'OFL' || typeof licenceSrc !== 'string' || !UPLOAD_RE.test(licenceSrc)) return null;
+  if (!onlyKeys(record, ['request', 'licence', 'licenceSrc', 'files']) || licence !== 'OFL' || typeof licenceSrc !== 'string' || !STORE_REF_RE.test(licenceSrc)) return null;
   if (!Array.isArray(files) || files.length === 0 || files.length > RECORD_MAX_FILES) return null;
   const seen = new Set<string>();
   const out: GoogleFaceFile[] = [];
   for (const file of files) {
     if (!isRecord(file) || !onlyKeys(file, ['src', 'weight', 'style'])) return null;
     const { src, weight, style } = file;
-    if (typeof src !== 'string' || !UPLOAD_RE.test(src) || src.includes('..') || typeof weight !== 'string' || !WEIGHT_RE.test(weight) || (style !== 'normal' && style !== 'italic')) return null;
+    if (typeof src !== 'string' || !STORE_REF_RE.test(src) || typeof weight !== 'string' || !WEIGHT_RE.test(weight) || (style !== 'normal' && style !== 'italic')) return null;
     if (seen.has(`${style} ${weight}`)) return null;
     seen.add(`${style} ${weight}`);
     out.push({ src, weight, style });

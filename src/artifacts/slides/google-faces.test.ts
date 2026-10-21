@@ -143,6 +143,13 @@ describe('the face’s host record (X27 as amended)', () => {
     expect(googleFaceState(refused)).toEqual({ state: 'refused', message: 'Roboto Slab is Apache-2.0 on Google Fonts; MAWS fetches only OFL faces, so it draws as its fallback; upload a font file to use it' });
   });
 
+  it('holds any ref the store answers (an earlier upload of the same bytes keeps its name), and nothing outside the assets', () => {
+    const at = (src: string) => googleRecord({ ...lora, google: { ...saved(), files: [{ src, weight: '400', style: 'normal' }] } });
+    expect(at('assets/Lora Regular.woff2')).not.toBeNull();
+    expect(at('assets/lora?.woff2')).not.toBeNull();
+    for (const src of ['assets/..', 'assets/.', 'assets/a/b.woff2', 'assets/a\\b.woff2', 'assets/a\u0001.woff2', 'assets/', 'x/assets/a.woff2']) expect(at(src), src).toBeNull();
+  });
+
   it('is dropped from every index the loader reads, so an agent can neither forge nor send one', () => {
     const parsed = parseDeckJson(JSON.stringify({ order: [], faces: { lora } }));
     expect(parsed.ok && parsed.deck.faces).toEqual({ lora: { family: 'Lora', href: `${LORA}&display=swap` } });

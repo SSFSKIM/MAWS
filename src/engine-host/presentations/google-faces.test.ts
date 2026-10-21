@@ -182,6 +182,27 @@ describe('the host’s Google Fonts fetch', () => {
     expect(timers.filter((t) => !t.cancelled)).toEqual([]);
   });
 
+  // the review's P1: identical bytes already uploaded answer the upload's own ref, which the record holds as it is
+  it('records the ref an earlier upload of the same bytes answers, and never loops on a ref no reader takes', async () => {
+    const f = start();
+    const id = await deck();
+    const woff2 = new Uint8Array(readFileSync(join(FIXTURES, 'lora-400.woff2')));
+    await store().uploadAsset(id, woff2, { name: 'Lora Regular.woff2', mime: 'font/woff2' }, human);
+    await name(id, 'lora', { family: 'Lora', href: LORA });
+    await f.idle();
+    expect(faceFiles(faceOf(id, 'lora'))).toEqual([{ src: 'assets/Lora Regular.woff2', weight: '400', style: 'normal' }]);
+    expect(calls.filter((url) => url === LORA)).toHaveLength(1);
+
+    // a name the store keeps but no record may hold (a control character): the write is taken back and waits its backoff
+    const other = await deck();
+    await store().uploadAsset(other, woff2, { name: 'Lora\u0001.woff2', mime: 'font/woff2' }, human);
+    await name(other, 'lora', { family: 'Lora', href: LORA });
+    await f.idle();
+    expect(faceOf(other, 'lora').google).toBeUndefined();
+    expect(calls.filter((url) => url === LORA)).toHaveLength(2);
+    expect(timers.filter((t) => !t.cancelled).map((t) => t.ms)).toEqual([30_000]);
+  });
+
   it('fetches on a document’s load: a deck named before this run, opened in it', async () => {
     const id = await deck();
     await name(id, 'lora', { family: 'Lora', href: LORA });

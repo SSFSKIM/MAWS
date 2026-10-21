@@ -159,6 +159,8 @@ function asks(face: unknown, request: GoogleRequest): boolean {
 }
 
 class Discarded extends Error {}
+/** A record the write's refs would leave unreadable: the write is taken back and the request waits as a failure does. */
+class Unrecordable extends Error {}
 
 export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>, options: GoogleFacesOptions): GoogleFaces {
   const { store, service } = documents;
@@ -276,7 +278,10 @@ export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>
       }
       log(fetched.kind === 'saved' ? `${family}: saved ${fetched.files.length} file(s) under OFL` : `${family}: refused ${fetched.refused} (${fetched.detail})`);
       settle(url, null);
-      for (const target of job.targets.values()) await land(target, job.request, fetched);
+      const unwritten = new Map<string, Target>();
+      for (const [k, target] of job.targets) if (!(await land(target, job.request, fetched))) unwritten.set(k, target);
+      // never a loop: a target its write could not record waits out the backoff (a commit or load past the pause retries)
+      if (unwritten.size > 0) settle(url, { request: job.request, targets: unwritten });
     }
   }
 
@@ -292,7 +297,8 @@ export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>
     waiting.set(url, entry);
   }
 
-  async function land(target: Target, request: GoogleRequest, fetched: Exclude<Fetched, { kind: 'pending' }>): Promise<void> {
+  // Whether the target is settled: written, discarded, or gone; false when the record could not be written.
+  async function land(target: Target, request: GoogleRequest, fetched: Exclude<Fetched, { kind: 'pending' }>): Promise<boolean> {
     const { artifactId, key } = target;
     const assets =
       fetched.kind === 'saved'
@@ -309,7 +315,9 @@ export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>
             fetched.kind === 'saved'
               ? { request: request.url, licence: 'OFL', licenceSrc: refs[0]!.ref, files: fetched.files.map((file, i) => ({ src: refs[i + 1]!.ref, weight: file.weight, style: file.style })) }
               : { request: request.url, refused: fetched.refused };
-          Y.setDeckEntry(doc, 'faces', key, { ...face, google } as unknown as Y.Json);
+          const next = { ...face, google };
+          if (!googleRecord(next)) throw new Unrecordable(`the refs ${refs.map((r) => r.ref).join(', ')} make no record the readers take`);
+          Y.setDeckEntry(doc, 'faces', key, next as unknown as Y.Json);
         },
         {
           prepare: () => {
@@ -319,9 +327,11 @@ export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>
         },
       );
     } catch (error) {
-      if (error instanceof Discarded || (error instanceof ArtifactStoreError && error.code === 'notFound')) return;
+      if (error instanceof Discarded || (error instanceof ArtifactStoreError && error.code === 'notFound')) return true;
       log(`${request.family} could not be written into ${artifactId}: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
     }
+    return true;
   }
 
   const offs = [service.onCommitted(({ artifactId }) => note(artifactId)), service.onLoad(note)];
