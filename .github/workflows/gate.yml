@@ -83,7 +83,10 @@ env:
   # per-call bounds too: its 24-board design's create and publish ran 463 to 727 ms at a load of 18 to 25 on the MacBook,
   # and one of them passed the 1,000 ms bound at a load of about 75. document-scale-repeat (P4-R6) repeats row 5's first
   # batch after a read in one launch, recorded with no bound, so its strays are counted and named in the same posture.
-  MEASURED_E2E: artifacts-perf document-scale document-scale-repeat presentations-scale tool-time-heavy-live
+  # dashboard-scale and design-scale admit any trial started below a load of 10, looser than their bounds hold:
+  # dashboard-scale's replace row read 432 ms against its 500 at a load under 3, and beside foreign load at 5 to 6 its
+  # replace read 510 and its cold open 1,299 against 1,000 (p4-r6-func, 2026-10-21; 634 relaunched quiet).
+  MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat presentations-scale tool-time-heavy-live
 
 defaults:
   run:
