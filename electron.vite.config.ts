@@ -83,12 +83,18 @@ export default defineConfig(({ command }) => {
       },
       // E4a end
     },
-    renderer: {
-      resolve: { alias },
-      html: devNonce ? { cspNonce: devNonce } : undefined,
-      build: { rollupOptions: harnessInput ? { ...rollupOptions, input: harnessInput } : rollupOptions }, // C6: harness input
-      server: { fs: { allow: [__dirname] } }, // C6: harness fixtures under spikes/ and test/
-      plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss()],
-    },
+    // gate-offload: MAWS_BUILD_RENDERER=0 (`pnpm build:main-preload`) builds main and the preloads alone, which is all the
+    // unit gate's two build-reading suites read (the engine-host bundle guard, the preload bundle suite); static's full
+    // `pnpm build` keeps the renderer and the apps proven.
+    renderer:
+      process.env.MAWS_BUILD_RENDERER === '0'
+        ? undefined
+        : {
+            resolve: { alias },
+            html: devNonce ? { cspNonce: devNonce } : undefined,
+            build: { rollupOptions: harnessInput ? { ...rollupOptions, input: harnessInput } : rollupOptions }, // C6: harness input
+            server: { fs: { allow: [__dirname] } }, // C6: harness fixtures under spikes/ and test/
+            plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss()],
+          },
   };
 });

@@ -152,6 +152,10 @@ jobs:
       - run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
       - if: ${{ !cancelled() }}
         run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
+      # The whole `pnpm build` (verify's step): class 1a's proof that the renderer and the apps build. It ran in unit
+      # until 2026-10-21, where it held the critical path (unit builds main and the preloads alone now).
+      - if: ${{ !cancelled() }}
+        run: .github/scripts/gate-run.sh 'built in|error' pnpm build
       # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts), seconds and no lane: vitest collects
       # no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec or a
       # group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
@@ -168,8 +172,9 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shell suites start /bin/zsh, macOS's login shell
-      # The bundle guard among the unit suites reads the built engine-host chunk.
-      - run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      # The two suites that read a build, the engine-host bundle guard (out/main) and the preload bundle suite
+      # (out/preload), need electron-vite's main and preloads only; static runs the whole `pnpm build`.
+      - run: .github/scripts/gate-run.sh 'built in|error' pnpm build:main-preload
       # vitest's workers at the job's cores: on Linux `nproc`, a container's cpuset (`getconf` reports the host's cores
       # there and over-forks; Decision Log 35); macOS has no stock `nproc`.
       - run: |
