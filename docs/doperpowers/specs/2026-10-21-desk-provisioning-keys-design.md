@@ -47,7 +47,9 @@ and see a third enrollment refused while the two stay, run `sminos hub leave` on
 - [x] (2026-10-21) M2 — reviewed clean (task-reviewer; commits `be133c3a3`, fix `d6195c5ce`). The web: provisioning keys on the Machines page (MAWS).
 - [x] (2026-10-21) M3 — reviewed clean (task-reviewer and reviewer-high; doperpowers commits `f3ea1a0e`, fix `7831e8ac`, sminos 1.3.2). sminos: both codes decoded, `hub enroll` through a key, `hub check`, `hub leave`, `hub show`'s exit code,
       the parity vectors regenerated (doperpowers).
-- [ ] M4 — Acceptance across both repositories against the local hub; the record completed.
+- [x] (2026-10-21) M4 — Acceptance across both repositories against the local hub; the record completed: items 1–8, 10
+      and 11 pass as written, no fix needed (the walk is the appendix of `2026-10-21-desk-provisioning-keys-report.md`
+      beside this spec); item 9 by the gates — doperpowers `d358c760` green (run 39547860824), MAWS on the merged head.
 - [ ] Whole-branch review at xhigh (each repository's branch), then merge; the hub deploy is the orchestrator's, after
       merge.
 
@@ -1147,7 +1149,46 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   secret; an unreadable file at removal counts as a replacement and is kept; a file another `leave` already removed is
   reported as usual, exit 0. The provisioning padding vector now carries `=` on valid JSON.
   Date/Author: 2026-10-21, M3's executor; folded by the controller.
+- Decision: M4's walk order and stand-ins (no code changed): item 10 was walked before items 4 and 5, since its
+  `--replace` needs the `devcloud` key live (item 4 revokes it) and item 5 ends both machines item 10 relies on; item
+  5's lost-200 machine enrolled through the stand-in helper's `dc-` key for the same reason; "no request" was read
+  as the count of requests the Worker served in wrangler's captured traces (the local hub keeps no request log); the
+  browser ran at `localhost:8747` as the e2e suites do. the controller's dispatch's `pnpm --filter desk-hub local -- --state …`
+  fails: pnpm passes the `--` through and `run.ts`'s `parseArgs` refuses it; flags follow `local` directly
+  (Concrete Steps passes none).
+  Date/Author: 2026-10-21, M4's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**What shipped** (MAWS branch `desk-provisioning-keys`, doperpowers branch `desk-provisioning-keys`, sminos 1.3.2).
+An admin creates a provisioning key on the web (label, `dc-` prefix, expiry, optional cap, optional offline
+auto-revoke) and sees its `smns-provision-v1.` code once; a VM pipes it into `sminos hub enroll --name dc-…` and is an
+ordinary enrolled machine. The hub counts uses under a race, refuses a revoked, expired, exhausted or off-prefix
+redemption in §2's order, rotates a lost answer's retry under the same key, binds every revocation (admin, the
+machine's own `DELETE /machine/enrollment`, the offline sweep) to the enrollment it read, and sweeps a key's machines
+once offline past its time. The machine side reads the hub's two refusals of a dead credential as one outcome, Access's
+401 only past a 600 s propagation grace and a 90 s recheck; `hub check` answers 0/1/3/4 for the boot, `hub leave`
+removes only the credential it checked. Acceptance 1–11 hold (M4's walk; items 6 and 11 through the hub suite).
+
+**Against the purpose.** The unattended VM loop the Purpose names — create a key, enroll two machines with no human
+step, revoke the key and see a third refused while the two stay, `leave` one, and a revoked VM re-enrolling on its own
+through `check` 3 and `--replace` — was walked end to end against the local hub. What remains outside this change is
+the boot's own loop (devcloud's, including its retry of `check` exit 4) and the deploy.
+
+**What the reviews changed.** The spec's re-review moved Access's 401 from "revoked" to "revoked once past the grace and
+held on a recheck" and made exit 4 the boot's to retry — the one design correction after approval. The milestone
+reviews found four real defects, each fixed and re-reviewed: a key-made pending enrollment with no alarm until its mint
+returned (M1), an offline-revocation backoff that redemptions bypassed (M1), a confirmation that could still mint a key
+after Cancel (M2), and `leave` deleting a credential `enroll --replace` installed while it waited (M3). The first CI
+gate caught a render-purity lint error M2's local checks missed.
+
+**Lessons.** A reusable credential turns every "who acts on the file, when" question into a race worth a test: three of
+the four review defects were interleavings across an await. Reading a refusal from an edge service needs that service's
+propagation behaviour, not only its steady state — the deploy probe already held the 60 s fact the first draft missed.
+The worktree guard cost every worker in this run a re-plan (friction tracker entry 11); script files run as
+`zsh <file>` were the reliable route into a second worktree.
+
+**Left open** (in the PR bodies): no suite starts from a Registry stored before M1 (`ADDED_COLUMNS` for
+`enrollments.key`, checked at deploy); five `e2e-hub/session-plane.spec.ts` cases fail on master too (not this branch);
+the one-time code's padding vector does not refuse on padding alone; the key row's `expired` label follows the day
+clock, not the second.
