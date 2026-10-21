@@ -359,7 +359,10 @@ test('a step of a Mac job that can run after its start was refused is an upload,
     for (let i = 0; i < text.length; i++) {
       if (text[i] === '(') depth++;
       else if (text[i] === ')') depth--;
-      else if (depth === 0 && text.startsWith(op, i)) parts.push(text.slice(start, i).trim()), (start = i + op.length);
+      else if (depth === 0 && text.startsWith(op, i)) {
+        parts.push(text.slice(start, i).trim());
+        start = i + op.length;
+      }
     }
     parts.push(text.slice(start).trim());
     return parts.map((part) => (/^\(.*\)$/.test(part) && split(part.slice(1, -1), op).length === 1 ? part.slice(1, -1).trim() : part));
