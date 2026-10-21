@@ -1,0 +1,40 @@
+# The module cache gate.yml's pool unit jobs restore (.github/actions/module-cache): master's whole unit suite on the
+# pool with --fsModuleCache, saved under the tree's key whatever the suite's outcome. A `ci/` ref reads its default
+# branch's caches, so each shard of a later run transforms only the modules its commit changed (or whose imports' files
+# did; test/support/module-cache-key.ts) rather than the renderer's whole graph cold. On each push to master, and on
+# dispatch: a push while a save runs waits for it, and a newer push replaces one waiting, so the newest master is saved.
+name: unit-cache
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: unit-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  save:
+    runs-on: [self-hosted, ci-kit-pool, cpus-8]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/module-cache
+        with:
+          step: place
+      - uses: ./.github/actions/setup
+        with:
+          apt: zsh
+      # As gate.yml's unit job runs it, unsharded, so the cache holds every module some suite imports. A red suite
+      # still transformed what it imported, so its outcome never decides the save.
+      - run: .github/scripts/gate-run.sh 'built in|error' pnpm build:main-preload
+      - continue-on-error: true
+        run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$(nproc)" --fsModuleCache
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/module-cache
+        with:
+          step: save

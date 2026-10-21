@@ -198,9 +198,17 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.unit_shards) }}
     steps:
       - uses: actions/checkout@v7
+      # On the pool, the module cache master's unit-cache workflow saved (.github/actions/module-cache): the checkout at
+      # the fixed path its keys name, then, once the install has made node_modules, the newest cache for this tree's key.
+      - uses: ./.github/actions/module-cache
+        with:
+          step: place
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shell suites start /bin/zsh, macOS's login shell
+      - uses: ./.github/actions/module-cache
+        with:
+          step: restore
       # The two suites that read a build, the engine-host bundle guard (out/main) and the preload bundle suite
       # (out/preload), need electron-vite's main and preloads only; static runs the whole `pnpm build`.
       - run: .github/scripts/gate-run.sh 'built in|error' pnpm build:main-preload
@@ -220,8 +228,9 @@ jobs:
       # than transforming it again. Each `-timing` project has a Vite server of its own, so without it the whole app was
       # transformed again at the end of the run while the two App.test.tsx waited (42-52 s of their tests, 7-9 s with
       # it); the whole suite in one job ran about 45 s shorter (ci-kit's test-history spec, M5, arm C0), and each shard
-      # takes it as well. The cache starts empty in every job: nothing restores it, and the checkout's clean removes
-      # node_modules, so a job reads only what it wrote.
+      # takes it as well. On the pool the job starts from master's cache (the module-cache steps above), so a shard
+      # transforms only the modules its commit changed or whose imports' files did; elsewhere it starts empty (the
+      # checkout's clean removes node_modules) and a job reads only what it wrote.
       - id: test
         env:
           MAWS_TEST_JUNIT: ci-results/unit.xml

@@ -7,6 +7,9 @@ import react from '@vitejs/plugin-react';
 import { createRequire } from 'node:module';
 // C8c end
 import { compiledRendererSuites } from './test/support/compiled-suites'; // P3-F
+// Every project carries it: under --fsModuleCache a module's key also holds the files that decide where its imports
+// resolve, so a cache written at another commit misses where those changed.
+import { moduleCacheKey } from './test/support/module-cache-key';
 
 const alias = { '@shared': resolve(__dirname, 'src/shared'), '@artifacts': resolve(__dirname, 'src/artifacts') }; // P3-A: @artifacts
 // C8c start: `lowlight` aliased to a grammar-less build (ruled 2026-09-29, the C8c document's M1 fold (2)): the diff
@@ -51,9 +54,12 @@ const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts'];
 
 // A project under the React Compiler as electron-vite builds the app, over happy-dom (C8a; the `renderer-compiled`
 // projects), each with its own plugin instance.
+const COMPILER_BABEL = { plugins: ['babel-plugin-react-compiler'] };
 const compiled = (test: { name: string; include: string[]; exclude?: string[]; testTimeout?: number; hookTimeout?: number }) => ({
   resolve: { alias },
-  plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
+  // vitest's module cache keys a transform by its project's plugin names, not their options, so the Babel options ride
+  // in a plugin's name: a project whose react() compiles differently never reads these projects' transforms.
+  plugins: [react({ babel: COMPILER_BABEL }), { name: `maws:react-babel ${JSON.stringify(COMPILER_BABEL)}` }, moduleCacheKey()],
   test: { environment: 'happy-dom' as const, env: { MAWS_REACT_COMPILER: '1' }, setupFiles: HAPPY_DOM_SETUP, ...test },
 });
 
@@ -64,6 +70,7 @@ const liveProjects =
     ? [
         {
           resolve: { alias },
+          plugins: [moduleCacheKey()],
           test: {
             name: 'live',
             environment: 'node',
@@ -98,6 +105,7 @@ export default defineConfig({
     projects: [
       {
         resolve: { alias },
+        plugins: [moduleCacheKey()],
         test: {
           name: 'node',
           environment: 'node',
@@ -108,9 +116,10 @@ export default defineConfig({
           // including them; a second pass here only re-checked them (gate-offload Decision Log 35, P5).
         },
       },
-      { resolve: { alias }, test: { name: 'node-timing', environment: 'node', include: TIMING_NODE_TESTS, ...TIMING_TIMEOUTS } },
+      { resolve: { alias }, plugins: [moduleCacheKey()], test: { name: 'node-timing', environment: 'node', include: TIMING_NODE_TESTS, ...TIMING_TIMEOUTS } },
       {
         resolve: { alias },
+        plugins: [moduleCacheKey()],
         test: {
           name: 'renderer',
           environment: 'happy-dom',
@@ -119,14 +128,14 @@ export default defineConfig({
           setupFiles: HAPPY_DOM_SETUP,
         },
       },
-      { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, setupFiles: HAPPY_DOM_SETUP, ...TIMING_TIMEOUTS } },
+      { resolve: { alias }, plugins: [moduleCacheKey()], test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, setupFiles: HAPPY_DOM_SETUP, ...TIMING_TIMEOUTS } },
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
       // P3-B M6: `css` reads the editor's stylesheets as text, so the HTML export (run in main, tested here under Node)
       // inlines theme.css rather than the blank vitest gives a `.css?raw` import outside `css.include`.
       // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
-      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/ /* P3-D */] } } }, // P3-B: exclude, css
+      { resolve: { alias }, plugins: [moduleCacheKey()], test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/ /* P3-D */] } } }, // P3-B: exclude, css
       // P3-A end
       // P3-B start: the document kind's suites that need a DOM (a real Tiptap editor: UniqueID through split and paste,
       // the editor, comments, history) run under happy-dom; its model, markdown and writer stay in `artifacts` (Node).
@@ -134,6 +143,7 @@ export default defineConfig({
       // imports, `?raw` included, outside `css.include`).
       {
         resolve: { alias },
+        plugins: [moduleCacheKey()],
         // fix wave 1 of M4: the setup drops KaTeX's quirks-mode warning, happy-dom having no `document.compatMode`
         test: {
           name: 'artifacts-dom',

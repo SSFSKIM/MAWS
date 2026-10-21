@@ -1,0 +1,57 @@
+name: MAWS module cache
+description: >-
+  vitest's module cache (--fsModuleCache, node_modules/.vitest-cache) carried from master to the pool's unit jobs, so a
+  job transforms only what its commit changed (ci-kit's test-history spec, M5, arm CD; on the sharded unit job, CI-opt's
+  arms of 2026-10-21). `place` moves the checkout to one fixed path, `restore` unpacks the newest cache saved for this
+  tree's key, `save` stores this job's under it. Pool VMs only: vitest's keys and transforms name absolute paths, so a
+  cache written anywhere else would never be read.
+inputs:
+  step:
+    description: place (right after the checkout), restore (after the setup's install) or save.
+    required: true
+runs:
+  using: composite
+  steps:
+    # Each GCE VM's work folder is named after the VM and a VM runs one job, so the checkout moves to a path every VM
+    # shares and the work folder links to it. The fixed path is as deep as the work folder: actions/cache stores the
+    # path relative to the link and tar resolves it from the real directory, so the two must climb to the same parent.
+    - if: inputs.step == 'place' && startsWith(runner.name, 'ci-kit-gce-')
+      shell: bash
+      run: |
+        fixed=${GITHUB_WORKSPACE%/*/*/*}/fixed/MAWS/MAWS
+        rm -rf "$fixed"
+        mkdir -p "${fixed%/*}"
+        mv "$GITHUB_WORKSPACE" "$fixed"
+        ln -s "$fixed" "$GITHUB_WORKSPACE"
+    # The key is what vitest does not key its entries on and what the files' resolution reads: the tsconfigs (the
+    # transform reads compiler options there), every package.json (module type, a workspace package's exports, a
+    # directory's main), plus what makes every entry stale anyway (the lockfile, the vitest configs and the files they
+    # import), so such a change restores nothing rather than a cache no entry of which is read. A module's own content,
+    # its project's config and the files that decide its imports are in vitest's own key (test/support/module-cache-key.ts).
+    # A stale cache can only miss. -v1- is the prefix to move should every saved cache need dropping.
+    - id: key
+      if: inputs.step != 'place' && startsWith(runner.name, 'ci-kit-gce-')
+      shell: bash
+      run: echo "prefix=vitest-module-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/*/package.json', 'src/**/package.json', 'test/**/package.json', '!**/node_modules/**', 'tsconfig*.json', 'apps/*/tsconfig*.json', 'vitest.config.ts', 'apps/*/vitest.config.ts', 'test/support/compiled-suites.ts', 'test/support/module-cache-key.ts') }}-" >> "$GITHUB_OUTPUT"
+    - id: restore
+      if: inputs.step == 'restore' && steps.key.outputs.prefix
+      uses: actions/cache/restore@v6
+      with:
+        path: node_modules/.vitest-cache
+        key: ${{ steps.key.outputs.prefix }}${{ github.run_id }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+    - if: inputs.step == 'restore' && steps.key.outputs.prefix
+      shell: bash
+      env:
+        MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+      run: |
+        if [[ -d node_modules/.vitest-cache ]]; then
+          echo "module cache: ${MATCHED} ($(du -sh node_modules/.vitest-cache | cut -f1), $(find node_modules/.vitest-cache -type f | wc -l) files)"
+        else
+          echo "module cache: none for ${{ steps.key.outputs.prefix }}*; every module is transformed"
+        fi
+    - if: inputs.step == 'save' && steps.key.outputs.prefix
+      uses: actions/cache/save@v6
+      with:
+        path: node_modules/.vitest-cache
+        key: ${{ steps.key.outputs.prefix }}${{ github.run_id }}
