@@ -11,6 +11,7 @@ import {
   artifactConsoleMessageOf,
   attributeConsole,
   guardFrames,
+  guardWindowNavigation,
   installFramePolicies,
   isCspExempt,
   beneathStoreFrame,
@@ -361,6 +362,20 @@ describe('the policies installed on a session and a window', () => {
     expect(allowed.preventDefault).not.toHaveBeenCalled();
     expect(app.preventDefault).not.toHaveBeenCalled();
     await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation https://example.invalid/', 'blocked-navigation https://example.invalid/pdf-link']));
+  });
+
+  // P4 W2-C (tracker 2026-10-06, E2): the window's own guard writes the line the frame guard writes, so the e2e sees a
+  // PDF's link refused at the top level (Chromium's viewer navigates the window itself) as it sees a frame's
+  it('refuses every navigation of the app window itself and writes the seam line under MAWS_E2E', async () => {
+    const contents = new EventEmitter();
+    guardWindowNavigation(contents as unknown as WebContents, e2e());
+    const link = { url: 'https://example.invalid/pdf-link', isMainFrame: true, preventDefault: vi.fn() };
+    const app = { url: APP, isMainFrame: true, preventDefault: vi.fn() };
+    for (const event of [link, app]) contents.emit('will-navigate', event);
+    await settle();
+    expect(link.preventDefault).toHaveBeenCalled();
+    expect(app.preventDefault).toHaveBeenCalled();
+    await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation https://example.invalid/pdf-link', `blocked-navigation ${APP}`]));
   });
 
   class PermissionSession {
