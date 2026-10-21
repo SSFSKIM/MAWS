@@ -9,8 +9,12 @@
 // the stack, never to the browser's or the binding's own undo. While an IME composes, remote frames wait (the
 // provider's hold, parent Decision Log 33 to 35) until ProseMirror has ended the composition.
 //
-// P4-B2's spike S-IME (./armed.ts): with the prototype on, a text box also mounts ARMED, on a selected text element
-// before any edit: focused with its caret hidden and no mark bar, its first key turning it into the edit in place.
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D1, D3, D5 to D7; ./armed.ts): a text box also mounts
+// ARMED, on a selected text element before any edit: focused with its caret hidden and no mark bar, the stage taking its
+// presses (D3) and its first key turning it into the edit in place (T10, T11). An edit's caret goes where `editText`'s
+// placement says (a click's point, a double-click's word, everything, the end), taken once whether the box mounts with the
+// edit or is already mounted armed. Escape from an edit goes back to ARMED; from a table cell to the table (T17). Tab in a
+// cell moves to the next cell and past the last adds a row (T16).
 import { Editor, Extension } from '@tiptap/core';
 import { Plugin, TextSelection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
@@ -23,7 +27,10 @@ import { bindSlideText } from '../../yjs/slide-text';
 import type { SlideCanvas } from '../canvas';
 import type { DeckSession } from './session';
 import { hexColor, httpsHref, slideTextExtensions, type Gesture } from './text-schema';
-import { armedMode, registerArmed } from './armed';
+import { ARMED_TYPING, registerArmed } from './armed';
+import type { TextPlacement } from './session';
+import { isCell, nextCell, slideTree, tableOf } from './transform/selection';
+import { tableRow } from '../writers-elements';
 import './textbox.css';
 
 export const TEXTBOX_COPY = {
@@ -66,7 +73,7 @@ export interface TextBoxProps {
   slideId: string;
   elementId: string;
   readOnly?: boolean;
-  /** P4-B2 spike: mounted ARMED (the element selected, not yet edited); false once a key or a press began the edit. */
+  /** P4-B2: mounted ARMED (the element selected, not yet edited); false once a key or a press began the edit. */
   armed?: boolean;
 }
 
@@ -101,6 +108,29 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
     };
     const undo = () => (session.undoStep(), true);
     const redo = () => (session.redoStep(), true);
+    // T17: Escape commits and goes back to ARMED on this same box (the selection kept), or from a table cell to the table
+    const leave = () => {
+      const tree = slideTree(session.doc, slideId);
+      const table = isCell(tree, elementId) ? tableOf(tree, elementId) : null;
+      if (table) session.select([table]);
+      else session.editText(null);
+    };
+    // T16: Tab and Shift-Tab in a cell move to the next or previous cell with its content selected; Tab past the last adds
+    // a row and enters its first cell. Outside a cell the key is the editor's.
+    const cellStep = (back: boolean): boolean => {
+      const tree = slideTree(session.doc, slideId);
+      if (!isCell(tree, elementId) || readOnly) return false;
+      let next = nextCell(tree, elementId, back);
+      const table = tableOf(tree, elementId);
+      if (next === null && !back && table) {
+        let row: string | null = null;
+        session.edit((origin) => void (row = tableRow(session.doc, slideId, table, { add: tree.parentOf(elementId) }, origin)));
+        next = row === null ? null : (slideTree(session.doc, slideId).childrenOf(row)[0] ?? null);
+      }
+      if (next === null) return true; // Shift-Tab in the first cell: nowhere to go, the key taken
+      session.editText(next, { at: { kind: 'all' } });
+      return true;
+    };
     node.replaceChildren();
     const editor = new Editor({
       element: node,
@@ -130,7 +160,9 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
             'Mod-z': undo,
             'Shift-Mod-z': redo,
             'Mod-y': redo,
-            Escape: () => (session.editText(null), true),
+            Escape: () => (leave(), true),
+            Tab: () => cellStep(false),
+            'Shift-Tab': () => cellStep(true),
           }),
           addProseMirrorPlugins: () => [
             ...binding.plugins,
@@ -151,40 +183,37 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
       ],
     });
     binding.bind(editor.view);
-    // the text selected, so a fresh placeholder is typed over (P4-B2 spike: armed in mode `clear`, the caret at the start)
-    armSelection(editor, armedNow.current);
+    // armed: the caret hidden where the first key goes; an edit: where its placement says (everything when it says nothing)
+    if (armedNow.current) armSelection(editor);
+    else place(editor, session.takePlacement(elementId) ?? { kind: 'all' });
     editor.view.focus();
-    // P4-B2 spike: the armed box's acts, which the stage's keys reach while it is armed
+    // the armed box's acts, which the stage's keys reach while it is armed
     const unregister = registerArmed(session, {
       elementId,
       root: editor.view.dom,
       armed: () => armedNow.current && !editor.isDestroyed,
-      replace: () => {
-        const { doc } = editor.state;
-        const size = doc.content.size;
-        // the first block kept, emptied: the key's own insertion or composition then lands in it, with the marks the
-        // whole text carried (bold over all of it stays bold), as a key typed over a selection keeps them
-        if (armedMode() === 'clear' && size > 2) {
-          const marks = doc.resolve(1).marksAcross(doc.resolve(size - 1));
-          const tr = editor.state.tr.delete(1, size - 1);
-          editor.view.dispatch(marks && marks.length ? tr.setStoredMarks(marks) : tr);
-        }
-        session.editText(elementId);
+      replace: (text) => {
+        if (!editor.isDestroyed && editor.isEditable) armedType(editor, text);
+        session.editText(elementId, { at: { kind: 'keep' } });
       },
-      editAll: () => {
-        armSelection(editor, false);
-        session.editText(elementId);
+      editAll: () => session.editText(elementId, { at: { kind: 'all' } }),
+      markAll: (mark) => {
+        if (editor.isDestroyed || !editor.isEditable) return;
+        gesture(() => editor.chain().selectAll().toggleMark(mark).run());
+        armSelection(editor);
       },
       focus: () => editor.view.focus(),
     });
-    // P3-F F9: the keys the owner typed on the selected element before this box took the focus, typed over that
-    // selection as a typed key replaces it; and any that reach the stage while the box is open, at its selection
-    const typeIn = () => {
-      const typed = session.takeTyped(elementId);
-      if (typed !== null && !editor.isDestroyed && editor.isEditable) editor.view.dispatch(editor.state.tr.insertText(typed).scrollIntoView());
+    // an edit beginning on this box while it is mounted (the flip from ARMED, or a second placement): its caret, once, and
+    // the focus if something else held it (the stage's Enter on a selection whose box had lost it)
+    const takePlacement = () => {
+      if (editor.isDestroyed || session.snapshot().editingText !== elementId) return;
+      const at = session.takePlacement(elementId);
+      if (!at) return;
+      place(editor, at);
+      if (!editor.view.hasFocus()) editor.view.focus();
     };
-    typeIn();
-    const stopTyped = session.subscribe(typeIn);
+    const stopPlacement = session.subscribe(takePlacement);
 
     let holding = false;
     const hold = (on: boolean) => {
@@ -197,11 +226,14 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
     const onCompositionStart = () => {
       clearTimeout(settle);
       hold(true);
+      session.setComposing(true);
     };
     const onCompositionEnd = () => {
       clearTimeout(settle);
       settle = setTimeout(() => {
-        if (!editor.isDestroyed && !editor.view.composing) hold(false);
+        if (editor.isDestroyed || editor.view.composing) return;
+        hold(false);
+        session.setComposing(false);
       }, COMPOSE_SETTLE_MS);
     };
     dom.addEventListener('compositionstart', onCompositionStart);
@@ -210,14 +242,14 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
     const document = node.ownerDocument;
     const onPointerDown = (event: Event) => {
       const at = event.target as Node | null;
-      // P4-B2 spike: a press in the armed box begins the edit, the caret at the press (T3, roughly: no drag from it); a
-      // plain press elsewhere on the stage is the stage's, whose new selection ends the edit (ending it here first would
-      // arm the box again for the moment between, writing its selection while a composition may still be ending). A
-      // modified press (it may keep the element selected) or a press on a pin (it selects nothing) still ends it here.
-      if (at && armedNow.current && node.contains(at)) return session.editText(elementId);
+      // armed, every press is the stage's (D3: the root takes no pointer events, so a press on the text reaches the stage)
+      if (armedNow.current) return;
       if (at && (node.contains(at) || bar.current?.contains(at))) return;
+      // a plain press elsewhere on the stage is the stage's, whose new selection ends the edit (ending it here first would
+      // arm the box again for the moment between, writing its selection while a composition may still be ending); a
+      // modified press (it may keep the element selected) or a press on a pin (it selects nothing) ends it here
       const plain = !(event as PointerEvent).shiftKey && !(event as PointerEvent).metaKey && !(event as PointerEvent).ctrlKey;
-      if (at && plain && armedMode() !== null && node.closest('[data-stage-surface]')?.contains(at) && !(at as Element).closest?.('.deck-comment-pin')) return;
+      if (at && plain && node.closest('[data-stage-surface]')?.contains(at) && !(at as Element).closest?.('.deck-comment-pin')) return;
       session.editText(null);
     };
     document.addEventListener('pointerdown', onPointerDown, true);
@@ -229,7 +261,7 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
 
     return () => {
       unregister();
-      stopTyped();
+      stopPlacement();
       clearTimeout(settle);
       resize?.disconnect();
       document.removeEventListener('pointerdown', onPointerDown, true);
@@ -239,14 +271,15 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
       untrack();
       budget.dispose();
       hold(false);
+      if (session.snapshot().composing) session.setComposing(false);
       canvas.endTextEdit(elementId);
     };
   }, [session, canvas, slideId, elementId, readOnly]);
 
-  // P4-B2 spike: armed again after an edit (Escape), its selection as it is armed (the effect above set it at the mount)
+  // armed again after an edit (Escape, T17), its caret hidden where the first key goes (the effect above set it at the mount)
   const wasArmed = useRef(armed);
   useEffect(() => {
-    if (armed && !wasArmed.current && mounted && !mounted.editor.isDestroyed && !mounted.editor.view.composing) armSelection(mounted.editor, true);
+    if (armed && !wasArmed.current && mounted && !mounted.editor.isDestroyed && !mounted.editor.view.composing) armSelection(mounted.editor);
     wasArmed.current = armed;
   }, [armed, mounted]);
 
@@ -268,11 +301,58 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
   return <MarkBar ref={bar} editor={mounted.editor} node={mounted.node} session={session} refused={refused} />;
 }
 
-/** The selection a box opens with: all its text, or (P4-B2 spike, armed in mode `clear`) the caret at its start. */
-function armSelection(editor: Editor, armed: boolean): void {
+/** ARMED's hidden caret: at the start (the content is cleared by the first key) or, under `append`, at the end. */
+function armSelection(editor: Editor): void {
   const { doc } = editor.state;
-  const caret = armed && armedMode() === 'clear';
-  editor.view.dispatch(editor.state.tr.setSelection(caret ? TextSelection.create(doc, 1) : TextSelection.create(doc, 1, Math.max(1, doc.content.size - 1))));
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc, ARMED_TYPING === 'append' ? Math.max(1, doc.content.size - 1) : 1)));
+}
+
+/**
+ * T10 and T11 on the armed box: under `replace` the content is cleared, keeping the marks a text that is one marked run
+ * carried (stored marks, so the new text keeps them), and a printable key's `text` is typed in; under `append` the caret
+ * goes to the end and `text` follows. With no text (keyCode 229) the input method then composes in place.
+ */
+function armedType(editor: Editor, text: string | undefined): void {
+  const { doc } = editor.state;
+  const end = Math.max(1, doc.content.size - 1);
+  let tr = editor.state.tr;
+  if (ARMED_TYPING === 'append') tr = tr.setSelection(TextSelection.create(doc, end));
+  else if (doc.content.size > 2) {
+    const marks = doc.resolve(1).marksAcross(doc.resolve(end));
+    tr = tr.delete(1, end);
+    if (marks && marks.length) tr = tr.setStoredMarks(marks);
+  }
+  if (text) tr = tr.insertText(text);
+  editor.view.dispatch(tr.scrollIntoView());
+}
+
+const WORDS = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter(undefined, { granularity: 'word' }) : null;
+
+/** An edit's caret where its placement says (D4, D5): a point, the word at a point, everything, the end, or as it is. */
+function place(editor: Editor, at: TextPlacement): void {
+  const { doc } = editor.state;
+  const last = Math.max(1, doc.content.size - 1);
+  const clamp = (n: number) => Math.min(Math.max(1, n), last);
+  if (at.kind === 'keep') return;
+  if (at.kind === 'all') return void editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc, 1, last)));
+  if (at.kind === 'end') return void editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc, last)));
+  const hit = editor.view.posAtCoords({ left: at.x, top: at.y });
+  const pos = clamp(hit?.pos ?? last);
+  if (at.kind === 'point') return void editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc, pos)));
+  // the word at the point, by the platform's word segmentation (a Hangul word is one word); an empty block, a caret
+  const $pos = doc.resolve(pos);
+  const block = $pos.parent;
+  const text = block.textBetween(0, block.content.size, undefined, '￼');
+  const offset = $pos.parentOffset;
+  let from = pos;
+  let to = pos;
+  for (const seg of WORDS?.segment(text) ?? []) {
+    if (!seg.isWordLike || offset < seg.index || offset > seg.index + seg.segment.length) continue;
+    from = $pos.start() + seg.index;
+    to = from + seg.segment.length;
+    break;
+  }
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc, clamp(from), clamp(to))));
 }
 
 /**

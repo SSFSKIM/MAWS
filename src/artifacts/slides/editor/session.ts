@@ -16,6 +16,10 @@
 // asks before they are lost.
 // P3-F (L233): what the editor shows in place of the live deck (`shown`), so the header's Export, which outlives the body,
 // exports what is on screen (the design's what-you-see rule, P3-E's Decision Log 31).
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D1): the click model's state beside the selection: where
+// an edit's caret goes when it begins (`editText`'s placement, which the text box takes once), whether the stage owns the
+// keyboard (ARMED exists only then), whether a gesture is dragging, and whether an input method is composing in the box.
+// P3-F F9's typed keys retire: the armed box is focused before the first key.
 import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
 import { hasSlide, readNotes } from '../../yjs/slides';
@@ -44,7 +48,23 @@ export interface DeckSessionState {
   pending: number;
   /** P3-F (L233): what the editor shows in place of the live deck, if anything. */
   shown: DeckShown;
+  /**
+   * P4-B2 (D1): whether the stage owns the keyboard: `stage` after a press on its content or a focus of the stage or its
+   * text box, `away` after a focus anywhere else (the inspector, the rail, a pin, the popover). ARMED needs `stage`.
+   */
+  keyboard: 'stage' | 'away';
+  /** P4-B2: a gesture is writing frames (from `beginDrag` to `endDrag`). */
+  dragging: boolean;
+  /** P4-B2: an input method is composing in the text box. */
+  composing: boolean;
 }
+
+/**
+ * P4-B2 (D3 to D7): where an edit's caret goes as it begins: everything selected, the caret at the end, the caret at a
+ * client point (a click, T3), the word at a client point (a double-click, T5), or the box's selection kept (the armed
+ * box's own key began it, T10 and T11).
+ */
+export type TextPlacement = { kind: 'all' } | { kind: 'end' } | { kind: 'keep' } | { kind: 'point'; x: number; y: number } | { kind: 'word'; x: number; y: number };
 
 export interface DeckSessionOptions {
   /** The replica's composition hold (A's provider, parent Decision Log 33 to 35): set while an IME composes. */
@@ -101,7 +121,7 @@ export class DeckSession {
   private disposed = false; // B4
   private writesHeld = false; // B4: the editor shows a version in place of the live deck
   private readonly notesDrafts = new Map<string, NotesDraft>(); // L203
-  private typed: { id: string; text: string } | null = null; // P3-F F9: keys typed on the edited element, not yet in its box
+  private placement: { id: string; at: TextPlacement } | null = null; // P4-B2: where the edit's caret goes, taken once
 
   constructor(
     readonly doc: Doc,
@@ -109,7 +129,7 @@ export class DeckSession {
     private readonly options: DeckSessionOptions = {},
   ) {
     this.undo = createDeckUndo(doc, { editor: 'deck' });
-    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0, shown: null };
+    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0, shown: null, keyboard: 'away', dragging: false, composing: false };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
     this.publish();
@@ -146,7 +166,7 @@ export class DeckSession {
     const next = { ...this.state, ...patch };
     if ((Object.keys(patch) as (keyof DeckSessionState)[]).every((k) => next[k] === this.state[k])) return;
     this.state = next;
-    if (this.typed && this.typed.id !== next.editingText) this.typed = null; // its edit ended before its box took them
+    if (this.placement && this.placement.id !== next.editingText) this.placement = null; // its edit ended before its box took it
     this.publish();
     this.notify();
   }
@@ -257,33 +277,44 @@ export class DeckSession {
   }
 
   /**
-   * Starts (or with null ends) editing a text element in place; it becomes the selection. P3-F F9: `typed` is a key the
-   * owner pressed on the selected element, which its text box types once it binds (`takeTyped`); the keys pressed before
-   * the box takes the focus are kept in order, and dropped with an edit that ends first.
+   * Starts (or with null ends) editing a text element in place; it becomes the selection. P4-B2: `at` is where the caret
+   * goes (everything selected when not given), which the element's text box takes once (`takePlacement`), whether it
+   * mounts now or is already mounted ARMED (the flip to EDIT: no remount, no focus change).
    */
-  editText(id: string | null, options: { typed?: string } = {}): void {
-    if (id !== null) this.set({ selection: Object.freeze([id]), editingText: id });
+  editText(id: string | null, options: { at?: TextPlacement } = {}): void {
+    if (id !== null) this.placement = { id, at: options.at ?? { kind: 'all' } };
+    if (id !== null) this.set({ selection: Object.freeze([id]), editingText: id, keyboard: 'stage' });
     else this.set({ editingText: null });
-    if (id === null || !options.typed) return;
-    this.typed = { id, text: (this.typed?.id === id ? this.typed.text : '') + options.typed };
-    this.notify(); // a box already open takes them now
+    if (id !== null) this.notify(); // a box already mounted takes the placement now
   }
 
-  /** P3-F F9: the keys typed on `id` that its text box has not typed yet, once; null when there are none. */
-  takeTyped(id: string): string | null {
-    if (this.typed?.id !== id || this.state.editingText !== id) return null;
-    const { text } = this.typed;
-    this.typed = null;
-    return text;
+  /** P4-B2: where the edit of `id` puts its caret, once; null when there is nothing to place. */
+  takePlacement(id: string): TextPlacement | null {
+    if (this.placement?.id !== id || this.state.editingText !== id) return null;
+    const { at } = this.placement;
+    this.placement = null;
+    return at;
+  }
+
+  /** P4-B2 (D1): whether the stage owns the keyboard (ARMED needs it). */
+  setKeyboard(keyboard: 'stage' | 'away'): void {
+    this.set({ keyboard });
+  }
+
+  /** P4-B2: an input method composing in the text box, or done. */
+  setComposing(composing: boolean): void {
+    this.set({ composing });
   }
 
   /** A drag: the writes between `begin` and `end` are one undo step. */
   beginDrag(): void {
     this.typingIn = null;
     this.undo.cut();
+    this.set({ dragging: true });
   }
   endDrag(): void {
     this.undo.cut();
+    this.set({ dragging: false });
   }
 
   undoStep(): void {
