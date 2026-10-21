@@ -4,14 +4,14 @@
 // `layout.action` for the renderer to run. An action is enabled only while the page has a handler registered for it
 // (`layout.setEnabledActions`), so an action whose child has not landed shows disabled, as it does everywhere else.
 // The menu is rebuilt on every `settings.changed` (overrides, the checked appearance) and every change of that set.
-// Items carry `id` (the action id; `tab.select:<n>` for the nine tab items; `edit.selectAll` for the Edit menu's own
-// Select All) so the smoke can click them by id.
+// Items carry `id` (the action id; `tab.select:<n>` for the nine tab items; `edit.selectAll`, `edit.undo` and `edit.redo`
+// for the Edit menu's own items) so the smoke can click them by id.
 import { Menu, webContents, type MenuItemConstructorOptions } from 'electron';
 import { appWindows } from './windows'; // E2
-import type { Settings, ThemeSetting } from '@shared/ipc/schema';
+import type { EditOp, Settings, ThemeSetting } from '@shared/ipc/schema';
 import { ACTIONS, ACTION_IDS, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
 import type { emit as emitEvent } from './ipc/events';
-import { onEmitted } from './ipc/events';
+import { emitTo, onEmitted } from './ipc/events';
 import { registerMainHandler } from './ipc/router';
 
 type Emit = typeof emitEvent;
@@ -40,6 +40,22 @@ function selectAll(emit: Emit): void {
   if (!target) return;
   target.selectAll();
   if (pages.some((page) => page.id === target.id)) void emit('layout.selectAll', {});
+}
+
+// P4-B2 K6 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D10; finding 1 of spikes/p4-click-model): Edit ▸
+// Undo and Redo are the app's own items too, not the roles. A role runs Blink's Undo, which acts only while Blink's own
+// undo stack can undo, and then on the element of its newest step, so a deck's or a design's own stack was never reached
+// from the menu. In focused contents that are not an app page (DevTools, a webview) the item runs the native command, as
+// the role did. In an app page it tells that page alone (`layout.edit`): an editor claiming the focused element answers
+// from its own stack, or the page asks for the native command back (`layout.nativeEdit`, below). A page that cancels ⌘Z
+// or ⇧⌘Z (the deck's stage, a text box's Mod-z) keeps the key from the menu, so the items serve the mouse and the keys no
+// page handled. With no window key the one window's page stands in, as for Select All.
+function edit(op: EditOp): void {
+  const pages = appWindows().map((win) => win.webContents); // E2
+  const target = webContents.getFocusedWebContents() ?? pages[0];
+  if (!target) return;
+  if (pages.some((page) => page.id === target.id)) emitTo(target, 'layout.edit', { op });
+  else target[op]();
 }
 
 export function menuTemplate(
@@ -114,7 +130,9 @@ export function menuTemplate(
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { id: 'edit.undo', label: 'Undo', accelerator: 'Cmd+Z', click: () => edit('undo') }, // P4-B2 K6
+        { id: 'edit.redo', label: 'Redo', accelerator: 'Cmd+Shift+Z', click: () => edit('redo') }, // P4-B2 K6
+        { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' },
         { id: 'edit.selectAll', label: 'Select All', accelerator: 'Cmd+A', click: () => selectAll(emit) },
       ],
@@ -163,4 +181,6 @@ export function startMenu(deps: { settings(): Settings; emit: Emit }): AppMenu {
 
 export function registerMenuHandlers(menu: AppMenu): void {
   registerMainHandler('layout.setEnabledActions', ({ actions }) => menu.setEnabled(actions));
+  // P4-B2 K6: an Edit ▸ Undo or Redo the asking page's editors did not claim, run natively in that page (its focused frame)
+  registerMainHandler('layout.nativeEdit', ({ op }, { sender }) => void sender[op]());
 }
