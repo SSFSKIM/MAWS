@@ -43,8 +43,8 @@ const json = <T = Record<string, unknown>>(result: McpToolResult): T => {
 describe('the document tools on the maws server', () => {
   it('lists the four document tools after A’s, each as `tools/list` describes it', () => {
     const names = [...tools.keys()];
-    expect(names.slice(-5)).toEqual(['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve', 'artifact_search' /* P4-B4, after B's */]);
-    expect([...tools.values()].map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations }))).toEqual(mawsToolList());
+    expect(names.slice(-6)).toEqual(['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve', 'artifact_search' /* P4-B4, after B's */, 'message' /* P4-R7 */]);
+    expect([...tools.values()].map(({ name, title, description, inputSchema, annotations, _meta }) => ({ name, title, description, inputSchema, annotations, ...(_meta && { _meta }) }))).toEqual(mawsToolList());
   });
 
   it('creates a document from markdown through artifact_create, reads it in the kind’s format and edits it', async () => {

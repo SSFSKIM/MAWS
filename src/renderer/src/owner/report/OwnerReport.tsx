@@ -99,7 +99,8 @@ function AnsweredQuestion({ appSessionId, text, choices, mark, live, held }: { a
   return <QuestionCard text={text} choices={choices} state={mark?.question ?? null} live={live} held={held} actions={actions} busy={busy} note={note} unreported={unreported} />;
 }
 
-function MessageCard({ text, live }: { text: string; live: boolean }) {
+// P4-R7: also a message tool's message (`ToHumanMessageRow`), so a span and a call read alike in the report.
+export function MessageCard({ text, live }: { text: string; live: boolean }) {
   return (
     <section className="owner-card" data-owner-card="to-human" aria-label={LABEL['to-human']}>
       <div className="owner-card-label">{LABEL['to-human']}</div>

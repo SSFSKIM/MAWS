@@ -1,6 +1,6 @@
 // The one compact-summary preview (E11 F2b, plan 2.6): owner-aware, chosen before truncation.
 import { describe, expect, it } from 'vitest';
-import { markFreeText, previewLine } from './preview';
+import { markFreeText, messageLine, previewLine } from './preview';
 
 describe('previewLine', () => {
   it('a plain answer is its first non-blank line, ANSI stripped and trimmed, capped', () => {
@@ -59,6 +59,32 @@ describe('previewLine', () => {
   });
 });
 
+
+// P4-R7: a message tool's text is a to-human message already, so its preview is its first line, not a choice among
+// marks: the same words a `<message>` span around it would preview as.
+describe('messageLine', () => {
+  it('is the first non-blank line, ANSI stripped and trimmed, capped; null when nothing is left', () => {
+    expect(messageLine('\n\n  Stage 2 is done.\nMoving on to stage 3.', 160)).toBe('Stage 2 is done.');
+    expect(messageLine('\u001b[1;36mColoured\u001b[0m line', 160)).toBe('Coloured line');
+    expect(messageLine('x'.repeat(300), 160)).toBe('x'.repeat(160));
+    expect(messageLine(' \n\t\n ', 160)).toBeNull();
+    expect(messageLine('<message></message>', 160)).toBeNull();
+  });
+
+  it('reads as the same words in a span preview: the owner’s tags dropped, so a tag alone on the first line is skipped', () => {
+    const body = 'The migration ran; three tables changed.';
+    expect(messageLine(`<to-human>\n${body}\n</to-human>`, 160)).toBe(body);
+    expect(messageLine(body, 160)).toBe(previewLine(`<message>${body}</message>`, 160));
+    // a mark inside the message is not chosen over its first line, as `previewLine` would choose an essential
+    expect(messageLine('Done.\n<essential>Mind the cache.</essential>', 160)).toBe('Done.');
+    expect(messageLine('<essential>Mind the cache.</essential> Then deploy.', 160)).toBe('Mind the cache. Then deploy.');
+  });
+
+  it('grammar 2: tags quoted in code stay as written, inline or across a line break', () => {
+    expect(messageLine('Use `<message>` to mark a message.', 160)).toBe('Use `<message>` to mark a message.');
+    expect(messageLine('Quote `<to-human>\nand </to-human>` as written.', 160)).toBe('Quote `<to-human>');
+  });
+});
 
 // P2-F (the owner's ruling at P2-F's sitting, A5.3): a side thread's finished summary in its parent's transcript showed
 // the literal tags; the card reads the marks, the row shows the words.

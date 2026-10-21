@@ -39,6 +39,7 @@ export function getBinaryConfig(): BinaryConfig {
 // P2-C2: the server whose `ask` replaces the native tool, and the native tool's name (the engine's `--disallowedTools`)
 const MAWS_SERVER = 'maws';
 export const NATIVE_ASK_TOOL = 'AskUserQuestion';
+export const MAWS_MESSAGE_TOOL = `mcp__${MAWS_SERVER}__message`; // P4-R7
 
 export const GATEWAY_AUTH_TOKEN = 'claudeusage-local-gateway'; // D-19: a non-secret marker; the relay substitutes the real token
 export const CHARTER_PIN = '87f8c7881119ea670901205dae35917d3751459c'; // the parent pin this child was authored against
@@ -245,7 +246,9 @@ export function buildLaunch(
   // P2-C2 (the P2 spec's Decision Log 33): where the launch offers the `maws` server, its `ask` is the one ask, so the
   // native AskUserQuestion is withdrawn from the model's view; without the server the native tool stays, the only ask.
   // The request-card path for native asks is untouched (imported and taken-over transcripts carry them).
-  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL);
+  // P4-R7: and its message tool is allowed, since the engine otherwise asks a permission for each call
+  // (pass3/p4-r7-tool), and a message must never wait on one
+  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL, '--allowedTools', MAWS_MESSAGE_TOOL);
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {

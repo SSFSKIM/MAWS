@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  carriesFullContract, CONTRACT_HEADER, FULL_CONTRACT, LEGACY_CONTRACT_1, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT,
-  TO_HUMAN_SUPPLEMENT_VERSION,
+  carriesFullContract, CONTRACT_HEADER, FULL_CONTRACT, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT,
+  TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from './contract';
+import { MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL } from './message-call';
 import type { MessageUuid } from '../graph/ids';
 import { marksOf } from './marks';
 
@@ -41,62 +42,86 @@ describe('contract 1 (Design §1), MAWS’s full contract until contract 5', () 
   });
 });
 
-// P2-C2: the owner's answer on Decision Log 31 (2026-10-13, parity with the plugin's style) swapped the one constant.
-describe('the full contract: contract 5', () => {
-  const words = TO_HUMAN_CONTRACT.split('\n').slice(1).join(' ').split(/\s+/).filter(Boolean);
+const wordsOf = (text: string) => text.split('\n').slice(1).join(' ').split(/\s+/).filter(Boolean);
+// The message rule as both texts that state it word it (P4-R7): the tool, when, and the reason the model can carry.
+const MESSAGE_RULE = ['A message you send before another tool call goes through `mcp__maws__message` (its `text` the message, in Markdown), called in the same response as that tool call', 'written as text there, it comes back as a paraphrase that never reaches them'];
 
-  it('is contract 5, of the message-tool shape, opening with its header', () => {
-    expect(FULL_CONTRACT.version).toBe(5);
-    expect(TO_HUMAN_CONTRACT_VERSION).toBe(5);
+// P4-R7 (the P4 spec's Decision Log 46): contract 5 with the message tool, MAWS's full contract from now on.
+describe('the full contract: contract 7', () => {
+  it('is contract 7, of the message-tool shape, opening with its header', () => {
+    expect(FULL_CONTRACT.version).toBe(7);
+    expect(TO_HUMAN_CONTRACT_VERSION).toBe(7);
     expect(FULL_CONTRACT.text).toBe(TO_HUMAN_CONTRACT);
-    expect(TO_HUMAN_CONTRACT.startsWith(`${CONTRACT_HEADER(5)}\n\n`)).toBe(true);
+    expect(TO_HUMAN_CONTRACT.startsWith(`${CONTRACT_HEADER(7)}\n\n`)).toBe(true);
     expect(styleShape(FULL_CONTRACT.version)).toBe('message-tool');
   });
 
-  it('names the one mark and MAWS’s ask tool, under 250 words, asks for none of the retired marks, and reads as no mark itself', () => {
-    expect(words.length).toBeLessThan(250);
-    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'a user message naming the askId', 'native AskUserQuestion only where', 'never in code', 'your answers included']) {
+  it('states the message rule beside the one mark and MAWS’s ask tool, under 320 words, and reads as no mark itself', () => {
+    expect(wordsOf(TO_HUMAN_CONTRACT).length).toBeLessThan(320); // contract 5 was 249; the rule adds its paragraph
+    for (const needle of [...MESSAGE_RULE, 'Every other message goes inside `<message>…</message>`', 'Where `mcp__maws__message` is missing, a span is the only form', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'a user message naming the askId', 'native AskUserQuestion only where', 'never in code', 'your answers included']) {
       expect(TO_HUMAN_CONTRACT).toContain(needle);
     }
-    for (const retired of ['need-input', 'insight', 'essential', 'to-human>', 'mcp__doperpowers__', 'mcp__sminos__']) expect(TO_HUMAN_CONTRACT).not.toContain(retired);
+    for (const retired of ['need-input', 'insight', 'essential', 'to-human>', 'mcp__doperpowers__', 'mcp__sminos__', PLUGIN_MESSAGE_TOOL]) expect(TO_HUMAN_CONTRACT).not.toContain(retired);
     expect(marksOf(TO_HUMAN_CONTRACT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
     expect(TO_HUMAN_CONTRACT.length).toBeLessThanOrEqual(16_384); // the launch spec's bound
+    expect(TO_HUMAN_CONTRACT).toContain(`\`${MAWS_MESSAGE_TOOL}\``); // the readers' name for it
   });
 
-  it('a style declaring exactly contract 5 carries it; no other version does', () => {
-    expect(carriesFullContract(5)).toBe(true);
-    for (const declared of [1, 2, 3, 4, 6, null]) expect(carriesFullContract(declared)).toBe(false);
+  it('keeps contract 5’s other paragraphs word for word', () => {
+    const tail = (text: string) => text.split('\n\n').slice(2).join('\n\n');
+    expect(tail(TO_HUMAN_CONTRACT)).toBe(tail(LEGACY_CONTRACT_5.text));
+  });
+
+  it('a style declaring exactly contract 7 carries it; no other version does, 5 included', () => {
+    expect(carriesFullContract(7)).toBe(true);
+    for (const declared of [1, 2, 3, 4, 5, 6, 8, null]) expect(carriesFullContract(declared)).toBe(false);
   });
 });
 
-// P2-C2 (the P2 spec's Decision Log 31)
+// Contract 5 (P2-C2), MAWS's full contract until P4-R7: what sessions recorded under it carry.
+describe('contract 5, recorded by sessions launched before contract 7', () => {
+  it('opens with its header and names no message tool', () => {
+    expect(LEGACY_CONTRACT_5.version).toBe(5);
+    expect(LEGACY_CONTRACT_5.text.startsWith(`${CONTRACT_HEADER(5)}\n\n`)).toBe(true);
+    expect(LEGACY_CONTRACT_5.text).toContain('goes inside `<message>…</message>`, one message per span, wherever written');
+    expect(LEGACY_CONTRACT_5.text).not.toContain('mcp__maws__message');
+    expect(wordsOf(LEGACY_CONTRACT_5.text).length).toBe(249);
+  });
+});
+
+// P2-C2 (the P2 spec's Decision Log 31). P4-R7 adds no boundary: the plugin's 6, which states the message rule, keeps
+// the shape of its 3 and 4, which do not, and supplement 2 states the rule beside either (the architect, 2026-10-21).
 describe('the shape rule: what a style declaring a contract version carries', () => {
   it.each([
     [1, 'marks'],
     [2, 'marks'],
     [3, 'message-tool'],
-    [4, 'message-tool'],
+    [4, 'message-tool'], // the owner's style today
+    [5, 'message-tool'], // MAWS's full contract before 7
+    [6, 'message-tool'], // the plugin's style with its message tool
+    [7, 'message-tool'], // MAWS's full contract
     [17, 'message-tool'], // a later key that keeps the shape needs no MAWS change
     [0, 'none'],
+    [2.5, 'none'],
     [null, 'none'],
   ] as const)('%s is %s', (declared, shape) => {
     expect(styleShape(declared)).toBe(shape);
   });
 });
 
-describe('the supplement (P2-C2)', () => {
-  const words = TO_HUMAN_SUPPLEMENT.split('\n').slice(1).join(' ').split(/\s+/).filter(Boolean);
-
-  it('opens with its own header, beside the contract’s, and is version 1', () => {
-    expect(TO_HUMAN_SUPPLEMENT_VERSION).toBe(1);
-    expect(SUPPLEMENT_HEADER(1)).toBe('# Messages to the human (MAWS to-human supplement 1)');
-    expect(TO_HUMAN_SUPPLEMENT.startsWith(`${SUPPLEMENT_HEADER(1)}\n\n`)).toBe(true);
+describe('the supplement: supplement 2 (P4-R7)', () => {
+  it('opens with its own header, beside the contract’s, and is version 2', () => {
+    expect(TO_HUMAN_SUPPLEMENT_VERSION).toBe(2);
+    expect(SUPPLEMENT.text).toBe(TO_HUMAN_SUPPLEMENT);
+    expect(SUPPLEMENT_HEADER(2)).toBe('# Messages to the human (MAWS to-human supplement 2)');
+    expect(TO_HUMAN_SUPPLEMENT.startsWith(`${SUPPLEMENT_HEADER(2)}\n\n`)).toBe(true);
     expect(TO_HUMAN_SUPPLEMENT.startsWith(CONTRACT_HEADER(1).split('contract')[0]!)).toBe(true); // one family of headers
   });
 
-  it('names the one mark and the ask tool of a MAWS session, under 120 words, and nothing of the retired marks', () => {
-    expect(words.length).toBeLessThan(120);
-    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'Neither `mcp__sminos__AskUserQuestion` nor `mcp__doperpowers__AskUserQuestion` is available here', 'native AskUserQuestion only where', 'never inside code', 'your answers included']) {
+  // It goes beside a style of 3 or 4, which says nothing of a message tool, and one of 6, which names the plugin's.
+  it('states the message rule, names MAWS’s tools and says the plugin’s message tool is not here, under 170 words', () => {
+    expect(wordsOf(TO_HUMAN_SUPPLEMENT).length).toBeLessThan(170);
+    for (const needle of [...MESSAGE_RULE, 'Every other message goes inside `<message>…</message>`, the one mark here too', `\`${PLUGIN_MESSAGE_TOOL}\` is not available here`, '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'Neither `mcp__sminos__AskUserQuestion` nor `mcp__doperpowers__AskUserQuestion` is available here', 'native AskUserQuestion only where', 'never inside code', 'your answers included']) {
       expect(TO_HUMAN_SUPPLEMENT).toContain(needle);
     }
     for (const retired of ['need-input', 'insight', 'essential', 'to-human>']) expect(TO_HUMAN_SUPPLEMENT).not.toContain(retired);
@@ -104,5 +129,15 @@ describe('the supplement (P2-C2)', () => {
 
   it('quotes its mark in code, so it reads as no mark itself', () => {
     expect(marksOf(TO_HUMAN_SUPPLEMENT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
+  });
+});
+
+// Supplement 1 (P2-C2), what sessions launched beside a message-tool style before P4-R7 recorded.
+describe('supplement 1, recorded by sessions launched before supplement 2', () => {
+  it('opens with its header and names the ask tool and no message tool', () => {
+    expect(LEGACY_SUPPLEMENT_1.version).toBe(1);
+    expect(LEGACY_SUPPLEMENT_1.text.startsWith(`${SUPPLEMENT_HEADER(1)}\n\n`)).toBe(true);
+    expect(LEGACY_SUPPLEMENT_1.text).toContain('`mcp__maws__ask`');
+    expect(LEGACY_SUPPLEMENT_1.text).not.toContain('mcp__maws__message');
   });
 });

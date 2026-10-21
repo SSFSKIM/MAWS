@@ -1,0 +1,258 @@
+{
+ "summary": {
+  "before": {
+   "runs": 5,
+   "cost": 0.2535,
+   "midTool": 0,
+   "midSpan": 7,
+   "lost": 4,
+   "lostNeedingAction": 4,
+   "notesNarration": 0,
+   "notesUnjudged": 0,
+   "finalSpan": 5,
+   "finalNone": 0,
+   "messageCalls": 0,
+   "midTurnMessages": 11,
+   "lostShare": 0.364
+  },
+  "after": {
+   "runs": 5,
+   "cost": 0.2649,
+   "midTool": 11,
+   "midSpan": 0,
+   "lost": 0,
+   "lostNeedingAction": 0,
+   "notesNarration": 0,
+   "notesUnjudged": 0,
+   "finalSpan": 5,
+   "finalNone": 0,
+   "messageCalls": 11,
+   "midTurnMessages": 11,
+   "lostShare": 0
+  }
+ },
+ "runs": [
+  {
+   "arm": "before",
+   "scenario": "stages",
+   "rep": 0,
+   "cost": 0.07179739999999998,
+   "midTool": 0,
+   "midSpan": 3,
+   "notes": [],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 0,
+   "responses": 5
+  },
+  {
+   "arm": "before",
+   "scenario": "stages",
+   "rep": 1,
+   "cost": 0.0430254,
+   "midTool": 0,
+   "midSpan": 2,
+   "notes": [
+    {
+     "note": "Stage 2/4 complete: 34 of 37 missing labels restored from audio, though calls 0412, 0977, and 1203 need manual labeling. I'll mark those three as UNKNOWN for now and move on to stage 3.",
+     "addressed_to_human": true,
+     "needs_action_from_human": true,
+     "why": "Reports stage progress to the human and flags three calls that need manual labeling.",
+     "usage": {
+      "input_tokens": 335,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 55,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "service_tier": "standard",
+      "inference_geo": "global",
+      "speed": "standard"
+     }
+    }
+   ],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 0,
+   "responses": 5
+  },
+  {
+   "arm": "before",
+   "scenario": "stages",
+   "rep": 2,
+   "cost": 0.040484,
+   "midTool": 0,
+   "midSpan": 2,
+   "notes": [
+    {
+     "note": "Stage 2 of 4 restored 34 of the 37 missing labels; calls 0412, 0977, and 1203 still need manual labeling. I'll continue with the remaining stages now.",
+     "addressed_to_human": true,
+     "needs_action_from_human": true,
+     "why": "Progress report to the human flagging three calls that still need manual labeling.",
+     "usage": {
+      "input_tokens": 320,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 53,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "service_tier": "standard",
+      "inference_geo": "global",
+      "speed": "standard"
+     }
+    }
+   ],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 0,
+   "responses": 5
+  },
+  {
+   "arm": "before",
+   "scenario": "deploy",
+   "rep": 0,
+   "cost": 0.05715560000000001,
+   "midTool": 0,
+   "midSpan": 0,
+   "notes": [
+    {
+     "note": "Heads up: the TLS cert for staging.example.com expires in 2 days and only the account owner can renew it via the registrar's dashboard, so I can't handle that step myself. I'll proceed with step 3 while you take care of the renewal.",
+     "addressed_to_human": true,
+     "needs_action_from_human": true,
+     "why": "warns the human about the expiring cert and asks them to renew it",
+     "usage": {
+      "input_tokens": 336,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 51,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "service_tier": "standard",
+      "inference_geo": "global",
+      "speed": "standard"
+     }
+    }
+   ],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 0,
+   "responses": 5
+  },
+  {
+   "arm": "before",
+   "scenario": "deploy",
+   "rep": 1,
+   "cost": 0.041034799999999996,
+   "midTool": 0,
+   "midSpan": 0,
+   "notes": [
+    {
+     "note": "Heads up: staging.example.com's TLS cert expires in 2 days and only you, as account owner, can renew it via the registrar's dashboard. I'll proceed with step 3 while you handle that.",
+     "addressed_to_human": true,
+     "needs_action_from_human": true,
+     "why": "Warns the human that the cert expires soon and asks them to renew it as account owner.",
+     "usage": {
+      "input_tokens": 323,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 57,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "service_tier": "standard",
+      "inference_geo": "global",
+      "speed": "standard"
+     }
+    }
+   ],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 0,
+   "responses": 4
+  },
+  {
+   "arm": "after",
+   "scenario": "stages",
+   "rep": 0,
+   "cost": 0.07868979999999999,
+   "midTool": 3,
+   "midSpan": 0,
+   "notes": [],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 3,
+   "responses": 5
+  },
+  {
+   "arm": "after",
+   "scenario": "stages",
+   "rep": 1,
+   "cost": 0.0479372,
+   "midTool": 3,
+   "midSpan": 0,
+   "notes": [],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 3,
+   "responses": 5
+  },
+  {
+   "arm": "after",
+   "scenario": "stages",
+   "rep": 2,
+   "cost": 0.047379000000000004,
+   "midTool": 3,
+   "midSpan": 0,
+   "notes": [],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 3,
+   "responses": 5
+  },
+  {
+   "arm": "after",
+   "scenario": "deploy",
+   "rep": 0,
+   "cost": 0.054384,
+   "midTool": 1,
+   "midSpan": 0,
+   "notes": [],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 1,
+   "responses": 4
+  },
+  {
+   "arm": "after",
+   "scenario": "deploy",
+   "rep": 1,
+   "cost": 0.036490400000000006,
+   "midTool": 1,
+   "midSpan": 0,
+   "notes": [],
+   "finalSpan": 1,
+   "finalNone": 0,
+   "messageCalls": 1,
+   "responses": 4
+  }
+ ]
+}

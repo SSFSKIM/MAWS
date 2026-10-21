@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
-import { CONTRACT_HEADER, LEGACY_CONTRACT_1, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import { slugOf } from '../../engine-host/fs/paths';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
@@ -17,10 +17,14 @@ import type { HostDispatch } from '../ipc/router';
 import { decideFlags, desiredSource, laneOn, OwnerChannelLaunches, ownerChannelLaunch, type OwnerLaunchSetup } from './launch';
 import type { RecordedState } from './prompt-state';
 
-const CURRENT = `contract:${TO_HUMAN_CONTRACT_VERSION}` as const; // P2-C2: contract 5
+const CURRENT = `contract:${TO_HUMAN_CONTRACT_VERSION}` as const; // P4-R7: contract 7
 const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION);
 
-const SUPP = 'supplement:1' as const; // P2-C2
+const SUPP = `supplement:${TO_HUMAN_SUPPLEMENT_VERSION}` as const; // P4-R7: supplement 2
+
+it('MAWS appends contract 7 and supplement 2, and advertises 7 (P4-R7)', () => {
+  expect([CURRENT, SUPP, ADVERTISED]).toEqual(['contract:7', 'supplement:2', '7']);
+});
 
 describe('decideFlags: the decision table (Design §2; P2-C2 adds the supplement), with the flag declared', () => {
   const cell = (desired: Parameters<typeof decideFlags>[0], recorded: RecordedState) => {
@@ -41,9 +45,14 @@ describe('decideFlags: the decision table (Design §2; P2-C2 adds the supplement
     ['external-style-plus-supplement', 'unrecorded', { append: 'supplement', off: false, applied: 'external-style-plus-supplement' }],
     ['external-style-plus-supplement', CURRENT, { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }], // the contract leaves at once
     ['external-style-plus-supplement', 'contract:1', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
-    ['maws-contract', 'contract:1', { append: 'contract', off: true, applied: 'maws-contract' }], // contract 1 gives way to 5 at once
+    ['maws-contract', 'contract:1', { append: 'contract', off: true, applied: 'maws-contract' }], // contract 1 gives way to 7 at once
+    ['maws-contract', 'contract:5', { append: 'contract', off: true, applied: 'maws-contract' }], // P4-R7: so does contract 5
+    ['external-style-plus-supplement', 'contract:5', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
+    ['external-compatible-style', 'contract:5', { append: null, off: true, applied: 'external-compatible-style' }],
     ['external-style-plus-supplement', SUPP, { append: 'supplement', off: false, applied: 'external-style-plus-supplement' }],
-    ['external-style-plus-supplement', 'supplement:2', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
+    ['external-style-plus-supplement', 'supplement:1', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }], // P4-R7: supplement 1 gives way to 2
+    ['maws-contract', 'supplement:1', { append: 'contract', off: true, applied: 'maws-contract' }],
+    ['external-style-plus-supplement', 'supplement:3', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }], // a version MAWS never appended
     ['external-style-plus-supplement', 'none', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
     ['off', 'unrecorded', { append: null, off: false, applied: 'off' }],
     ['off', CURRENT, { append: null, off: true, applied: 'off' }],
@@ -68,6 +77,10 @@ describe('decideFlags without the flag: applied stays what the snapshot keeps, u
     ['off', CURRENT, 'maws-contract'],
     ['off', 'contract:2', 'maws-contract'],
     ['off', SUPP, 'external-style-plus-supplement'],
+    // P4-R7: a session recorded under contract 5 or supplement 1 keeps it, the message rule missing, until it compacts
+    ['maws-contract', 'contract:5', 'maws-contract'],
+    ['external-style-plus-supplement', 'supplement:1', 'external-style-plus-supplement'],
+    ['external-style-plus-supplement', 'contract:5', 'maws-contract'],
   ] as const)('desired %s, recorded %s: no "off", applied %s', (desired, recorded, applied) => {
     expect(decideFlags(desired, recorded, false)).toEqual({ append: appends[desired] ?? null, off: false, offUnavailable: true, applied });
   });
@@ -90,10 +103,10 @@ describe('desiredSource: the shape rule (P2-C2)', () => {
     expect(desiredSource(on, { shape, contract: shape === 'marks' ? 1 : shape === 'message-tool' ? 4 : null })).toBe(source);
   });
 
-  it('a style declaring MAWS’s own full contract (5) gets nothing appended', () => {
-    expect(desiredSource(true, { shape: 'message-tool', contract: 5 })).toBe('external-compatible-style');
-    expect(desiredSource(true, { shape: 'message-tool', contract: 6 })).toBe('external-style-plus-supplement');
-    expect(desiredSource(false, { shape: 'message-tool', contract: 5 })).toBe('off');
+  it('a style declaring MAWS’s own full contract (7) gets nothing appended; every other message-tool style gets the supplement', () => {
+    expect(desiredSource(true, { shape: 'message-tool', contract: 7 })).toBe('external-compatible-style');
+    for (const contract of [3, 4, 5, 6, 8]) expect(desiredSource(true, { shape: 'message-tool', contract })).toBe('external-style-plus-supplement'); // P4-R7: 5 lacks the message rule
+    expect(desiredSource(false, { shape: 'message-tool', contract: 7 })).toBe('off');
   });
 });
 
@@ -175,7 +188,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
   it('a new session with the lane on appends the contract, sets the variable and records unrecorded → maws-contract', async () => {
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec({ extraSettings: { env: { CUA_BROWSER_BACKENDS: '/sock' } } }), { kind: 'new', transcriptOf: null });
     expect(decided.appendSystemPrompt).toBe(TO_HUMAN_CONTRACT);
-    expect(decided.appendSystemPrompt!.startsWith(CONTRACT_HEADER(5))).toBe(true);
+    expect(decided.appendSystemPrompt!.startsWith(CONTRACT_HEADER(7))).toBe(true); // P4-R7
     expect(decided.systemPromptSnapshot ?? null).toBeNull();
     expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/sock', [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
     expect(decision).toMatchObject({ appSessionId: record, laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract', style: 'default' });
@@ -200,6 +213,26 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     expect(decision).toMatchObject({ desired: 'maws-contract', recorded: 'contract:1', snapshotOff: true, applied: 'maws-contract' });
     recordSnapshot(configHome, TO_HUMAN_CONTRACT);
     expect((await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record })).record).toMatchObject({ recorded: CURRENT, snapshotOff: false });
+  });
+
+  // P4-R7: a session MAWS gave contract 5 gets contract 7 (the message rule) at its next launch, as contract 1 got 5
+  it('a session recorded under contract 5, no style: contract 7 appended and "off" passed, once', async () => {
+    transcript(configHome, LEGACY_CONTRACT_5.text);
+    const { spec: decided, record: decision } = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off', extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '7' } } });
+    expect(decision).toMatchObject({ desired: 'maws-contract', recorded: 'contract:5', snapshotOff: true, applied: 'maws-contract' });
+    recordSnapshot(configHome, TO_HUMAN_CONTRACT);
+    expect((await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record })).record).toMatchObject({ recorded: 'contract:7', snapshotOff: false });
+  });
+
+  it('a session recorded under supplement 1 beside a contract-4 style gets supplement 2 and "off", once', async () => {
+    transcript(configHome, LEGACY_SUPPLEMENT_1.text);
+    messageToolStyle(configHome);
+    const { spec: decided, record: decision } = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off' });
+    expect(decision).toMatchObject({ desired: 'external-style-plus-supplement', recorded: 'supplement:1', snapshotOff: true, applied: 'external-style-plus-supplement' });
+    recordSnapshot(configHome, TO_HUMAN_SUPPLEMENT);
+    expect((await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record })).record).toMatchObject({ recorded: 'supplement:2', snapshotOff: false });
   });
 
   // P2-C2 (Decision Log 31): a message-tool style (the owner's doperpowers at 7.149.0 declares 4)
@@ -230,20 +263,32 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     recordSnapshot(configHome, TO_HUMAN_SUPPLEMENT);
     const next = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
     expect(next.spec.systemPromptSnapshot ?? null).toBeNull();
-    expect(next.record).toMatchObject({ recorded: 'supplement:1', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement' });
+    expect(next.record).toMatchObject({ recorded: SUPP, appended: true, snapshotOff: false, applied: 'external-style-plus-supplement' });
     expect(binaryCalls).toBe(1); // asked once, for the launch that wanted "off"
   });
 
   it('a style moving back from 4 to 2 drops the recorded supplement; a key bump keeping the shape changes nothing', async () => {
-    transcript(configHome, `${SUPPLEMENT_HEADER(1)}\n\nthe supplement`);
+    transcript(configHome, `${SUPPLEMENT_HEADER(TO_HUMAN_SUPPLEMENT_VERSION)}\n\nthe supplement`);
     messageToolStyle(configHome, 2);
     const marks = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
     expect(marks.spec.appendSystemPrompt ?? null).toBeNull();
-    expect(marks.record).toMatchObject({ desired: 'external-compatible-style', recorded: 'supplement:1', snapshotOff: true, applied: 'external-compatible-style' });
+    expect(marks.record).toMatchObject({ desired: 'external-compatible-style', recorded: SUPP, snapshotOff: true, applied: 'external-compatible-style' });
     messageToolStyle(configHome, 9);
     const later = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
     expect(later.spec.appendSystemPrompt).toBe(TO_HUMAN_SUPPLEMENT);
-    expect(later.record).toMatchObject({ desired: 'external-style-plus-supplement', recorded: 'supplement:1', snapshotOff: false });
+    expect(later.record).toMatchObject({ desired: 'external-style-plus-supplement', recorded: SUPP, snapshotOff: false });
+  });
+
+  // P4-R7: the plugin's style with its message tool keeps the shape and gets the same supplement; MAWS's own 7 none
+  it('a style declaring 6 gets supplement 2; one declaring 7 carries the contract and gets nothing', async () => {
+    messageToolStyle(configHome, 6);
+    const six = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
+    expect(six.spec.appendSystemPrompt).toBe(TO_HUMAN_SUPPLEMENT);
+    expect(six.record).toMatchObject({ desired: 'external-style-plus-supplement', applied: 'external-style-plus-supplement' });
+    messageToolStyle(configHome, 7);
+    const seven = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
+    expect(seven.spec.appendSystemPrompt ?? null).toBeNull();
+    expect(seven.record).toMatchObject({ desired: 'external-compatible-style', applied: 'external-compatible-style' });
   });
 
   it('a resume with the override off over a recorded contract passes "off", no append and no variable', async () => {
@@ -278,11 +323,11 @@ describe('ownerChannelLaunch over a scratch config home', () => {
   });
 
   it('a fork reads its parent’s transcript', async () => {
-    transcript(configHome, `${CONTRACT_HEADER(7)}\n\nan older contract`);
+    transcript(configHome, `${CONTRACT_HEADER(5)}\n\nan older contract`);
     const child = index.sessions.upsertFromSummary(summary({ directory: work })).record.appId;
     const forked = spec({ appSessionId: child, resume: { sessionId: ENGINE_ID, fork: true }, inheritGrantsFrom: record });
     const { record: decision } = await ownerChannelLaunch(s, forked, { kind: 'fork', transcriptOf: record });
-    expect(decision).toMatchObject({ appSessionId: child, recorded: 'contract:7', appended: true, snapshotOff: true });
+    expect(decision).toMatchObject({ appSessionId: child, recorded: 'contract:5', appended: true, snapshotOff: true });
   });
 
   it('reads the config home of the engine’s environment (s.env), never main’s process.env', async () => {

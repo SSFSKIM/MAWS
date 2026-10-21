@@ -1,10 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost } from './digest';
+import { parseJournalRow } from '@shared/wire/journal'; // P4-R7
+import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
-import { framesOf, loadJournal } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, framesOf, loadJournal } from '../../../test/support/fixtures';
 import { Normalizer } from '../../engine-host/normalizer'; // C12
 
 const APP = 'app-1' as AppSessionId;
@@ -281,6 +284,72 @@ describe('digest fold', () => {
     expect(seen.size).toBe(2000);
     expect(seen.has('e2099')).toBe(true);
     expect(seen.has('e0')).toBe(false);
+  });
+});
+
+// P4-R7: a message the model sent through a message tool is the session's last line once the tool accepted it. Its call
+// and its result arrive in different batches, so the read model keeps the calls awaiting results beside the ledger.
+describe('a message tool’s message as the last line', () => {
+  const call = (id: string, text: unknown, over: Record<string, unknown> = {}) => ev('tool.use', { toolUseId: id, toolName: 'mcp__maws__message', input: { text }, ...over });
+  const result = (id: string, over: Record<string, unknown> = {}) => ev('tool.result', { toolUseId: id, content: [{ type: 'text', text: 'sent' }], ...over });
+  const text = (words: string) => ev('assistant.block.complete', { block: { type: 'text', text: words } });
+  // The batches folded in turn as the read model folds them, with one session's state carried across them.
+  function lines(...batches: SessionEvent[][]): (string | null)[] {
+    const seen = new Set<string>();
+    const ledger = costLedger(emptyDigest(APP));
+    const messages: MessageCalls = new Map();
+    let digest = emptyDigest(APP);
+    return batches.map((batch) => (digest = foldEvents(digest, seen, batch, ledger, true, messages)).lastAssistantLine);
+  }
+
+  it('the call in one batch and its accepted result in the next: the message’s first line, once the result is in', () => {
+    expect(lines([ev('turn.started', {}), text('Looking first.'), call('c1', '\nStage 1 is done.\nMoving on.')], [result('c1')])).toEqual(['Looking first.', 'Stage 1 is done.']);
+    expect(lines([call('c1', 'x'.repeat(300), { toolName: 'mcp__to-human__message' })], [result('c1')])).toEqual([null, 'x'.repeat(160)]);
+  });
+
+  it('a refused result, or a call with no words, leaves the line it had', () => {
+    expect(lines([text('Looking first.'), call('c1', 'Stage 1 is done.')], [result('c1', { isError: true, content: 'MCP error: the server went away' })])).toEqual(['Looking first.', 'Looking first.']);
+    expect(lines([text('Looking first.'), call('c1', '  ')], [result('c1')])).toEqual(['Looking first.', 'Looking first.']);
+  });
+
+  it('a later text is the newer line', () => {
+    expect(lines([call('c1', 'Stage 1 is done.'), result('c1')], [text('All stages ran.')])).toEqual(['Stage 1 is done.', 'All stages ran.']);
+  });
+
+  it('a message call is no work: the activity stays the last tool’s through the call and its result', () => {
+    const seen = new Set<string>();
+    const ledger = costLedger(emptyDigest(APP));
+    const messages: MessageCalls = new Map();
+    const bash = ev('tool.use', { toolUseId: 'b1', toolName: 'Bash', input: { command: 'sh stage.sh 2' } });
+    const digest = foldEvents(emptyDigest(APP), seen, [ev('turn.started', {}), bash, call('c1', 'Stage 1 is done.')], ledger, true, messages);
+    expect(digest.activity).toBe('Running sh stage.sh 2');
+    expect(foldEvents(digest, seen, [result('c1')], ledger, true, messages)).toMatchObject({ activity: 'Running sh stage.sh 2', lastAssistantLine: 'Stage 1 is done.' });
+  });
+
+  it('a subagent’s call and result leave the parent’s line alone', () => {
+    expect(lines([text('Looking first.'), call('c1', 'Child found it.', CHILD)], [result('c1', CHILD)])).toEqual(['Looking first.', 'Looking first.']);
+  });
+
+  it('a call its turn ended without answering sent nothing, whatever arrives after the end', () => {
+    expect(lines([ev('turn.started', {}), text('Looking first.'), call('c1', 'Stage 1 is done.')], [ev('turn.ended', {})], [result('c1')])).toEqual(['Looking first.', 'Looking first.', 'Looking first.']);
+  });
+
+  it('one event on its own keeps no call waiting: a result folded alone is no message', () => {
+    expect(run([text('Looking first.'), call('c1', 'Stage 1 is done.'), result('c1')]).lastAssistantLine).toBe('Looking first.');
+  });
+
+  // The recorded session (spikes/protocol-probe/fixtures/p4/p4-r7-tool-stages.jsonl): three statuses through the tool,
+  // each in the same response as the next command, then the final message as a span; one batch per frame.
+  it('over the recorded wire, each status is the last line in turn once its result is in, then the final message', () => {
+    const rows = readFileSync(join(FIXTURE_DIR, 'p4', 'p4-r7-tool-stages.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => parseJournalRow(JSON.parse(line)));
+    const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+    const shown = lines(...rows.map((row) => normalizer.push(row))).filter((line, i, all) => line !== null && line !== all[i - 1]);
+    expect(shown).toEqual([
+      'Stage 1 of 4 is done. It indexed 1,240 call transcripts, and 37 of them are missing their speaker labels.',
+      'Stage 2 of 4 is done. It restored 34 of the 37 missing labels from the audio. Calls 0412, 0977 and 1203 could not be restored and need a person to label them. Moving on to stage 3.'.slice(0, 160),
+      'Stage 3 of 4 is done. The classifier is trained. Accuracy on the held-out 10% is 91.4%, down from 93.0% last week, a drop of 1.6 points.',
+      'Stage 4 of 4 is done, so the whole pipeline has run. It wrote `out/labels.csv` with 1,240 rows.', // the span's first line
+    ]);
   });
 });
 

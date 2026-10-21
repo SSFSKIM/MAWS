@@ -137,7 +137,8 @@ export function toHumanJournal(dir: string, startAt: number): string {
 // the sheet's answer writes are the frames of pass3/p1-maws-ask-async.jsonl (seq 4 to 20, 95, 104 to 107, 120) with only
 // the session id changed, and the native question the frames of question-roundtrip.jsonl (seq 136 to 140) cut to one
 // question. Two human turns:
-//   1. a `<message>`, then an async `mcp__maws__ask`: the host answers its call `asked` at once, and the replay holds at
+//   1. a `<message>`, then (P4-R7) a message through `mcp__maws__message` and an async `mcp__maws__ask` in one response:
+//      the host answers the first `sent` and the second `asked` at once, and the replay holds at
 //      the steer the sheet writes when the person submits; the first turn ends, and the steer's turn replies;
 //   2. a native AskUserQuestion: the engine's `can_use_tool` for it, held until the person answers its request card.
 export const SUPPLEMENT = {
@@ -146,6 +147,10 @@ export const SUPPLEMENT = {
   message: 'The migration ran: two columns added, nothing dropped.',
   askQuestion: 'Proceed?', // the recorded ask's one question (choices Yes and No)
   askReply: 'Going on with the next step.',
+  // P4-R7: a message sent through MAWS's message tool before the ask, in the ask's response (pass3/p4-r7-tool-stages'
+  // shape: the call, its tools/call, the host's `sent`, the engine's echo and the tool result)
+  toolMessage: 'The backup of legacy_users is in backups/legacy_users.sql, in case you want it before the next step.',
+  toolMessageId: 'toolu_01P4r7MessageCall',
   second: 'Ask me which colour to use.',
   question: 'Which color do you prefer?',
   choices: ['Red', 'Blue'],
@@ -153,7 +158,7 @@ export const SUPPLEMENT = {
 };
 
 export function supplementJournal(dir: string, startAt: number): string {
-  const { frame, session, push, id, lifecycle, running, prompt, echo, text, result, prelude, write } = scribe(startAt);
+  const { frame, session, push, now, id, lifecycle, running, prompt, echo, text, result, prelude, write } = scribe(startAt);
   const async = rowsOf('spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl');
   const recordedSession = async.find((row) => row.seq === 30)!.frame.session_id as string;
   // a recorded frame under this journal's engine session
@@ -177,6 +182,17 @@ export function supplementJournal(dir: string, startAt: number): string {
   push('in', init);
   echo(u1, SUPPLEMENT.first);
   text('msg_01P2c2Message', id(2), `<message>\n${SUPPLEMENT.message}\n</message>`, u1);
+  // P4-R7: the message call, in the ask's response before it; the host answers its tools/call itself
+  const messageCall = ask(95);
+  Object.assign(messageCall, { uuid: id(9), user_message_uuid: u1, user_message_uuids: [u1] });
+  Object.assign(messageCall.message as Record<string, unknown>, { content: [{ type: 'tool_use', id: SUPPLEMENT.toolMessageId, name: 'mcp__maws__message', input: { text: SUPPLEMENT.toolMessage }, caller: { type: 'direct' } }] });
+  push('in', messageCall);
+  const messageRequest = '5d7f1c2a-0000-4000-8000-0000000000a1';
+  push('in', { type: 'control_request', request_id: messageRequest, request: { subtype: 'mcp_message', server_name: 'maws', message: { method: 'tools/call', params: { name: 'message', arguments: { text: SUPPLEMENT.toolMessage }, _meta: { 'claudecode/toolUseId': SUPPLEMENT.toolMessageId, progressToken: 3 } }, jsonrpc: '2.0', id: 3 } } });
+  const sent = { mcp_response: { jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: 'sent' }] } } };
+  push('out', { type: 'control_response', response: { subtype: 'success', request_id: messageRequest, response: sent } });
+  push('in', { type: 'control_response', response: { subtype: 'success', request_id: messageRequest, response: sent } });
+  push('in', { type: 'user', message: { role: 'user', content: [{ tool_use_id: SUPPLEMENT.toolMessageId, type: 'tool_result', content: [{ type: 'text', text: 'sent' }] }] }, parent_tool_use_id: null, session_id: session, uuid: id(10), timestamp: now(), tool_use_result: [{ type: 'text', text: 'sent' }] });
   const call = ask(95); // the assistant's mcp__maws__ask tool_use (blocking: false)
   Object.assign(call, { uuid: id(3), user_message_uuid: u1, user_message_uuids: [u1] });
   push('in', call);

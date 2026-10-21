@@ -154,7 +154,7 @@ describe('launch contract builds the X6 command line and environment', () => {
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '--mcp-config', JSON.stringify({ mcpServers: { x: { command: 'node' } } }),
       '--max-budget-usd', '0.5',
-      '--disallowedTools', 'AskUserQuestion', // P2-C2: the app's initialize offers the maws server
+      '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__message', // P2-C2: the app's initialize offers the maws server; P4-R7: its message tool allowed
       SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never', effortLevel: 'high' }),
     ]);
     expect(plan.sessionId).toBe('11111111-1111-4111-8111-111111111111');
@@ -392,7 +392,7 @@ describe('the owner channel’s flags (P2-C)', () => {
       '--max-budget-usd', '0.5',
       '--append-system-prompt', CONTRACT,
       '--system-prompt-snapshot', 'off',
-      '--disallowedTools', 'AskUserQuestion', // P2-C2
+      '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__message', // P2-C2; P4-R7
       SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' }),
     ]);
   });
@@ -415,7 +415,7 @@ describe('the owner channel’s flags (P2-C)', () => {
 
   it('passes "off" alone, without an append (a lane switched off on a session that recorded the contract)', () => {
     const plan = buildLaunch(spec({ systemPromptSnapshot: 'off' }), CAPTURED, { ...OPTS, declaresSystemPromptSnapshot: true });
-    expect(tail(plan.args).slice(-6)).toEqual(['--system-prompt-snapshot', 'off', '--disallowedTools', 'AskUserQuestion', SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' })]);
+    expect(tail(plan.args).slice(-8)).toEqual(['--system-prompt-snapshot', 'off', '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__message', SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' })]);
     expect(plan.args).not.toContain('--append-system-prompt');
   });
 
@@ -442,5 +442,13 @@ describe('the native ask withdrawn where the maws server is offered (P2-C2)', ()
   it('leaves the native ask, the only one, on a launch without the maws server', () => {
     expect(asks(buildLaunch(spec(), CAPTURED, { ...OPTS, sdkMcpServers: [] }).args)).toEqual([]);
     expect(asks(buildLaunch(spec(), CAPTURED, { ...OPTS, sdkMcpServers: ['other'] }).args)).toEqual([]);
+  });
+
+  // P4-R7: in default mode the engine asks a permission for each call of an MCP tool (pass3/p4-r7-tool); a message must
+  // never wait on one, so the launch that offers the server allows its message tool, and nothing else of it
+  it('allows mcp__maws__message alone where the server is offered, and nothing where it is not', () => {
+    const allowed = (args: string[]) => args.flatMap((arg, k) => (arg === '--allowedTools' ? [args[k + 1]] : []));
+    expect(allowed(buildLaunch(spec(), CAPTURED, OPTS).args)).toEqual(['mcp__maws__message']);
+    expect(allowed(buildLaunch(spec(), CAPTURED, { ...OPTS, sdkMcpServers: [] }).args)).toEqual([]);
   });
 });
