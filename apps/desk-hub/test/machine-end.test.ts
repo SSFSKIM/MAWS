@@ -69,7 +69,7 @@ describe('a stream nobody reads, left alone', () => {
       renew: async () => {},
       fromMachine: async (context: { generation: number }, frames: UpFrame[]) => {
         const sent = await object.send({ t: 'have', project: 'p', have: {}, archive: false } as DownFrame, context.generation);
-        return sent === 'written' ? { applied: frames.length, stale: false, failed: false } : { applied: 0, stale: false, failed: true };
+        return sent === 'written' ? { applied: frames.length, stale: false, failed: false, refused: [] } : { applied: 0, stale: false, failed: true, refused: [] };
       },
     };
     const env = { PROJECT: { idFromName: (name: string) => name, get: () => project }, REGISTRY: { idFromName: (name: string) => name, get: () => ({ orgFrame: directory }) } };
