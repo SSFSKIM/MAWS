@@ -38,7 +38,13 @@ The states are §4.4's, binding. Everything below them (thresholds, selection de
 **D1. The states, as code.**
 - **IDLE and SEL:** the session's `selection`.
 - **EDIT(id):** `editingText`.
-- **ARMED(id):** derived, never stored: one selected element on a writable slide, outside EDIT, which is itself a text target. The TextBox for it mounts armed, and the flip to EDIT is `session.editText(id, placement)` on the mounted box: no remount and no focus change.
+- **ARMED(id):** derived, never stored: one selected element on a writable slide, outside EDIT, which is itself a text target, while the stage owns the keyboard. The TextBox for it mounts armed, and the flip to EDIT is `session.editText(id, placement)` on the mounted box: no remount and no focus change.
+- **The keyboard's owner** (`session.keyboard: 'stage' | 'away'`, the plan review's P2) is the input that makes ARMED and every other focus rule agree:
+  - It becomes `stage` on a press on the stage's content or on focus of the stage surface or the box.
+  - It becomes `away` on focus anywhere else: the inspector, the rail, the notes, a pin, the popover, F6's next region.
+  - When it is `away`, the selection is kept and the armed box unmounts, so nothing takes the focus back. When it returns, the box mounts armed again.
+  - A box takes the focus on mount only when armed with the keyboard on the stage, or in EDIT. The spike's prototype focused on every mount.
+  - M1 builds this contract, M4's F6 and A3 read it, and M5's pins and popover only ever set `away`.
 - **CELLS(table, a, b):** a selection of two or more `th`/`td` of one table, with the gesture's anchor cell kept by the overlay.
 - **PRESS and DRAG:** the overlay's pending press and gesture. The session gains a `dragging` flag, which the gesture hold (D17) and the inspector's settled version (D13) read.
 - **`composing`:** the box's `view.composing`, mirrored on the session so the overlay's keys and T20 can read it.
@@ -48,7 +54,7 @@ The states are §4.4's, binding. Everything below them (thresholds, selection de
 **D3. A press on the armed element is the stage's, and it moves no focus.**
 - While armed, the editor root takes no pointer events (`.deck-stage[data-armed] .deck-textbox { pointer-events: none }`), so presses reach the element's node and the overlay's PRESS.
 - `mousedown` on the armed element is cancelled, so the focus stays in the editor (I2: no focusin or focusout).
-- A 3 px move is DRAG(move) (T2). A release without one is T3: EDIT with the caret at `posAtCoords` of the release.
+- A 3 px move is DRAG(move) (T2). A release without one is a candidate for T3, which acts on the `click` that follows it (below).
 - A gesture the stage kept (a handle, a drag, a cancel) gives the focus back to the box at its end (the spike's `rearm`).
 
 **D4. T1 and T3.**
@@ -59,6 +65,14 @@ The states are §4.4's, binding. Everything below them (thresholds, selection de
   - a table gives EDIT of the cell under the pointer, caret at the point;
   - a press inside a multi-selection narrows it, as today.
 - A press with `detail ≥ 2` defers to the dblclick (T4).
+- **Where the click count comes from** (the plan review's P1). Pointer events carry no click count in Chromium, and the overlay's cancelled `pointerdown` suppresses the compatibility `mousedown`, so neither can be read for it.
+  - T3 therefore runs on the `click` event. `click` still fires after a cancelled pointerdown and a captured pointerup. It acts only when its `detail` is 1, the press that preceded it made no drag, and X was selected before that press.
+  - T5 runs on `dblclick`, as today.
+  - A drag sets a flag that the next `click` reads, and then drops.
+- **P12 is read as:** editing starts exactly once in a double-click, and from an unselected element no caret is drawn before the word.
+  - From an unselected element, the first click only selects and arms, with the caret hidden.
+  - From an already-armed element, the first `click` is T3 and places the caret, which the dblclick then extends to the word. That is the same single EDIT, and the same caret-then-word every macOS text view draws.
+- These sequences are tested twice: in the DOM tests with constructed events, and in the e2e on the pinned Electron with Playwright's mouse (real `clickCount`).
 
 **D5. T5: a double-click from any state edits the deepest text under the pointer** (the owner's departure from Canva's level entry, Decision Log 6).
 - D is the deepest text target or cell among the hits, ignoring scope. If D exists: select it, then EDIT with the word at the point selected. A placeholder gets select-all, an empty element a caret, and the scope becomes D's parent. If no text target is hit, the gesture drills one level, as today.
@@ -96,9 +110,15 @@ The states are §4.4's, binding. Everything below them (thresholds, selection de
 - In `src/main/menu.ts`, Undo and Redo become app items with ids `edit.undo` and `edit.redo`, keeping ⌘Z and ⇧⌘Z as accelerators, following Select All's pattern.
   - If the focused contents is not an app page (a webview, DevTools), the item runs that contents' `undo()` or `redo()`, as the role did.
   - Otherwise it emits `layout.edit {op}`.
-- The renderer keeps a registry of edit claimants (`registerEditClaimant({claims(el), undo(), redo()})`). The deck editor and the design workbench claim any focus inside their root. An unclaimed op calls back `layout.nativeEdit {op}`, and main runs the focused contents' command, so inputs, the composer and the document editor behave as under the role.
+- The renderer keeps a registry of edit claimants (`registerEditClaimant({claims(el), undo(), redo()})`).
+- A claimant claims by the editable surface that has focus, never by its root's containment (the plan review's P1). The deck editor and the design workbench claim only:
+  - the stage surface;
+  - the armed or edited text box;
+  - the deck's notes field, whose typing is the deck's stack today.
+- They claim nothing while read-only or while a history version is shown, the same conditions under which `DeckEditor`'s key handler steps aside. Inspector inputs, comment reply fields, the rail and any iframe stay native.
+- An unclaimed op calls back `layout.nativeEdit {op}`, and main runs the focused contents' command, so inputs, the composer and the document editor behave as under the role.
 - A ⌘Z the page cancels never reaches the item (Q3 on the real Mac, L8), so the editors' own keys are unchanged; the item serves the mouse and unhandled keys.
-- Tests: a menu unit test for the two items, a renderer claimant test, and an e2e case that nudges an element, clicks `edit.undo` by id (`getMenuItemById(...).click()`) and reads the element back in place, then does the same inside a plain input.
+- Tests: a menu unit test for the two items; a renderer claimant test covering an inspector input, a reply textarea, a history preview and a focused iframe inside the claimed root, all native; and an e2e case that nudges an element, clicks `edit.undo` by id (`getMenuItemById(...).click()`) and reads the element back in place, then does the same inside the inspector's width field.
 
 **D11. The IME cases** (I1 to I5; Decision Log 24's ruling 4: I2 replays the trace, I1, I3, I4 and I5 are simulated).
 - `e2e/presentations-ime.spec.ts` is rewritten against the unconditional ARMED state, with no `armed(mode)` calls. It keeps the spike's Q2 and Q3 assertions; the Q3 Edit › Undo assertion flips to "undoes the deck step" once D10 lands.
@@ -117,7 +137,8 @@ The states are §4.4's, binding. Everything below them (thresholds, selection de
   - an untouched field's Enter writes nothing;
   - the arrows step from the model's value;
   - "Mixed" compares rounded values.
-- Tests: in both the compiled and the uncompiled DOM projects, a real move and resize with the inspector mounted. X holds during the frames and shows the new whole number after the end; a cancel shows the old value; 1334.73 reads 1335 and an untouched Enter writes nothing; a layout pass alone updates W.
+- A cancelled gesture keeps what its frames wrote, as P3 does: the gestures write every frame and `end(false)` rolls nothing back, except a flow drag (the plan review's P2). Rollback on cancel is not this plan's change. So the inspector shows the model's value at the cancel, as at any gesture's end.
+- Tests: in both the compiled and the uncompiled DOM projects, a real move and resize with the inspector mounted. X holds during the frames and shows the new whole number after the end; a cancel shows the model's value at the cancel; 1334.73 reads 1335 and an untouched Enter writes nothing; a layout pass alone updates W.
 
 **D14. The stage's keyboard exit (row 253): F6 and ⇧F6 cycle the editor's regions**, keeping the selection.
 - The deck's ring is the toolbar, the filmstrip, the stage, the inspector (its last field), the notes and the open rail. The board's ring is the toolbar, the board list, the world and the inspector. An absent region is skipped.
@@ -161,6 +182,8 @@ The states are §4.4's, binding. Everything below them (thresholds, selection de
 - **The gesture hold:**
   - `DeckSession.beginDrag` and `endDrag` add a gesture reason to the replica's hold (one hold, two reasons, the provider unchanged). Awareness, acks, a host step 1 and X35 frames keep flowing.
   - At the drop, `endDrag(reassert)` releases the buffer before the step's closing cut, then rewrites the gesture's last values for any key a held remote write moved, so the owner's drop wins whatever the clientIDs.
+  - The re-assert re-reads, after the flush, whether the session still takes writes and whether each target still exists on a writable, unheld slide or board (the plan review's P2). It skips any target that no longer qualifies. The release, the cut and the gesture's state run in a `finally`, so a throw cannot leave the hold set.
+  - Tests: a remote write moving the dragged element, a held-board publish, and the element's deletion, each arriving under the hold.
   - The board drag in `World.tsx` uses the same calls.
   - The 5 s cap stays, and the probe records when it fires.
 - **Row 212:** the renderer seam's stand-in agent (`agentRepublishing`) goes. The class-1 case drives the host's real `artifact_publish` through the presentations perf seam, as `e2e/presentations-scale.spec.ts` row 2 does, with a fidelity regression: rising revisions, the agent's frames integrated as remote, and its last font size in the read-back.
@@ -172,6 +195,12 @@ The states are §4.4's, binding. Everything below them (thresholds, selection de
 **D19. Google Fonts fetched once (§2 item 4, row 176, R-8).**
 - **Where:** the engine host fetches. The portable logic lives in `src/artifacts/slides/google-faces.ts` (the request's canonical form, the repository directory rule, the `METADATA.pb` reader, the CSS2 parser) and the host module in `src/engine-host/presentations/google-faces.ts`. It covers decks and designs, which share `faces`.
 - **When:** on any commit (`service.onCommitted`) and on a document's load (a new `service.onLoad`), for an `href` face with no host record answering it, one family at a time. The publish never waits on the network.
+- **The request's identity** (the plan review's P2) is what is licensed, fetched, cached and checked for staleness, never the `href` alone.
+  - The `href` must name exactly one family, equal to the entry's `family`.
+  - A link naming other families, or a `text=` subset, is refused by name: a subset is not a face for the deck's text.
+  - The identity is that family with its axis tuple (`wght`, `ital`), the other parameters dropped.
+  - The CSS2 answer's `font-family` must equal it too.
+  - Fixtures: a mismatched family, a multi-family link and a subset link.
 - **The licence:**
   - The index file is `https://raw.githubusercontent.com/google/fonts/main/ofl/<dir>/METADATA.pb`, where `<dir>` is the family lowercased with everything outside `[a-z0-9]` removed.
   - It needs a top-level `name:` equal to the family and `license: "OFL"`.
@@ -268,6 +297,13 @@ D19: `egress.ts` with its source-guard test, `google-faces.ts` (portable and hos
 5. 2026-10-21: row 231's attribution is re-opened by measurement (D17), and 16 ms is a target, not a promise. Row 182 is re-deferred (D18).
 6. 2026-10-21: the Google Fonts design departs from the ledger's proposed X27 shape (refs, files per style and weight, `href` kept beside the record) and from the repository's TTFs, which are rejected on size (NotoSerifKR's variable TTF is 23.8 MB, over the 16 MB asset limit).
 7. 2026-10-21: the cluster click on a board fits its members. Figma's live check (prior art §1.5 item 10) never ran, and the fit's code exists.
+9. 2026-10-21 (the executor, at the plan's adversarial review; doperpowers:adversarial-reviewer, verdict needs-attention, six findings, each taken):
+   - (P1) K6's claimants claim by the focused editable surface, never by root containment, and claim nothing read-only or in a preview.
+   - (P1) T3 acts on `click`, since pointer events carry no click count, and P12 is read for the already-armed case.
+   - (P2) ARMED needs the stage to own the keyboard (`session.keyboard`), a contract shared by M1, M4 and M5.
+   - (P2) Google Fonts' licence, fetch, cache and staleness bind one canonical family identity, and multi-family and subset links are refused.
+   - (P2) The gesture hold's re-assert re-checks writability and targets after the flush, in a `finally`.
+   - (P2) A cancelled gesture keeps P3's committed frames, with no rollback, and the inspector shows the model's value.
 8. 2026-10-21 (the architect, at the outline): the outline accepted; departures 1 (on the condition that T5 still reaches the deepest text or cell whatever the scope, the owner's Decision Log 6), 4, 5 (the acceptance stays p95 ≤ 24 ms, 16 ms a recorded target, M0's measured floor recorded) and 6 (as an X27 amendment, on the condition that decks with today's `faces` shape load and export unchanged, with a test; the ledger row's new text in the hand-back) accepted. R-8's egress approved, the charter's dated line the architect's at landing; its rule, which `egress.ts`'s tests hold: GET only to exactly fonts.googleapis.com/css2, fonts.gstatic.com/s/ and raw.githubusercontent.com/google/fonts/ (METADATA.pb and OFL.txt), no cookies or credentials, no redirect leaving the allowlist, a timeout, a size cap and a content-type check per response, called only when a deck names a Google Fonts face and never at render, a failure or a non-OFL licence refusing by the face's name. `e2e:presentations-drag` joins `MEASURED_E2E` on this branch (the workflow reads the branch's own gate.yml), the line reported to the architect. Every Mac run goes through the architect with what, how long and whether quiet. M5 and M7 start at once off master in isolated worktrees; M0, M1, M3, M4 and M6 wait for the integration's landing.
 
 ## Residue rows (proposed; Logged, Owner, Item, Evidence, Closes when)
