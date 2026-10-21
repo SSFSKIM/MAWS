@@ -149,6 +149,24 @@ describe('the deck window', () => {
     expect(filters.live.has(4242)).toBe(false);
     await expect(used).rejects.toThrow();
   });
+
+  // P4 (the skewed-element row's re-review): a `drawn` picture is taken where the slide draws the element, its region (in
+  // slide px) moved by where the slide sits in its frame (a section the dialect lets translate)
+  it('captures a drawn job at its region moved by the slide’s offset in the frame', async () => {
+    const captured: unknown[] = [];
+    const contents = Object.assign(new EventEmitter(), {
+      id: 4343,
+      executeJavaScript: async () => ({ x: 300, y: 0, w: 1920, h: 1080 }),
+      capturePage: async (rect: unknown) => {
+        captured.push(rect);
+        return { toPNG: () => Buffer.from('png') };
+      },
+    });
+    const win = { webContents: contents, setBackgroundColor: () => {}, isDestroyed: () => false, destroy: () => {} };
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(win as never);
+    await withDeckWindow({}, new AbortController().signal, (deck) => deck.capture({ slideId: 's1', elementId: 'lean', mode: 'drawn', box: { x: 171.13, y: 200, w: 257.74, h: 100 } }));
+    expect(captured).toEqual([{ x: 471, y: 200, width: 258, height: 100 }]);
+  });
 });
 
 describe('the system a deck exports in', () => {

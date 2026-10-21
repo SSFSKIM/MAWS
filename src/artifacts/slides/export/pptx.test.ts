@@ -419,10 +419,15 @@ describe('the PPTX mapping: skewed elements', () => {
     expect(named(out, 'turned')).toMatchObject({ kind: 'shape', shape: 'rect', options: { rotate: 30 } });
   });
 
-  it('takes no picture of a skewed element the slide shows none of, which keeps its native object', () => {
-    const off: MeasuredElement = { ...body.elements[0]!, id: 'off', tag: 'div', box: { x: 2000, y: 200, w: 200, h: 100 }, rotate: 0, linear: lean, drawn: { x: 1920, y: 200, w: 0, h: 100 }, paint: fill };
+  // the re-review: a native stand-in's box need not stay within the skewed paint (a skewY(30deg) box just past the right
+  // edge turns back onto the slide), so a skewed element is its picture or nothing
+  it('draws nothing for a skewed element the slide shows none of, or one whose picture is missing', () => {
+    const off: MeasuredElement = { ...body.elements[0]!, id: 'off', tag: 'div', box: { x: 1921, y: 200, w: 200, h: 100 }, rotate: 30, linear: [1, Math.tan(Math.PI / 6), 0, 1], drawn: { x: 1920, y: 142, w: 0, h: 216 }, paint: fill };
     const measured = { slides: [{ ...body, elements: [off] }] };
     expect(pictureJobs(measured, 'named')).toEqual([]);
-    expect(pptxSlides(deck(), measured, { variant: 'named', pictures: new Map(), asset })[0]!.objects).toMatchObject([{ kind: 'shape', name: 'off', options: { x: inches(2000) } }]);
+    expect(pptxSlides(deck(), measured, { variant: 'named', pictures: new Map(), asset })[0]!.objects).toEqual([]);
+    const shown = { slides: [{ ...body, elements: [{ ...off, id: 'shown', drawn: { x: 100, y: 142, w: 200, h: 216 } }] }] };
+    expect(pictureJobs(shown, 'named').map((j) => j.key)).toEqual(['body/shown']);
+    expect(pptxSlides(deck(), shown, { variant: 'named', pictures: new Map(), asset })[0]!.objects).toEqual([]);
   });
 });

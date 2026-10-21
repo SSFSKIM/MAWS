@@ -95,7 +95,7 @@ export function pictureJobs(measured: MeasuredDeck, variant: PptxFontVariant): P
     for (const el of slide.elements) {
       const job = (mode: PictureJob['mode'], box = el.box) => jobs.push({ key: pictureKey(slide.id, el.id), slideId: slide.id, elementId: el.id, mode, box });
       // a skew has no native form (P4): the window's picture of the element as drawn (a group's own, when it paints; none
-      // where the slide shows none of it, which keeps its native object)
+      // where the slide shows none of it, which then draws nothing)
       if (el.drawn) {
         if (el.drawn.w > 0 && el.drawn.h > 0 && (el.tag !== 'div' || painted(el.paint) || el.paint.image)) job('drawn', el.drawn);
       }
@@ -507,8 +507,10 @@ export function atDrawnSize(el: MeasuredElement): MeasuredElement {
 }
 
 function elementObjects(drawn: MeasuredElement, ir: ElementIR | undefined, picture: string | undefined, options: PptxMapOptions): PptxObject[] {
-  // a skewed element: the window's picture of it as drawn, its turn and lean in it, so placed unturned where it is drawn
-  if (drawn.drawn && picture) return pictureObject({ ...drawn, box: drawn.drawn, rotate: 0 }, picture);
+  // a skewed element: the window's picture of it as drawn, its turn and lean in it, so placed unturned where it is drawn;
+  // or nothing (no native stand-in, whose box need not stay within the skewed paint: one the slide shows none of, an
+  // unpainted group, a picture not taken)
+  if (drawn.drawn) return pictureObject({ ...drawn, box: drawn.drawn, rotate: 0 }, picture);
   const el = atDrawnSize(drawn);
   switch (el.tag) {
     case 'img':

@@ -181,7 +181,8 @@ const MEASURE_ARGS: MeasureArgs = { textTags: [...TEXT_TAGS] };
 // place as the slide draws it (skewed, and clipped by its ancestors as the canvas clips it: moving an ancestor would make
 // it the containing block of what is pinned inside it); the elements measured on their own (pictured or mapped on their
 // own) are hidden within it, as a table's rows and cells are not, and the window captures the region the measure says it
-// paints (the job's box, in slide px, which are the window's with the frame at its origin).
+// paints (the job's box, in slide px), moved by the slide's own offset in its frame, which `drawn` answers (a section may
+// carry a transform of its own).
 export const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode']) => `(() => {
   const slide = ${JSON.stringify(slideId)}, eid = ${JSON.stringify(elementId)}, mode = ${JSON.stringify(mode)};
   document.body.setAttribute('data-shown', '');
@@ -217,6 +218,7 @@ export const STAGE = (slideId: string, elementId: string | null, mode: PictureJo
     return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height };
   };
   return frames().then(() => {
+    if (mode === 'drawn' && frame) { const s = frame.querySelector('.maws-slide').getBoundingClientRect(); const o = frame.getBoundingClientRect(); return { x: s.left - o.left, y: s.top - o.top, w: s.width, h: s.height }; }
     if (!isolated) { const sized = frame && frame.hasAttribute('data-size') ? frame.getBoundingClientRect() : null; return { x: 0, y: 0, w: sized ? sized.width : ${SLIDE_W}, h: sized ? sized.height : ${SLIDE_H} }; }
     const at = rectOf();
     target.setAttribute('data-maws-moved', '');
@@ -267,8 +269,9 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
       capture: async (job, size) => {
         const w = live();
         const staged = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true)) as { x: number; y: number; w: number; h: number };
-        // a `drawn` picture is taken in place, of the region the measure says the element paints (P4)
-        const box = job.mode === 'drawn' ? job.box : staged;
+        // a `drawn` picture is taken in place, of the region the measure says the element paints (P4), in slide px: moved
+        // by where the slide sits in the frame
+        const box = job.mode === 'drawn' ? { ...job.box, x: job.box.x + staged.x, y: job.box.y + staged.y } : staged;
         const x = Math.max(0, Math.floor(box.x));
         const y = Math.max(0, Math.floor(box.y));
         // an element larger than the slide: the window grows to hold it for this picture (fix wave 2)

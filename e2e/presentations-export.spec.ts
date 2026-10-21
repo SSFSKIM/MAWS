@@ -401,13 +401,16 @@ test('a collapsed table: its border inside its box and square, its background an
 // group's members with their connector, are the window's pictures of them as drawn, placed unturned at the box each is
 // drawn in; a turn alone keeps its native object.
 const SKEWED = (): Record<string, string> => ({
-  'project/deck.json': JSON.stringify({ v: 4, title: 'Skews', cover: 's1', order: ['s1'] }),
+  'project/deck.json': JSON.stringify({ v: 4, title: 'Skews', cover: 's1', order: ['s1', 's2'] }),
   'project/slides/s1.html': `<section id="s1" style="background:#ffffff">
 <div id="lean" style="position:absolute; left:200px; top:200px; width:200px; height:100px; background:#00ff00; transform:skewX(30deg)"></div>
 <div id="tilt" data-group="" style="position:absolute; left:800px; top:200px; width:300px; height:200px; transform:skewY(20deg)"><x-connector id="wire" x1="0" y1="100" x2="300" y2="100"></x-connector><p id="word" style="position:absolute; left:20px; top:20px; font-size:28px">Lean</p></div>
 <div id="plain" style="position:absolute; left:200px; top:600px; width:200px; height:100px; background:#00ff00; transform:rotate(30deg)"></div>
 <div id="cast" style="position:absolute; left:1300px; top:150px; width:200px; height:100px; background:#00ff00; box-shadow:0 40px 0 #0000ff; transform:skewX(30deg)"></div>
 <div id="wrap" style="width:500px"><div id="pin" style="position:absolute; left:50%; top:800px; width:200px; height:100px; background:#ff8800; transform:skewX(30deg)"></div></div>
+</section>`,
+  'project/slides/s2.html': `<section id="s2" style="background:#ffffff; transform:translate(300px, 0px)">
+<div id="moved" style="position:absolute; left:200px; top:200px; width:200px; height:100px; background:#ff00ff; transform:skewX(30deg)"></div>
 </section>`,
 });
 
@@ -458,6 +461,19 @@ test('a skewed element and a skewed group’s members export as pictures of them
   expect(pin.size[0]).toBeGreaterThanOrEqual(255);
   const [orange] = await pixelsOf(pin.png, [[pin.size[0] / 2, pin.size[1] / 2]]);
   expect([orange![0]! > 200, orange![1]! > 100 && orange![1]! < 170, orange![2]! < 60, orange![3]! > 200], 'orange at its centre').toEqual([true, true, true, true]);
+
+  // the re-review's: a slide whose section carries a translate of its own draws the element 300 px off the region the
+  // measure gives in slide px; the window takes it where it is drawn, so its picture is the box, not empty
+  const xml2 = await slideXml(zip, 2);
+  const moved = xml2.split(/(?=<p:(?:sp|pic)>)/).find((p) => p.includes('name="moved"'))!;
+  expect(moved.startsWith('<p:pic>')).toBe(true);
+  const rels2 = await zip.file('ppt/slides/_rels/slide2.xml.rels')!.async('string');
+  const rId2 = /<a:blip r:embed="(rId\d+)"/.exec(moved)![1];
+  const target2 = new RegExp(`Id="${rId2}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels2)![1]!;
+  const movedPng = Buffer.from(await zip.file(`ppt/media/${target2}`)!.async('uint8array'));
+  const [mw, mh] = pngSize(movedPng) as [number, number];
+  const [magenta] = await pixelsOf(movedPng, [[mw / 2, mh / 2]]);
+  expect([magenta![0]! > 200, magenta![1]! < 60, magenta![2]! > 200, magenta![3]! > 200], 'magenta at its centre').toEqual([true, true, true, true]);
 });
 
 // S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load
