@@ -28,7 +28,8 @@
 // carries that amount, less what the case holds back, as its `--max-budget-usd` (a row Resume takes none, and S6's run
 // no turn). That budget is reserved in `charges.jsonl` before the launch, against the session's own receipts (the
 // session counts as spent at the larger of the two), and settled at the case's end once its process is gone: to its
-// receipts, or kept whole when a prompt went unreceipted (a timeout or a crash before its result). So the next case,
+// receipts, or kept whole when a paid call went unreceipted (a timeout or a crash before its result; a side question
+// without a reservation of its own). So the next case,
 // or a fresh Playwright worker reading the run root, never sees a remainder a running session may still spend.
 // Case 2's side thread is a fork of the parent and takes the parent's own `--max-budget-usd` (Q12 as the owner ruled at
 // P2-F's sitting, D7; src/engine-host/launcher.ts): that number bounds each session, not their sum, so the test still
@@ -43,7 +44,8 @@
 // allocation once it settled are logged as the finding `fork overspend: <cost> > 0.08 (uncapped fork, Q12)` (the
 // helper's wording, from before D7) and fail case 2's spend assertion.
 // A paid call no receipt shows is charged, never left free: case 4's `/btw` side question is answered by a control
-// response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent. US$0.05: the side question of
+// response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent, as the parent's (which lets the
+// parent's launch reservation settle to its receipts rather than wait on that answer). US$0.05: the side question of
 // the recorded fixture (spikes/protocol-probe/fixtures/pass3/p1-side-question-session.jsonl) carried a context of about
 // 22,700 tokens (the cache reads of the main calls beside it); S3's parent at case 4 holds more (case 1's artifact turn
 // with its screenshot, case 3's Bash turn, the maws tools), about 30,000 to 35,000 tokens, which at Haiku 4.5's
@@ -410,7 +412,7 @@ function descendants(pid: number): number[] {
 }
 
 // The case's end: every session still running stopped, the app closed, the A-15 reading after it, every launch budget
-// settled to its session's receipts once no process of the case is left (kept whole for a prompt gone unreceipted), no
+// settled to its session's receipts once no process of the case is left (kept whole for a paid call gone unreceipted), no
 // breach in any of the case's readings (no key of the run's own), the owner plugins none, and no process of the app or
 // its engines left.
 // Every step runs whatever an earlier one threw (a session that would not stop, the app's cleanup rejecting): the
@@ -444,7 +446,7 @@ async function closeLive(live: Live): Promise<void> {
       }
     },
     ...[...live.reservations].map(([id, reserved]) => () => {
-      charge(live.note, settledReservation(reserved, sessionRows(live, id)));
+      charge(live.note, settledReservation(reserved, sessionRows(live, id), charges()));
       live.reservations.delete(id);
     }),
     () => live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`),
@@ -735,7 +737,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
     // charged before it is asked: its answer comes as a control response, with no result frame to receipt it
-    charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD });
+    charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD, sideQuestionOf: parent });
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
     const view = l.panel.locator(`[data-side-btw-view="${parent}"]`);
     await expect(view).toBeVisible({ timeout: 30_000 });
