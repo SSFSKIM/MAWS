@@ -15,7 +15,7 @@ import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
 import { dateFormats, formatClock } from '@shared/app/date-format';
 import { askModAnswers } from '../../../../../src/renderer/src/transcript/model/ask-mod';
-import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
+import { TranscriptActionsProvider } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
 import { MessageIcon } from '../../../../../src/renderer/src/transcript/view/rows/icons';
 import { chatBlocks, dayOf, type ChatBlock, type HumanItem, type QuietLine, type RunItem } from '../../conversation/chat';
@@ -24,6 +24,7 @@ import { settledText, DELIVERY_TEXT } from '../../conversation/words';
 import { deliveryKey, type OutboxItem, type RequestRecord } from '../../project/conversation';
 import { useProjectName } from '../../state/grid';
 import { questionsOf, RequestCard } from '../requests/RequestCard';
+import { BROWSER_ACTIONS } from './browser-actions';
 import { Bubble } from './Bubble';
 import { useDesk } from './desk-context';
 
@@ -40,15 +41,17 @@ const QUIET_SHOWN = 3;
  * the bottom is the scroll origin. The browser then keeps the tail itself (the scroll position stays 0 at the bottom as
  * rows are added below), a change above a reader who has scrolled back moves nothing they see (it lies at the far end
  * from the origin), and its own scroll anchoring holds them in place when a row below them arrives or grows. Nothing
- * here measures or anchors, except on an engine without scroll anchoring (`useAnchoringFallback`): it opens at the tail
- * because the origin is the tail, and a landing scrolls its card into view. The scroll position reads 0 at the bottom
- * and negative upward (Chrome, Safari, Firefox). The scroller is the rows' query container, as MAWS's is, so a wide
- * table or code block in a message breaks out as far as the pane allows and no further.
+ * here anchors content, except on an engine without scroll anchoring (`useAnchoringFallback`); a resize of the
+ * scroller itself is held on every engine (`useResizeHold`, or the fallback). It opens at the tail because the origin
+ * is the tail, and a landing scrolls its card into view. The scroll position reads 0 at the bottom and negative upward
+ * (Chrome, Safari, Firefox). The scroller is the rows' query container, as MAWS's is, so a wide table or code block in
+ * a message breaks out as far as the pane allows and no further.
  */
 export function StreamView({ items, outbox, landed = null, workLabel = 'on a computer' }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null; workLabel?: string }) {
   const landedRow = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
+  useResizeHold(scroller);
   useAnchoringFallback(scroller, list);
   const now = useDayClock();
   // A landing decides where the reader is: scrolled to its card.
@@ -87,19 +90,68 @@ export function StreamView({ items, outbox, landed = null, workLabel = 'on a com
 }
 
 /**
+ * The reader's place through a resize of the scroller itself, on an engine with scroll anchoring: the composer growing,
+ * a keyboard that resizes the page, a rotation. The scroller keeps a reader at their distance from the bottom, its
+ * scroll origin, so a change of its own height moves every row they see by as much, unless the engine's anchoring holds
+ * them: Chrome's holds most such changes, WebKit's some (not the composer's), and none holds a reader the change clamps
+ * at the oldest edge (a box that grew under a reader nearer that edge than it grew). Where the browser left the reader
+ * at their distance from the bottom, or clamped them there, the view's top is put back where it was: where the reader
+ * was when last seen, plus the box's height then, less its height now. Where its anchoring moved them, that stands: it
+ * also follows the rows a rotation rewraps, which a distance cannot. Last seen is a scroll event's place or this
+ * observer's own; a scroll that arrives while a change of the box's height is not handled yet is the browser's, not the
+ * reader's. At the tail the tail stays in view. Without anchoring, the fallback holds a resize itself, with the rows it
+ * rewraps (`useAnchoringFallback`).
+ */
+function useResizeHold(scroller: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box || !CSS.supports('overflow-anchor', 'auto')) return;
+    let height = box.clientHeight;
+    let seen = -box.scrollTop; // the reader's distance from the bottom, when last seen
+    const onScroll = () => {
+      if (box.clientHeight === height) seen = -box.scrollTop;
+    };
+    const observer = new ResizeObserver(() => {
+      const was = height;
+      height = box.clientHeight;
+      const now = -box.scrollTop;
+      const left = Math.abs(now - seen) < 0.5;
+      const clamped = height > was && now < seen && now >= box.scrollHeight - height - 1;
+      if (height !== was && (seen < 1 || left || clamped)) {
+        const to = seen < 1 ? 0 : Math.max(0, seen + was - height);
+        if (Math.abs(to - now) >= 0.5) box.scrollTop = -to;
+      }
+      seen = -box.scrollTop;
+    });
+    box.addEventListener('scroll', onScroll, { passive: true });
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+      box.removeEventListener('scroll', onScroll);
+    };
+  }, [scroller]);
+}
+
+/**
  * Scroll anchoring for an engine that has none: Safari before 27, where `overflow-anchor` does not parse (WebKit gates
  * the property and the anchoring on one setting, so supporting the one is having the other). In the column-reverse
  * scroller only a change between a reader scrolled back and the bottom moves what they see, so that is all this holds:
  * while the reader is off the tail, a change in the list's height leaves the row at the top of their view where it was.
  * Each row's distance from the list's bottom is kept as last laid out, which no scroll changes; the row at the top of
  * the view is found among them at the scroll position now (so a scroll not yet reported counts), and the scroll position
- * moves by as much as that row's distance changed, before the frame is painted. At the tail, the origin follows. A list
- * that shrank has the browser clamp a reader at its oldest edge before this runs; they are left there, at the edge.
+ * moves by as much as that row's distance changed, before the frame is painted. At the tail, the origin follows.
  *
- * A row is an item, not a block: a sender's run is one block holding many items, and a message arriving in the run the
- * reader is in, or one of its items growing, changes that block's height from inside it, so measured whole it would
- * hold the run's bottom and let the reader's row move. A block with no items in it (a day's separator, a folded quiet
- * run) is its own row.
+ * Where the scroll position no longer says where the reader was, the place they were last seen does (a scroll event's,
+ * or this observer's own): after a resize of the scroller itself (the composer growing, a keyboard, a rotation), which
+ * this holds too on such an engine, the view's top being that place plus the box's height then, its row found as the
+ * list was laid out, so the rows a rotation rewraps move nothing either; and after a shrink of the list under a reader
+ * nearer its oldest edge than the shrink, whom the browser clamps at the edge before this runs. A scroll that arrives
+ * while either is not handled yet is the browser's, not the reader's. A reader at the edge before the shrink stays.
+ *
+ * A row is an innermost item, not a block: a sender's run is one block holding many items, and an opened run of agent
+ * traffic one item holding its lines, each an item of its own. A message arriving in the run the reader is in, or one
+ * of its items growing, changes the block or the item from inside, so measured whole it would hold the run's bottom and
+ * let the reader's row move. A block with no items in it (a day's separator, a folded quiet run) is its own row.
  */
 function useAnchoringFallback(scroller: RefObject<HTMLDivElement | null>, list: RefObject<HTMLOListElement | null>) {
   useLayoutEffect(() => {
@@ -108,23 +160,43 @@ function useAnchoringFallback(scroller: RefObject<HTMLDivElement | null>, list: 
     if (!box || !ol || CSS.supports('overflow-anchor', 'auto')) return;
     const fromBottom = (row: Element) => ol.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom;
     let laidOut: Array<[row: Element, fromBottom: number]> = []; // top row first
+    let laidOutHeight = ol.offsetHeight;
+    let height = box.clientHeight;
+    let seen = -box.scrollTop; // the reader's distance from the bottom, when last seen
+    const clamped = () => ol.offsetHeight < laidOutHeight && -box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
+    const onScroll = () => {
+      if (box.clientHeight === height && !clamped()) seen = -box.scrollTop;
+    };
     const observer = new ResizeObserver(() => {
-      const back = -box.scrollTop;
+      const was = height;
+      height = box.clientHeight;
+      const now = -box.scrollTop;
+      // The reader's distance from the bottom before this change, and the view's top as the list was laid out.
+      const back = height !== was ? seen : clamped() ? Math.max(seen, now) : now;
       if (back >= 1) {
-        const anchor = laidOut.find(([row, was]) => was < back + box.clientHeight && row.isConnected);
+        const top = back + was;
+        const anchor = laidOut.find(([row, at]) => at < top && row.isConnected);
         const moved = anchor ? fromBottom(anchor[0]) - anchor[1] : 0;
-        if (moved > 0 || (moved < 0 && back < box.scrollHeight - box.clientHeight - 1)) box.scrollTop -= moved;
+        const to = Math.max(0, top - height + moved);
+        if (Math.abs(to - now) >= 0.5) box.scrollTop = -to;
       }
       // Read after any correction: a base read before the scroll would leave every distance off by it.
       const bottom = ol.getBoundingClientRect().bottom;
       const rows = [...ol.children].flatMap((block) => {
-        const items = block.querySelectorAll('[data-item]');
-        return items.length > 0 ? [...items] : [block];
+        const items = [...block.querySelectorAll('[data-item]')].filter((item) => !item.querySelector('[data-item]'));
+        return items.length > 0 ? items : [block];
       });
       laidOut = rows.map((row) => [row, bottom - row.getBoundingClientRect().bottom]);
+      laidOutHeight = ol.offsetHeight;
+      seen = -box.scrollTop;
     });
+    box.addEventListener('scroll', onScroll, { passive: true });
+    observer.observe(box);
     observer.observe(ol);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      box.removeEventListener('scroll', onScroll);
+    };
   }, [scroller, list]);
 }
 
@@ -274,14 +346,6 @@ function RunItemView({ item }: { item: RunItem }) {
       return <RequestCard request={item.ref} embedded />;
   }
 }
-
-/**
- * What MAWS's Markdown does with a link here: a web link opens in a new tab with no opener and no referrer (the page
- * never navigates away from the desk); a path chip names a file on the session's machine, which the browser cannot open.
- */
-const BROWSER_ACTIONS: Partial<TranscriptActions> = {
-  openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
-};
 
 /** A session's message: MAWS's answer prose. */
 function Prose({ text }: { text: string }) {
@@ -591,7 +655,7 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
       {open && (
         <ul className="desk-chat-says" data-testid="agent-run-messages">
           {says.map((s) => (
-            <li key={s.offset} data-offset={s.offset}>
+            <li key={s.offset} data-item="say" data-offset={s.offset}>
               {line(s.event)}
             </li>
           ))}
