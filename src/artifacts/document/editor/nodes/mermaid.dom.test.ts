@@ -1,9 +1,9 @@
 // The document's mermaid renderer (happy-dom; P3-F, sitting candidate 20). Mermaid is one module-wide instance, shared
-// with the transcript, which configures it in the app's palette and face; the page's palette and face ride in each
-// diagram's own source, so they hold whoever configured the instance last. Mermaid cannot lay out in happy-dom: its
-// render is faked, and at the fake's start the transcript configures mermaid (as a transcript diagram does while this one
-// waits in mermaid's queue) and mermaid's own parse reads the source over that configuration, as its render starts by
-// doing.
+// with the transcript, which configures it in the app's palette and face; the page's face, and the page's palette or the
+// named theme's own colours, ride in each diagram's own source, so they hold whoever configured the instance last.
+// Mermaid cannot lay out in happy-dom: its render is faked, and at the fake's start the transcript configures mermaid (as a
+// transcript diagram does while this one waits in mermaid's queue) and mermaid's own parse reads the source over that
+// configuration, as its render starts by doing.
 import mermaid, { type MermaidConfig } from 'mermaid';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderMermaid } from './mermaid';
@@ -70,6 +70,19 @@ const PAGE_PALETTE = {
   textColor: 'rgb(31, 30, 27)',
 };
 
+// A theme's own variables, as mermaid computes them for these author's variables under that theme alone.
+function ownVariables(theme: NonNullable<MermaidConfig['theme']>, themeVariables: Record<string, string> = {}): Record<string, unknown> {
+  mermaid.initialize({ theme, themeVariables });
+  return mermaid.mermaidAPI.getSiteConfig().themeVariables as Record<string, unknown>;
+}
+
+// Variables with each `hsl()` hue read in [0, 360): khroma writes some below zero, the same colour.
+function hues(variables: Record<string, unknown>): Record<string, unknown> {
+  const hue = (value: unknown) =>
+    typeof value === 'string' ? value.replace(/^(hsla?\()(-?[\d.]+)/, (_, open: string, h: string) => `${open}${(((Number(h) % 360) + 360) % 360).toFixed(6)}`) : value;
+  return Object.fromEntries(Object.entries(variables).map(([name, value]) => [name, hue(value)]));
+}
+
 describe('a document diagram drawn after the transcript configured mermaid', () => {
   it('draws in the page’s palette and face', async () => {
     const { config } = await renderedAfterTranscript('graph TD\n  A[Start] --> B[Finish]');
@@ -87,13 +100,9 @@ describe('a document diagram drawn after the transcript configured mermaid', () 
     expect(config.fontFamily).toBe(PAGE_FONT);
   });
 
-  it('keeps what a front matter’s config sets as the author wrote it', async () => {
-    const { source, config } = await renderedAfterTranscript(
-      '---\ntitle: Flow\nconfig:\n  theme: forest\n  layout: elk\n  themeVariables:\n    primaryColor: "#ffeeaa"\n---\ngraph TD\n  A --> B',
-    );
-    expect(source.startsWith('---\ntitle: Flow\nconfig:\n  theme: forest\n  layout: elk\n  themeVariables:\n    primaryColor: "#ffeeaa"\n---\n')).toBe(true);
-    expect(config.theme).toBe('forest');
-    expect(config.layout).toBe('elk');
+  it('draws in the page’s palette and face under an explicit `theme: base`', async () => {
+    const { config } = await renderedAfterTranscript('---\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: "#ffeeaa"\n---\ngraph TD\n  A --> B');
+    expect(config.theme).toBe('base');
     expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, primaryColor: '#ffeeaa', fontFamily: PAGE_FONT });
     expect(config.fontFamily).toBe(PAGE_FONT);
   });
@@ -107,19 +116,60 @@ describe('a document diagram drawn after the transcript configured mermaid', () 
     expect(config.fontFamily).toBe('Georgia, serif');
   });
 
+});
+
+// The owner's ruling (2026-10-21): a diagram whose front matter or own directive names a theme keeps that theme's colours.
+describe('a document diagram that names a theme, drawn after the transcript configured mermaid', () => {
+  it('keeps forest’s own colours, named in its front matter, in the page’s face', async () => {
+    const forest = ownVariables('forest');
+    const { config } = await renderedAfterTranscript('---\nconfig:\n  theme: forest\n---\ngraph TD\n  A --> B');
+    expect(config.theme).toBe('forest');
+    expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
+    expect(config.fontFamily).toBe(PAGE_FONT);
+  });
+
+  it('keeps forest’s own colours, named only in its own init directive', async () => {
+    const forest = ownVariables('forest');
+    const { config } = await renderedAfterTranscript('%%{init: {"theme": "forest"}}%%\ngraph TD\n  A --> B');
+    expect(config.theme).toBe('forest');
+    expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
+  });
+
+  // neutral writes its tertiary colours with a hue below zero, which mermaid's directive check would blank
+  it('keeps neutral’s own colours, the transcript’s tertiary colour included', async () => {
+    const neutral = ownVariables('neutral');
+    const { config } = await renderedAfterTranscript('---\nconfig:\n  theme: neutral\n---\ngraph TD\n  A --> B');
+    expect(hues(config.themeVariables)).toEqual(hues({ ...neutral, fontFamily: PAGE_FONT }));
+    expect(config.themeVariables.tertiaryColor).not.toBe(TRANSCRIPT.themeVariables.tertiaryColor);
+  });
+
+  // what forest derives from the author's key follows it, as mermaid draws forest with that key alone
+  it('keeps the author’s own variables, and what the theme derives from them', async () => {
+    const forest = ownVariables('forest', { mainBkg: '#ffeeaa' });
+    const { source, config } = await renderedAfterTranscript(
+      '---\ntitle: Flow\nconfig:\n  theme: forest\n  layout: elk\n  themeVariables:\n    mainBkg: "#ffeeaa"\n---\ngraph TD\n  A --> B',
+    );
+    expect(source.startsWith('---\ntitle: Flow\nconfig:\n  theme: forest\n  layout: elk\n  themeVariables:\n    mainBkg: "#ffeeaa"\n---\n')).toBe(true);
+    expect(config.layout).toBe('elk');
+    expect(config.themeVariables).toMatchObject({ mainBkg: '#ffeeaa', actorBkg: '#ffeeaa' });
+    expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
+  });
+
   // mermaid reads a front matter only after its own cleanup: an HTML tag's double-quoted attributes single-quoted, every
   // line ended in `\n`
-  it('keeps what a front matter whose title holds an HTML tag sets', async () => {
+  it('keeps the theme a front matter whose title holds an HTML tag names', async () => {
+    const forest = ownVariables('forest');
     const { source, config } = await renderedAfterTranscript('---\ntitle: "<b class="label">Title</b>"\nconfig:\n  theme: forest\n---\ngraph TD\n  A --> B');
     expect(source.startsWith('---\ntitle: "<b class="label">Title</b>"\nconfig:\n  theme: forest\n---\n')).toBe(true);
     expect(config.theme).toBe('forest');
-    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+    expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
   });
 
-  it('keeps what an indented front matter with carriage-return line ends sets', async () => {
+  it('keeps the theme an indented front matter with carriage-return line ends names', async () => {
+    const dark = ownVariables('dark');
     const { config } = await renderedAfterTranscript('  ---\r  title: Flow\r  config:\r    theme: dark\r  ---\rgraph TD\r  A --> B');
     expect(config.theme).toBe('dark');
-    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+    expect(hues(config.themeVariables)).toEqual(hues({ ...dark, fontFamily: PAGE_FONT }));
   });
 });
 
@@ -134,7 +184,7 @@ it('hands mermaid a source whose front matter cannot be read as written, for mer
 // source is built directly: happy-dom's style parser mangles such a name before the page could hand it over)
 it('hands mermaid a face whose name holds an apostrophe', async () => {
   const face = '"Bob\'s Grotesk", sans-serif';
-  await mermaid.parse(withPage('graph TD\n  A --> B', { fontFamily: face, themeVariables: { primaryColor: 'rgb(250, 249, 246)' } }));
+  await mermaid.parse(withPage('graph TD\n  A --> B', { theme: 'base', fontFamily: face, themeVariables: { primaryColor: 'rgb(250, 249, 246)' } }));
   const config = mermaid.mermaidAPI.getConfig();
   expect(config.fontFamily).toBe(face);
   expect(config.themeVariables).toMatchObject({ primaryColor: 'rgb(250, 249, 246)', fontFamily: face });
