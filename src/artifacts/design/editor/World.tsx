@@ -313,6 +313,10 @@ export function World(props: WorldProps) {
     win.addEventListener('pointercancel', onUp, { capture: true });
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
+      // P4-B2 (D13): a frame drag still running when the world goes ends here, so the session's drag ends with it
+      const d = drag.current;
+      if (d && d.kind !== 'pan' && d.moving) session.endDrag();
+      drag.current = null;
       el.removeEventListener('scroll', onScroll);
       el.removeEventListener('pointerdown', onDown, { capture: true });
       win.removeEventListener('pointermove', onMove, { capture: true });

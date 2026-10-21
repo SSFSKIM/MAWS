@@ -874,6 +874,17 @@ describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () 
     expect(plain(doc, 'title')).toBe('Hello world');
   });
 
+  it('D13: the overlay going mid-drag ends the session’s drag, which the inspector’s settled version reads', () => {
+    const { session, node } = mount();
+    click(node('a'));
+    under = node('a');
+    pointer('pointerdown', node('a'), 10, 10);
+    pointer('pointermove', node('a'), 20, 10, { metaKey: true });
+    expect(session.snapshot().dragging).toBe(true);
+    cleanup();
+    expect(session.snapshot().dragging).toBe(false);
+  });
+
   it('T22 on a design board: a key on the world reaches the selected heading’s armed box; a double-click on an inactive board’s heading edits it in one gesture', () => {
     const doc = design();
     const session = new DeckSession(doc, 0);

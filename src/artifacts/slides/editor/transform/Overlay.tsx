@@ -136,6 +136,18 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     setMeasured(canvas ? measureAll(canvas, new Set([...selection, ...remote.flatMap((r) => r.elementIds)]), scale) : new Map());
   }, [canvas, selection, remote, scale, version, slideId, session, laidOut]);
 
+  // P4-B2 (D13): a gesture still running when the overlay goes (the editor unmounted mid-drag) ends as a cancel, so the
+  // session's drag ends with it (the inspector's settled version and the gesture hold read it)
+  useEffect(
+    () => () => {
+      const g = gesture.current;
+      gesture.current = null;
+      pending.current = null;
+      g?.end(false);
+    },
+    [],
+  );
+
   const ctx = useCallback((): ClipboardContext | null => (canvas ? { session, slideId, canvas, scale, artifactId, importAsset } : null), [canvas, session, slideId, scale, artifactId, importAsset]);
 
   const slidePoint = useCallback(
