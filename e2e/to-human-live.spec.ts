@@ -104,17 +104,31 @@ const PROMPTS = {
 
 // ---- the scratch root ------------------------------------------------------------------------------------------------
 
-const root = skip === null ? realpathSync(mkdtempSync('/tmp/maws-p2c-live-')) : '/tmp/maws-p2c-live-skipped'; // made only for a run
-const config = join(root, 'claude-config');
-const userData = join(root, 'user-data');
-const repo = join(root, 'p2c-repo');
+// Made in the worker that runs the test (beforeAll, which a skipped test never reaches), not when the module loads:
+// Playwright's runner loads the spec too, to list it, and a root made there was left behind empty.
 const REPO_NAME = 'p2c-repo';
-const market = join(root, 'doperpowers-market');
-const engineScript = join(root, 'engine', 'claude');
-const budgetFile = join(root, 'budget-usd');
-const probeLog = join(root, 'probe.log');
-const notifyHook = join(root, 'notify-hook.cjs');
-const db = join(userData, 'index.sqlite');
+let root = '';
+let config = '';
+let userData = '';
+let repo = '';
+let market = '';
+let engineScript = '';
+let budgetFile = '';
+let probeLog = '';
+let notifyHook = '';
+let db = '';
+test.beforeAll(() => {
+  root = realpathSync(mkdtempSync('/tmp/maws-p2c-live-'));
+  config = join(root, 'claude-config');
+  userData = join(root, 'user-data');
+  repo = join(root, REPO_NAME);
+  market = join(root, 'doperpowers-market');
+  engineScript = join(root, 'engine', 'claude');
+  budgetFile = join(root, 'budget-usd');
+  probeLog = join(root, 'probe.log');
+  notifyHook = join(root, 'notify-hook.cjs');
+  db = join(userData, 'index.sqlite');
+});
 
 const line = (text: string) => {
   appendFileSync(join(OUT, 'live-run.txt'), `${text}\n`);

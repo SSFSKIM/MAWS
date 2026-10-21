@@ -52,13 +52,23 @@ const SKILL = 'p2a-hello';
 
 // ---- the scratch root ------------------------------------------------------------------------------------------------
 
-const root = skip === null ? realpathSync(mkdtempSync('/tmp/maws-p2a-live-')) : '/tmp/maws-p2a-live-skipped'; // made only for a run
-const config = join(root, 'claude-config');
-const userData = join(root, 'user-data');
-const repo = join(root, 'p2a-repo');
-const logFile = join(root, 'live-run.txt');
+// Made in the worker that runs the test (beforeAll, which a skipped test never reaches), not when the module loads:
+// Playwright's runner loads the spec too, to list it, and a root made there was left behind empty.
+let root = '';
+let config = '';
+let userData = '';
+let repo = '';
+let logFile = '';
+let observationsFile = '';
+test.beforeAll(() => {
+  root = realpathSync(mkdtempSync('/tmp/maws-p2a-live-'));
+  config = join(root, 'claude-config');
+  userData = join(root, 'user-data');
+  repo = join(root, 'p2a-repo');
+  logFile = join(root, 'live-run.txt');
+  observationsFile = join(root, 'observations.json');
+});
 const log = (line = '') => appendFileSync(logFile, `${line}\n`);
-const observationsFile = join(root, 'observations.json');
 function observe(key: string, data: unknown): void {
   const prior = existsSync(observationsFile) ? (JSON.parse(readFileSync(observationsFile, 'utf8')) as Record<string, unknown>) : {};
   writeFileSync(observationsFile, JSON.stringify({ ...prior, [key]: data }, null, 2));
