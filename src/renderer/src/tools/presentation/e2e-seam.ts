@@ -44,19 +44,19 @@ export interface PresentationsSeam {
   timings(artifactId: string): { surface: string; timings: DeckTimings }[];
   /**
    * M5: measures one drag on the deck's open tab from now until `stop`; P4-B2 M0: each move's queue, handler and paint,
-   * and the remote applies beside them (`drag-stats.ts`). `remotes` answers how many updates of other origins the tab's
-   * replica has applied since `start`.
+   * and the remote applies beside them (`drag-stats.ts`); M6: the gesture hold's frames at the drop and its 5 s caps.
    */
-  dragProbe: { start(artifactId: string): void; remotes(): number; stop(): DragStats };
+  dragProbe: { start(artifactId: string): void; stop(): DragStats };
   /** Fix wave 1: another replica selecting elements (its awareness), until cleared. */
   presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
   /** P4-B2: each open tab's selection, the text element edited if any, and whether its stage owns the keyboard. */
   editorState(artifactId: string): { surface: string; selection: string[]; editingText: string | null; keyboard: 'stage' | 'away' }[];
   /**
-   * P4-B2 (tracker row 256): each open tab's replica, the remote content frames it has received and those its composition
-   * hold buffers now (`PortProvider.counts`).
+   * P4-B2 (tracker row 256): each open tab's replica, the remote content frames it has received and those its hold
+   * buffers now (`PortProvider.counts`); M6: the times the hold's 5 s cap cleared it, and the highest row the replica has
+   * integrated (its saved state's `integrated`, which a held row reaches only once applied).
    */
-  frames(artifactId: string): { surface: string; received: number; held: number }[];
+  frames(artifactId: string): { surface: string; received: number; held: number; capped: number; integrated: number }[];
 }
 
 declare global {
@@ -138,11 +138,16 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
       openDeckTabs()
         .filter((tab) => tab.artifactId === artifactId)
         .flatMap((tab) => {
-          // the window's replica carries its provider (the renderer host's); the interface does not, being any host's
-          const handle = tab.snapshot().handle as (DocumentHandle & { provider?: unknown }) | null;
-          return handle?.provider instanceof PortProvider ? [{ surface: tab.surface, ...handle.provider.counts() }] : [];
+          const provider = providerOf(tab);
+          return provider ? [{ surface: tab.surface, ...provider.counts(), integrated: provider.state.integrated }] : [];
         }),
   };
+}
+
+// The window's replica carries its provider (the renderer host's); the interface does not, being any host's.
+function providerOf(tab: ReturnType<typeof openDeckTabs>[number]): PortProvider | null {
+  const handle = tab.snapshot().handle as (DocumentHandle & { provider?: unknown }) | null;
+  return handle?.provider instanceof PortProvider ? handle.provider : null;
 }
 
 // S7b's drag measure (spikes/p3-store/s7/electron/deck-page.ts), split by P4-B2 M0 (`drag-stats.ts`): each pointer move
@@ -150,25 +155,38 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
 // its overlay), the editor's transaction it caused (the replica's update with the session's origin) and the animation
 // frame after it; beside them each update of another origin (an agent's publish reaching the tab through the host) with
 // its transaction's start, its next frame and the frame after that, and the drop. One drag per probe: a move after the
-// drop, or a write of the session's after it (the gesture's end), is no move's.
+// drop, or a write of the session's after it (the gesture's end), is no move's. P4-B2 M6: the drop's listener
+// (capturing on the window, before the editor's) reads the frames the replica's hold buffers, which the drop is about
+// to flush; a clearance by the hold's 5 s cap is seen at the apply it causes (the provider counts it first), else at
+// the next move or the drop.
 function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
   let running: { record: DragRecord; end(): void } | null = null;
   return {
     start(artifactId) {
       running?.end();
       running = null;
-      const session = openDeckTabs().find((tab) => tab.artifactId === artifactId && tab.snapshot().session)?.snapshot().session;
-      if (!session) throw new Error(`no open tab shows ${artifactId}`);
-      const record: DragRecord = { moves: [], remotes: [], longTasks: 0 };
+      const tab = openDeckTabs().find((t) => t.artifactId === artifactId && t.snapshot().session);
+      const session = tab?.snapshot().session;
+      if (!tab || !session) throw new Error(`no open tab shows ${artifactId}`);
+      const provider = providerOf(tab);
+      const record: DragRecord = { moves: [], remotes: [], longTasks: 0, caps: [] };
       const now = () => win.performance.now();
       const nextFrame = (then: (at: number) => void) => win.requestAnimationFrame(() => then(now()));
       const observer = new PerformanceObserver((list) => (record.longTasks += list.getEntries().length));
       observer.observe({ type: 'longtask' });
+      let capped = provider?.counts().capped ?? 0;
+      const sawCaps = (at: number) => {
+        for (const seen = provider?.counts().capped ?? 0; capped < seen; capped += 1) record.caps!.push(at);
+      };
       const onMove = (e: PointerEvent) => {
-        if (e.buttons && record.drop === undefined) record.moves.push({ tIn: e.timeStamp, tDispatch: now() });
+        if (!e.buttons || record.drop !== undefined) return;
+        record.moves.push({ tIn: e.timeStamp, tDispatch: now() });
+        sawCaps(e.timeStamp);
       };
       const onUp = (e: PointerEvent) => {
-        if (record.moves.length > 0 && record.drop === undefined) record.drop = { tIn: e.timeStamp, tDispatch: now() };
+        if (record.moves.length === 0 || record.drop !== undefined) return;
+        record.drop = { tIn: e.timeStamp, tDispatch: now(), held: provider?.counts().held ?? 0 };
+        sawCaps(e.timeStamp);
       };
       const begun = new WeakMap<object, number>();
       const onBefore = (tr: { origin: unknown }) => {
@@ -178,6 +196,7 @@ function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
         const at = now();
         if (origin !== session.origin) {
           const remote: RemoteApply = { tStart: begun.get(tr) ?? at, tEnd: at };
+          sawCaps(remote.tStart);
           record.remotes.push(remote);
           nextFrame((frame) => {
             remote.tFrame = frame;
@@ -204,10 +223,6 @@ function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
           observer.disconnect();
         },
       };
-    },
-    remotes: () => {
-      if (!running) throw new Error('the drag probe is not running');
-      return running.record.remotes.length;
     },
     stop: () => {
       if (!running) throw new Error('the drag probe is not running');
