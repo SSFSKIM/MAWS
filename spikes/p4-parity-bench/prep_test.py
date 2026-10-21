@@ -31,6 +31,7 @@ URL = 'https://claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA'
 URL_UUID = 'https://claude.ai/code/artifact/5d1c9a7e-3b2f-4e8a-9c61-0f4d2b7a8e13'
 OTHER = 'https://claude.ai/artifact/LWvigD6DBBdof4qCcTGaKU'  # another Artifact, as a same-titled deck would be
 SLIDES = 'https://claude.ai/artifact-type/slides'
+NO_SEED = 'no seed: a Cowork deck repetition of the record takes before --seed (§7a)'
 
 
 def read(path):
@@ -185,25 +186,27 @@ class CoworkDeck(Prep):
     # read_file saves a published file under its published path in the scratchpad (the folder itself is the engine's).
     SAVED = '/sessions/timed/scratchpad/artifact-files/autumn-workshops-2026'
 
-    def seed_slides(self):
+    def seed_slides(self, url=URL, name='seed.jsonl', create='ok'):
+        """A seed session in the Slides flow; `create` 'ok', 'failed' or None (the files published to `url` with no create)."""
         r = Recorder(self.SEED_MNT)
         r.human('Make a slide deck titled "Autumn Workshops 2026" from the files in deck/.')
         r.call('Artifact', {'action': 'quickstart', 'intent': 'slides'})
-        r.call('Artifact', {'type_url': SLIDES, 'title': 'Autumn Workshops 2026', 'auto_open': 'after_first_write'})
+        if create:
+            r.call('Artifact', {'type_url': SLIDES, 'title': 'Autumn Workshops 2026', 'auto_open': 'after_first_write'}, ok=create == 'ok')
         put = lambda rel: r.call('Write', {'file_path': '%s/%s' % (self.SCRATCH, rel), 'content': read(os.path.join(DECK, rel))})
         slides = ['project/slides/%s.html' % sid for sid in json.loads(read(os.path.join(DECK, 'project', 'deck.json')))['order']]
         put('project/deck.json')
         put(slides[0])
         # the list form: each file published at its own spelling, read from it under root
-        r.call('Artifact', {'url': URL, 'root': self.SCRATCH, 'file_path': self.SCRATCH + '/project/deck.json', 'files': [{'path': slides[0], 'contentType': 'text/html'}]})
+        r.call('Artifact', {'url': url, 'root': self.SCRATCH, 'file_path': self.SCRATCH + '/project/deck.json', 'files': [{'path': slides[0], 'contentType': 'text/html'}]})
         for rel in slides[1:]:
             put(rel)
         # the map form, a plain source and a {from, contentType} one
         files = {rel: rel for rel in slides[2:-1]}
         files[slides[-1]] = {'from': slides[-1], 'contentType': 'text/html'}
-        r.call('Artifact', {'url': URL, 'root': self.SCRATCH, 'file_path': '%s/%s' % (self.SCRATCH, slides[1]), 'files': files})
-        r.call('Artifact', {'action': 'verify', 'url': URL})
-        return records(os.path.join(self.dir, 'seed.jsonl'), r.recs)
+        r.call('Artifact', {'url': url, 'root': self.SCRATCH, 'file_path': '%s/%s' % (self.SCRATCH, slides[1]), 'files': files})
+        r.call('Artifact', {'action': 'verify', 'url': url})
+        return records(os.path.join(self.dir, name), r.recs)
 
     def timed_b5(self, read_url=URL, **publish):
         """A fresh session's B5 edit: the deck read, slide 2's file saved by read_file, edited there and published
@@ -234,7 +237,8 @@ class CoworkDeck(Prep):
         out = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--seed-transcript', seed)
         self.assertTrue(out['seedCheck']['pass'], out['seedCheck'])
         self.assertTrue(out['check']['pass'], out['check'])
-        self.assertEqual((out['afterSource'], out['valid'], out['permissionMode']), ("rebuilt from the records' calls", 'yes', 'auto'))
+        # valid but for its seed, which no `before --seed` took: the record's Cowork decks run on the seeds ledger's
+        self.assertEqual((out['afterSource'], out['valid'], out['permissionMode']), ("rebuilt from the records' calls", [NO_SEED], 'auto'))
         self.assertEqual((out['deckUrl'], out['deckUrlFrom']), (URL, "the seed's records"))
         # the hold's first read of the same seed: the rebuilt deck is the bench's, its url and the seed turn's mode printed
         first = self.main('deck', seed, os.path.join(self.dir, 'cowork-seed'))
@@ -524,6 +528,58 @@ class Seeds(CoworkDeck):
         with self.assertRaises(SystemExit) as refused:
             self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--seed-transcript', DESKTOP_T)
         self.assertIn('is not the seed seed-01 took', str(refused.exception))
+
+    def test_a_turn_off_the_seeds_deck_stops_before_any_fallback(self):
+        """The seed's own publishes name its url: a timed turn that creates an Artifact, or publishes or read_files
+        another one, stops with the attempt open and its reason kept, and bench-after/ (here the deck with B5's edit,
+        which would pass) is never taken for it, since the parser would time a publish to another deck."""
+        edited = os.path.join(self.dir, 'edited')
+        shutil.copytree(DECK, edited)
+        slide = os.path.join(edited, 'project', 'slides', 'sessions.html')
+        write(slide, read(slide).replace('Grace Okafor, 14 October', 'Grace Okafor, 21 October'))
+        cases = [(dict(url=OTHER), 'it published to %s' % OTHER), (dict(read_url=OTHER), 'it read a file of %s' % OTHER),
+                 (dict(type_url=SLIDES, title='Autumn Workshops 2026', url=None), 'it created a new Artifact (a publish with type_url %s)' % SLIDES)]
+        for n, (change, why) in enumerate(cases, 1):
+            with self.subTest(change=change):
+                run = os.path.join(self.dir, 'run-%d' % n)
+                self.main('seed-add', self.seed_slides(), '--out', run)
+                self.main('before', 'B5', '1', '--out', run, '--surface', 'cowork', '--seed', 'next')
+                shutil.copytree(edited, os.path.join(prep.ARM_DIR, 'bench-after'))
+                self.cowork_session(self.timed_b5(**change))
+                with self.assertRaises(SystemExit) as stopped:
+                    prep.main(['after', 'B5', '1', '--out', run, '--permissions-answered', '0'])
+                self.assertIn("the timed turn left the seed's deck: %s, and the seed seed-01 took is %s" % (why, URL), str(stopped.exception))
+                d = os.path.join(run, 'desktop-B5-r1')
+                self.assertFalse(os.path.exists(os.path.join(d, 'manifest.json')))
+                self.assertIn(why, json.loads(read(os.path.join(d, 'pending.json')))['afterStopped'])
+
+    def test_the_seed_check_reads_successful_publishes_and_read_files_only(self):
+        call = lambda inp, ok=True: dict(name='Artifact', input=inp, cwd='/w', ok=ok, id='t')
+        on = [call({'action': 'read', 'url': OTHER}), call({'url': OTHER, 'file_path': 'a.html'}, ok=False), call({'action': 'list', 'type_url': SLIDES}),
+              call({'action': 'read', 'type_url': SLIDES}), call({'action': 'read_file', 'url': URL_UUID, 'path': 'project/deck.json'}),
+              call({'url': URL + '/', 'file_path': 'a.html'}), dict(call({'file_path': '/w/a.html', 'content': ''}), name='Write')]
+        self.assertIsNone(prep.off_seed(on, URL))
+        # read with a file path is read_file in the engine's consolidated spelling; an asset's publish is a publish the
+        # parser counts as a landing
+        self.assertEqual(prep.off_seed(on + [call({'action': 'read', 'url': OTHER, 'path': 'project/deck.json'})], URL), 'read a file of %s' % OTHER)
+        self.assertEqual(prep.off_seed(on + [call({'url': OTHER, 'asset': True, 'file_path': 'a.png'})], URL), 'published to %s' % OTHER)
+
+    def test_a_seed_makes_its_own_deck(self):
+        """A seed session that made no deck (it published the bench's files to an Artifact it did not create, or its
+        create failed) is not good, nor is one whose deck is an earlier entry's, in either spelling of its url."""
+        self.assertTrue(self.main('seed-add', self.seed_slides(), '--out', self.run_dir)['ok'])
+        twin = self.main('seed-add', self.seed_slides(url=URL_UUID, name='twin.jsonl'), '--out', self.run_dir)
+        self.assertEqual((twin['ok'], twin['why']), (False, 'the deck of seed-01'))
+        for url, name, create in (('https://claude.ai/artifact/11112FTvFtEEuCBPrANzJj', 'none.jsonl', None),
+                                  ('https://claude.ai/artifact/1111111111111111111111', 'failed.jsonl', 'failed')):
+            with self.subTest(create=create):
+                entry = self.main('seed-add', self.seed_slides(url=url, name=name, create=create), '--out', self.run_dir)
+                self.assertTrue(entry['same']['pass'], entry['same'])
+                self.assertEqual((entry['ok'], entry['why']), (False, 'the session made no new deck (no successful create)'))
+        self.assertEqual(self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')['seed'], 'seed-01')
+        with self.assertRaises(SystemExit) as none_left:
+            self.main('before', 'B7', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        self.assertIn('no good unused seed', str(none_left.exception))
 
     def test_a_seed_is_only_for_a_cowork_deck(self):
         self.main('seed-add', self.seed_slides(), '--out', self.run_dir)

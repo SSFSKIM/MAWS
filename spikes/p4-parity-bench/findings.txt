@@ -45,8 +45,9 @@ Repetitions. At least five valid repetitions per cell, each a fresh session, the
   repetition that waits on a permission);
 - its edit landed, and the checker (check.py, one set of rules for both apps, read from the artifact before and after
   the turn) passed;
-- for a Cowork deck whose seed was rebuilt from its records, that seed is the bench's (`check.py same seed/maws-deck`),
-  and its timed turn ran in another session than its seed's (§7a; `freshSession` in the manifest).
+- for a Cowork deck, it ran on a seed `before --seed` took (§7a; `seedId` in the manifest), that seed, rebuilt from its
+  records, is the bench's (`check.py same seed/maws-deck`), and its timed turn ran in another session than its seed's
+  (`freshSession`).
 An invalid repetition is listed with its reason, never dropped silently; an attempt made again keeps its own directory
 (…-a2, …-a3) and nothing recorded is overwritten. A cell short of five valid repetitions is run again in the same hold,
 never judged short.
@@ -413,19 +414,34 @@ Harness additions for the mini, made on the MacBook with tests before any hold (
 - `desktop-prep.py seed-prompt` prints the untimed prompt that has a Cowork session make the Slides deck from
   seed/maws-deck, file for file, and reply with its url. `seed-add <transcript> --out RUN` rebuilds that session's deck
   from its records and enters it in RUN/seeds.json. The entry is good when the deck is `same` as the bench's, every
-  human turn of the seed session ran in auto, and its url is known: from the seed's calls, else the create's result,
-  else the session's reply.
+  human turn of the seed session ran in auto, the session made the deck itself (a successful `type_url` create among
+  its calls, else "the session made no new deck"), its url is known (from the seed's calls, else the successful
+  create's result, else the session's reply), and no earlier entry's url names the same Artifact, compared the
+  engine's way (else "the deck of seed-NN"). An entry that is not good stays in the ledger with its reason and is never
+  handed out.
 - `before --seed next` takes the next good seed nobody has used (a seed is used once, even by an attempt then redone),
-  names its deck in the prompt by its url, and keeps its transcript for `after`. `after` refuses another
-  --seed-transcript, stops when the turn edited another Artifact than the seed's, and records `freshSession`, which
-  the parser requires. `before --ref` overrides any handle by hand.
+  names its deck in the prompt by its url, prints that url (`seedUrl`) and keeps its transcript for `after`. `after`
+  refuses another --seed-transcript. Before it rebuilds anything it reads the timed turn's successful Artifact calls: a
+  create, or a publish or read_file naming another Artifact than the seed's, stops it with the attempt left open and
+  the reason kept, and never falls back to bench-after/ for it (the parser would time a publish to another deck); the
+  repetition is redone on another seed. It records `seedId` and `freshSession`; the parser excludes a Cowork deck
+  repetition without a seed ("no seed: a Cowork deck repetition of the record takes before --seed") and one in its
+  seed's session. The driver's last-resort follow-up, `bench.writeDeckFiles(url)`, names the deck by that url, never by
+  the title every seed deck shares. `before --ref` overrides any handle by hand.
 - spikes/p4-parity-bench/mini/:
-  - `queue-runner.sh`, the serial executor in the console's login session; it takes MAWS_BENCH_* keys only;
+  - `queue-runner.sh`, the serial executor in the console's login session; it takes MAWS_BENCH_* keys only, and runs
+    each repetition in the background and waits on it, so a TERM or INT (a forced stop's bootout) ends the repetition
+    in hand and removes runner.pid;
   - `queue.plist.template`, its one-shot LaunchAgent (Interactive, Aqua, under the run directory);
-  - `bench-queue.sh`, the operator's plist, start, run, status and stop over ssh. Its `run` hands over one
-    repetition, waits, prints the log's tail and exits with the repetition's code.
-- The tests: prep_test.py's Seeds and mini_test.py (the runner with a stand-in for the bench's invocation, no
-  launchd).
+  - `bench-queue.sh`, the operator's plist, start, run, status and stop over ssh. Its `run` refuses (exit 2) a request
+    that lacks MAWS_BENCH_TASKS, MAWS_BENCH_OUT or MAWS_BENCH_SCOPE, since the bench would run on its defaults; else
+    it hands over one repetition, waits, prints the log's tail and exits with the repetition's code. Its own failures
+    have their own codes: 124 when no answer came within BENCH_RUN_TIMEOUT (the repetition still running), 125 when no
+    runner is up or it went before answering. A runner is up only while runner.pid names a live queue-runner.sh. `stop`
+    waits up to BENCH_STOP_TIMEOUT (1800 s) for the repetition in hand; past it, it exits 1 and leaves the runner to
+    stop when the repetition ends, unless `stop RUN --force` boots it out.
+- The tests: prep_test.py's Seeds and mini_test.py (the runner with a stand-in for the bench's invocation and one for
+  launchctl, no launchd).
 
 The operator's commands on the mini (RUN the run directory, the bench's checkout at /tmp/maws-parity-bench/repo):
 - Start: `spikes/p4-parity-bench/mini/bench-queue.sh start RUN`.
@@ -435,7 +451,8 @@ The operator's commands on the mini (RUN the run directory, the bench's checkout
   seed-add <its transcript> --out RUN`.
 - A Cowork deck repetition: `desktop-prep.py before B5 1 --out RUN --surface cowork --seed next`, the driver, then
   `after B5 1 --out RUN --permissions-answered N`.
-- When the hold ends: `bench-queue.sh stop RUN`.
+- When the hold ends: `bench-queue.sh stop RUN` (exit 1 while a repetition still runs past the timeout; `stop RUN
+  --force` ends it).
 
 The owner's part, asked once:
 1. A sign-in: if Desktop asks for one after its update, the owner signs in to their Claude account on the mini (it goes

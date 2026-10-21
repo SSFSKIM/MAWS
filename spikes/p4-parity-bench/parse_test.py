@@ -129,6 +129,16 @@ class Validity(Bench):
         self.assertEqual(parse.valid(rows['seed']), ["the seed was not the bench's: slide 2 differs"])
         self.assertEqual(parse.valid(rows['ok']), [])
 
+    def test_a_cowork_deck_runs_on_a_seed(self):
+        """§7a: a Cowork deck repetition of the record runs on a seed `before --seed` took; one without is excluded, and
+        a seed is no rule for the other surfaces or kinds."""
+        deck = dict(task='B5', kind='presentation', surface='cowork')
+        rows = [parse.edit_row(self.manifest(name, 'desktop', DESKTOP_T, **dict(deck, **extra))) for name, extra in (
+            ('desktop-B5-r1', {}), ('desktop-B5-r2', dict(seedId='seed-01', freshSession=True)), ('desktop-B5-r3', dict(surface='code')),
+            ('desktop-B1-r4', dict(task='B1', kind='document')))]
+        self.assertEqual(rows[1]['seedId'], 'seed-01')
+        self.assertEqual([parse.valid(r) for r in rows], [['no seed: a Cowork deck repetition of the record takes before --seed (§7a)'], [], [], []])
+
     def test_landing_counts_only_the_artifacts_file(self):
         def other_file_first(r):  # the Read becomes an Edit of another file, landing before doc.md's
             for b in (r.get('message') or {}).get('content') or []:

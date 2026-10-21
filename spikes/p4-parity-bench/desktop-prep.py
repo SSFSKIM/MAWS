@@ -16,10 +16,13 @@ Desktop's records are only read.
 
 Seeds (§7a): a Cowork deck's timed turn runs in a fresh session of its own, on a deck an untimed Cowork session made
 beforehand from seed/maws-deck (`seed-prompt`). `seed-add` rebuilds that deck from the seed session's records, checks it
-`same` against the bench's, reads its url and the seed turn's permission mode, and enters it in the run's seeds ledger;
-`before --seed next` takes the next good seed not yet used (a seed is used once, even by an attempt that is then redone),
-names its deck in the prompt by its url, and keeps its transcript for `after`, which records whether the timed turn ran
-in another session than the seed's (`freshSession`; the parser excludes a repetition where it did not).
+`same` against the bench's, reads its url and the seed turn's permission mode, and enters it in the run's seeds ledger
+(good only when the session created the deck itself and no other entry names the same Artifact); `before --seed next`
+takes the next good seed not yet used (a seed is used once, even by an attempt that is then redone), names its deck in
+the prompt by its url, and keeps its transcript for `after`. `after` stops, before any rebuild, when the timed turn's
+successful calls create an Artifact or publish or read_file another than the seed's, and records the seed and whether
+the timed turn ran in another session than the seed's (`seedId`, `freshSession`; the parser excludes a Cowork deck
+repetition without either).
 
 Attempts: a repetition's records live in RUN/desktop-<task>-r<rep>, a later attempt at the same repetition in
 …-a2, …-a3: nothing is overwritten. `before` opens the first attempt without a manifest; an attempt it finds laid but
@@ -206,8 +209,8 @@ def before(args):
                    seedId=seed and seed['id'], seedTranscript=seed and seed['transcript'], seedUrl=seed and seed['url'])
     write(os.path.join(d, 'pending.json'), json.dumps(pending, indent=2) + '\n')
     note = 'no seed: a Cowork deck repetition of the record takes --seed (§7a)' if kind == 'presentation' and args.surface == 'cowork' and not seed else None
-    print(json.dumps({'prompt': prompt, 'folder': ARM_DIR, 'file': name, 'attempt': attempt, 'seed': seed and seed['id'], 'note': note,
-                      'pending': os.path.join(d, 'pending.json')}, indent=2))
+    print(json.dumps({'prompt': prompt, 'folder': ARM_DIR, 'file': name, 'attempt': attempt, 'seed': seed and seed['id'], 'seedUrl': seed and seed['url'],
+                      'note': note, 'pending': os.path.join(d, 'pending.json')}, indent=2))
 
 
 # ---- Desktop's records ----------------------------------------------------------------------------------------------
@@ -609,6 +612,28 @@ def turn_window(transcript, match):
     raise RebuildError('no turn in %s matched the task' % transcript)
 
 
+def creates(call):
+    """A successful create: a publish (the action omitted or 'publish', not an asset's) with `type_url`, which makes a new
+    Artifact from a type. A read or list naming a type_url only reads the type."""
+    return call['name'] == 'Artifact' and call['ok'] and artifact_action(call['input']) == 'publish' and isinstance(call['input'].get('type_url'), str)
+
+
+def off_seed(timed, seed_url):
+    """How the timed turn's successful calls leave the seed's deck, or None: a create, or a publish or read_file naming
+    another Artifact than the seed's (compared the engine's way). Checked before anything is rebuilt, since the replay's
+    refusals of the same calls fall back to bench-after/ and the parser would time a publish to another deck."""
+    for c in timed:
+        if c['name'] != 'Artifact' or not c['ok']:
+            continue
+        if creates(c):
+            return 'created a new Artifact (a publish with type_url %s)' % c['input']['type_url']
+        url = c['input'].get('url')
+        publish = (c['input'].get('action') or 'publish') == 'publish'  # every spelling the parser counts as a landing, an asset's too
+        if (publish or artifact_action(c['input']) == 'read_file') and isinstance(url, str) and artifact_id(url) != artifact_id(seed_url):
+            return '%s %s' % ('published to' if publish else 'read a file of', url)
+    return None
+
+
 def check(*args):
     res = subprocess.run(['/usr/bin/python3', '-I', os.path.join(HERE, 'check.py'), *args], capture_output=True, text=True)
     try:
@@ -670,23 +695,29 @@ def after(args):
     else:
         if not s['transcript']:
             stop(d, p, 'no transcript for the Cowork session %s' % s['local'])
-        # Before: the seed's calls up to the timed turn's send (the seed transcript may be the timed one), else the
-        # bench's seed deck. After: the same replay carried on through the timed turn's calls, on the same deck (no
-        # create, no other url). Any error on the way is the rebuild's (`rebuilding`): the deck after falls back to
-        # bench-after/, else the attempt stays open.
+        # First, for a seed `before --seed` took, the timed turn's calls must stay on its deck (`off_seed`): a turn that
+        # left it stops here, before any rebuild and never falling back to bench-after/. Before: the seed's calls up to
+        # the timed turn's send (the seed transcript may be the timed one), else the bench's seed deck. After: the same
+        # replay carried on through the timed turn's calls, on the same deck (no create, no other url). Any error on the
+        # way is the rebuild's (`rebuilding`): the deck after falls back to bench-after/, else the attempt stays open.
         try:
             with rebuilding():
                 send, until = turn_window(s['transcript'], p['promptMatch'])
-                r = Replay(None if args.seed_transcript else seed_files())
-                for c in calls(args.seed_transcript, until=send) if args.seed_transcript else []:
-                    r.apply(c)
-                before_path = write_deck(r.published, os.path.join(d, 'before-deck')) if args.seed_transcript else SEED_DECK
+                timed = calls(s['transcript'], since=send, until=until)
+                off = off_seed(timed, p['seedUrl']) if p.get('seedUrl') else None
+                if off is None:
+                    r = Replay(None if args.seed_transcript else seed_files())
+                    for c in calls(args.seed_transcript, until=send) if args.seed_transcript else []:
+                        r.apply(c)
+                    before_path = write_deck(r.published, os.path.join(d, 'before-deck')) if args.seed_transcript else SEED_DECK
         except RebuildError as e:
             stop(d, p, 'the deck before the turn could not be rebuilt from the records: %s' % e)
+        if off:
+            stop(d, p, "the timed turn left the seed's deck: it %s, and the seed %s took is %s (redo the repetition on another seed)" % (off, p['seedId'], p['seedUrl']))
         try:
             with rebuilding():
                 r.timed(bool(args.seed_transcript) and os.path.realpath(args.seed_transcript) == os.path.realpath(s['transcript']))
-                for c in calls(s['transcript'], since=send, until=until):
+                for c in timed:
                     r.apply(c)
                 after_path = write_deck(r.published, os.path.join(d, 'after-deck'))
             after_source = "rebuilt from the records' calls"
@@ -762,15 +793,15 @@ def seed_prompt(args):
 
 
 def urls_in(transcript):
-    """The Artifact urls a session's records show outside its calls: the create's tool result, then its replies."""
-    creates, results, replies = set(), [], []
+    """The Artifact urls a session's records show outside its calls: a successful create's tool result, then its replies."""
+    made, results, replies = set(), [], []
     for r in jsonl(transcript):
         for b in (r.get('message') or {}).get('content') or [] if isinstance((r.get('message') or {}).get('content'), list) else []:
             if not isinstance(b, dict):
                 continue
-            if r.get('type') == 'assistant' and b.get('type') == 'tool_use' and b.get('name') == 'Artifact' and isinstance((b.get('input') or {}).get('type_url'), str):
-                creates.add(b.get('id'))
-            elif r.get('type') == 'user' and b.get('type') == 'tool_result' and b.get('tool_use_id') in creates:
+            if r.get('type') == 'assistant' and b.get('type') == 'tool_use' and creates(dict(name=b.get('name'), input=b.get('input') or {}, ok=True)):
+                made.add(b.get('id'))
+            elif r.get('type') == 'user' and b.get('type') == 'tool_result' and b.get('tool_use_id') in made and not b.get('is_error'):
                 results += [m.group(0) for m in ARTIFACT_URL_ANY.finditer(json.dumps(b.get('content')))]
             elif r.get('type') == 'assistant' and b.get('type') == 'text':
                 replies += [m.group(0) for m in ARTIFACT_URL_ANY.finditer(b.get('text', ''))]
@@ -782,7 +813,8 @@ ARTIFACT_URL_ANY = re.compile(r'https://(?:[a-z0-9-]+\.)?claude\.ai/(?:artifact|
 
 def seed_add(args):
     """A seed session's deck rebuilt from its records and entered in the run's ledger: good when it is the bench's
-    (`same`), every human turn of the seed session ran in auto, and its url is known."""
+    (`same`), every human turn of the seed session ran in auto, the session made the deck itself (a successful create),
+    its url is known, and no other entry's url names the same Artifact (a deck is one seed's)."""
     transcript = os.path.abspath(args.transcript)
     led = ledger(args.out)
     if any(os.path.realpath(s['transcript']) == os.path.realpath(transcript) for s in led['seeds']):
@@ -793,8 +825,10 @@ def seed_add(args):
                  addedAt=datetime.now(timezone.utc).isoformat())
     try:
         with rebuilding():
+            seed_calls = calls(transcript)
+            made = any(creates(c) for c in seed_calls)
             r = Replay()
-            for c in calls(transcript):
+            for c in seed_calls:
                 r.apply(c)
             out = write_deck(r.published, os.path.join(os.path.abspath(args.out), 'seeds', sid))
         entry['same'] = check('same', SEED_DECK, out)
@@ -804,9 +838,12 @@ def seed_add(args):
     except RebuildError as e:
         entry['why'] = 'the deck could not be rebuilt from the records: %s' % e
     if entry['why'] is None:
+        twin = next((s['id'] for s in led['seeds'] if entry['url'] and s.get('url') and artifact_id(s['url']) == artifact_id(entry['url'])), None)
         reasons = [w for w, bad in (("not the bench's deck: %s" % (entry['same'] or {}).get('detail'), not (entry['same'] or {}).get('pass')),
                                     ('a turn not in auto: %s' % modes, not modes or any(m != 'auto' for m in modes)),
-                                    ('no url in the records', entry['url'] is None)) if bad]
+                                    ('the session made no new deck (no successful create)', not made),
+                                    ('no url in the records', entry['url'] is None),
+                                    ('the deck of %s' % twin, twin is not None)) if bad]
         entry['why'] = '; '.join(reasons) or None
     entry['ok'] = entry['why'] is None
     led['seeds'].append(entry)

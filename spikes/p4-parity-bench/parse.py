@@ -42,9 +42,10 @@ A manifest (one per repetition attempt; written by `e2e/bench-edit-live.spec.ts`
 for Desktop) is JSON: {arm: "maws"|"desktop", task: "B1"|"B3"|"B5"|"B7", rep, attempt, surface?: "code"|"cowork" (MAWS's
 is "maws"), kind, host, transcript, journal?, relay?, audit?, landing?, landingActions?, landingFiles?, sessionId?,
 promptMatch?, startedAt, load: {before: [1,5,15], after: [1,5,15]}, check: {pass, detail}, humanStop?: null | reason,
-seedCheck?: {pass, detail}, freshSession?: bool, pin: null | {model, effort}, measurementOnly: bool, prompt}. Relative paths resolve against
-the manifest's directory. A cell is a task in an arm on a surface. What makes a repetition valid is `valid()`; what
-voids a verdict is VOIDING. The parser prints aggregates only, never message content.
+seedId?: string, seedCheck?: {pass, detail}, freshSession?: bool, pin: null | {model, effort}, measurementOnly: bool,
+prompt}. Relative paths resolve against the manifest's directory. A cell is a task in an arm on a surface. What makes
+a repetition valid is `valid()`; what voids a verdict is VOIDING. The parser prints aggregates only, never message
+content.
 """
 import argparse
 import glob
@@ -438,7 +439,8 @@ def edit_row(manifest_path):
     row = dict(arm=m['arm'], task=m['task'], rep=m['rep'], attempt=m.get('attempt') or 1, surface=m.get('surface') or ('maws' if m['arm'] == 'maws' else 'unknown'),
                kind=m.get('kind'), host=m.get('host'), startedAt=m.get('startedAt'), manifest=os.path.relpath(manifest_path), sessionId=None, entrypoint=None,
                engine=None, route=None, load=m.get('load'), check=m.get('check'), pin=m.get('pin'), measurementOnly=bool(m.get('measurementOnly')),
-               humanStop=m.get('humanStop'), seedCheck=m.get('seedCheck'), freshSession=m.get('freshSession'), measured=None, error=missing_records(m, base))
+               humanStop=m.get('humanStop'), seedId=m.get('seedId'), seedCheck=m.get('seedCheck'), freshSession=m.get('freshSession'), measured=None,
+               error=missing_records(m, base))
     if row['error']:
         return row
     meta, api, turns = parse_transcript(resolve(base, m['transcript']))
@@ -488,7 +490,8 @@ VOIDING = (('models', 'model'), ('efforts', 'effort'), ('thinking', 'thinking'))
 
 def valid(r):
     """A repetition counts when its records are there and its turn was found; the turn ran in auto mode with no human stop;
-    its edit landed and its checker passed; and, where its seed was rebuilt (a Cowork deck), the seed was the bench's."""
+    its edit landed and its checker passed; and a Cowork deck ran on a seed `before --seed` took (§7a), in another session
+    than the seed's, the seed rebuilt and the bench's."""
     why = []
     x = r['measured']
     if x is None:
@@ -502,6 +505,8 @@ def valid(r):
         why.append('a human stop: %s' % r['humanStop'])
     if r.get('seedCheck') is not None and not r['seedCheck'].get('pass'):
         why.append("the seed was not the bench's: %s" % r['seedCheck'].get('detail'))
+    if r['arm'] == 'desktop' and r.get('surface') == 'cowork' and r.get('kind') == 'presentation' and not r.get('seedId'):
+        why.append('no seed: a Cowork deck repetition of the record takes before --seed (§7a)')
     if r.get('freshSession') is False:  # §7a: a timed turn runs in a fresh session, never in its seed's
         why.append("the timed turn ran in its seed's session, not a fresh one")
     if not (r.get('check') or {}).get('pass'):

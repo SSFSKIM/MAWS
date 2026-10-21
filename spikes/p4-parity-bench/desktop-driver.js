@@ -194,11 +194,12 @@ globalThis.bench = {
     return result;
   },
   // The untimed follow-up of a Cowork deck repetition, the last resort only: the deck's files written to the folder by
-  // the model, for when desktop-prep cannot rebuild the deck from the records.
-  async writeDeckFiles(title) {
+  // the model, for when desktop-prep cannot rebuild the deck from the records. The deck is named by its url, the
+  // seedUrl `before --seed` printed in step 1 (the seed's deck), never by its title, which every seed deck shares.
+  async writeDeckFiles(url) {
     const a = await app();
-    await send(a, `Write the current files of the slide deck "${title}" into the folder bench-after/ exactly as they are now (project/deck.json and project/slides/<id>.html). Change nothing in the deck.`);
+    await send(a, `Write the current files of the slide deck at ${url} into the folder bench-after/ exactly as they are now (project/deck.json and project/slides/<id>.html). Change nothing in the deck.`);
     return waitTurn(a);
   },
 };
-nodeRepl.write('bench driver loaded: bench.probe(), bench.rep({ surface, folder, prompt }), bench.writeDeckFiles(title)');
+nodeRepl.write('bench driver loaded: bench.probe(), bench.rep({ surface, folder, prompt }), bench.writeDeckFiles(url)');
