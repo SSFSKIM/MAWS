@@ -91,6 +91,18 @@ interface ClickCandidate {
   single: boolean;
 }
 
+/**
+ * P4-B2 (D17): a gesture's end, then `after` whatever it threw: the end flushes the replica's hold, whose listeners may
+ * throw. Outside the component, since the React Compiler does not lower a `try` without a `catch`.
+ */
+function endThen(g: Gesture | null, commit: boolean, after: () => void): void {
+  try {
+    g?.end(commit);
+  } finally {
+    after();
+  }
+}
+
 export function Overlay({ session, canvas, slideId, scale, readOnly, surface, frame, onNotice, renderText, artifactId, importAsset, pins = true /* P4-B2 */ }: OverlayProps) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   const version = useDocVersion(session);
@@ -324,17 +336,14 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
 
     // P4-B2 (D3, A3): a gesture's end gives the focus back to the selection's target (`follow`): an armed box's keys
     // would otherwise reach the stage, with no input method
-    // the gesture ends written, its step closed, and the layout passes it saw caught up (P4-B2 D17: the end flushes the
-    // replica's hold, whose listeners may throw; the gesture is already let go)
-    const finish = (g: Gesture) => {
-      try {
-        g.end(true);
-      } finally {
+    // the gesture ends written, its step closed, and the layout passes it saw caught up (P4-B2 D17: the gesture is already
+    // let go)
+    const finish = (g: Gesture) =>
+      endThen(g, true, () => {
         setShown(null);
         catchUpLayout();
         follow(el);
-      }
-    };
+      });
 
     const onUp = (e: PointerEvent) => {
       const g = gesture.current;
@@ -415,13 +424,11 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       const g = gesture.current;
       gesture.current = null;
       pending.current = null;
-      try {
-        g?.end(false);
-      } finally {
+      endThen(g, false, () => {
         setShown(null);
         catchUpLayout();
         follow(el);
-      }
+      });
     };
 
     el.addEventListener('pointerdown', onDown);
