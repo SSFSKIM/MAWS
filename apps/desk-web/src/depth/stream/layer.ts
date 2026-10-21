@@ -12,6 +12,11 @@
 // named before it with that row's `uuid` (the desk open-fast spec, section 9: the producer keeps a named block's text
 // until its step ends, since its row reaches the transcript only then): the layer draws it named, as if its `block-row`
 // had come, and draws it on through a reconnect whose fresh snapshot carries it.
+//
+// A snapshot's copy of a block past the producer's bound is its tail (`truncated`, the open-fast spec's section 7: the
+// last 65,536 characters; chunks stay whole). A first snapshot can draw only that tail. A reconnect's fresh copy of a
+// block drawn before is spliced onto the text drawn where the two overlap, so a block streaming across a reconnect stays
+// whole (`spliced`).
 import type { BlockRow, JsonObject, SessionBodies, Streaming } from 'desk-hub/protocol';
 import type { StepEnd } from 'desk-hub/protocol';
 
@@ -44,7 +49,45 @@ type Request = {
   named: Set<number>;
   /** The request's `step-end` has arrived: it takes no more chunks. */
   ended: boolean;
+  /** Blocks a snapshot carried cut to their tail (`truncated`): what streamed before the tail is not in their text. */
+  tails: Set<number>;
 };
+
+/**
+ * The shortest overlap `spliced` joins at. A shorter one may be chance — text that repeats a line's end, or a lone
+ * character — where the gap streamed as much as the tail holds, or nearly, and nothing drawn overlaps it. A second
+ * overlap this long leaves which one the gap streamed unknown, so `spliced` joins only where there is one alone.
+ */
+const SPLICE_MIN = 256;
+
+/**
+ * `drawn`, a block's text as drawn before a reconnect, with `tail`, the fresh snapshot's copy of the block cut to its
+ * last characters, spliced on: the text from `drawn`'s start through the snapshot's cut. `drawn` runs from the block's
+ * start, or from a tail an earlier snapshot gave, to a point the tail's watermark has passed, so where the gap streamed
+ * less than the tail holds the tail starts inside `drawn`, its first characters `drawn`'s last. They join at that
+ * overlap when it is the only one of SPLICE_MIN characters or more. Null otherwise, and the tail alone is drawn: with
+ * none, the gap streamed past what `drawn` reaches, or may have; with more than one, as text that repeats can give,
+ * which one the gap streamed is unknown, and the longest can drop what it streamed.
+ */
+function spliced(drawn: string, tail: string): string | null {
+  // The longest prefix of `tail` that ends `drawn`, by Knuth–Morris–Pratt: the tail's failure function, then `drawn`'s
+  // last `tail.length` characters run through it. Linear in the tail, so a 64 KiB tail costs nothing noticeable.
+  const n = tail.length;
+  if (n < SPLICE_MIN || drawn.length < SPLICE_MIN) return null;
+  const fail = new Int32Array(n);
+  for (let i = 1, k = 0; i < n; i++) {
+    while (k > 0 && tail.charCodeAt(i) !== tail.charCodeAt(k)) k = fail[k - 1];
+    if (tail.charCodeAt(i) === tail.charCodeAt(k)) k++;
+    fail[i] = k;
+  }
+  let k = 0;
+  for (let i = Math.max(0, drawn.length - n); i < drawn.length; i++) {
+    while (k > 0 && drawn.charCodeAt(i) !== tail.charCodeAt(k)) k = fail[k - 1];
+    if (drawn.charCodeAt(i) === tail.charCodeAt(k)) k++;
+  }
+  // Every shorter overlap is a border of `tail`'s first `k` characters, so the next longest is `fail[k - 1]`.
+  return k >= SPLICE_MIN && fail[k - 1] < SPLICE_MIN ? drawn + tail.slice(k) : null;
+}
 
 const requestKey = (turnId: string, agentId: string | null, step: number) => `${turnId}\u0000${agentId ?? ''}\u0000${step}`;
 
@@ -61,20 +104,23 @@ function kindOf(name: unknown): BlockKind {
  * `chunkIndex` counts across the whole request, so the entry's `upTo` is the watermark; a block's own `upTo` is
  * informational. A tool call's block carries `id` and `name`, its `text` the arguments' JSON as far as it has streamed,
  * never parsed here. A block named before the snapshot carries its row's `uuid` (`settledBy` here; a uuid that is not a
- * string is none); `namedAt` and `truncated` (the text cut to its tail) are passed over. An entry with no blocks gives
- * nothing to draw.
+ * string is none); `truncated` says its text is the block's tail; `namedAt` is passed over. An entry with no blocks
+ * gives nothing to draw.
  */
-function snapshotEntry(entry: Streaming): { upTo: number; blocks: Array<Pick<StreamBlock, 'index' | 'kind' | 'text' | 'toolName' | 'toolUseId' | 'settledBy'>> } {
+function snapshotEntry(entry: Streaming): { upTo: number; blocks: Array<{ block: Pick<StreamBlock, 'index' | 'kind' | 'text' | 'toolName' | 'toolUseId' | 'settledBy'>; tail: boolean }> } {
   const raw: JsonObject[] = Array.isArray(entry.blocks) ? (entry.blocks as JsonObject[]) : [];
   const blocks = raw
     .filter((block) => typeof block.index === 'number')
     .map((block) => ({
-      index: block.index as number,
-      kind: kindOf(block.kind),
-      text: typeof block.text === 'string' ? block.text : '',
-      toolName: typeof block.name === 'string' ? block.name : null,
-      toolUseId: typeof block.id === 'string' ? block.id : null,
-      settledBy: typeof block.uuid === 'string' ? block.uuid : null,
+      block: {
+        index: block.index as number,
+        kind: kindOf(block.kind),
+        text: typeof block.text === 'string' ? block.text : '',
+        toolName: typeof block.name === 'string' ? block.name : null,
+        toolUseId: typeof block.id === 'string' ? block.id : null,
+        settledBy: typeof block.uuid === 'string' ? block.uuid : null,
+      },
+      tail: block.truncated === true,
     }));
   return { upTo: typeof entry.upTo === 'number' ? entry.upTo : -1, blocks };
 }
@@ -93,9 +139,10 @@ export class StreamingLayer {
       const request = this.request(entry.turnId, entry.agentId, entry.step);
       const { upTo, blocks } = snapshotEntry(entry);
       request.upTo = upTo;
-      for (const block of blocks) {
+      for (const { block, tail } of blocks) {
         request.blocks.set(block.index, { turnId: entry.turnId, agentId: entry.agentId, step: entry.step, ...block });
         if (block.settledBy !== null) request.named.add(block.index);
+        if (tail) request.tails.add(block.index);
       }
     }
   }
@@ -104,7 +151,10 @@ export class StreamingLayer {
    * A fresh snapshot's `streaming` after a disruption, over what was drawn before it. A block the snapshot carries is
    * drawn from it, named or not, as `load` draws it, a block drawn before keeping its identity (its live label's clock
    * goes on): its text the snapshot's, or, for a block the old subscription had named, the text drawn (its `block-row`
-   * came once the block was whole, so no copy holds more of it, and a copy cut before that holds less); named by the
+   * came once the block was whole, so no copy holds more of it, and a copy cut before that holds less), or, for a block
+   * still streaming that the snapshot carries cut to its tail (`truncated`), that tail spliced onto the text drawn
+   * where the two overlap, so the block stays whole (`spliced`; the tail alone where they do not, or overlap more than
+   * one way); named by the
    * snapshot's `uuid` when it carries one, else by what named it before (a snapshot cut before a `block-row` the old
    * subscription delivered carries the block unnamed, and that `block-row` follows it). So a block named and carried
    * across an empty-history reconnect — its row not yet on disk, none landing — stays drawn until its row lands.
@@ -153,7 +203,7 @@ export class StreamingLayer {
       for (const [index, block] of old.blocks) {
         const fresh = request?.blocks.get(index);
         if (fresh) {
-          const text = old.named.has(index) ? block.text : fresh.text;
+          const text = old.named.has(index) ? block.text : request!.tails.has(index) ? (spliced(block.text, fresh.text) ?? fresh.text) : fresh.text;
           request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text, toolName: fresh.toolName, toolUseId: fresh.toolUseId, settledBy: fresh.settledBy ?? block.settledBy }));
           continue;
         }
@@ -260,7 +310,7 @@ export class StreamingLayer {
   private request(turnId: string, agentId: string | null, step: number): Request {
     const key = requestKey(turnId, agentId, step);
     let request = this.requests.get(key);
-    if (!request) this.requests.set(key, (request = { turnId, agentId, step, upTo: -1, blocks: new Map(), named: new Set(), ended: false }));
+    if (!request) this.requests.set(key, (request = { turnId, agentId, step, upTo: -1, blocks: new Map(), named: new Set(), ended: false, tails: new Set() }));
     return request;
   }
 }

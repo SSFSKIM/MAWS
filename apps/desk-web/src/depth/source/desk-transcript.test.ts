@@ -244,6 +244,36 @@ describe('the main transcript through the session plane', () => {
     expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
   });
 
+  /** Rows as the plane sends them (newest first) with the oldest one carried again, newer than its first place. */
+  const withOldestTwice = <R,>(rows: readonly R[]): R[] => [...rows.slice(0, -2), rows.at(-1)!, ...rows.slice(-2)];
+
+  it('holds a row an older page carries twice once, at its oldest place', async () => {
+    const script = scriptOf(recording.session, null);
+    const cut = script.findLastIndex((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text') - 4;
+    const played = rowsOf(script, cut);
+    plane.snapshot(script, cut, 3);
+    await settle();
+    controller.loadOlder();
+    const page = rowsBefore(script, cut, String(played.at(-3)!.uuid), 100);
+    expect(page.more).toBe(false);
+    plane.send('rows', { ...page, rows: withOldestTwice(page.rows) });
+    await settle();
+    expect(controller.heldRows().map((row) => row.uuid)).toEqual(played.map((row) => row.uuid));
+    await step(script.slice(cut));
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  it('holds a row a snapshot carries twice once, at its oldest place', async () => {
+    const script = scriptOf(recording.session, null);
+    const cut = script.findLastIndex((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text') - 4;
+    const body = snapshotAt(script, cut, { subagents: metas });
+    plane.send('snapshot', { ...body, rows: withOldestTwice(body.rows) });
+    await settle();
+    expect(controller.heldRows().map((row) => row.uuid)).toEqual(rowsOf(script, cut).map((row) => row.uuid));
+    await step(script.slice(cut));
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
   it('an end keeps what was drawn, says why, and a new subscription takes up from a fresh snapshot', async () => {
     const script = scriptOf(recording.session, null);
     const middle = script.findLastIndex((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text') - 2;
