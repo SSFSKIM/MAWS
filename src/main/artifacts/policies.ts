@@ -7,7 +7,8 @@
 // partition): a request filter, a download filter and permission handlers. On a webContents (the app window, the
 // capture window): a guard on subframe navigations and the WebRTC policy (CSP does not govern WebRTC, and STUN never
 // passes `webRequest`). New windows and top-level navigations are already refused on every window (`window.ts`,
-// `capture.ts`). Under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG set, a cancelled navigation or download appends
+// `capture.ts`; the app window's through `guardWindowNavigation`). Under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG set, a
+// cancelled navigation (a frame's or the app window's own) or download appends
 // `blocked-navigation <url>` or `blocked-download <url>` to the seam log, so the e2e sees the policies run on the real
 // session and webContents.
 //
@@ -277,6 +278,19 @@ export function guardFrames(contents: WebContents, env: SeamEnv): void {
     // an initiator that can no longer be read is judged by the frame it navigates (Decision Log 44a)
     const initiatorShows = shownRead(() => event.initiator, () => shownRead(() => event.frame));
     if (!shouldBlockFrameNavigation({ url: event.url, frameBeneath, initiatorBeneath, initiatorShows })) return;
+    event.preventDefault();
+    seam(env, `blocked-navigation ${event.url}`);
+  });
+}
+
+// The app window's guard on its own navigations (`window.ts`): the page never navigates, so every one is refused, and
+// written to the seam log as a frame's is (P4 W2-C, tracker 2026-10-06): a PDF's link reaches here, since Chromium's
+// viewer navigates the window itself. `reloads` (development, the dev server's page): a navigation to the page's own URL
+// is let through, since that is how a page's own `location.reload()` reaches `will-navigate` (Vite's full reload, and the
+// transcript store's on a hot update: tracker 2026-09-28); a built app's page never reloads itself this way.
+export function guardWindowNavigation(contents: WebContents, env: SeamEnv, { reloads = false }: { reloads?: boolean } = {}): void {
+  contents.on('will-navigate', (event) => {
+    if (reloads && event.url === contents.getURL()) return;
     event.preventDefault();
     seam(env, `blocked-navigation ${event.url}`);
   });

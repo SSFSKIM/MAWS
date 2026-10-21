@@ -223,6 +223,7 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
       copy,
       '<!-- made by the agent; a <head> in a comment --><!doctype html><html><head><title>E2</title></head><body style="margin:0">' +
         '<h1 id="hero" style="margin:0;height:200px">Sales overview</h1><p class="lead">more</p>' +
+        '<a id="away" href="https://example.invalid/away" style="position:absolute;left:0;top:440px">away</a>' +
         "<script>document.addEventListener('click', () => parent.postMessage('e2-page-click', '*'));</script></body></html>",
     );
     const at = new Date().toISOString();
@@ -290,6 +291,19 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
     expect(await frame.locator('[data-maws-pick-overlay]').count()).toBe(0);
     await maws.page.mouse.click(100, 300);
     await expect.poll(posted).toHaveLength(7); // the page still hears its clicks: no picking started
+
+    // P4 W2-C (tracker 2026-10-06): a link to the web stays on the page. The bridge keeps the frame from a navigation the
+    // app's `frame-src` would refuse (a delivered file, which has no bridge, is left on Chromium's blocked page: case 3);
+    // the page still hears the click, so it landed in the frame
+    const navigations = await recordNavigations(maws);
+    const pageUrl = frame.url();
+    await frame.locator('#away').click();
+    await expect.poll(posted).toHaveLength(8);
+    expect((await posted())[7]).toBe('e2-page-click');
+    await maws.page.waitForTimeout(1_000);
+    expect((await navigations()).filter((line) => line.includes('example.invalid')), 'no navigation began').toEqual([]);
+    expect(frame.url()).toBe(pageUrl);
+    await expect(frame.locator('#hero')).toHaveText('Sales overview');
   } finally {
     await maws.cleanup();
   }
@@ -344,8 +358,8 @@ async function darkIn(s: Scene, element: Locator): Promise<{ dark: number; centr
 }
 
 // What main saw the app window navigate, from now on: starts and failed loads of any frame, and top-level commits.
-async function recordNavigations(s: Scene): Promise<() => Promise<string[]>> {
-  await s.maws.app.evaluate(({ BrowserWindow }) => {
+async function recordNavigations(maws: MawsLaunch): Promise<() => Promise<string[]>> {
+  await maws.app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
     const log: string[] = [];
     (globalThis as unknown as { __e2Navigations: string[] }).__e2Navigations = log;
@@ -353,7 +367,7 @@ async function recordNavigations(s: Scene): Promise<() => Promise<string[]>> {
     win.webContents.on('did-fail-load', (_event, code, _description, url, main) => log.push(`fail ${main ? 'window' : 'frame'} ${code} ${url}`));
     win.webContents.on('did-navigate', (_event, url) => log.push(`navigated window ${url}`));
   });
-  return () => s.maws.app.evaluate(() => [...(globalThis as unknown as { __e2Navigations: string[] }).__e2Navigations]);
+  return () => maws.app.evaluate(() => [...(globalThis as unknown as { __e2Navigations: string[] }).__e2Navigations]);
 }
 
 // Every frame URL in the app window, and the window's own URL.
@@ -692,8 +706,10 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(userData, (name) => name === 'e2-download.txt' || name.endsWith('.crdownload'))).toEqual([]);
     // a link to the web: the app's own `frame-src` refuses the frame's navigation before any request is made (so main's
-    // frame guard is never asked); the frame is left on Chromium's blocked page until Reload, the window stays put
-    const navigations = await recordNavigations(s);
+    // frame guard is never asked); the frame is left on Chromium's blocked page until Reload, the window stays put. A
+    // delivered file is served byte for byte, without the bridge script, so it keeps this; an HTML artifact's link stays
+    // on its page (the bridge script's case)
+    const navigations = await recordNavigations(s.maws);
     const appUrl = s.page.url();
     await page.locator('#away').click();
     await expect.poll(navigations).toContain('fail frame -30 https://example.invalid/away'); // ERR_BLOCKED_BY_CSP
@@ -709,11 +725,13 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     await expect(pdfFrame).not.toHaveAttribute('sandbox');
     await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
     await shoot(s, 'viewer-pdf');
-    // its link: Chromium's viewer asks to navigate the window itself; main's top-level guard (`window.ts`) refuses it, so
-    // the app stays put and no frame holds anything outside the scheme, the viewer and its resources
+    // its link: Chromium's viewer asks to navigate the window itself; main's top-level guard (`window.ts`) refuses it and
+    // writes the seam line a frame's refusal writes, so the app stays put and no frame holds anything outside the scheme,
+    // the viewer and its resources
     const square = (await darkIn(s, pdfFrame)).centre!;
     await s.page.mouse.click(square.x, square.y);
     await expect.poll(navigations, { timeout: 10_000 }).toContain('start window https://example.invalid/pdf-link');
+    await expect.poll(() => seamLines(s)).toContain('blocked-navigation https://example.invalid/pdf-link');
     await s.page.waitForTimeout(1_000);
     expect((await navigations()).filter((line) => line.startsWith('navigated window'))).toEqual([]);
     const after = await framesOfWindow(s);

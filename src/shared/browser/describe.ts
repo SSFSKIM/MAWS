@@ -5,8 +5,10 @@
 // to resolve, so the rules below follow Playwright's `roleUtils` where that is cheap and answer null or `''` (omitted
 // from the anchor) wherever they cannot be sure. Lifted from `spikes/browser-probe/shared/locator.cjs`.
 //
-// DOM-only and dependency-free: the browser preload bundles it alone (no zod, nothing under `@shared/ipc/`). The DOM is
-// typed structurally (`DomElement`) because `src/shared` also compiles under the Node program, which has no DOM lib.
+// DOM-only and dependency-free but for X10's zod-free field helper: the browser preload bundles it alone (no zod,
+// nothing under `@shared/ipc/`). The DOM is typed structurally (`DomElement`) because `src/shared` also compiles under
+// the Node program, which has no DOM lib.
+import { anchorField, oneLine } from '../anchor/field';
 
 // The slice of the DOM this module reads; a real `Element` (and happy-dom's) satisfies it.
 export interface DomNode {
@@ -27,6 +29,7 @@ export interface DomElement extends DomNode {
   hasAttribute(name: string): boolean;
 }
 export interface DomShadowRoot {
+  readonly childNodes: ArrayLike<DomNode>; // the display label reads the tree as it renders (P4 W2-C)
   querySelectorAll(selectors: string): ArrayLike<DomElement>;
 }
 interface DomStyle {
@@ -41,35 +44,17 @@ export interface DomDocument {
   getElementById(elementId: string): DomElement | null;
 }
 
-export type ElementDescription = { css: string; role: string | null; name: string; a11y: string; tag: string; confident: boolean };
+// `displayName` (P4 W2-C): present only beside an empty `name`, when `displayNameOf` finds a label (a label, never a key).
+export type ElementDescription = { css: string; role: string | null; name: string; displayName?: string; a11y: string; tag: string; confident: boolean };
 
 export const CSS_PATH_MAX = 2000;
 export const A11Y_SEGMENT_NAME_MAX = 40; // E2's `TEXT_MAX` for page text
 export const A11Y_PATH_MAX = 300;
 
-// --- text helpers (E2's `oneLine` and `fit`, `src/renderer/src/tools/deliverables/comment/pick.ts`) ---
+// --- text helpers (the cut is X10's `anchorField`, `../anchor/field.ts`) ---
 
-// eslint-disable-next-line no-control-regex -- the control characters are what is matched
-const CONTROL = /[\x00-\x1f\x7f]/g;
 // eslint-disable-next-line no-control-regex -- the control characters are what is matched
 const HAS_CONTROL = /[\x00-\x1f\x7f]/;
-export const oneLine = (text: string): string => text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
-
-// At most `max` UTF-16 units (what a schema's `max` counts), an ellipsis marking a cut, never half a surrogate pair.
-export function fit(text: string, max: number): string {
-  if (text.length <= max) return text;
-  let kept = text.slice(0, Math.max(0, max - 1));
-  if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
-  return `${kept}…`;
-}
-
-// The same from the other end: the last `max - 1` units after an ellipsis (the innermost segments of a path).
-export function fitEnd(text: string, max: number): string {
-  if (text.length <= max) return text;
-  let kept = text.slice(text.length - Math.max(0, max - 1));
-  if (/^[\uDC00-\uDFFF]/.test(kept)) kept = kept.slice(1);
-  return `…${kept}`;
-}
 
 // Playwright's `asFlatString` with its matcher's whitespace rule: soft hyphens and zero-width spaces dropped, runs of
 // whitespace one space, trimmed.
@@ -333,6 +318,8 @@ export const NAME_FROM_CONTENT_ROLES: ReadonlySet<string> = new Set([
 const CONTENT_OF_DESCENDANT: ReadonlySet<string> = new Set(['', 'caption', 'code', 'contentinfo', 'definition', 'deletion', 'emphasis', 'insertion', 'list', 'listitem', 'mark', 'none', 'paragraph', 'presentation', 'region', 'row', 'rowgroup', 'section', 'strong', 'subscript', 'superscript', 'table', 'term', 'time']);
 const PROHIBITS_NAMING: ReadonlySet<string> = new Set(['caption', 'code', 'definition', 'deletion', 'emphasis', 'generic', 'insertion', 'mark', 'paragraph', 'presentation', 'strong', 'subscript', 'suggestion', 'superscript', 'term', 'time']);
 const IGNORED: ReadonlySet<string> = new Set(['script', 'style', 'noscript', 'template']);
+// The roles whose value an embedded control contributes to a name (`embeddedText`): what a person typed or chose.
+const VALUE_ROLES: ReadonlySet<string> = new Set(['textbox', 'searchbox', 'combobox', 'listbox', 'progressbar', 'scrollbar', 'slider', 'spinbutton', 'meter']);
 const LABELABLE: ReadonlySet<string> = new Set(['button', 'input', 'meter', 'output', 'progress', 'select', 'textarea']);
 const PLACEHOLDER_TYPES: ReadonlySet<string> = new Set(['text', 'password', 'number', 'search', 'tel', 'email', 'url']);
 
@@ -468,7 +455,7 @@ function embeddedText(el: DomElement, outer: Walk, referenced: boolean): Text {
   // An embedded control contributes its value (Playwright reads a textbox's value, a select's chosen option, a range's
   // number): what a person typed, a password included. The channel carries geometry and names only (Design §9, A-33),
   // so every such value is doubt and the name around it is omitted (Decision Log 35).
-  if (['textbox', 'searchbox', 'combobox', 'listbox', 'progressbar', 'scrollbar', 'slider', 'spinbutton', 'meter'].includes(role)) return DOUBT;
+  if (VALUE_ROLES.has(role)) return DOUBT;
   if (role === 'menu') return '';
   const label = el.getAttribute('aria-label') ?? '';
   if (flat(label) !== '') return label;
@@ -538,6 +525,90 @@ function computeName(el: DomElement): string {
   return PRESENTATIONAL.has(role) && el.localName !== 'iframe' ? '' : flat(el.getAttribute('title') ?? '');
 }
 
+// --- the display label (P4 W2-C, tracker 2026-10-07; E4d Decision Log 29(c)) ---
+
+// A best-effort label for an element whose exact name is `''` because an open shadow root in its content makes that name
+// doubt (a web-component icon in a button, most Lit libraries). The badge and the anchor's label read it; the anchor's
+// `name`, which E4c narrows by, never does. Only for a role named from its content, as Playwright names it. The first
+// found of: the content's rendered text, an open shadow tree read in place of its host's children and a slot as what it
+// places; the element's own `title`; within the content in tree order, an `aria-label`, `label`, `title` or `alt`, or an
+// SVG `<title>`; then a custom element's `icon` or `name`. A control, editable content (what a person typed, as in a
+// name: an editable element, one inside an editable region, an editable part of the content), a hidden subtree and a
+// script are never read. `''` when the content holds no open shadow root or gives nothing.
+const DISPLAY_NODES_MAX = 2000; // a bound on the walk: the content is the page's
+const LABEL_ATTRIBUTES = ['aria-label', 'label', 'title', 'alt'];
+const ICON_ATTRIBUTES = ['icon', 'name'];
+type Display = { budget: number; shadowed: boolean; label: string; icon: string };
+
+// What an element's own `contenteditable` says: editable (`''`, `true`, `plaintext-only`), not (`false`), or nothing,
+// absent or an invalid value, which inherits (HTML's rule).
+function ownEditability(el: DomElement): boolean | null {
+  const value = el.getAttribute('contenteditable')?.toLowerCase() ?? null;
+  if (value === '' || value === 'true' || value === 'plaintext-only') return true;
+  return value === 'false' ? false : null;
+}
+
+// Whether an element is editable: the nearest `contenteditable` at or above it decides.
+function editable(el: DomElement): boolean {
+  for (let node: DomElement | null = el; node !== null; node = node.parentElement) {
+    const own = ownEditability(node);
+    if (own !== null) return own;
+  }
+  return false;
+}
+
+export function displayNameOf(el: DomElement): string {
+  if (!NAME_FROM_CONTENT_ROLES.has(ariaRole(el) ?? '') && el.localName !== 'summary') return '';
+  if (editable(el)) return '';
+  const found: Display = { budget: DISPLAY_NODES_MAX, shadowed: false, label: '', icon: '' };
+  const text = flat(contentDisplay(el, found));
+  if (!found.shadowed) return '';
+  return oneLine(text || flat(el.getAttribute('title') ?? '') || found.label || found.icon);
+}
+
+const firstAttribute = (el: DomElement, names: string[]): string => names.map((name) => flat(el.getAttribute(name) ?? '')).find((value) => value !== '') ?? '';
+
+function unread(el: DomElement): boolean {
+  if (IGNORED.has(el.localName) || ['input', 'textarea', 'select', 'desc'].includes(el.localName) || VALUE_ROLES.has(ariaRole(el) ?? '')) return true;
+  if (ownEditability(el) === true) return true; // the walk starts outside every editable region, so its own decides
+  if (el.hasAttribute('hidden')) return true;
+  const style = styleOf(el);
+  return style !== null && (style.display === 'none' || (style.visibility !== '' && style.visibility !== 'visible'));
+}
+
+// The text an element's content renders, open shadow trees and slots read as they render.
+function contentDisplay(el: DomElement, found: Display): string {
+  let nodes: ArrayLike<DomNode> = el.childNodes;
+  if (el.shadowRoot) {
+    found.shadowed = true;
+    nodes = el.shadowRoot.childNodes;
+  } else if (el.localName === 'slot') {
+    const placed = (el as DomElement & { assignedNodes?(options: { flatten: boolean }): ArrayLike<DomNode> }).assignedNodes?.({ flatten: true });
+    if (placed && placed.length > 0) nodes = placed;
+  }
+  return Array.from(nodes)
+    .map((node) => nodeDisplay(node, found))
+    .join('');
+}
+
+function nodeDisplay(node: DomNode, found: Display): string {
+  if (found.budget <= 0) return '';
+  found.budget -= 1;
+  if (node.nodeType === 3) return node.textContent ?? '';
+  if (node.nodeType !== 1) return '';
+  const el = node as DomElement;
+  if (unread(el)) return '';
+  if (el.localName === 'title') {
+    if (found.label === '') found.label = flat(el.textContent ?? '');
+    return '';
+  }
+  if (found.label === '') found.label = firstAttribute(el, LABEL_ATTRIBUTES);
+  if (found.icon === '' && el.localName.includes('-')) found.icon = firstAttribute(el, ICON_ATTRIBUTES);
+  const text = contentDisplay(el, found);
+  const display = styleOf(el)?.display || 'inline';
+  return display !== 'inline' || el.localName === 'br' ? ` ${text} ` : text;
+}
+
 // --- the path and the description ---
 
 // Roles whose name the path leaves out (E0b's choice: a list's or a form's name is noise there).
@@ -553,9 +624,9 @@ export function a11yPath(el: DomElement): string {
     const role = roleOf(node);
     if (role === null) continue;
     const name = UNNAMED_IN_PATH.has(role) ? '' : accessibleNameOf(node);
-    segments.unshift(name === '' ? role : `${role} “${fit(name, A11Y_SEGMENT_NAME_MAX)}”`);
+    segments.unshift(name === '' ? role : `${role} “${anchorField(name, A11Y_SEGMENT_NAME_MAX)}”`);
   }
-  return fitEnd(segments.join(' > '), A11Y_PATH_MAX);
+  return anchorField(segments.join(' > '), A11Y_PATH_MAX, { keep: 'tail' });
 }
 
 // Playwright's `getByRole` skips an element under `aria-hidden="true"`, so a role and name sent for one would only make
@@ -569,5 +640,7 @@ function underAriaHidden(el: DomElement): boolean {
 export function describeElement(el: DomElement): ElementDescription | null {
   const css = cssPath(el);
   if (css === null) return null;
-  return { css, role: roleOf(el), name: accessibleNameOf(el), a11y: a11yPath(el), tag: el.localName, confident: !underAriaHidden(el) };
+  const name = accessibleNameOf(el);
+  const displayName = name === '' ? displayNameOf(el) : '';
+  return { css, role: roleOf(el), name, ...(displayName !== '' && { displayName }), a11y: a11yPath(el), tag: el.localName, confident: !underAriaHidden(el) };
 }

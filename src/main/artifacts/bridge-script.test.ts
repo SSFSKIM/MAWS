@@ -213,6 +213,28 @@ describe('the bridge script (E2 Design §10)', () => {
     expect(posted).toEqual([]);
   });
 
+  // P4 W2-C (tracker 2026-10-06, E2): a link out of the scheme would point the frame at a page the app's `frame-src`
+  // refuses, leaving Chromium's blocked page until Reload; the bridge keeps the page in place instead
+  it('keeps the page in place on a link outside the scheme, and leaves the scheme’s own links, script links and the page’s handlers alone', () => {
+    win.happyDOM.setURL('maws-artifact://record/1/index.html');
+    page(
+      '<a id="web" href="https://example.invalid/away">away</a><a id="nested" href="http://example.invalid/"><span id="inner">in</span></a>' +
+        '<a id="mail" href="mailto:someone@example.invalid">mail</a><a id="blank" target="_blank" href="https://example.invalid/new">new</a>' +
+        '<map name="m"><area id="area" href="https://example.invalid/area"></map><svg><a id="svg" href="https://example.invalid/svg"><text>s</text></a></svg>' +
+        '<a id="relative" href="other.html">other</a><a id="hash" href="#part">part</a><a id="own" href="maws-artifact://record/2/index.html">v2</a>' +
+        '<a id="script" href="javascript:void 0">script</a><a id="plain">no href</a>',
+    );
+    // what the page's own handler saw, last on the way up; it then stops happy-dom's own navigation of the link
+    const heard: Record<string, boolean> = {};
+    win.addEventListener('click', (event) => {
+      heard[(event.target as unknown as { id: string }).id] = event.defaultPrevented;
+      event.preventDefault();
+    });
+    for (const id of ['web', 'inner', 'mail', 'blank', 'area', 'svg', 'relative', 'hash', 'own', 'script', 'plain']) click($(`#${id}`));
+    expect(heard).toEqual({ web: true, inner: true, mail: true, blank: true, area: true, svg: true, relative: false, hash: false, own: false, script: false, plain: false });
+    expect(posted).toEqual([]);
+  });
+
   it('does nothing in a top-level document (the capture window), where there is no parent', () => {
     Object.defineProperty(win, 'parent', { configurable: true, get: () => win });
     page('<p>x</p>');
