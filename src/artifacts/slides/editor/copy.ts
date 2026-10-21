@@ -73,6 +73,14 @@ export const DECK_COPY = {
   insertConnector: 'Connector',
   tableSize: (rows: number, cols: number) => `${rows} × ${cols} table`,
   shapeName: (kind: string) => ({ rect: 'Rectangle', rounded: 'Rounded rectangle', ellipse: 'Ellipse', diamond: 'Diamond', 'arrow-right': 'Arrow right', 'arrow-left': 'Arrow left', 'arrow-up': 'Arrow up', 'arrow-down': 'Arrow down', line: 'Line shape' })[kind] ?? kind,
+  // P4-B2 (D15): the stage's elements as assistive technology reads them, and what the stage's status says
+  items: (name: string, n: number) => `${name}, ${n} ${n === 1 ? 'item' : 'items'}`,
+  iconName: (name: string) => {
+    const words = name.replace(/([a-z])([A-Z])/g, '$1 $2');
+    return `${words[0]}${words.slice(1).toLowerCase()} icon`;
+  },
+  selectedCount: (n: number) => `${n} elements selected`,
+  position: (n: number, total: number) => `${n} of ${total}`,
   uploading: 'Uploading the image…',
   // M6 (M5's review): Detach transform is named only where the inspector offers it (the token has a fallback)
   tokenTransform: (detachable: boolean) =>

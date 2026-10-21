@@ -22,7 +22,17 @@ export interface SlideCanvasOptions {
   embedUrl?: (slideId: string, elementId: string, raw: string) => string;
   /** B6: the deck's uploaded faces' private names, for its font-family values (canvas/faces.ts); none by default. */
   faces?: FaceAliases;
+  /**
+   * P4-B2 (D15, A1): the stage's and the boards' canvases only (never a thumbnail, the presenter or a preview): every
+   * element's node is focusable by script (`tabindex="-1"`) and takes the role and name this answers for it, from its
+   * tag, its attributes and how many elements it holds; null leaves its native semantics (text, tables). A role or name
+   * the model's own attributes give wins. Only the DOM is written, never the model.
+   */
+  describe?: Describe;
 }
+
+/** P4-B2 (D15, A1): how an element's node is named for assistive technology (`SlideCanvasOptions.describe`). */
+export type Describe = (element: { tag: string; attrs: Readonly<Record<string, string>> }, children: number) => { role?: string; label?: string } | null;
 
 /** A longest strictly increasing subsequence of `seq` (values, in order). */
 function longestRun(seq: number[]): number[] {
@@ -102,6 +112,7 @@ export class SlideCanvas {
   private readonly draw: DrawContext;
   private readonly thumbnail: boolean;
   private readonly embedUrl: EmbedUrl | undefined;
+  private readonly describe: Describe | undefined; // P4-B2 (D15, A1)
   private laidOut = false;
   private readonly layoutWaiters: (() => void)[] = [];
   /** P3-C M7 fix wave 1: told after every completed layout pass (the comment pins and card follow geometry with it). */
@@ -129,6 +140,7 @@ export class SlideCanvas {
   ) {
     this.draw = { assetUrl: options.assetUrl ?? (() => null), faces: options.faces ?? new Map() };
     this.thumbnail = options.thumbnail ?? false;
+    this.describe = options.describe;
     const embedUrl = options.embedUrl;
     this.embedUrl = embedUrl && ((id, raw) => embedUrl(slideId, id, raw));
     const document = host.ownerDocument;
@@ -250,9 +262,12 @@ export class SlideCanvas {
     const els = readFlat(this.doc, this.slideId, false);
     const lists = childLists(els);
     const parents = only ?? new Set([ROOT, ...els.map((e) => e.id)]);
+    const byId = this.describe ? new Map(els.map((e) => [e.id, e])) : null; // P4-B2 (D15)
     for (const p of parents) {
       const host = p === ROOT ? this.root : this.nodes.get(p);
       if (!host) continue;
+      const own = byId?.get(p);
+      if (own) this.describeNode(host, own, (lists.get(p) ?? []).length); // what it holds may have changed
       const want = (lists.get(p) ?? []).map((e) => {
         const n = this.nodes.get(e.id)!;
         this.setLayer(n, e, p === ROOT);
@@ -273,6 +288,30 @@ export class SlideCanvas {
         this.writes.place++;
       }
     }
+  }
+
+  /**
+   * P4-B2 (D15, A1): an element's node as assistive technology reads it (`describe`): focusable by script, with the role
+   * and name answered for it unless the model's own attributes give them. Each write only where the value changes.
+   */
+  private describeNode(n: Element, e: { tag: string; attrs: Readonly<Record<string, string>> }, children: number): void {
+    if (!this.describe) return;
+    const set = (name: string, value: string | undefined) => {
+      if (value === undefined) {
+        if (n.hasAttribute(name)) n.removeAttribute(name);
+      } else if (n.getAttribute(name) !== value) n.setAttribute(name, value);
+    };
+    set('tabindex', '-1');
+    const said = this.describe(e, children);
+    if (e.attrs.role === undefined) set('role', said?.role);
+    if (e.attrs['aria-label'] === undefined && e.attrs['aria-labelledby'] === undefined) set('aria-label', said?.label);
+  }
+
+  /** P4-B2 (D15): how many elements a node holds as drawn (its child element nodes). */
+  private static held(n: Element): number {
+    let count = 0;
+    for (const c of Array.from(n.children)) if (c.hasAttribute('data-eid')) count++;
+    return count;
   }
 
   /**
@@ -359,6 +398,12 @@ export class SlideCanvas {
               reparents.add(this.parentKeyOf(n));
               reparents.add((s.parent as string) ?? ROOT);
             } else if (k === 'raw' || k === 'tag') replace.add(c.id);
+          }
+          // P4-B2 (D15): an attribute changed (an alt, a group's mark) may change how the node is named
+          if (this.describe && c.keys.some((k) => k.startsWith('attr:'))) {
+            const attrs: Record<string, string> = {};
+            for (const [k, v] of Object.entries(s)) if (k.startsWith('attr:') && typeof v === 'string') attrs[k.slice(5)] = v;
+            this.describeNode(n, { tag: s.tag as string, attrs }, SlideCanvas.held(n));
           }
         }
       }

@@ -20,6 +20,7 @@ import type { FaceAliases } from '../../slides/canvas/faces';
 import type { Guide, Handle, Pt } from '../../slides/geometry';
 import { HANDLES } from '../../slides/geometry';
 import type { DeckSession } from '../../slides/editor/session';
+import { describeElement } from '../../slides/editor/a11y';
 import { SlideView } from '../../slides/editor/SlideView';
 import { TextBox } from '../../slides/editor/TextBox';
 import { CLIPBOARD_TYPE, type ImportAsset } from '../../slides/editor/transform/clipboard';
@@ -641,7 +642,7 @@ const Board = memo(function Board(props: {
       data-missing={board.missing || undefined}
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
     >
-      <SlideView doc={doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" />
+      <SlideView doc={doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" describe={describeElement} /* P4-B2 (D15, A1) */ />
       {board.missing && <div className="design-board-missing" />}
     </div>
   );
