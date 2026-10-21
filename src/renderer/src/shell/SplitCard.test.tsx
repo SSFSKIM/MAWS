@@ -115,6 +115,50 @@ function dragTo(x: number): void {
   act(() => void fireEvent.pointerUp(divider(), { pointerId: 1, clientX: x }));
 }
 
+// LC-3 (2026-10-21; the architect's D1): while the drag is armed, the card's rect is outlined where the card will open,
+// with nothing of S mounted for it; a disarm, a cancel or the release takes the outline away, and the release opens the
+// card on it. The real card still mounts once, on release (its Decision Log 5).
+describe('the armed drag’s outline of the card', () => {
+  const outline = () => area().querySelector<HTMLElement>('[data-split-card-outline]');
+  const press = () => act(() => void fireEvent.pointerDown(divider(), { pointerId: 1, button: 0, clientX: 600 }));
+  const at = (x: number) => act(() => void fireEvent.pointerMove(divider(), { pointerId: 1, clientX: x }));
+  const rect = (el: HTMLElement) => [el.style.right, el.style.bottom, el.style.width, el.style.height];
+
+  it('shows while armed, at the card’s place and size, and mounts nothing; a disarm hides it; the release opens the card on it', () => {
+    shell();
+    press();
+    at(200);
+    expect(outline(), 'held at 320: not armed').toBeNull();
+    at(150);
+    const shown = outline()!;
+    expect(rect(shown)).toEqual(['16px', '16px', '560px', '640px']);
+    expect(shown.closest('[aria-hidden="true"]')).not.toBeNull();
+    expect(card()).toBeNull();
+    expect(composers()).toEqual([A]); // S's one composer, in its pane held at 0 px
+    at(161);
+    expect(outline(), 'disarmed').toBeNull();
+    at(150);
+    expect(outline()).not.toBeNull();
+    act(() => void fireEvent.pointerUp(divider(), { pointerId: 1, clientX: 150 }));
+    expect(outline()).toBeNull();
+    expect(rect(card()!)).toEqual(rect(shown));
+    expect(live.most).toBe(1);
+  });
+
+  it('takes the stored size of what the card will sit over; a cancel takes it away and writes nothing', () => {
+    useLayout.getState().setFloatingCardSize(`main:${SETTINGS.id}`, { w: 470, h: 300 });
+    shell();
+    const before = useLayout.getState().main;
+    press();
+    at(150);
+    expect(rect(outline()!)).toEqual(['16px', '16px', '470px', '300px']);
+    act(() => void fireEvent.pointerCancel(divider(), { pointerId: 1, clientX: 150 }));
+    expect(outline()).toBeNull();
+    expect(card()).toBeNull();
+    expect(useLayout.getState().main).toBe(before);
+  });
+});
+
 describe('the split’s floating card in the Shell', () => {
   it('released armed, S’s session is the card at the bottom right of the main area’s content: its only composer, with the keyboard', () => {
     shell();
@@ -124,7 +168,7 @@ describe('the split’s floating card in the Shell', () => {
     const shown = card()!;
     expect(shown.dataset.cardHost).toBe('split');
     expect(within(shown).getByRole('heading', { name: 'Alpha session' })).toBeTruthy();
-    expect([shown.style.right, shown.style.bottom, shown.style.width, shown.style.height]).toEqual(['16px', '16px', '420px', '420px']); // 420 × 60 % of 700
+    expect([shown.style.right, shown.style.bottom, shown.style.width, shown.style.height]).toEqual(['16px', '16px', '560px', '640px']); // LC-3: 560 × min(640, 700 − 32)
     // On the content row across the region, never over a strip, inside main; a mark-up occluder; never a dialog
     const layer = shown.closest<HTMLElement>('[data-floating-layer]')!;
     expect(layer.hasAttribute('data-markup-occluder')).toBe(true);
@@ -202,14 +246,14 @@ describe('the split’s floating card in the Shell', () => {
     const shown = card()!;
     size = { width: 600, height: 400 };
     resize(shown.parentElement!, size);
-    expect([shown.style.width, shown.style.height]).toEqual(['420px', '240px']); // 60 % of 400, and the 240 minimum
+    expect([shown.style.width, shown.style.height]).toEqual(['560px', '368px']); // the body less its margins: 400 − 32
     expect(set().floating).toBeDefined();
     expect(useLayout.getState().regions.floatingCard).toEqual({});
     const corner = shown.querySelector<HTMLElement>('[data-card-resize="top-left"]')!;
     act(() => void fireEvent.pointerDown(corner, { pointerId: 1, button: 0, clientX: 500, clientY: 300 }));
-    act(() => void fireEvent.pointerMove(corner, { pointerId: 1, clientX: 450, clientY: 260 }));
-    act(() => void fireEvent.pointerUp(corner, { pointerId: 1, clientX: 450, clientY: 260 }));
-    expect(useLayout.getState().regions.floatingCard).toEqual({ [`main:${SETTINGS.id}`]: { w: 470, h: 280 } });
+    act(() => void fireEvent.pointerMove(corner, { pointerId: 1, clientX: 550, clientY: 340 }));
+    act(() => void fireEvent.pointerUp(corner, { pointerId: 1, clientX: 550, clientY: 340 }));
+    expect(useLayout.getState().regions.floatingCard).toEqual({ [`main:${SETTINGS.id}`]: { w: 510, h: 328 } });
   });
 
   it('A’s last tab closing shows S full width, the card gone; S’s session tab closing takes the card and the pill with it', () => {

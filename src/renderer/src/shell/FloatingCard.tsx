@@ -18,7 +18,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize } from '@shared/ipc/schema/layout';
 import { IconButton, MaximizeIcon } from '../app/IconButton';
 import { SessionPane } from '../session/SessionPane';
-import { useLayout } from '../stores/layout';
+import { mainCardKey, useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { CARD_MARGIN, CARD_MIN, cardHost, cardSession, cardSizeKey, closeCard, dockCard, placeCard, splitFloat, useFloatingCard, type CardHost, type CardRect, type ColumnDrag } from './floating';
 import { Pill, useSessionTitle } from './FloatingPill';
@@ -119,6 +119,28 @@ export function SplitCardLayer() {
   );
 }
 
+// LC-3 (2026-10-21; the architect's D1): while the divider's drag is armed, the outline of the card where the release
+// will open it, sized as the card will be (what it will sit over: the pane beside the floating one). Nothing of the
+// session mounts for it: S stays in its pane, held at 0 px, and its card mounts once, on release (its Decision Log 5).
+// The main area renders it in the card layer's cell while armed only, so a disarm, a cancel or the release removes it.
+export function SplitCardOutline({ floating }: { floating: 0 | 1 }) {
+  const area = useRef<HTMLDivElement>(null);
+  const bounds = useSize(area);
+  const stored = useLayout((s) => s.regions.floatingCard[mainCardKey(currentSet(s.main).panes[floating === 0 ? 1 : 0]?.activeTabId ?? '')]);
+  const size = bounds && placeCard(stored, bounds, 'split');
+  return (
+    <div ref={area} aria-hidden className="pointer-events-none relative z-20 min-h-0 min-w-0" style={{ gridRow: 3, gridColumn: '1 / -1' }}>
+      {size && (
+        <div
+          data-split-card-outline
+          className="absolute rounded-lg border-2 border-dashed border-accent"
+          style={{ right: CARD_MARGIN, bottom: CARD_MARGIN, width: size.w, height: size.h }}
+        />
+      )}
+    </div>
+  );
+}
+
 // The card or its pill of the `host` region's card, while that card is up.
 function CardOrPill({ host, area, bounds }: { host: CardHost; area: RefObject<HTMLElement | null>; bounds: Bounds }) {
   const session = useLayout((s) => (cardHost(s) === host ? cardSession(s) : null));
@@ -150,7 +172,7 @@ function Card({ host, appSessionId, area, bounds, column }: { host: CardHost; ap
   const [live, setLive] = useState<FloatingCardSize | null>(null); // the size while an edge is dragged
   const gesture = useRef<Gesture | null>(null);
   const self = useRef<HTMLDivElement>(null);
-  const size = live ?? placeCard(stored, bounds);
+  const size = live ?? placeCard(stored, bounds, host);
   const columnElement = column?.element ?? null;
 
   // A gesture the card loses (it unmounts, docked mid-drag; the column comes or goes; what it sits over changes) is
@@ -209,7 +231,7 @@ function Card({ host, appSessionId, area, bounds, column }: { host: CardHost; ap
     const h = g.start.h + (g.top ? g.pointerY - event.clientY : 0);
     // A column's width goes to the pane, whose spacer holds the page's floor; the card follows the spacer's rect.
     if (g.drag) g.drag.width(Math.round(Math.max(CARD_MIN.w, w)));
-    else setLive(placeCard({ w, h }, bounds));
+    else setLive(placeCard({ w, h }, bounds, host));
   };
   const end = () => {
     const g = gesture.current;
