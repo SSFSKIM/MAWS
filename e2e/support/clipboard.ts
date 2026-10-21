@@ -1,18 +1,19 @@
 // The Mac's pasteboard as an end-to-end case drives it (⌘C, ⌘V, Electron's `clipboard`). There is one for the whole
 // Mac, shared with the owner's copies, other apps, a GUI sitting and every MAWS run in any checkout. A case runs its
-// clipboard steps inside `withNativeClipboard`, which serializes them across runs with a lock file in the OS temp
-// directory (within a run, the one worker of playwright.config.ts already does) and afterwards writes back what the
+// clipboard steps inside `withNativeClipboard`, which serializes them across runs with a lock file at one fixed path of
+// the machine (within a run, the one worker of playwright.config.ts already does) and afterwards writes back what the
 // pasteboard held when the steps began (every kind Electron's `clipboard.read()` reports or, if writing those fails,
 // the text alone), but only while the pasteboard still holds a text the steps put there: a copy made by anything else
 // since is left alone. That is all it can promise. A copy made while the steps run fails the case, and one made after
 // their last write is kept at the price of the owner's earlier copy, so a run that drives the clipboard needs the Mac's
 // pasteboard to itself.
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { ElectronApplication } from '@playwright/test';
 import { acquireFileLock } from '../../test/support/file-lock';
 
-const LOCK = join(tmpdir(), 'maws-e2e-clipboard.lock');
+// /tmp, not the OS temp directory: that is $TMPDIR, which each of ci-kit's runner instances may set apart, and a lock
+// there would hold only within one runner while the jobs of two share the pasteboard (ci-kit's mac-lane concurrency
+// spec, M2; its audit's H3).
+const LOCK = '/tmp/maws-e2e-clipboard.lock';
 
 // What main keeps between the read and the write-back: each item's payload by MIME type, and the plain text.
 type Saved = { items: Record<string, Blob | { title: string; url: string }>[]; text: string };

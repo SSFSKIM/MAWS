@@ -11,6 +11,7 @@ import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { shellsUnder, untilExited } from './processes';
 import { launchEnvironment } from './scratch-env';
+import { cornerOrigin, windowCorner } from './window-origin';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
 
@@ -138,6 +139,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     const page = await app.firstWindow();
     const consoleErrors = await collectConsoleErrors(page);
     await sizeForGroup(app, page); // P3-F1
+    await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
     return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, cleanup };
   } catch (error) {
@@ -172,6 +174,20 @@ async function sizeForGroup(app: ElectronApplication, page: Page): Promise<void>
   const [width, height] = [Number(size[1]), Number(size[2])];
   await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w, h), [width, height] as const);
   await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [width, height] as const);
+}
+
+// ci-kit's mac-lane concurrency spec, M2 (its audit's H6): on a shared runner instance the first window moves to the
+// corner of the primary display's work area its instance takes (window-origin.ts), after sizeForGroup so the corner
+// holds the window's own size; anywhere else it stays where the app put it.
+async function placeForInstance(app: ElectronApplication): Promise<void> {
+  const corner = windowCorner(process.env);
+  if (corner === null) return;
+  const { area, size } = await app.evaluate(({ BrowserWindow, screen }) => {
+    const [width, height] = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.getSize();
+    return { area: screen.getPrimaryDisplay().workArea, size: { width: width!, height: height! } };
+  });
+  const { x, y } = cornerOrigin(corner, area, size);
+  await app.evaluate(({ BrowserWindow }, [x, y]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setPosition(x, y), [x, y] as const);
 }
 
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window

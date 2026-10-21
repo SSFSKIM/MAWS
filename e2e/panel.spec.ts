@@ -12,6 +12,7 @@ import type { PanelChildMetrics, PanelHarnessApi, PanelHarnessTab } from '../src
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
 import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
+import { latencyWait } from './support/latency';
 import { sidebarRow } from './support/sidebar';
 import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_DRAG } from './support/panel-support';
 import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
@@ -679,6 +680,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
   });
 
   test('a second edit to an already-dirty file updates the change line', async ({ maws }) => {
+    // Each edit's change line within a second, the wait's own timeout, loosened on a loaded or shared machine (latency.ts).
+    const changeLineWait = latencyWait('change line latency', 1_000);
     await withRepository(async (repo) => {
       const panel = await PanelPage.open(maws);
       await panel.call('setSession', 'A', { directory: repo.dir });
@@ -689,7 +692,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       for (const lines of [2, 3]) {
         const written = Date.now();
         repo.append(`edit ${lines}`);
-        await expect(panel.changeLine).toHaveText(`+${lines} −0 across 2 files · 1 untracked`, { timeout: 1_000 });
+        await expect(panel.changeLine).toHaveText(`+${lines} −0 across 2 files · 1 untracked`, { timeout: changeLineWait });
         latencies.push(Date.now() - written);
       }
       test.info().annotations.push({ type: 'change line latency (ms)', description: latencies.join(', ') });
