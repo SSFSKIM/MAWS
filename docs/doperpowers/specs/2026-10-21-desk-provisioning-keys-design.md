@@ -389,7 +389,7 @@ while its child runs, stops the uplink within a second and starts none while no 
 `daemon` verb is needed. A machine that is not enrolled here says so and exits 0: a teardown script runs `leave` on a
 VM whose boot may have failed before enrolling. The hub unreachable, a 5xx, a marked 401 inside the grace, or any
 answer that is not acceptance or rejection: the credential is kept, the reason is on stderr, exit 1, so the teardown
-can retry. There is no `--local`:
+can retry. A credential `enroll --replace` installed while `leave` ran is kept and named, exit 1 (Decision Log). There is no `--local`:
 a VM the hub cannot be told about is deleted anyway, and the offline sweep is for exactly that. Accepted edge: a Mac that enrolled under a name other than its host name and leaves writes
 as its host name afterwards, and the sessions it held under the enrolled name read as another machine's until it
 enrolls again (`former` is in `hub.json`, which `leave` removes); a VM about to be deleted has no such history, and a
@@ -1121,6 +1121,14 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   once the hub has been asked (a key the hub made cannot be unmade from the browser); closing the dialog during that
   request leaves the key listed unused (`0 / ∞`), revocable, which a test pins.
   Date/Author: 2026-10-21, M2's executor; folded by the controller.
+- Decision: `leave` and a concurrent `enroll --replace` (M3's review, both reviewers): enroll's write of `hub.json` and
+  `leave`'s removal take one lock, and `leave` removes the file only if it still holds the credential it checked. A
+  replacement installed while `leave` waited (its 90 s recheck, or a slow `DELETE` answer) is kept and reported on
+  stderr, and `leave` exits **1** — retry `leave` to end the new enrollment too. Rejected: exit 0, since the checked
+  enrollment is gone — `leave`'s 0 means "this machine is no longer enrolled", which does not hold with a replacement
+  installed; the caller runs `leave` to make the machine gone (usually before deleting the server), and devcloud's
+  teardown proceeds on either exit with the offline sweep covering the rest, so 1 costs it nothing.
+  Date/Author: 2026-10-21, the orchestrator (ruling); recorded by the controller.
 
 ## Outcomes & Retrospective
 
