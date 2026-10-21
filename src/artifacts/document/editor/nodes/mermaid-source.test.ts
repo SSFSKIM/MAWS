@@ -1,7 +1,7 @@
 // The source a document diagram hands mermaid (mermaid-source.ts): the page's palette and face go in where the author's
 // front matter config leaves them unset, the front matter read as mermaid reads it and kept as written.
 import { describe, expect, it } from 'vitest';
-import { authorTheme, configKeysOf, pinnable, withPage, type Page } from './mermaid-source';
+import { besideInit, namedTheme, pinnable, withPage, type Page } from './mermaid-source';
 
 const PAGE: Page = {
   theme: 'base',
@@ -61,56 +61,24 @@ describe('a document diagram’s source', () => {
   });
 });
 
-// The owner's ruling (2026-10-21): a diagram that names a theme keeps that theme's colours.
-describe('the theme a document diagram’s author names', () => {
-  // mermaid's configuration's key names, as configKeysOf reads them from its default configuration (a few, here)
-  const KEYS = configKeysOf({ theme: 'default', fontFamily: 'x', themeVariables: { primaryColor: '#fff', lineColor: '#000', mainBkg: '#fff' } });
-  const named = (head: string) => authorTheme(`${head}${BODY}`, KEYS)?.theme ?? null;
-
-  it('is read from its front matter, then its own init directives, a later one winning, as mermaid merges them', () => {
-    expect(named('---\nconfig:\n  theme: forest\n---\n')).toBe('forest');
-    expect(named('%%{init: {"theme": "forest"}}%%\n')).toBe('forest');
-    expect(named("%%{initialize: {'theme': 'neutral'}}%%\n")).toBe('neutral'); // mermaid reads `'` as `"`
-    expect(named('---\nconfig:\n  theme: dark\n---\n%%{init: {"theme": "forest"}}%%\n')).toBe('forest');
-    expect(named('%%{init: {"theme": "dark"}}%%\n%%{init: {"themeVariables": {"primaryColor": "#fff"}}}%%\n%%{init: {"theme": "neo"}}%%\n')).toBe('neo');
-  });
-
+// The owner's ruling (2026-10-21): a diagram that names a theme keeps that theme's colours. Mermaid's own parse reads which
+// theme a source names (mermaid.dom.test.ts); these are what this module adds to it.
+describe('the theme a configuration mermaid read names', () => {
   // base has no colours of its own; a name mermaid's themes lack draws in whatever palette mermaid was configured with
-  it('is none when it is base or a name mermaid does not know', () => {
-    expect(named('---\nconfig:\n  theme: base\n---\n')).toBeNull();
-    expect(named('---\nconfig:\n  theme: forest\n---\n%%{init: {"theme": "base"}}%%\n')).toBeNull();
-    expect(named('---\nconfig:\n  theme: solarized\n---\n')).toBeNull();
-    expect(named('')).toBeNull();
-  });
-
-  // mermaid drops every init directive when one does not parse
-  it('is the front matter’s when an init directive is malformed', () => {
-    expect(named('---\nconfig:\n  theme: dark\n---\n%%{init: {"theme": "forest"}}%%\n%%{init: {theme: neo}}%%\n')).toBe('dark');
-    expect(named('%%{init: {theme: forest}}%%\n')).toBeNull();
-  });
-
-  it('comes with the author’s own variables, merged and checked as mermaid does', () => {
-    const head = '---\nconfig:\n  theme: forest\n  themeVariables:\n    primaryColor: "#ffeeaa"\n    lineColor: hsl(-10, 0%, 0%)\n---\n';
-    expect(authorTheme(`${head}%%{init: {"themeVariables": {"primaryColor": "#000000"}}}%%\n${BODY}`, KEYS)).toEqual({
-      theme: 'forest',
-      themeVariables: { primaryColor: '#000000', lineColor: '' },
-    });
-  });
-
-  // mermaid's check deletes a key its configuration lacks (a theme's own methods among them) and a null value, each
-  // directive before it merges them
-  it('keeps only the variables mermaid’s check keeps, a later directive’s null leaving an earlier value', () => {
-    const head = '---\nconfig:\n  theme: forest\n  themeVariables:\n    updateColors: red\n    __mainBkg: red\n    lineColor: null\n---\n';
-    const directives = '%%{init: {"themeVariables": {"mainBkg": "#ffeeaa"}}}%%\n%%{init: {"themeVariables": {"mainBkg": null, "calculate": "red"}}}%%\n';
-    expect(authorTheme(`${head}${directives}${BODY}`, KEYS)).toEqual({ theme: 'forest', themeVariables: { mainBkg: '#ffeeaa' } });
+  it('is a theme mermaid knows, other than base', () => {
+    expect(namedTheme({ theme: 'forest' })).toBe('forest');
+    expect(namedTheme({ theme: 'redux-dark-color' })).toBe('redux-dark-color');
+    expect(namedTheme({ theme: 'base' })).toBeNull();
+    expect(namedTheme({ theme: 'solarized' })).toBeNull();
+    expect(namedTheme({})).toBeNull();
   });
 });
 
-// mermaid's configKeys (defaultConfig.ts's keyify)
-it('reads every key name of mermaid’s default configuration, at any depth, but an array’s', () => {
-  expect(configKeysOf({ theme: 'default', flowchart: { curve: 'basis', padding: undefined }, themeVariables: { mainBkg: '#fff' }, secure: ['secure'] })).toEqual(
-    new Set(['theme', 'flowchart', 'curve', 'padding', 'themeVariables', 'mainBkg']),
-  );
+// mermaid merges two or more init directives each checked first, one alone unchecked over the front matter; this
+// render's own directive makes it two or more, so mermaid's parse reads the author's beside an empty one
+it('reads a source for mermaid’s parse beside an empty init directive, after its front matter', () => {
+  expect(besideInit(`---\ntitle: Flow\n---\n${BODY}`)).toBe(`---\ntitle: Flow\n---\n%%{init: {}}%%\n${BODY}`);
+  expect(besideInit(BODY)).toBe(`%%{init: {}}%%\n${BODY}`);
 });
 
 describe('a named theme’s own variables, as a directive carries them', () => {

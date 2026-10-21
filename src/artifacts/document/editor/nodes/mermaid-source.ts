@@ -2,11 +2,12 @@
 // an init directive (mermaid.ts says why they ride in the source). Mermaid applies a front matter's `config` under any
 // directive, so the directive carries only what that config leaves unset, and the author's keys hold as written (P4,
 // tracker row 2026-10-19 "Wave S c20"). The palette is the page's, or, for a diagram whose author names a theme, that
-// theme's own colours (the owner's ruling, 2026-10-21). The source is read as mermaid 11.17.2 reads it, each step below
-// citing mermaid's own: the front matter (preprocess.ts, diagram-api/frontmatter.ts) after mermaid's cleanup, by its own
-// pattern, the block's indent removed from each line, js-yaml in the JSON schema (mermaid bundles js-yaml 4.3.0; 4.3.2
-// differs only in merge keys, which that schema lacks), then the init directives after it (utils.ts). The source mermaid
-// is handed keeps the author's bytes, and one whose config cannot be read goes as written, for mermaid to draw or reject.
+// theme's own colours (the owner's ruling, 2026-10-21). The front matter is read as mermaid 11.17.2 reads it, each step
+// citing mermaid's own (preprocess.ts, diagram-api/frontmatter.ts): after mermaid's cleanup, by its own pattern, the
+// block's indent removed from each line, js-yaml in the JSON schema (mermaid bundles js-yaml 4.3.0; 4.3.2 differs only in
+// merge keys, which that schema lacks). Which theme the author names, and with what variables, mermaid's own parse reads
+// (mermaid.ts). The source mermaid is handed keeps the author's bytes, and one whose config cannot be read goes as
+// written, for mermaid to draw or reject.
 import { JSON_SCHEMA, load } from 'js-yaml';
 import type { MermaidConfig } from 'mermaid';
 
@@ -42,81 +43,34 @@ function cleaned(source: string): string {
     .replace(/<(\w+)([^>]*)>/g, (_, tag: string, attributes: string) => `<${tag}${attributes.replace(/="([^"]*)"/g, "='$1'")}>`);
 }
 
-// the front matter's `config` and the cleaned text after the front matter, or null when the config cannot be read
-function authored(source: string): { config: Record<string, unknown>; rest: string } | null {
-  const text = cleaned(source);
-  const front = FRONT_MATTER.exec(text);
-  if (!front) return { config: {}, rest: text };
-  const [head, indent, body] = front;
+// the front matter's `config`, or null when it cannot be read
+function authorConfig(source: string): Record<string, unknown> | null {
+  const front = FRONT_MATTER.exec(cleaned(source));
+  if (!front) return {};
+  const [, indent, body] = front;
   const yaml = indent ? body.split('\n').map((line) => (line.startsWith(indent) ? line.slice(indent.length) : line)).join('\n') : body;
   try {
-    return { config: record(record(load(yaml, { schema: JSON_SCHEMA })).config), rest: text.slice(head.length) };
+    return record(record(load(yaml, { schema: JSON_SCHEMA })).config);
   } catch {
     return null;
   }
 }
 
-// mermaid's directive patterns (utils.ts: directiveRegex, and detectDirective's comments that are no directive)
-const DIRECTIVE = /%{2}{\s*(?:(\w+)\s*:|(\w+))\s*(?:(\w+)|((?:(?!}%{2}).|\r?\n)*))?\s*(?:}%{2})?/gi;
-const WITHOUT_OPEN = /\s*(?:(\w+)(?=:):|(\w+))\s*(?:(\w+)|((?:(?!}%{2}).|\r?\n)*))?\s*(?:}%{2})?/;
-const NOT_A_DIRECTIVE = new RegExp(`[%]{2}(?![{]${WITHOUT_OPEN.source})(?=[}][%]{2}).*\n`, 'ig');
-const INIT = /(?:init\b)|(?:initialize\b)/;
-
-// the init directives' arguments in order, as mermaid's detectDirective reads them: every `'` read as `"`, and one that
-// does not parse drops them all
-function initArgs(text: string): unknown[] {
-  const read = text.trim().replace(NOT_A_DIRECTIVE, '').replace(/'/gm, '"');
-  try {
-    return [...read.matchAll(DIRECTIVE)]
-      .filter((match) => match[1]?.match(INIT) || match[2]?.match(INIT))
-      .map((match) => (match[3] ? match[3].trim() : match[4] ? JSON.parse(match[4].trim()) : null));
-  } catch {
-    return [];
-  }
+// The theme a configuration names, as mermaid's own parse of the author's source read it (front matter and directives,
+// merged and checked as its render does); null for none and for a name mermaid's themes lack. An explicit `base` names
+// none: base has no colours of its own (its variables are how it is meant to be coloured), and a document's are its
+// page's, so it keeps the page's palette, the author's own base variables still winning key by key.
+export function namedTheme(config: { theme?: unknown }): Theme | null {
+  const { theme } = config;
+  return typeof theme === 'string' && theme !== 'base' && THEMES.has(theme) ? (theme as Theme) : null;
 }
 
-// mermaid's configKeys (defaultConfig.ts's keyify): every key name of its default configuration, at any depth, but an
-// array's; its directive check deletes any other
-export function configKeysOf(config: object): Set<string> {
-  const keys = new Set<string>();
-  const walk = (value: object) => {
-    for (const [name, child] of Object.entries(value)) {
-      if (Array.isArray(child)) continue;
-      keys.add(name);
-      if (typeof child === 'object' && child !== null) walk(child);
-    }
-  };
-  walk(config);
-  return keys;
-}
-
-// theme variables as mermaid's directive check (sanitizeDirective.ts) leaves each front matter or directive before it
-// merges them: only its configuration's key names (never a theme's own methods), none null, and a value holding
-// anything beyond SAFE blanked
-function checked(value: unknown, keys: ReadonlySet<string>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(record(value))
-      .filter(([name, variable]) => variable != null && keys.has(name) && !name.startsWith('__') && !name.includes('proto') && !name.includes('constr'))
-      .map(([name, variable]) => [name, typeof variable === 'string' && !SAFE.test(variable) ? '' : variable]),
-  );
-}
-
-// The theme the author names, from the front matter's config and then the init directives, a later one winning as mermaid
-// merges them, with the author's own theme variables merged and checked as mermaid does (`keys`: configKeysOf mermaid's
-// default configuration); null when none is named. An explicit `base` names none: base has no colours of its own (its
-// variables are how it is meant to be coloured), and a document's are its page's, so it keeps the page's palette, the
-// author's own base variables still winning key by key.
-export function authorTheme(source: string, keys: ReadonlySet<string>): { theme: Theme; themeVariables: Record<string, unknown> } | null {
-  const author = authored(source);
-  if (!author) return null;
-  let theme = author.config.theme;
-  const themeVariables = checked(author.config.themeVariables, keys);
-  for (const args of initArgs(author.rest).map(record)) {
-    if (args.theme != null) theme = args.theme;
-    Object.assign(themeVariables, checked(args.themeVariables, keys));
-  }
-  if (typeof theme !== 'string' || theme === 'base' || !THEMES.has(theme)) return null;
-  return { theme: theme as Theme, themeVariables };
+// The source beside an empty init directive, after its front matter. Mermaid merges two or more init directives each
+// checked first, and one alone unchecked over the front matter (utils.ts, detectInit); a render's own directive makes the
+// author's two or more, so mermaid's parse reads the author's configuration from this as that render will.
+export function besideInit(source: string): string {
+  const head = FRONT_MATTER.exec(source)?.[0] ?? '';
+  return `${head}%%{init: {}}%%\n${source.slice(head.length)}`;
 }
 
 // A named theme's own variables as a directive can carry them: its strings but the face (the page's rides apart), a hue
@@ -133,9 +87,8 @@ export function pinnable(variables: Record<string, unknown>): Record<string, str
 }
 
 export function withPage(source: string, page: Page): string {
-  const author = authored(source);
-  if (!author) return source;
-  const own = author.config;
+  const own = authorConfig(source);
+  if (own === null) return source;
   const ownVariables = record(own.themeVariables);
   const init: Record<string, unknown> = {};
   if (unset(own, 'theme')) init.theme = page.theme;

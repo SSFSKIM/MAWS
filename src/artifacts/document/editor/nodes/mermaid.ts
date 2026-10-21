@@ -10,13 +10,14 @@
 // diagram's own source (mermaid-source.ts), which mermaid reads over whatever configuration it holds at the start of that
 // render: under the author's front matter config, and before an init directive the source writes itself, so both win. A
 // named theme computes its colours over the last configuration's (mermaid's config.ts, updateCurrentConfig), so its
-// source pins every colour of its own, read from mermaid as this render configured it.
+// source pins every colour of its own.
 import type { Mermaid } from 'mermaid';
+import type { Page } from './mermaid-source';
 
 type MermaidPlugin = ReturnType<(typeof import('@streamdown/mermaid'))['createMermaidPlugin']>;
+type Source = typeof import('./mermaid-source');
 
-let loaded: Promise<[MermaidPlugin, Mermaid, typeof import('./mermaid-source')]> | null = null;
-let configKeys: ReadonlySet<string> | null = null; // the key names mermaid's directive check keeps
+let loaded: Promise<[MermaidPlugin, Mermaid, Source]> | null = null;
 let n = 0;
 
 function themeOf(into: HTMLElement): Record<string, string> {
@@ -36,6 +37,31 @@ function themeOf(into: HTMLElement): Record<string, string> {
   };
 }
 
+const SETTINGS = { securityLevel: 'strict', suppressErrorRendering: true } as const;
+
+// The page for a diagram whose author names a theme: that theme's own colours as the author's variables colour it, read
+// from mermaid. Best-effort: null when the author names none, and on any failure, the diagram then drawn as before the
+// ruling. Mermaid's own parse reads the author's theme and variables (merged and checked as its render will), and only
+// the strings a directive can carry come back out, so nothing the author wrote reaches mermaid's configuration.
+async function themedPage(source: string, fontFamily: string, plugin: MermaidPlugin, mermaid: Mermaid, module: Source, configure: () => void): Promise<Page | null> {
+  if (!/\btheme\b/.test(source)) return null;
+  try {
+    const parsed = await mermaid.parse(module.besideInit(source), { suppressErrors: true });
+    const theme = parsed ? module.namedTheme(parsed.config) : null;
+    if (!parsed || !theme) return null;
+    try {
+      plugin.getMermaid({ ...SETTINGS, theme, themeVariables: { fontFamily, ...parsed.config.themeVariables } });
+      return { theme, fontFamily, themeVariables: module.pinnable(mermaid.mermaidAPI.getSiteConfig().themeVariables) };
+    } finally {
+      // the page's configuration back in the same turn, so no render starts under the theme's, and the transcript's
+      // diagrams, which configure mermaid only on their plugin's first, draw in what they did before the ruling
+      configure();
+    }
+  } catch {
+    return null;
+  }
+}
+
 export async function renderMermaid(source: string, into: HTMLElement): Promise<string> {
   loaded ??= Promise.all([
     import('@streamdown/mermaid').then((module) => module.createMermaidPlugin()),
@@ -44,22 +70,15 @@ export async function renderMermaid(source: string, into: HTMLElement): Promise<
   ]);
   const themeVariables = themeOf(into);
   const { fontFamily, ...colours } = themeVariables;
-  const [plugin, mermaid, { authorTheme, configKeysOf, pinnable, withPage }] = await loaded;
-  configKeys ??= configKeysOf(mermaid.mermaidAPI.defaultConfig);
-  const named = authorTheme(source, configKeys);
-  const settings = { securityLevel: 'strict', suppressErrorRendering: true } as const;
-  let page;
-  let drawer;
-  if (named) {
-    // the theme as the author's own variables colour it, in the page's face, which then holds even when mermaid drops every
-    // init directive for a malformed one of the author's; read back at once, before anything else can configure mermaid
-    drawer = plugin.getMermaid({ ...settings, theme: named.theme, themeVariables: { fontFamily, ...named.themeVariables } });
-    page = { theme: named.theme, fontFamily, themeVariables: pinnable(mermaid.mermaidAPI.getSiteConfig().themeVariables) };
-  } else {
-    drawer = plugin.getMermaid({ ...settings, theme: 'base', themeVariables });
-    page = { theme: 'base' as const, fontFamily, themeVariables: colours };
+  const [plugin, mermaid, module] = await loaded;
+  const configure = () => plugin.getMermaid({ ...SETTINGS, theme: 'base', themeVariables });
+  const before: Page = { theme: 'base', fontFamily, themeVariables: colours };
+  const draw = async (page: Page) => (await configure().render(`doc-diagram-${(n += 1)}`, module.withPage(source, page))).svg;
+  const themed = await themedPage(source, fontFamily, plugin, mermaid, module, configure);
+  if (!themed) return draw(before);
+  try {
+    return await draw(themed);
+  } catch {
+    return draw(before); // as before the ruling; its rejection, if any, is mermaid's own
   }
-  n += 1;
-  const { svg } = await drawer.render(`doc-diagram-${n}`, withPage(source, page));
-  return svg;
 }

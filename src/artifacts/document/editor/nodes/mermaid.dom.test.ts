@@ -72,7 +72,7 @@ const PAGE_PALETTE = {
 };
 
 // A theme's own variables, as mermaid computes them for these author's variables under that theme alone.
-function ownVariables(theme: NonNullable<MermaidConfig['theme']>, themeVariables: Record<string, string> = {}): Record<string, unknown> {
+function ownVariables(theme: NonNullable<MermaidConfig['theme']>, themeVariables: Record<string, unknown> = {}): Record<string, unknown> {
   mermaid.initialize({ theme, themeVariables });
   return mermaid.mermaidAPI.getSiteConfig().themeVariables as Record<string, unknown>;
 }
@@ -136,6 +136,14 @@ describe('a document diagram that names a theme, drawn after the transcript conf
     expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
   });
 
+  // mermaid reads `'` as `"` in a directive, and the author's directive over the front matter
+  it('keeps the theme mermaid reads, the author’s directive naming it over the front matter', async () => {
+    const neutral = ownVariables('neutral');
+    const { config } = await renderedAfterTranscript("---\nconfig:\n  theme: dark\n---\n%%{initialize: {'theme': 'neutral'}}%%\ngraph TD\n  A --> B");
+    expect(config.theme).toBe('neutral');
+    expect(hues(config.themeVariables)).toEqual(hues({ ...neutral, fontFamily: PAGE_FONT }));
+  });
+
   // neutral writes its tertiary colours with a hue below zero, which mermaid's directive check would blank
   it('keeps neutral’s own colours, the transcript’s tertiary colour included', async () => {
     const neutral = ownVariables('neutral');
@@ -191,13 +199,68 @@ describe('a document diagram that names a theme, drawn after the transcript conf
     expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
   });
 
-  // a malformed init directive makes mermaid drop every one, the page's too; the theme then draws as this render
-  // configured it
-  it('takes the page’s face when an init directive of the author’s is malformed', async () => {
-    const forest = ownVariables('forest');
+  // a malformed init directive makes mermaid drop every one, the page's too, so the diagram draws as before the ruling:
+  // its theme under the page's configuration
+  it('draws as before the ruling, in the page’s face, when an init directive of the author’s is malformed', async () => {
     const { config } = await renderedAfterTranscript('---\nconfig:\n  theme: forest\n---\n%%{init: {theme: neo}}%%\ngraph TD\n  A --> B', false);
     expect(config.theme).toBe('forest');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+  });
+
+  // mermaid's check drops a null inside a nested variable too; this one, met by xychart's parse, drew before the ruling
+  // (with no transcript diagram between, nothing else configures mermaid over what this render left)
+  it('draws a forest xychart whose theme variables hold a nested null, in forest’s colours', async () => {
+    const forest = ownVariables('forest', { xyChart: {} });
+    const { config } = await renderedAfterTranscript(
+      '---\nconfig:\n  theme: forest\n  themeVariables:\n    xyChart:\n      plotColorPalette: null\n---\nxychart-beta\n  x-axis [a, b]\n  bar [1, 2]',
+      false,
+    );
+    expect(config.theme).toBe('forest');
     expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
+  });
+
+  // mermaid's merge ignores a later directive's object where an earlier one set a value
+  it('keeps an author’s colour and face a later directive sets to an object', async () => {
+    const forest = ownVariables('forest', { primaryColor: '#ffeeaa', fontFamily: 'Georgia' });
+    const { config } = await renderedAfterTranscript(
+      '%%{init: {"theme": "forest", "themeVariables": {"primaryColor": "#ffeeaa", "fontFamily": "Georgia"}}}%%\n%%{init: {"themeVariables": {"primaryColor": {}, "fontFamily": {}}}}%%\ngraph TD\n  A --> B',
+    );
+    expect(config.themeVariables).toMatchObject({ primaryColor: '#ffeeaa', fontFamily: 'Georgia' });
+    expect(hues(config.themeVariables)).toEqual(hues(forest));
+  });
+});
+
+// Pinning a named theme's colours is best-effort: when it fails, the diagram draws as it did before the ruling.
+describe('a document diagram whose theme cannot be pinned', () => {
+  const FOREST = '---\nconfig:\n  theme: forest\n---\ngraph TD\n  A --> B';
+  const BEFORE = withPage(FOREST, { theme: 'base', fontFamily: PAGE_FONT, themeVariables: PAGE_PALETTE });
+
+  it('draws as before the ruling when reading the theme’s colours throws', async () => {
+    const initialize = mermaid.initialize.bind(mermaid);
+    vi.spyOn(mermaid, 'initialize').mockImplementation((config) => {
+      if (config.theme === 'forest') throw new Error('the theme cannot be read');
+      initialize(config);
+    });
+    const { source } = await renderedAfterTranscript(FOREST);
+    expect(source).toBe(BEFORE);
+  });
+
+  it('draws as before the ruling when mermaid rejects the pinned source', async () => {
+    const render = vi.spyOn(mermaid, 'render');
+    render.mockImplementation(async (_id, text) => {
+      if (text !== BEFORE) throw new Error('rejected');
+      return { svg: '<svg data-before=""></svg>', diagramType: 'flowchart-v2' } as Awaited<ReturnType<typeof mermaid.render>>;
+    });
+    expect(await renderMermaid(FOREST, onPage())).toBe('<svg data-before=""></svg>');
+    expect(render.mock.calls.map(([, text]) => text === BEFORE)).toEqual([false, true]);
+  });
+
+  // the transcript configures mermaid only on its plugin's first diagram, so its later ones draw in what a document left
+  it('leaves mermaid configured as before the ruling', async () => {
+    await renderedAfterTranscript(FOREST, false);
+    const site = mermaid.mermaidAPI.getSiteConfig();
+    expect(site.theme).toBe('base');
+    expect(site.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
   });
 });
 
