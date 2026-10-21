@@ -327,9 +327,13 @@ describe('the last assistant line and a message tool’s call', () => {
     return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').lastAssistantText;
   };
 
-  it('an accepted call after the last text is the line, its message’s first line, under either name', () => {
+  it('an accepted call after the last text is the line, its message’s first line', () => {
     expect(lastLine(said('Looking first.'), call('c1', '\nStage 1 is done.\nMoving on.'), result('c1'), bash('b1'))).toBe('Stage 1 is done.');
-    expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.', 'mcp__to-human__message'), result('c1'))).toBe('Stage 1 is done.');
+  });
+
+  // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
+  it('an accepted call of the to-human plugin’s message tool is an ordinary tool call: the text before it stays the line', () => {
+    expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.', 'mcp__to-human__message'), result('c1'))).toBe('Looking first.');
   });
 
   it('a text written after the call is the newer line', () => {

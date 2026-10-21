@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { parseJournalRow } from '@shared/wire/journal'; // P4-R7
-import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
+import { activityForTool, applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
 import { FIXTURE_DIR, framesOf, loadJournal } from '../../../test/support/fixtures';
@@ -304,7 +304,20 @@ describe('a message tool’s message as the last line', () => {
 
   it('the call in one batch and its accepted result in the next: the message’s first line, once the result is in', () => {
     expect(lines([ev('turn.started', {}), text('Looking first.'), call('c1', '\nStage 1 is done.\nMoving on.')], [result('c1')])).toEqual(['Looking first.', 'Stage 1 is done.']);
-    expect(lines([call('c1', 'x'.repeat(300), { toolName: 'mcp__to-human__message' })], [result('c1')])).toEqual([null, 'x'.repeat(160)]);
+    expect(lines([call('c1', 'x'.repeat(300))], [result('c1')])).toEqual([null, 'x'.repeat(160)]);
+  });
+
+  // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
+  it('an accepted call of the to-human plugin’s message tool is work like any MCP call, and leaves the line it had', () => {
+    const seen = new Set<string>();
+    const messages: MessageCalls = new Map();
+    let digest = emptyDigest(APP);
+    const fold = (batch: SessionEvent[]) => (digest = foldEvents(digest, seen, batch, costLedger(digest), true, messages));
+    fold([ev('turn.started', {}), text('Looking first.'), call('c1', 'Stage 1 is done.', { toolName: 'mcp__to-human__message' })]);
+    expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: activityForTool('mcp__to-human__message', { text: 'Stage 1 is done.' }) });
+    expect(messages.size).toBe(0);
+    fold([result('c1')]);
+    expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: 'Working' });
   });
 
   it('a refused result, or a call with no words, leaves the line it had', () => {

@@ -213,7 +213,7 @@ describe('the report projection (the P2-C document, Design §7)', () => {
       const b = builder();
       b.turn('u1');
       b.text('m1', 0, '<message>Starting the stages.</message>');
-      b.toolUse('c1', 'mcp__to-human__message', { text: 'Stage 1 is done.' }, 'm2', 0);
+      b.toolUse('c1', 'mcp__maws__message', { text: 'Stage 1 is done.' }, 'm2', 0);
       b.result('c1', SENT);
       b.toolUse('t1', 'Bash', { command: 'sh stage.sh 2' }, 'm2', 1);
       b.result('t1', 'ok', { structured: BASH_RESULT('ok') });

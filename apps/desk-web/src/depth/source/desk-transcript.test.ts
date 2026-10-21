@@ -129,6 +129,31 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rows));
   });
 
+  // P4-R7: MAWS reads its own message tool alone; the desk reads the to-human plugin's too (`../message-tools`), the
+  // sessions it shows messaging their owner through it, so the source it hands MAWS's store names both.
+  it('draws an accepted call of a message tool, MAWS’s or the to-human plugin’s, as the message it sends, as a fresh load does', async () => {
+    const answer = recording.session.findLast((row) => row.type === 'assistant')!;
+    const result = recording.session.find((row) => row.type === 'user' && JSON.stringify(row.message).includes('"tool_result"'))!;
+    const before = recording.session.slice(0, recording.session.indexOf(answer));
+    const sent = (id: string, name: string, text: string, parent: string): JsonObject[] => [
+      { ...answer, uuid: `call-${id}`, parentUuid: parent, apiBlockIndex: 0, message: { ...(answer.message as JsonObject), id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input: { text } }] } },
+      { ...result, uuid: `sent-${id}`, parentUuid: `call-${id}`, sourceToolAssistantUUID: `call-${id}`, toolUseResult: [{ type: 'text', text: 'sent' }], message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: 'sent' }] }] } },
+    ];
+    const rows = [
+      ...before,
+      ...sent('toolu_maws', 'mcp__maws__message', 'Stage 1 is done.', String(before.at(-1)!.uuid)),
+      ...sent('toolu_plugin', 'mcp__to-human__message', 'Stage 2 is done.', 'sent-toolu_maws'),
+      { ...answer, parentUuid: 'sent-toolu_plugin' },
+    ] as SessionBodies['row']['row'][];
+    const script = scriptOf(rows, null);
+    plane.snapshot(script, 0);
+    await settle();
+    await step(script);
+    const drawn = store.getState().entries[controller.key].rows;
+    expect(drawn.flatMap((row) => (row.kind === 'to_human' ? [[row.toolUseId, row.text, row.pending]] : []))).toEqual([['toolu_maws', 'Stage 1 is done.', false], ['toolu_plugin', 'Stage 2 is done.', false]]);
+    expect(drawn).toEqual(await freshRows(rows));
+  });
+
   it('a reconnect in the middle of a response keeps what was drawn, merges the fresh snapshot, and ends with no gap and no duplicated text', async () => {
     const script = scriptOf(recording.session, null);
     const lastText = script.findLastIndex((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text');

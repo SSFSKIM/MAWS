@@ -2,8 +2,8 @@
 // server's `message`, which the engine exposes as `mcp__maws__message`. A message the model sends before another tool
 // call goes through it, because text written there comes back from the API as a progress-update thinking block, a
 // paraphrase the human never sees, while a tool's input is never summarized. Input `{text}`, the message in Markdown;
-// result `sent`; refused only when there is no text. The plugin's `mcp__to-human__message` has the same input and
-// result, and every reader takes an accepted call of either as a to-human message at its place (`../owner/message-call`).
+// result `sent`, the to-human plugin's result for its tool of the same shape; refused only when there is no text. Every
+// MAWS reader takes an accepted call as a to-human message at its place (`../owner/message-call`), and only this tool's.
 // It is always loaded (`_meta["anthropic/alwaysLoad"]`, which the pinned engine honours for an SDK server's tool,
 // P4-B4's probe): under tool search a deferred tool would cost a ToolSearch before the first message. `./tools`
 // appends the name and entry after the search tool (its P4-R7 blocks); this file imports only zod, so the two never
