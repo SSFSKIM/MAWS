@@ -151,16 +151,29 @@ export function isTextTarget(tree: SlideTree, id: string): boolean {
   return tag !== undefined && TEXT_TAGS.has(tag) && !CONTAINER_TAGS.has(tag);
 }
 
-/** T5: the deepest text target among a press's hits (deepest first as painted), whatever the scope; null without one. */
+/**
+ * The frontmost element under a press and its ancestors, deepest first. A press's hits are the whole painted stack, so
+ * an element covered by another is among them; whatever a press reaches past the scope it reaches through this chain,
+ * never past what is drawn in front (the M1 review's P2).
+ */
+function frontChain(tree: SlideTree, hits: readonly string[]): string[] {
+  const hit = hits.find((h) => tree.has(h));
+  return hit === undefined ? [] : chainOf(tree, hit);
+}
+
+/** T5: the deepest text target under the press (the frontmost element or its ancestors), whatever the scope; or null. */
 export function deepestText(tree: SlideTree, hits: readonly string[]): string | null {
-  return hits.find((h) => tree.has(h) && isTextTarget(tree, h)) ?? null;
+  return frontChain(tree, hits).find((id) => isTextTarget(tree, id)) ?? null;
 }
 
 /** T3 into a selected container: the element under the press one level inside `parent`, or null. */
 export function childAt(tree: SlideTree, hits: readonly string[], parent: string): string | null {
-  const hit = hits.find((h) => tree.has(h));
-  if (hit === undefined) return null;
-  return chainOf(tree, hit).find((id) => tree.parentOf(id) === parent) ?? null;
+  return frontChain(tree, hits).find((id) => tree.parentOf(id) === parent) ?? null;
+}
+
+/** T3 and D8 on a table: the cell of `table` under the press (in the frontmost element's chain), or null. */
+export function cellAt(tree: SlideTree, hits: readonly string[], table: string): string | null {
+  return frontChain(tree, hits).find((id) => tableOf(tree, id) === table) ?? null;
 }
 
 /** Whether the element is a table cell. */

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { newDoc, transact } from '../../../yjs';
 import { importSlide, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
-import { cellGrid, cellRange, cellsTable, childAt, deepestText, drill, escapeUp, isTextTarget, marquee, nextCell, pick, selectAll, slideTree, tableOf, tabNext } from './selection';
+import { cellAt, cellGrid, cellRange, cellsTable, childAt, deepestText, drill, escapeUp, isTextTarget, marquee, nextCell, pick, selectAll, slideTree, tableOf, tabNext } from './selection';
 
 const SLIDE = `<section id="s" style="background:#ffffff; padding:128px">
 <h2 id="title" style="font-size:64px">Title</h2>
@@ -94,6 +94,7 @@ describe('P4-B2: text targets, the deepest text, a container’s child and table
   const TABLE = `<section id="s" style="background:#ffffff; padding:128px">
 <div id="g" data-group="" style="position:absolute; left:100px; top:100px; width:600px; height:300px"><h2 id="gh" style="position:absolute; left:0px; top:0px; width:600px; font-size:48px">Grouped</h2><div id="g2" data-group="" style="position:absolute; left:0px; top:100px; width:600px; height:100px"><p id="deep" style="position:absolute; left:0px; top:0px; width:600px; font-size:32px">Deep</p></div></div>
 <table id="t" style="position:absolute; left:800px; top:100px; width:600px; font-size:24px"><tr id="r1"><th>A</th><th>B</th><th>C</th></tr><tr id="r2"><td>1</td><td>2</td><td>3</td></tr></table>
+<div id="cover" style="position:absolute; left:0px; top:0px; width:1920px; height:1080px; background:#000000"></div>
 </section>`;
   function tableTree() {
     const doc = newDoc();
@@ -122,6 +123,15 @@ describe('P4-B2: text targets, the deepest text, a container’s child and table
     expect(childAt(t, ['deep', 'g2', 'g'], 'g')).toBe('g2');
     expect(childAt(t, ['deep', 'g2', 'g'], 'g2')).toBe('deep');
     expect(childAt(t, ['gh', 'g'], 't')).toBeNull();
+  });
+
+  it('what a press reaches past the scope is the frontmost element’s, never a covered one’s (the M1 review’s P2)', () => {
+    const { t, b2 } = tableTree();
+    // an opaque cover painted over the heading and the table: the hits are the whole stack, front first
+    expect(deepestText(t, ['cover', 'deep', 'g2', 'g'])).toBeNull();
+    expect(childAt(t, ['cover', 'deep', 'g2', 'g'], 'g')).toBeNull();
+    expect(cellAt(t, ['cover', b2, 'r2', 't'], 't')).toBeNull();
+    expect(cellAt(t, [b2, 'r2', 't', 'cover'], 't')).toBe(b2);
   });
 
   it('a cell’s table, the grid, a range between two cells, the next and previous cell, a selection of cells (D8, T16)', () => {

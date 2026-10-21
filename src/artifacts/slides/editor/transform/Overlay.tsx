@@ -28,7 +28,7 @@ import { copySelection, pasteClipboard, type ClipboardContext, type ImportAsset 
 import { selectionCommands } from './commands';
 import { handlesOf, nudge, startEndpoint, startFlowMove, startMarquee, startMove, startResize, startRotate, type Frame, type Gesture, type Mods } from './gestures';
 import { hitIds, measure, measureAll, type Measured } from './measure';
-import { allPinned, cellRange, cellsTable, childAt, deepestText, drill, escapeUp, isTextTarget, pick, selectAll, slideTree, tableOf, tabNext } from './selection';
+import { allPinned, cellAt, cellRange, cellsTable, childAt, deepestText, drill, escapeUp, isTextTarget, pick, selectAll, slideTree, tabNext } from './selection';
 import { useDocVersion } from './use-doc-version';
 
 export interface OverlayProps {
@@ -210,7 +210,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       let make: () => Gesture | null = () => null;
       // P4-B2 (D8): a press in a cell of the table already selected, dragged, selects the range of cells it crosses
       const table = !readOnly && !e.shiftKey && current.length === 1 && picked.target === current[0] && tree.element(current[0]!)?.tag === 'table' ? current[0]! : null;
-      const anchor = table ? (hits.find((h) => tableOf(tree, h) === table) ?? null) : null;
+      const anchor = table ? cellAt(tree, hits, table) : null;
       if (table && anchor) make = () => cellsGesture(c, table, anchor);
       else if (picked.target === null) make = () => startMarquee(c, p, base);
       else if (!readOnly && !e.shiftKey && picked.selection.length > 0) {
@@ -233,7 +233,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       frame: () => {
         const tree = slideTree(session.doc, slideId);
         const p = slidePoint(lastClient);
-        const cell = hitIds(c.canvas, lastClient, p, 0, []).find((h) => tableOf(tree, h) === table);
+        const cell = cellAt(tree, hitIds(c.canvas, lastClient, p, 0, []), table);
         if (cell) session.select(cellRange(tree, table, anchor, cell));
         return { guides: [] };
       },
@@ -300,7 +300,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       const at = { kind: 'point' as const, x: e.clientX, y: e.clientY };
       if (isTextTarget(tree, cand.target)) return session.editText(cand.target, { at });
       if (tree.element(cand.target)?.tag === 'table') {
-        const cell = cand.hits.find((h) => tableOf(tree, h) === cand.target);
+        const cell = cellAt(tree, cand.hits, cand.target);
         if (cell) session.editText(cell, { at });
         return;
       }
