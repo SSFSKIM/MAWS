@@ -7,9 +7,12 @@ import { tokenProperties } from '../design-system/css';
 import { literalValues } from '../design-system/resolve-vars';
 import { builtinView } from '../design-system/view';
 import { isMirrorCopy, mirrorSlug, type MirrorCopy } from '../library/mirror';
-import { newDoc } from '../yjs';
+import { newDoc, transact } from '../yjs';
+import * as Y from '../yjs/slides';
 import type { Artifact } from '@shared/artifacts/entity';
 import { DECK_PATH, slidePath } from './deck';
+import { FIXTURE_FILES, fixtureDoc } from './export/deck.test-support';
+import { LORA_FILES, LORA_LICENCE, loraFace, robotoSlabFace, TODAYS_FACES } from './export/faces.test-support';
 import { deckTokenValues, presentationMirrorWriter } from './mirror';
 import { publishDeck } from './publish';
 
@@ -90,5 +93,32 @@ describe('the deck mirror’s assets', () => {
     const out = presentationMirrorWriter(() => null)({ artifact: ARTIFACT, doc, assets: listed.filter((a) => a.name !== 'logo.png'), readAsset: bytesOf }).files;
     expect(Object.keys(out)).not.toContain(`${mirrorSlug(ARTIFACT)}/assets/logo.png`);
     expect(Object.keys(presentationMirrorWriter(() => null)({ artifact: ARTIFACT, doc }).files).some((path) => path.includes('/assets/'))).toBe(false);
+  });
+
+  // P4-B2 D19: a Google Fonts face the host fetched is its saved files and their licence, copied beside the slides
+  it('copies a fetched face’s files and its licence; a refused face copies nothing', () => {
+    const doc = newDoc();
+    publishDeck(doc, {}, files, false);
+    transact(doc, () => {
+      Y.setDeckEntry(doc, 'faces', 'lora', loraFace() as Y.Json);
+      Y.setDeckEntry(doc, 'faces', 'roboto-slab', robotoSlabFace() as Y.Json);
+    });
+    const gf = [...LORA_FILES.map((file) => file.src), LORA_LICENCE, 'assets/gf-robotoslab-400.woff2'].map((ref) => ({ ref, name: ref.slice('assets/'.length), mime: 'application/octet-stream', size: 1 }));
+    const out = presentationMirrorWriter(() => null)({ artifact: ARTIFACT, doc, assets: [...listed, ...gf], readAsset: bytesOf }).files;
+    const slug = mirrorSlug(ARTIFACT);
+    const copies = Object.keys(out).filter((path) => path.startsWith(`${slug}/assets/gf-`)).sort();
+    expect(copies).toEqual([...LORA_FILES.map((file) => file.src), LORA_LICENCE].map((ref) => `${slug}/${ref}`).sort());
+  });
+
+  // the architect's condition: a deck whose faces are today's shape mirrors exactly as before (pinned from the pre-D19 code)
+  it('mirrors today’s faces byte for byte as before', () => {
+    const doc = fixtureDoc({ ...FIXTURE_FILES, [DECK_PATH]: JSON.stringify({ ...JSON.parse(FIXTURE_FILES[DECK_PATH]!), faces: TODAYS_FACES }) });
+    const assets = ['brand.woff2', 'logo.png', 'unused.png'].map((name) => ({ ref: `assets/${name}`, name, mime: 'application/octet-stream', size: 1 }));
+    const out = presentationMirrorWriter(() => null)({ artifact: ARTIFACT, doc, assets, readAsset: bytesOf }).files;
+    const slug = mirrorSlug(ARTIFACT);
+    expect(Object.keys(out).sort()).toEqual(['assets/brand.woff2', 'assets/logo.png', 'deck.json', 'slides/body.html', 'slides/cover.html', 'slides/gone.html'].map((path) => `${slug}/${path}`));
+    expect(out[`${slug}/deck.json`]).toBe(
+      '{\n  "v": 4,\n  "title": "Quarterly",\n  "cover": "cover",\n  "order": [\n    "cover",\n    "body",\n    "gone"\n  ],\n  "faces": {\n    "blob": {\n      "family": "Blob",\n      "src": "/_blob/abc"\n    },\n    "brand-sans": {\n      "family": "Brand Sans",\n      "src": "assets/brand.woff2"\n    },\n    "source-serif-4": {\n      "family": "Source Serif 4",\n      "href": "https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@300..700&display=swap"\n    }\n  }\n}\n',
+    );
   });
 });

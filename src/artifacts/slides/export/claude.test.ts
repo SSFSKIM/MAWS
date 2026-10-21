@@ -2,7 +2,8 @@
 // deck: no `var()` anywhere, MAWS's overrides gone from the index but applied in the literals, uploaded assets moved under
 // `project/ds/maws/`, and this child's own loader reading every slide back with nothing held.
 import { describe, expect, it } from 'vitest';
-import { newDoc } from '../../yjs';
+import { newDoc, transact } from '../../yjs';
+import * as Y from '../../yjs/slides';
 import { heldSlides } from '../answer';
 import { publishDeck } from '../publish';
 import { builtinView } from '../../design-system/view';
@@ -12,6 +13,7 @@ import { loadSlide } from '../parse';
 import { BENCH_SLIDES, CLAUDE_SLIDES, LAYOUT_SLIDES } from '../fixtures/corpus';
 import { claudeAssetPath, claudeDeckFiles } from './claude';
 import { FIXTURE_FILES, fixtureDoc, measuredAt } from './deck.test-support';
+import { LORA_FILES, LORA_HREF, LORA_LICENCE, loraFace, robotoSlabFace, TODAYS_FACES } from './faces.test-support';
 import { MeasureNeeded } from './lower';
 import { exportDeckOf } from './standalone';
 import { apply, cornersOf, multiply, placement, shift, type Box } from '../geometry';
@@ -184,5 +186,39 @@ describe('the For Claude export: the final review', () => {
     expect(cover.match(/url\(project\/ds\/maws\/logo\.png\)/g)).toHaveLength(2);
     expect(files['project/ds/maws/logo.png']).toBe(LOGO);
     expect(loadSlide(cover, { fileId: 'cover' }).ok).toBe(true);
+  });
+});
+
+// P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): the host's record of a Google Fonts face is
+// MAWS's; Claude's format names the face by its link and fetches it itself, so the zip writes the face without it.
+describe('the For Claude export of Google Fonts faces (D19)', () => {
+  const assets = new Map<string, Uint8Array>([['assets/logo.png', LOGO], ['assets/brand.woff2', FONT], ...LORA_FILES.map((file): [string, Uint8Array] => [file.src, FONT]), [LORA_LICENCE, new Uint8Array([1])]]);
+  const zip = (doc: ReturnType<typeof fixtureDoc>) => claudeDeckFiles(doc, { resolveVar: deckTokenValues(builtinView().tokens, exportDeckOf(doc, 'x').overrides), assets });
+
+  it('writes a fetched or refused face as its family and link alone, and none of the files MAWS saved for it', () => {
+    const doc = fixtureDoc();
+    transact(doc, () => {
+      Y.setDeckEntry(doc, 'faces', 'lora', loraFace() as Y.Json);
+      Y.setDeckEntry(doc, 'faces', 'roboto-slab', robotoSlabFace() as Y.Json);
+    });
+    const files = zip(doc);
+    expect(files[DECK_PATH]).not.toContain('"google"');
+    const index = parseDeckJson(files[DECK_PATH] as string);
+    expect(index.ok && index.diagnostics).toEqual([]);
+    expect(index.ok && index.deck.faces).toEqual({
+      'brand-sans': { family: 'Brand Sans', src: 'project/ds/maws/brand.woff2' },
+      lora: { family: 'Lora', href: LORA_HREF },
+      'roboto-slab': { family: 'Roboto Slab', href: 'https://fonts.googleapis.com/css2?family=Roboto+Slab' },
+    });
+    expect(Object.keys(files).filter((path) => path.includes('gf-lora'))).toEqual([]);
+  });
+
+  // the architect's condition: a deck whose faces are today's shape exports exactly as before (pinned from the pre-D19 code)
+  it('writes today’s faces byte for byte as before', () => {
+    const files = zip(fixtureDoc({ ...FIXTURE_FILES, [DECK_PATH]: JSON.stringify({ ...JSON.parse(FIXTURE_FILES[DECK_PATH]!), faces: TODAYS_FACES }) }));
+    expect(Object.keys(files).sort()).toEqual([DECK_PATH, 'project/ds/maws/brand.woff2', 'project/ds/maws/logo.png', slidePath('body'), slidePath('cover'), slidePath('gone')]);
+    expect(files[DECK_PATH]).toBe(
+      '{\n  "v": 4,\n  "title": "Quarterly",\n  "cover": "cover",\n  "order": [\n    "cover",\n    "body",\n    "gone"\n  ],\n  "faces": {\n    "blob": {\n      "family": "Blob",\n      "src": "/_blob/abc"\n    },\n    "brand-sans": {\n      "family": "Brand Sans",\n      "src": "project/ds/maws/brand.woff2"\n    },\n    "source-serif-4": {\n      "family": "Source Serif 4",\n      "href": "https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@300..700&display=swap"\n    }\n  }\n}\n',
+    );
   });
 });

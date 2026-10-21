@@ -7,7 +7,8 @@
 // (M2 fix wave: a board turning held never loses a picture its source still draws; the copies are lazy, so nothing is
 // reread); once every board loads, only the uploads they name are. A board whose
 // source never arrived has no file (its manifest entry stays). The uploaded assets the design names (pictures, CSS
-// backgrounds, faces) are copied into `<slug>/assets/`. A legacy generic-file state (a design no actor has opened since
+// backgrounds, faces; a Google Fonts face the host fetched is the files it saved and their licence, P4-B2 D19's
+// `faceAssetRefs`) are copied into `<slug>/assets/`. A legacy generic-file state (a design no actor has opened since
 // E1, read at startup) is written as its migration would build it, on a temporary copy, never migrating the store's
 // state; malformed legacy input throws, before the host replaces or removes any file. Portable: the host's design
 // module gives it the governing system's tokens.
@@ -18,6 +19,7 @@ import type { TokenSet } from '../design-system/tokens';
 import type { TokenOverrides } from '../design-system/view';
 import { mirrorSlug, type MirrorOutput, type MirrorWriter } from '../library/mirror';
 import { slideAssetRefs } from '../slides/asset-refs';
+import { faceAssetRefs } from '../slides/deck';
 import { heldOf, readSlide } from '../slides/model';
 import { serializeSlide } from '../slides/serialize';
 import { serializeCanvasJson } from './canvas';
@@ -50,7 +52,7 @@ export function designMirrorWriter(tokensOf: (artifact: Artifact) => TokenSet | 
       const files: MirrorOutput['files'] = { [`${folder}/canvas.json`]: serializeCanvasJson(canvas) };
       const used = new Set<string>();
       let anyHeld = false;
-      for (const face of Object.values(canvas.faces ?? {})) if (typeof face.src === 'string') used.add(face.src);
+      for (const face of Object.values(canvas.faces ?? {})) for (const ref of faceAssetRefs(face)) used.add(ref);
       for (const id of boardOrder(model)) {
         if (isMissingSource(model, id)) continue;
         const held = heldOf(model, id);

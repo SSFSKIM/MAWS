@@ -4,7 +4,8 @@
 // system's (as its stage sets them) and then left out of the index; a token neither the system nor its fallback gives a
 // value takes its property out (Claude's grammar has no `var()`). A held slide is its held source, verbatim. The
 // uploaded assets the deck names (pictures, CSS backgrounds, faces) are copied into `<slug>/assets/`, so its deck-root
-// references resolve in the folder as a design system's do (Decision Log 37 (1)). Portable: the engine host's
+// references resolve in the folder as a design system's do (Decision Log 37 (1)); a Google Fonts face the engine host
+// fetched is the files it saved and their licence (P4-B2 D19's `faceAssetRefs`). Portable: the engine host's
 // presentation module gives it the governing system's tokens.
 import type { Artifact } from '@shared/artifacts/entity';
 import { tokenProperties } from '../design-system/css';
@@ -13,7 +14,7 @@ import type { TokenSet } from '../design-system/tokens';
 import type { TokenOverrides } from '../design-system/view';
 import { mirrorSlug, type MirrorOutput, type MirrorWriter } from '../library/mirror';
 import { slideAssetRefs } from './asset-refs';
-import { serializeDeckJson } from './deck';
+import { faceAssetRefs, serializeDeckJson } from './deck';
 import { heldOf, readDeckJson, readSlide, slideOrder } from './model';
 import { serializeSlide } from './serialize';
 
@@ -42,7 +43,7 @@ export function presentationMirrorWriter(tokensOf: (artifact: Artifact) => Token
     const resolveVar = deckTokenValues(tokensOf(artifact), dsOverrides);
     const files: MirrorOutput['files'] = { [`${folder}/deck.json`]: serializeDeckJson(deck) };
     const used = new Set<string>();
-    for (const face of Object.values(deck.faces ?? {})) if (typeof face.src === 'string') used.add(face.src);
+    for (const face of Object.values(deck.faces ?? {})) for (const ref of faceAssetRefs(face)) used.add(ref);
     for (const id of slideOrder(doc)) {
       const held = heldOf(doc, id);
       const slide = held ? null : readSlide(doc, id);
