@@ -1,0 +1,191 @@
+{
+ "arm": "maws",
+ "task": "B5",
+ "rep": 1,
+ "attempt": 1,
+ "surface": "maws/attach",
+ "variant": "attach",
+ "build": {
+  "commit": "80e89dd2",
+  "builtAt": "2026-10-21T20:43:57.352Z",
+  "checkout": "80e89dd2365d3016cde0b502dadfe53cf8da4f9b"
+ },
+ "kind": "presentation",
+ "host": "Mac-mini.local",
+ "startedAt": "2026-10-21T21:02:18.226Z",
+ "manifest": "../../../../../tmp/maws-parity-bench/a3/run-a/maws-attach-B5-r1/manifest.json",
+ "sessionId": "ef542ebe-df4c-4feb-a2e0-537890807dfb",
+ "entrypoint": "sdk-ts",
+ "engine": "2.1.306",
+ "route": "gateway",
+ "load": {
+  "before": [
+   3.23,
+   2.81,
+   3.03
+  ],
+  "after": [
+   3.04,
+   2.78,
+   3.02
+  ]
+ },
+ "check": {
+  "pass": true,
+  "detail": "slide 2: the session lead date -> 21 October, nothing else changed"
+ },
+ "pin": null,
+ "measurementOnly": false,
+ "humanStop": null,
+ "seedId": null,
+ "seedCheck": null,
+ "freshSession": null,
+ "priorTurns": 0,
+ "measured": {
+  "turn": 1,
+  "sendAt": "2026-10-21T21:02:19.517Z",
+  "permissionMode": "auto",
+  "sendToFirstToken": 1.972,
+  "firstTokenSrc": "journal first delta",
+  "sendToFirstBlock": 2.808,
+  "sendToEditLanded": 5.835,
+  "landing": {
+   "name": "artifact_publish",
+   "inChars": 657,
+   "span": 0.361,
+   "mawsExec": 0.034
+  },
+  "landingCalls": 1,
+  "sendToLastLanding": 5.835,
+  "toLanding": {
+   "requests": 1,
+   "firstByteWait": 1.297,
+   "generation": 3.906,
+   "serverHold": 0.296,
+   "thinkingTokens": 92,
+   "outputTokens": 517
+  },
+  "sendToTurnEnd": 7.887,
+  "stopHookMs": 182,
+  "apiErrors": 0,
+  "requests": 2,
+  "contextFirst": 30979,
+  "contextMax": 31761,
+  "firstByteWait": 3.299,
+  "generation": 3.955,
+  "serverHold": 0.296,
+  "toolExec": 0.043,
+  "mawsExec": 0.034,
+  "toolSpanUnion": 0.361,
+  "outputTokens": 641,
+  "thinkingTokens": 92,
+  "cache": {
+   "state": "cold",
+   "firstRead": 12942,
+   "firstWrite": 18035,
+   "read": 43919,
+   "write": 18817
+  },
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "requestedModels": [
+   "claude-opus-5-5[1m]"
+  ],
+  "efforts": [
+   "xhigh"
+  ],
+  "thinking": [
+   "adaptive"
+  ],
+  "thinkingSeen": "thinking blocks present",
+  "advisorModels": [],
+  "iterationTypes": [],
+  "serviceTiers": [
+   "standard"
+  ],
+  "speeds": [
+   "standard"
+  ],
+  "relayJoined": 2,
+  "accounts": [
+   "fa95bd34-0db9-44ae-be00-4f2b7387054b"
+  ],
+  "sources": [
+   "journal",
+   "journal stream end",
+   "journal ttft_ms"
+  ],
+  "perRequest": [
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 2.515,
+    "firstByte": 1.297,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.296,
+    "holdSrc": "journal",
+    "gen": 3.906,
+    "toolExec": 0.043,
+    "mawsExec": 0.034,
+    "ctx": 30979,
+    "cacheRead": 12942,
+    "cacheWrite": 18035,
+    "out": 517,
+    "think": 92,
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "thinking": "adaptive",
+    "requestedModel": "claude-opus-5-5[1m]",
+    "thinkingBlocks": true,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [
+     "artifact_publish"
+    ],
+    "relayJoined": true
+   },
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 2.022,
+    "firstByte": 2.002,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.0,
+    "holdSrc": "journal",
+    "gen": 0.049,
+    "toolExec": null,
+    "mawsExec": null,
+    "ctx": 31761,
+    "cacheRead": 30977,
+    "cacheWrite": 782,
+    "out": 124,
+    "think": 0,
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "thinking": "adaptive",
+    "requestedModel": "claude-opus-5-5[1m]",
+    "thinkingBlocks": false,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [],
+    "relayJoined": true
+   }
+  ],
+  "tools": [
+   {
+    "name": "artifact_publish",
+    "span": 0.361,
+    "err": false,
+    "mawsExec": 0.034,
+    "inChars": 657,
+    "resultChars": 533
+   }
+  ]
+ },
+ "error": null
+}

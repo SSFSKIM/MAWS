@@ -1,0 +1,66 @@
+{
+  "arm": "maws",
+  "task": "B3",
+  "rep": 7,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "document",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T20:57:58.092Z",
+  "prompt": "In the document [Riverside Community Garden: Spring Season Plan](maws-artifact:ac381180-4b34-440b-b004-990761aa7be4), rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "promptMatch": ", rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "artifactId": "ac381180-4b34-440b-b004-990761aa7be4",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/3972e10d-0f32-40ad-9588-0fda621e798f.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/6bda0b96-7f5d-4c6e-9f03-49ffa57c4eee/qzqfugkn.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "3972e10d-0f32-40ad-9588-0fda621e798f",
+  "appSessionId": "6bda0b96-7f5d-4c6e-9f03-49ffa57c4eee",
+  "load": {
+    "before": [
+      1.68,
+      2.99,
+      3.21
+    ],
+    "after": [
+      1.54,
+      2.77,
+      3.12
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "the introduction rewritten (128 -> 138 words), nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "variant": "base",
+  "build": {
+    "commit": "7e8dd275",
+    "builtAt": "2026-10-21T20:42:29.110Z",
+    "checkout": "7e8dd275d1c591b505c9b17a2ff47fbe98e678a8"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.3187689,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 18,
+      "toolUseId": "toolu_01LUf3reNQsjPHQdgb7QeFXX"
+    },
+    {
+      "name": "artifact_edit",
+      "ms": 33,
+      "toolUseId": "toolu_01KUq14ro1ddgr8eHVhFUL8U"
+    }
+  ]
+}

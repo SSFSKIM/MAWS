@@ -1,0 +1,66 @@
+{
+  "arm": "maws",
+  "task": "B3",
+  "rep": 5,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "document",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T20:53:45.743Z",
+  "prompt": "In the document [Riverside Community Garden: Spring Season Plan](maws-artifact:a678939c-b5d4-4b4c-bf19-47edb0cb212e), rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "promptMatch": ", rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "artifactId": "a678939c-b5d4-4b4c-bf19-47edb0cb212e",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/68c62aa6-f2b7-46e0-ace3-dc808a1f313c.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/209e3885-6847-429a-8f87-5eb86dc62c6f/j4e5ding.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "68c62aa6-f2b7-46e0-ace3-dc808a1f313c",
+  "appSessionId": "209e3885-6847-429a-8f87-5eb86dc62c6f",
+  "load": {
+    "before": [
+      1.91,
+      4.24,
+      3.59
+    ],
+    "after": [
+      1.69,
+      3.93,
+      3.5
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "the introduction rewritten (128 -> 139 words), nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "variant": "alwaysLoad",
+  "build": {
+    "commit": "646970a5",
+    "builtAt": "2026-10-21T20:43:13.358Z",
+    "checkout": "646970a54a2861582fafd12a34e5ffff94604568"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.2717742,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 24,
+      "toolUseId": "toolu_013Djgv5W1S8isRKv2bCVa46"
+    },
+    {
+      "name": "artifact_edit",
+      "ms": 30,
+      "toolUseId": "toolu_01R3euvBsQovoMkyWYy2VSW5"
+    }
+  ]
+}

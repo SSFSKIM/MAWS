@@ -1,0 +1,191 @@
+{
+ "arm": "maws",
+ "task": "B3",
+ "rep": 8,
+ "attempt": 1,
+ "surface": "maws/attach",
+ "variant": "attach",
+ "build": {
+  "commit": "80e89dd2",
+  "builtAt": "2026-10-21T20:43:57.352Z",
+  "checkout": "80e89dd2365d3016cde0b502dadfe53cf8da4f9b"
+ },
+ "kind": "document",
+ "host": "Mac-mini.local",
+ "startedAt": "2026-10-21T21:24:49.601Z",
+ "manifest": "../../../../../tmp/maws-parity-bench/a3/run-b/maws-attach-B3-r8/manifest.json",
+ "sessionId": "890ca133-e67c-4aec-8d95-6b7ac6c5b8e4",
+ "entrypoint": "sdk-ts",
+ "engine": "2.1.306",
+ "route": "gateway",
+ "load": {
+  "before": [
+   2.94,
+   2.87,
+   2.91
+  ],
+  "after": [
+   3.57,
+   3.04,
+   2.96
+  ]
+ },
+ "check": {
+  "pass": true,
+  "detail": "the introduction rewritten (128 -> 137 words), nothing else changed"
+ },
+ "pin": null,
+ "measurementOnly": false,
+ "humanStop": null,
+ "seedId": null,
+ "seedCheck": null,
+ "freshSession": null,
+ "priorTurns": 0,
+ "measured": {
+  "turn": 1,
+  "sendAt": "2026-10-21T21:24:51.002Z",
+  "permissionMode": "auto",
+  "sendToFirstToken": 2.21,
+  "firstTokenSrc": "journal first delta",
+  "sendToFirstBlock": 16.61,
+  "sendToEditLanded": 19.212,
+  "landing": {
+   "name": "artifact_edit",
+   "inChars": 919,
+   "span": 0.247,
+   "mawsExec": 0.021
+  },
+  "landingCalls": 1,
+  "sendToLastLanding": 19.212,
+  "toLanding": {
+   "requests": 1,
+   "firstByteWait": 1.475,
+   "generation": 17.239,
+   "serverHold": 0.201,
+   "thinkingTokens": 1830,
+   "outputTokens": 2209
+  },
+  "sendToTurnEnd": 22.676,
+  "stopHookMs": 228,
+  "apiErrors": 0,
+  "requests": 2,
+  "contextFirst": 32107,
+  "contextMax": 34502,
+  "firstByteWait": 4.885,
+  "generation": 17.302,
+  "serverHold": 0.201,
+  "toolExec": 0.023,
+  "mawsExec": 0.021,
+  "toolSpanUnion": 0.247,
+  "outputTokens": 2443,
+  "thinkingTokens": 1830,
+  "cache": {
+   "state": "cold",
+   "firstRead": 12942,
+   "firstWrite": 19163,
+   "read": 45047,
+   "write": 21558
+  },
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "requestedModels": [
+   "claude-opus-5-5[1m]"
+  ],
+  "efforts": [
+   "xhigh"
+  ],
+  "thinking": [
+   "adaptive"
+  ],
+  "thinkingSeen": "thinking blocks present",
+  "advisorModels": [],
+  "iterationTypes": [],
+  "serviceTiers": [
+   "standard"
+  ],
+  "speeds": [
+   "standard"
+  ],
+  "relayJoined": 2,
+  "accounts": [
+   "fa95bd34-0db9-44ae-be00-4f2b7387054b"
+  ],
+  "sources": [
+   "journal",
+   "journal stream end",
+   "journal ttft_ms"
+  ],
+  "perRequest": [
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 16.336,
+    "firstByte": 1.475,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.201,
+    "holdSrc": "journal",
+    "gen": 17.239,
+    "toolExec": 0.023,
+    "mawsExec": 0.021,
+    "ctx": 32107,
+    "cacheRead": 12942,
+    "cacheWrite": 19163,
+    "out": 2209,
+    "think": 1830,
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "thinking": "adaptive",
+    "requestedModel": "claude-opus-5-5[1m]",
+    "thinkingBlocks": true,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [
+     "artifact_edit"
+    ],
+    "relayJoined": true
+   },
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 3.441,
+    "firstByte": 3.41,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.0,
+    "holdSrc": "journal",
+    "gen": 0.063,
+    "toolExec": null,
+    "mawsExec": null,
+    "ctx": 34502,
+    "cacheRead": 32105,
+    "cacheWrite": 2395,
+    "out": 234,
+    "think": 0,
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "thinking": "adaptive",
+    "requestedModel": "claude-opus-5-5[1m]",
+    "thinkingBlocks": false,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [],
+    "relayJoined": true
+   }
+  ],
+  "tools": [
+   {
+    "name": "artifact_edit",
+    "span": 0.247,
+    "err": false,
+    "mawsExec": 0.021,
+    "inChars": 919,
+    "resultChars": 298
+   }
+  ]
+ },
+ "error": null
+}

@@ -58,6 +58,16 @@ export interface MessageQueueDeps {
   // P2-C: the steers an earlier launch wrote and left unstated (its host died with it; prompt-history.ts
   // `unsettledPrompts`), read at recovery, each abandoned as a row; absent, none
   unsettled?: () => Promise<MessageUuid[]>;
+  // P4-A3: the content a submission's frame carries, made from the entry's (the linked reads); the entry keeps its own.
+  // A steer's frame is written as it is: its write must stay ordered with a stop's hold.
+  prepare?: (content: SendContent) => Promise<Prepared>;
+}
+
+// P4-A3: a submission's prepared content, and what keeps or undoes the preparation's effects: `settle(true)` once that
+// content reached the pipe, `settle(false)` when it did not (paused, removed, edited, exited or not written).
+export interface Prepared {
+  content: SendContent;
+  settle(written: boolean): void;
 }
 
 export class QueueEntryError extends Error {
@@ -84,6 +94,7 @@ export class MessageQueue {
   // P2-C: every steer written (any priority, a promotion's included) whose end no lifecycle or row has stated yet; the
   // exit abandons what is left, so no prompt the engine was handed outlives the process unrecorded
   private readonly unended = new Set<MessageUuid>();
+  private preparing: QueueEntry | null = null; // P4-A3: the submission whose frame is being prepared (the queue is busy)
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -97,7 +108,7 @@ export class MessageQueue {
 
   // A turn is open, or an entry is `submitting`, or a `released` entry's turn has not ended.
   get busy(): boolean {
-    return this.deps.turnOpen() || this.entries.some((e) => e.state !== 'queued');
+    return this.deps.turnOpen() || this.preparing !== null || this.entries.some((e) => e.state !== 'queued');
   }
 
   // recover() ran: until then the persisted queue is the store's, never this object's (`session.queue.list`, M5)
@@ -616,9 +627,43 @@ export class MessageQueue {
     if (head) await this.submit(head, trigger);
   }
 
-  // queued → submitting (persisted) → the frame written; true when it reached the pipe. A failed write reverts the entry
-  // and pauses the queue with `failReason` (`engine_turn` after an engine-initiated turn, with its held notice).
+  // queued → (prepared) → submitting (persisted) → the frame written; true when it reached the pipe. A failed write reverts
+  // the entry and pauses the queue with `failReason` (`engine_turn` after an engine-initiated turn, with its held notice).
   private async submit(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn' = 'write_failed'): Promise<boolean> {
+    if (!this.deps.prepare) return this.write(entry, trigger, failReason, entry.content);
+    // P4-A3: the frame's content first, the entry still queued and the queue busy. A pause, an exit or the entry's removal
+    // meanwhile leaves it as it is (queued, or gone; the pause, the exit or the removal saved it) with nothing written and
+    // nothing saved here, and a removal lets the next head go; an entry edited meanwhile goes with its new content,
+    // unprepared. Whatever the preparation did is kept only if its content reached the pipe (`settle`).
+    const from = entry.content;
+    let prepared: Prepared = { content: from, settle: () => {} };
+    this.preparing = entry;
+    try {
+      prepared = await this.deps.prepare(from);
+    } catch (error) {
+      this.log(`submission ${entry.queueId} not prepared: ${messageOf(error)}`);
+    } finally {
+      this.preparing = null;
+    }
+    let written = false;
+    let usedPrepared = false;
+    try {
+      if (!this.deps.canWrite() || this.releasePaused) return false;
+      if (entry.state !== 'queued' || !this.entries.includes(entry)) {
+        await this.releaseHead(trigger);
+        return false;
+      }
+      // decided once, before the write: an edit whose save then fails puts the old content back during it
+      usedPrepared = entry.content === from;
+      written = await this.write(entry, trigger, failReason, usedPrepared ? prepared.content : entry.content);
+      return written;
+    } finally {
+      prepared.settle(written && usedPrepared);
+    }
+  }
+
+  // queued → submitting (persisted) → the frame, `content`, written; true when it reached the pipe.
+  private async write(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn', content: SendContent): Promise<boolean> {
     const uuid = randomUUID() as MessageUuid;
     Object.assign(entry, { state: 'submitting', messageUuid: uuid, submittedAt: new Date().toISOString(), uncertain: false });
     const current = () => entry.state === 'submitting' && entry.messageUuid === uuid && this.entries.includes(entry);
@@ -639,7 +684,7 @@ export class MessageQueue {
     }
     this.journal({ event: 'queue', action: 'release', trigger, queueId: entry.queueId, messageUuid: uuid });
     try {
-      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content: entry.content }, parent_tool_use_id: null, origin: { kind: 'human' } });
+      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' } });
     } catch (error) {
       if (current()) {
         this.log(`submission ${entry.queueId} not written: ${error instanceof Error ? error.message : String(error)}`);

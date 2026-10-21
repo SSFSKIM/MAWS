@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, RecentTurnsSchema } from '@shared/ipc/schema/session';
 import { NO_TURNS, readRecentTurns, recentTurnsOf } from './recent-turns';
+import { linkedReadBlock } from '@shared/maws/linked-read'; // P4-A3
 
 const ROOT = join(__dirname, '../../..');
 const fixture = (name: string) => join(ROOT, 'test/fixtures/transcripts', `${name}.jsonl`);
@@ -37,6 +38,13 @@ const assistant = (uuid: string, parentUuid: string, content: unknown[]) => ({ t
 const progress = (uuid: string, parentUuid: string) => ({ type: 'progress', uuid, parentUuid, data: { type: 'hook_progress' } });
 
 describe('recentTurnsOf', () => {
+  it('reads a prompt as the human wrote it: a linked read sent with it is not its words (P4-A3)', () => {
+    const id = '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806';
+    const read = JSON.stringify({ status: 'read', artifactId: id, kind: 'document', title: 'Plan', revision: 3, markdown: 'x ^p1\n' }, null, 2);
+    const words = `Fix [the plan](maws-artifact:${id}).`;
+    const answer = recentTurnsOf(records(user('u1', null, [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read) }]), assistant('a1', 'u1', [{ type: 'text', text: 'Done.' }])), 20, false);
+    expect(prompts(answer)).toEqual([words]);
+  });
   it('one turn per human prompt, its last answer and its tool calls (a steer the engine took folds into its turn)', () => {
     expect(brief('w1-steer-next-disk')).toEqual([{ prompt: expect.stringMatching(/^Count to 8 with separate Bash sleep 1 calls/), answer: 'COUNTED', tools: 8 }]);
   });

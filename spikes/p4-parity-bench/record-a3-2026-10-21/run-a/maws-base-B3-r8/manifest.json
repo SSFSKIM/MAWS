@@ -1,0 +1,66 @@
+{
+  "arm": "maws",
+  "task": "B3",
+  "rep": 8,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "document",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T21:01:12.188Z",
+  "prompt": "In the document [Riverside Community Garden: Spring Season Plan](maws-artifact:b350ed7e-a4bd-45c7-b182-51c1c314f96a), rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "promptMatch": ", rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "artifactId": "b350ed7e-a4bd-45c7-b182-51c1c314f96a",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/f10a9965-06a6-4f15-bd52-1ade918499bb.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/261a2ad7-c183-4e00-b110-35b5bc3f55f6/6abkqdqz.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "f10a9965-06a6-4f15-bd52-1ade918499bb",
+  "appSessionId": "261a2ad7-c183-4e00-b110-35b5bc3f55f6",
+  "load": {
+    "before": [
+      2.08,
+      2.5,
+      2.95
+    ],
+    "after": [
+      3.34,
+      2.8,
+      3.03
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "the introduction rewritten (128 -> 137 words), nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "variant": "base",
+  "build": {
+    "commit": "7e8dd275",
+    "builtAt": "2026-10-21T20:42:29.110Z",
+    "checkout": "7e8dd275d1c591b505c9b17a2ff47fbe98e678a8"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.3394808,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 18,
+      "toolUseId": "toolu_01YNtSHHjHao4Dr1YXXVYogy"
+    },
+    {
+      "name": "artifact_edit",
+      "ms": 36,
+      "toolUseId": "toolu_01VwESdvUYy5rF6DPX5TABaM"
+    }
+  ]
+}

@@ -19,7 +19,9 @@
 // `artifact_search` after the document tools (`./search-tools`), points `artifact_list` to it, and gives `show_pane` an
 // `at` (`../artifacts/link`'s location); the listed artifact moved to the leaf `./listed-artifact`, re-exported here.
 // P4-R7 (the P4 spec's Decision Log 46, the X9 amendment) appends `message` after the search tool (`./message-tool`),
-// the one tool listed with `_meta` (always loaded).
+// listed with `_meta` (always loaded). P4-A3 (docs/doperpowers/plans/2026-10-21-p4-a3-edit-protocol.md) lists the tools
+// an edit needs the same way, `artifact_describe_type`, `artifact_read`, `artifact_publish` and the document's
+// `artifact_edit`: under tool search a deferred tool costs one ToolSearch request before a session's first edit.
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { ArtifactLocationSchema } from '../artifacts/link'; // P4-B4
@@ -30,7 +32,7 @@ import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './pan
 import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
 import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
 import { SEARCH_TOOL_NAMES, SEARCH_TOOLS } from './search-tools'; // P4-B4
-import { MESSAGE_TOOL_NAMES, MESSAGE_TOOLS } from './message-tool'; // P4-R7
+import { ALWAYS_LOAD, MESSAGE_TOOL_NAMES, MESSAGE_TOOLS } from './message-tool'; // P4-R7; P4-A3: ALWAYS_LOAD
 
 export { ARTIFACT_ID } from './artifact-id';
 export { ArtifactEditorSchema, ListedArtifactSchema, type ArtifactEditor, type ListedArtifact } from './listed-artifact'; // P4-B4
@@ -489,6 +491,7 @@ export const MAWS_TOOLS = {
       "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs.",
     input: ArtifactDescribeTypeInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
+    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_read: {
     title: 'Read artifact',
@@ -496,6 +499,7 @@ export const MAWS_TOOLS = {
       "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure, a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned.",
     input: ArtifactReadInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
+    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_publish: {
     title: 'Publish artifact',
@@ -503,6 +507,7 @@ export const MAWS_TOOLS = {
       "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
     input: ArtifactPublishInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
+    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_upload_asset: {
     title: 'Upload artifact asset',

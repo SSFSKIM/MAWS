@@ -79,9 +79,15 @@ export interface MawsToolServerDeps {
 export class MawsToolServer {
   private readonly tools: Map<string, McpToolDefinition>;
   private readonly calls = new Map<RequestId, { id: RpcId; controller: AbortController; answered: boolean }>();
+  private callsStarted = 0;
 
   constructor(private readonly deps: MawsToolServerDeps) {
     this.tools = new Map(deps.tools.map((tool) => [tool.name, tool]));
+  }
+
+  // P4-A3: how many calls have started, ever: a read the host makes knows from it whether one ran beside it
+  get started(): number {
+    return this.callsStarted;
   }
 
   get inFlight(): number {
@@ -174,6 +180,7 @@ export class MawsToolServer {
     const controller = new AbortController();
     const call = { id, controller, answered: false };
     this.calls.set(requestId, call);
+    this.callsStarted++;
     this.deps.onChange?.();
     let result: McpToolResult;
     try {
