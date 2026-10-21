@@ -361,7 +361,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
         {!preview &&
           inspectorOpen &&
           slide &&
-          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} />)}
+          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} />)}
       </div>
     </div>
   );

@@ -7,8 +7,12 @@
 // tokens (`var(--ds-color-*)` with the house system's literal as fallback); the swatches paint inside the deck's
 // `DesignSystemScope`, which the caller renders the inspector in. The panel follows the replica: a remote change
 // re-renders it.
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D13; tracker row 280): it reads the selection at the
+// settled version (an update or a layout pass outside a drag, and every gesture's end), so it shows where a move or a
+// resize left the element, not its frames, and X, Y, W and H in whole pixels (the model keeps its fractions).
 import { useMemo, useSyncExternalStore } from 'react';
 import type { Doc } from '../../yjs';
+import type { SlideCanvas } from '../canvas';
 import type { DeckFace } from '../deck';
 import { TEXT_TAGS } from '../ir';
 import { ROOT } from '../model';
@@ -20,7 +24,7 @@ import { Arrange, Border, Fill, ShadowSection, Text } from './inspector/sections
 import { pickedOf, planStyle, type Picked, type Props } from './inspector/selection';
 import { ROLE_LABELS, roleOfStyle } from './menus/TextStyle';
 import type { DeckSession } from './session';
-import { useDocVersion } from './transform/use-doc-version';
+import { useSettledVersion } from './transform/use-doc-version';
 import './inspector.css';
 
 export interface InspectorProps {
@@ -33,6 +37,8 @@ export interface InspectorProps {
   uploadAsset?: (file: File) => Promise<string>;
   /** An element's laid-out box in its host (slide px): position and size shown when its style does not say them in px. */
   measure?: (elementId: string) => { x: number; y: number; w: number; h: number } | null;
+  /** P4-B2 (D13): the slide's canvas on the stage, whose layout passes (geometry moving with no write) refresh the panel. */
+  canvas?: SlideCanvas | null;
 }
 
 const TAG_NAMES: Record<string, string> = {
@@ -59,12 +65,19 @@ function pickedAt(doc: Doc, slideId: string, selection: readonly string[], versi
   return pickedOf(doc, slideId, selection);
 }
 
-export function Inspector({ session, slideId, readOnly, faces, uploadAsset, measure }: InspectorProps) {
+/** P4-B2 (D13): the laid-out boxes as of `version`: a new reader per version, so what reads it is keyed on the version. */
+function measureAt(measure: InspectorProps['measure'], version: number): InspectorProps['measure'] {
+  void version;
+  return measure && ((id) => measure(id));
+}
+
+export function Inspector({ session, slideId, readOnly, faces, uploadAsset, measure: measureNow, canvas = null }: InspectorProps) {
   const doc = session.doc;
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
-  const version = useDocVersion(session);
+  const version = useSettledVersion(session, canvas);
   const selection = state.currentSlide === slideId ? state.selection : [];
   const picked = useMemo(() => pickedAt(doc, slideId, selection, version), [doc, slideId, selection, version]);
+  const measure = useMemo(() => measureAt(measureNow, version), [measureNow, version]);
 
   const api = useMemo((): InspectorApi => {
     const typingKey = (how: Write) => (how === 'edit' ? null : `inspector:${how.typing}:${selection.join(',')}`);

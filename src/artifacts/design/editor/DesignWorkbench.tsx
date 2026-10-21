@@ -580,7 +580,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
           <div className="design-inspector" data-design-rail="inspector" data-board-context={!elementsSelected || undefined}>
             {!elementsSelected && <BoardInspector session={session} board={active} readOnly={readOnly} />}
             {elementsSelected && <WithZoom view={view}>{(zoom) => <MoveToBoard session={session} boards={boards} active={active} selection={state.selection} canvas={activeCanvas} zoom={zoom} readOnly={!editable} onMoved={onMoved} onNotice={setNotice} />}</WithZoom>}
-            {scope(<Inspector session={session} slideId={active.id} readOnly={!editable} faces={deckFaces} uploadAsset={uploadAsset} measure={measureAtZoom} />)}
+            {scope(<Inspector session={session} slideId={active.id} readOnly={!editable} faces={deckFaces} uploadAsset={uploadAsset} measure={measureAtZoom} canvas={activeCanvas} />)}
           </div>
         )}
           </>
