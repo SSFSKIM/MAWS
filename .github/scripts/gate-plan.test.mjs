@@ -288,7 +288,11 @@ test('every fallback runs the full suite and names the path that sent it there',
     ['M\ttest/live/support/live.ts', /^test support/],
     ['M\t.github/workflows/gate.yml', /^a gate file \(\.github\/workflows\/gate.yml\)$/],
     ['M\tscripts/darwin-unit-files.sh', /^a gate file/],
-    ['M\tdocs/doperpowers/plans/x.md', /^outside the source and test trees \(docs\/doperpowers\/plans\/x.md\)$/],
+    ['M\tdocs/doperpowers/evidence/p1-e8/g0-cli-probe.txt', /^read through fs, a glob or a query import \(docs\/doperpowers\/evidence\/p1-e8\/g0-cli-probe.txt\)$/],
+    ['A\tdocs/doperpowers/evidence/p4-b4/note.ts', /^read through fs, a glob or a query import/],
+    ['R100\tdocs/doperpowers/plans/a.md\tdocs/doperpowers/evidence/a.md', /^read through fs, a glob or a query import \(docs\/doperpowers\/evidence\/a.md\)$/],
+    ['R100\tdocs/a.ts\tsrc/shared/a.ts', /^a renamed non-test file \(docs\/a.ts → src\/shared\/a.ts\)$/],
+    ['R100\tsrc/shared/a.ts\tdocs/a.ts', /^a renamed non-test file/],
     ['M\te2e/library.spec.ts', /^outside the source and test trees/],
     ['M\tspikes/protocol-probe/fixtures/pass3/x.jsonl', /^outside the source and test trees/],
     ['M\tapps/desk-hub/wrangler.jsonc', /^outside the source and test trees/],
@@ -379,4 +383,20 @@ test("gate.yml passes the plan's selection to the unit and unit:darwin test step
     assert.match(body, /\n {10}UNIT_RELATED: \$\{\{ needs\.plan\.outputs\.related \}\}\n/, job);
     assert.match(body, /\n {10}if \[\[ -n \$UNIT_RELATED \]\]; then\n {12}.*node \.github\/scripts\/unit-related\.mjs /, job);
   }
+});
+
+// No suite reads docs/ but its evidence (gate-affected.mjs, UNREAD): a docs path counts for nothing, so a docs-only
+// change runs no suite, and docs beside source select as the source alone would.
+test("a path under docs/ but its evidence counts for nothing: docs alone run no suite, docs beside source don't widen it", () => {
+  const docs = ['M\tdocs/charter.md', 'A\tdocs/doperpowers/plans/2026-10-21-x.md', 'D\tdocs/doperpowers/ledgers/old.md', 'R100\tdocs/a.md\tdocs/doperpowers/b.md', 'M\tdocs/tech-debt-tracker.md'];
+  assert.deepEqual(decide(docs), { paths: 5, related: [] });
+  const { outputs, summary } = plan({ HEAD_MESSAGE: selected(docs) });
+  assert.equal(outputs.related, '[]');
+  assert.match(summary, /\nSelection: affected — 5 paths, unit runs vitest related\n$/);
+  assert.deepEqual(decide([...docs, 'M\tapps/desk-web/src/views/org/OrgView.tsx']), { paths: 6, related: ['apps/desk-web/src/views/org/OrgView.tsx'] });
+  assert.deepEqual(decide(['M\tdocs/charter.md', 'M\tsrc/shared/sessions/model-label.ts']), decide(['M\tsrc/shared/sessions/model-label.ts']) && { ...decide(['M\tsrc/shared/sessions/model-label.ts']), paths: 2 });
+  // Its evidence is data: any path there runs the full suite, beside docs or alone.
+  const evidence = plan({ HEAD_MESSAGE: selected([...docs, 'M\tdocs/doperpowers/evidence/p1-e8/g0-cli-probe.txt']) });
+  assert.equal(evidence.outputs.related, '');
+  assert.match(evidence.summary, /\nSelection: affected — full suite: read through fs, a glob or a query import \(docs\/doperpowers\/evidence\/p1-e8\/g0-cli-probe.txt\)\n$/);
 });
