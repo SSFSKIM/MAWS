@@ -9,8 +9,8 @@
 // (`pinMoves`), at a resize and inside the frame's scroll handler (a scroll of the stage), so it never trails its pin
 // by a frame (V6); hidden while its pin is outside the stage's visible rect, or not drawn.
 //
-// While it is open: a press inside the stage that is not on it or a pin closes it and is consumed (it selects nothing,
-// starts no marquee and no pan), the keyboard going to the pin (V4); a press outside the frame closes it and goes on;
+// While it is open: a press inside the stage that is not on it or a pin closes it and is consumed with its click (it
+// selects nothing, starts no marquee and no pan), the keyboard going to the pin (V4); a press outside the frame closes it and goes on;
 // Escape on the stage closes it before the stage's own Escape. It closes on its own when its pin goes: the last open
 // thread resolved, the element deleted (its threads stay, orphans in the rail, V9), or (the deck) the slide changed;
 // the drafts stay (V5, V8). The keyboard goes into the popover when it opens and to the pin when it closes, never to
@@ -113,9 +113,11 @@ function Open({ api, host, shownSlide, layoutKey, target }: Props & { target: Pi
       const target = e.target as Element;
       if (target.closest(OWN)) return;
       if (onStage(target)) {
-        // consumed: the stage's overlay and the world never see it, so it selects nothing, no marquee, no pan
+        // consumed: the stage's overlay and the world never see it, so it selects nothing, no marquee, no pan; nor
+        // does anything see the click the same gesture ends in (a board's title selects on its click)
         e.stopPropagation();
         e.preventDefault();
+        swallowClick(host, e.pointerId);
         toPin();
       }
       closePopover();
@@ -159,6 +161,28 @@ function Open({ api, host, shownSlide, layoutKey, target }: Props & { target: Pi
       readOnly={readOnly}
     />
   );
+}
+
+/**
+ * The click a consumed press's gesture ends in, swallowed at the frame: a cancelled pointerdown does not cancel it. Kept
+ * until just after the gesture's pointerup (or pointercancel), so a click that never comes (a drag off the frame) leaves
+ * the next one alone; outlives the popover, which the press closes.
+ */
+function swallowClick(host: HTMLElement, pointerId: number): void {
+  const win = host.ownerDocument.defaultView ?? window;
+  const onClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  const end = (e: PointerEvent) => {
+    if (e.pointerId !== pointerId) return;
+    win.removeEventListener('pointerup', end, { capture: true });
+    win.removeEventListener('pointercancel', end, { capture: true });
+    setTimeout(() => host.removeEventListener('click', onClick, { capture: true }), 0);
+  };
+  host.addEventListener('click', onClick, { capture: true });
+  win.addEventListener('pointerup', end, { capture: true });
+  win.addEventListener('pointercancel', end, { capture: true });
 }
 
 /** P4-B2: the deck's slide shown, as the frame reads it. */

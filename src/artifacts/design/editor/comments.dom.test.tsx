@@ -375,6 +375,26 @@ describe('the pin popover over the world', () => {
     expect(document.activeElement).toBe(container.querySelector('[data-comment-pin="cta"]'));
   });
 
+  // the review's P2: cancelling the closing press's pointerdown does not cancel the click its gesture ends in
+  it('the closing press on another board’s title selects nothing, its click included; the next click is the title’s again', async () => {
+    const { doc, view, session, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    act(() => session.show('b1'));
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!);
+    const title = container.querySelector<HTMLElement>('[data-board-title="b2"]')!;
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(title, { button: 0, pointerId: 1 });
+    fireEvent.click(title);
+    expect(popover()).toBeNull();
+    expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual([null, 'b1']);
+    await settle(); // the gesture over: its click is no longer swallowed
+    fireEvent.click(title);
+    expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual(['b2', 'b2']);
+  });
+
   it('a board’s own pin opens its popover; the rail’s Show of a board’s thread does too (V11)', async () => {
     const { doc, container } = mount();
     addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1, body: 'Wider?' }, 'deck-comments');
