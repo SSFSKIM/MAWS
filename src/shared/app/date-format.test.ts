@@ -2,7 +2,7 @@
 // the system's. This suite runs under the owner's Korean system locale (vitest.config.ts's `node-display` project), so
 // each English expectation below is read where the system would have written Korean.
 import { describe, expect, it } from 'vitest';
-import { DISPLAY_LOCALE, dateFormats, dateTimeFormat, formatAgo, formatCalendarDay, formatClock, formatDate, formatDateTime, formatDayTime, formatShortDate, formatUntil, formatWeekdayClock, formatWeekdayHour } from './date-format';
+import { DISPLAY_LOCALE, dateFormats, dateTimeFormat, formatAgo, formatCalendarDay, formatClock, formatCompactCount, formatCount, formatDate, formatDateTime, formatDayTime, formatShortDate, formatUntil, formatWeekdayClock, formatWeekdayHour } from './date-format';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -52,6 +52,19 @@ describe('the display locale, under a Korean system locale', () => {
     expect(formatCalendarDay('2026-10-12')).toBe('Oct 12, 2026');
     expect(formatCalendarDay('2026-01-01')).toBe('Jan 1, 2026');
     expect(['2026-10-1', 'soon', ''].map(formatCalendarDay)).toEqual([null, null, null]);
+  });
+
+  it('a count grouped, and a compact count to a tenth, in English', () => {
+    expect([0, 999, 12_345, 1_234_567].map(formatCount)).toEqual(['0', '999', '12,345', '1,234,567']);
+    expect([512, 36_800, 200_000, 1_000_000, 1_250_000].map(formatCompactCount)).toEqual(['512', '36.8K', '200K', '1M', '1.3M']);
+  });
+});
+
+// The desk's counts are the module's too, so the switch that would make the page Korean makes them Korean with it.
+describe('counts, in an explicit locale', () => {
+  it('a compact count in the locale’s notation', () => {
+    expect([36_800, 200_000].map((n) => dateFormats('en-US').compactCount(n))).toEqual(['36.8K', '200K']);
+    expect([36_800, 200_000].map((n) => dateFormats('ko-KR').compactCount(n))).toEqual(['3.7만', '20만']);
   });
 });
 

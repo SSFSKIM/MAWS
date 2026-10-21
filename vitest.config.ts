@@ -37,6 +37,7 @@ const TIMING_NODE_TESTS = [
   'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
+  'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
 ];
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
