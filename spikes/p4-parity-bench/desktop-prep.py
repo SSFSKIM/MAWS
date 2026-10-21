@@ -6,13 +6,20 @@ send, wait) is desktop-driver.js through cua. Nothing here writes outside the ru
 Desktop's records are only read.
 
   python3 -I desktop-prep.py before <task> <rep> --out RUN [--surface code|cowork] [--seed next|<id>] [--ref TEXT]
-  python3 -I desktop-prep.py after  <task> <rep> --out RUN --permissions-answered N [--seed-transcript T] ...
+  python3 -I desktop-prep.py after  <task> <rep> --out RUN --permissions-answered N [--transcript FILE|newest] ...
   python3 -I desktop-prep.py deck   <transcript> <out dir>     a Cowork deck rebuilt from a session's records, its url,
                                                                `same` against the bench's, and the turns' permission modes
   python3 -I desktop-prep.py kinds  <transcript.jsonl | audit.jsonl> ...   the artifact kinds a session was offered and
                                                                the permission mode its records carry
   python3 -I desktop-prep.py seed-prompt                       the untimed prompt that makes a Cowork seed deck
-  python3 -I desktop-prep.py seed-add <transcript> --out RUN   a seed session's deck checked and entered in RUN/seeds.json
+  python3 -I desktop-prep.py seed-add <transcript|newest> --out RUN   a seed session's deck checked and entered in RUN/seeds.json
+
+Cloud Cowork (Desktop 3.1623.0, findings §7b): the Claude tab's Cowork runs in Anthropic's cloud (entrypoint
+remote_cowork, a Linux VM, engine 2.1.305) and keeps its transcript in the VM. After the turn, an untimed follow-up in
+the same session has it send that file (desktop-driver.js `bench.handOver()`), and Desktop saves it under ~/Downloads.
+`after --transcript newest` (or a path) and `seed-add newest` take the newest .jsonl there, copy it into the run and
+read it like any transcript; the follow-up's own records come after the timed turn's and the turn window leaves them
+out. A fresh session is told by the records' session id, not the file: two hand-overs of one session are one session.
 
 Seeds (§7a): a Cowork deck's timed turn runs in a fresh session of its own, on a deck an untimed Cowork session made
 beforehand from seed/maws-deck (`seed-prompt`). `seed-add` rebuilds that deck from the seed session's records, checks it
@@ -50,6 +57,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import unicodedata
 from datetime import datetime, timezone
 
@@ -60,6 +68,8 @@ ARM_DIR = os.environ.get('MAWS_BENCH_DESKTOP_DIR', '/tmp/maws-parity-bench/MAWS 
 CLAUDE_APP = os.environ.get('MAWS_BENCH_CLAUDE_APP') or os.path.expanduser('~/Library/Application Support/Claude')  # overridable for a dry run
 CONFIG_HOME = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.expanduser('~/.claude')
 CLAUDE_USAGE = os.path.expanduser('~/Library/Application Support/ClaudeUsage')
+# Where Desktop saves a file a cloud Cowork session hands over (bench.handOver() in desktop-driver.js).
+DOWNLOADS = os.environ.get('MAWS_BENCH_DOWNLOADS') or os.path.expanduser('~/Downloads')
 SEED_DECK = os.path.join(HERE, 'seed', 'maws-deck')
 FILES = {'document': 'doc.md', 'presentation': 'deck.html'}
 # The landing calls: a plain file's edit tools (counted only on the artifact's file, `landingFiles`), or the publish of
@@ -155,6 +165,36 @@ def pending_attempt(out, task, rep):
 
 
 # ---- before ---------------------------------------------------------------------------------------------------------
+
+# ---- a cloud session's handed-over transcript ------------------------------------------------------------------------
+
+def handed_over(arg, since, dest):
+    """The handed-over transcript `arg` (a path, or 'newest': the newest .jsonl in DOWNLOADS saved since `since`), copied
+    to `dest`, so the run keeps its own copy."""
+    if arg == 'newest':
+        found = sorted((os.path.getmtime(p), p) for p in glob.glob(os.path.join(DOWNLOADS, '*.jsonl'))
+                       if since is None or os.path.getmtime(p) + 5 >= since)
+        if not found:
+            sys.exit('no .jsonl in %s saved since %s: hand the transcript over first (bench.handOver())' % (DOWNLOADS, since))
+        arg = found[-1][1]
+    if not os.path.isfile(arg):
+        sys.exit('no transcript at %s' % arg)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    shutil.copyfile(arg, dest)
+    return dest
+
+
+def session_id(transcript):
+    return bench_parse().parse_transcript(transcript)[0]['sessionId']
+
+
+def transcript_session(path):
+    """A session known only by its transcript (a cloud Cowork hand-over): what Desktop's local records would have said."""
+    meta, _, turns = bench_parse().parse_transcript(path)
+    return dict(transcript=path, audit=None, local=None, cliVersion=meta['version'],
+                meta=dict(sessionId=meta['sessionId'], entrypoint=meta['entrypoint'], version=meta['version'],
+                          permissionMode=turns[0]['permissionMode'] if turns else None))
+
 
 # ---- the seeds ledger ------------------------------------------------------------------------------------------------
 
@@ -673,7 +713,10 @@ def after(args):
     p = json.loads(read(os.path.join(d, 'pending.json')))
     started = ts(p['startedAt'])
     load_after = load()
-    s = code_session(started) if p['surface'] == 'code' else cowork_session(started)
+    if args.transcript:  # a cloud Cowork session: its records are the handed-over transcript
+        s = transcript_session(handed_over(args.transcript, started, os.path.join(d, 'transcript.jsonl')))
+    else:
+        s = code_session(started) if p['surface'] == 'code' else cowork_session(started)
     if s is None:
         stop(d, p, 'no Desktop %s session found since %s in %s' % (p['surface'], p['startedAt'], ARM_DIR))
     name = FILES[p['kind']]
@@ -732,7 +775,9 @@ def after(args):
             after_source = 'bench-after/ (the model transcribed the deck; the last resort)'
         if args.seed_transcript:
             seed_check = check('same', SEED_DECK, before_path)
-            fresh = os.path.realpath(args.seed_transcript) != os.path.realpath(s['transcript'])
+            # one session whatever the file: the same transcript, or the same session id (two hand-overs of a session)
+            seed_sid = session_id(args.seed_transcript)
+            fresh = not (os.path.realpath(args.seed_transcript) == os.path.realpath(s['transcript']) or (seed_sid and seed_sid == session_id(s['transcript'])))
         if p.get('seedUrl') and r.url and artifact_id(r.url) != artifact_id(p['seedUrl']):
             stop(d, p, 'the turn edited %s, not the seed %s took (%s)' % (r.url, p['seedId'], p['seedUrl']))
         deck_url = r.url
@@ -815,13 +860,19 @@ def seed_add(args):
     """A seed session's deck rebuilt from its records and entered in the run's ledger: good when it is the bench's
     (`same`), every human turn of the seed session ran in auto, the session made the deck itself (a successful create),
     its url is known, and no other entry's url names the same Artifact (a deck is one seed's)."""
-    transcript = os.path.abspath(args.transcript)
     led = ledger(args.out)
-    if any(os.path.realpath(s['transcript']) == os.path.realpath(transcript) for s in led['seeds']):
-        sys.exit('%s is already in %s' % (transcript, ledger_path(args.out)))
     sid = 'seed-%02d' % (len(led['seeds']) + 1)
+    source = args.transcript if args.transcript == 'newest' else os.path.abspath(args.transcript)
+    if source != 'newest' and any(os.path.realpath(s.get('source') or s['transcript']) == os.path.realpath(source) for s in led['seeds']):
+        sys.exit('%s is already in %s' % (source, ledger_path(args.out)))
+    # the run's own copy (a hand-over lands in ~/Downloads among other files)
+    transcript = handed_over(source, time.time() - 900 if source == 'newest' else None, os.path.join(os.path.abspath(args.out), 'seeds', sid + '.jsonl'))
+    this_session = session_id(transcript)
+    if this_session and any(s.get('sessionId') == this_session for s in led['seeds']):
+        os.remove(transcript)
+        sys.exit('session %s is already in %s' % (this_session, ledger_path(args.out)))
     modes = [t['permissionMode'] for t in bench_parse().parse_transcript(transcript)[2]]
-    entry = dict(id=sid, transcript=transcript, url=None, urlFrom=None, same=None, permissionModes=modes, ok=False, why=None, usedBy=None,
+    entry = dict(id=sid, transcript=transcript, source=source, sessionId=this_session, url=None, urlFrom=None, same=None, permissionModes=modes, ok=False, why=None, usedBy=None,
                  addedAt=datetime.now(timezone.utc).isoformat())
     try:
         with rebuilding():
@@ -903,6 +954,7 @@ def main(argv):
         else:
             a.add_argument('--permissions-answered', type=int, required=True, metavar='N',
                            help="the permission cards the driver answered in the turn (bench.rep()'s permissionsAnswered); more than 0 is a human stop")
+            a.add_argument('--transcript', metavar='FILE|newest', help="a cloud Cowork session's handed-over transcript (newest: the newest .jsonl saved in ~/Downloads since before)")
             a.add_argument('--seed-transcript', metavar='T', help="a Cowork deck's seed session's transcript (it may be the timed one): the deck before the turn is rebuilt from it")
             a.add_argument('--measurement-only', action='store_true', help='the cell ran at Desktop\'s own setting, MAWS pinned to it')
             a.add_argument('--landing-actions', action='append', help='TOOL=op,op: the operations of TOOL that land an edit')

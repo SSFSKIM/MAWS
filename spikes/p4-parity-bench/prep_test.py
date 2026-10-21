@@ -53,26 +53,27 @@ def records(path, recs):
 class Recorder:
     """A transcript in the engine's shape: human turns, tool calls and their results, one second apart."""
 
-    def __init__(self, cwd, start=0):
+    def __init__(self, cwd, start=0, session=None):
         self.cwd, self.t, self.recs, self.n = cwd, start, [], 0
+        self.session = session or 'session-of-' + cwd  # a seed's and a timed turn's sessions differ unless told otherwise
 
     def at(self):
         self.t += 1
         return '2026-10-19T12:%02d:%02d.000Z' % divmod(self.t, 60)
 
     def human(self, text):
-        self.recs.append(dict(type='user', timestamp=self.at(), turnOrigin='human', permissionMode='auto', cwd=self.cwd, sessionId='s', message={'role': 'user', 'content': text}))
+        self.recs.append(dict(type='user', timestamp=self.at(), turnOrigin='human', permissionMode='auto', cwd=self.cwd, sessionId=self.session, message={'role': 'user', 'content': text}))
 
     def call(self, name, inp, ok=True, result='ok'):
         self.n += 1
         tid = 'toolu_%d' % self.n
-        self.recs.append(dict(type='assistant', timestamp=self.at(), cwd=self.cwd, sessionId='s', requestId='q%d' % self.n,
+        self.recs.append(dict(type='assistant', timestamp=self.at(), cwd=self.cwd, sessionId=self.session, requestId='q%d' % self.n,
                               message={'id': 'm%d' % self.n, 'model': 'claude-opus-5-5', 'content': [{'type': 'tool_use', 'id': tid, 'name': name, 'input': inp}], 'usage': {'output_tokens': 5}}))
-        self.recs.append(dict(type='user', timestamp=self.at(), cwd=self.cwd, sessionId='s', message={'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': tid, 'content': result, 'is_error': not ok}]}))
+        self.recs.append(dict(type='user', timestamp=self.at(), cwd=self.cwd, sessionId=self.session, message={'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': tid, 'content': result, 'is_error': not ok}]}))
 
     def reply(self, text):
         self.n += 1
-        self.recs.append(dict(type='assistant', timestamp=self.at(), cwd=self.cwd, sessionId='s', requestId='q%d' % self.n,
+        self.recs.append(dict(type='assistant', timestamp=self.at(), cwd=self.cwd, sessionId=self.session, requestId='q%d' % self.n,
                               message={'id': 'm%d' % self.n, 'model': 'claude-opus-5-5', 'content': [{'type': 'text', 'text': text}], 'usage': {'output_tokens': 5}}))
 
 
@@ -188,7 +189,7 @@ class CoworkDeck(Prep):
 
     def seed_slides(self, url=URL, name='seed.jsonl', create='ok'):
         """A seed session in the Slides flow; `create` 'ok', 'failed' or None (the files published to `url` with no create)."""
-        r = Recorder(self.SEED_MNT)
+        r = Recorder(self.SEED_MNT, session='seed-session-' + name)
         r.human('Make a slide deck titled "Autumn Workshops 2026" from the files in deck/.')
         r.call('Artifact', {'action': 'quickstart', 'intent': 'slides'})
         if create:
@@ -587,6 +588,65 @@ class Seeds(CoworkDeck):
             self.main('before', 'B1', '1', '--out', self.run_dir, '--seed', 'next')
         self.assertIn('--seed is for a Cowork deck', str(refused.exception))
         self.assertIsNone(self.ledger()['seeds'][0]['usedBy'])
+
+
+class CloudCowork(CoworkDeck):
+    """Desktop 3.1623.0's Cowork runs in the cloud: each session's transcript reaches the mini only when an untimed
+    follow-up has the session send it, saved under ~/Downloads; the follow-up's own records come after the turn."""
+    HAND_OVER = "Send me this session's own transcript file with SendUserFile."
+
+    def setUp(self):
+        super().setUp()
+        self.saved['DOWNLOADS'] = prep.DOWNLOADS
+        prep.DOWNLOADS = os.path.join(self.dir, 'Downloads')
+        os.makedirs(prep.DOWNLOADS)
+
+    def handed_over(self, path, session, name):
+        """The session's records with the hand-over turn after them, as Desktop saves the sent file."""
+        recs = [dict(json.loads(line), sessionId=session) for line in read(path).splitlines()]
+        r = Recorder('/home/claude', start=900, session=session)
+        r.human(self.HAND_OVER)
+        r.call('Bash', {'command': 'ls -t ~/.claude/projects/*/*.jsonl | head -1'})
+        r.call('SendUserFile', {'path': '/root/.claude/projects/-home-claude/%s.jsonl' % session})
+        out = records(os.path.join(prep.DOWNLOADS, name), recs + r.recs)
+        time.sleep(0.01)
+        return out
+
+    def test_the_hand_over_end_to_end(self):
+        self.handed_over(self.seed_slides(), 'cloud-seed', 'seed.jsonl')
+        entry = self.main('seed-add', 'newest', '--out', self.run_dir)
+        self.assertTrue(entry['ok'], entry)
+        self.assertEqual((entry['sessionId'], entry['transcript']), ('cloud-seed', os.path.join(self.run_dir, 'seeds', 'seed-01.jsonl')))
+        self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        self.handed_over(records(os.path.join(self.dir, 'timed.jsonl'), self.timed_b5().recs), 'cloud-timed', 'timed.jsonl')
+        out = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--transcript', 'newest')
+        self.assertEqual((out['valid'], out['freshSession'], out['check']['pass'], out['permissionMode']), ('yes', True, True, 'auto'), out)
+        self.assertEqual(out['transcript'], os.path.join(self.run_dir, 'desktop-B5-r1', 'transcript.jsonl'))
+        with open(out['manifest'], encoding='utf-8') as f:
+            m = json.load(f)
+        self.assertEqual(m['desktop']['meta']['sessionId'], 'cloud-timed')
+        row = prep.bench_parse().edit_row(out['manifest'])
+        self.assertEqual([t['name'] for t in row['measured']['tools']], ['Artifact', 'Artifact', 'Artifact', 'Edit', 'Artifact'], 'the hand-over is not in the timed turn')
+
+    def test_two_hand_overs_of_one_session_are_one_session(self):
+        self.handed_over(self.seed_slides(), 'one-session', 'seed.jsonl')
+        self.assertTrue(self.main('seed-add', 'newest', '--out', self.run_dir)['ok'])
+        self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        self.handed_over(records(os.path.join(self.dir, 'timed.jsonl'), self.timed_b5().recs), 'one-session', 'again.jsonl')
+        out = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--transcript', 'newest')
+        self.assertFalse(out['freshSession'])
+        self.assertIn("the timed turn ran in its seed's session, not a fresh one", out['valid'])
+        with self.assertRaises(SystemExit) as again:  # the same session handed over twice is one seed
+            self.main('seed-add', os.path.join(prep.DOWNLOADS, 'seed.jsonl'), '--out', self.run_dir)
+        self.assertIn('already in', str(again.exception))
+
+    def test_newest_takes_only_a_hand_over_saved_since_before(self):
+        old = self.handed_over(self.seed_slides(), 'cloud-seed', 'old.jsonl')
+        os.utime(old, (time.time() - 3600, time.time() - 3600))
+        self.main('before', 'B1', '1', '--out', self.run_dir)
+        with self.assertRaises(SystemExit) as none:
+            self.main('after', 'B1', '1', '--out', self.run_dir, '--permissions-answered', '0', '--transcript', 'newest')
+        self.assertIn('hand the transcript over first', str(none.exception))
 
 
 if __name__ == '__main__':
