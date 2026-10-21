@@ -13,8 +13,8 @@
 // beyond the cap is not kept and counts as a change. Watches are ref-counted per root by the
 // directories each owner (the requesting window) passed, and an owner's are released together when it goes; the first
 // watch of a root emits its status as `initial`.
-import { watch as fsWatch } from 'node:fs';
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { constants, watch as fsWatch } from 'node:fs';
+import { access, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { GitChangeReason, GitChanged, GitStatus } from '@shared/ipc/schema/git';
 import { GitTimeoutError } from './runner';
@@ -36,7 +36,7 @@ export interface GitWatcherDeps {
   watch?: WatchFn;
   statFile?(path: string): Promise<FileFacts | null>;
   linkedWorktrees?(commonDir: string): Promise<string[]>; // absolute paths; the common dir's `worktrees/*/gitdir` by default
-  hasDotGit?(directory: string): Promise<boolean>; // whether the directory holds a `.git` of its own, file or directory
+  isRepository?(directory: string): Promise<boolean>; // whether git reads the directory as a repository of its own; isNestedRepository by default
 }
 
 const DEBOUNCE_MS = 250;
@@ -112,6 +112,11 @@ function within(rel: string, dirs: readonly string[]): boolean {
   return dirs.some((dir) => rel.startsWith(`${dir}/`));
 }
 
+// Whether an event's path names the directory itself, its `.git`, or a directory above it.
+function names(rel: string, dir: string): boolean {
+  return rel === dir || rel === `${dir}/.git` || dir.startsWith(`${rel}/`);
+}
+
 // The common dir's `worktrees/<name>/gitdir` names each linked worktree's `.git`: its registration, which `worktree
 // add` writes and `remove` and `prune` delete, and what an event re-reads the list on.
 function registration(sub: string): boolean {
@@ -132,6 +137,36 @@ async function readLinkedWorktrees(commonDir: string): Promise<string[]> {
     }),
   );
   return paths.filter((path): path is string => path !== null);
+}
+
+// P4 W2-B review fix: whether git reads the directory as a repository of its own while it lists untracked files, as
+// dir.c's is_nonbare_repository_dir does: its `.git` is a git directory, or a gitfile (`gitdir: <path>`, relative to
+// the gitfile's directory) naming one; a `.git` file git cannot read counts too, the side git takes. An empty `.git`
+// directory, a junk file or a repository not yet given its HEAD is not one: git enters the directory as any other.
+export async function isNestedRepository(directory: string): Promise<boolean> {
+  const dotGit = join(directory, '.git');
+  const kind = await stat(dotGit).catch(() => null);
+  if (kind === null) return false;
+  if (kind.isDirectory()) return isGitDirectory(dotGit);
+  if (!kind.isFile()) return false;
+  const text = await readFile(dotGit, 'utf8').catch(() => null);
+  if (text === null) return true;
+  if (!text.startsWith('gitdir: ')) return false;
+  return isGitDirectory(resolve(directory, text.slice('gitdir: '.length).replace(/[\r\n]+$/, '')));
+}
+
+// setup.c's is_git_directory: a HEAD that is a symlink into `refs/`, a `ref: refs/…` or an object name, and `objects/`
+// and `refs/` in the common dir (the one `commondir` names, for a linked worktree's git dir).
+async function isGitDirectory(dir: string): Promise<boolean> {
+  const head = join(dir, 'HEAD');
+  const link = await readlink(head).catch(() => null);
+  const text = link === null ? await readFile(head, 'utf8').catch(() => null) : null;
+  const valid = link !== null ? link.startsWith('refs/') : text !== null && (/^ref:\s*refs\//.test(text) || /^(?:[0-9a-f]{40})/i.test(text));
+  if (!valid) return false;
+  const common = await readFile(join(dir, 'commondir'), 'utf8').then((path) => resolve(dir, path.replace(/[\r\n]+$/, '')), () => dir);
+  const searchable = (path: string) => access(path, constants.X_OK).then(() => true, () => false);
+  const [objects, refs] = await Promise.all([searchable(join(common, 'objects')), searchable(join(common, 'refs'))]);
+  return objects && refs;
 }
 
 function under(path: string, dir: string): boolean {
@@ -169,13 +204,13 @@ export class GitWatcher {
   private readonly watchFn: WatchFn;
   private readonly statFile: (path: string) => Promise<FileFacts | null>;
   private readonly linkedWorktrees: (commonDir: string) => Promise<string[]>;
-  private readonly hasDotGit: (directory: string) => Promise<boolean>;
+  private readonly isRepository: (directory: string) => Promise<boolean>;
 
   constructor(private readonly deps: GitWatcherDeps) {
     this.watchFn = deps.watch ?? (fsWatch as unknown as WatchFn);
     this.statFile = deps.statFile ?? ((path) => stat(path).then((s) => ({ size: s.size, mtimeMs: s.mtimeMs }), () => null));
     this.linkedWorktrees = deps.linkedWorktrees ?? readLinkedWorktrees;
-    this.hasDotGit = deps.hasDotGit ?? ((directory) => stat(join(directory, '.git')).then(() => true, () => false));
+    this.isRepository = deps.isRepository ?? isNestedRepository;
   }
 
   // Resolves the directory's status (failing as `status` fails, with nothing registered), then counts one more watcher
@@ -280,8 +315,10 @@ export class GitWatcher {
         if (filename === null) return this.changed(root, 'worktree');
         const rel = filename.split(sep).join('/');
         if (gitDirRel !== null && rel.startsWith(`${gitDirRel}/`)) return onGitPath(rel.slice(gitDirRel.length + 1), classifyRootPath(rel, gitDirRel), gitDirIsCommon);
-        // A found repository's `.git` coming or going forgets it; a pass finds it again from a write beneath it.
-        if (root.clones.length > 0 && rel.endsWith('/.git')) root.clones = root.clones.filter((dir) => rel !== `${dir}/.git`);
+        // An event naming a found repository's directory, its `.git` or a directory above it (a rename names only what
+        // moved, never what lay beneath) forgets it, so a replacement's writes count at once; a pass finds a repository
+        // still there again from the next write beneath it, for one status.
+        if (root.clones.some((dir) => names(rel, dir))) root.clones = root.clones.filter((dir) => !names(rel, dir));
         if (insideNestedCheckout(rel, root.nested, root.clones)) return;
         this.changed(root, classifyRootPath(rel, gitDirRel), rel);
       });
@@ -434,27 +471,41 @@ export class GitWatcher {
   // The files beneath the status's untracked directories: those already known that are still beneath one, and those
   // the events touched, read afresh (in parallel), while the root keeps fewer than INNER_CAP. `overflow`: a touched file
   // beyond the cap, whose change cannot be judged, so the pass emits.
-  // P4 W2-B (tracker 2026-09-30, git watcher blind spots): git never enters a directory holding a `.git` of its own while
-  // it lists untracked files (the repository is one `dir/` line, or lies inside an untracked parent's), so a file beneath
-  // such a repository is not the root's. A new file's repository is found here, once, and joins `clones`, whose writes the
-  // watch drops from then on; one no longer beneath an untracked directory (gone, or added to the index) is forgotten. A
+  // P4 W2-B (tracker 2026-09-30, git watcher blind spots): git never enters a repository nested in a directory it lists
+  // untracked (isNestedRepository: the repository is one `dir/` line, or lies inside an untracked parent's), nor any
+  // `.git` entry, so a file beneath either is not the root's. A touched file's repository is found here, asked once per
+  // directory per pass (a known file is asked again whenever it is touched, so a repository caught half-created is found
+  // by a later pass), and joins `clones`, whose writes the watch drops from then on. Each pass asks the found ones again
+  // and forgets those no longer a repository beneath an untracked directory (gone, renamed away, added to the index). A
   // gitlink, a submodule's or an embedded clone's, is tracked, never beneath one, and stays the root's.
   private async innerFacts(root: Root, status: GitStatus, touched: Set<string>): Promise<{ inner: Map<string, FileFacts | null>; overflow: boolean }> {
     const dirs = status.files.filter((file) => file.untracked && file.path.endsWith('/')).map((file) => file.path);
     const beneath = (rel: string) => dirs.some((dir) => rel.startsWith(dir));
-    root.clones = root.clones.filter((dir) => beneath(`${dir}/`));
+    const ask = this.asker(status.repoRoot);
+    const stale = await Promise.all(root.clones.map(async (dir) => (!beneath(`${dir}/`) || !(await ask(dir)) ? dir : null)));
+    root.clones = root.clones.filter((dir) => !stale.includes(dir)); // the watch may have forgotten some meanwhile
     const counts = (rel: string) => beneath(rel) && !within(rel, root.clones);
     const inner = new Map([...root.inner].filter(([rel]) => counts(rel)));
     const room = INNER_CAP - inner.size;
     const known: string[] = [];
     const fresh: string[] = [];
     const beyond: string[] = [];
+    const asked = new Set<string>(); // the directories whose repository is in question
     for (const rel of touched) {
       if (!counts(rel)) continue;
-      if (inner.has(rel)) known.push(rel);
-      else (fresh.length < room ? fresh : beyond).push(rel);
+      const dotGit = rel.indexOf('/.git/');
+      if (dotGit >= 0) asked.add(rel.slice(0, dotGit)); // never the root's file: only a sign of where a repository may be
+      else {
+        if (inner.has(rel)) known.push(rel);
+        else if (fresh.length < room) fresh.push(rel);
+        else {
+          beyond.push(rel);
+          continue;
+        }
+        asked.add(dirname(rel));
+      }
     }
-    const found = await this.nestedRepositories(status.repoRoot, dirs, fresh);
+    const found = await this.nestedRepositories(ask, dirs, [...asked]);
     root.clones.push(...found);
     for (const rel of inner.keys()) if (within(rel, found)) inner.delete(rel); // a repository created over known files
     const read = [...known, ...fresh].filter((rel) => !within(rel, found));
@@ -464,25 +515,29 @@ export class GitWatcher {
     return { inner, overflow };
   }
 
-  // The repositories the new files beneath untracked directories lie in: for each file, the outermost directory from its
-  // untracked directory down to its own that holds a `.git`, seen in the path itself (a write through the repository's
-  // `.git/`) or else asked of each directory, once per pass. Bounded as the files are, by INNER_CAP.
-  private async nestedRepositories(repoRoot: string, dirs: string[], fresh: string[]): Promise<string[]> {
-    const asked = new Map<string, Promise<boolean>>();
-    const ask = (dir: string) => {
-      let answer = asked.get(dir);
-      if (!answer) asked.set(dir, (answer = this.hasDotGit(join(repoRoot, dir))));
+  // Whether a root-relative directory is a repository of its own, each directory asked at most once by the one asker.
+  private asker(repoRoot: string): (dir: string) => Promise<boolean> {
+    const answers = new Map<string, Promise<boolean>>();
+    return (dir) => {
+      let answer = answers.get(dir);
+      if (!answer) answers.set(dir, (answer = this.isRepository(join(repoRoot, dir))));
       return answer;
     };
+  }
+
+  // The repositories the given directories lie in: for each, the outermost from its untracked directory down to itself
+  // that is one. Bounded as the touched files are, by INNER_CAP.
+  private async nestedRepositories(ask: (dir: string) => Promise<boolean>, dirs: string[], paths: string[]): Promise<string[]> {
     const found = await Promise.all(
-      fresh.map(async (rel) => {
-        const top = dirs.find((dir) => rel.startsWith(dir));
+      paths.map(async (path) => {
+        const top = dirs.find((dir) => `${path}/`.startsWith(dir));
         if (top === undefined) return null;
-        const below = rel.slice(top.length).split('/');
         let dir = top.slice(0, -1);
+        const below = path === dir ? [] : path.slice(top.length).split('/');
+        if (await ask(dir)) return dir;
         for (const name of below) {
-          if (name === '.git' || (await ask(dir))) return dir;
           dir = `${dir}/${name}`;
+          if (await ask(dir)) return dir;
         }
         return null;
       }),

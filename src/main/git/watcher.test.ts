@@ -1,11 +1,13 @@
 import { execFile as nodeExecFile } from 'node:child_process';
-import { watch as fsWatch } from 'node:fs';
+import { watch as fsWatch, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitChangedSchema, type GitChanged, type GitStatus } from '@shared/ipc/schema/git';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { GitTimeoutError, type ExecFileFn } from './runner';
 import { GitService } from './service';
-import { classifyCommonPath, classifyGitPath, classifyRootPath, GitWatcher, INNER_CAP, refMatters, type WatchFn } from './watcher';
+import { classifyCommonPath, classifyGitPath, classifyRootPath, GitWatcher, INNER_CAP, isNestedRepository, refMatters, type WatchFn } from './watcher';
 
 const ROOT = '/repo';
 
@@ -127,6 +129,55 @@ describe('the repository watcher classifies paths', () => {
     expect(classifyCommonPath('worktrees/other/reftable/tables.list')).toBeNull(); // another worktree's HEAD
     expect(refMatters('reftable/tables.list', status({ branch: 'feat/x', upstream: 'origin/feat/x' }))).toBe(true);
     expect(refMatters('reftable/0x000000000001-0x000000000003-60af3f9a.ref', status({ branch: null, upstream: null }))).toBe(true);
+  });
+});
+
+// git status (probed with `--untracked-files=all`) enters a directory whose `.git` is an empty directory, a junk file, a
+// gitfile naming nothing, or a git dir without a valid HEAD, and lists only the directory of one whose `.git` is a git
+// dir or a gitfile naming one.
+describe('the repository watcher reads a nested `.git` as git does', () => {
+  let base: string;
+  beforeEach(() => void (base = realpathSync(mkdtempSync(join(tmpdir(), 'maws-nested-')))));
+  afterEach(() => rmSync(base, { recursive: true, force: true }));
+  const gitDir = (dir: string, head: string | null, common = dir) => {
+    mkdirSync(join(common, 'objects'), { recursive: true });
+    mkdirSync(join(common, 'refs'), { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    if (head !== null) writeFileSync(join(dir, 'HEAD'), head);
+  };
+  const shape = (name: string, make: (dir: string) => void) => {
+    const dir = join(base, name);
+    mkdirSync(dir, { recursive: true });
+    make(dir);
+    return dir;
+  };
+
+  it('counts a git dir with a valid HEAD, objects/ and refs/, or a gitfile naming one; nothing else', async () => {
+    gitDir(join(base, 'elsewhere'), 'ref: refs/heads/main\n');
+    gitDir(join(base, 'main.git', 'worktrees', 'wt'), 'a'.repeat(40) + '\n', join(base, 'main.git'));
+    writeFileSync(join(base, 'main.git', 'worktrees', 'wt', 'commondir'), '../..\n');
+    const yes = {
+      clone: shape('clone', (dir) => gitDir(join(dir, '.git'), 'ref: refs/heads/main\n')),
+      detached: shape('detached', (dir) => gitDir(join(dir, '.git'), 'b'.repeat(40) + '\n')),
+      reftable: shape('reftable', (dir) => gitDir(join(dir, '.git'), 'ref: refs/heads/.invalid\n')),
+      symlinked: shape('symlinked', (dir) => {
+        gitDir(join(dir, '.git'), null);
+        symlinkSync('refs/heads/main', join(dir, '.git', 'HEAD'));
+      }),
+      gitfile: shape('gitfile', (dir) => writeFileSync(join(dir, '.git'), `gitdir: ${join(base, 'elsewhere')}\n`)),
+      relative: shape('relative', (dir) => writeFileSync(join(dir, '.git'), 'gitdir: ../elsewhere\n')),
+      worktree: shape('worktree', (dir) => writeFileSync(join(dir, '.git'), `gitdir: ${join(base, 'main.git', 'worktrees', 'wt')}\n`)),
+    };
+    const no = {
+      none: shape('none', () => {}),
+      empty: shape('empty', (dir) => mkdirSync(join(dir, '.git'))),
+      junk: shape('junk', (dir) => writeFileSync(join(dir, '.git'), 'not a gitfile\n')),
+      nowhere: shape('nowhere', (dir) => writeFileSync(join(dir, '.git'), `gitdir: ${join(base, 'missing')}\n`)),
+      headless: shape('headless', (dir) => gitDir(join(dir, '.git'), null)), // `git init` caught before its HEAD
+      junkHead: shape('junkHead', (dir) => gitDir(join(dir, '.git'), 'garbage\n')),
+    };
+    for (const [name, dir] of Object.entries(yes)) expect(await isNestedRepository(dir), name).toBe(true);
+    for (const [name, dir] of Object.entries(no)) expect(await isNestedRepository(dir), name).toBe(false);
   });
 });
 
@@ -340,7 +391,7 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     const files = new Map<string, { size: number; mtimeMs: number }>([[`${ROOT}/new/`, { size: 96, mtimeMs: 1 }]]);
     const current = status({ dirty: true, files: [{ path: 'new/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
     const emitted: GitChanged[] = [];
-    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, hasDotGit: async () => false });
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, isRepository: async () => false });
     await watcher.watch(ROOT);
     await vi.advanceTimersByTimeAsync(300);
     const quiet = emitted.length;
@@ -368,9 +419,9 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     const fake = fakeWatch();
     const current = status({ dirty: true, files: [{ path: 'node_modules/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
     const statFile = vi.fn<(path: string) => Promise<{ size: number; mtimeMs: number }>>(async () => ({ size: 1, mtimeMs: 1 }));
-    const hasDotGit = vi.fn<(directory: string) => Promise<boolean>>(async () => false);
+    const isRepository = vi.fn<(directory: string) => Promise<boolean>>(async () => false);
     const emitted: GitChanged[] = [];
-    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile, hasDotGit });
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile, isRepository });
     await watcher.watch(ROOT);
     await vi.advanceTimersByTimeAsync(300);
     const file = (i: number) => `node_modules/pkg/f${i}.js`;
@@ -379,7 +430,7 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     const quiet = emitted.length;
     await vi.advanceTimersByTimeAsync(1000);
     expect(statFile.mock.calls.filter(([path]) => String(path).includes('/pkg/'))).toHaveLength(INNER_CAP); // the last is not kept
-    expect(hasDotGit.mock.calls).toEqual([[`${ROOT}/node_modules`], [`${ROOT}/node_modules/pkg`]]); // one ask per directory, not per file
+    expect(isRepository.mock.calls).toEqual([[`${ROOT}/node_modules`], [`${ROOT}/node_modules/pkg`]]); // one ask per directory, not per file
     expect(emitted).toHaveLength(quiet + 1);
 
     fake.fire(ROOT, file(0)); // kept, unchanged: silent
@@ -513,33 +564,35 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     const files = new Map<string, { size: number; mtimeMs: number }>();
     const write = (rel: string, mtimeMs: number) => files.set(`${ROOT}/${rel}`, { size: 1, mtimeMs });
     const repos = new Set([`${ROOT}/vendor/clone`, `${ROOT}/direct`, `${ROOT}/emb`]);
-    const hasDotGit = vi.fn(async (directory: string) => repos.has(directory));
+    const isRepository = vi.fn(async (directory: string) => repos.has(directory));
     const read = vi.fn(async () => current);
     const emitted: GitChanged[] = [];
-    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, hasDotGit, linkedWorktrees: async () => [] });
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, isRepository, linkedWorktrees: async () => [] });
     await watcher.watch(ROOT);
     const runs = counter(read, fake.fire);
     await runs(ROOT);
     const quiet = emitted.length;
 
-    // a clone inside the untracked `vendor/`, found by a stat: its first write costs one status that finds nothing new
+    // a clone inside the untracked `vendor/`, found by asking each directory: its first write costs one status that finds nothing new
     write('vendor/clone/src/a.ts', 1);
     expect(await runs(ROOT, 'vendor/clone/src/a.ts')).toBe(1);
-    expect(hasDotGit).toHaveBeenCalledWith(`${ROOT}/vendor/clone`);
+    expect(isRepository).toHaveBeenCalledWith(`${ROOT}/vendor/clone`);
     write('vendor/clone/src/a.ts', 2);
     expect(await runs(ROOT, 'vendor/clone/src/a.ts', 'vendor/clone/.git/index', 'vendor/clone/.git/HEAD')).toBe(0);
-    // a clone listed as `direct/`, found without a stat by a write through its own `.git/`
+    // a clone listed as `direct/`, found from a write through its own `.git/`
     expect(await runs(ROOT, 'direct/.git/refs/heads/main')).toBe(1);
-    expect(hasDotGit).not.toHaveBeenCalledWith(`${ROOT}/direct`);
     write('direct/x.ts', 1);
     expect(await runs(ROOT, 'direct/x.ts')).toBe(0);
     expect(emitted).toHaveLength(quiet); // nothing inside a nested repository moved the parent
 
-    // a plain untracked directory's files still count, and a content write there emits
+    // a `.git` that is no repository (an empty directory, a junk file) leaves its directory the root's: asked, not assumed
+    expect(await runs(ROOT, 'notes/.git/config')).toBe(1);
+    expect(emitted).toHaveLength(quiet); // what lies in a `.git` is never the root's file
     write('notes/draft.md', 1);
     expect(await runs(ROOT, 'notes/draft.md')).toBe(1);
     expect(emitted).toHaveLength(quiet + 1);
     // a repository created over a file the projection holds: the pass that finds it lets the file go, no later one does
+    repos.add(`${ROOT}/notes`);
     expect(await runs(ROOT, 'notes/.git/HEAD')).toBe(1);
     const created = emitted.length;
     expect(await runs(ROOT, 'elsewhere.ts', 'notes/draft.md')).toBe(1);
@@ -547,16 +600,47 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     // a tracked repository is the parent's, whatever its `.git` is
     expect(await runs(ROOT, 'emb/src/c.ts')).toBe(1);
     expect(await runs(ROOT, 'emb/.git/index')).toBe(1);
-    expect(hasDotGit).not.toHaveBeenCalledWith(`${ROOT}/emb`);
+    expect(isRepository).not.toHaveBeenCalledWith(`${ROOT}/emb`);
+    watcher.dispose();
+  });
 
-    // the clone's own directory stays the parent's; its `.git` going forgets it, and its files count again
-    expect(await runs(ROOT, 'vendor/clone')).toBe(1);
-    repos.delete(`${ROOT}/vendor/clone`);
-    expect(await runs(ROOT, 'vendor/clone/.git')).toBe(0);
-    const before = emitted.length;
-    write('vendor/clone/src/a.ts', 3);
-    expect(await runs(ROOT, 'vendor/clone/src/a.ts')).toBe(1);
-    expect(emitted).toHaveLength(before + 1);
+  // A rename names only what moved (`mv vendor/clone away && mkdir vendor/clone`, or `mv vendor away`), never what lay
+  // beneath it, so an event naming a found repository's directory, its `.git` or a directory above it forgets it at once.
+  it("forgets a found repository on an event naming its directory, its `.git` or a directory above it, and when a pass finds it gone", async () => {
+    const fake = fakeWatch();
+    const current = status({ dirty: true, files: [{ path: 'vendor/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
+    const files = new Map<string, { size: number; mtimeMs: number }>();
+    const write = (rel: string, mtimeMs: number) => files.set(`${ROOT}/${rel}`, { size: 1, mtimeMs });
+    const repos = new Set<string>();
+    const read = vi.fn(async () => current);
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, isRepository: async (directory) => repos.has(directory), linkedWorktrees: async () => [] });
+    await watcher.watch(ROOT);
+    const runs = counter(read, fake.fire);
+    await runs(ROOT);
+    let round = 0;
+    const found = async () => {
+      repos.add(`${ROOT}/vendor/clone`);
+      write('vendor/clone/src/a.ts', ++round);
+      expect(await runs(ROOT, 'vendor/clone/src/a.ts')).toBe(1);
+      expect(await runs(ROOT, 'vendor/clone/src/a.ts')).toBe(0);
+      repos.delete(`${ROOT}/vendor/clone`); // what replaces it is no repository
+    };
+    for (const event of ['vendor/clone', 'vendor', 'vendor/clone/.git']) {
+      await found();
+      const file = `vendor/clone/new${round}.ts`;
+      write(file, 1);
+      expect(await runs(ROOT, event, file), event).toBe(1); // the replacement's first file, in the rename's own window
+      const before = emitted.length;
+      write(file, 2);
+      expect(await runs(ROOT, file), event).toBe(1);
+      expect(emitted, event).toHaveLength(before + 1); // it is the root's: a content write to it emits
+    }
+    // a `.git` gone with no event naming it: the next pass, for whatever it runs, asks again and forgets it
+    await found();
+    expect(await runs(ROOT, 'elsewhere.ts')).toBe(1);
+    write('vendor/clone/late.ts', 1);
+    expect(await runs(ROOT, 'vendor/clone/late.ts')).toBe(1);
     watcher.dispose();
   });
 
@@ -957,7 +1041,8 @@ describe('git.changed from a watched fixture repository', () => {
     const clone = repo.path('vendor/clone');
     await repo.write('vendor/clone/a.txt', '0\n');
     await repo.write('notes/draft.md', '0\n');
-    const statusRuns = () => execFile.mock.calls.filter(([, args]) => args[2] === 'status' && args[1] === repo.root).length;
+    await repo.write('notes/.git', 'not a gitfile\n'); // no repository: git enters `notes/` as any other directory
+    const statusRuns =() => execFile.mock.calls.filter(([, args]) => args[2] === 'status' && args[1] === repo.root).length;
     // Until no status has started for a while: the pass that finds the clone lands after its status returns, and a write
     // meanwhile still costs one (more under load), so what runs before that is not counted.
     const statusesSettle = async () => {
@@ -983,7 +1068,7 @@ describe('git.changed from a watched fixture repository', () => {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       expect(events.length).toBe(emitted); // nothing in the clone ever emitted
       expect(statusRuns()).toBe(runs); // and once found, nothing in it runs a status
-      await repo.write('notes/draft.md', '1\n'); // a plain untracked directory's file still emits
+      await repo.write('notes/draft.md', '1\n'); // a plain untracked directory's file still emits, a junk `.git` beside it
       await nextChange(emitted, 2000);
     } finally {
       local.dispose();
