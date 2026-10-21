@@ -981,7 +981,13 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
 
 ## Surprises & Discoveries
 
-(None yet; filled by the executors and M4.)
+- Redemptions run the offline sweep, since it sits in `sweep()` and `redeem` runs `sweep()` first (as it already ran
+  the revocations' and orphans' network work there): a redemption can wait on another machine's revocation. Kept, as
+  the spec places it; a failed offline revocation backs off a minute so it does not slow every redemption.
+- No suite starts from a Registry stored before M1, so the `enrollments.key` column's `ADDED_COLUMNS` path is not run
+  on workerd by the suite (the executor checked the statement against the system `sqlite3`). Worth a deploy-time look.
+- The full desk-hub suite under load once failed `session-plane.test.ts:746` (MAWS #88's presence assertion), a file
+  M1 does not touch; it passed alone twice.
 
 ## Decision Log
 
@@ -1079,6 +1085,19 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
      check: 4 with the stand-in down, 3 once it is back, `--replace` through, in one home) and in M4's walk
      (acceptance 10 (c)). The boot's retry loop is devcloud's; the orchestrator tells that session.
   Date/Author: 2026-10-21, the orchestrator (rulings); recorded by the executing session.
+- Decision: M1's executor's choices within the spec (commit `ccbb539b0`), kept by the controller: a rotation (§2
+  check 6) needs the exact stored name, as the one-time path's match is exact — a case twin gets `name-taken`; `busy`
+  answers any pending holder whose mint is in flight, as the table reads; the keys' SQL lives in
+  `src/objects/provisioning-keys.ts` beside `org-keys.ts`, the Registry calling it; each `bad-shape` message starts
+  with the first field that fails, and `ttl_s: null` is refused (only absence takes the default); a failed offline
+  revocation is logged and retried a minute later (an in-memory `offlineRetry`), rather than re-arming the alarm at
+  250 ms, since `sweep()` also runs before every redemption; candidates are swept in name order; the test hooks sit on
+  the Registry (backdate `seen` for several machines, read/clear the alarm, hold/release `leave`; the sweep race reuses
+  `faultNextRevoke`), and tests backdate `seen` rather than skew `Date.now()`, which would set a real alarm an hour
+  ahead; the sweep has its own suite file and hub (`provisioning-sweep.test.ts`); the code helpers moved to
+  `local/helpers.ts`, served by `run.ts` and the suites' proxy, and the provisioning helper also takes `label`; the
+  stand-in's 401 page is small HTML whose contract is the status and the words `Cloudflare Access`.
+  Date/Author: 2026-10-21, M1's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
