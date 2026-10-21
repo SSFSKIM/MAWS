@@ -92,6 +92,14 @@ env:
   # presentations-drag (P4-B2 M0) is the deck drag's fast group: no-agent control trials alternating with agent trials
   # that republish through the host, the class-1 drag case under MAWS_PRESENTATIONS_PERF=1.
   MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat presentations-drag presentations-scale tool-time-heavy-live
+  # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
+  # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
+  # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
+  # job asks for today's labels, which only the exclusive instance carries, and runs alone there; so a group nobody
+  # listed, an old commit's run or a rerun never shares. A name joins only on that spec's trial evidence (its M4: paired
+  # runs whose results match the solo control's); the plan keeps a MEASURED_E2E or foreground group alone whatever this
+  # says.
+  MAC_SHARED_E2E: ''
 
 defaults:
   run:
@@ -102,11 +110,14 @@ jobs:
     # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the self-hosted Mac
     # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
-    # GATE_RUNNER (linux, macos or pool), each e2e job its lane's runner or, for POOL_E2E, the pool's or hosted Linux's.
+    # GATE_RUNNER (linux, macos or pool), each e2e job its lane's runner or, for POOL_E2E, the pool's or hosted Linux's;
+    # on the Mac, the exclusive instance's labels, or the shared instances' for unit:darwin and the e2e groups on
+    # MAC_SHARED_E2E.
     # A push to master runs nothing here (the warm job of Decision Log 26 left with Decision Log 53); master's class 1a
     # is the landing gate's.
     runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-slim' }}
-    timeout-minutes: 30
+    # On the Mac, the exclusive instance's wait bound on top (gate-plan.mjs's MAC_EXCLUSIVE_WAIT_MINUTES).
+    timeout-minutes: ${{ vars.GATE_RUNNER == 'macos' && 40 || 30 }}
     outputs:
       static: ${{ steps.plan.outputs.static }}
       unit: ${{ steps.plan.outputs.unit }}
@@ -123,6 +134,8 @@ jobs:
       selection: ${{ steps.plan.outputs.selection }}
       related: ${{ steps.plan.outputs.related }}
       unit_shards: ${{ steps.plan.outputs.unit_shards }}
+      unit_darwin_runner: ${{ steps.plan.outputs.unit_darwin_runner }}
+      timeouts: ${{ steps.plan.outputs.timeouts }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -153,9 +166,15 @@ jobs:
     needs: plan
     if: needs.plan.outputs.static == 'true'
     runs-on: ${{ fromJSON(needs.plan.outputs.static_runner) }}
-    timeout-minutes: 30
+    # 30, and on the Mac the exclusive instance's wait bound on top (gate-plan.mjs), as for unit and probes.
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).static }}
+    # Each check's step runs whatever the one before it did, but only in a job whose checkout ran: on a Mac, ci-kit's hook
+    # refuses a job by failing its start, after which a `!cancelled()` step would still run, on the last job's workspace and
+    # beside the jobs the hook kept it from (ci-kit's mac-lane concurrency spec; gate-plan.test.mjs walks every Mac job for
+    # it).
     steps:
-      - uses: actions/checkout@v7
+      - id: checkout
+        uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       # The checks run at once (gate-bg.sh), each still a step of its own below, with its log and its gate-run summary:
       # tsc and eslint are single-threaded, and in series they held class 1a's critical path on a box whose other cores
@@ -174,16 +193,16 @@ jobs:
           $bg start build 'built in|error' pnpm build
           $bg start gate-scripts '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
       - name: pnpm typecheck
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait typecheck
       - name: pnpm lint
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait lint
       - name: pnpm build
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait build
       - name: the gate scripts' tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait gate-scripts
 
   # On the pool the whole suite runs in shards, `unit <k>/<n>`, each its own box (gate-plan.mjs's UNIT_SHARDS); a
@@ -193,7 +212,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.unit == 'true'
     runs-on: ${{ fromJSON(needs.plan.outputs.unit_runner) }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).unit }}
     strategy:
       fail-fast: false
       matrix:
@@ -250,8 +269,9 @@ jobs:
     name: unit:darwin
     needs: plan
     if: needs.plan.outputs.unit_darwin == 'true'
-    runs-on: [self-hosted, macOS, ARM64]
-    timeout-minutes: 30
+    # The exclusive instance, or a shared one when MAC_SHARED_E2E names unit:darwin; the timeout as the plan says.
+    runs-on: ${{ fromJSON(needs.plan.outputs.unit_darwin_runner) }}
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).unit_darwin }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -283,7 +303,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.probes == 'true'
     runs-on: ${{ fromJSON(needs.plan.outputs.probes_runner) }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).probes }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -295,7 +315,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.packaged == 'true'
     runs-on: [self-hosted, macOS, ARM64]
-    timeout-minutes: 30
+    timeout-minutes: 40 # 30, and the exclusive instance's wait bound (gate-plan.mjs's MAC_EXCLUSIVE_WAIT_MINUTES)
     env:
       MAWS_E2E_QUIET: '1'
       SHELL: /bin/zsh
@@ -345,7 +365,8 @@ jobs:
     if: needs.plan.outputs.e2e != '[]'
     name: e2e:${{ matrix.group }}
     runs-on: ${{ fromJSON(matrix.runner) }}
-    timeout-minutes: ${{ matrix.measured && 45 || 30 }}
+    # 30, a measured group's 45, and on the Mac the wait bound of its instance's start on top (gate-plan.mjs).
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
@@ -396,9 +417,11 @@ jobs:
         run: |
           display=()
           if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
-          # The one-job Mac builds each out/ variant once per run: scripts/e2e-build.sh restores it from this disk
-          # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries.
-          if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
+          # The Mac builds each out/ variant once per run and runner: scripts/e2e-build.sh restores it from this disk
+          # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries. One directory per
+          # runner instance (ci-kit's mac-lane concurrency spec, M2): two shared jobs on one variant would otherwise race
+          # its restore, its store and the prune.
+          if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build/$RUNNER_NAME MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
           # default's own specs, when the step above derived them (macOS's bash 3.2 has no mapfile).
           specs=()
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi

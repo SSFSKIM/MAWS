@@ -20,6 +20,7 @@ import { nextCronMatch, parseCron } from '../src/shared/engine/cron'; // E7
 import { formatIn } from '../src/renderer/src/tools/agents/model/elapsed'; // E7
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
 import { REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { latencyBudgets } from './support/latency';
 import { otherThemeColours } from './support/panel-support';
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
@@ -267,6 +268,7 @@ test.describe('the #panel harness: the agent tools', () => {
   });
 
   test('a workflow shows its phases and table updating per frame and stops', async ({ maws }) => {
+    const within = latencyBudgets();
     const h = await Harness.open(maws);
     const { progress } = AGENTS_STOP_WORKFLOW_TAIL;
     await h.load('A', 'events/agents-stop-workflow', { releaseTo: progress.releaseTo });
@@ -314,7 +316,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[1]);
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[2]);
     await expect.poll(async () => widget()).toMatchObject({ stopping: false, status: 'stopped', error: null });
-    expect(Date.now() - started, 'stopped from the frames, well inside STOP_SETTLE_MS').toBeLessThan(await h.agents('stopSettleMs'));
+    within('stopped from the frames after', Date.now() - started, await h.agents('stopSettleMs'), 'stopped from the frames, well inside STOP_SETTLE_MS');
     h.expectQuietConsole();
   });
 

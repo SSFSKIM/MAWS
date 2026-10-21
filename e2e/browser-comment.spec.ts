@@ -33,6 +33,7 @@ import { invoke, launchReady, value } from './support/c7-replay';
 import { otherThemeColours } from './support/code-product';
 import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/maws-tools';
 import { REPO_ROOT } from './support/launch';
+import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
 
 test.describe.configure({ timeout: 180_000 });
@@ -1198,6 +1199,7 @@ test('9. disk-form parity: a browser comment read from the engine’s JSONL draw
 // ---- (10) the agent's control ------------------------------------------------------------------------------------------------
 
 test('10. the control gate: under the agent the toggle is disabled and an arm is refused; an armed tab disarms at once when the agent takes the page; a report then is dropped', async () => {
+  const within = latencyBudgets();
   await commentScene({ titles: ['E4d: control'] }, async (s) => {
     const [id] = s.ids as [AppSessionId];
     const t = await openCommentPage(s, id);
@@ -1215,7 +1217,7 @@ test('10. the control gate: under the agent the toggle is disabled and an arm is
     expect(armedAfter, 'disarmed synchronously inside setControl').toBe(false);
     await expect.poll(async () => (await recorded(s)).changed.at(-1)?.payload).toEqual({ tabId: t.tabId, on: false, reason: 'agent' });
     const heardAt = (await recorded(s)).changed.at(-1)!.at;
-    expect(heardAt - at, 'the window heard the disarm within 200 ms').toBeLessThan(200);
+    within('disarm heard after', heardAt - at, 200, 'the window heard the disarm within 200 ms');
     await expect(commentNodes(t.page)).toHaveCount(0);
 
     // the toggle: disabled, its label the reason; main refuses an arm

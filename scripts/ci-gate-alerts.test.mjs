@@ -56,14 +56,16 @@ test('the Mac jobs of a run, from the flags and the repository variables', () =>
 // Every combination of the flags and the variables over a few gate sets, against the plan the workflow would run.
 test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its jobs on a Mac', async () => {
   const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
-  const mac = '["self-hosted","macOS","ARM64"]';
-  // The placements gate-plan.mjs does not write: the plan job on the Mac under GATE_RUNNER=macos; unit:darwin and
-  // packaged always on the Mac.
+  // The exclusive instance's labels, or the shared instances' one (ci-kit's mac-lane concurrency spec, M2).
+  const macs = ['["self-hosted","macOS","ARM64"]', '["ci-kit-mac-shared"]'];
+  // The placements gate-plan.mjs does not write: the plan job on the Mac under GATE_RUNNER=macos; packaged always on
+  // the Mac. unit:darwin takes the Mac runner the plan writes for it.
   assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}\n/);
-  for (const job of ['unit-darwin', 'packaged']) assert.match(workflow, new RegExp(`\\n {2}${job}:\\n(?: {4}.*\\n)*? {4}runs-on: \\[self-hosted, macOS, ARM64\\]\\n`), job);
+  assert.match(workflow, /\n {2}packaged:\n(?: {4}.*\n)*? {4}runs-on: \[self-hosted, macOS, ARM64\]\n/);
+  assert.match(workflow, /\n {2}unit-darwin:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_darwin_runner\) \}\}\n/);
   // Each e2e job takes the runner its matrix entry carries, the lane's or, for POOL_E2E, the pool's or hosted Linux.
   assert.match(workflow, /\n {2}e2e:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(matrix\.runner\) \}\}\n/);
-  const onMac = (runner) => JSON.stringify(JSON.parse(runner)) === mac;
+  const onMac = (runner) => macs.includes(JSON.stringify(JSON.parse(runner)));
 
   const cases = [];
   for (const gates of ['', 'static', 'static,unit,probes', 'unit:darwin', 'packaged', 'e2e:library', 'e2e:desk-web', 'e2e:library,e2e:desk-web'])
@@ -85,7 +87,7 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
       return (
         GATE_RUNNER === 'macos' ||
         ['static', 'unit', 'probes'].some((gate) => out[gate] === 'true' && onMac(out[`${gate}_runner`])) ||
-        out.unit_darwin === 'true' ||
+        (out.unit_darwin === 'true' && onMac(out.unit_darwin_runner)) ||
         out.packaged === 'true' ||
         JSON.parse(out.e2e).some((entry) => onMac(entry.runner))
       );
