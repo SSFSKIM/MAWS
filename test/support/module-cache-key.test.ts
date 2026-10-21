@@ -1,6 +1,6 @@
 // The module cache's resolution key (test/support/module-cache-key.ts): what a module's key adds for the paths it names
-// changes exactly when a file that could decide one of them appears or vanishes, and every project of vitest.config.ts
-// carries the plugin that adds it.
+// changes exactly when a file that could decide one of them appears or vanishes, a module whose transform expands a glob
+// is not cached at all, and every project of vitest.config.ts carries the plugin that adds it.
 import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -54,14 +54,19 @@ describe('a module’s resolution key', () => {
     expect(key('src/a.ts', source)).not.toBe(before);
   });
 
-  it('resolves an alias and reads the whole directory under a template literal’s head', () => {
-    const aliased = "import { util } from '@lib/util';";
-    const template = 'const load = (lang) => import(`./locales/${lang}.json`);';
-    const [aliasBefore, templateBefore] = [key('src/a.ts', aliased), key('src/a.ts', template)];
+  it('resolves an alias', () => {
+    const source = "import { util } from '@lib/util';";
+    const before = key('src/a.ts', source);
     file('lib/util.mts');
-    file('src/locales/ko.json');
-    expect(key('src/a.ts', aliased)).not.toBe(aliasBefore);
-    expect(key('src/a.ts', template)).not.toBe(templateBefore);
+    expect(key('src/a.ts', source)).not.toBe(before);
+  });
+
+  it('is false, so the module is never cached, wherever vite’s transform expands a glob', () => {
+    expect(key('src/a.ts', "const files = import.meta.glob<string>('./locales/*.json', { eager: true });")).toBe(false);
+    expect(key('src/a.ts', "const files = import.meta.glob('./locales/*.json');")).toBe(false);
+    expect(key('src/a.ts', 'const load = (lang) => import(`./locales/${lang}.json`);')).toBe(false);
+    expect(key('src/a.ts', 'const url = (name) => new URL(`./locales/${name}.json`, import.meta.url);')).toBe(false);
+    expect(key('src/a.ts', 'const load = () => import(`./locales/en.json`);')).not.toBe(false);
   });
 
   it('adds nothing for bare package imports, which the lockfile keys', () => {

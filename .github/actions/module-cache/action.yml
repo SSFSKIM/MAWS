@@ -23,16 +23,21 @@ runs:
         mkdir -p "${fixed%/*}"
         mv "$GITHUB_WORKSPACE" "$fixed"
         ln -s "$fixed" "$GITHUB_WORKSPACE"
-    # The key is what vitest does not key its entries on and what the files' resolution reads: the tsconfigs (the
-    # transform reads compiler options there), every package.json (module type, a workspace package's exports, a
-    # directory's main), plus what makes every entry stale anyway (the lockfile, the vitest configs and the files they
-    # import), so such a change restores nothing rather than a cache no entry of which is read. A module's own content,
-    # its project's config and the files that decide its imports are in vitest's own key (test/support/module-cache-key.ts).
-    # A stale cache can only miss. -v1- is the prefix to move should every saved cache need dropping.
+    # The key is what vitest does not key its entries on and what the files' resolution reads: every tracked tsconfig at
+    # any depth (the transform reads compiler options from each file's nearest tsconfig.json, so one added deeper changes
+    # it), every tracked package.json at any depth (module type, a workspace package's exports, a directory's main), plus
+    # what makes every entry stale anyway (the lockfile, the workspace file, the vitest configs and the files they
+    # import), so such a change restores nothing rather than a cache no entry of which is read. git's index lists the
+    # files, which is fast and never walks node_modules, and the hash covers each one's path with its content, so a file
+    # added, removed or renamed changes it too. A module's own content, its project's config and the files that decide
+    # its imports are in vitest's own key (test/support/module-cache-key.ts). A stale cache can only miss. -v1- is the
+    # prefix to move should every saved cache need dropping.
     - id: key
       if: inputs.step != 'place' && startsWith(runner.name, 'ci-kit-gce-')
       shell: bash
-      run: echo "prefix=vitest-module-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/*/package.json', 'src/**/package.json', 'test/**/package.json', '!**/node_modules/**', 'tsconfig*.json', 'apps/*/tsconfig*.json', 'vitest.config.ts', 'apps/*/vitest.config.ts', 'test/support/compiled-suites.ts', 'test/support/module-cache-key.ts') }}-" >> "$GITHUB_OUTPUT"
+      run: |
+        hash=$(git ls-files -z -- ':(glob)**/package.json' ':(glob)**/tsconfig*.json' pnpm-lock.yaml pnpm-workspace.yaml vitest.config.ts ':(glob)apps/*/vitest.config.ts' test/support/compiled-suites.ts test/support/module-cache-key.ts | xargs -0 sha256sum | sha256sum)
+        echo "prefix=vitest-module-cache-v1-${{ runner.os }}-${{ runner.arch }}-${hash%% *}-" >> "$GITHUB_OUTPUT"
     - id: restore
       if: inputs.step == 'restore' && steps.key.outputs.prefix
       uses: actions/cache/restore@v6
