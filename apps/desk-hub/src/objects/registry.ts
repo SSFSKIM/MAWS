@@ -142,8 +142,8 @@ export class Registry extends DurableObject<Env> {
 
   private readonly keys: OrgKeys;
   private readonly provisioning: ProvisioningKeys;
-  /** Not before then is an overdue offline revocation tried again, after one failed (an object restart forgets it). */
-  private offlineRetry = 0;
+  /** Per enrollment, when an offline revocation that failed is tried again (an object restart forgets it). */
+  private readonly offlineRetry = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -280,16 +280,7 @@ export class Registry extends DurableObject<Env> {
       }
       this.ctx.storage.transactionSync(() => {
         this.sql.exec("UPDATE enrollments SET state = 'pending', machine = ?, expires = ? WHERE id = ?", machine, expires, id);
-        this.sql.exec(
-          "INSERT INTO machines (name, name_key, client_id, token_name, state, enrollment, created, confirmed) VALUES (?, ?, NULL, ?, 'pending', ?, ?, NULL)",
-          machine,
-          machineNameKey(machine),
-          tokenName,
-          id,
-          iso(Date.now()),
-        );
-        // This redemption deletes every token of the name before it mints, which is what an orphan of it waited for.
-        this.sql.exec('DELETE FROM orphans WHERE token_name = ?', tokenName);
+        this.reserve(machine, tokenName, id, iso(Date.now()));
       });
     } else {
       // A rotation: the credential minted before stops at the hub at once, before Cloudflare deletes it.
@@ -337,19 +328,25 @@ export class Registry extends DurableObject<Env> {
         machine,
         key.id,
       );
-      this.sql.exec(
-        "INSERT INTO machines (name, name_key, client_id, token_name, state, enrollment, created, confirmed) VALUES (?, ?, NULL, ?, 'pending', ?, ?, NULL)",
-        machine,
-        machineNameKey(machine),
-        tokenName,
-        id,
-        iso(now),
-      );
+      this.reserve(machine, tokenName, id, iso(now));
       this.provisioning.use(key.id);
-      // This redemption deletes every token of the name before it mints, which is what an orphan of it waited for.
-      this.sql.exec('DELETE FROM orphans WHERE token_name = ?', tokenName);
     });
     return this.mint(id, machine, tokenName, org);
+  }
+
+  /** Reserves the name for the enrollment's machine, pending and without a credential until the mint returns; called
+   * inside the caller's transaction, beside its own change to the enrollment. */
+  private reserve(machine: string, tokenName: string, enrollment: string, created: string): void {
+    this.sql.exec(
+      "INSERT INTO machines (name, name_key, client_id, token_name, state, enrollment, created, confirmed) VALUES (?, ?, NULL, ?, 'pending', ?, ?, NULL)",
+      machine,
+      machineNameKey(machine),
+      tokenName,
+      enrollment,
+      created,
+    );
+    // This redemption deletes every token of the name before it mints, which is what an orphan of it waited for.
+    this.sql.exec('DELETE FROM orphans WHERE token_name = ?', tokenName);
   }
 
   /** A pending enrollment redeemed again: its time moves on, and the credential minted before stops at the hub at once,
@@ -362,10 +359,12 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** Mints the reserved machine's service token, on its name's queue, after deleting every token of the name. The
-   * enrollment is busy from this call's synchronous start until its answer. */
+   * enrollment is busy from this call's synchronous start until its answer, and its expiry's alarm is set before the
+   * API is called, so an object reset during the calls still leaves a wakeup that expires it and orphans its token. */
   private async mint(id: string, machine: string, tokenName: string, org: string): Promise<Result<Redeemed>> {
     this.busy.add(id);
     try {
+      await this.scheduleAlarm();
       return await this.onName(tokenName, async (): Promise<Result<Redeemed>> => {
         const api = serviceTokens(this.config.api);
         await api.deleteNamed(tokenName);
@@ -803,12 +802,15 @@ export class Registry extends DurableObject<Env> {
    * revocation began does not save it. One that fails is tried again a minute on, the others going ahead.
    */
   private async sweepOffline(now: number): Promise<void> {
-    for (const { name, enrollment, deadline } of this.offlineDeadlines()) {
-      if (deadline > now) continue;
+    const candidates = this.offlineDeadlines();
+    for (const enrollment of this.offlineRetry.keys()) if (!candidates.some((c) => c.enrollment === enrollment)) this.offlineRetry.delete(enrollment);
+    for (const { name, enrollment, deadline } of candidates) {
+      if (deadline > now || (this.offlineRetry.get(enrollment) ?? 0) > now) continue;
       try {
         await this.revokeMachine(name, { enrollment });
+        this.offlineRetry.delete(enrollment);
       } catch (error) {
-        this.offlineRetry = Date.now() + RETRY_MS;
+        this.offlineRetry.set(enrollment, Date.now() + RETRY_MS);
         console.error(JSON.stringify({ desk: 'offline-revoke', machine: name, message: error instanceof Error ? error.message : String(error) }));
       }
     }
@@ -883,7 +885,7 @@ export class Registry extends DurableObject<Env> {
       .exec<{ expires: string }>("SELECT expires FROM enrollments WHERE state IN ('open', 'pending')")
       .toArray()
       .map((e) => Date.parse(e.expires));
-    for (const { deadline } of this.offlineDeadlines()) next.push(Math.max(deadline, this.offlineRetry));
+    for (const { enrollment, deadline } of this.offlineDeadlines()) next.push(Math.max(deadline, this.offlineRetry.get(enrollment) ?? 0));
     if (this.sql.exec('SELECT 1 FROM orphans UNION ALL SELECT 1 FROM revocations LIMIT 1').toArray().length > 0) next.push(now + RETRY_MS);
     if (next.length === 0) return;
     const at = Math.max(Math.min(...next), now + 250);

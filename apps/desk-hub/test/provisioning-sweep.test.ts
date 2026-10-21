@@ -2,7 +2,7 @@
 // a machine enrolled through a key whose `offline_revoke_s` is set, offline that long in the Registry's view, is revoked
 // by the Registry's alarm as an admin's revocation would revoke it. The Registry reads `Date.now()` and the offline time
 // is an hour at least, so the suite moves `seen` back (`hub.backdate`) rather than wait. A suite of its own, on a hub of
-// its own, so the alarm it reads is the sweep's and no earlier test's.
+// its own, so the alarm it reads is the one under test and no earlier test's: a key redemption's, then the sweep's.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { serviceTokenName } from '../src/protocol/identity';
 import type { OrgFrame } from '../src/protocol/machine';
@@ -21,6 +21,7 @@ afterEach(() => {
 const HOUR = 3600;
 const tokensNamed = (machine: string) => hub.standin.tokens().filter((t) => t.name === serviceTokenName(ORG, machine));
 const isDelete = (request: Request) => request.method === 'DELETE';
+const isCreate = (request: Request) => request.method === 'POST' && new URL(request.url).pathname.endsWith('/access/service_tokens');
 const machines = async () => ((await (await hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: Array<{ name: string; state: string; client_id: string | null }> }).machines;
 const listed = async (name: string) => (await machines()).find((m) => m.name === name);
 const gone = (name: string, ms = 10_000) => waitFor(async () => ((await listed(name)) ? undefined : true), ms);
@@ -42,6 +43,35 @@ async function confirmed(token: string, name: string): Promise<Credentials> {
   expect((await self(creds)).status).toBe(200);
   return creds;
 }
+
+describe('a redemption through a key', () => {
+  it("installs its pending enrollment's alarm before the mint's API calls answer, so a reset meanwhile still expires it", async () => {
+    const { token } = await provisioningKey(hub, ADMIN, { label: 'alarm', prefix: 'dc-' });
+    // Nothing else is pending: the alarm, once cleared, is set again only by this redemption.
+    await waitFor(async () => ((await hub.registryAlarm(true)) === null ? true : undefined));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    hub.faults.push((request) => {
+      if (held || !isCreate(request)) return null;
+      held = true;
+      return gate.then(() => null);
+    });
+    const before = Date.now();
+    const redeeming = hub.fetchAs(null, '/machine/enroll', { body: { token, machine: 'dc-alarm-1' } });
+    await waitFor(() => (held ? true : undefined));
+    const alarm = await hub.registryAlarm();
+    release();
+    expect(alarm).not.toBeNull();
+    expect(alarm!).toBeGreaterThanOrEqual(before + 900_000 - 1000);
+    expect(alarm!).toBeLessThanOrEqual(Date.now() + 900_000);
+    const answered = await redeeming;
+    expect(answered.status).toBe(200);
+    // Confirmed, so its expiry is no later test's concern.
+    const body = (await answered.json()) as { client_id: string; client_secret: string };
+    expect((await self({ clientId: body.client_id, clientSecret: body.client_secret })).status).toBe(200);
+  });
+});
 
 describe('the offline sweep', () => {
   it("is scheduled when a key's machine goes offline, and revokes it once offline the key's time, as an admin's revocation would", async () => {
@@ -138,5 +168,20 @@ describe('the offline sweep', () => {
     await hub.releaseRevoke('dc-late-1');
     await gone('dc-late-1');
     expect(await refusal(await self(creds))).toBe('401 access');
+  });
+
+  it('waits a minute before trying a failed revocation again, though a redemption sweeps meanwhile', async () => {
+    const { token } = await provisioningKey(hub, ADMIN, { label: 'retry', prefix: 'dc-', offline_revoke_s: HOUR });
+    await confirmed(token, 'dc-retry-1');
+    hub.expectRuntimeLog(/a revocation answer the suite lost/);
+    await hub.faultNextRevoke('dc-retry-1', 'lose');
+    await hub.backdate({ machines: [{ name: 'dc-retry-1', confirmed: ago(2 * HOUR) }] });
+    await waitFor(() => (hub.runtimeLogs.some((l) => l.message.includes('"desk":"offline-revoke"') && l.message.includes('dc-retry-1')) ? true : undefined), 10_000);
+    const failed = Date.now();
+    // A redemption runs the sweep; within the minute the failed candidate is not tried again.
+    await enroll(hub, ADMIN, 'retry-sweeper-1');
+    expect(await listed('dc-retry-1')).toMatchObject({ state: 'active' });
+    // Its alarm waits for the retry rather than spinning.
+    expect(await hub.registryAlarm()).toBeGreaterThan(failed + 30_000);
   });
 });
