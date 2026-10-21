@@ -12,7 +12,7 @@
 //   2c drag    the same drag with no agent, a trial before each of row 2's: recorded, no bound (P4-B2 D17's control);
 //              rows 2 and 2c are each read against the 16 ms target (`dragTarget`, recorded), and every drag trial keeps
 //              the probe's whole split (queue, handler, paint; the remote applies and the moves they touched; P4-B2
-//              M6: the frames the gesture hold had at the drop, and when its 5 s cap cleared it)
+//              M6: the frames the gesture hold had at the drop, the frames it released, and when its 5 s cap cleared it)
 //   3 renderer working set ≤ 500 MB (read after a forced collection, B's Decision Log 44; the figure before it kept)
 //   4 publish  one slide occupies the host loop ≤ 50 ms; the whole deck ≤ 200 ms (the loop's busy time over the call;
 //              the longest single stretch kept beside it)
@@ -287,7 +287,7 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       const drag = await page.evaluate(() => (window as unknown as DeckSeam).__maws_presentations.dragProbe.stop());
       if (withAgent) expect(published.length, 'the agent republished during the drag').toBeGreaterThan(2);
       expect(drag.withTransaction, 'the drag wrote on its moves').toBeGreaterThan(100);
-      const hold = `the gesture hold had ${drag.hold.heldAtDrop} frames at the drop${drag.hold.capsMs.length > 0 ? `, its 5 s cap cleared it at ${drag.hold.capsMs.join(', ')} ms` : ''}`; // P4-B2 M6
+      const hold = `the gesture hold had ${drag.hold.heldAtDrop} frames at the drop and released ${drag.hold.released} in all${drag.hold.capsMs.length > 0 ? `, its 5 s cap cleared it at ${drag.hold.capsMs.join(', ')} ms` : ''}`; // P4-B2 M6
       const split = `queue p95 ${drag.queueMs.p95}, handler p95 ${drag.handlerMs.p95}, paint p95 ${drag.paintMs.p95} ms; remote applies ${drag.remote.duringMoves} during the moves, ${drag.remote.afterDrop} after the drop, ${drag.touched} moves touched (the untouched moves' move → frame p95 ${drag.untouchedToFrameMs.p95} ms); ${hold}`;
       const agentNote = withAgent ? `; the agent published ${published.length} slides (busy p95 ${stats(published.map((p) => p.busyMs)).p95} ms)` : '; no agent';
       await sleep(1_000);

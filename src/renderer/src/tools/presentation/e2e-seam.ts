@@ -44,7 +44,8 @@ export interface PresentationsSeam {
   timings(artifactId: string): { surface: string; timings: DeckTimings }[];
   /**
    * M5: measures one drag on the deck's open tab from now until `stop`; P4-B2 M0: each move's queue, handler and paint,
-   * and the remote applies beside them (`drag-stats.ts`); M6: the gesture hold's frames at the drop and its 5 s caps.
+   * and the remote applies beside them (`drag-stats.ts`); M6: the gesture hold's frames at the drop, its 5 s caps and
+   * the frames it released.
    */
   dragProbe: { start(artifactId: string): void; stop(): DragStats };
   /** Fix wave 1: another replica selecting elements (its awareness), until cleared. */
@@ -53,10 +54,11 @@ export interface PresentationsSeam {
   editorState(artifactId: string): { surface: string; selection: string[]; editingText: string | null; keyboard: 'stage' | 'away' }[];
   /**
    * P4-B2 (tracker row 256): each open tab's replica, the remote content frames it has received and those its hold
-   * buffers now (`PortProvider.counts`); M6: the times the hold's 5 s cap cleared it, and the highest row the replica has
-   * integrated (its saved state's `integrated`, which a held row reaches only once applied).
+   * buffers now (`PortProvider.counts`); M6: the times the hold's 5 s cap cleared it, the buffered frames its clearings
+   * released, and the highest row the replica has integrated (its saved state's `integrated`, which a held row reaches
+   * only once applied).
    */
-  frames(artifactId: string): { surface: string; received: number; held: number; capped: number; integrated: number }[];
+  frames(artifactId: string): { surface: string; received: number; held: number; capped: number; released: number; integrated: number }[];
 }
 
 declare global {
@@ -158,7 +160,8 @@ function providerOf(tab: ReturnType<typeof openDeckTabs>[number]): PortProvider 
 // drop, or a write of the session's after it (the gesture's end), is no move's. P4-B2 M6: the drop's listener
 // (capturing on the window, before the editor's) reads the frames the replica's hold buffers, which the drop is about
 // to flush; a clearance by the hold's 5 s cap is seen at the apply it causes (the provider counts it first), else at
-// the next move or the drop.
+// the next move or the drop; and the frames the hold released over the probe (the provider's count, from its start to
+// its stop), the one proof that it buffered any (a cap over an empty buffer is counted too).
 function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
   let running: { record: DragRecord; end(): void } | null = null;
   return {
@@ -175,6 +178,7 @@ function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
       const observer = new PerformanceObserver((list) => (record.longTasks += list.getEntries().length));
       observer.observe({ type: 'longtask' });
       let capped = provider?.counts().capped ?? 0;
+      const releasedBefore = provider?.counts().released ?? 0;
       const sawCaps = (at: number) => {
         for (const seen = provider?.counts().capped ?? 0; capped < seen; capped += 1) record.caps!.push(at);
       };
@@ -216,6 +220,7 @@ function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
       running = {
         record,
         end() {
+          record.released = (provider?.counts().released ?? 0) - releasedBefore;
           win.removeEventListener('pointermove', onMove, true);
           win.removeEventListener('pointerup', onUp, true);
           session.doc.off('beforeTransaction', onBefore);

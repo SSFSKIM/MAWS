@@ -426,20 +426,23 @@ describe('PortProvider', () => {
       expect(log).not.toHaveBeenCalled(); // cleared by the editor, not the cap
     });
 
-    it('counts the frames received and those held (row 256): held while the hold stands, none once it is cleared', () => {
+    it('counts the frames received and those held (row 256): held while the hold stands, none once it is cleared, which releases them (D17)', () => {
       const { provider, replicaEnd, hostEnd, write } = heldReplica();
       const before = provider.counts();
-      expect(before.held).toBe(0);
+      expect(before).toMatchObject({ held: 0, released: 0 });
       provider.holdRemote(true);
       write(0, 'one ');
       write(4, 'two');
       pump(replicaEnd, hostEnd);
-      expect(provider.counts()).toEqual({ received: before.received + 2, held: 2, capped: 0 });
+      expect(provider.counts()).toEqual({ received: before.received + 2, held: 2, capped: 0, released: 0 });
       provider.holdRemote(false);
-      expect(provider.counts()).toEqual({ received: before.received + 2, held: 0, capped: 0 });
+      expect(provider.counts()).toEqual({ received: before.received + 2, held: 0, capped: 0, released: 2 });
       write(7, ' three');
       pump(replicaEnd, hostEnd);
-      expect(provider.counts()).toEqual({ received: before.received + 3, held: 0, capped: 0 });
+      expect(provider.counts()).toEqual({ received: before.received + 3, held: 0, capped: 0, released: 2 }); // applied on arrival, never held
+      provider.holdRemote(true);
+      provider.holdRemote(false); // a hold that buffered nothing releases nothing
+      expect(provider.counts().released).toBe(2);
     });
 
     it('splits the merged runs at a buffered restored frame', () => {
@@ -550,10 +553,22 @@ describe('PortProvider', () => {
         expect(text(doc)).toBe('late');
         expect(log).toHaveBeenCalledWith(expect.stringMatching(/hold reached its 5 s cap.*1 buffered frame/));
         expect(seen).toEqual([1]);
-        expect(provider.counts()).toMatchObject({ held: 0, capped: 1 });
+        expect(provider.counts()).toMatchObject({ held: 0, capped: 1, released: 1 });
         write(4, ' and live'); // the hold is off: applied on arrival
         pump(replicaEnd, hostEnd);
         expect(text(doc)).toBe('late and live');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('counts a cap that cleared an empty hold as a cap that released nothing (D17)', () => {
+      vi.useFakeTimers();
+      try {
+        const { provider } = heldReplica();
+        provider.holdRemote(true);
+        vi.advanceTimersByTime(5000);
+        expect(provider.counts()).toMatchObject({ held: 0, capped: 1, released: 0 });
       } finally {
         vi.useRealTimers();
       }

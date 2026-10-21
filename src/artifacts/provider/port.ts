@@ -92,6 +92,7 @@ export class PortProvider {
   private buffered: Frame[] = []; // inbound frames waiting out a hold, in arrival order
   private received = 0; // P4-B2 (row 256): the remote content frames received, held or not
   private capped = 0; // P4-B2 (D17): the times the 5 s cap cleared a hold
+  private released = 0; // P4-B2 (D17): the buffered frames a hold's clearing (its end or its cap) released to apply
   private readonly awarenessThrottleMs: number;
   private awarenessTimer: ReturnType<typeof setTimeout> | null = null; // the open throttle window
   private awarenessPending = new Set<number>(); // clients whose awareness changed inside it
@@ -122,10 +123,11 @@ export class PortProvider {
   /**
    * P4-B2 (tracker row 256): the remote content frames (step 2, update, restored) this replica has received since it was
    * made, and how many the composition hold buffers now, so an e2e can see a frame arrive and wait out the hold. D17:
-   * and how many times the 5 s cap has cleared a hold, counted before the flush it causes.
+   * and how many times the 5 s cap has cleared a hold, counted before the flush it causes, and how many buffered frames
+   * the clearings released (a cap or an end over an empty buffer releases none), so the e2e sees frames held and let go.
    */
-  counts(): { received: number; held: number; capped: number } {
-    return { received: this.received, held: this.buffered.length, capped: this.capped };
+  counts(): { received: number; held: number; capped: number; released: number } {
+    return { received: this.received, held: this.buffered.length, capped: this.capped, released: this.released };
   }
 
   subscribe(listener: (state: SaveState) => void): () => void {
@@ -210,6 +212,7 @@ export class PortProvider {
     }
     const frames = this.buffered;
     this.buffered = [];
+    this.released += frames.length;
     if (frames.length > 0) this.process(frames);
   }
 

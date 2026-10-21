@@ -86,11 +86,13 @@ describe('summarizeDrag', () => {
     expect(summarizeDrag({ moves, remotes: [{ tStart: 14, tEnd: 15, tFrame: 17 }], longTasks: 0 }).touched).toBe(2);
   });
 
-  it('(M6) reads the gesture hold: the frames it held as the drop came, and each clearance by its 5 s cap in ms after the first move', () => {
+  it('(M6) reads the gesture hold: the frames it held as the drop came, each clearance by its 5 s cap in ms after the first move, and the frames it released', () => {
     const moves = [move(100, 10, 2, 3), move(116, 10, 2, 3)];
-    expect(summarizeDrag({ moves, remotes: [], drop: { tIn: 150, tDispatch: 160, held: 3 }, caps: [5100.04], longTasks: 0 }).hold).toEqual({ heldAtDrop: 3, capsMs: [5000] });
-    // nothing held at the drop, the cap never reached
-    expect(summarizeDrag({ moves, remotes: [], drop: { tIn: 150, tDispatch: 160 }, longTasks: 0 }).hold).toEqual({ heldAtDrop: 0, capsMs: [] });
+    expect(summarizeDrag({ moves, remotes: [], drop: { tIn: 150, tDispatch: 160, held: 3 }, caps: [5100.04], released: 5, longTasks: 0 }).hold).toEqual({ heldAtDrop: 3, capsMs: [5000], released: 5 });
+    // a cap that cleared an empty hold released nothing
+    expect(summarizeDrag({ moves, remotes: [], drop: { tIn: 150, tDispatch: 160 }, caps: [5100], released: 0, longTasks: 0 }).hold).toEqual({ heldAtDrop: 0, capsMs: [5000], released: 0 });
+    // nothing held at the drop, the cap never reached, nothing released
+    expect(summarizeDrag({ moves, remotes: [], drop: { tIn: 150, tDispatch: 160 }, longTasks: 0 }).hold).toEqual({ heldAtDrop: 0, capsMs: [], released: 0 });
   });
 
   it('times the drag from its first move’s timeStamp to the drop’s, or to its last move’s when no drop came', () => {

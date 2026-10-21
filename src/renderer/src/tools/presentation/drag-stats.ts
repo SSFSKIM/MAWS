@@ -8,8 +8,9 @@
 // and set beside the updates of other origins the session's doc applied (an agent's publishes, through the host): their
 // count during the moves and after the drop, and the moves that one of them or its following frame overlapped.
 // P4-B2 M6 (D17's gesture hold): the drag holds the replica's remote frames, so beside them, the frames the hold had
-// buffered as the drop came (its flush applies them, merged, as one update) and each time the hold's 5 s cap cleared it
-// first (its buffer then applied mid-drag, and the frames after it arrive unheld).
+// buffered as the drop came (its flush applies them, merged, as one update), each time the hold's 5 s cap cleared it
+// first (its buffer then applied mid-drag, and the frames after it arrive unheld), and the frames the hold released at
+// either (the provider's count: a cap over an empty buffer releases none, so only this shows a frame held and let go).
 // Every time is on the page's clock (ms; an event's timeStamp is on it too).
 
 /** p50, p95 and max of a set of times (ms, to 0.1). */
@@ -46,6 +47,8 @@ export interface DragRecord {
   longTasks: number;
   /** M6: when the probe saw each clearance of the hold by its 5 s cap (the cap's own apply, else the next move or the stop). */
   caps?: number[];
+  /** M6: the buffered frames the hold released over the probe, at its cap or at the drop (absent: none). */
+  released?: number;
 }
 
 export interface DragStats {
@@ -79,6 +82,8 @@ export interface DragStats {
     heldAtDrop: number;
     /** Each clearance by its 5 s cap, ms after the first move. */
     capsMs: number[];
+    /** The buffered frames it released, at its cap or at the drop: a frame held and let go (a cap alone proves none). */
+    released: number;
   };
 }
 
@@ -94,7 +99,7 @@ export function spread(values: number[]): Spread {
 type Written = DragMove & { tTx: number };
 type Framed = Written & { tFrame: number };
 
-export function summarizeDrag({ moves, remotes, drop, longTasks, caps = [] }: DragRecord): DragStats {
+export function summarizeDrag({ moves, remotes, drop, longTasks, caps = [], released = 0 }: DragRecord): DragStats {
   const written = moves.filter((m): m is Written => m.tTx !== undefined);
   const framed = written.filter((m): m is Framed => m.tFrame !== undefined);
   const footprints = remotes.map((r) => ({ from: r.tStart, to: r.tFrameEnd ?? r.tFrame ?? r.tEnd }));
@@ -116,6 +121,6 @@ export function summarizeDrag({ moves, remotes, drop, longTasks, caps = [] }: Dr
     untouchedToFrameMs: spread(untouched.map((m) => m.tFrame - m.tIn)),
     durationMs: first && last ? tenth((drop?.tIn ?? last.tIn) - first.tIn) : 0,
     longTasks,
-    hold: { heldAtDrop: drop?.held ?? 0, capsMs: caps.map((at) => tenth(at - (first?.tIn ?? at))) },
+    hold: { heldAtDrop: drop?.held ?? 0, capsMs: caps.map((at) => tenth(at - (first?.tIn ?? at))), released },
   };
 }

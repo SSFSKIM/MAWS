@@ -9,7 +9,9 @@
 // counts the agent's updates as the tab's replica applies them (src/renderer/src/tools/presentation/drag-stats.ts).
 // P4-B2 M6 (D17's gesture hold): the drag holds the tab's remote frames, so the agent's publishes wait in the replica's
 // buffer and apply merged at the drop, or when the hold's 5 s cap clears it first; the probe records the frames held at
-// the drop and each cap, and an agent trial whose hold held none of the agent's frames is a problem.
+// the drop, each cap and the frames the hold released at either. An agent trial whose hold released none of the agent's
+// frames is a problem (the cap is counted over an empty buffer too, so a cap alone proves nothing held), and so is a
+// control trial whose hold released any.
 // One case, two runs:
 // - class 1 (`pnpm e2e:presentations`, MAWS_PRESENTATIONS_PERF unset): one drag with the agent, its fidelity regression
 //   (each publish answered by the host with a rising revision, the tab's replica integrating the last publish's row
@@ -63,7 +65,7 @@ interface Seam {
     seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>;
     files(artifactId: string): Promise<Record<string, string>>;
     dragProbe: { start(artifactId: string): void; stop(): DragStats };
-    frames(artifactId: string): { surface: string; received: number; held: number; capped: number; integrated: number }[];
+    frames(artifactId: string): { surface: string; received: number; held: number; capped: number; released: number; integrated: number }[];
   };
 }
 
@@ -153,10 +155,12 @@ async function dragOnce(page: Page, tab: Locator, id: string, agent: DeckAgent, 
   const problems: string[] = [];
   if (drag.withTransaction <= 100) problems.push(`only ${drag.withTransaction} of ${drag.moves} moves wrote`); // a move held by a snap writes nothing
   if (kind === 'control' && remote > 0) problems.push(`the control trial’s replica applied ${remote} remote updates`);
+  if (kind === 'control' && drag.hold.released > 0) problems.push(`the control trial’s gesture hold released ${drag.hold.released} frames`);
   if (kind === 'agent') {
     if (published.length <= 2) problems.push(`the agent republished ${published.length} slides during the drag, not more than 2`);
-    // M6: a publish lands while the pointer moves, so the hold buffers it until the drop or its cap
-    if (drag.hold.heldAtDrop === 0 && drag.hold.capsMs.length === 0) problems.push('the gesture hold held none of the agent’s frames');
+    // M6: a publish lands while the pointer moves, so the hold buffers it and releases it at the drop or its cap (the
+    // cap fires over an empty buffer too: only a frame released shows one held)
+    if (drag.hold.released === 0) problems.push('the gesture hold held and released none of the agent’s frames');
     const readBack = await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.files(a), id);
     problems.push(...fidelityProblems({ revisionBefore, published, remoteApplies: remote, integrated: await integrated(), agentFiles: agent.files, readBack }));
   }
@@ -169,7 +173,7 @@ function trialLine({ kind, order, direction, load, drag: d, publishes, problems 
     `queue p95 ${d.queueMs.p95}, handler p95 ${d.handlerMs.p95}, paint p95 ${d.paintMs.p95} ms (move → transaction p95 ${d.inputToTxMs.p95})`,
     `${d.touched} moves touched by a remote apply, the untouched moves' move → frame p95 ${d.untouchedToFrameMs.p95} ms`,
     `remote applies ${d.remote.duringMoves} during the moves and ${d.remote.afterDrop} after the drop (apply p95 ${d.remote.applyMs.p95} ms)`,
-    `the hold had ${d.hold.heldAtDrop} frames at the drop, ${d.hold.capsMs.length > 0 ? `its 5 s cap cleared it at ${d.hold.capsMs.join(', ')} ms` : 'its 5 s cap never reached'}`,
+    `the hold had ${d.hold.heldAtDrop} frames at the drop and released ${d.hold.released} in all, ${d.hold.capsMs.length > 0 ? `its 5 s cap cleared it at ${d.hold.capsMs.join(', ')} ms` : 'its 5 s cap never reached'}`,
     `${d.withTransaction}/${d.moves} moves wrote over ${d.durationMs} ms; ${d.longTasks} long tasks; ${publishes.length} publishes${problems.length > 0 ? `; problems: ${problems.join('; ')}` : ''}`,
   ].join('; ');
 }
@@ -190,7 +194,7 @@ function summarize(trials: Trial[]) {
       medianP95: { toTx: median(p95s((d) => d.inputToTxMs.p95)), queue: median(p95s((d) => d.queueMs.p95)), handler: median(p95s((d) => d.handlerMs.p95)), paint: median(p95s((d) => d.paintMs.p95)), untouchedToFrame: median(p95s((d) => d.untouchedToFrameMs.p95)) },
       touched: mine.reduce((n, t) => n + t.drag.touched, 0),
       remote: { duringMoves: mine.reduce((n, t) => n + t.drag.remote.duringMoves, 0), afterDrop: mine.reduce((n, t) => n + t.drag.remote.afterDrop, 0) },
-      hold: { heldAtDrop: mine.reduce((n, t) => n + t.drag.hold.heldAtDrop, 0), capped: mine.filter((t) => t.drag.hold.capsMs.length > 0).length }, // M6: trials the cap cleared
+      hold: { heldAtDrop: mine.reduce((n, t) => n + t.drag.hold.heldAtDrop, 0), capped: mine.filter((t) => t.drag.hold.capsMs.length > 0).length /* M6: trials the cap cleared */, released: mine.reduce((n, t) => n + t.drag.hold.released, 0) },
       publishes: mine.reduce((n, t) => n + t.publishes.length, 0),
     };
   };
