@@ -98,12 +98,10 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     [owner, phone],
   );
 
-  // The rows held, as the subscription keeps them: read again whenever the held set changes (a row, a page, a fresh
-  // snapshot merged in), which its count and its oldest row say.
-  const held = owner.main.heldRows();
+  // The rows held, as the subscription keeps them: a new array whenever the held set changes (a row, a page, a fresh
+  // snapshot merged in).
+  const held = state.held;
   const loaded = state.phase === 'live' || held.length > 0;
-  const heldCount = held.length;
-  const oldest = held[0];
   const sends = useMemo(
     () =>
       tailSends({
@@ -113,10 +111,9 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
         deliveries: conversation.deliveries,
         outbox: Object.values(conversation.outbox),
         rpcs: Object.values(conversation.rpcs),
-        transcript: loaded ? { rows: owner.main.heldRows(), complete: !state.more } : null,
+        transcript: loaded ? { rows: held, complete: !state.more } : null,
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the held rows are read through their count and oldest row
-    [session.session, session.machine, events, conversation.deliveries, conversation.outbox, conversation.rpcs, loaded, state.more, heldCount, oldest, owner],
+    [session.session, session.machine, events, conversation.deliveries, conversation.outbox, conversation.rpcs, loaded, state.more, held],
   );
   // The session's requests as the conversation keeps them, settled ones included; those pending are the tail's cards.
   const known = useMemo(() => Object.values(conversation.requests).filter((r) => r.machine === session.machine && r.raised.session === session.session), [conversation.requests, session.machine, session.session]);
@@ -136,11 +133,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
 
   // The ask mod's async questions the log or the transcript knows, each waiting on its card below while its request is
   // pending, or withdrawn once its request was settled so.
-  const overlays = useMemo(
-    () => questionOverlayFacts(askedQuestions(session.session, events, owner.main.heldRows()), known),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the held rows are read through their count and oldest row
-    [session.session, events, known, heldCount, oldest, owner],
-  );
+  const overlays = useMemo(() => questionOverlayFacts(askedQuestions(session.session, events, held), known), [session.session, events, known, held]);
 
   // The machine serves no transcript for it, as the session's owner learned from its subscription.
   const unavailable = useTranscriptServed(session) === 'none';

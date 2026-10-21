@@ -103,6 +103,11 @@ export type DepthTranscriptState = {
   /** The source MAWS's view attaches under `key`; a new one when the transcript is rebuilt (older rows, a new subscription). */
   source: TranscriptSource;
   /**
+   * The held rows, oldest first, as `heldRows()` returns them: a new array whenever one is added or the set is
+   * replaced (a snapshot, an older page), so a view that reads them follows them through its subscription.
+   */
+  held: readonly Row[];
+  /**
    * `loading` until the first snapshot is in; `reconnecting` while a fresh one is awaited after an interruption (a
    * subscription the hub ended before its snapshot, `end {discontinuity}` at n 0, reaches here as one too) or, for a
    * transcript served before, after `resubscribe`; `ended` after any other `end`, with its reason. What was drawn stays
@@ -357,6 +362,7 @@ export class DeskTranscript {
     this.source = new RowsSource(this);
     this.state = createStore<DepthTranscriptState>(() => ({
       source: this.source,
+      held: this.rows,
       phase: 'loading',
       ended: null,
       streaming: [],
@@ -562,7 +568,7 @@ export class DeskTranscript {
     const fresh = hasUuid(row) && !this.uuids.has(row.uuid);
     if (fresh) {
       this.uuids.add(row.uuid);
-      this.rows.push(row);
+      this.rows = [...this.rows, row];
       const model = modelOf(row);
       if (model !== null && model !== this.state.getState().model) this.setModel(model);
       this.noteRow(row);
@@ -684,7 +690,7 @@ export class DeskTranscript {
   /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged; the tree with them. */
   private rebuild(): void {
     this.source = new RowsSource(this);
-    this.state.setState({ source: this.source });
+    this.state.setState({ source: this.source, held: this.rows });
     this.retree();
   }
 
@@ -742,6 +748,6 @@ export class DeskTranscript {
 
   private publish(): void {
     this.settleLanded();
-    this.state.setState({ streaming: this.layer.blocks(this.target.agentId) });
+    this.state.setState({ streaming: this.layer.blocks(this.target.agentId), held: this.rows });
   }
 }
