@@ -97,12 +97,16 @@ export function PinButton({ api, slideId, elementId, threads, style, data }: { a
       aria-expanded={samePin(api.popover, target)}
       title={label}
       style={style}
+      // a pointer's press moves no focus by itself (an empty compose card blurred would be discarded before its own pin
+      // could reveal it); the press's outcome decides where the keyboard goes: the card's field, the popover's, or here
+      onPointerDown={(event) => event.preventDefault()}
       onClick={(event) => {
-        event.currentTarget.focus({ preventScroll: true });
-        api.pressPin(
+        const pin = event.currentTarget;
+        const did = api.pressPin(
           target,
           threads.map((t) => t.id),
         );
+        if (did !== 'card') pin.focus({ preventScroll: true });
       }}
     >
       {threads.length > 1 ? threads.length : ''}

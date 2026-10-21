@@ -28,6 +28,9 @@ export { COMMENTS_ORIGIN };
 
 export const HUMAN_AUTHOR: CommentAuthor = { actor: { kind: 'human' }, now: () => Date.now() };
 
+/** P4-B2: what a pin's press did. */
+export type PinPress = 'closed' | 'opened' | 'card';
+
 /** P4-B2: a pin, by the element it is on (a design's board thread: the board's ROOT), and the thread a popover opens on. */
 export interface PinTarget {
   slideId: string;
@@ -61,9 +64,9 @@ export interface DeckCommentsApi {
   closePopover(): void;
   /**
    * P4-B2: a pin pressed: its popover closes when it is the open one (V4), and opens otherwise (V2, V3), unless the
-   * pin's only open thread is the one the compose card is on, whose card is revealed and focused instead.
+   * pin's only open thread is the one the compose card is on, whose card is revealed and focused instead (`card`).
    */
-  pressPin(target: PinTarget, threadIds: readonly string[]): void;
+  pressPin(target: PinTarget, threadIds: readonly string[]): PinPress;
   /** P4-B2: the editor's reply drafts, the popover's and the rail's (V5). */
   readonly drafts: ReplyDrafts;
   /** P4-B2: ⌥⌘⇧J hid the pins (and so the popover); nothing is resolved (V12). */
@@ -130,13 +133,18 @@ export function useDeckComments({ session, surface, author = HUMAN_AUTHOR, readO
     return kept;
   }, [surface, revealCard]);
   const pressPin = useCallback(
-    (target: PinTarget, threadIds: readonly string[]) => {
-      if (samePin(popover, target)) return setPopover(null);
+    (target: PinTarget, threadIds: readonly string[]): PinPress => {
+      if (samePin(popover, target)) {
+        setPopover(null);
+        return 'closed';
+      }
       if (threadIds.length === 1 && threadIds[0] === composing && surface?.focusDraft) {
         revealCard();
-        return surface.focusDraft();
+        surface.focusDraft();
+        return 'card';
       }
       setPopover({ slideId: target.slideId, elementId: target.elementId });
+      return 'opened';
     },
     [popover, composing, surface, revealCard],
   );

@@ -8,6 +8,7 @@
 // popover; ⌥⌘M and ⌥⌘⇧J. happy-dom lays nothing out: the stage's nodes get the boxes their own px style says (the
 // comments suite's fake layout), and the frame, the stage and the pins the rects stubbed below.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '../../../document/editor/comments/surface';
@@ -47,7 +48,12 @@ function surface() {
     opened: (passage) => opened.push(passage),
     overlay: (props) => {
       reach.current = props;
-      return <div data-card-host />;
+      // the compose card's field, focusable as the real card's is (its blur would discard an empty card)
+      return (
+        <div data-card-host>
+          <textarea aria-label="Compose" />
+        </div>
+      );
     },
     draft: () => kept.current,
     focusDraft,
@@ -401,9 +407,26 @@ describe('the compose card and the keys (V12)', () => {
     act(() => ['tb1', 'tb2'].forEach((t) => resolve(session.doc, t, AGENT, 1, 'remote')));
     await settle();
     fakeLayout(container);
-    fireEvent.click(pin('body')!);
+    // the card's empty field has the keyboard: the pin's press must not take it (a blur would discard the card) before
+    // the card is revealed and focused (the review's P2)
+    const compose = screen.getByRole('textbox', { name: 'Compose' });
+    act(() => compose.focus());
+    const blurred = vi.fn();
+    compose.addEventListener('blur', blurred);
+    await userEvent.click(pin('body')!);
     expect(popover()).toBeNull();
     expect(s.focusDraft).toHaveBeenCalledTimes(1);
+    expect(blurred).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(compose);
+  });
+
+  it('a pointer press on a pin moves no focus by itself: the popover’s field takes it on opening, the pin on closing', async () => {
+    const { pin } = await mount();
+    await userEvent.click(pin('body')!);
+    expect(document.activeElement).toBe(field('tb2'));
+    await userEvent.click(pin('body')!);
+    expect(popover()).toBeNull();
+    expect(document.activeElement).toBe(pin('body'));
   });
 
   it('Comment refocuses a kept draft instead of writing a second thread', async () => {
