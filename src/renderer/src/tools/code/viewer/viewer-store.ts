@@ -432,9 +432,13 @@ export function createViewerStore(client: MawsBridge) {
     // editor's caps) and shown as theirs in the merge view; a read answering yet another hash is newer and wins. The
     // read lands only on the incarnation that saved (`current`); answers whether it landed. P4 W2-C (tracker
     // 2026-10-06): it carries the tab's generation as a load does, superseding the loads in flight (read before it, they
-    // may answer a disk it has seen move on) and superseded by a newer one, whose read then says what the disk holds.
+    // may answer a disk it has seen move on) and superseded by a newer one, whose read then says what the disk holds. A
+    // conflict answering the theirs already shown reads nothing but supersedes the loads in flight all the same, so an
+    // older read of the baseline cannot withdraw that theirs while the disk holds it (the review); the disk's next change
+    // brings its own read.
     const conflicted = async (tabId: string, entry: ViewerEntry, hash: string, current: () => boolean): Promise<boolean> => {
       if (entry.theirs?.hash === hash) {
+        supersede(tabId);
         patch(tabId, { saving: false, theirs: { ...entry.theirs, view: 'merge' } });
         return true;
       }
