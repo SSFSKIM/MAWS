@@ -7,7 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { EffortSchema, type Effort, type LaunchSpec } from '@shared/engine/launch-spec';
 import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
-import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09)
+import { messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09); P4-R7y: the hook
 
 export type Attestation = { accepted: true; directory: string };
 type Gateway = LaunchSpec['gateway'];
@@ -93,17 +93,32 @@ export function withOwnerChannel(spec: LaunchSpec, flags: OwnerChannelFlags): La
   const { appendSystemPrompt: _append, systemPromptSnapshot: _snapshot, extraSettings, ...rest } = spec;
   void _append;
   void _snapshot;
-  const { env: callerEnv, ...settings } = extraSettings ?? {};
+  const { env: callerEnv, hooks: callerHooks, ...settings } = extraSettings ?? {};
   const env: Record<string, unknown> = { ...(callerEnv as Record<string, unknown> | undefined) };
   delete env[NATIVE_TO_HUMAN_ENV];
   if (flags.laneOn) env[NATIVE_TO_HUMAN_ENV] = String(TO_HUMAN_CONTRACT_VERSION);
-  const merged = Object.keys(env).length > 0 ? { ...settings, env } : settings;
+  const hooks = withMessageToolHook(callerHooks, flags.laneOn); // P4-R7y
+  const merged = { ...settings, ...(Object.keys(env).length > 0 ? { env } : {}), ...(hooks !== undefined ? { hooks } : {}) };
   return {
     ...rest,
     extraSettings: Object.keys(merged).length > 0 ? merged : null,
     ...(flags.append !== null ? { appendSystemPrompt: APPENDED[flags.append] } : {}),
     ...(flags.snapshotOff ? { systemPromptSnapshot: 'off' as const } : {}),
   };
+}
+
+// P4-R7y (2026-10-21, the owner's ask): under the same condition as the advertisement, MAWS's SessionStart group
+// (`messageToolHookGroup`: the model told at every start that the plugin's message tool is MAWS's here) joins the
+// settings' hooks after the caller's, once; with the lane off, where the plugin's tool is real, it is taken out (a
+// retried spec). The caller's other hooks stay as they were.
+const MESSAGE_TOOL_GROUP = JSON.stringify(messageToolHookGroup());
+function withMessageToolHook(hooks: unknown, on: boolean): Record<string, unknown> | undefined {
+  const rest: Record<string, unknown> = typeof hooks === 'object' && hooks !== null && !Array.isArray(hooks) ? { ...hooks } : {};
+  const groups = (Array.isArray(rest.SessionStart) ? rest.SessionStart : []).filter((group) => JSON.stringify(group) !== MESSAGE_TOOL_GROUP);
+  delete rest.SessionStart;
+  if (on) groups.push(messageToolHookGroup());
+  if (groups.length > 0) rest.SessionStart = groups;
+  return Object.keys(rest).length > 0 ? rest : undefined;
 }
 // P2-C end
 

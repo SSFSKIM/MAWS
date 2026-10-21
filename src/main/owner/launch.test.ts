@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
-import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import { slugOf } from '../../engine-host/fs/paths';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
@@ -21,6 +21,7 @@ const CURRENT = `contract:${TO_HUMAN_CONTRACT_VERSION}` as const; // P4-R7: cont
 const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION);
 
 const SUPP = `supplement:${TO_HUMAN_SUPPLEMENT_VERSION}` as const; // P4-R7: supplement 2
+const HOOKS = { SessionStart: [messageToolHookGroup()] }; // P4-R7y: a lane-on launch's SessionStart hook
 
 it('MAWS appends contract 7 and supplement 2, and advertises 7 (P4-R7)', () => {
   expect([CURRENT, SUPP, ADVERTISED]).toEqual(['contract:7', 'supplement:2', '7']);
@@ -190,7 +191,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     expect(decided.appendSystemPrompt).toBe(TO_HUMAN_CONTRACT);
     expect(decided.appendSystemPrompt!.startsWith(CONTRACT_HEADER(7))).toBe(true); // P4-R7
     expect(decided.systemPromptSnapshot ?? null).toBeNull();
-    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/sock', [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/sock', [NATIVE_TO_HUMAN_ENV]: ADVERTISED }, hooks: HOOKS });
     expect(decision).toMatchObject({ appSessionId: record, laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract', style: 'default' });
     expect(binaryCalls).toBe(0); // "off" was never wanted
     launches.launched(decision!, { launchId: 'l1', at: AT });
@@ -201,7 +202,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     compatibleStyle(configHome);
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
     expect(decided.appendSystemPrompt ?? null).toBeNull();
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED }, hooks: HOOKS });
     expect(decision).toMatchObject({ desired: 'external-compatible-style', applied: 'external-compatible-style', style: 'report' });
   });
 
@@ -247,7 +248,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     expect(decided.appendSystemPrompt).toBe(TO_HUMAN_SUPPLEMENT);
     expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION));
     expect(decided.systemPromptSnapshot ?? null).toBeNull();
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED }, hooks: HOOKS });
     expect(decision).toMatchObject({ desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement', style: 'report' });
     launches.launched(decision!, { launchId: 'l1', at: AT });
     expect(index.ownerChannel.session(record)).toMatchObject({ desired: 'external-style-plus-supplement', appended: true, applied: 'external-style-plus-supplement' });
@@ -348,6 +349,28 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     expect(decision).toMatchObject({ laneOn: false, desired: 'off', applied: 'off' });
     index.ownerChannel.setOverride(record, 'on');
     expect((await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null })).record).toMatchObject({ laneOn: true, override: 'on', desired: 'maws-contract' });
+  });
+
+  // P4-R7y (the owner's ask of 2026-10-21): the SessionStart hook goes exactly where the advertisement goes
+  it('every launch kind carries MAWS’s SessionStart hook in its settings while the lane is on, beside the advertisement, and none while it is off', async () => {
+    transcript(configHome, TO_HUMAN_CONTRACT);
+    const child = index.sessions.upsertFromSummary(summary({ directory: work })).record.appId;
+    const kinds = [
+      { kind: 'new' as const, spec: spec(), transcriptOf: null },
+      { kind: 'fork' as const, spec: spec({ appSessionId: child, resume: { sessionId: ENGINE_ID, fork: true }, inheritGrantsFrom: record }), transcriptOf: record },
+      { kind: 'resume' as const, spec: resumeSpec(), transcriptOf: record },
+    ];
+    for (const on of [true, false]) {
+      appEnabled = on;
+      for (const { kind, spec: given, transcriptOf } of kinds) {
+        const { spec: decided, record: decision } = await ownerChannelLaunch(s, given, { kind, transcriptOf });
+        expect(decision, `${kind}, lane ${on ? 'on' : 'off'}`).toMatchObject({ kind, laneOn: on });
+        const settings = decided.extraSettings as { env?: Record<string, string>; hooks?: unknown } | null;
+        expect(settings?.hooks ?? null, `${kind}, lane ${on ? 'on' : 'off'}`).toEqual(on ? HOOKS : null);
+        expect(settings?.env?.[NATIVE_TO_HUMAN_ENV] ?? null).toBe(on ? ADVERTISED : null);
+        expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
+      }
+    }
   });
 
   it('without the owner channel (no index), the spec goes unchanged and nothing is recorded', async () => {

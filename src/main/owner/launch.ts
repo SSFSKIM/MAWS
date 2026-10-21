@@ -10,7 +10,8 @@
 //    recorded state differs from the one the desired state records,
 //    only where the binary declares the flag; `applied` is what is in effect after the launch.
 // While the lane is on the launch also advertises MAWS_NATIVE_TO_HUMAN (the contract version) in its settings env, so a
-// plugin drawing its own to-human view can defer. The decision is recorded in the index when the host answers
+// plugin drawing its own to-human view can defer, and (P4-R7y) carries the SessionStart hook that tells the model at
+// every start that the plugin's message tool is MAWS's here. The decision is recorded in the index when the host answers
 // `launching`, and the engine's own report of its output style at that launch's first `session.init` is compared with
 // the resolver's reading of the settings (the mismatch check): a mismatch makes the next decisions resolve by the engine's
 // name until a launch's init agrees with the resolver's own reading again. Each record is published as the session's

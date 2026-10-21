@@ -28,7 +28,9 @@ export const BIN=realpathSync(process.env.PROBE_ENGINE||join(homedir(),'.local/b
 export const ENGINE_VERSION=execFileSync(BIN,['--version'],{encoding:'utf8',timeout:15000}).trim().split(/\s+/)[0];
 export const PROVENANCE={charter:'docs/charter.md',child:'E0a',pin:'f11ae359af82c86831f052140683ed620dd25500',document:'docs/doperpowers/plans/2026-10-05-p1-extension.md',spike:'E0a',engine:BIN,engineVersion:ENGINE_VERSION};
 // MAWS's flags beyond the harness's own (launch.ts ENGINE_FLAGS less what harness.mjs already passes), and its --settings.
-const PRODUCT_FLAGS=['--forward-subagent-text','--replay-user-messages','--include-hook-events','--settings',JSON.stringify({dialogExpiry:'never'})];
+// P4-R7y: `flagSettings` replaces that JSON for a launch whose `--settings` carries more, as MAWS's does (hooks, env).
+const PRODUCT_FLAGS=['--forward-subagent-text','--replay-user-messages','--include-hook-events'];
+const FLAG_SETTINGS={dialogExpiry:'never'};
 const SPEND_CAP='0.30';
 export const initPayload=cwd=>probeInitialize({accepted:true,directory:cwd}); // declares no MCP server; p1-sdk-mcp.mjs adds its own
 const RELAY_HELLO='http://127.0.0.1:8641/api/hello';
@@ -97,14 +99,14 @@ export const resultSummary=r=>r?{subtype:r.subtype,is_error:r.is_error,num_turns
 // recording never leaves one open. Throws when the scenario body failed, the engine exited non-zero or the owner-file
 // delta is not empty. `sessionId: null` passes no --session-id (a plain `--resume <id>` launch, E7), as `pinned: false`
 // does; `spendCap` is the probe's --max-budget-usd guard; `debugPattern` picks the debug lines copied into the fixture.
-export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true,spendCap=SPEND_CAP,debugPattern=DEBUG_RE,dir='fixtures/pass3/',relay=true}={},body){
+export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true,spendCap=SPEND_CAP,debugPattern=DEBUG_RE,dir='fixtures/pass3/',relay=true,flagSettings=FLAG_SETTINGS}={},body){
  const env=engineEnv(run.home,vars);
  const {configHome,globalConfig}=assertScratch(env);
  if(relay)await relayReady(); // P4-B4: a launch against the stub API (stub-api.mjs) needs no relay
  const before=ownerTmpKeys();
  let failure;
  const p=await harnessRun(name,async p=>{
-  p.note({event:'provenance',...PROVENANCE,...provenance,model,configHome,globalConfig,pinnedSessionId:pinned?sessionId:null,envKeys:Object.keys(env).sort(),extraFlags:flags,settings:JSON.parse(readFileSync(join(run.home,'settings.json'),'utf8'))});
+  p.note({event:'provenance',...PROVENANCE,...provenance,model,configHome,globalConfig,pinnedSessionId:pinned?sessionId:null,envKeys:Object.keys(env).sort(),extraFlags:flags,settings:JSON.parse(readFileSync(join(run.home,'settings.json'),'utf8')),...(flagSettings===FLAG_SETTINGS?{}:{flagSettings})});
   p.note({event:'owner_file_check',phase:'before',count:before.length,digest:digest(before)});
   p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
   p.on('elicitation',r=>{p.note({event:'elicitation_seen',request:r});return {action:'decline'};});
@@ -114,7 +116,7 @@ export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance
   p.on('ui_prompt_suggest',()=>({shown:false}));
   try{await body(p,{sessionId,run});}catch(e){failure=e;throw e;}
   finally{noteDebug(p,debugFile,debugPattern);p.note({event:'spend',result:resultSummary(lastResult(p))});}
- },{cwd:run.cwd,env,bin:BIN,dir,model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,...(pinned&&sessionId?['--session-id',sessionId]:[]),'--max-budget-usd',spendCap,'--debug-file',debugFile,...flags]});
+ },{cwd:run.cwd,env,bin:BIN,dir,model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,'--settings',JSON.stringify(flagSettings),...(pinned&&sessionId?['--session-id',sessionId]:[]),'--max-budget-usd',spendCap,'--debug-file',debugFile,...flags]});
  const exit=await p.closed;
  const after=ownerTmpKeys();
  const same=JSON.stringify(after)===JSON.stringify(before);
