@@ -1,11 +1,11 @@
 // Durations and time separators (C6 execution document, Copy and *Time separators* under Derivation). Separator labels
-// depend on "now", the locale and the time zone, so they are configurable: the app leaves the defaults, the snapshot
-// suite pins all three so a snapshot never depends on the machine that took it.
-import { dateFormats } from '@shared/app/date-format';
+// depend on "now" and the time zone, so both are configurable: the app leaves the defaults, the snapshot suite pins
+// them so a snapshot never depends on the machine that took it. The words are the display locale's, as every date MAWS
+// shows (`@shared/app/date-format`; English throughout, P4 Decision Log 4).
+import { dateFormats, dateTimeFormat } from '@shared/app/date-format';
 
 export interface TimeConfig {
   now: string; // ISO-8601
-  locale: string;
   timeZone: string;
 }
 
@@ -37,35 +37,27 @@ export function needsSeparator(previousAt: string | null, at: string, subject: S
   return gap >= (subject === 'human' ? HOUR : 10 * MINUTE);
 }
 
-// Formatters are built once per (locale, zone, shape) and reused: the flat row list labels every separator on each
-// flatten, and building a formatter costs far more than formatting with one (M6 profile: four per label cost about
-// 12 ms per flatten of synthetic/500, and mounting a few receipts flattens several times in one frame).
-const formatters = new Map<string, Intl.DateTimeFormat>();
-function formatter(locale: string | undefined, timeZone: string | undefined, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  const key = `${locale ?? ''}|${timeZone ?? ''}|${JSON.stringify(options)}`;
-  let format = formatters.get(key);
-  if (!format) formatters.set(key, (format = new Intl.DateTimeFormat(locale, { ...options, timeZone })));
-  return format;
-}
+// Formatters are the date module's, built once per (zone, shape) and reused: the flat row list labels every separator
+// on each flatten, and building a formatter costs far more than formatting with one (M6 profile: four per label cost
+// about 12 ms per flatten of synthetic/500, and mounting a few receipts flattens several times in one frame).
 
 // Calendar day of an instant in the configured zone (the system's when none is configured), as a day number, so
-// "today" and "yesterday" follow the zone.
+// "today" and "yesterday" follow the zone; read in Latin digits whatever the display locale.
 function dayNumber(ms: number, timeZone: string | undefined): number {
-  const parts = formatter('en-US', timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date(ms));
+  const parts = dateTimeFormat({ year: 'numeric', month: 'numeric', day: 'numeric', numberingSystem: 'latn', timeZone }).formatToParts(new Date(ms));
   const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
   return Math.floor(Date.UTC(value('year'), value('month') - 1, value('day')) / DAY);
 }
 
 export function separatorLabel(at: string): string {
-  const locale = config?.locale ?? undefined;
   const timeZone = config?.timeZone ?? undefined;
   const instant = Date.parse(at);
   const now = config ? Date.parse(config.now) : Date.now();
   const daysAgo = dayNumber(now, timeZone) - dayNumber(instant, timeZone);
-  const time = formatter(locale, timeZone, { hour: 'numeric', minute: '2-digit' }).format(instant);
+  const time = dateTimeFormat({ hour: 'numeric', minute: '2-digit', timeZone }).format(instant);
   let day: string;
-  if (daysAgo === 0 || daysAgo === 1) day = dateFormats(locale).day(daysAgo); // Today, Yesterday; 오늘, 어제
-  else if (daysAgo > 1 && daysAgo <= 6) day = formatter(locale, timeZone, { weekday: 'long' }).format(instant);
-  else day = formatter(locale, timeZone, { year: 'numeric', month: 'short', day: 'numeric' }).format(instant);
+  if (daysAgo === 0 || daysAgo === 1) day = dateFormats().day(daysAgo); // Today, Yesterday
+  else if (daysAgo > 1 && daysAgo <= 6) day = dateTimeFormat({ weekday: 'long', timeZone }).format(instant);
+  else day = dateTimeFormat({ year: 'numeric', month: 'short', day: 'numeric', timeZone }).format(instant);
   return `${day} ${time}`;
 }

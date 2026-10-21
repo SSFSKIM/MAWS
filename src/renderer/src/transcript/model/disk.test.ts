@@ -195,7 +195,7 @@ describe('a /compact turn from disk', () => {
 // where there are no `maws.*` events and no meta rows, only the call, its `asked` result and the steer the answers
 // travelled in. The capsule reads answered all the same, in the first of the two turns, and the steer is no bubble.
 describe('a maws ask read from disk', () => {
-  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' })); // the snapshot suite's pin
   afterAll(() => configureTime(null));
   const sortKeys = (value: unknown): unknown =>
     Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
@@ -221,7 +221,7 @@ describe('a maws ask read from disk', () => {
 // where there are no `maws.delivery.artifact` events, only the calls and their results, the screenshot's carrying the
 // engine's pointer text between the image and the server's JSON. The rows and cells read as the journal's do.
 describe('maws artifacts read from disk', () => {
-  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' })); // the snapshot suite's pin
   afterAll(() => configureTime(null));
   const sortKeys = (value: unknown): unknown =>
     Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
@@ -249,7 +249,7 @@ describe('maws artifacts read from disk', () => {
 // disk, where there are no `maws.browser.action` events, only the calls and their results (each result carrying main's
 // own `ms`). The seven rows read as the journal's do, `ms` included.
 describe('maws browser actions read from disk', () => {
-  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' })); // the snapshot suite's pin
   afterAll(() => configureTime(null));
   const sortKeys = (value: unknown): unknown =>
     Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
