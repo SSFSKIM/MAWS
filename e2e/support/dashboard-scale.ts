@@ -88,17 +88,18 @@ export const MEMORY_LATE_MS = 1_000;
  * 30 s and within `tolerance`, a pair with a late sample (started more than 1 s after its mark, P3-F L249) deciding
  * nothing; else the sample of the 60 s mark, however late it started or long it took. That figure is gated at `limit`;
  * with neither, the row is unsettled. Every sample stays in the input; the late ones are answered in `excluded` and named
- * in the reason.
+ * in the reason. Each comparison, the pair's and the bound's, is on the raw MB the sample holds; the figure answered and
+ * the MB the reason and `excluded` name are rounded to 0.1 MB, the report's precision (P4 L189).
  */
 export function memoryVerdict(samples: readonly { startedAt: number; completedAt: number; load: number; mb: number }[], limit: number, tolerance = 0.05): { verdict: Verdict; value: number | null; reason?: string; excluded: { mark: number; startedAt: number; mb: number }[] } {
   const t0 = samples[0]?.startedAt ?? 0;
   const markOf = (k: number) => k * MEMORY_SPACING_MS;
   const isLate = (k: number) => samples[k]!.startedAt - t0 - markOf(k) > MEMORY_LATE_MS;
-  const excluded = samples.flatMap((s, k) => (isLate(k) ? [{ mark: markOf(k), startedAt: s.startedAt - t0, mb: s.mb }] : []));
+  const excluded = samples.flatMap((s, k) => (isLate(k) ? [{ mark: markOf(k), startedAt: s.startedAt - t0, mb: reported(s.mb) }] : []));
   const named = excluded.length === 0 ? '' : `; excluded from the deciding pair as started more than ${MEMORY_LATE_MS / 1000} s after its mark: ${excluded.map((e) => `the ${e.mark / 1000} s mark's sample started at ${seconds(e.startedAt)} (${e.mb.toFixed(1)} MB)`).join(', ')}`;
   const loaded = samples.filter((s) => s.load >= LOAD_BELOW);
   if (loaded.length > 0) return { verdict: 'hardware-blocked', value: null, reason: `${loaded.length} sample(s) started at load ${LOAD_BELOW} or more (${loaded.map((s) => s.load).join(', ')})${named}`, excluded };
-  const judged = (value: number, how: string) => (value <= limit ? { verdict: 'met' as const, value, reason: `${how}${named}`, excluded } : { verdict: 'failed' as const, value, reason: `${how}: ${value.toFixed(1)} MB over ${limit} MB${named}`, excluded });
+  const judged = (value: number, how: string) => (value <= limit ? { verdict: 'met' as const, value: reported(value), reason: `${how}${named}`, excluded } : { verdict: 'failed' as const, value: reported(value), reason: `${how}: ${value.toFixed(1)} MB over ${limit} MB${named}`, excluded });
   for (let i = 1; i < samples.length; i++) {
     const [a, b] = [samples[i - 1]!, samples[i]!];
     if (a.startedAt - t0 < MEMORY_FLOOR_MS || isLate(i - 1) || isLate(i)) continue;
@@ -110,3 +111,4 @@ export function memoryVerdict(samples: readonly { startedAt: number; completedAt
 }
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+const reported = (mb: number) => +mb.toFixed(1);
