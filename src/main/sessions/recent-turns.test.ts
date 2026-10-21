@@ -207,6 +207,21 @@ describe('recentTurnsOf', () => {
       expect(turnOf(...stages(resultOf('toolu_m', 'MCP error: the server went away', true)))).toEqual([['Looking first.', 2]]);
     });
 
+    // A call whose turn closed without its result sent nothing: the transcript draws the engine's cell, its divider
+    // counting it. Still pending at the window's end, its turn may still be running, so it is not counted yet.
+    it('its turn closed without a result, at the next prompt or the turn’s end, it is one of the turn’s tool calls and no answer', () => {
+      const asked = [user('p1', null, 'Run the stages'), assistant('a1', 'p1', call('toolu_m', 'Stage 1 is done.'))];
+      expect(turnOf(...asked, user('p2', 'a1', 'Go on'))).toEqual([[null, 1], [null, 0]]);
+      expect(turnOf(...asked, { type: 'system', subtype: 'turn_duration', durationMs: 1200, uuid: 'd1', parentUuid: 'a1' })).toEqual([[null, 1]]);
+      expect(turnOf(...asked)).toEqual([[null, 0]]);
+    });
+
+    it('a promptless turn holding only such a call is shown, its tool call counted', () => {
+      // a window cut inside a turn: its prompt lies before the window
+      const answer = recentTurnsOf(records(assistant('a1', 'before', call('toolu_m', 'Stage 1 is done.')), user('p2', 'a1', 'Go on')), 5, true);
+      expect(answer.turns).toEqual([{ prompt: null, answer: null, toolCalls: 1 }, { prompt: { text: 'Go on', at: '2026-10-09T11:00:01.000Z' }, answer: null, toolCalls: 0 }]);
+    });
+
     // spikes/protocol-probe/fixtures/p4/p4-r7-tool-stages.jsonl: the transcript as the engine wrote it (its meta row
     // `disk`, user and assistant records with their blocks; a record whose parent the probe left out is chained to the
     // one before it), each status's result written before the next command of the same response
