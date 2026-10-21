@@ -21,6 +21,9 @@ const STAGE = '[data-stage-surface]';
  */
 export function isDeckEditSurface(active: Element): boolean {
   if (active.matches(STAGE) || active.matches('.deck-notes-field')) return true;
+  // D15's A3: the stage moves the focus onto the one selected element's own node, which is the stage's as it is (never
+  // what the node holds: an embed's frame keeps its own undo)
+  if (active.matches('[data-eid]') && active.closest(STAGE) != null) return true;
   return active.matches('.deck-textbox') && active.parentElement?.closest(STAGE) != null;
 }
 

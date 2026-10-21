@@ -94,6 +94,17 @@ describe('a deck’s own surfaces take the Edit menu’s Undo and Redo onto its 
     expect(native()).toEqual([]);
   });
 
+  it('on a selected element’s own node, where the stage puts the focus (D15’s A3): the deck’s step', () => {
+    const { session, stage, left } = mountDeck();
+    focus(stage);
+    act(() => session.select(['a']));
+    const node = stage.querySelector<HTMLElement>('[data-eid="a"]')!;
+    focus(node);
+    page.menu('undo');
+    expect(left()).toBe('300px');
+    expect(native()).toEqual([]);
+  });
+
   it('in a slide text box on the stage: the deck’s step, not the box’s own text', () => {
     const { session, container, left } = mountDeck();
     act(() => session.editText('title'));

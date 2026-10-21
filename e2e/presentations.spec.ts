@@ -615,7 +615,7 @@ test('Edit ▸ Undo and Redo: the deck’s step on the stage, the field’s own 
   // a nudge on the stage, taken back and done again from the menu
   await page.mouse.click(at(800, 560).x, at(800, 560).y);
   await expect(tab.locator('[data-overlay] [data-selected="b"]')).toBeVisible();
-  await expect(tab.locator('[data-stage-surface]')).toBeFocused();
+  await expect(tab.locator('[data-stage-slide] [data-eid="b"]')).toBeFocused(); // D15's A3: the element's own node, the stage's
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await element('b'))?.style.left).toBe('701px');
   await fromMenu('edit.undo');
