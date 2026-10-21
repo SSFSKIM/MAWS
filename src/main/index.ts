@@ -223,7 +223,8 @@ void startWithProfileLock(app, () => {
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
-  // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace
+  // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
+  // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
   const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields), and main's attention service answers `attention.*` over the hosts' events (C3 execution document, M5).
@@ -550,7 +551,8 @@ void startWithProfileLock(app, () => {
 
   // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over
   // <userData>/browser/tabs.json, the partitions, the views and browser.*, after the index (a deleted session closes its
-  // tabs) and before any window, so the first page finds its handlers. Its will-quit write runs before the hosts stop.
+  // tabs) and before any window, so the first page finds its handlers. Its will-quit write runs once the hosts' drain has
+  // settled (P4 W2-B).
   // Settings 11's browser section is read from the service at each use: the profile when a tab opens, the link target
   // when a page opens a window.
   const browser = startBrowser({
@@ -606,8 +608,9 @@ void startWithProfileLock(app, () => {
   });
   shutdown.add('artifacts', artifacts.stop);
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
-  // engine host's main-only commands). Its stop runs before the hosts' (steps run in the order added): every lease,
-  // watch and pending operation ends, each operation withdrawn from the host, while the host can still hear it.
+  // engine host's main-only commands). At will-quit every lease, watch and pending operation ends. P4 W2-B: the stop runs
+  // after the hosts' drain, so its withdrawals answer host_unavailable in main; the host ends every operation of a main
+  // that leaves on its own (src/engine-host/connectors/register.ts, onClientGone), which the withdrawals only repeated.
   // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
   // P3-HD (Decision Log 14): the root supplies route D, which the service composes after route E; the engine stays preferred.
   // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
@@ -761,8 +764,11 @@ void startWithProfileLock(app, () => {
   };
   // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a
   // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting). E11:
-  // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound)
-  shutdown.add('hosts', () => hosts.stop());
+  // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound).
+  // P4 W2-B (tracker 2026-10-07 "The keep-quit drain…"): a drain, so it runs before every other step and those stop only
+  // once it has settled or the bound passed; the lines it reads are folded by services still running (the index, side
+  // threads, attention, the read model), where they once reached services already stopped
+  shutdown.drain('hosts', () => hosts.stop());
   // E9 start: push-to-talk dictation (E9 execution document, M2): voice.* over the bundled helper, spawned on first use
   // (or, under the harness, the scripted backend or the probe-only helper); the helper is asked to quit at will-quit.
   const voice = startVoice({

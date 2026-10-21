@@ -3,30 +3,24 @@
 // re-read 250 ms after the last new status C8a's git store takes for the directory (its `git.changed`), one read in
 // flight per key; a scope past REVIEW_SCOPE_BYTES_CAP keeps its file list and fetches one file at a time; and This
 // branch's base from C10's `git.worktree.branch`. Last turn reads no git: its files come from the transcript store.
+// The held scopes are the cache Source control's store shares (./held-diffs, P4 W2-B).
 //
 // The status and the watch that keeps it current are C8a's `useGit`; the surfaces hold its watch while mounted.
 import { useEffect, useMemo } from 'react';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import { type CommandName, type CommandResult, type MawsBridge } from '@shared/ipc/schema';
-import type { GitDiff, GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
+import { type MawsBridge } from '@shared/ipc/schema';
+import type { GitStatus } from '@shared/ipc/schema/git';
 import { ipc } from '../../../ipc/client';
 import { useGit } from '../../../stores/git';
 import { useTranscriptStore, type TurnActivity, type TurnId } from '../../../transcript';
 import { REVIEW_COPY } from '../copy';
-import {
-  gitScopeFiles,
-  indexDiffers,
-  receiptOf,
-  REVIEW_SCOPE_BYTES_CAP,
-  splitPatch,
-  turnScopeFiles,
-  type PatchFile,
-  type ReviewFile,
-  type ReviewScope,
-} from './review-model';
+import { createHeldDiffs, diffKeys, followGitStatus, HELD_DIFF_REFRESH_MS, mapWith, settled, type FileDiff, type ScopeDiff } from './held-diffs';
+import { gitScopeFiles, indexDiffers, receiptOf, turnScopeFiles, type ReviewFile, type ReviewScope } from './review-model';
 
-export const REVIEW_REFRESH_MS = 250; // trailing, like C8a's GIT_DIFF_DELAY_MS
+export type { FileDiff, ScopeDiff } from './held-diffs';
+
+export const REVIEW_REFRESH_MS = HELD_DIFF_REFRESH_MS;
 
 export type GitScope = Exclude<ReviewScope, 'turn'>;
 export interface DiffTarget {
@@ -35,11 +29,6 @@ export interface DiffTarget {
   base: string | null; // This branch's base; null for the other scopes
 }
 
-export type ScopeDiff =
-  | { status: 'loading' }
-  | { status: 'ok'; files: GitDiffFile[]; patch: ReadonlyMap<string, PatchFile> | null } // patch null past the scope cap
-  | { status: 'error'; message: string };
-export type FileDiff = { status: 'loading' } | { status: 'ok'; file: PatchFile | null } | { status: 'error'; message: string };
 // `failed`: the call itself failed; not kept, so the next lookup asks again.
 export type BaseLookup = { status: 'loading' } | { status: 'ok'; base: string } | { status: 'unavailable'; reason: string; failed?: true };
 
@@ -55,12 +44,11 @@ export interface ReviewStore {
   reset(): void; // tests
 }
 
-const diffKey = (t: DiffTarget) => `${t.directory}\0${t.scope}\0${t.base ?? ''}`;
-const fileKey = (t: DiffTarget, path: string) => `${diffKey(t)}\0${path}`;
+const keys = diffKeys<DiffTarget>((t) => `${t.directory}\0${t.scope}\0${t.base ?? ''}`, '\0');
 const baseKey = (repoRoot: string, branch: string) => `${repoRoot}\0${branch}`;
 
-export const diffOf = (s: Pick<ReviewStore, 'diffs'>, t: DiffTarget) => s.diffs.get(diffKey(t));
-export const fileDiffOf = (s: Pick<ReviewStore, 'files'>, t: DiffTarget, path: string) => s.files.get(fileKey(t, path));
+export const diffOf = (s: Pick<ReviewStore, 'diffs'>, t: DiffTarget) => s.diffs.get(keys.diff(t));
+export const fileDiffOf = (s: Pick<ReviewStore, 'files'>, t: DiffTarget, path: string) => s.files.get(keys.file(t, path));
 export const baseOf = (s: Pick<ReviewStore, 'bases'>, repoRoot: string, branch: string) => s.bases.get(baseKey(repoRoot, branch));
 
 const diffInput = (t: DiffTarget, path?: string) => ({
@@ -70,114 +58,26 @@ const diffInput = (t: DiffTarget, path?: string) => ({
   ...(path !== undefined ? { path } : {}),
 });
 
-// A bridge that throws (not a command's failure answer) is a failure too, so nothing stays in flight.
-async function settled<N extends CommandName>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
-  try {
-    return await call;
-  } catch (error) {
-    return { ok: false, error: { code: 'internal', message: error instanceof Error ? error.message : String(error) } };
-  }
-}
-
-interface Held {
-  target: DiffTarget;
-  count: number;
-  timer: ReturnType<typeof setTimeout> | null;
-  reading: boolean;
-  again: boolean;
-}
-
-function mapWith<K, V>(map: ReadonlyMap<K, V>, key: K, value: V): Map<K, V> {
-  return new Map(map).set(key, value);
-}
-function mapWithout<K, V>(map: ReadonlyMap<K, V>, drop: (key: K) => boolean): Map<K, V> {
-  return new Map([...map].filter(([key]) => !drop(key)));
-}
-
 export function createReviewStore(
   client: MawsBridge,
   options: { git?: typeof useGit } = {},
 ): UseBoundStore<StoreApi<ReviewStore>> {
-  const held = new Map<string, Held>();
-  const fileLoads = new Map<string, symbol>();
-
   const store = create<ReviewStore>()((set, get) => {
-    const read = async (key: string) => {
-      const h = held.get(key);
-      if (!h) return;
-      if (h.reading) {
-        h.again = true;
-        return;
-      }
-      h.reading = true;
-      const result = await settled(client.invoke('git.diff', diffInput(h.target)));
-      h.reading = false;
-      if (held.get(key) !== h) return; // released meanwhile
-      const next: ScopeDiff = result.ok ? answered(result.value) : { status: 'error', message: result.error.message };
-      set((s) => ({ diffs: mapWith(s.diffs, key, next), files: mapWithout(s.files, (k) => k.startsWith(`${key}\0`)) }));
-      for (const k of [...fileLoads.keys()]) if (k.startsWith(`${key}\0`)) fileLoads.delete(k);
-      if (h.again) {
-        h.again = false;
-        void read(key);
-      }
-    };
-
-    const schedule = (h: Held, key: string) => {
-      if (h.timer !== null) clearTimeout(h.timer);
-      h.timer = setTimeout(() => {
-        h.timer = null;
-        void read(key);
-      }, REVIEW_REFRESH_MS);
-    };
+    const heldDiffs = createHeldDiffs(client, set, { keys, input: diffInput });
 
     return {
       diffs: new Map(),
       files: new Map(),
       bases: new Map(),
 
-      hold(target) {
-        const key = diffKey(target);
-        let h = held.get(key);
-        if (h) h.count += 1;
-        else {
-          h = { target, count: 1, timer: null, reading: false, again: false };
-          held.set(key, h);
-          set((s) => ({ diffs: mapWith(s.diffs, key, { status: 'loading' }) }));
-          void read(key);
-        }
-        const mine = h;
-        let released = false;
-        return () => {
-          if (released) return;
-          released = true;
-          if (--mine.count > 0) return;
-          if (mine.timer !== null) clearTimeout(mine.timer);
-          held.delete(key);
-          for (const k of [...fileLoads.keys()]) if (k.startsWith(`${key}\0`)) fileLoads.delete(k);
-          set((s) => ({ diffs: mapWithout(s.diffs, (k) => k === key), files: mapWithout(s.files, (k) => k.startsWith(`${key}\0`)) }));
-        };
-      },
-
-      refresh(target) {
-        if (held.has(diffKey(target))) void read(diffKey(target));
-      },
+      hold: heldDiffs.hold,
+      refresh: heldDiffs.refresh,
 
       statusChanged(directory) {
-        for (const [key, h] of held) if (h.target.directory === directory) schedule(h, key);
+        heldDiffs.reread((t) => t.directory === directory);
       },
 
-      loadFile(target, path) {
-        const key = fileKey(target, path);
-        if (!held.has(diffKey(target)) || fileLoads.has(key)) return;
-        const generation = Symbol();
-        fileLoads.set(key, generation);
-        set((s) => ({ files: mapWith(s.files, key, { status: 'loading' }) }));
-        void settled(client.invoke('git.diff', diffInput(target, path))).then((result) => {
-          if (fileLoads.get(key) !== generation) return; // the scope re-read or was released meanwhile
-          const next: FileDiff = result.ok ? { status: 'ok', file: splitPatch(result.value.patch)[0] ?? null } : { status: 'error', message: result.error.message };
-          set((s) => ({ files: mapWith(s.files, key, next) }));
-        });
-      },
+      loadFile: heldDiffs.loadFile,
 
       lookupBase(repoRoot, branch) {
         const key = baseKey(repoRoot, branch);
@@ -201,33 +101,15 @@ export function createReviewStore(
       },
 
       reset() {
-        for (const h of held.values()) if (h.timer !== null) clearTimeout(h.timer);
-        held.clear();
-        fileLoads.clear();
+        heldDiffs.clear();
         set({ diffs: new Map(), files: new Map(), bases: new Map() });
       },
     };
   });
 
-  // A new status C8a's store took for a directory (its git.changed, or a watch's first answer) re-reads the scopes held
-  // over that directory. Its status objects are replaced, never mutated, so a reference change is a new status.
-  if (options.git) {
-    const git = options.git;
-    git.subscribe((state, prev) => {
-      if (state.entries === prev.entries) return;
-      for (const [directory, entry] of state.entries) {
-        const before = prev.entries.get(directory);
-        if (entry.status && before?.status && entry.status !== before.status) store.getState().statusChanged(directory);
-      }
-    });
-  }
+  // A new status C8a's store took for a directory re-reads the scopes held over that directory.
+  if (options.git) followGitStatus(options.git, (directory) => store.getState().statusChanged(directory));
   return store;
-}
-
-// The whole patch is kept split per file within the cap; past it, only the list (each file fetched on selection).
-function answered(diff: GitDiff): ScopeDiff {
-  if (diff.patch.length > REVIEW_SCOPE_BYTES_CAP) return { status: 'ok', files: diff.files, patch: null };
-  return { status: 'ok', files: diff.files, patch: new Map(splitPatch(diff.patch).map((file) => [file.path, file])) };
 }
 
 export const useReview = createReviewStore(ipc, { git: useGit });
