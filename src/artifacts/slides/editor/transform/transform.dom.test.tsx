@@ -464,8 +464,8 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     return { session, stage, notes: screen.getByRole('textbox', { name: 'Speaker notes' }), user: userEvent.setup() };
   }
 
-  // P4-B2 (D1): a text element selected is ARMED, its box holding the focus; any other, the stage
-  const focusOf = (stage: HTMLElement, id: string) => (id === 'title' || id === 'body' ? stage.querySelector(`[data-eid="${id}"] .deck-textbox`) : stage);
+  // P4-B2 (D1, D15 A3): a text element selected is ARMED, its box holding the focus; any other, its own node
+  const focusOf = (stage: HTMLElement, id: string) => (id === 'title' || id === 'body' ? stage.querySelector(`[data-eid="${id}"] .deck-textbox`) : stage.querySelector(`[data-eid="${id}"]`));
 
   it('Tab walks the slide’s elements, then leaves for the next control; Shift+Tab walks back and leaves before the first', async () => {
     const { session, stage, notes, user } = mount(deck());
@@ -477,7 +477,7 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     expect(document.activeElement).toBe(notes);
     expect(session.snapshot().selection).toEqual(['b']); // leaving changes nothing on the slide
     await user.tab({ shift: true });
-    expect(document.activeElement).toBe(stage);
+    expect(document.activeElement).toBe(focusOf(stage, 'b')); // P4-B2 (A3): back on the stage, the focus is the selection's
     for (const id of ['a', 'body', 'title']) {
       await user.tab({ shift: true });
       expect([session.snapshot().selection, document.activeElement]).toEqual([[id], focusOf(stage, id)]);

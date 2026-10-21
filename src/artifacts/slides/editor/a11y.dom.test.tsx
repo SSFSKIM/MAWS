@@ -4,7 +4,8 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newDoc, onUpdate, transact, type Doc } from '../../yjs';
-import { deleteElementTree, importSlide, setAttrs, slideFile, writeDeckKeys } from '../model';
+import * as Y from '../../yjs/slides';
+import { deleteElementTree, importSlide, readFlat, setAttrs, slideFile, writeDeckKeys } from '../model';
 import { loadSlide } from '../parse';
 import { DeckEditor } from './DeckEditor';
 import { DeckSession } from './session';
@@ -92,3 +93,108 @@ describe('P4-B2 (D15) A1: every element of the shown slide is a node assistive t
     expect(read('bare')).toEqual([null, null]);
   });
 });
+
+describe('P4-B2 (D15) A2 to A5: the focus follows the selection, the status says what it does not, never the body', () => {
+  const SLIDE = `<section id="s" style="background:#ffffff">
+<h1 id="title" style="font-size:64px">Quarterly plan</h1>
+<div id="band" style="position:absolute; left:0px; top:0px; width:1920px; height:96px; background:#eef2f1"></div>
+<x-shape id="dot" kind="ellipse" style="position:absolute; left:500px; top:800px; width:100px; height:100px; background:#2b7a78"></x-shape>
+<x-icon id="star" name="Star" style="position:absolute; left:700px; top:800px; width:64px; height:64px; color:#2b7a78"></x-icon>
+<table id="t" style="position:absolute; left:1300px; top:300px; width:400px"><tr id="r1"><th>A</th><td>1</td></tr></table>
+</section>`;
+
+  function mount() {
+    const doc = deck(SLIDE);
+    const session = new DeckSession(doc, 0);
+    const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    const stage = container.querySelector<HTMLElement>('[data-stage-surface]')!;
+    const node = (id: string) => stage.querySelector<HTMLElement>(`[data-eid="${id}"]`)!;
+    const box = (id: string) => node(id).querySelector<HTMLElement>('.deck-textbox');
+    const status = () => stage.querySelector('[role="status"][data-stage-status]')!.textContent;
+    const notes = container.querySelector<HTMLTextAreaElement>('.deck-notes-field')!;
+    act(() => stage.focus());
+    const key = (init: KeyboardEventInit) => act(() => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
+    return { doc, session, stage, node, box, status, notes, key };
+  }
+
+  it('A3: the armed box for one text element, the node for one other, the stage for several or none; a focus on a node selects it', () => {
+    const { session, stage, node, box } = mount();
+    act(() => session.select(['band']));
+    expect(document.activeElement).toBe(node('band'));
+    act(() => session.select(['title']));
+    expect(document.activeElement).toBe(box('title'));
+    act(() => session.select(['band', 'dot']));
+    expect(document.activeElement).toBe(stage);
+    act(() => session.select([]));
+    expect(document.activeElement).toBe(stage);
+    act(() => node('dot').focus()); // VoiceOver's focus brought to a node
+    expect(session.snapshot().selection).toEqual(['dot']);
+    expect(document.activeElement).toBe(node('dot'));
+  });
+
+  it('A3: the keys reach the stage from a focused node (Tab walks, Delete removes), and nothing takes the focus back from outside the stage', () => {
+    const { doc, session, node, notes, key } = mount();
+    act(() => session.select(['band']));
+    key({ key: 'Tab' });
+    expect([session.snapshot().selection, document.activeElement]).toEqual([['dot'], node('dot')]);
+    act(() => notes.focus());
+    act(() => session.select(['star']));
+    expect(document.activeElement).toBe(notes); // the keyboard is away: the selection changes, the focus stays
+    act(() => node('star').focus());
+    key({ key: 'Delete' });
+    expect(Y.hasElement(doc, 's', 'star')).toBe(false);
+  });
+
+  it('A5: whenever the focused node or editor goes, the focus goes to the stage or the next selection, never the body', () => {
+    const { doc, session, stage, node, box, key } = mount();
+    act(() => session.select(['band']));
+    key({ key: 'Delete' }); // the focused node removed
+    expect(document.activeElement).toBe(stage);
+    act(() => session.select(['dot']));
+    act(() => transact(doc, () => deleteElementTree(doc, 's', 'dot'), 'remote')); // another replica deletes it
+    expect(document.activeElement).toBe(stage);
+    act(() => session.select(['star']));
+    const before = node('star');
+    act(() => setAttrs(doc, 's', 'star', { name: 'Clock' }, 'remote')); // an agent's change makes its node anew
+    expect(node('star')).not.toBe(before);
+    expect(document.activeElement).toBe(node('star'));
+    const [cell] = cellsOf(doc);
+    act(() => session.editText(cell!));
+    expect(document.activeElement).toBe(box(cell!));
+    key({ key: 'Escape' }); // T17 from a cell: the table selected, its node focused
+    expect([session.snapshot().selection, document.activeElement]).toEqual([['t'], node('t')]);
+    act(() => session.select(['title']));
+    key({ key: 'Escape' }); // ARMED at the top level: nothing selected
+    expect(document.activeElement).toBe(stage);
+  });
+
+  it('A2: the status says a multi-selection’s count and nothing else; one element’s place rides on what its focus reads', () => {
+    const { session, node, box, status } = mount();
+    act(() => session.select(['band', 'dot']));
+    expect(status()).toBe('2 elements selected');
+    act(() => session.select(['dot']));
+    expect(status()).toBe('');
+    expect(node('dot').getAttribute('aria-description')).toBe('3 of 5');
+    act(() => session.select(['title']));
+    expect(node('dot').hasAttribute('aria-description')).toBe(false);
+    expect(box('title')!.getAttribute('aria-description')).toBe('1 of 5');
+    act(() => session.editText('title'));
+    expect(status()).toBe('');
+  });
+
+  it('A4: the armed or editing box is a multi-line text field named as the element', () => {
+    const { session, box } = mount();
+    act(() => session.select(['title']));
+    const root = box('title')!;
+    expect([root.getAttribute('role'), root.getAttribute('aria-multiline'), root.getAttribute('aria-label')]).toEqual(['textbox', 'true', 'Heading 1']);
+    act(() => session.editText('title'));
+    expect(box('title')).toBe(root);
+    expect(root.getAttribute('role')).toBe('textbox');
+  });
+});
+
+function cellsOf(doc: Doc): string[] {
+  return readFlat(doc, 's', false)
+    .filter((e) => e.tag === 'th' || e.tag === 'td')
+    .map((e) => e.id);
+}

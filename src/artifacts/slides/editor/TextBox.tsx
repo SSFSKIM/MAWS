@@ -30,6 +30,7 @@ import { hexColor, httpsHref, slideTextExtensions, type Gesture } from './text-s
 import { ARMED_TYPING, registerArmed } from './armed';
 import type { TextPlacement } from './session';
 import { isCell, nextCell, slideTree, tableOf } from './transform/selection';
+import { elementName } from './names';
 import { tableRow } from '../writers-elements';
 import './textbox.css';
 
@@ -138,7 +139,8 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
       injectCSS: false, // textbox.css: Tiptap's sheet would turn ligatures off, unlike the drawn slide
       enableCoreExtensions: { delete: false, drop: false },
       editorProps: {
-        attributes: { class: 'deck-textbox', spellcheck: 'true' },
+        // P4-B2 (D15 A4): the armed or editing box is a multi-line text field named as the element is
+        attributes: { class: 'deck-textbox', spellcheck: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-label': textName(session.doc, slideId, elementId) },
         handleDOMEvents: {
           // the Edit menu's undo and redo reach a contenteditable as these; the deck's stack takes them
           beforeinput: (_view, event) => {
@@ -299,6 +301,12 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
 
   if (!mounted || readOnly || armed) return null;
   return <MarkBar ref={bar} editor={mounted.editor} node={mounted.node} session={session} refused={refused} />;
+}
+
+/** P4-B2 (D15 A4): the text box's name, the element's (its type class, else its kind), as the inspector titles it. */
+function textName(doc: Doc, slideId: string, elementId: string): string {
+  const e = slideTree(doc, slideId).element(elementId);
+  return e ? elementName(e) : '';
 }
 
 /** ARMED's hidden caret: at the start (the content is cleared by the first key) or, under `append`, at the end. */

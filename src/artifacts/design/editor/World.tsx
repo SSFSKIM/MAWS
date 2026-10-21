@@ -20,7 +20,7 @@ import type { FaceAliases } from '../../slides/canvas/faces';
 import type { Guide, Handle, Pt } from '../../slides/geometry';
 import { HANDLES } from '../../slides/geometry';
 import type { DeckSession } from '../../slides/editor/session';
-import { describeElement } from '../../slides/editor/a11y';
+import { describeElement, stageFocus } from '../../slides/editor/a11y';
 import { SlideView } from '../../slides/editor/SlideView';
 import { TextBox } from '../../slides/editor/TextBox';
 import { CLIPBOARD_TYPE, type ImportAsset } from '../../slides/editor/transform/clipboard';
@@ -336,7 +336,7 @@ export function World(props: WorldProps) {
     const doc = el.ownerDocument;
     const onPaste = (e: ClipboardEvent) => {
       const data = e.clipboardData;
-      if (doc.activeElement !== el || !data) return;
+      if (!stageFocus(el, doc.activeElement) || !data) return; // P4-B2 (A3): the world or an element's node holding the focus
       if (data.getData(CLIPBOARD_TYPE) || /<section[\s>]/i.test(data.getData('text/html'))) return; // structured: C's
       const text = data.getData('text/plain');
       const { active: board, readOnly: ro } = latest.current;
@@ -361,7 +361,7 @@ export function World(props: WorldProps) {
     const el = surface.current;
     if (!el) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.target !== el || e.defaultPrevented) return;
+      if (!stageFocus(el, e.target) || e.defaultPrevented) return; // P4-B2 (A3): the world or an element's node holding the focus
       const { boards: all, readOnly: ro, fitAll, fitSelection, removeBoard, duplicateBoard } = latest.current;
       const mod = e.metaKey || e.ctrlKey;
       const done = () => {
