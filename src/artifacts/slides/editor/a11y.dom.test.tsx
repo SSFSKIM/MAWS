@@ -2,7 +2,7 @@
 // boards for assistive technology and the keyboard, asserted on roles, names, states and the focus (never spoken
 // strings, which vary by screen reader). The live VoiceOver run is the decks round's.
 import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { newDoc, onUpdate, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { deleteElementTree, importSlide, readFlat, setAttrs, slideFile, writeDeckKeys } from '../model';
@@ -107,8 +107,8 @@ describe('P4-B2 (D15) A2 to A5: the focus follows the selection, the status says
 <table id="t" style="position:absolute; left:1300px; top:300px; width:400px"><tr id="r1"><th>A</th><td>1</td></tr></table>
 </section>`;
 
-  function mount() {
-    const doc = deck(SLIDE);
+  function mount(html = SLIDE) {
+    const doc = deck(html);
     const session = new DeckSession(doc, 0);
     const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
     const stage = container.querySelector<HTMLElement>('[data-stage-surface]')!;
@@ -116,9 +116,30 @@ describe('P4-B2 (D15) A2 to A5: the focus follows the selection, the status says
     const box = (id: string) => node(id).querySelector<HTMLElement>('.deck-textbox');
     const status = () => stage.querySelector('[role="status"][data-stage-status]')!.textContent;
     const notes = container.querySelector<HTMLTextAreaElement>('.deck-notes-field')!;
+    const toolbar = container.querySelector<HTMLElement>('.deck-toolbar')!;
+    const order = () => Array.from(node('title').parentElement!.children, (n) => (n as HTMLElement).dataset.eid);
     act(() => stage.focus());
     const key = (init: KeyboardEventInit) => act(() => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
-    return { doc, session, stage, node, box, status, notes, key };
+    return { doc, session, stage, node, box, status, notes, toolbar, order, key };
+  }
+
+  // Chromium drops the focus to the body when the focused node, or a node holding it, is moved (`insertBefore`, as the
+  // canvas reorders its nodes); happy-dom keeps it. Emulated for one test, restored after it.
+  function chromiumMoves() {
+    const insertBefore = Node.prototype.insertBefore;
+    let dropped = 0;
+    Node.prototype.insertBefore = function <T extends Node>(this: Node, moved: T, before: Node | null): T {
+      const active = moved.ownerDocument?.activeElement;
+      if (moved.isConnected && active instanceof HTMLElement && moved.contains(active)) {
+        active.blur();
+        dropped++;
+      }
+      return insertBefore.call(this, moved, before) as T;
+    };
+    onTestFinished(() => {
+      Node.prototype.insertBefore = insertBefore;
+    });
+    return { dropped: () => dropped };
   }
 
   it('A3: the armed box for one text element, the node for one other, the stage for several or none; a focus on a node selects it', () => {
@@ -170,6 +191,45 @@ describe('P4-B2 (D15) A2 to A5: the focus follows the selection, the status says
     act(() => session.select(['title']));
     key({ key: 'Escape' }); // ARMED at the top level: nothing selected
     expect(document.activeElement).toBe(stage);
+  });
+
+  it('A5: a focused node the canvas moves (⌘], Chromium dropping its focus to the body) takes the focus back, the keys with it', () => {
+    const moves = chromiumMoves();
+    const { session, node, order, key } = mount();
+    act(() => session.select(['band']));
+    expect(document.activeElement).toBe(node('band'));
+    const before = order();
+    key({ key: ']', metaKey: true });
+    expect(order()).not.toEqual(before);
+    expect(moves.dropped()).toBe(1);
+    expect([session.snapshot().selection, session.snapshot().keyboard, document.activeElement]).toEqual([['band'], 'stage', node('band')]);
+    const again = order();
+    key({ key: ']', metaKey: true }); // the element keys still reach the stage
+    expect(order()).not.toEqual(again);
+    expect(document.activeElement).toBe(node('band'));
+  });
+
+  it('A5: the armed box of a pinned text element the canvas moves (⌘]) takes the focus back', () => {
+    const moves = chromiumMoves();
+    const { session, box, order, key } = mount(SLIDE.replace('<div id="band"', '<p id="note" style="position:absolute; left:100px; top:500px; width:400px">Note</p>\n<div id="band"'));
+    act(() => session.select(['note']));
+    expect(document.activeElement).toBe(box('note'));
+    const before = order();
+    key({ key: ']', metaKey: true });
+    expect(order()).not.toEqual(before);
+    expect(moves.dropped()).toBe(1);
+    expect(armedBox(session)?.elementId).toBe('note');
+    expect(document.activeElement).toBe(box('note'));
+  });
+
+  it('A5: a focus the owner took away is never pulled back: after a press outside the stage, a write leaves it on the body', () => {
+    const { doc, session, node, toolbar } = mount();
+    act(() => session.select(['band']));
+    expect(document.activeElement).toBe(node('band'));
+    act(() => void toolbar.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })));
+    act(() => node('band').blur()); // the press landed on chrome that takes no focus: the body has it, with no focusin
+    act(() => setAttrs(doc, 's', 'dot', { kind: 'rect' }, 'remote')); // any write
+    expect([session.snapshot().keyboard, document.activeElement]).toEqual(['stage', document.body]);
   });
 
   it('A2: the status says a multi-selection’s count and nothing else; one element’s place rides on what its focus reads', () => {

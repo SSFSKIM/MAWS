@@ -166,7 +166,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
   // own (the surface, a node, the box, or nothing once what held it went): the armed box for one text target (it takes
   // the focus as it mounts), the element's node for one other element (any one element where nothing is edited), the
   // stage for several or none. A text edit ending (Escape, a click elsewhere) brings the keys back this way too.
-  const lastOwn = useRef<Element | null>(null); // what last held the stage's own focus
+  const lastOwn = useRef<Element | null>(null); // what last held the stage's own focus, while nothing took it since (null after a departure)
   const pressing = useRef(false); // the overlay focusing the stage for a press, whose selection then takes the focus
   const follow = useCallback(
     (el: HTMLElement | null) => {
@@ -190,12 +190,14 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     [canvas, session, slideId, readOnly],
   );
   useEffect(() => follow(surface.current), [follow, surface, selection, state.keyboard, editing, armedId]);
-  // A5: a node that held the focus made anew or gone with the selection unchanged (an agent's change) gives it back
+  // A5: the stage's own focus fallen to the body with the selection unchanged gives it back: its node made anew or gone
+  // (an agent's change), or moved (Chromium drops the focus of a node `insertBefore` moves, as the canvas reorders them
+  // for ⌘]). A departure (a focus elsewhere, a press outside the stage) clears `lastOwn`, so it is never undone.
   useEffect(() => {
     const own = lastOwn.current;
     const el = surface.current;
     const doc = el?.ownerDocument;
-    if (own && !own.isConnected && doc && (doc.activeElement === null || doc.activeElement === doc.body)) follow(el);
+    if (own && doc && (doc.activeElement === null || doc.activeElement === doc.body)) follow(el);
   }, [follow, surface, version, laidOut]);
   // A2: a single selection's place among its siblings ("2 of 5"), on the node or the text box the focus reads
   const described = useRef<Element | null>(null);
@@ -556,6 +558,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       const at = e.target;
       const ours = stageFocus(el, at) || (at instanceof Element && el.contains(at) && at.closest('.deck-textbox') !== null);
       session.setKeyboard(ours ? 'stage' : 'away');
+      if (!ours) lastOwn.current = null; // A5: a departure, never undone
       if (!ours || !(at instanceof Element)) return;
       lastOwn.current = at;
       // P4-B2 (A3): a focus brought to an element's node (assistive technology's) selects it, so its focus and Delete agree
@@ -567,6 +570,11 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       // the stage entered from outside it (Tab, F6): the focus goes on to the selection's target
       const from = e.relatedTarget;
       if (at === el && !pressing.current && !(from instanceof Node && el.contains(from))) follow(el);
+    };
+    // A5: a press outside the stage is a departure too: on chrome that takes no focus it leaves the focus on the body with
+    // no focusin
+    const onPressAway = (e: PointerEvent) => {
+      if (!(e.target instanceof Node && el.contains(e.target))) lastOwn.current = null;
     };
 
     const doc = el.ownerDocument;
@@ -609,6 +617,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     const armedPaste = armedClip(paste);
     el.addEventListener('keydown', onArmedKey, true);
     doc.addEventListener('focusin', onFocusIn);
+    doc.addEventListener('pointerdown', onPressAway, true);
     el.addEventListener('copy', armedCopy, true);
     el.addEventListener('cut', armedCut, true);
     el.addEventListener('paste', armedPaste, true);
@@ -622,6 +631,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     return () => {
       el.removeEventListener('keydown', onArmedKey, true);
       doc.removeEventListener('focusin', onFocusIn);
+      doc.removeEventListener('pointerdown', onPressAway, true);
       el.removeEventListener('copy', armedCopy, true);
       el.removeEventListener('cut', armedCut, true);
       el.removeEventListener('paste', armedPaste, true);
