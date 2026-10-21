@@ -40,6 +40,7 @@ export interface OverlayProps {
   importAsset?: ImportAsset;
   /** The text box for a text element edited in place, drawn inside the overlay (made anew when its node is). */
   renderText?: (elementId: string, canvas: SlideCanvas) => ReactNode;
+  pins?: boolean; // P4-B2 (D16): the comment pins, the deck's; a design's world draws every board's in one layer of its own
 }
 
 // a key per drawn node, so the text box mounts again on a node the canvas made anew (a tag an agent changed)
@@ -67,7 +68,7 @@ interface Pending {
   pointerId: number;
 }
 
-export function Overlay({ session, canvas, slideId, scale, readOnly, surface, frame, onNotice, renderText, artifactId, importAsset }: OverlayProps) {
+export function Overlay({ session, canvas, slideId, scale, readOnly, surface, frame, onNotice, renderText, artifactId, importAsset, pins = true /* P4-B2 */ }: OverlayProps) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   const version = useDocVersion(session);
   const selection = state.selection;
@@ -444,7 +445,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       {shown?.ghost && <div className="deck-ghost" style={boxStyle(shown.ghost)} />}
       {shown?.insertion && <div className="deck-insertion" data-insertion style={boxStyle(shown.insertion)} />}
       {editing !== null && canvas && renderText && <Fragment key={keyOf(canvas.node(editing))}>{renderText(editing, canvas)}</Fragment>}
-      {canvas && <CommentPins canvas={canvas} slideId={slideId} scale={scale} version={version} />}
+      {pins && canvas && <CommentPins canvas={canvas} slideId={slideId} scale={scale} version={version} />}
     </div>
   );
 }

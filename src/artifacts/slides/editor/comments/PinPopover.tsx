@@ -15,7 +15,7 @@
 // thread resolved, the element deleted (its threads stay, orphans in the rail, V9), or (the deck) the slide changed;
 // the drafts stay (V5, V8). The keyboard goes into the popover when it opens and to the pin when it closes, never to
 // the stage (the stage's keyboard is the state machine's, P4-B2 Decision Log 9).
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { pinOf, placeCard, type CardStyle } from '../../../comments/placement';
 import { ThreadPopover } from '../../../comments/ThreadPopover';

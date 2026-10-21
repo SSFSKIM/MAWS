@@ -470,6 +470,7 @@ export function World(props: WorldProps) {
               artifactId={artifactId}
               importAsset={importAsset}
               renderText={(elementId, canvas) => <TextBox session={session} canvas={canvas} slideId={active.id} elementId={elementId} readOnly={!activeEditable} />}
+              pins={false} // P4-B2 (D16): the comment frame draws every board's pins, this one's too, in one layer
             />,
           )}
         </div>

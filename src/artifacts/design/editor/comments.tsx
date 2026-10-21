@@ -4,29 +4,39 @@
 // thread at the selected (else the active) board's ROOT, quoting its title. Both open P2's card through B's surface, the
 // element's through C's controller with the surface's passage renamed for a board (its title, not a slide number) and
 // both naming their target (`artifactTarget`, Decision Log 12) for the agent's lead. Showing a board's thread selects
-// the board's frame. C's pins, rail, Resolve and Reopen, reply and orphan reading are C's as they are; this module adds
-// the comment frame's locator over every board (an element's box on its board's canvas, a board's frame), the boards'
-// own pins at their top-right corners, and the element pins of every board but the active one, C's pins (`CommentPins`)
-// over each such board's own canvas: the active board's are its overlay's, the one interaction overlay, so an element
-// pins once wherever it is, including on a board another replica moved it to while this one shows another. Thread
-// writes carry C's comments origin, outside undo.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+// the board's frame. C's rail, Resolve and Reopen, reply and orphan reading are C's as they are; this module adds the
+// comment frame's locator over every board (an element's box on its board's canvas, a board's frame). Thread writes
+// carry C's comments origin, outside undo.
+//
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; the prior art's V1 to V15): every pin of the
+// world is in one layer here, the active board's included (its overlay draws none), so an element pins once wherever it
+// is, including on a board another replica moved it to while this one shows another: each board's own pin at its
+// frame's top-right corner and each commented element's at its own, in board order and then the board's reading order.
+// Pins under 32 screen px apart merge into one count at their centroid (`clusterPins`), whose press fits its members
+// (V15). A pin opens C's popover (PinPopover.tsx), which follows its pin through a pan or a zoom and hides while the pin
+// is outside the world's visible rect (V6); the compose card stands at its pin and hides under a popover, as the deck's.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import { clusterPins } from '../../comments/pin-clusters';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from '../../document/editor/comments/surface';
 import type { SlideCanvas } from '../../slides/canvas';
-import { ROOT } from '../../slides/model';
-import { addThread, discardThread, elementQuote, getThread, newThreadId, reopen, reply, resolve, type DeckThread } from '../../slides/threads';
+import type { Box } from '../../slides/geometry';
+import { resolveAnchor, ROOT } from '../../slides/model';
+import { addThread, discardThread, elementQuote, getThread, newThreadId, reopen, reply, resolve, threadStatus, type DeckThread } from '../../slides/threads';
+import { commentKeys, PIN_PX } from '../../slides/editor/comments/CommentFrame';
 import { COMMENTS_ORIGIN, HUMAN_AUTHOR, useDeckComments, type DeckCommentsApi } from '../../slides/editor/comments/controller';
 import { COMMENTS_COPY } from '../../slides/editor/comments/copy';
 import type { CommentsRailLabels } from '../../slides/editor/comments/CommentsRail';
-import { CommentPins } from '../../slides/editor/comments/Pins';
-import { useDeckThreadStates, useOpenThreadCount } from '../../slides/editor/comments/use-threads';
+import { PinPopover } from '../../slides/editor/comments/PinPopover';
+import { inSlideOrder, PinButton, pinNode, threadsByElement } from '../../slides/editor/comments/Pins';
+import { useOpenDeckThreads, useOpenThreadCount } from '../../slides/editor/comments/use-threads';
 import type { DeckSession } from '../../slides/editor/session';
+import { measure } from '../../slides/editor/transform/measure';
 import { useDocVersion } from '../../slides/editor/transform/use-doc-version';
 import * as Y from '../../yjs/slides';
 import type { BoardFrame } from '../canvas';
 import { boardLabel, type BoardView } from './boards';
 import { DESIGN_COPY as C } from './copy';
-import type { DesignView } from './viewport';
+import { unionRect, type DesignView, type Rect } from './viewport';
 import '../../slides/editor/comments/comments.css';
 
 /** How the chrome names a board from the model (its title, else its id). */
@@ -57,7 +67,7 @@ export function useDesignComments({ session, view, surface, author = HUMAN_AUTHO
     [surface, session],
   );
   const deck = useDeckComments({ session, surface: elementSurface, author, readOnly, openRail });
-  const { setActive } = deck;
+  const { setActive, closePopover, openPopover, resumeDraft } = deck;
 
   const commentBoard = useCallback(
     (boardId: string): string | null => {
@@ -68,18 +78,21 @@ export function useDesignComments({ session, view, surface, author = HUMAN_AUTHO
       const threadId = newThreadId();
       addThread(doc, { threadId, slideId: boardId, elementId: ROOT, quote, by: author.actor, at: author.now() }, COMMENTS_ORIGIN);
       setActive(threadId);
+      closePopover(); // P4-B2: the card it opens shows
       surface.opened({ threadId, tabId: boardId, tabTitle: labelOf(session, boardId), quote, artifactTarget: 'board' });
       return threadId;
     },
-    [surface, readOnly, session, author, setActive],
+    [surface, readOnly, session, author, setActive, closePopover],
   );
   const comment = useCallback((): string | null => {
+    const kept = resumeDraft(); // P4-B2: the artifact's one draft first (X36)
+    if (kept !== null) return kept;
     const { selection } = session.snapshot();
     if (selection.length === 1) return deck.comment();
     if (selection.length > 0) return null;
     const board = boardTarget(session, view);
     return board === null ? null : commentBoard(board);
-  }, [session, view, deck, commentBoard]);
+  }, [session, view, deck, commentBoard, resumeDraft]);
   const show = useCallback(
     (thread: Pick<DeckThread, 'id' | 'slideId' | 'elementId'>) => {
       if (thread.elementId !== ROOT) {
@@ -92,10 +105,11 @@ export function useDesignComments({ session, view, surface, author = HUMAN_AUTHO
         session.select([]);
         view.selectFrame(thread.slideId);
         reveal(thread.slideId);
+        if (threadStatus(session.doc, thread.id) === 'open') openPopover({ slideId: thread.slideId, elementId: ROOT, threadId: thread.id }); // P4-B2 (V11)
       }
       setActive(thread.id);
     },
-    [deck, session, view, reveal, setActive],
+    [deck, session, view, reveal, setActive, openPopover],
   );
   return useMemo(() => ({ ...deck, comment, show }), [deck, comment, show]);
 }
@@ -145,7 +159,7 @@ export function DesignCommentButtons({ api, view, railOpen, onToggleRail }: { ap
 
 interface FrameProps {
   api: DeckCommentsApi;
-  /** The board C's overlay is on (its element pins are the overlay's). */
+  /** The board the stage's overlay acts on (P4-B2: its pins are this frame's, as every board's). */
   activeId: string | null;
   surface: DocumentComments | undefined;
   view: DesignView;
@@ -156,17 +170,19 @@ interface FrameProps {
 
 /**
  * The frame around the world P2's card is drawn over (C's `CommentFrame` for a world of boards): the card's thread is
- * located on whichever board it is on, an element by its node on that board's canvas, a board by its frame on screen;
- * the layout key moves with the view, every update and every board's layout pass. ⌥⌘M comments. The boards' pins.
+ * located on whichever board it is on, at its pin (P4-B2); the layout key moves with the view, every update and every
+ * board's layout pass. ⌥⌘M comments, ⌥⌘⇧J hides the pins. Every pin of the world, and the pin popover.
  */
 export function DesignCommentFrame({ api, activeId, surface, view, boards, canvases, children }: FrameProps) {
-  const { session, author, readOnly, setActive } = api;
+  void activeId; // P4-B2: the active board's pins are this frame's too
+  const { session, author, readOnly, setActive, setComposing, pinMoves } = api;
   const frame = useRef<HTMLDivElement>(null);
   const version = useDocVersion(session);
-  // DL39's bounded wave: the view reaches this frame only while something drawn here follows it, an open thread's pin
-  // or the card on screen (its thread active); else a pan or a zoom renders nothing here and asks nothing of the host
-  const threads = useDeckThreadStates(session.doc);
-  const follows = api.active !== null || threads.some((t) => t.status === 'open' && t.live);
+  // DL39's bounded wave: the view reaches this frame only while something drawn here follows it, an open thread's pin,
+  // the card on screen (its thread active) or (P4-B2) the popover; else a pan or a zoom renders nothing here and asks
+  // nothing of the host
+  const open = useOpenDeckThreads(session.doc);
+  const follows = api.active !== null || api.popover !== null || open.some((t) => resolveAnchor(session.doc, t).live);
   const at = useSyncExternalStore(view.subscribe, () => {
     const v = follows ? view.snapshot().viewport : null;
     return v ? `${v.zoom}:${v.x}:${v.y}` : '';
@@ -195,6 +211,7 @@ export function DesignCommentFrame({ api, activeId, surface, view, boards, canva
     const offs = [...canvases.values()].map((canvas) => canvas.onLayout(moved));
     return () => offs.forEach((off) => off());
   }, [canvases, moved]);
+  useEffect(() => pinMoves.subscribe(moved), [pinMoves, moved]); // P4-B2: the card stands at its pin
 
   const latest = useRef(canvases);
   useLayoutEffect(() => {
@@ -205,25 +222,28 @@ export function DesignCommentFrame({ api, activeId, surface, view, boards, canva
     const writable = (threadId: string) => !readOnly && getThread(doc, threadId) !== null;
     return {
       doc,
-      locate: (threadId) => threadRect(latest.current, frame.current, getThread(doc, threadId)),
+      locate: (threadId) => pinRect(latest.current, frame.current, getThread(doc, threadId)), // P4-B2: at the pin
       setActive,
       resolve: (threadId) => void (writable(threadId) && resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN)),
       reopen: (threadId) => void (writable(threadId) && reopen(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN)),
       record: (threadId, body) => void (writable(threadId) && reply(doc, threadId, { id: `${threadId}:${newThreadId()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN)),
       discard: (threadId) => void (!readOnly && discardThread(doc, threadId, COMMENTS_ORIGIN)),
       focus: () => frame.current?.querySelector<HTMLElement>('[data-stage-surface]')?.focus({ preventScroll: true }),
+      hosting: setComposing, // P4-B2
     };
-  }, [session, readOnly, author, setActive]);
+  }, [session, readOnly, author, setActive, setComposing]);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.code !== 'KeyM' || !event.altKey || !(event.metaKey || event.ctrlKey) || event.shiftKey) return;
-    if (api.comment() !== null) event.preventDefault();
-  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => commentKeys(event, api);
+  const layoutKey = `${at}:${version}:${layout}`;
   return (
     <div ref={frame} className="deck-comment-frame design-comment-frame" data-design-comment-frame onKeyDown={onKeyDown}>
       {children}
-      {viewport && <BoardPins api={api} threads={threads} activeId={activeId} boards={boards} canvases={canvases} version={version} zoom={viewport.zoom} x={viewport.x} y={viewport.y} />}
-      {surface?.overlay({ ...reach, layoutKey: `${at}:${version}:${layout}` })}
+      {viewport && !api.pinsHidden && <WorldPins api={api} threads={open} boards={boards} canvases={canvases} view={view} version={version} zoom={viewport.zoom} x={viewport.x} y={viewport.y} />}
+      {/* P4-B2: the card's host stays mounted under an open popover, hidden */}
+      <div className="deck-comment-card-slot" data-card-slot={api.popover ? 'hidden' : undefined}>
+        {surface?.overlay({ ...reach, layoutKey })}
+      </div>
+      <PinPopover api={api} frame={frame} layoutKey={layoutKey} />
     </div>
   );
 }
@@ -238,54 +258,106 @@ function threadRect(canvases: ReadonlyMap<string, SlideCanvas>, frame: HTMLEleme
   return { x: r.left - f.left, y: r.top - f.top, width: r.width, height: r.height };
 }
 
+/** P4-B2: where a thread's card stands: its pin as drawn, else where its pin will be (the top-right corner of its element or board). */
+function pinRect(canvases: ReadonlyMap<string, SlideCanvas>, frame: HTMLElement | null, thread: { slideId: string; elementId: string } | null): PassageRect | null {
+  const at = threadRect(canvases, frame, thread);
+  if (!at || !frame || !thread) return null;
+  const pin = pinNode(frame, thread);
+  if (!pin) return { x: at.x + at.width + 2, y: at.y - PIN_PX, width: PIN_PX, height: PIN_PX };
+  const r = pin.getBoundingClientRect();
+  const f = frame.getBoundingClientRect();
+  return { x: r.left - f.left, y: r.top - f.top, width: r.width, height: r.height };
+}
+
+interface WorldPin {
+  slideId: string;
+  elementId: string;
+  threads: readonly DeckThread[];
+  /** The pin's point on screen, relative to the frame (its target's top-right corner). */
+  x: number;
+  y: number;
+  /** Its target in world px, for a cluster's fit. */
+  world: Rect;
+}
+
 /**
- * One pin per board carrying an open board-level thread, at its frame's top-right corner on screen; and C's element pins
- * on each inactive board carrying an open element thread, in a box at the board's place on screen.
+ * P4-B2 (D16; V1, V13, V15): every pin of the world in one layer, in screen px: each board's own pin at its frame's
+ * top-right corner and each commented element's at its top-right as its board's canvas draws it (measured in board px,
+ * only the commented elements, again at every update, layout pass and zoom; a pan moves them with no measure), in board
+ * order, a board's own pin before its elements' in their reading order. Pins under 32 screen px apart are one count at
+ * their centroid, whose press fits its members.
  */
-function BoardPins(props: { api: DeckCommentsApi; threads: ReturnType<typeof useDeckThreadStates>; activeId: string | null; boards: readonly BoardView[]; canvases: ReadonlyMap<string, SlideCanvas>; version: number; zoom: number; x: number; y: number }) {
-  const { api, threads, activeId, boards, canvases, version, zoom, x, y } = props;
-  const { byBoard, elementBoards } = useMemo(() => {
-    const out = new Map<string, typeof threads>();
-    const elements = new Set<string>();
-    for (const t of threads) {
-      if (t.status !== 'open' || !t.live) continue;
-      if (t.elementId === ROOT) out.set(t.slideId, [...(out.get(t.slideId) ?? []), t]);
-      else elements.add(t.slideId);
+function WorldPins(props: { api: DeckCommentsApi; threads: readonly DeckThread[]; boards: readonly BoardView[]; canvases: ReadonlyMap<string, SlideCanvas>; view: DesignView; version: number; zoom: number; x: number; y: number }) {
+  const { api, threads, boards, canvases, view, version, zoom, x, y } = props;
+  const drawn = useMemo(() => boards.filter((b): b is BoardView & { frame: BoardFrame } => b.frame !== null), [boards]);
+  // the open threads by board, then by element (a board's own under ROOT)
+  const byBoard = useMemo(() => new Map(drawn.map((b) => [b.id, threadsByElement(threads, b.id)])), [drawn, threads]);
+  // each board's commented elements as its canvas draws them, in its reading order, in board px
+  const [boxes, setBoxes] = useState<ReadonlyMap<string, readonly [string, Box][]>>(new Map());
+  const [laidOut, setLaidOut] = useState(0);
+  useEffect(() => {
+    const offs = [...canvases.values()].map((canvas) => canvas.onLayout(() => setLaidOut((n) => n + 1)));
+    return () => offs.forEach((off) => off());
+  }, [canvases]);
+  useLayoutEffect(() => {
+    const next = new Map<string, [string, Box][]>();
+    for (const [boardId, elements] of byBoard) {
+      const canvas = canvases.get(boardId);
+      const ids = [...elements.keys()].filter((id) => id !== ROOT);
+      if (!canvas || ids.length === 0) continue;
+      next.set(
+        boardId,
+        inSlideOrder(canvas, ids).flatMap((id): [string, Box][] => {
+          const m = measure(canvas, id, zoom);
+          return m ? [[id, m.bounds]] : [];
+        }),
+      );
     }
-    return { byBoard: out, elementBoards: elements };
-  }, [threads]);
-  const frames = new Map(boards.flatMap((b): [string, BoardFrame][] => (b.frame ? [[b.id, b.frame]] : [])));
-  const passive = [...elementBoards].filter((id) => id !== activeId && frames.has(id) && canvases.has(id));
-  if (byBoard.size === 0 && passive.length === 0) return null;
+    setBoxes(next);
+  }, [byBoard, canvases, zoom, version, laidOut]);
+  const { pinMoves } = api;
+  useLayoutEffect(() => pinMoves.placed(), [boxes, zoom, x, y, pinMoves]);
+
+  const pins: WorldPin[] = drawn.flatMap((b) => {
+    const elements = byBoard.get(b.id);
+    if (!elements) return [];
+    const f = b.frame;
+    const own = elements.get(ROOT);
+    const board: WorldPin[] = own ? [{ slideId: b.id, elementId: ROOT, threads: own, x: x + (f.x + f.w) * zoom, y: y + f.y * zoom, world: { x: f.x, y: f.y, w: f.w, h: f.h } }] : [];
+    const placed = (boxes.get(b.id) ?? []).flatMap(([elementId, box]): WorldPin[] => {
+      const list = elements.get(elementId);
+      return list ? [{ slideId: b.id, elementId, threads: list, x: x + (f.x + box.x + box.w) * zoom, y: y + (f.y + box.y) * zoom, world: { x: f.x + box.x, y: f.y + box.y, w: box.w, h: box.h } }] : [];
+    });
+    return [...board, ...placed];
+  });
+  if (pins.length === 0) return null;
+  const clusters = clusterPins(pins.map((p, i) => ({ id: String(i), x: p.x, y: p.y })));
   return (
     <div className="design-board-pins">
-      {passive.map((boardId) => {
-        const f = frames.get(boardId)!;
-        return (
-          <div key={`elements:${boardId}`} className="design-board-element-pins" data-board-pins-of={boardId} style={{ left: x + f.x * zoom, top: y + f.y * zoom, width: f.w * zoom, height: f.h * zoom }}>
-            <CommentPins canvas={canvases.get(boardId)!} slideId={boardId} scale={zoom} version={version} />
-          </div>
-        );
-      })}
-      {[...byBoard].map(([boardId, list]) => {
-        const f = frames.get(boardId);
-        if (!f) return null;
-        const latest = list[list.length - 1]!;
-        const style: CSSProperties = { left: x + (f.x + f.w) * zoom, top: y + f.y * zoom };
+      {clusters.map((cluster) => {
+        const members = cluster.ids.map((i) => pins[Number(i)]!);
+        if (members.length === 1) {
+          const p = members[0]!;
+          const data: Record<`data-${string}`, string> = p.elementId === ROOT ? { 'data-board-pin': p.slideId } : { 'data-comment-pin': p.elementId, 'data-pin-board': p.slideId };
+          return <PinButton key={`${p.slideId}/${p.elementId}`} api={api} slideId={p.slideId} elementId={p.elementId} threads={p.threads} style={{ left: p.x, top: p.y }} data={data} />;
+        }
+        const count = members.reduce((n, p) => n + p.threads.length, 0);
+        const label = C.pinCluster(count);
         return (
           <button
-            key={boardId}
+            key={members.map((p) => `${p.slideId}/${p.elementId}`).join(' ')}
             type="button"
             className="deck-comment-pin"
-            data-board-pin={boardId}
-            data-threads={list.map((t) => t.id).join(' ')}
-            data-active={list.some((t) => t.id === api.active) || undefined}
-            aria-label={COMMENTS_COPY.pin(latest.quote, list.length)}
-            title={COMMENTS_COPY.pin(latest.quote, list.length)}
-            style={style}
-            onClick={() => api.openRail(latest.id)}
+            data-pin-cluster={members.map((p) => `${p.slideId}/${p.elementId}`).join(' ')}
+            aria-label={label}
+            title={label}
+            style={{ left: cluster.x, top: cluster.y }}
+            onClick={() => {
+              const rect = unionRect(members.map((p) => p.world));
+              if (rect) view.fitTo(rect);
+            }}
           >
-            {list.length > 1 ? list.length : ''}
+            {count}
           </button>
         );
       })}
