@@ -4,7 +4,10 @@
 // Markdown. Live thinking is its label alone, as MAWS draws a thinking block with no text: the engine's live
 // `thinking` chunks carry none (DC2's walk on 2.1.300, composite 2038124c), and where it records thinking as omitted
 // the settled row holds none either. A tool call's input is not drawn while it streams, as MAWS draws none: the call's row appears when its
-// transcript row lands. Their ids are the block's identity.
+// transcript row lands. Except a message tool's (`mcp__maws__message`, `mcp__to-human__message`): its input is the
+// message itself, which the session writes to its owner as it would write a `<message>` span, so it is drawn as it
+// streams (`message-input.ts`) as the row MAWS draws for the call once it lands, a `to_human` row (P4-R7), its result
+// still to come. Their ids are the block's identity.
 //
 // The report's bridge (DC9; the composite's §9.1, "Streaming in the report"). MAWS's report reads turns: its projection
 // groups rows by `turnId` and takes a streaming text's mark from the open turn's live buffers in its own store, which
@@ -13,12 +16,16 @@
 // model is answering, its prompt's or the notification's that woke it — and a text whose words already carry a mark is
 // handed over as a settled text of the same words (`live` off, its marks closed): the projection then reads the mark
 // from the text, folds the turn into its working record, and keeps the mark in view, while an unmarked text keeps its
-// live drawing and folds inside the record like any unmarked text. Without a turn (a subagent's pane, which draws no
-// report) the rows belong to no turn, as DC6 drew them.
+// live drawing and folds inside the record like any unmarked text. A message tool's streaming message marks its turn as
+// its landed row does (MAWS's projection reads a `to_human` row as a mark). Without a turn (a subagent's pane, which
+// draws no report) the rows belong to no turn, as DC6 drew them.
+import type { ToolUseId } from '@shared/graph/ids';
+import { isMessageTool } from '@shared/owner/message-call';
 import { marksOfText } from '../../../../../src/renderer/src/transcript/model/owner-marks';
 import type { Row, RowId, TurnId } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { StreamBlock } from '../stream/layer';
 import { liveMarkdown } from './live-marks';
+import { streamingMessageText } from './message-input';
 
 const rowId = (block: StreamBlock) => `desk-stream:${block.turnId}:${block.agentId ?? 'main'}:${block.step}:${block.index}` as RowId;
 
@@ -38,6 +45,9 @@ export function streamingRows(blocks: readonly StreamBlock[], since: (block: Str
       rows.push({ id: rowId(block), turnId, at: since(block), kind: 'assistant_text', messageUuid: null, blockIndex: block.index, markdown, live, phase: 'answer', model: null });
     } else if (block.kind === 'thinking') {
       rows.push({ id: rowId(block), turnId, at: since(block), kind: 'thinking', messageUuid: null, text: '', live: true, durationMs: null });
+    } else if (isMessageTool(block.toolName) && block.toolUseId !== null) {
+      const text = streamingMessageText(block.text);
+      if (text !== null) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'to_human', toolUseId: block.toolUseId as ToolUseId, text, pending: true });
     }
   }
   return rows;
