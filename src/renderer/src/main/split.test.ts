@@ -7,7 +7,7 @@ const sessionRight = { left: false, right: true };
 const none = { left: false, right: false };
 
 describe('splitDrag: the pointer-implied width, held, armed or followed', () => {
-  it('names the provisional constants', () => {
+  it('names the constants LC-3 confirmed', () => {
     expect([S_MIN_PX, A_MIN_PX, FLOAT_THRESHOLD_PX]).toEqual([320, 320, 160]);
   });
 

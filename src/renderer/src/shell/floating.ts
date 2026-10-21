@@ -168,9 +168,10 @@ useLayout.subscribe((state, before) => {
   if (split !== null && currentSet(state.main).focusedPane === split.pane && currentSet(before.main).focusedPane !== split.pane) openCard();
 });
 
-// P4-B3 (its Decision Log 13; Codex forces its chat open on pending input): a pill opens when its session gains an open
-// request that asks for an answer (the kinds the composer docks), one no pending list held before. A pill closed while
-// that request is still pending stays closed for it; the next new one raises it again. It never takes the keyboard.
+// P4-B3 (its Decision Log 13; Codex: elicitations force its card open (source); a command approval did not (LC-3, live)):
+// a pill opens when its session gains an open request that asks for an answer (the kinds the composer docks), one no
+// pending list held before. A pill closed while that request is still pending stays closed for it; the next new one
+// raises it again. It never takes the keyboard.
 const RAISING: ReadonlySet<AttentionKind> = new Set<AttentionKind>(['permission', 'question', 'plan', 'elicitation', 'dialog']);
 let raised: { session: AppSessionId | null; ids: ReadonlySet<string> } = { session: null, ids: new Set() };
 function raiseOnRequest(): void {
@@ -210,14 +211,20 @@ useLayout.subscribe((state) => {
 
 export const CARD_MARGIN = 16; // from the region body's right and bottom edges, and the least room kept on every side
 export const CARD_MIN = { w: 360, h: 240 };
-const CARD_DEFAULT = { w: 420, h: 640, heightShare: 0.6 };
+// The default per region. The panel's card: 420 × min(60 % of its body, 640) (P3-G §D1.4). The main split's: 560 × 640,
+// Codex's floating chat (LC-3, 2026-10-21: seen 560 wide, and as tall as its window allowed), the main area being wide.
+const CARD_DEFAULT: Record<CardHost, { w: number; h: number; heightShare: number }> = {
+  panel: { w: 420, h: 640, heightShare: 0.6 },
+  split: { w: 560, h: 640, heightShare: 1 },
+};
 
 // The card's size in a body of `bounds` (the panel region under its header, or the main area's content row): the stored
-// size, else 420 × min(60 % of the body, 640); no smaller than the minimum unless the body is, no larger than the body
-// less the margins.
-export function placeCard(stored: FloatingCardSize | undefined, bounds: { width: number; height: number }): FloatingCardSize {
+// size, else the region's default; no smaller than the minimum unless the body is, no larger than the body less the
+// margins.
+export function placeCard(stored: FloatingCardSize | undefined, bounds: { width: number; height: number }, host: CardHost = 'panel'): FloatingCardSize {
   const fit = (value: number, min: number, max: number) => Math.round(Math.max(Math.min(min, max), Math.min(value, max)));
-  const base = stored ?? { w: CARD_DEFAULT.w, h: Math.min(bounds.height * CARD_DEFAULT.heightShare, CARD_DEFAULT.h) };
+  const d = CARD_DEFAULT[host];
+  const base = stored ?? { w: d.w, h: Math.min(bounds.height * d.heightShare, d.h) };
   return { w: fit(base.w, CARD_MIN.w, bounds.width - 2 * CARD_MARGIN), h: fit(base.h, CARD_MIN.h, bounds.height - 2 * CARD_MARGIN) };
 }
 
@@ -228,6 +235,9 @@ export function placeCard(stored: FloatingCardSize | undefined, bounds: { width:
 // the card to the right); the pill moves into the browser's chrome row (the coordinator's ruling on P3-G M2: the page
 // keeps its full height). The panel's pane does this under the panel's card, a main tab's pane under the split's.
 export const COLUMN_PAGE_MIN = 280; // the page keeps at least this much beside the column
+// The column's default width over either surface: P3-G's 420 (LC-3 kept it: Codex's 560 is a chat card's width, and a
+// page should not lose more of itself to the column).
+const COLUMN_DEFAULT_W = 420;
 
 // The region a pane of `surface` lies in has a card up: the panel's pane under the panel's card, a main pane under the
 // split's.
@@ -235,14 +245,14 @@ const hostOf = (surface: 'panel' | 'main'): CardHost => (surface === 'panel' ? '
 export const cardOver = (state: Layout, surface: 'panel' | 'main'): boolean => cardHost(state) === hostOf(surface);
 
 // The column the open card asks of a `surface` pane under it (null while no card is open over that surface): the live
-// drag's width, else the stored width of what the card sits over, else the card's default; never under the card's
+// drag's width, else the stored width of what the card sits over, else the column's default; never under the card's
 // minimum (a width stored while the page's floor held the column narrower comes back to it once there is room).
 export function useColumnWidth(surface: 'panel' | 'main'): number | null {
   const up = useLayout((s) => cardOver(s, surface));
   const stored = useLayout((s) => s.regions.floatingCard[cardSizeKey(s)]?.w);
   const closed = useFloatingCard((s) => s.closed);
   const drag = useFloatingCard((s) => s.columnDrag);
-  return up && !closed ? Math.max(CARD_MIN.w, drag ?? stored ?? CARD_DEFAULT.w) : null;
+  return up && !closed ? Math.max(CARD_MIN.w, drag ?? stored ?? COLUMN_DEFAULT_W) : null;
 }
 
 // ---- transitions (§D1.2) ----------------------------------------------------------------------------------------------

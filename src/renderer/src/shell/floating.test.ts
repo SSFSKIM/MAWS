@@ -257,6 +257,16 @@ describe('the card’s size', () => {
     expect(placeCard({ w: 100, h: 100 }, { width: 800, height: 700 })).toEqual({ w: 360, h: 240 });
     expect(placeCard({ w: 400, h: 300 }, { width: 300, height: 200 })).toEqual({ w: 268, h: 168 }); // a body smaller than the minimum
   });
+
+  // LC-3 (2026-10-21): the main split's card defaults to Codex's floating chat, 560 × 640, inside the body less its
+  // margins; the panel's keeps P3-G's 420 × 60 %.
+  it('over the main area defaults to 560 × min(640, the body less its margins); a stored size and the minimum rule as before', () => {
+    expect(placeCard(undefined, { width: 1500, height: 800 }, 'split')).toEqual({ w: 560, h: 640 });
+    expect(placeCard(undefined, { width: 1000, height: 600 }, 'split')).toEqual({ w: 560, h: 568 });
+    expect(placeCard(undefined, { width: 500, height: 200 }, 'split')).toEqual({ w: 468, h: 168 });
+    expect(placeCard({ w: 470, h: 280 }, { width: 1500, height: 800 }, 'split')).toEqual({ w: 470, h: 280 });
+    expect(placeCard(undefined, { width: 1000, height: 600 }, 'panel')).toEqual({ w: 420, h: 360 });
+  });
 });
 
 describe('the card’s size key', () => {

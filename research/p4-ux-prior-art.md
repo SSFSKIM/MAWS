@@ -607,11 +607,11 @@ Also:
   - Between the bounds the pane is held, a dead zone.
 - **Other controls.** While full width the divider is not rendered. Arrows move it ±10 px and Home and End go to the bounds. A double-click resets it. There is an "Enter full screen" button and a `toggleMaximizeSidePanel` command, which has no default key.
 - **The floating chat.** In the newest build on this machine, `chatgpt-26.1013.31256`, it is the only variant; the gated composer-only overlay was removed (`CHANGES-chatgpt-26.928.40906..chatgpt-26.1013.31256.md`).
-  - **Placement:** bottom right by default with a 10 px inset; it can be dragged to five anchors, and the anchor is persisted.
+  - **Placement:** bottom right by default with a 10 px inset; it can be dragged to five anchors, and the anchor is persisted. (Corrected 2026-10-21, LC-3: the visible gap from the edges, measured live, is 16 pt, for the card and for its minimized button.)
   - **Compact:** the composer only, with a Running pill.
   - **Expanded:** transcript and composer, 572 × 640 by default (minimum 372 × 400), size persisted.
-  - **Minimized:** a 36 px button with a badge; it restores on click or ⌥L.
-  - **Pending approval:** forces the chat expanded.
+  - **Minimized:** a 36 px button with a badge; it restores on click. (Corrected 2026-10-21, LC-3: not ⌥L on macOS, where `focusMainChat`'s Alt+L has no default key.)
+  - **Pending approval:** forces the chat expanded. (Corrected 2026-10-21, LC-3: elicitations force it open in the source; live, a command approval did not expand the compact card.)
   - **Content clearance:** the content keeps at least 118 px clear at the bottom.
   - **Round trip:** the thread stays mounted. A drag into full width can push the stored ratio to 1.0, so the pane may return at its maximum. That is a quirk not to copy.
 - **Window resize.** At ≤960 px with the sidebar shown, or ≤720 px in any case, Codex closes the pane and reopens it when the window widens. MAWS's window minimum is 960 (`src/main/window.ts:69`), so this is moot.
@@ -690,7 +690,7 @@ Also:
 | Floating, card | the card's Dock | Docked | ratio = `r0`; S's composer focused |
 | Floating, card | the card's Close | Floating, pill | pill at the bottom right; unread-dot rule as in P3-G |
 | Floating, pill | pill click | Floating, card | — |
-| Floating, pill | the session raises a permission request or question | Floating, card | Codex forces its chat open on a pending approval |
+| Floating, pill | the session raises a permission request or question | Floating, card | Codex: elicitations force its card open (source); a command approval did not (LC-3, live) |
 | Floating, any | the window narrows or widens | same | never docks; card re-clamped inside the main region with its anchor kept (minimum 360 × 240, 16 px margin); stored card size not rewritten |
 | Docked | the window narrows | Docked | never floats; both panes stay at or above their minimums while W ≥ S_min + A_min |
 | Floating, any | A's last tab closes | Docked, single pane | S shown full width; card unmounted |
