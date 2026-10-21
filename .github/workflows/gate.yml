@@ -157,7 +157,9 @@ jobs:
       - uses: ./.github/actions/setup
       # The checks run at once (gate-bg.sh), each still a step of its own below, with its log and its gate-run summary:
       # tsc and eslint are single-threaded, and in series they held class 1a's critical path on a box whose other cores
-      # sat idle. Each project of `pnpm typecheck` is a process of its own, read from the script.
+      # sat idle. Each project of `pnpm typecheck` is a process of its own, read from the script. At once only on a
+      # machine of 24 GiB or more, the pool's 16-core box: together they peak at about 15 GB, so on the hosted runner
+      # and the Mac the start step runs them one at a time.
       # The whole `pnpm build` (verify's step) is class 1a's proof that the renderer and the apps build; it ran in unit
       # until 2026-10-21, where it held the critical path (unit builds main and the preloads alone now).
       # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts) have no lane of their own: vitest

@@ -4,6 +4,13 @@
 # log as it runs, adds its gate-run summary to its own step's summary, and exits with its status, so each check keeps a
 # step, a log and a summary block of its own however the runs overlap.
 #
+# At once only on a machine with AT_ONCE_GIB of memory or more: together the checks peak at about 15 GB (measured on the
+# pool's 16-core box, which has 32), more than the hosted runner's 7 GB or the 16 GB Mac, which e2e shares, can hold.
+# On a smaller machine `start` runs its command to its end before it returns, one at a time, and writes the same log,
+# summary and status, so the wait steps read them as they would a background command's. The job's first start decides,
+# from /proc/meminfo's MemTotal on Linux or `sysctl -n hw.memsize` on macOS, says which in its output, and the job's
+# later starts keep it. GATE_BG_MEMORY, in bytes, stands in for that reading in a test.
+#
 #   gate-bg.sh start <name> <count-pattern> <command> [args…]
 #   gate-bg.sh start-parts <name> <count-pattern> <package script>
 #       each ` && ` part of a package.json script as a command of its own, <name>-1, <name>-2, …, with node_modules/.bin
@@ -12,34 +19,79 @@
 #       each one's log in turn (a start-parts name: each part's), then its time; exits 1 if any failed
 #
 # A background command outlives the step that started it (the runner ends a job's processes when the job ends). Run
-# from the checkout's root.
+# from the checkout's root. Bash 3.2 and BSD userland (a macOS runner) as well as Linux.
 set -uo pipefail
 dir=${RUNNER_TEMP:?}/gate-bg
 mkdir -p "$dir"
 here=$(dirname "$0")
+AT_ONCE_GIB=24
+
+# Sets at_once, true or false: the job's first start decides, and its later starts read the decision.
+pace() {
+  local bytes kib gib
+  if [[ -f $dir/at-once ]]; then
+    at_once=$(cat "$dir/at-once")
+    return
+  fi
+  if [[ -n ${GATE_BG_MEMORY:-} ]]; then
+    bytes=$GATE_BG_MEMORY
+  elif [[ -r /proc/meminfo ]]; then
+    kib=$(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo)
+    case $kib in '' | *[!0-9]*) bytes='' ;; *) bytes=$((kib * 1024)) ;; esac
+  else
+    bytes=$(sysctl -n hw.memsize 2>/dev/null)
+  fi
+  at_once=false
+  case $bytes in
+    '' | *[!0-9]*)
+      echo "gate-bg: the machine's memory could not be read, so the checks run one at a time" ;;
+    *)
+      gib=$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1073741824 }')
+      if ((bytes >= AT_ONCE_GIB * 1024 * 1024 * 1024)); then
+        at_once=true
+        echo "gate-bg: $gib GiB of memory, $AT_ONCE_GIB or more, so the checks run at once"
+      else
+        echo "gate-bg: $gib GiB of memory, under $AT_ONCE_GIB, so the checks run one at a time"
+      fi ;;
+  esac
+  echo "$at_once" >"$dir/at-once"
+}
+
+# One command through gate-run.sh, into its log, summary, status and end time; the status file appears once the rest
+# is written. gate-run.sh appends to the step summary, so each command writes a file of its own, which its wait step
+# appends.
+run() {
+  local name=$1
+  shift
+  GITHUB_STEP_SUMMARY=$dir/$name.summary "$here/gate-run.sh" "$@" >"$dir/$name.log" 2>&1 </dev/null
+  echo "$?" >"$dir/$name.status.part"
+  date +%s >"$dir/$name.end"
+  mv "$dir/$name.status.part" "$dir/$name.status"
+}
 
 start() {
   local name=$1
   shift
   date +%s >"$dir/$name.start"
-  # gate-run.sh appends to the step summary; each command writes its own file, which its wait step appends. Nothing
-  # holds the step's own output open, where the runner would wait about 5 s for it to close.
-  (
-    GITHUB_STEP_SUMMARY=$dir/$name.summary "$here/gate-run.sh" "$@" >"$dir/$name.log" 2>&1 </dev/null
-    echo "$?" >"$dir/$name.status.part"
-    date +%s >"$dir/$name.end"
-    mv "$dir/$name.status.part" "$dir/$name.status"
-  ) >/dev/null 2>&1 </dev/null &
-  echo "gate-bg: $name started: ${*:2}"
+  if $at_once; then
+    # Nothing holds the step's own output open, where the runner would wait about 5 s for it to close.
+    run "$name" "$@" >/dev/null 2>&1 </dev/null &
+    echo "gate-bg: $name started: ${*:2}"
+  else
+    run "$name" "$@"
+    echo "gate-bg: $name ran in $(($(cat "$dir/$name.end") - $(cat "$dir/$name.start"))) s, exit $(cat "$dir/$name.status"): ${*:2}"
+  fi
 }
 
 mode=${1:?usage: gate-bg.sh start <name> <count-pattern> <command…> | start-parts <name> <count-pattern> <script> | wait <name>…}
 shift
 case $mode in
   start)
+    pace
     start "$@"
     ;;
   start-parts)
+    pace
     name=${1:?start-parts needs a name}
     pattern=${2:?start-parts needs a count pattern}
     script=${3:?start-parts needs a package script}
