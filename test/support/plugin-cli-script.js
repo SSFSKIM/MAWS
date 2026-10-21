@@ -15,6 +15,7 @@
 // trees) under its `installLocation`, so the manifest service reads files where the engine's would be. It writes only
 // inside an explicit CLAUDE_CONFIG_DIR, never the owner's `~/.claude`.
 'use strict';
+const { execFileSync, spawn } = require('node:child_process');
 const { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } = require('node:fs');
 const { homedir } = require('node:os');
 const { basename, dirname, isAbsolute, join, resolve, sep } = require('node:path');
@@ -337,24 +338,61 @@ function run(argv, input, ctx) {
 
 // Blocks this process for `ms` (the stub is a short-lived child; a mutation may be held for a test to watch it run).
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const HOLD_MS = 60_000; // the longest a held run (or a stubborn run's member) lives
+
+// P4 W2-D (tracker 2026-10-06): a held mutation while a `stubborn` file is beside the stub stands for a CLI that will
+// not stop: it and a member it starts in its process group (as a clone or a helper would be) note each SIGTERM in
+// `signals.log` and carry on, so only SIGKILL ends them. Once the member listens, the group's ids go to `stubborn.json`
+// for the test to probe; the run then waits, as a held one does, for the hold to go.
+function pgidOf(pid) {
+  const proc = `/proc/${pid}/stat`; // Linux: `pid (comm) state ppid pgrp …`, the name possibly holding spaces
+  if (existsSync(proc)) return Number(readFileSync(proc, 'utf8').split(') ').at(-1).split(' ')[2]);
+  return Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
+}
+const noteSignals = (dir) => process.on('SIGTERM', () => appendFileSync(join(dir, 'signals.log'), `${process.pid} SIGTERM\n`));
+
+function stubbornMember(dir) {
+  noteSignals(dir);
+  setTimeout(() => process.exit(0), HOLD_MS);
+  process.stdout.write('listening\n');
+}
+
+function stubbornHold(dir, complete) {
+  noteSignals(dir);
+  const member = spawn(process.execPath, [__filename, '--stubborn-member'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  member.stdout.once('data', () => writeFileSync(join(dir, 'stubborn.json'), json({ pgid: pgidOf(process.pid), leader: process.pid, member: member.pid, memberPgid: pgidOf(member.pid) })));
+  const until = Date.now() + HOLD_MS;
+  const wait = setInterval(() => {
+    if (existsSync(join(dir, 'hold')) && Date.now() < until) return;
+    clearInterval(wait);
+    member.stdout.destroy();
+    member.unref(); // left running: the runner stops what the CLI leaves in its group
+    complete();
+  }, 50);
+}
 
 function main() {
   const dir = __dirname;
   const argv = process.argv.slice(2);
+  if (argv[0] === '--stubborn-member') return stubbornMember(dir);
   appendFileSync(join(dir, 'calls.log'), `${json(argv)}\n`);
   const stateFile = join(dir, 'state.json');
   const ctx = { cwd: process.cwd(), configHome: process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME || '/', '.claude') };
   const mutating = argv[0] === 'plugin' && argv.includes('--json') && !argv.includes('list');
+  const complete = () => {
+    const out = run(argv, JSON.parse(readFileSync(stateFile, 'utf8')), ctx);
+    if (mutating) writeFileSync(stateFile, pretty(out.state));
+    materialise(out.state, ctx, process.env);
+    process.stdout.write(out.stdout);
+    process.stderr.write(out.stderr);
+    process.exitCode = out.code;
+  };
   if (mutating && existsSync(join(dir, 'hold'))) {
     process.stderr.write(`Holding ${argv.slice(1, -1).join(' ')} (plugin CLI stub)\n`);
-    for (let waited = 0; existsSync(join(dir, 'hold')) && waited < 60_000; waited += 50) sleep(50);
+    if (existsSync(join(dir, 'stubborn'))) return stubbornHold(dir, complete);
+    for (let waited = 0; existsSync(join(dir, 'hold')) && waited < HOLD_MS; waited += 50) sleep(50);
   }
-  const out = run(argv, JSON.parse(readFileSync(stateFile, 'utf8')), ctx);
-  if (mutating) writeFileSync(stateFile, pretty(out.state));
-  materialise(out.state, ctx, process.env);
-  process.stdout.write(out.stdout);
-  process.stderr.write(out.stderr);
-  process.exitCode = out.code;
+  complete();
 }
 
 module.exports = { run, pluginTree, writeTree, entryOf, materialise };
