@@ -451,7 +451,9 @@ const NO_BORDERS: MeasuredPaint['borders'] = [null, null, null, null];
 /**
  * A native table's own paint (P3-F, exports-capture scalpel-5#2), which the cells' fills and borders do not carry: its
  * fill and shadow under the table (or, for a gradient, the window's picture of the table without its cells), its outline
- * over it, where the canvas draws a collapsed border over the cells' fills.
+ * over it, where the canvas draws a collapsed border over the cells' fills. P4 (the collapsed-table row; the probe in
+ * e2e/presentations-export.spec.ts): Chromium draws that border whole inside the measured box (so the outline keeps the
+ * half-width inset every box's has) and square, the table's radius rounding only its background and its shadow.
  */
 function tablePaint(el: MeasuredElement, picture: string | undefined): { under: PptxObject[]; over: PptxObject[] } {
   const fill = `${el.id}:fill`;
@@ -461,7 +463,7 @@ function tablePaint(el: MeasuredElement, picture: string | undefined): { under: 
     const { options, shape } = paintObjects({ ...el, paint: { ...el.paint, borders: NO_BORDERS } }, true);
     under.push({ kind: 'shape', name: fill, shape, options: { ...options, objectName: fill } });
   }
-  const { options, shape, sides } = paintObjects({ ...el, paint: { ...el.paint, shadow: null } }, false);
+  const { options, shape, sides } = paintObjects({ ...el, paint: { ...el.paint, shadow: null, radius: 0 } }, false);
   const outline: PptxObject[] = options.line ? [{ kind: 'shape', name: `${el.id}:border`, shape, options: { ...options, objectName: `${el.id}:border` } }] : [];
   return { under, over: [...outline, ...sides] };
 }

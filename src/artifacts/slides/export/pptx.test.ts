@@ -317,6 +317,30 @@ describe('the PPTX mapping: the exports-capture panel', () => {
     // an unpainted table: the native table alone, as before
     expect(onBody(grid).map((o) => o.name)).toEqual(['grid']);
   });
+  // P4 (the collapsed-table row): Chromium draws a collapsed table's whole outer border inside its measured box and never
+  // rounds it, while its background and shadow keep the radius (the presentations-export probe on the export window)
+  it('draws a collapsed table’s 16 px outline square and inside its box, its fill and shadow under it rounded', () => {
+    const grid = body.elements.find((e) => e.id === 'grid')!;
+    const red = { width: 16, style: 'solid', color: 'rgb(255, 0, 0)' };
+    const rounded: MeasuredElement = { ...grid, paint: { ...NO_PAINT, fill: 'rgb(0, 0, 255)', borders: [red, red, red, red], radius: 40, shadow: { x: 12, y: 12, blur: 0, color: 'rgb(0, 255, 0)' } } };
+    const out = onBody(rounded);
+    expect(out.map((o) => [o.kind, o.name])).toEqual([['shape', 'grid:fill'], ['table', 'grid'], ['shape', 'grid:border']]);
+    const outline = out[2]!;
+    if (outline.kind !== 'shape') throw new Error('a shape');
+    expect(outline.shape).toBe('rect');
+    expect(outline.options).not.toHaveProperty('rectRadius');
+    const o = outline.options as { x: number; y: number; w: number; h: number; line: { width: number } };
+    const stroke = pxOfPt(o.line.width);
+    expect(stroke).toBe(16);
+    // the stroke from the box's edge (128, 229, 400 × 120) to 16 px inside it
+    nearCanvas(px(o.x) - stroke / 2, 128);
+    nearCanvas(px(o.y) - stroke / 2, 229);
+    nearCanvas(px(o.x) + px(o.w) + stroke / 2, 528);
+    nearCanvas(px(o.y) + px(o.h) + stroke / 2, 349);
+    nearCanvas(px(o.x) + stroke / 2, 144);
+    // the fill and its shadow at the whole box, with the table's radius
+    expect(out[0]).toMatchObject({ shape: 'roundRect', options: { objectName: 'grid:fill', x: inches(128), w: inches(400), rectRadius: inches(40), shadow: { type: 'outer', color: '00FF00' } } });
+  });
   // scalpel-5#3: an image's own paint (the presentation guide's `border-radius:16px`, a border, a background) is no
   // native picture's: the window's picture of it, which draws them; a shadow PowerPoint casts itself
   it('scalpel-5#3: takes a rounded or framed image as the window draws it, and casts an image’s shadow natively', () => {

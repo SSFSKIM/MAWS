@@ -315,6 +315,88 @@ test('transforms: scaled text at its drawn size; pictures of translated, scaled 
   expect(back.held).toEqual([]);
 });
 
+/** Each point's [r, g, b, a] in a PNG, read by main's nativeImage. */
+const pixelsOf = (png: Buffer, points: [number, number][]) =>
+  launch!.app.evaluate(({ nativeImage }, [b64, at]) => {
+    const image = nativeImage.createFromBuffer(Buffer.from(b64, 'base64'));
+    const { width } = image.getSize();
+    const bitmap = image.toBitmap(); // BGRA
+    return at.map(([x, y]) => {
+      const i = (Math.round(y) * width + Math.round(x)) * 4;
+      return [bitmap[i + 2]!, bitmap[i + 1]!, bitmap[i]!, bitmap[i + 3]!];
+    });
+  }, [png.toString('base64'), points] as const);
+const colourOf = ([r, g, b]: number[]) => (r! > 200 && g! < 60 && b! < 60 ? 'red' : r! < 60 && g! > 200 && b! < 60 ? 'green' : r! < 60 && g! < 60 && b! > 200 ? 'blue' : r! > 230 && g! > 230 && b! > 230 ? 'white' : `rgb(${r}, ${g}, ${b})`);
+
+// P4 (the collapsed-table row): the probe of what Chromium draws for a collapsed table (the canvas's `border-collapse:
+// collapse`) with a 16 px border, a radius and a shadow, on the export window's own page (the slide's PNG), recorded as
+// evidence, and the PPTX that matches it: the whole outer border lies inside the measured box (none of it outside, so
+// the outline keeps its half-width inset) and its corners are square, while the background and the shadow are rounded.
+const TABLES = (): Record<string, string> => ({
+  'project/deck.json': JSON.stringify({ v: 4, title: 'Tables', cover: 's1', order: ['s1'] }),
+  'project/slides/s1.html': `<section id="s1" style="background:#ffffff">
+<table id="thick" style="position:absolute; left:200px; top:200px; border:16px solid #ff0000; border-radius:40px; background:#0000ff; box-shadow:12px 12px 0 #00ff00; font-size:28px"><tr id="a1"><td>North</td><td>12</td></tr><tr id="a2"><td>South</td><td>34</td></tr></table>
+<table id="thin" style="position:absolute; left:900px; top:200px; border:4px solid #ff0000; border-radius:40px; background:#0000ff; font-size:28px"><tr id="b1"><td>North</td><td>12</td></tr><tr id="b2"><td>South</td><td>34</td></tr></table>
+</section>`,
+});
+
+test('a collapsed table: its border inside its box and square, its background and shadow rounded, in the canvas and the PPTX', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const { id, held } = await seedDeck(page, 'Tables', TABLES());
+  expect(held).toEqual([]);
+  const xml = await slideXml(await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path)), 1);
+  const part = (name: string) => xml.split(/<p:sp>/).find((p) => p.includes(`name="${name}"`))!;
+  // the measured box: the fill's place (the whole box)
+  const boxOf = (name: string) => {
+    const [x, y, w, h] = offsetOf(xml, `${name}:fill`)!.map((n) => n / EMU) as [number, number, number, number];
+    return { x, y, w, h };
+  };
+  const thick = boxOf('thick');
+  const thin = boxOf('thin');
+  const midThick = thick.y + thick.h / 2;
+  const points: Record<string, [number, number]> = {
+    'thick: 2 px outside its left edge': [thick.x - 2, midThick],
+    'thick: 1 px inside its left edge': [thick.x + 1, midThick],
+    'thick: 14 px inside its left edge': [thick.x + 14, midThick],
+    'thick: 18 px inside its left edge': [thick.x + 18, midThick],
+    'thick: its corner, 2 px in': [thick.x + 2, thick.y + 2],
+    'thick: 6 px right of its right edge': [thick.x + thick.w + 6, midThick],
+    'thick: 9 px past its bottom-right corner': [thick.x + thick.w + 9, thick.y + thick.h + 9],
+    'thin: its corner, 1 px in': [thin.x + 1, thin.y + 1],
+    'thin: 7 px in from its corner': [thin.x + 7, thin.y + 7],
+    'thin: 6 px inside its left edge': [thin.x + 6, thin.y + thin.h / 2],
+  };
+  const png = readFileSync((await exportAs(page, id, 'png')).path);
+  const seen = Object.fromEntries((await pixelsOf(png, Object.values(points))).map((rgba, i) => [Object.keys(points)[i]!, colourOf(rgba)]));
+  const versions = await launch!.app.evaluate(() => ({ electron: process.versions.electron, chrome: process.versions.chrome }));
+  const probe = { ...versions, boxes: { thick, thin }, seen };
+  console.log(`[collapsed-table probe] ${JSON.stringify(probe)}`);
+  await test.info().attach('collapsed-table-probe.json', { body: JSON.stringify(probe, null, 2), contentType: 'application/json' });
+  expect(seen).toEqual({
+    // nothing of the border outside the box; all 16 px of it inside; the background after it
+    'thick: 2 px outside its left edge': 'white',
+    'thick: 1 px inside its left edge': 'red',
+    'thick: 14 px inside its left edge': 'red',
+    'thick: 18 px inside its left edge': 'blue',
+    // the border's corner square, under a 40 px radius
+    'thick: its corner, 2 px in': 'red',
+    // the shadow at 12 px, its corner rounded by the radius (12 + 40 px about the corner's centre)
+    'thick: 6 px right of its right edge': 'green',
+    'thick: 9 px past its bottom-right corner': 'white',
+    // a 4 px border: square at the corner, the background inside it rounded
+    'thin: its corner, 1 px in': 'red',
+    'thin: 7 px in from its corner': 'white',
+    'thin: 6 px inside its left edge': 'blue',
+  });
+  // the PPTX: the outline a square rectangle whose 16 px stroke runs from the box's edge inward (its path 8 px in), the
+  // fill and the shadow under the table a rounded rectangle at the box
+  expect(part('thick:border')).toContain('prst="rect"');
+  expect(offsetOf(xml, 'thick:border')).toEqual([(thick.x + 8) * EMU, (thick.y + 8) * EMU, (thick.w - 16) * EMU, (thick.h - 16) * EMU].map(Math.round));
+  expect(part('thick:fill')).toContain('prst="roundRect"');
+  expect(part('thin:border')).toContain('prst="rect"');
+});
+
 // S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load
 // average beside each time, as the scale gate records its bounds)
 test('the 100-slide deck exports to PPTX, named and as pictures, and to PDF within the budget', async () => {
