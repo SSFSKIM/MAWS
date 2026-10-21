@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
+import { READ_AS_DATA, SOURCE_READERS, affected } from './gate-affected.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scenarios = [
@@ -49,11 +50,12 @@ function plan(scenarioEnv) {
       },
       stdio: 'pipe',
     });
-    const outputs = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map((line) => {
+    const raw = readFileSync(output, 'utf8');
+    const outputs = Object.fromEntries(raw.trim().split('\n').map((line) => {
       const separator = line.indexOf('=');
       return [line.slice(0, separator), line.slice(separator + 1)];
     }));
-    return { outputs, summary: readFileSync(summary, 'utf8') };
+    return { outputs, raw, summary: readFileSync(summary, 'utf8') };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -237,4 +239,144 @@ test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml 
   assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- id: checkout\n {8}uses: actions\/checkout@v7\n/);
   // A job refused before its checkout uploads nothing: the Mac's persistent workspace still holds the last job's reports.
   assert.match(job, /\n {6}- if: \(failure\(\) \|\| needs\.plan\.outputs\.evidence == 'true'\) && steps\.checkout\.outcome == 'success'\n {8}uses: actions\/upload-artifact@v7\n/);
+});
+
+// Selection for iteration runs (ci-kit's test-history spec, M4; gate-affected.mjs): a push whose commit says
+// `Selection: affected` lists its change, and the plan narrows unit and unit:darwin to vitest's related mode over it, or
+// says why it runs the full suite.
+const selected = (lines, count = lines.length) => `ci-gate: 0123abcd affected\n\nNonce: 1-2\nGates: unit\nClass1a: pool\nSelection: affected\nAffected-Count: ${count}${lines.map((line) => `\nAffected: ${line}`).join('')}`;
+const decide = (lines, count) => affected(selected(lines, count));
+
+test('a run without the Selection: trailer writes the outputs and the summary it always wrote, byte for byte', () => {
+  const pushed = plan({ HEAD_MESSAGE: 'ci-gate: 0123abcd\n\nNonce: 1-2\nGates: static,unit,probes\nClass1a: pool' });
+  const outputs = [
+    'static=true', 'unit=true', 'unit_darwin=false', 'probes=true', 'e2e=[]',
+    `static_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-4'])}`, `unit_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-8'])}`, `probes_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-2'])}`, 'pool=true',
+    'packaged=false', 'evidence=false', 'live=false', 'default_beside=[]',
+  ];
+  assert.equal(pushed.raw, `${outputs.join('\n')}\n`);
+  assert.equal(pushed.summary, '### Gates\n\n- `static`\n- `unit`\n- `probes`\n\nFrom: the `Gates:` trailer. Class 1a: pool. E2e lane: linux.\n');
+  // A dispatch never reads the trailer, whatever the pushed commit says.
+  const dispatched = plan({ EVENT: 'workflow_dispatch', INPUT_GATES: 'unit', HEAD_MESSAGE: selected(['M\tsrc/shared/a.ts']) });
+  assert.equal(dispatched.outputs.selection, undefined);
+  assert.equal(dispatched.outputs.related, undefined);
+  assert.doesNotMatch(dispatched.summary, /Selection/);
+});
+
+test('a source-only change runs vitest related over its paths, and the summary gives their count', () => {
+  const { outputs, summary } = plan({ HEAD_MESSAGE: selected(['M\tapps/desk-web/src/views/org/OrgView.tsx', 'A\tapps/desk-web/src/views/org/badge.ts']) });
+  assert.equal(outputs.selection, 'affected');
+  assert.deepEqual(JSON.parse(outputs.related), ['apps/desk-web/src/views/org/OrgView.tsx', 'apps/desk-web/src/views/org/badge.ts']);
+  assert.match(summary, /\nSelection: affected — 2 paths, unit runs vitest related\n$/);
+  // The gate set is what the trailers ask, as without selection.
+  assert.equal(outputs.unit, 'true');
+  assert.equal(outputs.static, 'false');
+});
+
+test('every fallback runs the full suite and names the path that sent it there', () => {
+  const cases = [
+    ['M\tpnpm-lock.yaml', /^the lockfile or a package.json \(pnpm-lock.yaml\)$/],
+    ['M\tpackage.json', /^the lockfile or a package.json \(package.json\)$/],
+    ['M\tapps/desk-web/package.json', /^the lockfile or a package.json/],
+    ['M\tvitest.config.ts', /^a vitest or vite config \(vitest.config.ts\)$/],
+    ['M\tapps/desk-hub/vitest.config.ts', /^a vitest or vite config/],
+    ['M\tapps/desk-web/vite.config.ts', /^a vitest or vite config/],
+    ['M\telectron.vite.config.ts', /^a vitest or vite config/],
+    ['M\ttest/support/compiled-suites.ts', /^test support \(test\/support\/compiled-suites.ts\)$/],
+    ['M\ttest/support/artifacts-dom-setup.ts', /^test support/],
+    ['A\tapps/desk-hub/test/support/bundle.ts', /^test support/],
+    ['M\ttest/live/support/live.ts', /^test support/],
+    ['M\t.github/workflows/gate.yml', /^a gate file \(\.github\/workflows\/gate.yml\)$/],
+    ['M\tscripts/darwin-unit-files.sh', /^a gate file/],
+    ['M\tdocs/doperpowers/plans/x.md', /^outside the source and test trees \(docs\/doperpowers\/plans\/x.md\)$/],
+    ['M\te2e/library.spec.ts', /^outside the source and test trees/],
+    ['M\tspikes/protocol-probe/fixtures/pass3/x.jsonl', /^outside the source and test trees/],
+    ['M\tapps/desk-hub/wrangler.jsonc', /^outside the source and test trees/],
+    ['M\tapps/desk-hub/fake-machine/machine.ts', /^outside the source and test trees/],
+    ['D\tsrc/shared/sessions/models.ts', /^a deleted non-test file \(src\/shared\/sessions\/models.ts\)$/],
+    ['R100\tsrc/shared/a.ts\tsrc/shared/b.ts', /^a renamed non-test file \(src\/shared\/a.ts → src\/shared\/b.ts\)$/],
+    ['R090\tsrc/shared/a.ts\tsrc/shared/a.test.ts', /^a renamed non-test file/],
+    ['M\tsrc/renderer/src/styles/tokens.css', /^read through fs, a glob or a query import \(src\/renderer\/src\/styles\/tokens.css\)$/],
+    ['M\tsrc/artifacts/types/document/SKILL.md', /^read through fs, a glob or a query import/],
+    ['A\ttest/fixtures/settings/new.json', /^read through fs, a glob or a query import/],
+    ['A\ttest/snapshots/transcript/helper.ts', /^read through fs, a glob or a query import \(test\/snapshots\/transcript\/helper.ts\)$/],
+    ['C080\tsrc/shared/a.ts\tsrc/shared/c.ts', /^a change git calls C080 \(src\/shared\/c.ts\)$/],
+  ];
+  for (const [line, reason] of cases) {
+    const decision = decide(['M\tsrc/shared/sessions/model-label.ts', line]);
+    assert.equal(decision.related, undefined, line);
+    assert.equal(decision.paths, 2, line);
+    assert.match(decision.reason, reason, line);
+  }
+  const { outputs, summary } = plan({ HEAD_MESSAGE: selected(['M\tsrc/shared/a.ts', 'M\tpackage.json']) });
+  assert.equal(outputs.selection, 'affected');
+  assert.equal(outputs.related, '');
+  assert.match(summary, /\nSelection: affected — full suite: the lockfile or a package.json \(package.json\)\n$/);
+});
+
+test("a test file's rename or delete keeps the selection, the renamed file related and the deleted one not", () => {
+  assert.deepEqual(decide(['R100\tsrc/shared/a.test.ts\tsrc/shared/b.test.ts', 'D\tsrc/shared/c.test.ts', 'M\tsrc/shared/d.ts', 'D\tsrc/renderer/src/x.test.tsx']), {
+    paths: 4,
+    related: [
+      'src/shared/b.test.ts', 'src/shared/d.ts',
+      // the readers of src/renderer (the deleted suite) and of src/shared, in SOURCE_READERS' order
+      'test/support/tokens-guard.test.ts', 'test/support/compiled-suites.test.ts', 'test/artifacts/one-schema.test.ts', 'src/engine-host/bundle-guard.test.ts', 'src/preload/bundle.test.ts',
+      'src/preload/bridge.test.ts', 'src/engine-host/documents/sigkill.test.ts', 'src/engine-host/documents/retention-crash.test.ts',
+    ],
+  });
+  // A test file under a support directory is a suite, not support.
+  assert.deepEqual(decide(['M\ttest/support/tokens-guard.test.ts']).related, ['test/support/tokens-guard.test.ts']);
+  // A deleted suite leaves nothing to run where no suite reads its tree; a type test is a test file too.
+  assert.deepEqual(decide(['D\tapps/desk-web/src/views/org/OrgView.test.tsx']), { paths: 1, related: [] });
+  assert.equal(decide(['D\tsrc/shared/sessions/intent.test-d.ts']).related.includes('src/shared/sessions/intent.test-d.ts'), false);
+});
+
+test("a change above ci-gate's bound, or a list that does not add up, runs the full suite", () => {
+  assert.deepEqual(decide([], 250), { paths: 250, reason: 'too many paths (250)' });
+  const { outputs, summary } = plan({ HEAD_MESSAGE: selected([], 250) });
+  assert.equal(outputs.related, '');
+  assert.match(summary, /\nSelection: affected — full suite: too many paths \(250\)\n$/);
+  assert.deepEqual(decide(['M\tsrc/shared/a.ts'], 2), { paths: 2, reason: 'the path list is incomplete (1 of 2 read)' });
+  assert.deepEqual(decide(['M src/shared/a.ts']), { paths: 1, reason: 'the path list is incomplete (1 of 1 read)' });
+  assert.deepEqual(decide(['R100\tsrc/shared/a.test.ts']), { paths: 1, reason: 'the path list is incomplete (1 of 1 read)' });
+  assert.deepEqual(affected('ci-gate: 0123abcd affected\n\nSelection: affected'), { paths: null, reason: 'no Affected-Count: trailer' });
+  // A change of no paths (the tested commit is the merge base) runs no suite.
+  assert.deepEqual(decide([]), { paths: 0, related: [] });
+  assert.match(plan({ HEAD_MESSAGE: selected([]) }).summary, /\nSelection: affected — 0 paths, unit runs vitest related\n$/);
+});
+
+test('a change under a tree a suite reads without importing adds that suite to the related list', () => {
+  assert.deepEqual(decide(['M\tsrc/engine-host/fs/watcher.ts']).related, [
+    'src/engine-host/fs/watcher.ts', 'test/support/read-only-guard.test.ts', 'test/artifacts/one-schema.test.ts', 'src/engine-host/bundle-guard.test.ts', 'src/preload/bundle.test.ts',
+    'src/engine-host/documents/sigkill.test.ts', 'src/engine-host/documents/retention-crash.test.ts',
+  ]);
+  assert.deepEqual(decide(['M\tapps/desk-hub/src/objects/machine.ts']).related, [
+    'apps/desk-hub/src/objects/machine.ts', 'apps/desk-hub/test/support/local.ts', 'apps/desk-hub/test/support/hub.ts', 'apps/desk-hub/test/fake-machine/command.test.ts', 'apps/desk-hub/test/stream-close.test.ts',
+  ]);
+  assert.ok(decide(['M\tsrc/artifacts/design/editor/BoardList.tsx']).related.includes('test/react-compiler.test.ts'));
+  assert.ok(!decide(['M\tsrc/artifacts/design/editor/Board.tsx']).related.includes('test/react-compiler.test.ts'));
+  assert.deepEqual(decide(['M\tapps/desk-web/src/sw/handlers.ts']).related, ['apps/desk-web/src/sw/handlers.ts', 'apps/desk-web/src/sw/sw-imports.test.ts']);
+});
+
+// The lists name files and directories of this tree: a reader moved or renamed must move here with it.
+test('every source reader, reader tree and data directory the selection names exists', () => {
+  for (const { trees, suites } of SOURCE_READERS) for (const path of [...trees, ...suites]) assert.ok(existsSync(join(root, path)), path);
+  for (const dir of READ_AS_DATA) assert.ok(existsSync(join(root, dir)), dir);
+});
+
+test('a Selection: trailer other than affected is refused', () => {
+  const { status, stderr } = refusal({ HEAD_MESSAGE: 'ci-gate: test\n\nGates: unit\nSelection: all' });
+  assert.equal(status, 1);
+  assert.equal(stderr, 'gate-plan: no such selection: all (affected, through ci-gate.sh --affected)\n');
+});
+
+// The plan's two outputs reach both unit jobs' test steps, which run unit-related.mjs only when given a list.
+test("gate.yml passes the plan's selection to the unit and unit:darwin test steps", () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  assert.match(workflow, /\n {6}selection: \$\{\{ steps\.plan\.outputs\.selection \}\}\n {6}related: \$\{\{ steps\.plan\.outputs\.related \}\}\n/);
+  for (const job of ['unit', 'unit-darwin']) {
+    const body = new RegExp(`\\n {2}${job}:\\n((?: {4}.*\\n|\\n)*?)(?= {2}\\S|$)`).exec(workflow)[1];
+    assert.match(body, /\n {10}UNIT_RELATED: \$\{\{ needs\.plan\.outputs\.related \}\}\n/, job);
+    assert.match(body, /\n {10}if \[\[ -n \$UNIT_RELATED \]\]; then\n {12}.*node \.github\/scripts\/unit-related\.mjs /, job);
+  }
 });

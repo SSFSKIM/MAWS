@@ -2,8 +2,8 @@
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
 #   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
-#                      [--class1a linux|macos|pool] [--default-beside <groups>] [--evidence] [--live] [--label <name>]
-#                      [--keep]
+#                      [--class1a linux|macos|pool] [--default-beside <groups>] [--evidence] [--live] [--affected]
+#                      [--label <name>] [--keep]
 #
 #   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
 #   scripts/ci-gate.sh <worktree> --gates all                    the whole set (on a macOS e2e lane, every Mac job)
@@ -40,13 +40,23 @@
 #                      run rather than skip, the e2e job with MAWS_LIVE, MAWS_LIBRARY_LIVE and MAWS_LIVE_DOCUMENT at 1,
 #                      each spec within its own cap. --gates names live groups alone, the plan refusing any other gate
 #                      beside them, and without --live any live group, Decision Log 75 (default: off)
+#   --affected         an iteration run: unit and unit:darwin test only what the change can reach (vitest's related mode
+#                      over its paths), or the whole suite, with the reason in the run's summary, where vitest's module
+#                      graph cannot see (a package.json or the lockfile, a vitest or vite config, test support, gate
+#                      files, a path outside the source and test trees, a deleted or renamed non-test file, a file read
+#                      as data; .github/scripts/gate-affected.mjs). The change is every path `git diff --name-status -M`
+#                      lists from the merge base with origin/master, fetched first, to the tested commit. The run's
+#                      title says `affected` (ci-kit's test-history spec, M4). A selected run is NEVER landing evidence,
+#                      even when it ran the whole suite: a landing needs a full class 1a run on the head's tree without
+#                      --affected, and a red selected run counts as red (default: off)
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:` (none for `all`, the plan's
-# default set), `Runner:`, `Class1a:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers. The pushed tree is always the
-# tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
+# default set), `Runner:`, `Class1a:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
+# `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
+# The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
 # The pool takes class 1a and the POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the
 # repository, so the script runs from any directory.
 #
@@ -79,6 +89,7 @@ class1a=''
 default_beside=''
 evidence=''
 live=''
+affected=''
 label=''
 keep=false
 while (($# > 0)); do
@@ -89,6 +100,7 @@ while (($# > 0)); do
     --default-beside) default_beside=${2:?--default-beside needs a list of e2e groups}; shift 2 ;;
     --evidence) evidence=yes; shift ;;
     --live) live=yes; shift ;;
+    --affected) affected=yes; shift ;;
     --label) label=${2:?--label needs a name}; shift 2 ;;
     --keep) keep=true; shift ;;
     -h | --help) usage ;;
@@ -152,6 +164,31 @@ log=$out/ci-$short.log
 exec > >(tee "$log") 2>&1
 [[ -z $alert_check ]] || printf '%s\n' "$alert_check"
 
+# --affected: the change's paths, from the merge base with origin/master to the tested commit, each as a line of
+# `git diff --name-status -M` (status, tab, path, and a rename's new path after another tab). A failed fetch goes ahead:
+# a stale origin/master only widens the set. Above AFFECTED_BOUND paths none is listed and the plan runs the whole suite
+# ("too many paths"): the list reaches the plan inside the commit message, as one environment variable, which Linux caps
+# at 128 KiB, and at the bound even renames between the tree's longest paths (140 characters on 2026-10-21) stay near
+# 60 KiB. The bound is the 93rd percentile of the files a landing changed over the 200 landings to 2026-10-21 (median
+# 14); a change that size reaches most suites anyway.
+AFFECTED_BOUND=200
+affected_lines=()
+if [[ -n $affected ]]; then
+  git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; the change is taken from the local origin/master'
+  base=$(git -C "$git_dir" merge-base origin/master "$sha") || { echo "ci-gate: --affected: no merge base of $short with origin/master" >&2; exit 2; }
+  # -z: each field ends in a NUL, a rename's two paths after its status, and no path is quoted.
+  while IFS= read -r -d '' change_status && IFS= read -r -d '' change_path; do
+    change_to=''
+    if [[ $change_status == [RC]* ]]; then IFS= read -r -d '' change_to || break; fi
+    if [[ $change_path$change_to == *[$'\t\n']* ]]; then
+      echo "ci-gate: --affected cannot list a path with a tab or a newline in its name ($change_path$change_to); run without it" >&2
+      exit 2
+    fi
+    affected_lines+=("$change_status"$'\t'"$change_path${change_to:+$'\t'$change_to}")
+  done < <(git -C "$git_dir" diff --name-status -M -z "$base" "$sha")
+  echo "ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$( ((${#affected_lines[@]} > AFFECTED_BOUND)) && echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite")"
+fi
+
 # One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
 trailers="Nonce: $(date +%s)-$$"
 [[ -n $gates_trailer ]] && trailers+=$'\n'"Gates: $gates_trailer"
@@ -160,7 +197,11 @@ trailers="Nonce: $(date +%s)-$$"
 [[ -n $default_beside ]] && trailers+=$'\n'"DefaultBeside: $default_beside"
 [[ -n $evidence ]] && trailers+=$'\n'"Evidence: $evidence"
 [[ -n $live ]] && trailers+=$'\n'"Live: $live"
-pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short" -m "$trailers") || exit 1
+if [[ -n $affected ]]; then
+  trailers+=$'\n'"Selection: affected"$'\n'"Affected-Count: ${#affected_lines[@]}"
+  if ((${#affected_lines[@]} > 0 && ${#affected_lines[@]} <= AFFECTED_BOUND)); then for line in "${affected_lines[@]}"; do trailers+=$'\n'"Affected: $line"; done; fi
+fi
+pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short${affected:+ affected}" -m "$trailers") || exit 1
 
 run_id=''
 finish() {
@@ -183,7 +224,7 @@ interrupted() {
 }
 trap interrupted INT TERM
 
-echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}"
+echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}${affected:+ (Selection: affected)}"
 # The ref is this invocation's own and the commit fixed, so a forced re-push is idempotent: a transient rejection
 # (a remote index-pack race while another gate pushes, a "[remote rejected] (failed)") is retried twice; an
 # authentication failure is not (Decision Log 54).
