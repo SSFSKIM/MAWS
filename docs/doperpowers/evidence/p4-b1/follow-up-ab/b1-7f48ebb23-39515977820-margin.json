@@ -1,0 +1,253 @@
+{
+  "hiddenRun": "2026-10-20T23:42:36.618Z",
+  "rows": [
+    {
+      "row": "1h p95",
+      "measure": "keystroke → frame in A, p95, the margin hidden (the 1m workload: 1920 × 1080, 2 windows, 2 agents, a streaming layer)",
+      "bound": "recorded: the control for 1m p95",
+      "limit": null,
+      "value": 22.6,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.28,
+      "note": "300 keystrokes; the margin hidden (54 threads); agents: perf-agent-1 33 batches, 0 refused; perf-agent-2 31 batches, 0 refused; a streaming layer (238 pieces, 238 frames, over the whole typing)"
+    },
+    {
+      "row": "1h max",
+      "measure": "keystroke → frame in A, max, the margin hidden",
+      "bound": "recorded",
+      "limit": null,
+      "value": 40.3,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.28,
+      "note": "p50 12"
+    },
+    {
+      "row": "1h ack p95",
+      "measure": "keystroke → durable ack, p95, the margin hidden",
+      "bound": "recorded",
+      "limit": null,
+      "value": 38.2,
+      "unit": "ms",
+      "pass": null,
+      "verdict": "recorded",
+      "load": 2.28,
+      "note": "300 of 300 acked"
+    },
+    {
+      "row": "1m p95",
+      "measure": "keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer), against the control 1h p95 of this job",
+      "bound": "p95 ≤ 1h p95 (22.6) + 6 ms",
+      "limit": 28.6,
+      "value": 22.6,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.72,
+      "note": "300 keystrokes; 54 cards, th81 active; agents: perf-agent-1 33 batches, 0 refused; perf-agent-2 30 batches, 0 refused; a streaming layer (234 pieces, 234 frames, over the whole typing); 1m − 1h +0 ms"
+    },
+    {
+      "row": "1m max",
+      "measure": "keystroke → frame in A, max, the margin open",
+      "bound": "max ≤ 50 ms",
+      "limit": 50,
+      "value": 31.8,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.72,
+      "note": "p50 12.3"
+    },
+    {
+      "row": "1m relayouts",
+      "measure": "the margin’s layout passes per frame callback (edits owe a pass, settled when they pause or at the 1 s ceiling)",
+      "bound": "≤ 0.1 per frame (about one a second under constant writes)",
+      "limit": 0.1,
+      "value": 0.07,
+      "unit": "passes",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.72,
+      "note": "39 passes over 555 frame callbacks (300 keys) in 41.8 s of typing, 0.93 a second; after a scripted scroll 0 more (R4: none)"
+    },
+    {
+      "row": "1m stale",
+      "measure": "the longest a change waited for the margin’s pass that read it, the margin open",
+      "bound": "≤ 1200 ms (the settle’s 1 s ceiling and the main thread’s queue)",
+      "limit": 1200,
+      "value": 1044,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.72
+    },
+    {
+      "row": "1m ack p95",
+      "measure": "keystroke → durable ack, p95, the margin open",
+      "bound": "p95 ≤ 100 ms",
+      "limit": 100,
+      "value": 31.7,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.72,
+      "note": "300 of 300 acked"
+    },
+    {
+      "row": "5m p99",
+      "measure": "host event-loop delay over the run, p99, the margin open",
+      "bound": "p99 ≤ 50 ms",
+      "limit": 50,
+      "value": 16.74,
+      "unit": "ms",
+      "pass": true,
+      "verdict": "met",
+      "load": 1.72
+    }
+  ],
+  "hidden": {
+    "loads": {
+      "launched": 3.01,
+      "steadyStart": 2.85,
+      "steadyEnd": 2.28
+    },
+    "threads": 54,
+    "layer": {
+      "on": true,
+      "pieces": 238,
+      "frames": 238,
+      "spanned": true
+    },
+    "typing": {
+      "keystrokes": 300,
+      "noTransaction": 0,
+      "frame": {
+        "n": 300,
+        "p50": 12,
+        "p95": 22.6,
+        "p99": 30.2,
+        "max": 40.3
+      },
+      "postPaint": {
+        "n": 300,
+        "p50": 13.6,
+        "p95": 28.7,
+        "p99": 38.9,
+        "max": 46.6
+      },
+      "presented": {
+        "n": 300,
+        "p50": 40,
+        "p95": 48,
+        "p99": 56,
+        "max": 72
+      },
+      "presentedReported": 300,
+      "ack": {
+        "n": 300,
+        "p50": 15.4,
+        "p95": 38.2,
+        "p99": 58.9,
+        "max": 71.8
+      },
+      "acked": 300,
+      "longTasks": {
+        "n": 0,
+        "max": 0
+      }
+    },
+    "frames": 556,
+    "loop": {
+      "p50": 10.264575,
+      "p99": 16.973823,
+      "max": 56.033279,
+      "mean": 10.498965496183205
+    }
+  },
+  "marginalHidden": [],
+  "run": "2026-10-20T23:43:25.555Z",
+  "seed": {
+    "large": {
+      "sections": 160,
+      "topBlocks": 1455,
+      "paragraphs": 2184,
+      "words": 102936,
+      "typed": 42000,
+      "deleted": 412,
+      "formatted": 281,
+      "v2Bytes": 1067044,
+      "ms": 698
+    }
+  },
+  "margin": {
+    "loads": {
+      "launched": 2.34,
+      "steadyStart": 2.34,
+      "steadyEnd": 1.72
+    },
+    "cards": 54,
+    "active": "th81",
+    "layer": {
+      "on": true,
+      "pieces": 234,
+      "frames": 234,
+      "spanned": true
+    },
+    "typing": {
+      "keystrokes": 300,
+      "noTransaction": 0,
+      "frame": {
+        "n": 300,
+        "p50": 12.3,
+        "p95": 22.6,
+        "p99": 28.3,
+        "max": 31.8
+      },
+      "postPaint": {
+        "n": 300,
+        "p50": 13.8,
+        "p95": 25.9,
+        "p99": 33.9,
+        "max": 45.1
+      },
+      "presented": {
+        "n": 300,
+        "p50": 40,
+        "p95": 48,
+        "p99": 64,
+        "max": 64
+      },
+      "presentedReported": 300,
+      "ack": {
+        "n": 300,
+        "p50": 14.8,
+        "p95": 31.7,
+        "p99": 45.3,
+        "max": 55.7
+      },
+      "acked": 300,
+      "longTasks": {
+        "n": 0,
+        "max": 0
+      }
+    },
+    "relayouts": {
+      "passes": 39,
+      "frames": 555,
+      "keystrokes": 300,
+      "typingSeconds": 41.838,
+      "staleMax": 1044,
+      "afterScroll": 0
+    },
+    "loop": {
+      "p50": 10.264575,
+      "p99": 16.736255,
+      "max": 33.783807,
+      "mean": 10.493507557274045
+    }
+  },
+  "marginal": []
+}
