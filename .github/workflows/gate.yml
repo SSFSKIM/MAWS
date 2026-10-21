@@ -7,7 +7,16 @@
 # waits for ci-kit's measured-job guard to find the desktop settled, and is refused, to be relaunched, when it has not.
 # A `Selection: affected` trailer (ci-gate.sh --affected) makes an iteration run: unit and unit:darwin test only what the
 # change its `Affected:` trailers list can reach, or the whole suite where vitest's module graph cannot see (the plan
-# says which, and why, in its summary). Such a run is never landing evidence (ci-kit's test-history spec, M4).
+# says which, and why, in its summary). Such a run is never landing evidence (ci-kit's test-history spec, M4). A `Lane:`
+# trailer (ci-gate.sh --lane vm or vm-trial) sends the run's MAC_VM_E2E groups to ci-kit's macOS guest alone.
+#
+# ci-kit's VM contract (its mac-lane concurrency spec, The VM lane): on a Mac with ci-kit's guest, the exclusive
+# instance's job-started hook reads the workflow a job runs under at its sha, and lets the job run beside a guest only
+# when the file carries the line below at the number ci-kit knows; any other job keeps the guest off until it ends. The
+# line promises that the guest can be kept off every job whose results it could change: every group with a timing bound
+# is on MEASURED_E2E, and on a Mac every MEASURED_E2E job's first step is ci-kit's settle, which holds the guest off for
+# it. gate-plan.test.mjs pins that promise; the number moves only when what it pins does.
+# ci-kit-vm-contract: 1
 name: gate
 
 on:
@@ -35,6 +44,10 @@ on:
         description: 'Run the paid live e2e groups with their run flags on; the gates must name LIVE_E2E groups only.'
         type: boolean
         default: false
+      lane:
+        description: "Where the MAC_VM_E2E groups go: vm (ci-kit's guest alone) or vm-trial (its trial slot); empty: either Mac desktop that is free."
+        type: string
+        default: ''
 
 concurrency:
   group: gate-${{ github.ref }}
@@ -91,6 +104,8 @@ env:
   # replace read 510 and its cold open 1,299 against 1,000 (p4-r6-func, 2026-10-21; 634 relaunched quiet).
   # presentations-drag (P4-B2 M0) is the deck drag's fast group: no-agent control trials alternating with agent trials
   # that republish through the host, the class-1 drag case under MAWS_PRESENTATIONS_PERF=1.
+  # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
+  # its package script, each such spec skipping without it, and is on this list: ci-kit's VM contract above rests on it.
   MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
@@ -100,6 +115,13 @@ env:
   # runs whose results match the solo control's); the plan keeps a MEASURED_E2E or foreground group alone whatever this
   # says.
   MAC_SHARED_E2E: ''
+  # The Mac jobs that may run in ci-kit's macOS guest, a second desktop on the mini, booted fresh from a golden image for
+  # one job and gone after it (the same spec, The VM lane): e2e groups, and `unit:darwin`, that ask for
+  # [ci-kit-mac-solo], which the exclusive instance and the guest both carry, so each runs on whichever desktop is free.
+  # A name joins only on that spec's trial evidence (its V4: green in the guest, matching the host's results). The plan
+  # keeps a MEASURED_E2E group on the exclusive instance whatever this says, and runs a group on both lists shared; a
+  # `Lane:` trailer moves these groups to the guest alone.
+  MAC_VM_E2E: ''
 
 defaults:
   run:
@@ -111,8 +133,8 @@ jobs:
     # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
     # GATE_RUNNER (linux, macos or pool), each e2e job its lane's runner or, for POOL_E2E, the pool's or hosted Linux's;
-    # on the Mac, the exclusive instance's labels, or the shared instances' for unit:darwin and the e2e groups on
-    # MAC_SHARED_E2E.
+    # on the Mac, the exclusive instance's labels, the shared instances' for unit:darwin and the e2e groups on
+    # MAC_SHARED_E2E, or [ci-kit-mac-solo] for those on MAC_VM_E2E (the guest's alone under a `Lane:`).
     # A push to master runs nothing here (the warm job of Decision Log 26 left with Decision Log 53); master's class 1a
     # is the landing gate's.
     runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-slim' }}
@@ -151,6 +173,7 @@ jobs:
           INPUT_CLASS1A: ${{ inputs.class1a }}
           INPUT_EVIDENCE: ${{ inputs.evidence }}
           INPUT_LIVE: ${{ inputs.live }}
+          INPUT_LANE: ${{ inputs.lane }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
@@ -269,7 +292,8 @@ jobs:
     name: unit:darwin
     needs: plan
     if: needs.plan.outputs.unit_darwin == 'true'
-    # The exclusive instance, or a shared one when MAC_SHARED_E2E names unit:darwin; the timeout as the plan says.
+    # The exclusive instance, a shared one when MAC_SHARED_E2E names unit:darwin, solo or the guest when MAC_VM_E2E does;
+    # the timeout as the plan says.
     runs-on: ${{ fromJSON(needs.plan.outputs.unit_darwin_runner) }}
     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).unit_darwin }}
     steps:

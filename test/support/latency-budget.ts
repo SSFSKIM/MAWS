@@ -6,7 +6,8 @@
 // suites read it through `e2e/support/latency.ts`.
 // A job on one of ci-kit's shared Mac runner instances (CI_KIT_SHARED_DESKTOP=1 in its environment; ci-kit's mac-lane
 // concurrency spec, M2) counts as loaded whatever the load reads when it starts: the job beside it may start its build or
-// its flood at any moment after that read.
+// its flood at any moment after that read. So does a job in ci-kit's macOS guest (CI_KIT_VM_GUEST=1, set in the guest's
+// runner environment alone; the spec's VM lane, V3), which runs at 1.3-1.7x the host's time whatever its own load reads.
 import { cpus, loadavg } from 'node:os';
 
 export const QUIET_LOAD_PER_CORE = 1;
@@ -16,9 +17,15 @@ export interface MachineLoad {
   load: number; // the one-minute load average
   cores: number;
   shared?: boolean; // on a desktop ci-kit shares with another job
+  guest?: boolean; // in ci-kit's macOS guest
 }
 
-export const machineLoad = (env: Record<string, string | undefined> = process.env): MachineLoad => ({ load: loadavg()[0], cores: cpus().length, shared: env.CI_KIT_SHARED_DESKTOP === '1' });
+export const machineLoad = (env: Record<string, string | undefined> = process.env): MachineLoad => ({
+  load: loadavg()[0],
+  cores: cpus().length,
+  shared: env.CI_KIT_SHARED_DESKTOP === '1',
+  guest: env.CI_KIT_VM_GUEST === '1',
+});
 
 // The ceiling to assert, and why it is not the bound itself (null when it is).
 export interface BudgetVerdict {
@@ -28,9 +35,9 @@ export interface BudgetVerdict {
 
 // Where a bound is loosened, the machine that makes it so ("at load 74.3 on 10 cores"); null where it holds as named.
 export function loosenedOn(machine: MachineLoad): string | null {
-  if (!machine.shared && machine.load < machine.cores * QUIET_LOAD_PER_CORE) return null;
+  if (!machine.shared && !machine.guest && machine.load < machine.cores * QUIET_LOAD_PER_CORE) return null;
   const load = Math.round(machine.load * 10) / 10;
-  return `${machine.shared ? 'on a shared desktop (CI_KIT_SHARED_DESKTOP=1), ' : ''}at load ${load} on ${machine.cores} cores`;
+  return `${machine.shared ? 'on a shared desktop (CI_KIT_SHARED_DESKTOP=1), ' : ''}${machine.guest ? 'in a VM guest (CI_KIT_VM_GUEST=1), ' : ''}at load ${load} on ${machine.cores} cores`;
 }
 
 export function budgetVerdict(label: string, ms: number, budget: number, machine: MachineLoad): BudgetVerdict {
