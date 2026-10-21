@@ -12,14 +12,15 @@
 // P4-R7 (2026-10-21; the P4 spec's Decision Log 46): on the 5.5 models and Fable 5.1, text written before a tool call in
 // the same response comes back as a progress-update thinking block, a paraphrase without its tags, so a `<message>`
 // written there reaches no reader. The rule: a message sent before another tool call goes through a message tool,
-// whose input is never summarized, called in the same response as that call; every other message stays a span. The
-// tools are the plugin's `mcp__to-human__message` (its style declares 6) and MAWS's own `mcp__maws__message`, input
-// `{text}` in Markdown, result `sent`. MAWS's full contract moves to 7, which states the rule, and every message-tool
-// style (3 and up, MAWS's own full contract aside) gets supplement 2, which states it too, names MAWS's message tool
-// and says the plugin's is not available here (MAWS_NATIVE_TO_HUMAN keeps the plugin from registering it); so the loss
-// ends whatever the plugin's release. Every reader takes an accepted call of either tool (its result not an error) as
-// a to-human message at the call's place (`message-call.ts`). A session recorded under contract 1 or 5, or under
-// supplement 1, keeps what it recorded until the launch decision's "off" lets the prompt render again.
+// whose input is never summarized, called in the same response as that call; every other message stays a span. In MAWS
+// the tool is MAWS's own `mcp__maws__message`, input `{text}` in Markdown, result `sent`; the plugin's of the same shape
+// (its style declares 6) is someone else's tool here (the owner's ruling of 2026-10-21). MAWS's full contract moves to
+// 7, which states the rule, and every message-tool style (3 and up, MAWS's own full contract aside) gets supplement 2,
+// which states it too, names MAWS's message tool and says the plugin's is not available here (MAWS_NATIVE_TO_HUMAN keeps
+// the plugin from registering it); so the loss ends whatever the plugin's release. Every MAWS reader takes an accepted
+// call of MAWS's tool (its result not an error) as a to-human message at the call's place (`message-call.ts`), and a
+// call of the plugin's as the ordinary tool call it is. A session recorded under contract 1 or 5, or under supplement 1,
+// keeps what it recorded until the launch decision's "off" lets the prompt render again.
 export const CONTRACT_HEADER = (version: number): string => `# Messages to the human (MAWS to-human contract ${version})`;
 export const SUPPLEMENT_HEADER = (version: number): string => `# Messages to the human (MAWS to-human supplement ${version})`;
 

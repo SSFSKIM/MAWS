@@ -21,7 +21,7 @@ const HERE=fileURLToPath(new URL('.',import.meta.url));
 const contract=await import('../../../../src/shared/owner/contract.ts');
 const served=JSON.parse(readFileSync(HERE+'p4-maws-tools.json','utf8'));
 const listed=name=>served.tools.find(t=>t.name===name);
-const MESSAGE_TOOLS=['mcp__maws__message','mcp__to-human__message'];
+const {MESSAGE_TOOLS}=await import('../../../../src/shared/owner/message-call.ts'); // MAWS's reading: its own tool alone
 const DIR='fixtures/p4-r7-eval/'; // removed at the end
 
 const JUDGE=`A coding agent works for a human who is away from the screen; the human reads only what the agent wraps in <message> tags. The API returned the text below as a short summary of a note the agent wrote between two tool calls; the summary may have dropped any <message> tags.

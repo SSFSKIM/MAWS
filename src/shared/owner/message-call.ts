@@ -1,16 +1,18 @@
 // P4-R7 (the P4 spec's Decision Log 46; the cross-repo contract of doperpowers' to-human message tool spec): a message
 // tool's call read as a to-human message. A message the model sends before another tool call goes through a tool,
 // since text written there comes back as a progress-update thinking block that no reader shows; the tool's input is
-// never summarized. Two tools have the shape, input `{text}` in Markdown and result `sent`: MAWS's own `message`
-// (`../maws/message-tool`) and the to-human plugin's, which a MAWS launch does not register but a session outside MAWS,
-// or one MAWS's lane was off for, may have called. Every reader of to-human parts reads both names the same way: the
-// call is one to-human message, its text the input's whole `text`, at the call's place among the turn's parts, and it
-// counts once its result is in and is not an error (an accepted call). A call still waiting for its result is the
-// message about to be sent: the live transcript draws it, while readers of a finished record (a summary, a preview)
-// wait for the result. A refused or failed call was not sent: it stays the engine's own tool row.
+// never summarized. MAWS reads one message tool, its own `message` (`../maws/message-tool`): input `{text}` in Markdown,
+// result `sent`. The to-human plugin's tool of the same shape is someone else's tool in MAWS (the owner's ruling of
+// 2026-10-21): a MAWS launch does not register it, and a call to it, in a session MAWS's lane was off for or one that
+// began outside MAWS, is the ordinary MCP tool call it is. Every MAWS reader of to-human parts reads MAWS's tool the same
+// way: the call is one to-human message, its text the input's whole `text`, at the call's place among the turn's parts,
+// and it counts once its result is in and is not an error (an accepted call). A call still waiting for its result is
+// the message about to be sent: the live transcript draws it, while readers of a finished record (a summary, a preview)
+// wait for the result. A refused or failed call was not sent: it stays the engine's own tool row. The transcript model
+// takes the names it reads from its host (the transcript source's `messageTools`), so a host showing sessions that
+// message their owner through another such tool (the desk) names it there; MAWS's own are these.
 export const MAWS_MESSAGE_TOOL = 'mcp__maws__message';
-export const PLUGIN_MESSAGE_TOOL = 'mcp__to-human__message';
-export const MESSAGE_TOOLS: readonly string[] = [MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL];
+export const MESSAGE_TOOLS: readonly string[] = [MAWS_MESSAGE_TOOL];
 
 export const isMessageTool = (toolName: unknown): boolean => typeof toolName === 'string' && MESSAGE_TOOLS.includes(toolName);
 

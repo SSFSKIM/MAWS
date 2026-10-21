@@ -36,7 +36,7 @@ import { BROWSER_TOOL_NAMES, browserCallOf, browserToolResultSchemaOf, type Brow
 import type { ContentBlock } from '@shared/graph/events';
 import { denialDisposition } from './classify';
 import { marksOfText } from './owner-marks'; // P2-C (2026-10-09)
-import { messageCallState, messageCallText } from '@shared/owner/message-call'; // P4-R7
+import { MESSAGE_TOOLS, messageCallState, messageCallText } from '@shared/owner/message-call'; // P4-R7
 // E4c end
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -160,14 +160,15 @@ export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail:
   return tail.length === 0 ? kept : [...kept, ...tail];
 }
 
-export function turnSummary(turn: TurnState): TurnSummary {
-  return deriveTurn(turn, null).summary;
+// `messageTools`, here and in `turnPhrases`: the host's (its state's `messageTools`), MAWS's own when absent.
+export function turnSummary(turn: TurnState, messageTools?: readonly string[]): TurnSummary {
+  return deriveTurn(turn, null, messageTools).summary;
 }
 
 // The group phrases of a whole turn ("Edited 3 files, ran 2 commands"): the turn summary popover's category segment.
 // Denied and stopped calls did not run, so they are counted as tool calls but phrase nothing.
-export function turnPhrases(turn: TurnState): string {
-  return groupSummary(phrasesOf(deriveTurn(turn, null).cells.filter((cell) => cell.classification.denial === null)));
+export function turnPhrases(turn: TurnState, messageTools?: readonly string[]): string {
+  return groupSummary(phrasesOf(deriveTurn(turn, null, messageTools).cells.filter((cell) => cell.classification.denial === null)));
 }
 
 // Stable per-turn selector for consumers that must not follow unrelated streaming batches.
@@ -304,7 +305,8 @@ interface TurnDerivation {
 // How many per-turn derivations ran (instrumentation: the memo tests pin that readers of the memo derive nothing).
 export const turnDerivations = { count: 0 };
 
-function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivation {
+// `messageTools`: the message tools the host reads (classify.ts, `presentationOf`), the state's when there is one.
+function deriveTurn(turn: TurnState, state: TranscriptState | null, messageTools = state?.messageTools ?? MESSAGE_TOOLS): TurnDerivation {
   turnDerivations.count += 1;
   const ui = state?.ui;
   const expanded = ui ? ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
@@ -470,7 +472,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       case 'tool.use': {
         if (dropped(event.messageUuid)) break;
-        const presentation = presentationOf(event.toolName);
+        const presentation = presentationOf(event.toolName, messageTools);
         if (presentation === 'cell') {
           tools.set(event.toolUseId, { use: event, result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false });
           items.push({ kind: 'tool', toolUseId: event.toolUseId });
@@ -1176,7 +1178,7 @@ function knownOfTurn(state: TranscriptState, turn: TurnState): KnownAgents {
   const kept = knownByTurn.get(turn);
   if (kept && kept.version === turn.version) return kept.known;
   const memo = state.memo.get(turn.id);
-  const work = memo && memo.version === turn.version ? memo.work : deriveTurn(turn, null).work;
+  const work = memo && memo.version === turn.version ? memo.work : deriveTurn(turn, null, state.messageTools).work;
   const known = { refs: work.subagents.map(refOf), ...namesOf(turn.events) };
   knownByTurn.set(turn, { version: turn.version, known });
   return known;

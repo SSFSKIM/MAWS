@@ -5,9 +5,12 @@ import {
   carriesFullContract, CONTRACT_HEADER, FULL_CONTRACT, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT,
   TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from './contract';
-import { MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL } from './message-call';
+import { MAWS_MESSAGE_TOOL } from './message-call';
 import type { MessageUuid } from '../graph/ids';
 import { marksOf } from './marks';
+
+// The to-human plugin's message tool, which MAWS names to the model only to say it is not available here.
+const PLUGIN_MESSAGE_TOOL = 'mcp__to-human__message';
 
 // The engine's record of the system prompt U2 run 6 rendered with the contract appended (S14, a new session): the
 // segment is the text the live runs tested (spikes/protocol-probe/findings-pass3-p2-to-human.txt).

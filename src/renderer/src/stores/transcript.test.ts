@@ -504,3 +504,37 @@ describe('transcript store: the report view', () => {
   });
 });
 // P2-C end
+
+// P4-R7: a key's state reads the message tools its source names (the transcript source's `messageTools`). MAWS's
+// sources name none, and MAWS reads its own alone, so a call of the to-human plugin's tool is the MCP cell it is; the
+// desk's sources name the plugin's too.
+describe('transcript store: the message tools a source names', () => {
+  const PLUGIN = 'mcp__to-human__message';
+  const BOTH = ['mcp__maws__message', PLUGIN];
+  function pluginMessageTurn() {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('m1', PLUGIN, { text: 'Stage 1 is done.' });
+    b.result('m1', [{ type: 'text', text: 'sent' }]);
+    b.text('a1', 0, 'Done.');
+    b.end(['u1']);
+    return b;
+  }
+  const source = (events: SessionEvent[], messageTools?: readonly string[]): TranscriptSource => ({ subscribe: () => () => {}, snapshot: async () => events, ...(messageTools && { messageTools }) });
+
+  it('reads MAWS’s own when the source names none, the names it gives when it does, and a re-attached key its new source’s', async () => {
+    const { events } = pluginMessageTurn();
+    const store = createTranscriptStore();
+    const read = (key: string) => {
+      store.getState().expandAll(key, { cells: true });
+      return store.getState().rows(key).flatMap((row) => (row.kind === 'to_human' ? [`message ${row.toolUseId}`] : row.kind === 'group' ? row.cells.map((cell) => `cell ${cell.toolName}`) : row.kind === 'cell' ? [`cell ${row.toolName}`] : []));
+    };
+    await store.getState().attach('maws', source(events));
+    await store.getState().attach('desk', source(events, BOTH));
+    expect(read('maws')).toEqual([`cell ${PLUGIN}`]);
+    expect(read('desk')).toEqual(['message m1']);
+    store.getState().detach('maws');
+    await store.getState().attach('maws', source(events, BOTH)); // a kept key started over: staged, then installed
+    expect(read('maws')).toEqual(['message m1']);
+  });
+});

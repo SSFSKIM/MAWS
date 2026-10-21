@@ -64,11 +64,12 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   // E4c start: every historical browser tool call is a browser action row (E4c execution document, Design §10)
   ...Object.fromEntries(Object.values(HISTORICAL_BROWSER_TOOL_USE).map((name) => [name, 'browser_action' as const])),
   // E4c end
-  // P4-R7: a message tool's call, MAWS's or the to-human plugin's, is the message it sends (derive.ts's `to_human` row)
-  ...Object.fromEntries(MESSAGE_TOOLS.map((name) => [name, 'message' as const])),
 };
 
-export function presentationOf(toolName: string): Presentation {
+// P4-R7: a call of a message tool the host reads (`messageTools`; MAWS's own unless the host names others, the
+// transcript source's `messageTools`) is the message it sends (derive.ts's `to_human` row).
+export function presentationOf(toolName: string, messageTools: readonly string[] = MESSAGE_TOOLS): Presentation {
+  if (messageTools.includes(toolName)) return 'message';
   return Object.hasOwn(ROW_KIND_TOOLS, toolName) ? ROW_KIND_TOOLS[toolName] : 'cell';
 }
 

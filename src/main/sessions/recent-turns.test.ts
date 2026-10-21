@@ -196,7 +196,11 @@ describe('recentTurnsOf', () => {
     it('accepted, it is the turn’s answer, at the call’s time, and no tool call', () => {
       const answer = recentTurnsOf(records(...stages(resultOf('toolu_m'))), 5, false);
       expect(answer.turns[0]).toMatchObject({ answer: { text: 'Stage 1 is done.', at: '2026-10-09T11:00:02.000Z' }, toolCalls: 1 });
-      expect(turnOf(...stages(resultOf('toolu_m'), 'mcp__to-human__message'))).toEqual([['Stage 1 is done.', 1]]);
+    });
+
+    // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
+    it('a call of the to-human plugin’s message tool, accepted, is one of the turn’s tool calls and no answer', () => {
+      expect(turnOf(...stages(resultOf('toolu_m'), 'mcp__to-human__message'))).toEqual([['Looking first.', 2]]);
     });
 
     it('a span written after it is the newer answer', () => {
