@@ -5,9 +5,10 @@
 // Zod-free and DOM-free: the sandboxed browser preload bundles it alone, so it imports nothing the app preload reaches
 // (`@shared/ipc/*`) and no zod, or Rollup would split a shared chunk (`src/preload/bundle.test.ts`). Main's schema for
 // the report is `comment.ts`'s `PickReportSchema`.
-import { A11Y_PATH_MAX, A11Y_SEGMENT_NAME_MAX, CSS_PATH_MAX, fit, fitEnd, oneLine, type ElementDescription } from './describe';
+import { anchorField, oneLine } from '../anchor/field'; // X10's field helper, zod-free
+import { A11Y_PATH_MAX, A11Y_SEGMENT_NAME_MAX, CSS_PATH_MAX, type ElementDescription } from './describe';
 
-export { A11Y_SEGMENT_NAME_MAX, CSS_PATH_MAX, fit, oneLine };
+export { A11Y_SEGMENT_NAME_MAX, CSS_PATH_MAX, oneLine };
 
 // `browser:preload:*` (E4a Design §14): main accepts a message on `fromPreload` only from a tab's own webContents.
 export const COMMENT_CHANNEL = { toPreload: 'browser:preload:comment', fromPreload: 'browser:preload:pick' } as const;
@@ -54,10 +55,10 @@ export function trimDescription(description: ElementDescription): { description:
   return {
     description: {
       ...description,
-      role: description.role === null ? null : fit(description.role, REPORT_TOKEN_MAX),
-      name: fit(description.name, REPORT_NAME_MAX),
-      a11y: fitEnd(description.a11y, REPORT_A11Y_MAX),
-      tag: fit(description.tag, REPORT_TOKEN_MAX),
+      role: description.role === null ? null : anchorField(description.role, REPORT_TOKEN_MAX),
+      name: anchorField(description.name, REPORT_NAME_MAX),
+      a11y: anchorField(description.a11y, REPORT_A11Y_MAX, { keep: 'tail' }),
+      tag: anchorField(description.tag, REPORT_TOKEN_MAX),
     },
     nameOverLong,
   };
@@ -69,8 +70,8 @@ export function trimDescription(description: ElementDescription): { description:
 export function elementLabel(description: Pick<ElementDescription, 'role' | 'name' | 'tag'>, max: number): string {
   const head = description.role ?? description.tag;
   const room = max - head.length - 3; // the space and the two quotes
-  if (description.name === '' || room < 2) return fit(head, max);
-  return `${head} “${fit(description.name, room)}”`;
+  if (description.name === '' || room < 2) return anchorField(head, max);
+  return `${head} “${anchorField(description.name, room)}”`;
 }
 
 // MAWS's own nodes in the page, each carrying the marker attribute so a hit test can skip them.

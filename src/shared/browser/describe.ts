@@ -5,8 +5,10 @@
 // to resolve, so the rules below follow Playwright's `roleUtils` where that is cheap and answer null or `''` (omitted
 // from the anchor) wherever they cannot be sure. Lifted from `spikes/browser-probe/shared/locator.cjs`.
 //
-// DOM-only and dependency-free: the browser preload bundles it alone (no zod, nothing under `@shared/ipc/`). The DOM is
-// typed structurally (`DomElement`) because `src/shared` also compiles under the Node program, which has no DOM lib.
+// DOM-only and dependency-free but for X10's zod-free field helper: the browser preload bundles it alone (no zod,
+// nothing under `@shared/ipc/`). The DOM is typed structurally (`DomElement`) because `src/shared` also compiles under
+// the Node program, which has no DOM lib.
+import { anchorField } from '../anchor/field';
 
 // The slice of the DOM this module reads; a real `Element` (and happy-dom's) satisfies it.
 export interface DomNode {
@@ -47,29 +49,10 @@ export const CSS_PATH_MAX = 2000;
 export const A11Y_SEGMENT_NAME_MAX = 40; // E2's `TEXT_MAX` for page text
 export const A11Y_PATH_MAX = 300;
 
-// --- text helpers (E2's `oneLine` and `fit`, `src/renderer/src/tools/deliverables/comment/pick.ts`) ---
+// --- text helpers (the cut is X10's `anchorField`, `../anchor/field.ts`) ---
 
-// eslint-disable-next-line no-control-regex -- the control characters are what is matched
-const CONTROL = /[\x00-\x1f\x7f]/g;
 // eslint-disable-next-line no-control-regex -- the control characters are what is matched
 const HAS_CONTROL = /[\x00-\x1f\x7f]/;
-export const oneLine = (text: string): string => text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
-
-// At most `max` UTF-16 units (what a schema's `max` counts), an ellipsis marking a cut, never half a surrogate pair.
-export function fit(text: string, max: number): string {
-  if (text.length <= max) return text;
-  let kept = text.slice(0, Math.max(0, max - 1));
-  if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
-  return `${kept}…`;
-}
-
-// The same from the other end: the last `max - 1` units after an ellipsis (the innermost segments of a path).
-export function fitEnd(text: string, max: number): string {
-  if (text.length <= max) return text;
-  let kept = text.slice(text.length - Math.max(0, max - 1));
-  if (/^[\uDC00-\uDFFF]/.test(kept)) kept = kept.slice(1);
-  return `…${kept}`;
-}
 
 // Playwright's `asFlatString` with its matcher's whitespace rule: soft hyphens and zero-width spaces dropped, runs of
 // whitespace one space, trimmed.
@@ -553,9 +536,9 @@ export function a11yPath(el: DomElement): string {
     const role = roleOf(node);
     if (role === null) continue;
     const name = UNNAMED_IN_PATH.has(role) ? '' : accessibleNameOf(node);
-    segments.unshift(name === '' ? role : `${role} “${fit(name, A11Y_SEGMENT_NAME_MAX)}”`);
+    segments.unshift(name === '' ? role : `${role} “${anchorField(name, A11Y_SEGMENT_NAME_MAX)}”`);
   }
-  return fitEnd(segments.join(' > '), A11Y_PATH_MAX);
+  return anchorField(segments.join(' > '), A11Y_PATH_MAX, { keep: 'tail' });
 }
 
 // Playwright's `getByRole` skips an element under `aria-hidden="true"`, so a role and name sent for one would only make
