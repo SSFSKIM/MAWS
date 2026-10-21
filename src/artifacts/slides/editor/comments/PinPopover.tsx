@@ -15,7 +15,7 @@
 // thread resolved, the element deleted (its threads stay, orphans in the rail, V9), or (the deck) the slide changed;
 // the drafts stay (V5, V8). The keyboard goes into the popover when it opens and to the pin when it closes, never to
 // the stage (the stage's keyboard is the state machine's, P4-B2 Decision Log 9).
-import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { pinOf, placeCard, type CardStyle } from '../../../comments/placement';
 import { ThreadPopover } from '../../../comments/ThreadPopover';
@@ -33,8 +33,8 @@ const OWN = '[data-pin-popover], .deck-comment-pin'; // a press on these is thei
 
 interface Props {
   api: DeckCommentsApi;
-  /** The frame it is placed in: its host box, holding the stage's surface and the pins. */
-  frame: RefObject<HTMLDivElement | null>;
+  /** The frame it is placed in (as mounted): its host box, holding the stage's surface and the pins. */
+  host: HTMLElement | null;
   /** The deck's: the slide on the stage, whose change closes the popover. A design's pins are on every board. */
   shownSlide?: string | null;
   /** Changes whenever pins may have moved without a render here (a zoom, a pan): placed again. */
@@ -50,7 +50,7 @@ interface Placed {
   hidden: boolean;
 }
 
-function Open({ api, frame, shownSlide, layoutKey, target }: Props & { target: PinTarget }) {
+function Open({ api, host, shownSlide, layoutKey, target }: Props & { target: PinTarget }) {
   const { session, author, readOnly, drafts, pinMoves, closePopover, setActive } = api;
   const doc = session.doc;
   const version = useDocVersion(session);
@@ -67,7 +67,6 @@ function Open({ api, frame, shownSlide, layoutKey, target }: Props & { target: P
 
   const [placed, setPlaced] = useState<Placed>({ placement: null, hidden: true });
   const place = useCallback(() => {
-    const host = frame.current;
     const pin = host ? pinNode(host, target) : null;
     let next: Placed = { placement: null, hidden: true };
     if (host && pin) {
@@ -80,12 +79,11 @@ function Open({ api, frame, shownSlide, layoutKey, target }: Props & { target: P
       next = { placement: placeCard({ width: host.clientWidth, height: host.clientHeight }, pinOf(rect, IDENTITY)), hidden: !onStage };
     }
     setPlaced((was) => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
-  }, [frame, target]);
+  }, [host, target]);
   // after every render here (a zoom, a pan, an update), and as the pins commit theirs
   useLayoutEffect(place);
   useLayoutEffect(() => pinMoves.subscribe(place), [pinMoves, place]);
   useLayoutEffect(() => {
-    const host = frame.current;
     if (!host) return;
     // the stage scrolled: placed inside the handler, so the popover is where its pin is in the frame that draws it
     const onScroll = () => flushSync(place);
@@ -96,11 +94,11 @@ function Open({ api, frame, shownSlide, layoutKey, target }: Props & { target: P
       host.removeEventListener('scroll', onScroll, { capture: true });
       observer?.disconnect();
     };
-  }, [frame, place]);
+  }, [host, place]);
   void layoutKey; // a prop that changes renders here, and every render places again
 
   // the keyboard back on the pin: after an exit, or a closing press on the stage
-  const toPin = useCallback(() => pinNode(frame.current ?? document, target)?.focus({ preventScroll: true }), [frame, target]);
+  const toPin = useCallback(() => pinNode(host ?? document, target)?.focus({ preventScroll: true }), [host, target]);
   const exit = useCallback(() => {
     toPin();
     closePopover();
@@ -108,7 +106,6 @@ function Open({ api, frame, shownSlide, layoutKey, target }: Props & { target: P
 
   // closing presses and Escape on the stage, while it is open
   useEffect(() => {
-    const host = frame.current;
     if (!host) return;
     const doc = host.ownerDocument;
     const onStage = (target: Element) => target.closest('[data-stage-surface]') !== null && host.contains(target);
@@ -140,7 +137,7 @@ function Open({ api, frame, shownSlide, layoutKey, target }: Props & { target: P
       doc.removeEventListener('pointerdown', outside, { capture: true });
       host.removeEventListener('keydown', onKey, { capture: true });
     };
-  }, [frame, closePopover, toPin, exit]);
+  }, [host, closePopover, toPin, exit]);
 
   if (gone) return null;
   const writable = !readOnly;

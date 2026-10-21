@@ -176,7 +176,14 @@ interface FrameProps {
 export function DesignCommentFrame({ api, activeId, surface, view, boards, canvases, children }: FrameProps) {
   void activeId; // P4-B2: the active board's pins are this frame's too
   const { session, author, readOnly, setActive, setComposing, pinMoves } = api;
-  const frame = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement | null>(null);
+  // P4-B2: the frame as mounted, for the popover, which places itself in it
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const attach = useCallback((element: HTMLDivElement | null) => {
+    const frameRef = frame; // a ref by its name, so the React Compiler takes this write for a ref's (World.tsx's way)
+    frameRef.current = element;
+    setHost(element);
+  }, []);
   const version = useDocVersion(session);
   // DL39's bounded wave: the view reaches this frame only while something drawn here follows it, an open thread's pin,
   // the card on screen (its thread active) or (P4-B2) the popover; else a pan or a zoom renders nothing here and asks
@@ -236,14 +243,14 @@ export function DesignCommentFrame({ api, activeId, surface, view, boards, canva
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => commentKeys(event, api);
   const layoutKey = `${at}:${version}:${layout}`;
   return (
-    <div ref={frame} className="deck-comment-frame design-comment-frame" data-design-comment-frame onKeyDown={onKeyDown}>
+    <div ref={attach} className="deck-comment-frame design-comment-frame" data-design-comment-frame onKeyDown={onKeyDown}>
       {children}
       {viewport && !api.pinsHidden && <WorldPins api={api} threads={open} boards={boards} canvases={canvases} view={view} version={version} zoom={viewport.zoom} x={viewport.x} y={viewport.y} />}
       {/* P4-B2: the card's host stays mounted under an open popover, hidden */}
       <div className="deck-comment-card-slot" data-card-slot={api.popover ? 'hidden' : undefined}>
         {surface?.overlay({ ...reach, layoutKey })}
       </div>
-      <PinPopover api={api} frame={frame} layoutKey={layoutKey} />
+      <PinPopover api={api} host={host} layoutKey={layoutKey} />
     </div>
   );
 }

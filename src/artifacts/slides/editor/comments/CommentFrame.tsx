@@ -34,7 +34,14 @@ interface Props {
 
 export function CommentFrame({ api, surface, canvas, scale, children }: Props) {
   const { session, author, readOnly, setActive, setComposing, pinMoves } = api;
-  const frame = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement | null>(null);
+  // P4-B2: the frame as mounted, for the popover, which places itself in it
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const attach = useCallback((element: HTMLDivElement | null) => {
+    const frameRef = frame; // a ref by its name, so the React Compiler takes this write for a ref's (World.tsx's way)
+    frameRef.current = element;
+    setHost(element);
+  }, []);
   const version = useDocVersion(session);
   const shownSlide = useShownSlide(api); // P4-B2
   const [layout, setLayout] = useState(0);
@@ -80,13 +87,13 @@ export function CommentFrame({ api, surface, canvas, scale, children }: Props) {
 
   const layoutKey = `${canvas?.slideId ?? ''}:${scale}:${version}:${layout}`;
   return (
-    <div ref={frame} className="deck-comment-frame" onScrollCapture={moved} onKeyDown={onKeyDown}>
+    <div ref={attach} className="deck-comment-frame" onScrollCapture={moved} onKeyDown={onKeyDown}>
       {children}
       {/* P4-B2: the card's host stays mounted under an open popover, hidden */}
       <div className="deck-comment-card-slot" data-card-slot={api.popover ? 'hidden' : undefined}>
         {surface?.overlay({ ...reach, layoutKey })}
       </div>
-      <PinPopover api={api} frame={frame} shownSlide={shownSlide} layoutKey={layoutKey} />
+      <PinPopover api={api} host={host} shownSlide={shownSlide} layoutKey={layoutKey} />
     </div>
   );
 }
