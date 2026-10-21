@@ -83,13 +83,17 @@ describe('X9: the maws server and its twelve tools', () => {
     expect(list.map((t) => t.name)).toEqual([...MAWS_TOOL_NAMES]);
     for (const tool of list) {
       const spec = MAWS_TOOLS[tool.name as keyof typeof MAWS_TOOLS];
-      const meta = 'meta' in spec ? { _meta: spec.meta } : {}; // P4-R7: only `message` carries one
+      const meta = 'meta' in spec ? { _meta: spec.meta } : {}; // P4-R7, P4-A3: the always-loaded tools carry one
       expect(tool).toEqual({ name: tool.name, title: spec.title, description: spec.description, inputSchema: z.toJSONSchema(spec.input), annotations: { ...spec.annotations, title: spec.title }, ...meta });
       expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     }
-    // P4-R7: the message tool alone is always loaded, whatever tool search defers (P4-B4's probe: the engine honours the
-    // key for an SDK server's tool); a deferred one would cost a ToolSearch before the first message
-    expect(list.filter((t) => t._meta !== undefined).map((t) => [t.name, t._meta])).toEqual([['message', { 'anthropic/alwaysLoad': true }]]);
+    // Always loaded, whatever tool search defers (P4-B4's probe: the engine honours the key for an SDK server's tool): the
+    // message tool (P4-R7), and the tools an edit of an artifact the session is handed needs (P4-A3), read, the kind's
+    // guide, a document's edit and the file kinds' publish, since a deferred one costs a ToolSearch request before the
+    // first edit; every other tool defers until a session asks for it
+    const alwaysLoaded = list.filter((t) => t._meta !== undefined);
+    expect(alwaysLoaded.map((t) => t.name)).toEqual(['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit', 'message']);
+    for (const tool of alwaysLoaded) expect(tool._meta, tool.name).toEqual({ 'anthropic/alwaysLoad': true });
     // E2 (Decision Log 4): the two writers are not read-only, so the engine never batches them nor runs them in plan mode
     expect(list.map((t) => [t.name, t.annotations])).toEqual([
       ['send_file', { readOnlyHint: true, openWorldHint: false, title: 'Send file' }],
