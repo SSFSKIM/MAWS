@@ -16,6 +16,7 @@ import { registerFs } from '../../engine-host/fs/register';
 import { registerEngineIpc } from '../../engine-host/ipc';
 import type { FsService } from '../../engine-host/fs/service';
 import { Index } from './index';
+import { locate, locatesWithoutGit } from './projects'; // P4 W2-B
 import { DISCOVERY_BATCH, IndexSessionSource, type ReadModelWriter, type SourceHost } from './source';
 import { SessionReadModel, type ReadModelWriter as ModelWriter } from '../sessions/read-model'; // C12
 
@@ -386,6 +387,131 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       await settle();
       expect(burst.map((s) => index.sessions.getByEngineId(s.sessionId))).toEqual([null, null]);
       expect(index.sessions.bindings()).toEqual([]);
+    });
+
+    // P4 W2-B (tracker 2026-10-07 "The index sync's warm-up queue…"): a write that lands while the drain's warm-up is
+    // out applies what `locate` answers without git (the queue's warm prefix) and the queued summaries of the sessions
+    // it is about, so their changes keep the host's order; every other directory waits for the warm-up, never located
+    // on main's thread (an answer `locate` computed would be in its cache).
+    describe('a write that lands while the warm-up is out', () => {
+      let tree: ReturnType<typeof tempDir>;
+      beforeEach(() => void (tree = tempDir('maws-source-')));
+      afterEach(() => tree.dispose());
+      const directory = (name: string) => {
+        const path = join(tree.path, name);
+        mkdirSync(path);
+        return path;
+      };
+      const applied = (s: TranscriptSummary) => index.sessions.getByEngineId(s.sessionId) !== null;
+      // A source whose every warm-up is held: the start's first, then each drain round's, in call order.
+      const heldWarmUps = (host: SourceHost) => {
+        const warmUps: { directories: string[]; release: () => void }[] = [];
+        source = new IndexSessionSource(index, host, { emit, tickMs: 5, warmLinkedWorktrees: (directories) => new Promise<void>((release) => void warmUps.push({ directories, release })) });
+        stop = source.start(recordingWriter().writer);
+        return warmUps;
+      };
+
+      it('a write about one session applies that session’s queued summaries and the warm prefix first, and leaves the cold rest to the warm-up', async () => {
+        const fake = scriptedHost();
+        const warmUps = heldWarmUps(fake.host);
+        warmUps[0].release(); // the start's own (no projects): its refold finds the queue empty
+        await settle();
+        const launch = index.sessions.createForLaunch({ directory: '/x', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } }).record;
+        const looked = summary(); // a session the owner is looking at
+        const lookedAt = index.sessions.upsertFromSummary(looked).record.appId;
+        source!.onSetVisible(lookedAt, true);
+        const warm = directory('warm');
+        locate(warm); // asked about once already
+        const burst = {
+          warm: summary({ directory: warm }),
+          cold: summary({ directory: directory('cold') }),
+          launched: summary({ directory: directory('launched'), customTitle: 'Named in its transcript' }),
+          held: summary({ directory: directory('held') }),
+          removed: summary({ directory: directory('removed') }),
+          advance: { ...looked, directory: directory('advance'), size: looked.size + 1, lastRecordAt: '2026-09-28T11:00:00.000Z', leafUuid: 'leaf-2' as MessageUuid },
+        };
+        for (const s of Object.values(burst)) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+        await settle();
+        expect(warmUps).toHaveLength(2); // the drain's is out
+        const late = summary({ directory: directory('late') });
+        fake.fire('fs.sessionChanged', { summary: late, appSessionId: null }); // arrives during it
+
+        // C3's status binding the transcript the launch writes: that transcript's record is seen first, and the launch takes it over
+        fake.fire('session.status', { appSessionId: launch.appId, status: status(launch.appId, { engineSessionId: burst.launched.sessionId }) });
+        expect(applied(burst.warm)).toBe(true);
+        expect(index.sessions.get(launch.appId)).toMatchObject({ engineSessionId: burst.launched.sessionId, title: { text: 'Named in its transcript' } });
+        expect(index.sessions.list({ includeArchived: true }).filter((r) => r.engineSessionId === burst.launched.sessionId)).toHaveLength(1);
+        // a terminal takes a session whose discovery is queued: the record is there, held
+        fake.fire('fs.holderChanged', { sessionId: burst.held.sessionId, appSessionId: null, holder: { kind: 'terminal', pid: 7 }, registry: null, job: null });
+        expect(index.sessions.getByEngineId(burst.held.sessionId)?.holder).toEqual({ kind: 'terminal', pid: 7 });
+        // a removal right after its discovery archives the record
+        fake.fire('fs.sessionRemoved', { sessionId: burst.removed.sessionId, appSessionId: null });
+        expect(index.sessions.getByEngineId(burst.removed.sessionId)).toMatchObject({ archived: true });
+        // the owner looks away after the advance arrived: it was read while shown
+        source!.onSetVisible(lookedAt, false);
+        expect(index.sessions.get(lookedAt)).toMatchObject({ unread: false, lastSeen: { messageUuid: 'leaf-2' } });
+
+        expect([burst.cold, late].map(applied)).toEqual([false, false]);
+        expect([burst.cold, late].map((s) => locatesWithoutGit(s.directory))).toEqual([false, false]);
+
+        warmUps[1].release();
+        await vi.waitFor(() => expect(applied(burst.cold)).toBe(true));
+        expect(applied(late)).toBe(false);
+        expect(warmUps).toHaveLength(3);
+        expect(warmUps[2].directories).toEqual([late.directory]); // the next round: only what arrived during the last
+        warmUps[2].release();
+        await vi.waitFor(() => expect(applied(late)).toBe(true));
+        // what the writes left stands
+        expect(index.sessions.getByEngineId(burst.removed.sessionId)).toMatchObject({ archived: true });
+        expect(index.sessions.getByEngineId(burst.held.sessionId)?.holder).toEqual({ kind: 'terminal', pid: 7 });
+        expect(index.sessions.get(lookedAt)).toMatchObject({ unread: false, lastSeen: { messageUuid: 'leaf-2' } });
+      });
+
+      it('the refold, the host’s reset and the holder fold apply the warm prefix and the summaries of sessions whose remembered holder they drop', async () => {
+        const fake = scriptedHost();
+        const warmUps = heldWarmUps(fake.host);
+        await settle(); // the start's sync folds an empty registry; the start's warm-up is still out
+        const terminal = (pid: number): Holder => ({ kind: 'terminal', pid });
+        const held = { stale: summary({ directory: directory('stale') }), kept: summary({ directory: directory('kept') }) };
+        // registry holders reported before the sessions' discovery: remembered for their records
+        fake.fire('fs.holderChanged', { sessionId: held.stale.sessionId, appSessionId: null, holder: terminal(8), registry: null, job: null });
+        fake.fire('fs.holderChanged', { sessionId: held.kept.sessionId, appSessionId: null, holder: terminal(9), registry: null, job: null });
+        const warm = directory('warm');
+        locate(warm);
+        const first = summary({ directory: warm });
+        const cold = summary({ directory: directory('cold') });
+        const behind = summary({ directory: warm }); // warm, but behind a cold one: it keeps its place
+        const last = summary({ directory: directory('last') });
+        for (const s of [first, cold, held.stale, behind, held.kept, last]) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+        await settle();
+        expect(warmUps).toHaveLength(2); // the drain's is out
+        const untouched = [cold, behind, last];
+
+        warmUps[0].release(); // the start's warm-up ends: the refold
+        await settle();
+        expect([first, ...untouched].map(applied)).toEqual([true, false, false, false]);
+
+        // the host goes: what it remembered of the registry goes with it, so the sessions it remembered holders for are seen first
+        fake.setState('crashed');
+        expect(index.sessions.getByEngineId(held.stale.sessionId)?.holder).toEqual(terminal(8));
+        expect(index.sessions.getByEngineId(held.kept.sessionId)?.holder).toEqual(terminal(9));
+        fake.setState('ready');
+        // back, it reports a holder for a session whose discovery then arrives; its registry no longer lists that one, nor the stale one
+        const gone = summary({ directory: directory('gone') });
+        fake.fire('fs.holderChanged', { sessionId: gone.sessionId, appSessionId: null, holder: terminal(10), registry: null, job: null });
+        fake.fire('fs.sessionChanged', { summary: gone, appSessionId: null });
+        fake.answers.set('fs.state', () => withHolders([{ sessionId: held.kept.sessionId, holder: terminal(9) }]));
+        fake.stream();
+        await settle(); // the sync's fold
+        expect(fake.names().filter((n) => n === 'fs.state')).toHaveLength(2);
+        expect([held.stale, held.kept, gone].map((s) => index.sessions.getByEngineId(s.sessionId)?.holder)).toEqual([{ kind: 'none' }, terminal(9), { kind: 'none' }]);
+
+        expect(untouched.map(applied)).toEqual([false, false, false]);
+        expect([cold, last].map((s) => locatesWithoutGit(s.directory))).toEqual([false, false]);
+        warmUps[1].release();
+        await vi.waitFor(() => expect(untouched.map(applied)).toEqual([true, true, true]));
+        expect([held.stale, held.kept, gone].map((s) => index.sessions.getByEngineId(s.sessionId)?.holder)).toEqual([{ kind: 'none' }, terminal(9), { kind: 'none' }]);
+      });
     });
   });
 

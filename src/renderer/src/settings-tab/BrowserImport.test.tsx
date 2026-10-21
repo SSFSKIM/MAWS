@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V16 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { browserTab, T1, T2 } from '../test-support/browser';
@@ -16,7 +16,7 @@ import { FAILS_ID, IMPORT_ID, importBridge, RECORD, WALLET_ID, type ImportBridge
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { browser } from '../tools/browser/store';
 import { BrowserImport } from './BrowserImport';
-import { formatDate } from '../app/date-format';
+import { formatDate } from '@shared/app/date-format';
 
 const A = 'app-a' as AppSessionId;
 let b: ImportBridge;
@@ -27,7 +27,7 @@ const row = (name: string) => within(profile()).getByRole('group', { name });
 const dialog = () => screen.getByRole('dialog');
 
 function renderBlock(answers: ImportBridge['answers'] = {}, profileSetting: string | null = null) {
-  b = importBridge({ ...SETTINGS_DEFAULTS_V16, browser: { ...SETTINGS_DEFAULTS_V16.browser, profile: profileSetting } });
+  b = importBridge({ ...SETTINGS_DEFAULTS_V17, browser: { ...SETTINGS_DEFAULTS_V17.browser, profile: profileSetting } });
   Object.assign(b.answers, answers);
   window.maws = b.bridge;
   const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -164,7 +164,7 @@ describe('an imported profile', () => {
     const consented = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt, count: 46, error: null, errorAt: null } };
     renderBlock({ 'browser.import.list': () => ({ profiles: [consented], fileBroken: false, running: null }), 'browser.bookmarks.sync': () => ({ syncedAt, count: 46 }) });
     const region = await screen.findByRole('region', { name: 'Person 1' });
-    expect(within(region).getByText('마지막 동기화 2 hours ago')).toBeTruthy();
+    expect(within(region).getByText('Last synced 2 hours ago')).toBeTruthy();
     fireEvent.click(within(region).getByRole('button', { name: 'Sync bookmarks now' }));
     await vi.waitFor(() => expect(calls('browser.bookmarks.sync')).toEqual([{ profileDir: 'Default' }]));
     cleanup();

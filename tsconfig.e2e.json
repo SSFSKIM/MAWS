@@ -45,6 +45,10 @@
     "src/engine-host/connectors/source-entry.ts",
     "src/engine-host/connectors/status.ts",
     "src/engine-host/mcp-call.ts",
+    // P4 W2-D: the widgets spec's Stop case bounds its wait by the plugin runner's own SIGKILL grace
+    "src/engine-host/plugins/cli-result.ts",
+    "src/engine-host/plugins/reload-after.ts",
+    "src/engine-host/plugins/runner.ts",
     "src/engine-host/outbound-writer.ts",
     "src/engine-host/rpc.ts",
     "src/engine-host/engine-compat.ts",

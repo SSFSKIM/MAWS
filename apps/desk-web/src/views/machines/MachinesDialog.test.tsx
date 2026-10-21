@@ -192,6 +192,26 @@ describe('MachinesDialog', () => {
     expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull();
     expect(screen.getByRole('dialog').textContent).toContain('An admin of the org enrolls and removes machines.');
   });
+
+  // The desk's one display locale (P4 Decision Log 4): this project runs under a Korean system locale
+  // (vitest.config.ts), where a formatter on the default locale writes the deadline "PM 02:05" (a Korean browser, "오후 02:05").
+  it("says by when the one machine's code must be pasted, as an English clock time", async () => {
+    await unlocked();
+    const expires = new Date(2026, 9, 6, 14, 5).toISOString();
+    const doubles = serve(ME.member);
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input), 'http://double').pathname === '/api/enrollments' ? Response.json({ enrollment: { id: 'e1', expires }, token: 'tok' }, { status: 201 }) : doubles(input, init),
+    );
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Enroll a machine' }));
+    fireEvent.change(within(screen.getByRole('form', { name: 'Machine name' })).getByRole('textbox'), { target: { value: 'studio' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    const confirm = screen.getByTestId('enroll-confirm');
+    fireEvent.change(await within(confirm).findByLabelText('The passphrase'), { target: { value: PASSPHRASE } });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+    const shown = await screen.findByTestId('enroll-code', {}, { timeout: 5000 });
+    expect(shown.textContent!.replace(/\s/g, ' ')).toContain('paste this code when it asks, before 2:05 PM:');
+  });
 });
 
 const PASSPHRASE = 'correct horse battery staple';
@@ -277,11 +297,12 @@ describe('MachinesDialog: provisioning keys', () => {
   });
 
   it('says a key whose time is up expired, and one still enrolling when it expires', async () => {
-    hub.addKey('stale', 'old-', { created: '2025-01-01T00:00:00.000Z', expires: '2025-04-01T00:00:00.000Z' });
+    hub.addKey('stale', 'old-', { created: '2025-01-01T00:00:00.000Z', expires: '2025-04-01T12:00:00.000Z' });
     hub.addKey('fresh', 'new-', { expires: new Date(Date.now() + 86_400_000).toISOString() });
     const { container } = open();
     await waitFor(() => expect(keyRow(container, 'stale')).not.toBeNull());
-    expect(keyRow(container, 'stale')!.textContent).toContain('expired');
+    // In English under this project's Korean system locale (vitest.config.ts), where the browser's would write "2025년 4월 1일"
+    expect(keyRow(container, 'stale')!.textContent).toContain('expired Apr 1, 2025');
     expect(keyRow(container, 'fresh')!.textContent).toContain('expires');
     expect(keyRow(container, 'fresh')!.textContent).not.toContain('expired');
   });

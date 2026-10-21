@@ -189,6 +189,9 @@ importers:
       '@types/d3-shape':
         specifier: 3.2.0
         version: 3.2.0
+      '@types/js-yaml':
+        specifier: 4.0.9
+        version: 4.0.9
       '@types/node':
         specifier: ^24
         version: 24.19.0
@@ -282,6 +285,9 @@ importers:
       happy-dom:
         specifier: ^20
         version: 20.14.5
+      js-yaml:
+        specifier: 4.3.2
+        version: 4.3.2
       jszip:
         specifier: 3.10.2
         version: 3.10.2
@@ -297,6 +303,9 @@ importers:
       marked:
         specifier: 17.0.6
         version: 17.0.6
+      mermaid:
+        specifier: 11.17.2
+        version: 11.17.2
       nanoid:
         specifier: 5.1.16
         version: 5.1.16
@@ -2815,6 +2824,9 @@ packages:
 
   '@types/http-cache-semantics@4.2.0':
     resolution: {integrity: sha512-L3LgimLHXtGkWikKnsPg0/VFx9OGZaC+eN1u4r+OB1XRqH3meBIAVC2zr1WdMH+RHmnRkqliQAOHNJ/E0j/e0Q==}
+
+  '@types/js-yaml@4.0.9':
+    resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==}
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
@@ -8242,6 +8254,8 @@ snapshots:
       '@types/unist': 3.0.3
 
   '@types/http-cache-semantics@4.2.0': {}
+
+  '@types/js-yaml@4.0.9': {}
 
   '@types/json-schema@7.0.15': {}
 

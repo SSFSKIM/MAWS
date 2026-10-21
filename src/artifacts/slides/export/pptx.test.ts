@@ -317,6 +317,30 @@ describe('the PPTX mapping: the exports-capture panel', () => {
     // an unpainted table: the native table alone, as before
     expect(onBody(grid).map((o) => o.name)).toEqual(['grid']);
   });
+  // P4 (the collapsed-table row): Chromium draws a collapsed table's whole outer border inside its measured box and never
+  // rounds it, while its background and shadow keep the radius (the presentations-export probe on the export window)
+  it('draws a collapsed table’s 16 px outline square and inside its box, its fill and shadow under it rounded', () => {
+    const grid = body.elements.find((e) => e.id === 'grid')!;
+    const red = { width: 16, style: 'solid', color: 'rgb(255, 0, 0)' };
+    const rounded: MeasuredElement = { ...grid, paint: { ...NO_PAINT, fill: 'rgb(0, 0, 255)', borders: [red, red, red, red], radius: 40, shadow: { x: 12, y: 12, blur: 0, color: 'rgb(0, 255, 0)' } } };
+    const out = onBody(rounded);
+    expect(out.map((o) => [o.kind, o.name])).toEqual([['shape', 'grid:fill'], ['table', 'grid'], ['shape', 'grid:border']]);
+    const outline = out[2]!;
+    if (outline.kind !== 'shape') throw new Error('a shape');
+    expect(outline.shape).toBe('rect');
+    expect(outline.options).not.toHaveProperty('rectRadius');
+    const o = outline.options as { x: number; y: number; w: number; h: number; line: { width: number } };
+    const stroke = pxOfPt(o.line.width);
+    expect(stroke).toBe(16);
+    // the stroke from the box's edge (128, 229, 400 × 120) to 16 px inside it
+    nearCanvas(px(o.x) - stroke / 2, 128);
+    nearCanvas(px(o.y) - stroke / 2, 229);
+    nearCanvas(px(o.x) + px(o.w) + stroke / 2, 528);
+    nearCanvas(px(o.y) + px(o.h) + stroke / 2, 349);
+    nearCanvas(px(o.x) + stroke / 2, 144);
+    // the fill and its shadow at the whole box, with the table's radius
+    expect(out[0]).toMatchObject({ shape: 'roundRect', options: { objectName: 'grid:fill', x: inches(128), w: inches(400), rectRadius: inches(40), shadow: { type: 'outer', color: '00FF00' } } });
+  });
   // scalpel-5#3: an image's own paint (the presentation guide's `border-radius:16px`, a border, a background) is no
   // native picture's: the window's picture of it, which draws them; a shadow PowerPoint casts itself
   it('scalpel-5#3: takes a rounded or framed image as the window draws it, and casts an image’s shadow natively', () => {
@@ -361,4 +385,49 @@ describe('the PPTX mapping: the exports-capture panel', () => {
     nearCanvas(px((whole.options as { y: number }).y) + 100, 50);
   });
   // (the exports-capture regressions end)
+});
+
+// P4 (the skewed-element row): a skew, an element's own or an ancestor's, has no native form (a PowerPoint box turns but
+// does not lean): the element, and every member of a skewed group with its connectors among them, is the window's picture
+// of it as drawn, placed unturned at the box it is drawn in; a turned or scaled element keeps its native object.
+describe('the PPTX mapping: skewed elements', () => {
+  const body = MEASURED.slides[1]!;
+  const lean: [number, number, number, number] = [1, 0, Math.tan(Math.PI / 9), 1]; // skewX(20deg)
+  const fill: MeasuredElement['paint'] = { fill: 'rgb(0, 255, 0)', image: false, borders: [null, null, null, null], radius: 0, shadow: null, opacity: 1 };
+
+  it('takes a skewed box, a skewed group’s text and its connector as drawn, and places each unturned at its drawn box', () => {
+    const card: MeasuredElement = { ...body.elements[0]!, id: 'card', tag: 'div', box: { x: 118, y: 200, w: 200, h: 100 }, rotate: 0, linear: lean, drawn: { x: 100, y: 200, w: 236.4, h: 100 }, paint: fill };
+    const wire: MeasuredElement = { ...body.elements[1]!, id: 'wire', box: { x: 400, y: 100, w: 300, h: 200 }, rotate: 10, linear: lean, drawn: { x: 380, y: 90, w: 380, h: 230 }, attrs: { x1: '0', y1: '0', x2: '300', y2: '200' } };
+    const points = body.elements.find((e) => e.id === 'points')!;
+    const text: MeasuredElement = { ...points, id: 'member', rotate: 10, linear: lean, drawn: { x: 410, y: 110, w: 120, h: 60 } };
+    const turned: MeasuredElement = { ...card, id: 'turned', rotate: 30, linear: [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6), -Math.sin(Math.PI / 6), Math.cos(Math.PI / 6)], drawn: undefined };
+    // the skewed group itself paints nothing: no picture of it
+    const group: MeasuredElement = { ...card, id: 'group', box: wire.box, drawn: wire.drawn, paint: { ...fill, fill: null } };
+    const measured = { slides: [{ ...body, elements: [card, group, wire, text, turned] }] };
+    expect(pictureJobs(measured, 'named').map((j) => [j.key, j.mode, j.box])).toEqual([
+      ['body/card', 'drawn', card.drawn],
+      ['body/wire', 'drawn', wire.drawn],
+      ['body/member', 'drawn', text.drawn],
+    ]);
+    const pictures = new Map(['card', 'wire', 'member'].map((id) => [pictureKey('body', id), PNG]));
+    const out = pptxSlides(deck(), measured, { variant: 'named', pictures, asset })[0]!.objects;
+    expect(out.map((o) => [o.kind, o.name])).toEqual([['image', 'card'], ['image', 'wire'], ['image', 'member'], ['shape', 'turned']]);
+    expect(named(out, 'card').options).toEqual({ data: PNG, objectName: 'card', x: inches(100), y: inches(200), w: inches(236.4), h: inches(100) });
+    expect(named(out, 'wire').options).toEqual({ data: PNG, objectName: 'wire', x: inches(380), y: inches(90), w: inches(380), h: inches(230) });
+    expect(named(out, 'member').options).not.toHaveProperty('rotate');
+    // a turn alone: its native box, turned
+    expect(named(out, 'turned')).toMatchObject({ kind: 'shape', shape: 'rect', options: { rotate: 30 } });
+  });
+
+  // the re-review: a native stand-in's box need not stay within the skewed paint (a skewY(30deg) box just past the right
+  // edge turns back onto the slide), so a skewed element is its picture or nothing
+  it('draws nothing for a skewed element the slide shows none of, or one whose picture is missing', () => {
+    const off: MeasuredElement = { ...body.elements[0]!, id: 'off', tag: 'div', box: { x: 1921, y: 200, w: 200, h: 100 }, rotate: 30, linear: [1, Math.tan(Math.PI / 6), 0, 1], drawn: { x: 1920, y: 142, w: 0, h: 216 }, paint: fill };
+    const measured = { slides: [{ ...body, elements: [off] }] };
+    expect(pictureJobs(measured, 'named')).toEqual([]);
+    expect(pptxSlides(deck(), measured, { variant: 'named', pictures: new Map(), asset })[0]!.objects).toEqual([]);
+    const shown = { slides: [{ ...body, elements: [{ ...off, id: 'shown', drawn: { x: 100, y: 142, w: 200, h: 216 } }] }] };
+    expect(pictureJobs(shown, 'named').map((j) => j.key)).toEqual(['body/shown']);
+    expect(pptxSlides(deck(), shown, { variant: 'named', pictures: new Map(), asset })[0]!.objects).toEqual([]);
+  });
 });

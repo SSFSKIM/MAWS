@@ -7,8 +7,9 @@
 //   output's tail are answered whether it succeeds or not;
 // - the check refuses by name a missing or empty file, a meta.json that is not JSON, a consumer field that is not finite
 //   or a version timestamp that does not parse, and, for a generated export, a soak descriptor other than the one asked;
-//   it answers each file's size and SHA-256 (integrity evidence only: a restore mints random client ids, so the bytes
-//   are not expected to repeat across runs) and the meta's workload and filesView fingerprints.
+//   it answers each file's size and SHA-256 (integrity evidence) and the meta's workload and filesView fingerprints;
+// - one descriptor's generations agree on `deckHistoryLogic` (P4: the soak is seeded and its restores author under ids
+//   of its own); runs are compared by it, not by the files' bytes.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -84,9 +85,15 @@ export interface DeckHistoryMeta {
   provenanceRows: number;
   s7aWalk: { slides: number; elements: number };
   ms: Record<string, number>;
+  restores?: { at: string; from: string; ms: number; bytes: number }[];
   soak?: typeof DECK_HISTORY_SOAK;
   workload?: unknown;
   filesView?: unknown;
+}
+
+/** What two generations of one descriptor agree on: the meta less its timings and the restores' sizes. */
+export function deckHistoryLogic({ month, versionAt, kind, enc, provenanceRows, s7aWalk, restores, soak, workload, filesView }: DeckHistoryMeta) {
+  return { month, versionAt, kind, enc, provenanceRows, s7aWalk, restores: restores?.map(({ at, from }) => ({ at, from })), soak, workload, filesView };
 }
 
 export type DeckHistoryCheck = { ok: true; meta: DeckHistoryMeta; files: Record<string, { bytes: number; sha256: string }> } | { ok: false; reason: string };

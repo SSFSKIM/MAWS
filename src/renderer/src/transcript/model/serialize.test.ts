@@ -12,7 +12,7 @@ afterEach(() => configureTime(null));
 
 describe('serializeRows', () => {
   it('renders a turn as markdown: the prompt, the divider line, the work as a list, the answer verbatim, the receipt', () => {
-    configureTime({ now: '2026-09-28T15:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-09-28T15:00:00.000Z', timeZone: 'UTC' });
     const b = builder();
     b.turn('u1', 'Fix the tests');
     b.thinking('m1', 0, 'Look first.');

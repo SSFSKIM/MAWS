@@ -11,6 +11,7 @@ import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { shellsUnder, untilExited } from './processes';
 import { launchEnvironment } from './scratch-env';
+import { cornerOrigin, windowCorner } from './window-origin';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
 
@@ -61,6 +62,9 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // launch names no CLAUDE_CONFIG_DIR at all: the engine and main then read `~/.claude` and `~/.claude.json` as the
   // owner's own MAWS does (a CLAUDE_CONFIG_DIR of `~/.claude` would move the global config file inside it).
   ownerConfigHome?: boolean;
+  // P4-W2L: the app's Chromium locale for this launch instead of en-US (`ko-KR`, the owner's), for a spec showing that
+  // every age, date and time stays English whatever the system's (P4 Decision Log 4).
+  lang?: string;
 }
 // C5 end
 
@@ -130,14 +134,16 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   try {
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     const launchedAt = Date.now();
+    const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
     app = executable
-      ? await _electron.launch({ executablePath: executable, args: E2E_APP_ARGS, env, cwd: REPO_ROOT })
-      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...E2E_APP_ARGS, main], env, cwd: REPO_ROOT });
+      ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
+      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: REPO_ROOT });
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
     const consoleErrors = await collectConsoleErrors(page);
     await sizeForGroup(app, page); // P3-F1
+    await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
     return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, cleanup };
   } catch (error) {
@@ -172,6 +178,20 @@ async function sizeForGroup(app: ElectronApplication, page: Page): Promise<void>
   const [width, height] = [Number(size[1]), Number(size[2])];
   await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w, h), [width, height] as const);
   await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [width, height] as const);
+}
+
+// ci-kit's mac-lane concurrency spec, M2 (its audit's H6): on a shared runner instance the first window moves to the
+// corner of the primary display's work area its instance takes (window-origin.ts), after sizeForGroup so the corner
+// holds the window's own size; anywhere else it stays where the app put it.
+async function placeForInstance(app: ElectronApplication): Promise<void> {
+  const corner = windowCorner(process.env);
+  if (corner === null) return;
+  const { area, size } = await app.evaluate(({ BrowserWindow, screen }) => {
+    const [width, height] = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.getSize();
+    return { area: screen.getPrimaryDisplay().workArea, size: { width: width!, height: height! } };
+  });
+  const { x, y } = cornerOrigin(corner, area, size);
+  await app.evaluate(({ BrowserWindow }, [x, y]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setPosition(x, y), [x, y] as const);
 }
 
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window

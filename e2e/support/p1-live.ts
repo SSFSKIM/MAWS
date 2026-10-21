@@ -48,13 +48,16 @@ const usd4 = (usd: number): number => Number(usd.toFixed(4));
 // whose result never came) charged its reservation or allocation. The spec keeps charges on disk so a fresh worker
 // still counts them; a later charge under the same key replaces the earlier (a reservation settled once its receipt
 // came). A charge `against` a session is a reservation its own receipts draw down: it counts only what it holds beyond
-// them, so the session is spent at the larger of the two.
+// them, so the session is spent at the larger of the two. A side question's reservation (`sideQuestionOf`) counts in
+// full, since no receipt ever shows its spend; it frees its session's launch reservation from waiting on a receipt
+// that never comes (settledReservation).
 export interface Charge {
   key: string;
   case: CaseName;
   label: string;
   usd: number;
   against?: string; // the app session id whose receipts it stands in for
+  sideQuestionOf?: string; // the app session id one of whose side questions it reserves
 }
 
 export interface Spent {
@@ -80,15 +83,19 @@ export function launchReservation(name: CaseName, id: string, label: string, usd
   return { key: `${name}:launch:${id}`, case: name, label: `the launch budget of ${label}`, usd, against: id };
 }
 
-// The reservation settled once the session's process is gone (`rows`, every launch's journal in order): nothing beyond
-// its receipts when a result followed its last prompt; the whole budget kept (still against its receipts) when a prompt
-// went unreceipted, a timeout or a crash before its result, since an absent receipt never gives money back.
-export function settledReservation(reserved: Charge, rows: readonly JournalRow[]): Charge {
-  const { settled, receipted } = chargeOf(rows, reserved.usd);
+// The reservation settled once the session's process is gone (`rows`, every launch's journal in order; `charges`, the
+// run's): nothing beyond its receipts when a result followed its last prompt; the whole budget kept (still against its
+// receipts) when a paid call went unreceipted, a timeout or a crash before its result, since an absent receipt never
+// gives money back. A side question is answered with no result frame, so it holds the budget too unless each of the
+// session's side questions carries a reservation of its own in `charges`.
+export function settledReservation(reserved: Charge, rows: readonly JournalRow[], charges: readonly Charge[] = []): Charge {
+  const apart = [...new Map(charges.map((c) => [c.key, c])).values()].filter((c) => c.sideQuestionOf !== undefined && c.sideQuestionOf === reserved.against).length;
+  const { settled, receipted } = chargeOf(rows, reserved.usd, apart);
   const shown = `US$${receipted.toFixed(4)}`;
+  const asked = rows.filter(isSideQuestion).length;
   return settled
-    ? { ...reserved, label: `${reserved.label}, settled to its receipts (${shown})`, usd: 0 }
-    : { ...reserved, label: `${reserved.label}, kept whole: a prompt went unreceipted (its receipts ${shown})` };
+    ? { ...reserved, label: `${reserved.label}, settled to its receipts (${shown})${asked > 0 ? `, its ${asked} side question${asked === 1 ? '' : 's'} charged apart` : ''}`, usd: 0 }
+    : { ...reserved, label: `${reserved.label}, kept whole: a paid call went unreceipted (its receipts ${shown})` };
 }
 
 export interface Budget {
@@ -122,10 +129,12 @@ const isMainResult = (row: JournalRow): boolean => {
   return row.direction === 'in' && frame?.type === 'result' && (frame.parent_tool_use_id ?? null) === null;
 };
 // What MAWS writes that the engine spends on: a prompt, or a side question (`/btw`, answered with no result frame).
-const isPaidRequest = (row: JournalRow): boolean => {
+const isPrompt = (row: JournalRow): boolean => row.direction === 'out' && (row.frame as { type?: unknown } | null)?.type === 'user';
+const isSideQuestion = (row: JournalRow): boolean => {
   const frame = row.frame as { type?: unknown; request?: { subtype?: unknown } } | null;
-  return row.direction === 'out' && (frame?.type === 'user' || (frame?.type === 'control_request' && frame.request?.subtype === 'side_question'));
+  return row.direction === 'out' && frame?.type === 'control_request' && frame.request?.subtype === 'side_question';
 };
+const isPaidRequest = (row: JournalRow): boolean => isPrompt(row) || isSideQuestion(row);
 
 // A main result that carries its figure: one without `total_cost_usd` is no receipt, its spend unknown rather than zero.
 const isPriced = (row: JournalRow): boolean => typeof (row.frame as { total_cost_usd?: unknown }).total_cost_usd === 'number';
@@ -133,10 +142,12 @@ const isPriced = (row: JournalRow): boolean => typeof (row.frame as { total_cost
 // What a session's paid calls cost, from its journal rows in order: its receipts (the main lane's `total_cost_usd`,
 // journalCost) when a result came after its last prompt or side question and every main result carried its figure
 // (`settled`); otherwise at least its whole `allocationUsd`, since an absent receipt must never give money back (an
-// interrupted or failed turn, a stopped one, a result whose figure is missing).
-export function chargeOf(rows: readonly JournalRow[], allocationUsd: number): { usd: number; receipted: number; settled: boolean } {
+// interrupted or failed turn, a stopped one, a result whose figure is missing). When the journal's side questions are
+// no more than `sideQuestionsReserved`, the ones charged apart, only its prompts wait on a result.
+export function chargeOf(rows: readonly JournalRow[], allocationUsd: number, sideQuestionsReserved = 0): { usd: number; receipted: number; settled: boolean } {
   const receipted = usd4(journalCost([...rows]).costUsd);
-  const answered = rows.findLastIndex(isPaidRequest) < rows.findLastIndex(isMainResult) || !rows.some(isPaidRequest);
+  const paid = rows.filter(isSideQuestion).length <= sideQuestionsReserved ? isPrompt : isPaidRequest;
+  const answered = rows.findLastIndex(paid) < rows.findLastIndex(isMainResult) || !rows.some(paid);
   const settled = answered && rows.filter(isMainResult).every(isPriced);
   return { usd: settled ? receipted : Math.max(receipted, allocationUsd), receipted, settled };
 }

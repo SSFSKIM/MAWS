@@ -8,7 +8,7 @@
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { isAnthropicDefaultMarketplace } from '@shared/plugins/source-key';
-import { formatAgo, formatDateTime, formatShortDate } from '../../app/date-format';
+import { formatAgo, formatDateTime, formatShortDate } from '@shared/app/date-format';
 import type { ObservedPlugin } from '@shared/engine/observed-facts';
 
 export type SourceGroup = 'here' | 'yours' | 'synced' | 'anthropic' | 'added';
@@ -127,7 +127,7 @@ export function isNew(at: string | null, now: number): boolean {
 }
 
 // "3 days ago" under a week, then "Oct 3", the year added when it is not this year; the full date and time as its title;
-// all in the system locale (`app/date-format.ts`; "3일 전", "10월 3일", as the Korean Desktop writes them).
+// all in the display locale (`@shared/app/date-format`).
 export function dateWords(at: string | null, now: number): { text: string; title: string } | null {
   const t = at === null ? NaN : Date.parse(at);
   if (!Number.isFinite(t)) return null;

@@ -12,6 +12,7 @@ import type { PanelChildMetrics, PanelHarnessApi, PanelHarnessTab } from '../src
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
 import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
+import { latencyWait } from './support/latency';
 import { sidebarRow } from './support/sidebar';
 import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_DRAG } from './support/panel-support';
 import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
@@ -679,6 +680,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
   });
 
   test('a second edit to an already-dirty file updates the change line', async ({ maws }) => {
+    // Each edit's change line within a second, the wait's own timeout, loosened on a loaded or shared machine (latency.ts).
+    const changeLineWait = latencyWait('change line latency', 1_000);
     await withRepository(async (repo) => {
       const panel = await PanelPage.open(maws);
       await panel.call('setSession', 'A', { directory: repo.dir });
@@ -689,7 +692,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       for (const lines of [2, 3]) {
         const written = Date.now();
         repo.append(`edit ${lines}`);
-        await expect(panel.changeLine).toHaveText(`+${lines} −0 across 2 files · 1 untracked`, { timeout: 1_000 });
+        await expect(panel.changeLine).toHaveText(`+${lines} −0 across 2 files · 1 untracked`, { timeout: changeLineWait });
         latencies.push(Date.now() - written);
       }
       test.info().annotations.push({ type: 'change line latency (ms)', description: latencies.join(', ') });
@@ -1277,6 +1280,7 @@ test.describe('the main split’s float (P4-B3)', () => {
       const area = page.locator('[data-main-area]');
       const divider = main.getByRole('separator', { name: 'Resize panes' });
       const card = main.getByRole('region', { name: 'Session card' });
+      const outline = main.locator('[data-split-card-outline]'); // LC-3: the card's place while the drag is armed
       const pill = main.getByRole('button', { name: 'Show session card' });
       const composers = page.locator(`section[data-composer="${id}"]`);
       const left = page.locator('[data-pane="0"]');
@@ -1337,13 +1341,19 @@ test.describe('the main split’s float (P4-B3)', () => {
         expect(Math.round((await right.locator(':scope > [role="tabpanel"]').boundingBox())!.width), 'the other pane spans the area').toBeGreaterThanOrEqual(Math.round(region.width) - 1);
         await expect(composers, 'S stays mounted while armed').toHaveCount(1);
         await expect(card, 'no card before release').toHaveCount(0);
+        await expect(outline, 'LC-3: the card’s outline while armed').toBeVisible();
         await to(161);
         await expect.poll(leftWidth, 'disarmed: back at the floor').toBe(320);
+        await expect(outline, 'a disarm takes the outline away').toHaveCount(0);
         expect(await firstRowInView(paneScroller), 'a disarm is lossless: the same row at the top').toBe(heldRow);
         await to(150);
         await expect.poll(leftWidth).toBe(0);
+        const outlined = (await outline.boundingBox())!;
         await page.mouse.up();
         await expect(card).toBeVisible();
+        await expect(outline).toHaveCount(0);
+        const opened = (await card.boundingBox())!;
+        for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(opened[key] - outlined[key]), `the card opens on its outline (${key})`).toBeLessThanOrEqual(1);
         await expect(divider, 'no divider while floating').toHaveCount(0);
       });
 

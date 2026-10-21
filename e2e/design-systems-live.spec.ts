@@ -37,13 +37,13 @@ import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
-import { journal, mainResults } from './support/c7-live';
+import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { liveMaxUsd } from './support/live-budget';
+import { endLiveRun, liveSpend } from './support/live-lifecycle';
 import { eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seedTranscripts } from './support/maws-tools';
-import { a15Line, a15Reading, chargeOf, initPluginsOf, installedEngine } from './support/p1-live';
-import { isAlive, ps } from './support/processes';
+import { a15Line, a15Reading, initPluginsOf, installedEngine } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_LIVE !== '1', 'the P3-D live run runs only under MAWS_LIVE=1');
@@ -310,53 +310,26 @@ test('an agent asked to make a design system from a project creates a Design Sys
     failure = error;
     note(`FAILED: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
-    // The session stopped, the app closed, the engine process gone (a detached host can outlive the app, so the app's
-    // close proves nothing about the engine), the spend from the journal's receipts, the owner file read again. Every
-    // step runs whatever an earlier one threw; the first error fails the test after the bookkeeping.
-    const failed = (what: string) => (error: unknown) => {
-      note(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-      failure ??= error;
-    };
-    if (maws !== null && id !== '') {
-      const page = maws.page;
-      await (async () => {
-        const status = value(await invoke(page, 'session.status', { appSessionId: id }));
-        enginePid ??= status.pid;
-        if (status.process !== 'exited') {
-          value(await invoke(page, 'session.stop', { appSessionId: id, reason: 'stop' }));
-          await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id })).process, { timeout: 30_000 }).toBe('exited');
-        }
-      })().catch(failed('the session could not be stopped'));
-    }
-    await maws?.cleanup().catch(failed('the app’s cleanup failed'));
-    if (enginePid !== null && isAlive(enginePid)) {
-      const command = ps(enginePid, 'command');
-      if (/claude/.test(command)) {
-        failed('the engine outlived the app')(new Error(`pid ${enginePid} (${command}) still runs after the app closed; killed`));
-        try {
-          process.kill(enginePid, 'SIGKILL');
-        } catch {
-          // gone since the check
-        }
-      }
-    }
-    note(`engine process: ${enginePid === null ? 'none recorded (no launch reached ready)' : `pid ${enginePid} ${isAlive(enginePid) ? 'STILL ALIVE' : 'gone'}`}`);
-    // The receipt is the engine's own `total_cost_usd`; a prompt with no receipt after it (a failed, stopped or
-    // unjournalled turn) is accounted at the whole cap, the session's --max-budget-usd (p1-live.ts's chargeOf), since
-    // an absent receipt must never read as no spend.
-    const rows = journalPath !== null && existsSync(journalPath) ? journal(journalPath) : [];
-    const charge = chargeOf(rows, CAP_USD);
-    const receipts = mainResults(rows).map((r) => r.frame.total_cost_usd).filter((usd): usd is number => typeof usd === 'number' && Number.isFinite(usd));
-    const accounted = prompted && rows.length === 0 ? CAP_USD : charge.usd;
-    note(`spend: receipt ${receipts.length > 0 ? `total_cost_usd ${charge.receipted.toFixed(4)}` : 'none'}; accounted exposure US$${accounted.toFixed(4)} (${!prompted ? 'no prompt sent' : rows.length === 0 ? 'no journal: the whole cap' : charge.settled ? 'settled by its receipt' : 'unreceipted turn: the whole cap'}); cap US$${CAP_USD}; journal ${journalPath ?? 'none (no launch)'}`);
+    // the session stopped, the app closed, the engine process gone, the spend from the journal's receipts
+    // (e2e/support/live-lifecycle.ts), the owner file read again; the first error fails the test after the bookkeeping
+    const page = maws?.page;
+    const ended = await endLiveRun({
+      session: page && id !== '' ? { status: async () => value(await invoke(page, 'session.status', { appSessionId: id })), stop: async () => void value(await invoke(page, 'session.stop', { appSessionId: id, reason: 'stop' })) } : null,
+      enginePid,
+      cleanup: maws === null ? null : () => maws!.cleanup(),
+      note,
+    });
+    failure ??= ended.errors[0] ?? null;
+    const spend = liveSpend(journalPath !== null && existsSync(journalPath) ? journal(journalPath) : [], CAP_USD, prompted);
+    note(`spend: receipt ${spend.receipts.length > 0 ? `total_cost_usd ${spend.receipted.toFixed(4)}` : 'none'}; accounted exposure US$${spend.accounted.toFixed(4)} (${spend.basis}); cap US$${CAP_USD}; journal ${journalPath ?? 'none (no launch)'}`);
     const a15After = a15Reading();
     note(a15Line('after the app closed', a15First, a15After, ours));
     note(`scratch kept for inspection: ${root}`);
     expect(compareA15(a15First.keys, a15After.keys, ours).breach, 'no project of the run’s scratch in the owner file (A-15)').toEqual([]);
-    expect(accounted, 'within the cap').toBeLessThanOrEqual(CAP_USD);
+    expect(spend.accounted, 'within the cap').toBeLessThanOrEqual(CAP_USD);
     if (failure === null) {
-      expect(receipts.length, 'a passing run has the engine’s receipt for its turn').toBeGreaterThan(0);
-      expect(charge.settled, 'the receipt came after the prompt').toBe(true);
+      expect(spend.receipts.length, 'a passing run has the engine’s receipt for its turn').toBeGreaterThan(0);
+      expect(spend.settled, 'the receipt came after the prompt').toBe(true);
     }
   }
   if (failure !== null) throw failure;

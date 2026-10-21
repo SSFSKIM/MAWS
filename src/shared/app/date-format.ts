@@ -1,11 +1,17 @@
-// Dates and times as the system writes them: the renderer's words are English and its dates and times follow the
-// system locale, as macOS and the rest of MAWS do (the architect's ruling for P2-D, 2026-10-09; the owner runs a Korean
-// locale). Relative times and month-day dates follow it too (D2 widened at the P2-F sitting: "2 hours ago" reads
-// "2시간 전", "Sep 27" reads "9월 27일", as the Korean Desktop writes them); the words around them stay English.
-// Compact ages and countdowns keep their compactness, their number and unit in Intl's narrow unit style ("2h", "2시간").
-// The budget's `clockTime` (budget/copy.ts) writes through `formatClock` (L129). One set of formatters per locale,
-// built once; the exports below are the system locale's, and `dateFormats(locale)` pins one for a test or a surface
-// that carries its own locale (the transcript's).
+// Every age, date and time MAWS shows, in one locale (P4 Decision Log 4, the owner 2026-10-19: English throughout,
+// relative ages included, whatever the system's locale; D2's system-locale ages are reversed). The shell, the library,
+// the transcript, the editors and their history, the exports and main's own words format through this module: the
+// named shapes below, or `dateTimeFormat` for a shape of a surface's own, so no other module builds a date formatter or
+// calls `toLocale*String` on a date (eslint's `maws-dates/one-locale` holds it, a Date's `toLocaleString` aside, which
+// it cannot tell from a number's). `DISPLAY_LOCALE` is the one switch: a Korean UI, if it comes, changes it here with
+// the copy around it. Times are in the system's zone. Dates written for machines (ISO stamps in files, logs, protocol
+// fields) are not this module's. One set of formatters per locale, built once; `dateFormats(locale)` builds another
+// locale's set (this module's test pins the Korean forms). Compact ages and countdowns keep Intl's narrow unit style
+// ("2h"). The budget's `clockTime` (budget/copy.ts) writes through `formatClock` (L129). The desk's web app
+// (apps/desk-web) writes its times here too, and its counts (`formatCount`, `formatCompactCount`), so a page of it reads
+// in one locale whatever the browser's; there the lint refuses every `toLocaleString` and `Intl.NumberFormat` as well.
+export const DISPLAY_LOCALE = 'en-US';
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -32,6 +38,8 @@ export interface DateFormats {
   shortDate(ms: number, now: number): string;
   // A date with its year (Oct 6, 2026; 2026년 10월 6일).
   date(ms: number): string;
+  // A month, day and clock time, no year (Oct 6, 2:05 PM): a version's time, a restore's label, a build time.
+  dayTime(ms: number): string;
   // The whole date and time, for a title (Oct 6, 2026, 2:05 PM).
   dateTime(ms: number): string;
   // How long ago, from an elapsed `ms`: "now" under a minute, then "2 minutes ago" … "3 weeks ago" (2분 전, 3주 전);
@@ -48,20 +56,27 @@ export interface DateFormats {
   amount(count: number, unit: AmountUnit): string;
   // The compact age of an elapsed `ms`: "now" under a minute (지금), then the largest whole unit (2m, 2h; 2시간).
   age(ms: number): string;
+  // A count, grouped: 12,345 (a compaction's tokens).
+  count(n: number): string;
+  // A count in compact notation, to a tenth: 36.8K, 200K, 1M (3.7만, 20만): a context window and its fill.
+  compactCount(n: number): string;
 }
 
-function build(locale: string | undefined): DateFormats {
+function build(locale: string): DateFormats {
   const clock = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });
   const weekdayClock = new Intl.DateTimeFormat(locale, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   const weekdayHour = new Intl.DateTimeFormat(locale, { weekday: 'short', hour: 'numeric' });
   const shortDate = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' });
   const shortDateYear = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', year: 'numeric' });
   const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
+  const dayTime = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const long = new Intl.RelativeTimeFormat(locale, { style: 'long' });
   const narrow = new Intl.RelativeTimeFormat(locale, { style: 'narrow' });
   const auto = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const now = auto.format(0, 'second');
   const label = (s: string) => s.charAt(0).toLocaleUpperCase(locale) + s.slice(1);
+  const count = new Intl.NumberFormat(locale);
+  const compactCount = new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 });
   const units = new Map<AmountUnit, Intl.NumberFormat>();
   const amount = (count: number, unit: AmountUnit) => {
     let format = units.get(unit);
@@ -75,6 +90,7 @@ function build(locale: string | undefined): DateFormats {
     shortDate: (ms, at) => (new Date(ms).getFullYear() === new Date(at).getFullYear() ? shortDate : shortDateYear).format(ms),
     date: (ms) => shortDateYear.format(ms),
     dateTime: (ms) => dateTime.format(ms),
+    dayTime: (ms) => dayTime.format(ms),
     ago(ms, options = {}) {
       if (options.seconds && ms >= 5_000 && ms < MINUTE) return long.format(-Math.floor(ms / 1000), 'second');
       if (ms < MINUTE) return now;
@@ -93,23 +109,44 @@ function build(locale: string | undefined): DateFormats {
       if (ms < MINUTE) return now;
       return amount(...unitOf(ms));
     },
+    count: (n) => count.format(n),
+    compactCount: (n) => compactCount.format(n),
   };
 }
 
 const built = new Map<string, DateFormats>();
-export function dateFormats(locale?: string): DateFormats {
-  const key = locale ?? '';
-  let formats = built.get(key);
-  if (!formats) built.set(key, (formats = build(locale)));
+export function dateFormats(locale: string = DISPLAY_LOCALE): DateFormats {
+  let formats = built.get(locale);
+  if (!formats) built.set(locale, (formats = build(locale)));
   return formats;
 }
 
-const system = dateFormats();
-export const formatClock = system.clock;
-export const formatWeekdayClock = system.weekdayClock;
-export const formatWeekdayHour = system.weekdayHour;
-export const formatShortDate = system.shortDate;
-export const formatDate = system.date;
-export const formatDateTime = system.dateTime;
-export const formatAgo = system.ago;
-export const formatUntil = system.until;
+const shown = dateFormats();
+export const formatClock = shown.clock;
+export const formatWeekdayClock = shown.weekdayClock;
+export const formatWeekdayHour = shown.weekdayHour;
+export const formatShortDate = shown.shortDate;
+export const formatDate = shown.date;
+export const formatDateTime = shown.dateTime;
+export const formatDayTime = shown.dayTime;
+export const formatAgo = shown.ago;
+export const formatUntil = shown.until;
+export const formatCount = shown.count;
+export const formatCompactCount = shown.compactCount;
+
+// A shape of a surface's own (the history's long day, the library's month headings, the transcript's separators in a
+// pinned zone), in the display locale; built once per shape, building costing far more than formatting (M6).
+const shapes = new Map<string, Intl.DateTimeFormat>();
+export function dateTimeFormat(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = JSON.stringify(options);
+  let format = shapes.get(key);
+  if (!format) shapes.set(key, (format = new Intl.DateTimeFormat(DISPLAY_LOCALE, options)));
+  return format;
+}
+
+// A calendar day written `2026-10-12` as a medium date (Oct 12, 2026), read with no time zone shift, as a document's
+// date chip and its exports show it; null for anything that is not a calendar day.
+export function formatCalendarDay(day: string): string | null {
+  const at = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
+  return Number.isNaN(at) ? null : dateTimeFormat({ dateStyle: 'medium', timeZone: 'UTC' }).format(at);
+}

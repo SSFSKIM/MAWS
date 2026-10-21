@@ -34,6 +34,13 @@ describe('elementLabel', () => {
     expect(elementLabel({ role: null, name: 'Frame title', tag: 'iframe' }, 200)).toBe('iframe “Frame title”');
   });
 
+  // P4 W2-C (tracker 2026-10-07): a web component's best-effort label stands in for an exact name that is empty
+  it('reads the display label where the exact name is empty, and the exact name wherever there is one', () => {
+    expect(elementLabel({ role: 'button', name: '', displayName: 'gear', tag: 'button' }, 200)).toBe('button “gear”');
+    expect(elementLabel({ role: 'button', name: 'Save', displayName: 'gear', tag: 'button' }, 200)).toBe('button “Save”');
+    expect(elementLabel({ role: 'button', name: '', displayName: 'g'.repeat(60), tag: 'button' }, 40)).toBe(`button “${'g'.repeat(30)}…”`);
+  });
+
   it('cuts the name, never the role, to fit the bound', () => {
     const label = elementLabel({ role: 'button', name: 'n'.repeat(300), tag: 'button' }, 200);
     expect(label).toHaveLength(200);
@@ -61,6 +68,14 @@ describe('trimDescription', () => {
     expect(trimmed.a11y.startsWith('…') && trimmed.a11y.endsWith('z')).toBe(true); // the innermost segments are kept
     expect(trimmed.css).toBe('#x');
     expect(trimDescription(description({ role: null })).description.role).toBeNull();
+  });
+
+  it('cuts a long display label to the name’s cap without flagging the name, and adds none where there was none', () => {
+    const { description: trimmed, nameOverLong } = trimDescription(description({ name: '', displayName: `${'d'.repeat(250)}z` }));
+    expect(nameOverLong).toBe(false);
+    expect(trimmed.displayName).toHaveLength(REPORT_NAME_MAX);
+    expect(trimmed.displayName!.endsWith('…')).toBe(true);
+    expect(trimDescription(description({})).description).not.toHaveProperty('displayName');
   });
 });
 

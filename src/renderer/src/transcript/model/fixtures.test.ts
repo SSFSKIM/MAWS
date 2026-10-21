@@ -72,7 +72,7 @@ describe('synthetic journals', () => {
   });
 
   it('transcript/boundaries: a retraction boundary, the retracted text absent, two time rows, a retry row updated in place, compaction and a notice', () => {
-    configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' });
     const state = stateOf(journal('boundaries'));
     const rows = rowsOf(withAllExpanded(state));
     const times = ofKind(rows, 'time');
@@ -414,7 +414,7 @@ describe('FX8 disk conversation history', () => {
   }
 
   it('a real fork persists outside folded work, without a second-writer notice', async () => {
-    configureTime({ now: '2026-10-04T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-10-04T00:00:00.000Z', timeZone: 'UTC' });
     const state = await fx8('fork');
     const rows = rowsOf(state);
     const boundaries = ofKind(rows, 'boundary');

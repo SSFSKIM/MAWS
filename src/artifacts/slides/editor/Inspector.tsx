@@ -7,8 +7,8 @@
 // tokens (`var(--ds-color-*)` with the house system's literal as fallback); the swatches paint inside the deck's
 // `DesignSystemScope`, which the caller renders the inspector in. The panel follows the replica: a remote change
 // re-renders it.
-import { useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
-import { onUpdate, type Doc } from '../../yjs';
+import { useMemo, useSyncExternalStore } from 'react';
+import type { Doc } from '../../yjs';
 import type { DeckFace } from '../deck';
 import { TEXT_TAGS } from '../ir';
 import { ROOT } from '../model';
@@ -20,6 +20,7 @@ import { Arrange, Border, Fill, ShadowSection, Text } from './inspector/sections
 import { pickedOf, planStyle, type Picked, type Props } from './inspector/selection';
 import { ROLE_LABELS, roleOfStyle } from './menus/TextStyle';
 import type { DeckSession } from './session';
+import { useDocVersion } from './transform/use-doc-version';
 import './inspector.css';
 
 export interface InspectorProps {
@@ -48,20 +49,22 @@ function nameOf(p: Picked): string {
   return TAG_NAMES[p.tag] ?? p.tag;
 }
 
-/** A number that moves on every update of the replica, so the panel re-reads the model. */
-function useDocVersion(doc: Doc): number {
-  const [version, bump] = useReducer((n: number) => n + 1, 0);
-  useEffect(() => onUpdate(doc, () => bump()), [doc]);
-  return version;
+/**
+ * P4-R9: the selection as the model has it at the replica's `version`. The React Compiler memoizes a computation on what
+ * it reads, never on a dependency list, so the version is an argument here: with `doc` the same object at every update,
+ * a read keyed on it alone kept the fields at the values they opened with.
+ */
+function pickedAt(doc: Doc, slideId: string, selection: readonly string[], version: number): Picked[] {
+  void version;
+  return pickedOf(doc, slideId, selection);
 }
 
 export function Inspector({ session, slideId, readOnly, faces, uploadAsset, measure }: InspectorProps) {
   const doc = session.doc;
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
-  const version = useDocVersion(doc);
+  const version = useDocVersion(session);
   const selection = state.currentSlide === slideId ? state.selection : [];
-  // `version` re-reads the model at each update
-  const picked = useMemo(() => pickedOf(doc, slideId, selection), [doc, slideId, selection, version]);
+  const picked = useMemo(() => pickedAt(doc, slideId, selection, version), [doc, slideId, selection, version]);
 
   const api = useMemo((): InspectorApi => {
     const typingKey = (how: Write) => (how === 'edit' ? null : `inspector:${how.typing}:${selection.join(',')}`);

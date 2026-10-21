@@ -20,6 +20,7 @@ import { closeScene, scratchProject, seamLines, show, type Scene } from './suppo
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
+import { latencyBudgets } from './support/latency';
 import {
   address, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
   preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
@@ -337,6 +338,7 @@ test('refused addresses: file:, the app’s own scheme and javascript: are refus
 // ---- (4) G3: the cover -------------------------------------------------------------------------------------------
 
 test('the cover: the palette hides the view within 200 ms behind its picture and Esc restores it; menus, popovers, a sheet and a toast over the pane cover, a popover elsewhere does not; the Overview; the app window’s reload', async () => {
+  const within = latencyBudgets();
   await browserScene(['E4a: cover'], async (s) => {
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
@@ -356,8 +358,7 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
     // the palette (a modal dialog): hidden within 200 ms, the page's picture in the pane; Esc: back, picture gone
     const ms = await hiddenAfter(s, t, 'palette');
     expect(ms, 'the view is hidden after the palette opens').not.toBeNull();
-    expect(ms!).toBeLessThan(200);
-    test.info().annotations.push({ type: 'palette hides the view (ms)', description: ms!.toFixed(1) });
+    within('palette hides the view (ms)', Math.round(ms! * 10) / 10, 200, 'the view is hidden within 200 ms of the palette');
     await expect(s.page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
     await expect(placeholder).toHaveAttribute('src', /^data:image\/jpeg;base64,/);
     await covered(true, 'palette');

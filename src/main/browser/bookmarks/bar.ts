@@ -83,10 +83,11 @@ export class BookmarkBar {
 }
 
 export const OPEN_ALL_COPY = {
-  // Chrome's question, in the owner's words (the spec's "The bar")
-  message: (n: number) => `${n}개의 탭을 열까요?`,
-  open: '열기',
-  cancel: '취소',
+  // Chrome's question in Chrome's English, as the rest of MAWS (the owner, 2026-10-21: "영어로 통일", one language per
+  // surface; P4 Decision Log 4); asked only above 20 tabs, so the count is always plural
+  message: (n: number) => `Open all ${n} tabs?`,
+  open: 'Open',
+  cancel: 'Cancel',
 };
 
 type ShowMessageBox = (window: BrowserWindow, options: MessageBoxOptions) => Promise<MessageBoxReturnValue>;

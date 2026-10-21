@@ -21,7 +21,7 @@ import { useRowSession } from '../context';
 // E4d end
 import { useRegisteredBubbleEditor } from '../registry';
 import { Markdown } from '../markdown/Markdown';
-import { formatClock } from '../../../app/date-format';
+import { formatClock } from '@shared/app/date-format';
 import { Chevron, copyText } from './parts';
 import { AnchorIcon } from './icons'; // E3
 
