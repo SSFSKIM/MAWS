@@ -76,6 +76,7 @@ interface Pending {
   make: () => Gesture | null;
   target: string | null;
   toggle: boolean;
+  deep: boolean; // P4-B2 (T21): a ⌘-press or Ctrl-press, a deep select and never T3's
   pointerId: number;
   /** P4-B2 (T3): the press's hits, whether its target was selected before it, and whether that was the whole selection */
   hits: readonly string[];
@@ -279,7 +280,8 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       const tree = slideTree(session.doc, slideId);
       const connectors = [...measureAll(c.canvas, tree.childrenOf(ROOT).filter((id) => tree.element(id)?.tag === 'x-connector'), scale).values()];
       const hits = hitIds(c.canvas, client, p, HIT_SLACK_PX / scale, connectors);
-      const picked = pick(tree, hits, current, { deep: e.metaKey || e.ctrlKey, toggle: e.shiftKey });
+      const deep = e.metaKey || e.ctrlKey;
+      const picked = pick(tree, hits, current, { deep, toggle: e.shiftKey });
       session.select(picked.selection);
       follow(el); // P4-B2 (A3)
       const base = e.shiftKey ? current : [];
@@ -298,7 +300,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         }
       }
       const wasSelected = picked.target !== null && current.includes(picked.target);
-      pending.current = { start: client, p0: p, make, target: picked.target, toggle: e.shiftKey, pointerId: e.pointerId, hits, wasSelected, single: wasSelected && current.length === 1 };
+      pending.current = { start: client, p0: p, make, target: picked.target, toggle: e.shiftKey, deep, pointerId: e.pointerId, hits, wasSelected, single: wasSelected && current.length === 1 };
       el.setPointerCapture?.(e.pointerId);
       e.preventDefault();
     };
@@ -354,8 +356,9 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (g) return finish(g);
       // a press without a drag inside a multi-selection narrows it to what was pressed
       if (pend && pend.target !== null && !pend.toggle && session.snapshot().selection.length > 1) session.select([pend.target]);
-      // P4-B2 (T3): a still press on an element already selected alone; the `click` after it decides (its count)
-      clickCandidate.current = pend && pend.target !== null && !pend.toggle ? { target: pend.target, hits: pend.hits, wasSelected: pend.wasSelected, single: pend.single } : null;
+      // P4-B2 (T3): a still press on an element already selected alone; the `click` after it decides (its count). A
+      // Shift-press toggles and a ⌘-press or Ctrl-press selects deep (T21): neither is T3's.
+      clickCandidate.current = pend && pend.target !== null && !pend.toggle && !pend.deep ? { target: pend.target, hits: pend.hits, wasSelected: pend.wasSelected, single: pend.single } : null;
       follow(el);
     };
 

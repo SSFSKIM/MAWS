@@ -589,14 +589,14 @@ describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () 
 
   const pointer = (type: string, target: Element, x: number, y: number, init: PointerEventInit = {}) =>
     act(() => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: x, clientY: y, ...init })));
-  const mouse = (type: 'click' | 'dblclick', target: Element, detail: number, x = 10, y = 10) =>
-    act(() => void target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail, clientX: x, clientY: y })));
-  /** One click on `target`: its press, its release and the click with count `detail`. */
+  const mouse = (type: 'click' | 'dblclick', target: Element, detail: number, x = 10, y = 10, init: MouseEventInit = {}) =>
+    act(() => void target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail, clientX: x, clientY: y, ...init })));
+  /** One click on `target`: its press, its release and the click with count `detail`, each with `init`'s modifiers. */
   const click = (target: Element, detail = 1, init: PointerEventInit = {}) => {
     under = target;
     pointer('pointerdown', target, 10, 10, init);
     pointer('pointerup', target, 10, 10, init);
-    mouse('click', target, detail);
+    mouse('click', target, detail, 10, 10, init);
   };
   const doubleClick = (target: Element) => {
     click(target, 1);
@@ -723,6 +723,29 @@ describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () 
     expect([cells.a1, cells.b2].map((id) => plain(doc, id))).toEqual(['A', '2']);
     key({ key: 'Escape' });
     expect(session.snapshot().selection).toEqual(['t']);
+  });
+
+  it('T21: a ⌘-click or Ctrl-click on the selected text target or cell is a deep select, never T3’s edit; the element keys stay the element’s', () => {
+    const { doc, session, node, box, cells } = mount();
+    click(node('title'));
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      click(node('title'), 1, mod);
+      expect(session.snapshot(), JSON.stringify(mod)).toMatchObject({ selection: ['title'], editingText: null });
+      expect(armedBox(session)?.elementId).toBe('title');
+      expect(document.activeElement).toBe(box('title'));
+    }
+    expect(key({ key: 'ArrowRight' })).toBe(false); // a nudge, not a caret move
+    expect(styleOf(doc, 'title').left).toBe('101px');
+    expect(plain(doc, 'title')).toBe('Hello world');
+    click(node(cells.a1)); // the table
+    click(node(cells.b1), 1, { metaKey: true }); // T21: the cell itself
+    expect(session.snapshot()).toMatchObject({ selection: [cells.b1], editingText: null });
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      click(node(cells.b1), 1, mod);
+      expect(session.snapshot(), JSON.stringify(mod)).toMatchObject({ selection: [cells.b1], editingText: null });
+      expect(armedBox(session)?.elementId).toBe(cells.b1);
+    }
+    expect(plain(doc, cells.b1)).toBe('B');
   });
 
   it('P10 and P11: in an edit a drag in the text moves nothing; a click on another element commits and selects it, unedited', () => {
