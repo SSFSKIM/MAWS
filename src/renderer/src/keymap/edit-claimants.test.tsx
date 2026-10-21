@@ -20,9 +20,9 @@ import { DesignView } from '@artifacts/design/editor/viewport';
 import { design } from '@artifacts/design/fixtures/support';
 import { connectEditClaimants, registerEditClaimant } from './edit-claimants';
 
-const SLIDE = `<section id="s" style="background:#ffffff">
+const SLIDE = `<section id="s">
 <h2 id="title" style="font-size:64px">Title</h2>
-<div id="a" style="position:absolute; left:300px; top:300px; width:200px; height:100px; background:#ff0000"></div>
+<div id="a" style="position:absolute; left:300px; top:300px; width:200px; height:100px"></div>
 <aside>Notes</aside>
 </section>`;
 
@@ -209,19 +209,19 @@ describe('a design board’s world', () => {
     view.setRoom({ w: 1000, h: 800 });
     view.setViewport({ zoom: 1, x: 0, y: 0 });
     const utils = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={readOnly} registerEditClaimant={registerEditClaimant} />);
-    if (!readOnly) act(() => session.edit((origin) => setStyle(doc, 'b1', 'title', { color: '#ff0000' }, origin)));
+    if (!readOnly) act(() => session.edit((origin) => setStyle(doc, 'b1', 'title', { opacity: '0.5' }, origin)));
     const world = utils.container.querySelector<HTMLElement>('[data-design-world]')!;
-    const color = () => readSlide(doc, 'b1').children.find((c) => c.id === 'title')!.style.color;
-    return { session, world, color };
+    const opacity = () => readSlide(doc, 'b1').children.find((c) => c.id === 'title')!.style.opacity;
+    return { session, world, opacity };
   }
 
   it('takes the design’s step on its one stack', () => {
-    const { world, color } = mountDesign();
+    const { world, opacity } = mountDesign();
     focus(world);
     page.menu('undo');
-    expect(color()).toBeUndefined();
+    expect(opacity()).toBeUndefined();
     page.menu('redo');
-    expect(color()).toBe('#ff0000');
+    expect(opacity()).toBe('0.5');
     expect(native()).toEqual([]);
   });
 
