@@ -5,7 +5,10 @@
 // the process, the journal and the queue; the wiring asks it through `SessionMawsHost`. P3-A (M6): the artifact tools
 // write through the host's artifact store; each turn's end writes the session's `turn` versions there, and the process's
 // end closes the session's agent replicas (their bases and presence with them). P4-A2 (X35): the session's events feed
-// its `ProvisionalEmitter`, which shows an artifact call on the documents' ports while its input streams.
+// its `ProvisionalEmitter`, which shows an artifact call on the documents' ports while its input streams. P4-A3: a human
+// message written to the engine carries the reads of the artifacts it links (`withLinkedReads`), read through the
+// session's own `artifact_read`.
+import { randomUUID } from 'node:crypto';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
@@ -14,7 +17,8 @@ import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerRe
 import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS, type AskAnswer, type AskResult } from '@shared/maws/tools';
-import type { ControlRequestFrame } from '@shared/wire/frames';
+import type { ControlRequestFrame, UserInputFrame } from '@shared/wire/frames';
+import type { LinkedArtifact } from '@shared/maws/linked-read'; // P4-A3
 import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
 import type { WriteOptions } from './outbound-writer';
 import type { MessageQueue } from './queue';
@@ -30,6 +34,8 @@ import type { ArtifactExportAnswer, ArtifactExportRequest, ExportBridge } from '
 import type { ArtifactStore } from './documents/store'; // P3-A
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 import { ProvisionalEmitter } from './tool-server/provisional'; // P4-A2 (X35)
+import { withLinkedReads, type LinkedReadOutcome } from './linked-reads'; // P4-A3
+import type { McpToolDefinition } from './tool-server/server';
 
 type AppSessionIdOf = LaunchSpec['appSessionId'];
 
@@ -69,6 +75,7 @@ export class SessionMaws {
   private readonly exports: ExportBridge; // P3-A M7: the bridge `artifact_export` asks main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private readonly provisional: ProvisionalEmitter; // P4-A2 (X35): the session's artifact calls shown as they stream
+  private readonly read: McpToolDefinition; // P4-A3: the session's `artifact_read`, as the server serves it, for the linked reads
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the asks' attention items (P2-C2: async ones too), published with the broker's
 
   constructor(private readonly host: SessionMawsHost) {
@@ -83,16 +90,18 @@ export class SessionMaws {
       },
     });
     this.provisional = new ProvisionalEmitter({ store: () => host.artifacts?.() ?? null, appSessionId: host.appSessionId, artifactScope: host.artifactScope, log: host.log });
+    const tools = mawsTools({
+      bridge: this.panes, capture: this.captures /* E2 */,
+      asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
+      artifactScope: host.artifactScope, // P2-E1
+      artifacts: host.artifacts, session: new ArtifactSession(), log: host.log, // P3-A (M6)
+      exporter: this.exports, // P3-A M7
+      datasetRefresh: host.datasetRefresh, // E3
+      provisional: this.provisional, // P4-A2
+    });
+    this.read = tools.find((tool) => tool.name === 'artifact_read')!;
     this.toolServer = new MawsToolServer({
-      tools: mawsTools({
-        bridge: this.panes, capture: this.captures /* E2 */,
-        asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
-        artifactScope: host.artifactScope, // P2-E1
-        artifacts: host.artifacts, session: new ArtifactSession(), log: host.log, // P3-A (M6)
-        exporter: this.exports, // P3-A M7
-        datasetRefresh: host.datasetRefresh, // E3
-        provisional: this.provisional, // P4-A2
-      }),
+      tools,
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),
       appSessionId: host.appSessionId,
@@ -102,6 +111,36 @@ export class SessionMaws {
       fromSubagent: host.fromSubagent && ((toolUseId) => host.fromSubagent!(toolUseId)), // P2-C3
     });
     // E1 end
+  }
+
+  // P4-A3: a human message as it is written, with the reads of the artifacts its words link (link order, within the cap;
+  // `../linked-reads`); any other frame, or one linking nothing readable, unchanged. A read is the session's own
+  // `artifact_read` answer at this moment (no tool-use id: it joins no call's operation), so it resolves, migrates and
+  // answers exactly as the agent's read would.
+  async withLinkedReads(frame: UserInputFrame): Promise<{ frame: UserInputFrame; outcome: LinkedReadOutcome | null }> {
+    if (frame.parent_tool_use_id !== null || (frame.origin as { kind?: unknown } | undefined)?.kind !== 'human') return { frame, outcome: null };
+    try {
+      const outcome = await withLinkedReads(frame.message.content, (link) => this.readLinked(link));
+      return { frame: outcome.content === frame.message.content ? frame : { ...frame, message: { ...frame.message, content: outcome.content } }, outcome };
+    } catch (error) {
+      this.host.log(`linked reads not attached: ${error instanceof Error ? error.message : String(error)}`); // the message goes as written
+      return { frame, outcome: null };
+    }
+  }
+
+  // A read that throws is one not attached: the message goes as written either way.
+  private async readLinked(link: LinkedArtifact): Promise<string | null> {
+    try {
+      const result = await this.read.call(
+        { artifact: link.artifactId, ...(link.tab !== undefined && { tab: link.tab }) },
+        { appSessionId: this.host.appSessionId, cwd: this.host.cwd(), toolUseId: null, requestId: `linked-read-${randomUUID()}` as RequestId, signal: new AbortController().signal, fromSubagent: false },
+      );
+      const text = result.content.find((block) => block.type === 'text');
+      return result.isError || !text || text.type !== 'text' ? null : text.text;
+    } catch (error) {
+      this.host.log(`linked read of ${link.artifactId} not attached: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
   }
 
   // The `maws` server's JSON-RPC traffic (the server answers another server's name itself).

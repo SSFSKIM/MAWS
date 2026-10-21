@@ -295,7 +295,8 @@ export class EngineSession {
     this.queue = new MessageQueue({
       appSessionId: opts.spec.appSessionId,
       store: this.store,
-      write: writeFrame,
+      // P4-A3: a human message goes with the reads of the artifacts it links; the entry the queue keeps is the human's
+      write: async (frame, writeOpts) => writeFrame((await this.maws.withLinkedReads(frame)).frame, writeOpts),
       meta: (frame) => this.record('meta', frame),
       // a host sequence that writes its own prompts (clear and implement) holds the queue like an open turn, and so does a
       // prompt written but not yet started (a `now` steer preempts the running turn and runs next: M6 live 3.7)
