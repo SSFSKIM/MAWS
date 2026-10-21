@@ -748,6 +748,11 @@ def after(args):
                 send, until = turn_window(s['transcript'], p['promptMatch'])
                 timed = calls(s['transcript'], since=send, until=until)
                 off = off_seed(timed, p['seedUrl']) if p.get('seedUrl') else None
+                # the timed turn in its seed's session: the same transcript, or the same session id (two hand-overs of a
+                # session); decided once, for the replay and for freshSession
+                seed_sid = session_id(args.seed_transcript) if args.seed_transcript else None
+                same = bool(args.seed_transcript) and (os.path.realpath(args.seed_transcript) == os.path.realpath(s['transcript'])
+                                                       or bool(seed_sid and seed_sid == session_id(s['transcript'])))
                 if off is None:
                     r = Replay(None if args.seed_transcript else seed_files())
                     for c in calls(args.seed_transcript, until=send) if args.seed_transcript else []:
@@ -759,7 +764,7 @@ def after(args):
             stop(d, p, "the timed turn left the seed's deck: it %s, and the seed %s took is %s (redo the repetition on another seed)" % (off, p['seedId'], p['seedUrl']))
         try:
             with rebuilding():
-                r.timed(bool(args.seed_transcript) and os.path.realpath(args.seed_transcript) == os.path.realpath(s['transcript']))
+                r.timed(same)
                 for c in timed:
                     r.apply(c)
                 after_path = write_deck(r.published, os.path.join(d, 'after-deck'))
@@ -775,9 +780,7 @@ def after(args):
             after_source = 'bench-after/ (the model transcribed the deck; the last resort)'
         if args.seed_transcript:
             seed_check = check('same', SEED_DECK, before_path)
-            # one session whatever the file: the same transcript, or the same session id (two hand-overs of a session)
-            seed_sid = session_id(args.seed_transcript)
-            fresh = not (os.path.realpath(args.seed_transcript) == os.path.realpath(s['transcript']) or (seed_sid and seed_sid == session_id(s['transcript'])))
+            fresh = not same
         if p.get('seedUrl') and r.url and artifact_id(r.url) != artifact_id(p['seedUrl']):
             stop(d, p, 'the turn edited %s, not the seed %s took (%s)' % (r.url, p['seedId'], p['seedUrl']))
         deck_url = r.url
@@ -804,7 +807,7 @@ def after(args):
     row = parse.edit_row(mpath)
     print(json.dumps({'manifest': mpath, 'attempt': attempt, 'valid': parse.valid(row) or 'yes', 'check': result, 'afterSource': after_source,
                       'permissionMode': (row['measured'] or {}).get('permissionMode'), 'pickerPermissionMode': s['meta'].get('permissionMode'),
-                      'seedCheck': seed_check, 'freshSession': fresh, 'deckUrl': deck_url, 'deckUrlFrom': deck_url_from, 'transcript': s['transcript'], 'meta': s['meta']}, indent=2))
+                      'seedCheck': seed_check, 'freshSession': fresh, 'priorTurns': row['priorTurns'], 'deckUrl': deck_url, 'deckUrlFrom': deck_url_from, 'transcript': s['transcript'], 'meta': s['meta']}, indent=2))
 
 
 def deck(args):
@@ -817,7 +820,7 @@ def deck(args):
             r = Replay()
             for c in calls(args.transcript):
                 r.apply(c)
-            out = write_deck(r.published, os.path.abspath(args.out))
+            out = write_deck(r.published, args.out)
     except RebuildError as e:
         print(json.dumps({'deck': None, 'rebuildError': str(e), 'permissionModes': modes}, indent=2))
         sys.exit(1)
@@ -866,7 +869,7 @@ def seed_add(args):
     if source != 'newest' and any(os.path.realpath(s.get('source') or s['transcript']) == os.path.realpath(source) for s in led['seeds']):
         sys.exit('%s is already in %s' % (source, ledger_path(args.out)))
     # the run's own copy (a hand-over lands in ~/Downloads among other files)
-    transcript = handed_over(source, time.time() - 900 if source == 'newest' else None, os.path.join(os.path.abspath(args.out), 'seeds', sid + '.jsonl'))
+    transcript = handed_over(source, time.time() - 900 if source == 'newest' else None, os.path.join(args.out, 'seeds', sid + '.jsonl'))
     this_session = session_id(transcript)
     if this_session and any(s.get('sessionId') == this_session for s in led['seeds']):
         os.remove(transcript)
@@ -881,7 +884,7 @@ def seed_add(args):
             r = Replay()
             for c in seed_calls:
                 r.apply(c)
-            out = write_deck(r.published, os.path.join(os.path.abspath(args.out), 'seeds', sid))
+            out = write_deck(r.published, os.path.join(args.out, 'seeds', sid))
         entry['same'] = check('same', SEED_DECK, out)
         results, replies = urls_in(transcript)
         entry['url'], entry['urlFrom'] = ((r.url, "the seed's calls") if r.url else (results[0], "the create's result") if results
@@ -968,6 +971,8 @@ def main(argv):
     sa.add_argument('transcript')
     sa.add_argument('--out', required=True)
     args = ap.parse_args(argv)
+    if getattr(args, 'out', None):  # every path the run's files record, a manifest's included, is absolute from here
+        args.out = os.path.abspath(args.out)
     {'before': before, 'after': after, 'deck': deck, 'kinds': kinds, 'seed-prompt': seed_prompt, 'seed-add': seed_add}[args.cmd](args)
 
 

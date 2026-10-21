@@ -1,14 +1,20 @@
 import { readFileSync } from 'node:fs';
-globalThis.nodeRepl = { write() {} };
-globalThis.cua = {};
+const written = [];
+globalThis.nodeRepl = { write(s) { written.push(s); } };
+let screen = null; // the fake Desktop the flows below drive
+globalThis.cua = { getApp: async () => screen };
 const src = readFileSync(process.argv[2], 'utf8');
 (0, eval)(src);
-const L = globalThis.bench.L;
+const { bench } = globalThis;
+const L = bench.L;
 // lines read live from Desktop 3.1623.0 in Part A (2026-10-21)
 const cases = {
   modeCode: '13 라디오 버튼 Description: Code, Value: 1',
   modeClaude: '12 라디오 버튼 Description: Claude, Value: 0',
   newSession: '122 버튼 새로 생성',
+  codeNewItem: '141 항목 새 세션, Value: 1',
+  pageUrl: '3 HTML 콘텐츠 새 세션 - Claude, URL: claude.ai/new',
+  cloudNewPage: '3 HTML 콘텐츠 새 세션 - Claude, URL: claude.ai/new',
   folderPopup: '206 팝업 버튼 Description: 폴더: /private/tmp/maws-parity-bench/MAWS parity bench, Help: /private/tmp/maws-parity-bench/MAWS parity bench',
   openFolder: '185 폴더 열기…',
   panelPath: '87 텍스트 필드 (settable) Value: /Users/new/x, ID: PathTextField',
@@ -26,16 +32,105 @@ const cases = {
   sendCloud: '67 버튼 메시지 보내기',
   stop: '150 버튼 중지',
 };
+const PROBE_PAGE = '3 HTML 콘텐츠 Available tools and system info - Claude, URL: claude.ai/chat/55cfb041-2381-476f-939b-a5078f7f0e4d';
 const negatives = {
-  permissionAuto: '72 팝업 버튼 수동',
-  sendCode: '67 버튼 메시지 보내기',
-  modelOpusExtra: '69 팝업 버튼 모델: Opus 5.5 높음',
-  effortExtraItem: '220 노력 엑스트라',
-  openFolder: '157 팝업 버튼 Description: 폴더: ~/Documents/GitHub/doperpowers',
-  modelOpusItem: '208 팝업 버튼 모델: Opus 5.5 엑스트라',
+  permissionAuto: ['72 팝업 버튼 수동'],
+  sendCode: ['67 버튼 메시지 보내기'],
+  modelOpusExtra: ['69 팝업 버튼 모델: Opus 5.5 높음'],
+  effortExtraItem: ['220 노력 엑스트라'],
+  openFolder: ['157 팝업 버튼 Description: 폴더: ~/Documents/GitHub/doperpowers'],
+  modelOpusItem: ['208 팝업 버튼 모델: Opus 5.5 엑스트라'],
+  // an existing session on screen: another session's item selected, or the new one not selected; a chat's page
+  codeNewItem: ['141 항목 Available tools inventory, Value: 1', '141 항목 새 세션, Value: 0'],
+  cloudNewPage: [PROBE_PAGE, '3 HTML 콘텐츠 Claude, URL: claude.ai/newsletter'],
+  recentItem: ['141 항목 새 세션, Value: 1'],
 };
 let bad = 0;
-for (const [k, line] of Object.entries(cases)) if (!L[k].some((p) => p.test(line))) { bad++; console.log('MISS', k, line); }
-for (const [k, line] of Object.entries(negatives)) if (L[k].some((p) => p.test(line))) { bad++; console.log('FALSE', k, line); }
-console.log(bad ? `${bad} wrong` : `all ${Object.keys(cases).length} labels match, ${Object.keys(negatives).length} near misses refused`);
+const fail = (...why) => { bad++; console.log(...why); };
+for (const [k, line] of Object.entries(cases)) if (!L[k].some((p) => p.test(line))) fail('MISS', k, line);
+for (const [k, ls] of Object.entries(negatives)) for (const line of ls) if (L[k].some((p) => p.test(line))) fail('FALSE', k, line);
+const eq = (what, got, want) => { if (JSON.stringify(got) !== JSON.stringify(want)) fail('WRONG', what, JSON.stringify(got), '!=', JSON.stringify(want)); };
+
+// The page's URL and the new-session sign on whole trees.
+eq('pageUrl', bench.pageUrl(`1 창 Claude\n${PROBE_PAGE}\n40 HTML 콘텐츠 Slides, URL: claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA`), 'claude.ai/chat/55cfb041-2381-476f-939b-a5078f7f0e4d');
+eq('isNewSession cowork', [bench.isNewSession(cases.cloudNewPage, 'cowork'), bench.isNewSession(PROBE_PAGE, 'cowork')], [true, false]);
+eq('isNewSession code', [bench.isNewSession(`${cases.codeNewItem}\n142 항목 Available tools inventory, Value: 0`, 'code'), bench.isNewSession(negatives.codeNewItem[0], 'code')], [true, false]);
+
+// The hand-over's Download: the last after the line naming the .jsonl file, else the last; never an earlier card's.
+const FILE = '40 텍스트 3f9a2c1e-7b4d-4e8a-9c61-0f4d2b7a8e13.jsonl';
+const pick = (...ls) => bench.pickDownload(ls.join('\n'))?.index ?? null;
+eq('pickDownload after the file', pick('20 텍스트 Send me ... the most recently modified .jsonl file under ~/.claude/projects/.', '30 버튼 다운로드', FILE, '41 버튼 다운로드'), 41);
+eq('pickDownload, no file line', pick('30 버튼 다운로드', '41 버튼 다운로드'), 41);
+eq('pickDownload, none after the file', pick('30 버튼 다운로드', FILE), 30);
+eq('pickDownload, the reply names the file after its card', pick('30 버튼 다운로드', '41 버튼 다운로드', '50 텍스트 Sent /root/.claude/projects/-home-claude/3f9a.jsonl'), 41);
+eq('pickDownload, no button', pick(FILE), null);
+
+// The flows, on a fake Claude tab: a page, the controls set, a prompt field, Send that starts a turn, the sidebar's
+// recent chats, and the hand-over's cards.
+function claudeTab({ page, newWorks = true, chats = [], cards = [], savePanel = false }) {
+  const st = { page, field: '', stopRenders: 0, saveShown: false, clicks: [], sent: [] };
+  const fake = {
+    st,
+    async getAXState() {
+      const running = st.stopRenders > 0;
+      if (running) st.stopRenders--;
+      return ['1 라디오 버튼 Description: Claude, Value: 1', '2 버튼 새로 생성', `3 HTML 콘텐츠 Claude, URL: ${st.page}`, '4 팝업 버튼 권한: 자동',
+        '5 팝업 버튼 모델: Opus 5.5 엑스트라', `6 텍스트 엔트리 영역 (settable) Description: Claude에게 프롬프트를 입력하세요., Value: ${st.field}`,
+        running ? '7 버튼 중지' : '7 버튼 메시지 보내기', ...chats.map((c, i) => `${20 + i} 항목 ${c.title}, Value: ${st.page === c.url ? 1 : 0}`),
+        ...cards, ...(st.saveShown ? ['90 버튼 저장, ID: OKButton'] : [])].join('\n');
+    },
+    async click(i) {
+      st.clicks.push(i);
+      if (i === 2 && newWorks) st.page = 'claude.ai/new';
+      if (i === 7 && st.stopRenders === 0) {
+        st.sent.push(st.field);
+        st.field = '';
+        st.stopRenders = 2;
+        if (st.page === 'claude.ai/new') st.page = `claude.ai/chat/sent-${st.sent.length}`;
+      }
+      if (i >= 20 && i < 20 + chats.length) st.page = chats[i - 20].url;
+      if (cards.some((c) => c.startsWith(`${i} `)) && savePanel) st.saveShown = true;
+      if (i === 90) st.saveShown = false;
+    },
+    async paste(text) { st.field = text; },
+    async pressKey() {},
+    async setValue() {},
+  };
+  return fake;
+}
+Object.assign(bench.T, { fresh: 50, savePanel: 50, sessionUrl: 50, reopenSettle: 50, turnSettle: 0, turn: 10_000 });
+const PROMPT = 'Make a new slide deck with the Artifact tool, titled "Autumn Workshops 2026".';
+const throws = async (what, f, text) => {
+  try { await f(); fail('NO THROW', what); } catch (e) { if (!String(e.message).includes(text)) fail('WRONG THROW', what, e.message); }
+};
+
+// New failing silently leaves the probe's chat on screen: the prompt is refused, never sent.
+screen = claudeTab({ page: 'claude.ai/chat/55cfb041-2381-476f-939b-a5078f7f0e4d', newWorks: false });
+await throws('send into an existing session', () => bench.send({ surface: 'cowork', prompt: PROMPT }), 'not a new one (the page is claude.ai/chat/55cfb041');
+await throws('rep into an existing session', () => bench.rep({ surface: 'cowork', prompt: PROMPT }), 'not a new one');
+eq('nothing sent into the existing session', [screen.st.sent, screen.st.clicks.includes(7)], [[], false]);
+
+// send: a new session, the prompt sent, back once Stop appears with the chat's URL.
+screen = claudeTab({ page: 'claude.ai/chat/55cfb041-2381-476f-939b-a5078f7f0e4d' });
+const sent = await bench.send({ surface: 'cowork', prompt: PROMPT });
+eq('send', [sent.url, screen.st.sent], ['claude.ai/chat/sent-1', [PROMPT]]);
+
+// reopen: the recent items clicked in turn until the page is the one asked for; the first eight only.
+const chats = Array.from({ length: 10 }, (_, i) => ({ title: 'Autumn Workshops 2026', url: `claude.ai/chat/c${i}` }));
+screen = claudeTab({ page: 'claude.ai/new', chats });
+eq('reopen', await bench.reopen('https://claude.ai/chat/c3/'), 'claude.ai/chat/c3');
+eq('reopen clicked', screen.st.clicks.filter((i) => i >= 20), [20, 21, 22, 23]);
+screen = claudeTab({ page: 'claude.ai/new', chats });
+await throws('reopen of a session not among the first eight', () => bench.reopen('claude.ai/chat/c9'), 'no recent item of the first eight');
+eq('reopen gave up after eight', screen.st.clicks.filter((i) => i >= 20).length, 8);
+
+// handOver: the transcript's card downloaded, Save clicked if a save panel comes, the file left for newest to confirm.
+const CARDS = ['30 버튼 다운로드', FILE, '41 버튼 다운로드'];
+for (const savePanel of [false, true]) {
+  screen = claudeTab({ page: 'claude.ai/chat/c0', cards: CARDS, savePanel });
+  const h = await bench.handOver();
+  eq(`handOver (save panel ${savePanel})`, [h.downloaded, h.button, screen.st.clicks.filter((i) => i >= 30)], ['unconfirmed', '41 버튼 다운로드', savePanel ? [41, 90] : [41]]);
+}
+
+console.log(bad ? `${bad} wrong` : `all ${Object.keys(cases).length} labels match, ${Object.values(negatives).flat().length} near misses refused, the flows hold`);
 process.exit(bad ? 1 : 0);

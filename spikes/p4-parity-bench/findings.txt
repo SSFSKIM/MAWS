@@ -39,6 +39,10 @@ The measure decided on: send to edit landed, per edit, from each app's own engin
 Repetitions. At least five valid repetitions per cell, each a fresh session, the two arms interleaved in the order of
 §7 fixed now, the cache state recorded per repetition. A repetition is valid when (parse.py `valid`):
 - its records are there (the manifest names a transcript, and every record it names is on disk);
+- its timed turn was its session's first (parse.py's `priorTurns`, the human turns before it in its transcript, is 0): a
+  prompt that went into an existing session, as when the driver's New fails silently, carries that session's context
+  and cache. The rule holds for both arms; a MAWS repetition is always a new session's first turn, and the Desktop
+  driver refuses to send into a session that is not new (§6);
 - its turn ran in Auto mode: both arms run in Auto, and a repetition whose turn the records show in another mode (the
   human `user` record's `permissionMode`) is invalid;
 - no human stopped it: a permission card the Desktop driver had to answer makes it invalid (MAWS's arm already fails a
@@ -269,13 +273,22 @@ driver's untimed follow-up has the model write to bench-after/ are then the last
 Slides flow among them, and the publishes it must refuse); the hold's first step tries it on real ones.
 
 Dry-run end to end against a fake Desktop store (the Desktop fixture as the session's transcript) through `report`.
-desktop-driver.js is the GUI half for `cua_repl`: written, not run (no GUI automation in this phase). Its labels are
-Desktop 2.42304's in English and Korean (the owner's Desktop runs ko-KR), each Korean label its own pattern (JavaScript's
-`\b` is ASCII-only, so it never sits beside Hangul), checked with node on sample lines; `bench.probe()` checks each
-against the live accessibility tree as the hold's first step. The folder panel's Open button, which exists only while
-the panel is up, is matched by its whole name, since Desktop's own Choose folder (폴더 선택) contains Choose (선택).
-After choosing Auto it checks that the permission-mode control shows Auto; a permission card it has to answer is
-counted in `bench.rep()`'s result, which step 3 passes on.
+desktop-driver.js is the GUI half for `cua_repl`. Its labels were Desktop 2.42304's at first and are 3.1623.0's Korean
+UI since Part A read them live (§7b), each Korean label its own pattern (JavaScript's `\b` is ASCII-only, so it never
+sits beside Hangul). driver_labels_test.mjs checks them with node against Part A's lines and their near misses, and
+`bench.probe()` against the live accessibility tree at a hold's start. After choosing Auto the driver checks that the
+permission-mode control shows Auto; a permission card it has to answer is counted in `bench.rep()`'s result, which
+step 3 passes on.
+
+Before it sends any prompt, the session on screen must be a new one: in the Code tab the sidebar's selected item is the
+new session (항목 새 세션, Value: 1), in the Claude tab the page is claude.ai/new. Otherwise the driver refuses to send,
+since a New click that failed silently would put the prompt into an existing session; §1's first-turn rule catches the
+same in the records. `bench.rep()` waits the turn out. `bench.send()` returns once Stop appears, with the session's url,
+and `bench.reopen(url)` opens that session again from the Claude tab's recent list (its items clicked in turn until the
+page's url is the one asked for, the first eight only), so cloud seeds can run side by side (§7a). `bench.handOver()`
+(§7a) clicks the transcript's own file card: the last Download button after the line naming the .jsonl file, else the
+last one, never an earlier card such as a deck's. These flows are tested against a fake Claude tab in
+driver_labels_test.mjs. The recent list's item (`recentItem`) is the one label not read live; the probe reads it first.
 
 
 ## 7. The record run
@@ -416,6 +429,9 @@ Getting the records:
 - Desktop 3.1623.0's Cowork runs in Anthropic's cloud, so its records reach the mini only through a hand-over.
 - After every Cowork turn, timed or seed, an untimed follow-up in the same session has the session send its own
   transcript file (`bench.handOver()`). Desktop saves the file under ~/Downloads.
+- `handOver` clicks the Download of the file's card, and Save if a save panel comes within about 5 seconds. It reports
+  `downloaded: 'unconfirmed'`, since it cannot see the file arrive; `newest` below confirms it, and refuses when no
+  .jsonl has been saved there since the attempt began (for a seed, in the last 15 minutes).
 - `after --transcript newest`, or `seed-add newest`, copies that file into the run and reads it like any transcript.
 - The follow-up's records come after the turn's, so the parser's turn window leaves them out.
 
@@ -432,11 +448,14 @@ The seed and the timed turn:
   records cannot rebuild leaves the attempt open, and the repetition is made again.
 
 Part B's first step is the hand-over end to end:
-- one seed session, its hand-over and `seed-add`;
+- one seed session sent with `bench.send`, reopened by its url with `bench.reopen`, handed over and entered with
+  `seed-add`;
 - one timed B5 repetition, its hand-over and `after`;
 - `parse.py report` reading that repetition as a valid row.
 
-If that step fails, the decks take Decision Log 25's fallback without asking:
+A label miss in that step (the driver not finding a control, the file's card or its button) is fixed against the live
+tree with `bench.probe()`, and the step is run again. Only a hand-over that cannot work (no transcript reaches the mini,
+or its records cannot be read) sends the decks to Decision Log 25's fallback, without asking:
 - (c), a plain deck.html in Code sessions on the mini (`before B5 <rep> --surface code`, judged with `report --judge
   B5=code --judge B7=code`);
 - the reason is written into the result;
@@ -489,12 +508,13 @@ The operator's commands on the mini (RUN the run directory, the bench's checkout
 - Start: `spikes/p4-parity-bench/mini/bench-queue.sh start RUN`.
 - A MAWS repetition: `… bench-queue.sh run RUN MAWS_BENCH_SCOPE=owner MAWS_BENCH_TASKS=B3 MAWS_BENCH_REP_FROM=1
   MAWS_BENCH_OUT=RUN MAWS_BENCH_PROFILE=RUN/maws-profile`.
-- A Cowork seed:
-  1. `bench.rep({surface: 'cowork', prompt: <desktop-prep.py seed-prompt>})`;
-  2. `bench.handOver()`;
-  3. `desktop-prep.py seed-add newest --out RUN`.
+- Cowork seeds, in batches of four side by side (each a cloud session, which keeps running once sent):
+  1. `bench.send({surface: 'cowork', prompt: <desktop-prep.py seed-prompt>})` four times, keeping each returned url;
+  2. for each url, `bench.reopen(url)`, then `bench.handOver()` (it waits out a seed turn still running), then
+     `desktop-prep.py seed-add newest --out RUN`.
 
-  Seeds may run side by side: each is a cloud session, which keeps running once sent.
+  If `bench.reopen` cannot find a session live, the seeds run one after another: `bench.rep({surface: 'cowork',
+  prompt: <seed-prompt>})`, `bench.handOver()`, `seed-add newest --out RUN`.
 - A Cowork deck repetition:
   1. `desktop-prep.py before B5 1 --out RUN --surface cowork --seed next`;
   2. `bench.rep({surface: 'cowork', prompt})`, then `bench.handOver()`;
@@ -531,13 +551,17 @@ opens the 12:00Z hold (quiet flag from 11:50Z, hard end 16:30Z), and the record 
   effort, whether Cowork offers Auto and Extra high), and any Cowork VM bundle download the new build asks for, which
   is the one open-ended step (5 to 20 minutes).
 - Part B, about 1 hour 15 minutes, in this order:
-  1. The Cowork hand-over end to end, as above, about 15 minutes; on failure, (c).
+  1. The Cowork hand-over end to end, as above, about 15 minutes. A label miss is fixed with `bench.probe()` and the
+     step run again; (c) only for a hand-over that cannot work.
   2. The clone, install and build, about 8 minutes, the hold's one CPU burst, over ssh while the GUI works.
   3. The queue runner, the MAWS profile's seeds and one MAWS shakedown repetition (B1 on sonnet:low, in its own run
      directory).
   4. One untimed dry Code repetition (B1).
-  5. The rest of the twelve Cowork seeds (ten needed and two spare), sent in batches of four because cloud sessions run
-     side by side, then handed over and entered; about 30 minutes.
+  5. The rest of the twelve Cowork seeds (ten needed and two spare), in batches of four through `bench.send` and
+     `bench.reopen` because cloud sessions run side by side, each then handed over and entered; about 30 minutes. If
+     `bench.reopen` cannot find a session live (step 1 shows it), the seeds run one after another at about 4 minutes
+     each, about 50 minutes for twelve. Part B then takes about 1 hour 35 minutes, and the whole 12:00Z hold about
+     4 hours 15 minutes, still inside its 16:30Z hard end.
 - Desktop's version is re-read over ssh at the hold's start. If it moved, `bench.probe()` and `node
   driver_labels_test.mjs desktop-driver.js` run again (10 minutes).
 

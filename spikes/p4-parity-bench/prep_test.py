@@ -601,10 +601,10 @@ class CloudCowork(CoworkDeck):
         prep.DOWNLOADS = os.path.join(self.dir, 'Downloads')
         os.makedirs(prep.DOWNLOADS)
 
-    def handed_over(self, path, session, name):
+    def handed_over(self, path, session, name, start=900):
         """The session's records with the hand-over turn after them, as Desktop saves the sent file."""
         recs = [dict(json.loads(line), sessionId=session) for line in read(path).splitlines()]
-        r = Recorder('/home/claude', start=900, session=session)
+        r = Recorder('/home/claude', start=start, session=session)
         r.human(self.HAND_OVER)
         r.call('Bash', {'command': 'ls -t ~/.claude/projects/*/*.jsonl | head -1'})
         r.call('SendUserFile', {'path': '/root/.claude/projects/-home-claude/%s.jsonl' % session})
@@ -639,6 +639,57 @@ class CloudCowork(CoworkDeck):
         with self.assertRaises(SystemExit) as again:  # the same session handed over twice is one seed
             self.main('seed-add', os.path.join(prep.DOWNLOADS, 'seed.jsonl'), '--out', self.run_dir)
         self.assertIn('already in', str(again.exception))
+
+    def test_the_timed_turn_in_an_existing_session_is_invalid(self):
+        """The driver's New failing silently sends the timed prompt into whatever session is showing (here the probe's):
+        another session than the seed's, so fresh by session id, but not its session's first turn."""
+        self.handed_over(self.seed_slides(), 'cloud-seed', 'seed.jsonl')
+        self.assertTrue(self.main('seed-add', 'newest', '--out', self.run_dir)['ok'])
+        self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        probe = Recorder('/home/claude', session='cloud-probe')
+        probe.human('List the tools available to you.')
+        probe.reply('Artifact, Bash, Read.')
+        self.handed_over(records(os.path.join(self.dir, 'probe.jsonl'), probe.recs + self.timed_b5().recs), 'cloud-probe', 'probe.jsonl')
+        out = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--transcript', 'newest')
+        self.assertEqual((out['check']['pass'], out['freshSession'], out['priorTurns']), (True, True, 1), out)
+        self.assertEqual(out['valid'], ["the timed turn was not its session's first: 1 earlier turn"])
+
+    def test_two_hand_overs_of_one_session_rebuild_as_one(self):
+        """The timed turn in its seed's session, handed over a second time: the replay keeps the seed's url for its
+        latest file, so a publish naming no url follows to the deck as the engine sends it, and the row is the seed's
+        session's (not fresh, and not its first turn)."""
+        first = self.handed_over(self.seed_slides(), 'one-session', 'seed.jsonl')
+        self.assertTrue(self.main('seed-add', 'newest', '--out', self.run_dir)['ok'])
+        self.main('before', 'B5', '1', '--out', self.run_dir, '--surface', 'cowork', '--seed', 'next')
+        slide = self.SCRATCH + '/project/slides/sessions.html'  # the last file the seed published to the deck
+        timed = Recorder(self.SEED_MNT, start=1000, session='one-session')
+        timed.human(B5)
+        timed.call('Edit', {'file_path': slide, 'old_string': 'Grace Okafor, 14 October', 'new_string': 'Grace Okafor, 21 October'})
+        timed.call('Artifact', {'root': self.SCRATCH, 'file_path': slide})
+        both = records(os.path.join(self.dir, 'both.jsonl'), [json.loads(line) for line in read(first).splitlines()] + timed.recs)
+        self.handed_over(both, 'one-session', 'again.jsonl', start=1100)
+        out = self.main('after', 'B5', '1', '--out', self.run_dir, '--permissions-answered', '0', '--transcript', 'newest')
+        self.assertEqual((out['afterSource'], out['check']['pass'], out['freshSession'], out['priorTurns']), ("rebuilt from the records' calls", True, False, 2), out)
+        self.assertEqual(out['valid'], ["the timed turn was not its session's first: 2 earlier turns", "the timed turn ran in its seed's session, not a fresh one"])
+
+    def test_a_relative_out_resolves(self):
+        """--out relative to the working directory: the manifest's paths are absolute, so the parser finds the records
+        wherever it runs from."""
+        cwd = os.getcwd()
+        os.chdir(self.dir)
+        try:
+            self.handed_over(self.seed_slides(), 'cloud-seed', 'seed.jsonl')
+            self.assertTrue(self.main('seed-add', 'newest', '--out', 'run')['ok'])
+            self.main('before', 'B5', '1', '--out', 'run', '--surface', 'cowork', '--seed', 'next')
+            self.handed_over(records(os.path.join(self.dir, 'timed.jsonl'), self.timed_b5().recs), 'cloud-timed', 'timed.jsonl')
+            out = self.main('after', 'B5', '1', '--out', 'run', '--permissions-answered', '0', '--transcript', 'newest')
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(out['valid'], 'yes', out)
+        m = json.loads(read(out['manifest']))
+        self.assertTrue(all(os.path.isabs(m[k]) for k in ('transcript', 'seedTranscript', 'before', 'after')), m)
+        row = prep.bench_parse().edit_row(out['manifest'])
+        self.assertEqual((row['error'], row['measured'] is not None), (None, True))
 
     def test_newest_takes_only_a_hand_over_saved_since_before(self):
         old = self.handed_over(self.seed_slides(), 'cloud-seed', 'old.jsonl')

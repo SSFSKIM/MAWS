@@ -139,6 +139,29 @@ class Validity(Bench):
         self.assertEqual(rows[1]['seedId'], 'seed-01')
         self.assertEqual([parse.valid(r) for r in rows], [['no seed: a Cowork deck repetition of the record takes before --seed (§7a)'], [], [], []])
 
+    def test_the_timed_turn_is_its_sessions_first(self):
+        """A prompt that went into an existing session (the driver's New having failed) carries that session's context
+        and cache: an earlier unrelated turn before the task's excludes the repetition, in either arm."""
+        def earlier(src, name):
+            path = os.path.join(self.dir, name)
+            with open(src, encoding='utf-8') as f:
+                recs = [json.loads(line) for line in f]
+            asst = next(r for r in recs if r.get('type') == 'assistant')
+            prior = [dict(recs[0], uuid='p1', timestamp='2026-10-19T11:58:00.000Z', turnPosition={'turnIndex': 1}, message={'role': 'user', 'content': 'List the tools available to you.'}),
+                     dict(asst, uuid='p2', timestamp='2026-10-19T11:58:05.000Z', requestId='req_prior', requestRef=None,
+                          message=dict(asst['message'], id='msg_prior', content=[{'type': 'text', 'text': 'Read, Edit, Write.'}]))]
+            with open(path, 'w', encoding='utf-8') as out:
+                out.write(''.join(json.dumps(r) + '\n' for r in prior + recs))
+            return path
+        rows = {name: parse.edit_row(p) for name, p in (
+            ('desktop', self.manifest('desktop-B1-r1', 'desktop', earlier(DESKTOP_T, 'desktop-prior.jsonl'))),
+            ('maws', self.manifest('maws-B1-r1', 'maws', earlier(MAWS_T, 'maws-prior.jsonl'))),
+            ('plain', self.manifest('desktop-B1-r2', 'desktop', DESKTOP_T)))}
+        for arm in ('desktop', 'maws'):
+            self.assertEqual(rows[arm]['measured']['sendToEditLanded'], 5.2, 'the task\'s turn is the one measured')
+            self.assertEqual((rows[arm]['priorTurns'], parse.valid(rows[arm])), (1, ["the timed turn was not its session's first: 1 earlier turn"]))
+        self.assertEqual((rows['plain']['priorTurns'], parse.valid(rows['plain'])), (0, []))
+
     def test_landing_counts_only_the_artifacts_file(self):
         def other_file_first(r):  # the Read becomes an Edit of another file, landing before doc.md's
             for b in (r.get('message') or {}).get('content') or []:

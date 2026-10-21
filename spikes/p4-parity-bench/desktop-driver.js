@@ -20,17 +20,26 @@
 //                (rep's permissionsAnswered counts the permission cards it had to answer)
 //   3. Bash:     python3 -I spikes/p4-parity-bench/desktop-prep.py after <task> <rep> --out <run>
 //                  --permissions-answered <step 2's permissionsAnswered> [--transcript newest]   (a Cowork turn: its hand-over)
-// A Cowork seed: bench.rep({ surface: 'cowork', prompt: <desktop-prep.py seed-prompt> }), bench.handOver(), then
-// desktop-prep.py seed-add newest --out <run>.
+// Cowork seeds, four side by side: bench.send({ surface: 'cowork', prompt: <desktop-prep.py seed-prompt> }) four times,
+// keeping each returned url; then for each, bench.reopen(url), bench.handOver() and desktop-prep.py seed-add newest
+// --out <run>. (One seed at a time: bench.rep, bench.handOver, seed-add.)
 //
 // Every step observes, acts, then verifies; a step whose verification fails throws with the lines it saw, and the
-// repetition is redone from step 1. The labels are 3.1623.0's Korean UI (the owner's Desktop runs ko-KR, input source
-// ABC), with English beside them; `bench.probe()` reports which of them the live tree shows.
+// repetition is redone from step 1. Before any prompt is sent the session on screen must be a new, empty one (the Code
+// tab's selected sidebar item 새 세션, the Claude tab's page claude.ai/new): a New click that failed silently would
+// put the prompt into an existing session, with its context and cache. The labels are 3.1623.0's Korean UI (the
+// owner's Desktop runs ko-KR, input source ABC), with English beside some; `bench.probe()` reports which of them the
+// live tree shows. `recentItem` alone was not read live (the Claude tab's sidebar list); the probe reads it first.
 
 const L = {
   modeCode: [/라디오 버튼 Description: Code/],
   modeClaude: [/라디오 버튼 Description: Claude/],
   newSession: [/버튼 새로 생성/, /button New/],
+  // the session on screen is a new one: the Code tab's sidebar item for it, selected; the Claude tab's page
+  codeNewItem: [/^\s*\d+\s+항목 새 세션, Value: 1(,|$)/],
+  pageUrl: [/HTML 콘텐츠 .*, URL: [^\s,]+/],
+  cloudNewPage: [/HTML 콘텐츠 .*, URL: (https:\/\/)?claude\.ai\/new\/?([?#][^\s,]*)?(,|$)/],
+  recentItem: [/^\s*\d+\s+항목 (?!새 세션, ).+, Value: [01](,|$)/],
   folderPopup: [/팝업 버튼 Description: 폴더:/],
   openFolder: [/^\s*\d+\s+폴더 열기…/, /Open folder…/],
   panelPath: [/텍스트 필드 \(settable\).*ID: PathTextField/],
@@ -54,8 +63,19 @@ const L = {
   save: [/버튼 저장, ID: OKButton/, /button Save, ID: OKButton/],
 };
 
+// The waits, in ms (a test shortens them).
+const T = { fresh: 5_000, savePanel: 5_000, sessionUrl: 15_000, reopenSettle: 5_000, turnSettle: 3_000, turn: 600_000 };
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const lines = (state) => state.split('\n');
+function findAll(state, patterns) {
+  const out = [];
+  for (const line of lines(state)) {
+    const m = /^\s*(\d+)\s/.exec(line);
+    if (m && patterns.some((p) => p.test(line))) out.push({ index: Number(m[1]), line: line.trim() });
+  }
+  return out.sort((x, y) => x.index - y.index);
+}
 function find(state, patterns, after = -1) {
   for (const p of patterns) {
     for (const line of lines(state)) {
@@ -68,6 +88,34 @@ function find(state, patterns, after = -1) {
 const has = (patterns) => (s) => find(s, patterns) !== null;
 const lacks = (patterns) => (s) => find(s, patterns) === null;
 const tree = (a) => a.getAXState({ emit: false, disableDiffing: true });
+
+// The page's URL: the first web area's in the tree (the page itself; a frame inside it comes later).
+function pageUrl(state) {
+  const hit = find(state, L.pageUrl);
+  return hit ? /, URL: ([^\s,]+)/.exec(hit.line)[1] : null;
+}
+const bareUrl = (u) => u.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+const sameUrl = (x, y) => typeof x === 'string' && typeof y === 'string' && bareUrl(x) === bareUrl(y);
+
+// The session on screen is a new, empty one, read on the surface's own sign.
+function isNewSession(state, surface) {
+  if (surface === 'code') return has(L.codeNewItem)(state);
+  const page = find(state, L.pageUrl);
+  return page !== null && L.cloudNewPage.some((p) => p.test(page.line));
+}
+
+// The hand-over's file card: the last Download button after the line naming the .jsonl file, else the last one (an
+// earlier card, a deck's among them, is never the transcript's).
+function pickDownload(state) {
+  const buttons = findAll(state, L.download);
+  let file = -1;
+  for (const line of lines(state)) {
+    const m = /^\s*(\d+)\s/.exec(line);
+    if (m && /[\w.-]+\.jsonl\b/.test(line) && !L.download.some((p) => p.test(line))) file = Math.max(file, Number(m[1]));
+  }
+  const after = buttons.filter((b) => b.index > file);
+  return (file >= 0 && after.length ? after : buttons).at(-1) ?? null;
+}
 
 async function app() {
   return cua.getApp('com.anthropic.claudefordesktop');
@@ -141,8 +189,26 @@ async function newCloudSession(a) {
   await opusExtra(a);
 }
 
+// A new session on the surface with its controls set, and verified new and empty just before anything is sent: else
+// the prompt is refused, since it would land in an existing session.
+async function newSession(a, surface, folder) {
+  if (surface === 'code') await newCodeSession(a, folder);
+  else if (surface === 'cowork') await newCloudSession(a);
+  else throw new Error(`surface is code or cowork, not ${surface}`);
+  const deadline = Date.now() + T.fresh;
+  for (;;) {
+    const s = await tree(a);
+    if (isNewSession(s, surface)) return;
+    if (Date.now() > deadline) {
+      const seen = surface === 'code' ? 'no selected 새 세션 item in the sidebar' : `the page is ${pageUrl(s)}, not claude.ai/new`;
+      throw new Error(`the session on screen is not a new one (${seen}): the prompt is not sent\n${lines(s).filter((l) => /항목 |HTML 콘텐츠/.test(l)).slice(0, 20).join('\n')}`);
+    }
+    await sleep(300);
+  }
+}
+
 // The prompt pasted whole (its quotes unchanged), checked in the field, then sent; verified by Stop appearing.
-async function send(a, surface, prompt) {
+async function sendPrompt(a, surface, prompt) {
   const s = await tree(a);
   const field = find(s, surface === 'code' ? L.promptCode : L.promptCloud);
   if (!field) throw new Error('no prompt field');
@@ -153,9 +219,9 @@ async function send(a, surface, prompt) {
   await clickUntil(a, 'Send', surface === 'code' ? L.sendCode : L.sendCloud, has(L.stop), 30_000);
 }
 
-// The turn's end: Stop gone for 3 s. A permission card is answered Always allow and counted (a human stop).
-async function waitTurn(a, ms = 600_000) {
-  const deadline = Date.now() + ms;
+// The turn's end: Stop gone for T.turnSettle. A permission card is answered Always allow and counted (a human stop).
+async function waitTurn(a) {
+  const deadline = Date.now() + T.turn;
   let goneSince = null;
   const answered = [];
   for (;;) {
@@ -166,39 +232,71 @@ async function waitTurn(a, ms = 600_000) {
       await a.click(allow.index);
     }
     goneSince = has(L.stop)(s) ? null : (goneSince ?? Date.now());
-    if (goneSince !== null && Date.now() - goneSince > 3_000) return { permissionsAnswered: answered.length, permissionCards: answered };
-    if (Date.now() > deadline) throw new Error('the turn did not end within 10 minutes');
+    if (goneSince !== null && Date.now() - goneSince > T.turnSettle) return { permissionsAnswered: answered.length, permissionCards: answered };
+    if (Date.now() > deadline) throw new Error(`the turn did not end within ${T.turn / 60_000} minutes`);
     await sleep(500);
   }
 }
 
-// The untimed hand-over that follows a cloud turn in the same session: the session sends its own transcript file, and
-// the file's card is downloaded on the mini (~/Downloads, the operator moves it with desktop-prep's --transcript).
-// Its records come after the timed turn's, so the parser's turn window leaves them out.
+// The untimed hand-over that follows a cloud turn in the same session (the one on screen; a turn still running there,
+// a reopened seed's, is waited out first): the session sends its own transcript file, and its card's Download is
+// clicked on the mini (~/Downloads), with Save if a save panel comes within T.savePanel. Whether the file arrived is
+// not seen from here: desktop-prep's `newest` confirms it. The hand-over's records come after the timed turn's, so the
+// parser's turn window leaves them out.
 const HAND_OVER = 'Send me this session\'s own transcript file with SendUserFile: the most recently modified .jsonl file under ~/.claude/projects/. Make no other change and call no other tool except to find that file.';
-async function handOver(ms = 120_000) {
+const CONFIRM = 'desktop-prep.py after --transcript newest (or seed-add newest) confirms the file';
+async function handOver() {
   const a = await app();
-  await send(a, 'cowork', HAND_OVER);
+  if (has(L.stop)(await tree(a))) await waitTurn(a);
+  await sendPrompt(a, 'cowork', HAND_OVER);
   const turn = await waitTurn(a);
   const s = await tree(a);
-  const card = find(s, L.download);
+  const card = pickDownload(s);
   if (!card) return { ...turn, downloaded: false, note: 'no download button in the tree: download the file card by hand and say so', lines: lines(s).filter((l) => /jsonl|다운로드|Download|파일/.test(l)).slice(-12) };
   await a.click(card.index);
-  const deadline = Date.now() + ms;
+  const deadline = Date.now() + T.savePanel;
   for (;;) {
     const t = await tree(a);
     const save = find(t, L.save);
     if (save) {
       await a.click(save.index);
-      return { ...turn, downloaded: true, via: 'save panel' };
+      return { ...turn, downloaded: 'unconfirmed', via: 'the save panel, Save clicked', button: card.line, note: CONFIRM };
     }
-    if (Date.now() > deadline || lacks(L.download)(t)) return { ...turn, downloaded: true, via: 'direct' };
+    if (Date.now() > deadline) return { ...turn, downloaded: 'unconfirmed', via: `no save panel within ${T.savePanel} ms`, button: card.line, note: CONFIRM };
     await sleep(500);
   }
 }
 
+// A Claude-tab session reopened from the sidebar's recent list: the recent items clicked in turn, each from a fresh
+// tree, until the page's URL is the given one; the first eight only.
+async function reopen(url) {
+  const a = await app();
+  let s = await clickUntil(a, 'the Claude tab', L.modeClaude, has(L.newSession));
+  if (sameUrl(pageUrl(s), url)) return pageUrl(s);
+  const tried = [];
+  for (let i = 0; i < 8; i++) {
+    const item = findAll(s, L.recentItem)[i];
+    if (!item) break;
+    const before = pageUrl(s);
+    await a.click(item.index);
+    const deadline = Date.now() + T.reopenSettle;
+    do {
+      await sleep(300);
+      s = await tree(a);
+    } while (pageUrl(s) === before && Date.now() < deadline);
+    const now = pageUrl(s);
+    if (sameUrl(now, url)) return now;
+    tried.push(`${item.line} -> ${now}`);
+  }
+  throw new Error(`no recent item of the first eight opened ${url}:\n${tried.join('\n')}`);
+}
+
 globalThis.bench = {
   L,
+  T,
+  pageUrl,
+  isNewSession,
+  pickDownload,
   // What the live tree shows of each label (the hold's first step, and whenever a step throws).
   async probe() {
     const s = await tree(await app());
@@ -210,15 +308,33 @@ globalThis.bench = {
   // One timed repetition: a fresh session on the surface, the prompt sent, the turn waited out.
   async rep({ surface, folder, prompt }) {
     const a = await app();
-    if (surface === 'code') await newCodeSession(a, folder);
-    else if (surface === 'cowork') await newCloudSession(a);
-    else throw new Error(`surface is code or cowork, not ${surface}`);
+    await newSession(a, surface, folder);
     const sentAt = new Date().toISOString();
-    await send(a, surface, prompt);
+    await sendPrompt(a, surface, prompt);
     const result = await waitTurn(a);
     nodeRepl.write(JSON.stringify({ surface, sentAt, endedAt: new Date().toISOString(), ...result }));
     return result;
   },
+  // A prompt sent in a fresh session, not waited out (cloud seeds side by side): returns once Stop appears, with the
+  // page's URL (for the Claude tab, once it has left claude.ai/new) for bench.reopen.
+  async send({ surface, folder, prompt }) {
+    const a = await app();
+    await newSession(a, surface, folder);
+    const sentAt = new Date().toISOString();
+    await sendPrompt(a, surface, prompt);
+    const deadline = Date.now() + T.sessionUrl;
+    let s = await tree(a);
+    while (surface === 'cowork' && isNewSession(s, surface) && Date.now() < deadline) {
+      await sleep(500);
+      s = await tree(a);
+    }
+    const url = pageUrl(s);
+    const result = { surface, sentAt, url };
+    if (surface === 'cowork' && isNewSession(s, surface)) Object.assign(result, { url: null, note: `the page was still claude.ai/new ${T.sessionUrl} ms after the send: hand this session over now, while it is on screen` });
+    nodeRepl.write(JSON.stringify(result));
+    return result;
+  },
+  reopen,
   handOver,
 };
-nodeRepl.write('bench driver loaded (Desktop 3.1623.0): bench.probe(), bench.rep({ surface: "code"|"cowork", folder, prompt }), bench.handOver()');
+nodeRepl.write('bench driver loaded (Desktop 3.1623.0): bench.probe(), bench.rep({ surface: "code"|"cowork", folder, prompt }), bench.send({ surface, folder, prompt }), bench.reopen(url), bench.handOver()');
