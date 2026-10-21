@@ -316,6 +316,16 @@ describe('a message tool’s message as the last line', () => {
     expect(lines([call('c1', 'Stage 1 is done.'), result('c1')], [text('All stages ran.')])).toEqual(['Stage 1 is done.', 'All stages ran.']);
   });
 
+  it('a message call is no work: the activity stays the last tool’s through the call and its result', () => {
+    const seen = new Set<string>();
+    const ledger = costLedger(emptyDigest(APP));
+    const messages: MessageCalls = new Map();
+    const bash = ev('tool.use', { toolUseId: 'b1', toolName: 'Bash', input: { command: 'sh stage.sh 2' } });
+    const digest = foldEvents(emptyDigest(APP), seen, [ev('turn.started', {}), bash, call('c1', 'Stage 1 is done.')], ledger, true, messages);
+    expect(digest.activity).toBe('Running sh stage.sh 2');
+    expect(foldEvents(digest, seen, [result('c1')], ledger, true, messages)).toMatchObject({ activity: 'Running sh stage.sh 2', lastAssistantLine: 'Stage 1 is done.' });
+  });
+
   it('a subagent’s call and result leave the parent’s line alone', () => {
     expect(lines([text('Looking first.'), call('c1', 'Child found it.', CHILD)], [result('c1', CHILD)])).toEqual(['Looking first.', 'Looking first.']);
   });

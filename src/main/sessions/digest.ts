@@ -157,15 +157,18 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
     case 'assistant.block.delta':
       return event.thinkingDelta !== null ? { ...d, activity: 'Thinking' } : d;
     case 'tool.use':
+      // P4-R7: a message call is no work: the activity stays what it was, and its line waits for the result
       if (isMessageTool(event.toolName)) {
         const text = messageCallText(event.input);
         messages.set(event.toolUseId, text === null ? null : messageLine(text, LAST_LINE_MAX));
+        return d;
       }
       return { ...d, activity: activityForTool(event.toolName, event.input) };
     case 'tool.result': {
+      if (!messages.has(event.toolUseId)) return { ...d, activity: 'Working' };
       const line = messages.get(event.toolUseId);
       messages.delete(event.toolUseId);
-      return { ...d, activity: 'Working', ...(line != null && !event.isError && { lastAssistantLine: line }) };
+      return line != null && !event.isError ? { ...d, lastAssistantLine: line } : d;
     }
     case 'assistant.block.complete': {
       const line = firstLine(event.block);
