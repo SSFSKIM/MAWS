@@ -120,19 +120,20 @@ describe('spentUnder', () => {
   });
 
   // One launch's journal as the host writes it: the spawn row (resuming `resume` or fresh), a main result per cumulative
-  // figure, then the exit row (clean unless given; none for a launch whose exit was never journaled), its rows split
-  // across the base file and the rotations `<id>.<n>.jsonl` at `rotate` (the indexes rotations start at).
-  interface Launch { id: string; minute: number; resume?: string; costs: number[]; exit?: { code: number | null; signal: string | null } | null; rotate?: { n: number; at: number }[] }
+  // figure, then the exit row (clean unless given; none for a launch whose exit was never journaled; at `exitMinute`
+  // when given, else just after its other rows), its rows split across the base file and the rotations
+  // `<id>.<n>.jsonl` at `rotate` (the indexes rotations start at).
+  interface Launch { id: string; minute: number; resume?: string; costs: number[]; exit?: { code: number | null; signal: string | null } | null; exitMinute?: number; rotate?: { n: number; at: number }[] }
   function writeSession(userData: string, appId: string, launches: Launch[]): void {
     const dir = join(userData, 'engine-host', 'journal', appId);
     mkdirSync(dir, { recursive: true });
-    for (const { id, minute, resume, costs, exit = { code: 0, signal: null }, rotate = [] } of launches) {
-      const at = (k: number) => new Date(Date.UTC(2026, 9, 21, 10, minute, k)).toISOString();
+    for (const { id, minute, resume, costs, exit = { code: 0, signal: null }, exitMinute, rotate = [] } of launches) {
+      const at = (m: number, k: number) => new Date(Date.UTC(2026, 9, 21, 10, m, k)).toISOString();
       const frames = [
         { direction: 'meta', frame: { event: 'spawn', launchId: id, args: ['-p', '--input-format', 'stream-json', ...(resume ? ['--resume', resume] : [])] } },
         ...costs.map((cost) => ({ direction: 'in', frame: { type: 'result', subtype: 'success', parent_tool_use_id: null, total_cost_usd: cost, num_turns: 1 } })),
         ...(exit ? [{ direction: 'meta', frame: { event: 'exit', ...exit, reason: exit.signal ? 'crash' : 'stop' } }] : []),
-      ].map((row, i) => JSON.stringify({ seq: i + 1, at: at(i), ...row }));
+      ].map((row, i) => JSON.stringify({ seq: i + 1, at: (row.frame as { event?: string }).event === 'exit' && exitMinute !== undefined ? at(exitMinute, 0) : at(minute, i), ...row }));
       const cuts = [0, ...rotate.map((r) => r.at), frames.length];
       const names = [`${id}.jsonl`, ...rotate.map((r) => `${id}.${r.n}.jsonl`)];
       names.forEach((name, k) => writeFileSync(join(dir, name), `${frames.slice(cuts[k], cuts[k + 1]).join('\n')}\n`));
@@ -174,6 +175,10 @@ describe('spentUnder', () => {
     expect(pair({ exit: null }, {})).toBeCloseTo(0.0059, 10); // the exit never journaled (the host gone with it)
     expect(pair({ exit: { code: 1, signal: null } }, {})).toBeCloseTo(0.0059, 10);
     expect(pair({}, { resume: undefined, costs: [0.003] })).toBeCloseTo(0.0047, 10); // fresh: its figure starts at 0
+    // two host lifetimes over one profile: the resume spawned while the launch before still ran (the engine allows a
+    // concurrent resume, pass2/resume-live-second.jsonl), so it restored nothing of that launch's later spend
+    expect(pair({ costs: [0.02], exitMinute: 9 }, { costs: [0.03] })).toBeCloseTo(0.05, 10);
+    expect(pair({ costs: [0.02], exitMinute: 4 }, { costs: [0.03] })).toBeCloseTo(0.03, 10); // exited before it: continued
     // the launch just before decides: an earlier launch's clean exit does not vouch for a later one's
     const userData = scratch();
     writeSession(userData, 'app-1', [
