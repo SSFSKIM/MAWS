@@ -58,11 +58,20 @@ const trailer = (key) =>
 
 const RUNNERS = { linux: 'ubuntu-24.04', macos: ['self-hosted', 'macOS', 'ARM64'] };
 const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
+// On the pool the whole unit suite runs as UNIT_SHARDS jobs, `unit <k>/<n>`, each vitest's --shard=<k>/<n> on a box of
+// UNIT_CPUS. One vitest process keeps its box's cores only 55-70% busy (its main process transforms for every worker),
+// so more processes on more boxes end the suite sooner than more cores on one. Five or more shards, or 16-core shards,
+// turned suites red that wait on those transforms cold (TranscriptSlot's hooks under renderer-compiled); four shards of
+// eight cores did not (CI-opt's critical-path arms, 2026-10-21). A selected run that tests only the related suites, and
+// a run off the pool, is the one job `unit`.
+const UNIT_SHARDS = 4;
+const UNIT_CPUS = 8;
 const CLASS1A_RUNNERS = {
   linux: { static: RUNNERS.linux, unit: RUNNERS.linux, probes: RUNNERS.linux },
   macos: { static: RUNNERS.macos, unit: RUNNERS.macos, probes: RUNNERS.macos },
-  // unit at 8 cores leaves one 16-core box room for static's 4 and probes' 2, so the three start together.
-  pool: { static: poolBox(4), unit: poolBox(8), probes: poolBox(2) },
+  // Each pool job is a GCE VM of its own (Decision Log 52). static runs its checks at once and needs the 16-core box's
+  // 32 GB (about 15 GB at its peak); unit's box is each shard's (UNIT_SHARDS).
+  pool: { static: poolBox(16), unit: poolBox(UNIT_CPUS), probes: poolBox(2) },
 };
 const gateRunner = (env.GATE_RUNNER ?? '').toLowerCase();
 const class1a = ((dispatched ? env.INPUT_CLASS1A : trailer('Class1a')) || gateRunner || 'linux').toLowerCase();
@@ -131,6 +140,12 @@ appendFileSync(
     `static_runner=${JSON.stringify(runners.static)}\nunit_runner=${JSON.stringify(runners.unit)}\nprobes_runner=${JSON.stringify(runners.probes)}\npool=${pool}\n`,
 );
 appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\nlive=${live}\ndefault_beside=${JSON.stringify(defaultBeside)}\n`);
+// The unit job's matrix: its shards, each with the `--shard` value and the suffix of its JUnit artifact's name
+// (test-results-unit-<k>of<n>-<attempt>, which ci-kit's test-history collector reads as one `unit` report), or the one
+// unsharded job.
+const shards = class1a === 'pool' && !selection?.related ? UNIT_SHARDS : 1;
+const unitShards = shards > 1 ? Array.from({ length: shards }, (_, i) => ({ shard: `${i + 1}/${shards}`, slug: `-${i + 1}of${shards}` })) : [{ shard: '', slug: '' }];
+appendFileSync(env.GITHUB_OUTPUT, `unit_shards=${JSON.stringify(unitShards)}\n`);
 const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
 const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
 // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.

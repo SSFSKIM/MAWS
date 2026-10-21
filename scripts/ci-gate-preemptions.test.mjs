@@ -162,6 +162,37 @@ test('a preempted job is rerun alone, once, and the final attempt reports it gre
   assert.equal(result.summary, 'ci-gate: preempted by GCE (1): unit; green on its rerun: unit');
 });
 
+// On the pool unit runs as shards, `unit <k>/<n>` (gate-plan.mjs's UNIT_SHARDS): a name with a space in it.
+const shards = (n, at) => Array.from({ length: n }, (_, i) => at[`unit ${i + 1}/${n}`] ?? green(`unit ${i + 1}/${n}`));
+const sharded = (at) => [plan, green('probes', 'ci-kit-gce-hs99q9dpex'), green('static'), ...shards(4, at)];
+
+test('a preempted unit shard is rerun alone by its whole name, and the final attempt reports it green', () => {
+  const result = settle({ jobs: sharded({ 'unit 2/4': preempted('unit 2/4') }), reruns: { 'unit 2/4': [green('unit 2/4', 'ci-kit-gce-hs99zzfujv')] } });
+  assert.deepEqual(result.reruns, ['unit 2/4']);
+  assert.equal(result.printed, 'ci-gate: unit 2/4 preempted in attempt 1\nci-gate: rerunning unit 2/4 alone as attempt 2\n');
+  assert.equal(result.attempt, '2 success');
+  assert.deepEqual(result.jobs, ['success\tplan', 'success\tprobes', 'success\tstatic', 'success\tunit 1/4', 'success\tunit 2/4', 'success\tunit 3/4', 'success\tunit 4/4']);
+  assert.equal(result.summary, 'ci-gate: preempted by GCE (1): unit 2/4; green on its rerun: unit 2/4');
+});
+
+// Three shards preempted at once, each kept apart by its whole name: one green on its rerun, one preempted again, one
+// whose rerun GitHub refuses (the fake has no outcome for it).
+test('preempted shards each keep their own name through the reruns, a second preemption and a refused rerun', () => {
+  const result = settle({
+    jobs: sharded({ 'unit 1/4': preempted('unit 1/4'), 'unit 3/4': preemptedMidStep('unit 3/4'), 'unit 4/4': preempted('unit 4/4') }),
+    reruns: { 'unit 1/4': [green('unit 1/4')], 'unit 3/4': [preempted('unit 3/4', 'ci-kit-gce-hs99zzfujv')] },
+  });
+  assert.deepEqual(result.reruns, ['unit 1/4', 'unit 3/4']);
+  assert.equal(
+    result.printed,
+    'ci-gate: unit 1/4 preempted in attempt 1\nci-gate: unit 3/4 preempted in attempt 1\nci-gate: unit 4/4 preempted in attempt 1\n' +
+      'ci-gate: rerunning unit 1/4 alone as attempt 2\nci-gate: rerunning unit 3/4 alone as attempt 3\nci-gate: unit 3/4 preempted again in attempt 3; it stays red\n' +
+      "ci-gate: unit 4/4's rerun was refused: fake gh: the scenario has no outcome for this rerun of unit 4/4; it stays red\n",
+  );
+  assert.equal(result.attempt, '3 failure');
+  assert.equal(result.summary, 'ci-gate: preempted by GCE (3): unit 1/4 unit 3/4 unit 4/4; green on its rerun: unit 1/4; preempted twice, red: unit 3/4; not rerun, red: unit 4/4');
+});
+
 test('a job preempted again on its rerun stays red, and the summary says it was preempted twice', () => {
   const result = settle({ jobs: classOneA(preempted('unit')), reruns: { unit: [preempted('unit', 'ci-kit-gce-hs99zzfujv')] } });
   assert.deepEqual(result.reruns, ['unit']);

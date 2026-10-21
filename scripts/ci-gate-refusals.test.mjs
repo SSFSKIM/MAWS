@@ -81,6 +81,26 @@ test('--default-beside with shell metacharacters is refused with exit 2, a valid
   assert.match(passed.stderr, /no commit \/nonexistent/);
 });
 
+// On the pool unit runs as shards, `unit <k>/<n>` (gate-plan.mjs's UNIT_SHARDS), jobs of the one gate `unit`.
+const shardedRun = ['failure\te2e:library', 'success\te2e:side', 'success\tplan', 'success\tprobes', 'success\tstatic', 'success\tunit 1/4', 'failure\tunit 2/4', 'success\tunit 3/4', 'failure\tunit 4/4', 'success\tunit:darwin'];
+
+test('a red unit shard relaunches as the gate unit, once however many shards were red', () => {
+  assert.equal(
+    refusals(shardedRun, [refusal('e2e:library'), red('unit 2/4'), red('unit 4/4')]),
+    'ci-gate: refused by the mini (1): e2e:library; green (6): e2e:side probes static unit 1/4 unit 3/4 unit:darwin; red (2): unit 2/4 unit 4/4; ' +
+      `relaunch the refused and the red (less any red baseline, Decision Log 58(c)): scripts/ci-gate.sh ${sha} --runner macos --class1a pool ` +
+      '--gates e2e:library,unit --label f1-landing --evidence\n',
+  );
+});
+
+test('a refused job is matched by its whole name, a space in it included', () => {
+  const jobs = shardedRun.map((job) => job.replace(/^\w+\tunit 1\/4$/, 'failure\tunit 1/4'));
+  assert.match(
+    refusals(jobs, [refusal('e2e:library'), refusal('unit 1/4'), red('unit 2/4'), red('unit 4/4')]),
+    /^ci-gate: refused by the mini \(2\): e2e:library unit 1\/4; green \(5\): e2e:side probes static unit 3\/4 unit:darwin; red \(2\): unit 2\/4 unit 4\/4; .* --gates e2e:library,unit --label /,
+  );
+});
+
 test('a relaunch without default carries no --default-beside', () => {
   const line = refusals(run('success'), [refusal('e2e:desk-web'), refusal('e2e:tools')], { default_beside: 'side' });
   assert.match(line, / --gates e2e:desk-web,e2e:library,e2e:tools --label f1-landing --evidence\n$/);
