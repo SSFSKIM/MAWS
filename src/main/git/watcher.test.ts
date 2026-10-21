@@ -106,6 +106,28 @@ describe('the repository watcher classifies paths', () => {
     expect(classifyCommonPath('objects/ab/cd')).toBeNull();
     expect(classifyCommonPath('worktrees/wt/index')).toBeNull(); // the per-worktree git dir has its own watch
   });
+
+  // The parent's status reads a submodule's HEAD, index and refs for the gitlink's line; a commit on a branch inside it
+  // moves its index and its reflog's logs/HEAD, not the HEAD file.
+  it("counts a submodule's HEAD, reflog HEAD, index and reftable under modules/, at any depth, as the parent's worktree", () => {
+    for (const sub of ['modules/up/HEAD', 'modules/libs/up/HEAD', 'modules/libs/up/logs/HEAD', 'modules/libs/up/index', 'modules/a/modules/b/HEAD', 'modules/a/modules/b/index', 'modules/up/reftable/tables.list']) {
+      expect(classifyGitPath(sub), sub).toBe('worktree');
+    }
+    for (const sub of ['modules', 'modules/up', 'modules/up/HEAD.lock', 'modules/up/index.lock', 'modules/up/objects/ab/cdef', 'modules/up/FETCH_HEAD', 'modules/up/ORIG_HEAD', 'modules/up/COMMIT_EDITMSG', 'modules/up/config', 'worktrees/wt/modules/up/HEAD']) {
+      expect(classifyGitPath(sub), sub).toBeNull();
+    }
+    expect(classifyRootPath('.git/modules/libs/up/HEAD', '.git')).toBe('worktree');
+    expect(classifyCommonPath('modules/up/HEAD')).toBeNull(); // the main worktree's submodules, not a linked worktree's
+  });
+
+  it("counts a reftable repository's tables as refs, which no ref filter rules out since their names carry no ref", () => {
+    for (const sub of ['reftable', 'reftable/tables.list', 'reftable/0x000000000001-0x000000000003-60af3f9a.ref']) expect(classifyGitPath(sub), sub).toBe('refs');
+    expect(classifyGitPath('reftable/tables.list.lock')).toBeNull();
+    expect(classifyCommonPath('reftable/tables.list')).toBe('refs');
+    expect(classifyCommonPath('worktrees/other/reftable/tables.list')).toBeNull(); // another worktree's HEAD
+    expect(refMatters('reftable/tables.list', status({ branch: 'feat/x', upstream: 'origin/feat/x' }))).toBe(true);
+    expect(refMatters('reftable/0x000000000001-0x000000000003-60af3f9a.ref', status({ branch: null, upstream: null }))).toBe(true);
+  });
 });
 
 describe('the repository watcher debounces, coalesces and backs off', () => {
@@ -318,7 +340,7 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     const files = new Map<string, { size: number; mtimeMs: number }>([[`${ROOT}/new/`, { size: 96, mtimeMs: 1 }]]);
     const current = status({ dirty: true, files: [{ path: 'new/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
     const emitted: GitChanged[] = [];
-    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null });
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, hasDotGit: async () => false });
     await watcher.watch(ROOT);
     await vi.advanceTimersByTimeAsync(300);
     const quiet = emitted.length;
@@ -346,8 +368,9 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     const fake = fakeWatch();
     const current = status({ dirty: true, files: [{ path: 'node_modules/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
     const statFile = vi.fn<(path: string) => Promise<{ size: number; mtimeMs: number }>>(async () => ({ size: 1, mtimeMs: 1 }));
+    const hasDotGit = vi.fn<(directory: string) => Promise<boolean>>(async () => false);
     const emitted: GitChanged[] = [];
-    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile });
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile, hasDotGit });
     await watcher.watch(ROOT);
     await vi.advanceTimersByTimeAsync(300);
     const file = (i: number) => `node_modules/pkg/f${i}.js`;
@@ -356,6 +379,7 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     const quiet = emitted.length;
     await vi.advanceTimersByTimeAsync(1000);
     expect(statFile.mock.calls.filter(([path]) => String(path).includes('/pkg/'))).toHaveLength(INNER_CAP); // the last is not kept
+    expect(hasDotGit.mock.calls).toEqual([[`${ROOT}/node_modules`], [`${ROOT}/node_modules/pkg`]]); // one ask per directory, not per file
     expect(emitted).toHaveLength(quiet + 1);
 
     fake.fire(ROOT, file(0)); // kept, unchanged: silent
@@ -476,6 +500,109 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     expect(await runs(ROOT, 'later/f.ts')).toBe(0);
     expect(await runs(ROOT, '.git/worktrees/later/HEAD', '.git/worktrees/later/index')).toBe(0); // its own git dir
     expect(linkedWorktrees).toHaveBeenCalledTimes(2);
+    watcher.dispose();
+  });
+
+  // Git never enters a directory holding a `.git` of its own while it lists untracked files: the repository is one
+  // `dir/` line, or lies inside an untracked parent's, and nothing beneath it is the root's. A gitlink (a submodule, or
+  // an embedded clone whose `.git` is a directory) is tracked, and its status is the parent's to read.
+  it('runs no status for writes inside a repository nested under an untracked directory once a pass has found it; a tracked one keeps counting', async () => {
+    const fake = fakeWatch();
+    const untracked = (path: string) => ({ path, oldPath: null, index: '?', worktree: '?', untracked: true });
+    const current = status({ dirty: true, files: [untracked('direct/'), untracked('notes/'), untracked('vendor/'), { path: 'emb', oldPath: null, index: '.', worktree: 'M', untracked: false }] });
+    const files = new Map<string, { size: number; mtimeMs: number }>();
+    const write = (rel: string, mtimeMs: number) => files.set(`${ROOT}/${rel}`, { size: 1, mtimeMs });
+    const repos = new Set([`${ROOT}/vendor/clone`, `${ROOT}/direct`, `${ROOT}/emb`]);
+    const hasDotGit = vi.fn(async (directory: string) => repos.has(directory));
+    const read = vi.fn(async () => current);
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, hasDotGit, linkedWorktrees: async () => [] });
+    await watcher.watch(ROOT);
+    const runs = counter(read, fake.fire);
+    await runs(ROOT);
+    const quiet = emitted.length;
+
+    // a clone inside the untracked `vendor/`, found by a stat: its first write costs one status that finds nothing new
+    write('vendor/clone/src/a.ts', 1);
+    expect(await runs(ROOT, 'vendor/clone/src/a.ts')).toBe(1);
+    expect(hasDotGit).toHaveBeenCalledWith(`${ROOT}/vendor/clone`);
+    write('vendor/clone/src/a.ts', 2);
+    expect(await runs(ROOT, 'vendor/clone/src/a.ts', 'vendor/clone/.git/index', 'vendor/clone/.git/HEAD')).toBe(0);
+    // a clone listed as `direct/`, found without a stat by a write through its own `.git/`
+    expect(await runs(ROOT, 'direct/.git/refs/heads/main')).toBe(1);
+    expect(hasDotGit).not.toHaveBeenCalledWith(`${ROOT}/direct`);
+    write('direct/x.ts', 1);
+    expect(await runs(ROOT, 'direct/x.ts')).toBe(0);
+    expect(emitted).toHaveLength(quiet); // nothing inside a nested repository moved the parent
+
+    // a plain untracked directory's files still count, and a content write there emits
+    write('notes/draft.md', 1);
+    expect(await runs(ROOT, 'notes/draft.md')).toBe(1);
+    expect(emitted).toHaveLength(quiet + 1);
+    // a repository created over a file the projection holds: the pass that finds it lets the file go, no later one does
+    expect(await runs(ROOT, 'notes/.git/HEAD')).toBe(1);
+    const created = emitted.length;
+    expect(await runs(ROOT, 'elsewhere.ts', 'notes/draft.md')).toBe(1);
+    expect(emitted).toHaveLength(created);
+    // a tracked repository is the parent's, whatever its `.git` is
+    expect(await runs(ROOT, 'emb/src/c.ts')).toBe(1);
+    expect(await runs(ROOT, 'emb/.git/index')).toBe(1);
+    expect(hasDotGit).not.toHaveBeenCalledWith(`${ROOT}/emb`);
+
+    // the clone's own directory stays the parent's; its `.git` going forgets it, and its files count again
+    expect(await runs(ROOT, 'vendor/clone')).toBe(1);
+    repos.delete(`${ROOT}/vendor/clone`);
+    expect(await runs(ROOT, 'vendor/clone/.git')).toBe(0);
+    const before = emitted.length;
+    write('vendor/clone/src/a.ts', 3);
+    expect(await runs(ROOT, 'vendor/clone/src/a.ts')).toBe(1);
+    expect(emitted).toHaveLength(before + 1);
+    watcher.dispose();
+  });
+
+  it("re-checks the parent for a submodule's HEAD, reflog and index under the git dir's modules/, at any depth", async () => {
+    const fake = fakeWatch();
+    let current = status();
+    const read = vi.fn(async () => current);
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async () => null, linkedWorktrees: async () => [] });
+    await watcher.watch(ROOT);
+    const runs = counter(read, fake.fire);
+    await runs(ROOT);
+    // a commit on a branch inside `libs/up` (a name with a slash): what git writes there, HEAD itself untouched
+    current = status({ dirty: true, files: [{ path: 'libs/up', oldPath: null, index: '.', worktree: 'M', untracked: false }] });
+    expect(await runs(ROOT, '.git/modules/libs/up/index.lock', '.git/modules/libs/up/index', '.git/modules/libs/up/logs/HEAD', '.git/modules/libs/up/refs/heads/feat')).toBe(1);
+    expect(emitted.at(-1)).toEqual({ repoRoot: ROOT, status: current, reason: 'worktree' });
+    for (const path of ['.git/modules/libs/up/HEAD', '.git/modules/a/modules/b/HEAD']) expect(await runs(ROOT, path), path).toBe(1);
+    // what the parent's status never reads there: the objects, a fetch, git's locks
+    expect(await runs(ROOT, '.git/modules/libs/up/objects/ab/cdef', '.git/modules/libs/up/FETCH_HEAD', '.git/modules/libs/up/refs/remotes/origin/main', '.git/modules/libs/up/HEAD.lock')).toBe(0);
+    watcher.dispose();
+
+    // a linked worktree's submodules live under its own git dir; the common dir's are the main worktree's
+    const wt = status({ repoRoot: '/wt', gitDir: '/repo/.git/worktrees/wt', isWorktree: true, branch: 'wt' });
+    const wtRead = vi.fn(async () => wt);
+    const linked = new GitWatcher({ status: wtRead, emit: () => {}, watch: fake.watch, statFile: async () => null, linkedWorktrees: async () => [] });
+    await linked.watch('/wt');
+    const wtRuns = counter(wtRead, fake.fire);
+    await wtRuns('/wt');
+    expect(await wtRuns('/repo/.git/worktrees/wt', 'modules/up/HEAD')).toBe(1);
+    expect(await wtRuns('/repo/.git', 'modules/up/HEAD', 'modules/up/index')).toBe(0);
+    linked.dispose();
+  });
+
+  it('re-checks a reftable repository for any write to its tables, whatever ref moved', async () => {
+    const fake = fakeWatch();
+    let current = status({ upstream: 'origin/main' });
+    const read = vi.fn(async () => current);
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async () => null, linkedWorktrees: async () => [] });
+    await watcher.watch(ROOT);
+    const runs = counter(read, fake.fire);
+    await runs(ROOT);
+    expect(await runs(ROOT, '.git/reftable/tables.list.lock')).toBe(0);
+    current = status({ upstream: 'origin/main', behind: 1 }); // `update-ref refs/remotes/origin/main`, as git writes it
+    expect(await runs(ROOT, '.git/reftable/0x000000000006-0x000000000006-882c0787.temp.dypC0x', '.git/reftable/0x000000000006-0x000000000006-45dce094.ref', '.git/reftable/tables.list')).toBe(1);
+    expect(emitted.at(-1)).toMatchObject({ reason: 'refs', status: { behind: 1 } });
     watcher.dispose();
   });
 
@@ -822,6 +949,84 @@ describe('git.changed from a watched fixture repository', () => {
       local.dispose();
     }
   }, 15_000);
+
+  it('runs no status of the parent for writes inside a clone nested under an untracked directory, once a pass has found it', async () => {
+    const execFile = vi.fn(nodeExecFile as unknown as ExecFileFn);
+    const local = new GitService({ emit: (e) => events.push(e), execFile, env: repo.serviceEnv() });
+    await repo.git('init', '-q', 'vendor/clone');
+    const clone = repo.path('vendor/clone');
+    await repo.write('vendor/clone/a.txt', '0\n');
+    await repo.write('notes/draft.md', '0\n');
+    const statusRuns = () => execFile.mock.calls.filter(([, args]) => args[2] === 'status' && args[1] === repo.root).length;
+    // Until no status has started for a while: the pass that finds the clone lands after its status returns, and a write
+    // meanwhile still costs one (more under load), so what runs before that is not counted.
+    const statusesSettle = async () => {
+      for (let last = -1; statusRuns() !== last; ) {
+        last = statusRuns();
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+    };
+    try {
+      const watched = await local.watch(repo.root);
+      expect(watched.files.map((file) => file.path)).toEqual(['notes/', 'vendor/']);
+      await settle();
+      const emitted = events.length;
+      await repo.write('vendor/clone/a.txt', '1\n'); // the write that finds it
+      await statusesSettle();
+      const runs = statusRuns();
+      for (let i = 2; i <= 4; i++) {
+        await repo.write('vendor/clone/a.txt', `${i}\n`); // each in a debounce window of its own
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      await repo.git('-C', clone, 'add', '-A');
+      await repo.git('-C', clone, 'commit', '-q', '-m', 'work in the nested clone');
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect(events.length).toBe(emitted); // nothing in the clone ever emitted
+      expect(statusRuns()).toBe(runs); // and once found, nothing in it runs a status
+      await repo.write('notes/draft.md', '1\n'); // a plain untracked directory's file still emits
+      await nextChange(emitted, 2000);
+    } finally {
+      local.dispose();
+    }
+  }, 15_000);
+
+  // A commit on a branch inside a submodule writes its index and reflog under `.git/modules/<name>/`, nothing in the
+  // worktree and not the HEAD file; the parent's status now lists the gitlink modified.
+  it('emits for a commit on a branch inside a submodule', async () => {
+    const upstream = await GitFixture.create();
+    try {
+      await repo.git('-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', upstream.root, 'libs/up');
+      await repo.git('commit', '-q', '-m', 'submodule');
+      const sub = repo.path('libs/up');
+      await repo.git('-C', sub, 'checkout', '-q', '-b', 'feat');
+      expect((await service.watch(repo.root)).files).toEqual([]);
+      await settle();
+      const baseline = events.length;
+      await repo.git('-C', sub, 'commit', '-q', '--allow-empty', '-m', 'in the submodule');
+      const { event } = await nextChange(baseline, 2000);
+      expect(event).toMatchObject({ reason: 'worktree', status: { files: [{ path: 'libs/up', worktree: 'M', untracked: false }] } });
+    } finally {
+      upstream.dispose();
+    }
+  }, 10_000);
+
+  // Every ref of a reftable repository, HEAD's too, lives in its tables; `git refs migrate` needs git 2.46.
+  it('emits refs for a reftable repository when a remote-tracking ref moves its ahead/behind', async ({ skip }) => {
+    try {
+      await repo.git('refs', 'migrate', '--ref-format=reftable');
+    } catch {
+      return skip('this git cannot migrate a repository to reftable');
+    }
+    await repo.addBareRemote();
+    await repo.write('README.md', 'hello\nahead\n');
+    await repo.git('commit', '-q', '-am', 'ahead');
+    expect(await service.watch(repo.root)).toMatchObject({ upstream: 'origin/main', ahead: 1 });
+    await settle();
+    const baseline = events.length;
+    await repo.git('update-ref', 'refs/remotes/origin/main', 'main'); // as a push would: only the tables move
+    const { event } = await nextChange(baseline, 2000);
+    expect(event).toMatchObject({ reason: 'refs', status: { ahead: 0 } });
+  }, 10_000);
 
   it('emits nothing after the last unwatch', async () => {
     const spy = vi.fn(fsWatch as unknown as WatchFn);

@@ -1,8 +1,9 @@
 // The repository watcher (C4 execution document, Interfaces "Git service" and M6): per repository root, one recursive
 // `fs.watch` on the root and one on the git dir when it lies outside the root (a linked worktree's lives under the
 // common dir's `worktrees/<name>/`), and for a linked worktree one on the common dir for the refs, packed-refs and
-// config it shares. Paths are classified (writes inside a linked worktree nested under the root are that worktree's, and
-// a ref counts only when it can move this root's status), a 250 ms trailing debounce capped at 1 s gathers them, at most one
+// config it shares. Paths are classified (writes inside a linked worktree nested under the root are that worktree's, so
+// are those inside a repository nested in an untracked directory, a submodule's git dir counts as the worktree, and a ref
+// counts only when it can move this root's status), a 250 ms trailing debounce capped at 1 s gathers them, at most one
 // `git status` runs per root with one re-run for whatever arrived meanwhile, and `git.changed` carries the fresh status
 // only when the compared projection moved. The projection is the status's own facts plus the size and mtime of every
 // listed file, so a second content write to an already-dirty file emits although its porcelain line is unchanged (C8a's
@@ -35,6 +36,7 @@ export interface GitWatcherDeps {
   watch?: WatchFn;
   statFile?(path: string): Promise<FileFacts | null>;
   linkedWorktrees?(commonDir: string): Promise<string[]>; // absolute paths; the common dir's `worktrees/*/gitdir` by default
+  hasDotGit?(directory: string): Promise<boolean>; // whether the directory holds a `.git` of its own, file or directory
 }
 
 const DEBOUNCE_MS = 250;
@@ -45,15 +47,23 @@ const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
 const WEIGHT: Record<Exclude<GitChangeReason, 'initial'>, number> = { worktree: 0, index: 1, refs: 2, head: 3 };
 
 // A path inside the git dir, relative to it. `config` holds the upstream and the remote URL (`branch -u`,
-// `remote set-url`), so it counts as `refs`. Git's own `*.lock` files are ignored here, and only here; so are the object
-// stores, git's and git-lfs's (whose clean filter runs under `git status` and writes under `lfs/`).
-export function classifyGitPath(sub: string): Exclude<GitChangeReason, 'initial' | 'worktree'> | null {
+// `remote set-url`), so it counts as `refs`, and so does a reftable repository's `reftable/`, where every ref lives,
+// HEAD's too. Git's own `*.lock` files are ignored here, and only here; so are the object stores, git's and git-lfs's
+// (whose clean filter runs under `git status` and writes under `lfs/`).
+export function classifyGitPath(sub: string): Exclude<GitChangeReason, 'initial'> | null {
   if (sub.endsWith('.lock') || under(sub, 'objects') || under(sub, 'lfs')) return null;
   if (sub === 'HEAD' || sub === 'ORIG_HEAD' || sub === 'MERGE_HEAD') return 'head';
   if (sub === 'index') return 'index';
-  if (sub === 'packed-refs' || sub.startsWith('refs/') || sub === 'config') return 'refs';
+  if (sub === 'packed-refs' || sub.startsWith('refs/') || sub === 'config' || under(sub, 'reftable')) return 'refs';
+  if (SUBMODULE.test(sub)) return 'worktree';
   return null;
 }
+
+// P4 W2-B (tracker 2026-09-30, git watcher blind spots): a submodule's git dir is `modules/<name>/`, the name possibly
+// holding '/', and a nested submodule's lies under its parent's own `modules/`. The parent's status reads each one's HEAD,
+// index and refs for the gitlink's line, so its HEAD, its reflog's `logs/HEAD` (which a commit on a branch moves while the
+// HEAD file stays), its index and its reftable count, as the worktree: the gitlink is a worktree entry of the parent's.
+const SUBMODULE = /^modules\/.+\/(?:HEAD|index|reftable(?:\/.*)?)$/;
 
 // A path inside a linked worktree's common dir, relative to it: only what the worktree shares — branch and
 // remote-tracking refs, packed-refs, config. The main worktree's own HEAD and index there are not this worktree's.
@@ -75,9 +85,10 @@ export function classifyRootPath(rel: string, gitDirRel: string | null): Exclude
 // `refs/` for a ref elsewhere (a remote fetched into `refs/custom/<remote>/*` tracks as `custom/<remote>/main`), so all
 // three readings count. Only the namespaces that cannot hold a status's ref under another name (other branches, other
 // remote-tracking refs, tags, notes) are ruled out; a ref anywhere else counts. The per-worktree HEAD and index are not refs.
+// A reftable repository's tables may hold any ref and their names carry none, so they always count.
 const RULED_OUT = ['refs/heads', 'refs/remotes', 'refs/tags', 'refs/notes'];
 export function refMatters(sub: string, status: Pick<GitStatus, 'branch' | 'upstream'>): boolean {
-  if (sub === 'packed-refs' || sub === 'config') return true;
+  if (sub === 'packed-refs' || sub === 'config' || under(sub, 'reftable')) return true;
   const refs = ['refs/stash'];
   if (status.branch !== null) refs.push(`refs/heads/${status.branch}`);
   if (status.upstream !== null) refs.push(`refs/remotes/${status.upstream}`, `refs/heads/${status.upstream}`, `refs/${status.upstream}`);
@@ -91,10 +102,14 @@ const ENGINE_WORKTREE = /(^|\/)\.claude\/worktrees\/[^/]+\//;
 
 // Whether a root-relative path lies inside another checkout nested under the root, whose files git never reads as the
 // root's: a linked worktree of the engine's layout (known before git has registered it), one the common dir lists
-// (`nested`, root-relative), or a nested checkout's own `.git`. The nested checkout's directory itself appearing or
-// going stays the root's.
-export function insideNestedCheckout(rel: string, nested: readonly string[]): boolean {
-  return ENGINE_WORKTREE.test(rel) || rel.endsWith('/.git') || nested.some((dir) => rel.startsWith(`${dir}/`));
+// (`nested`, root-relative), a repository a pass found in an untracked directory (`clones`, root-relative), or a nested
+// checkout's own `.git`. The nested checkout's directory itself appearing or going stays the root's.
+export function insideNestedCheckout(rel: string, nested: readonly string[], clones: readonly string[]): boolean {
+  return ENGINE_WORKTREE.test(rel) || rel.endsWith('/.git') || within(rel, nested) || within(rel, clones);
+}
+
+function within(rel: string, dirs: readonly string[]): boolean {
+  return dirs.some((dir) => rel.startsWith(`${dir}/`));
 }
 
 // The common dir's `worktrees/<name>/gitdir` names each linked worktree's `.git`: its registration, which `worktree
@@ -144,6 +159,7 @@ interface Root {
   retry: boolean; // the pending pass is the one automatic retry after a timeout; a new event clears it
   nested: string[]; // the linked worktrees under the root, root-relative
   nestedRead: 'idle' | 'reading' | 'again';
+  clones: string[]; // the repositories nested in the status's untracked directories that a pass found, root-relative
 }
 
 export class GitWatcher {
@@ -153,11 +169,13 @@ export class GitWatcher {
   private readonly watchFn: WatchFn;
   private readonly statFile: (path: string) => Promise<FileFacts | null>;
   private readonly linkedWorktrees: (commonDir: string) => Promise<string[]>;
+  private readonly hasDotGit: (directory: string) => Promise<boolean>;
 
   constructor(private readonly deps: GitWatcherDeps) {
     this.watchFn = deps.watch ?? (fsWatch as unknown as WatchFn);
     this.statFile = deps.statFile ?? ((path) => stat(path).then((s) => ({ size: s.size, mtimeMs: s.mtimeMs }), () => null));
     this.linkedWorktrees = deps.linkedWorktrees ?? readLinkedWorktrees;
+    this.hasDotGit = deps.hasDotGit ?? ((directory) => stat(join(directory, '.git')).then(() => true, () => false));
   }
 
   // Resolves the directory's status (failing as `status` fails, with nothing registered), then counts one more watcher
@@ -244,6 +262,7 @@ export class GitWatcher {
       retry: false,
       nested,
       nestedRead: 'idle',
+      clones: [],
     };
     const inside = relative(root.root, status.gitDir);
     const gitDirRel = inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep).join('/') : null;
@@ -261,7 +280,9 @@ export class GitWatcher {
         if (filename === null) return this.changed(root, 'worktree');
         const rel = filename.split(sep).join('/');
         if (gitDirRel !== null && rel.startsWith(`${gitDirRel}/`)) return onGitPath(rel.slice(gitDirRel.length + 1), classifyRootPath(rel, gitDirRel), gitDirIsCommon);
-        if (insideNestedCheckout(rel, root.nested)) return;
+        // A found repository's `.git` coming or going forgets it; a pass finds it again from a write beneath it.
+        if (root.clones.length > 0 && rel.endsWith('/.git')) root.clones = root.clones.filter((dir) => rel !== `${dir}/.git`);
+        if (insideNestedCheckout(rel, root.nested, root.clones)) return;
         this.changed(root, classifyRootPath(rel, gitDirRel), rel);
       });
       root.handles.push(rootWatch);
@@ -413,24 +434,60 @@ export class GitWatcher {
   // The files beneath the status's untracked directories: those already known that are still beneath one, and those
   // the events touched, read afresh (in parallel), while the root keeps fewer than INNER_CAP. `overflow`: a touched file
   // beyond the cap, whose change cannot be judged, so the pass emits.
+  // P4 W2-B (tracker 2026-09-30, git watcher blind spots): git never enters a directory holding a `.git` of its own while
+  // it lists untracked files (the repository is one `dir/` line, or lies inside an untracked parent's), so a file beneath
+  // such a repository is not the root's. A new file's repository is found here, once, and joins `clones`, whose writes the
+  // watch drops from then on; one no longer beneath an untracked directory (gone, or added to the index) is forgotten. A
+  // gitlink, a submodule's or an embedded clone's, is tracked, never beneath one, and stays the root's.
   private async innerFacts(root: Root, status: GitStatus, touched: Set<string>): Promise<{ inner: Map<string, FileFacts | null>; overflow: boolean }> {
     const dirs = status.files.filter((file) => file.untracked && file.path.endsWith('/')).map((file) => file.path);
     const beneath = (rel: string) => dirs.some((dir) => rel.startsWith(dir));
-    const inner = new Map([...root.inner].filter(([rel]) => beneath(rel)));
-    const read: string[] = [];
-    let room = INNER_CAP - inner.size;
-    let overflow = false;
+    root.clones = root.clones.filter((dir) => beneath(`${dir}/`));
+    const counts = (rel: string) => beneath(rel) && !within(rel, root.clones);
+    const inner = new Map([...root.inner].filter(([rel]) => counts(rel)));
+    const room = INNER_CAP - inner.size;
+    const known: string[] = [];
+    const fresh: string[] = [];
+    const beyond: string[] = [];
     for (const rel of touched) {
-      if (!beneath(rel)) continue;
-      if (inner.has(rel)) read.push(rel);
-      else if (room > 0) {
-        read.push(rel);
-        room--;
-      } else overflow = true;
+      if (!counts(rel)) continue;
+      if (inner.has(rel)) known.push(rel);
+      else (fresh.length < room ? fresh : beyond).push(rel);
     }
+    const found = await this.nestedRepositories(status.repoRoot, dirs, fresh);
+    root.clones.push(...found);
+    for (const rel of inner.keys()) if (within(rel, found)) inner.delete(rel); // a repository created over known files
+    const read = [...known, ...fresh].filter((rel) => !within(rel, found));
+    const overflow = beyond.some((rel) => !within(rel, found));
     const facts = await Promise.all(read.map((rel) => this.statFile(join(status.repoRoot, rel))));
     read.forEach((rel, i) => inner.set(rel, facts[i]));
     return { inner, overflow };
+  }
+
+  // The repositories the new files beneath untracked directories lie in: for each file, the outermost directory from its
+  // untracked directory down to its own that holds a `.git`, seen in the path itself (a write through the repository's
+  // `.git/`) or else asked of each directory, once per pass. Bounded as the files are, by INNER_CAP.
+  private async nestedRepositories(repoRoot: string, dirs: string[], fresh: string[]): Promise<string[]> {
+    const asked = new Map<string, Promise<boolean>>();
+    const ask = (dir: string) => {
+      let answer = asked.get(dir);
+      if (!answer) asked.set(dir, (answer = this.hasDotGit(join(repoRoot, dir))));
+      return answer;
+    };
+    const found = await Promise.all(
+      fresh.map(async (rel) => {
+        const top = dirs.find((dir) => rel.startsWith(dir));
+        if (top === undefined) return null;
+        const below = rel.slice(top.length).split('/');
+        let dir = top.slice(0, -1);
+        for (const name of below) {
+          if (name === '.git' || (await ask(dir))) return dir;
+          dir = `${dir}/${name}`;
+        }
+        return null;
+      }),
+    );
+    return [...new Set(found.filter((dir): dir is string => dir !== null))];
   }
 
   // What a change is judged by: every status fact except the time it was read, plus each listed file's size and mtime
