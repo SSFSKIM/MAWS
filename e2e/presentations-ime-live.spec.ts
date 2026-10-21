@@ -175,6 +175,8 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       prelude.perContextInput = read('defaults', ['read', 'com.apple.HIToolbox', 'TextInputGlobalPropertyPerContextInput']) ?? read('defaults', ['read', '-g', 'TextInputGlobalPropertyPerContextInput']);
       prelude.sourceBefore = read('defaults', ['read', 'com.apple.HIToolbox', 'AppleSelectedInputSources'])?.replace(/\s+/g, ' ');
       prelude.selected2Set = await inputSource('2-Set');
+      const selected = outcomeOf(prelude.selected2Set);
+      if (selected !== 'selected') stopped = `the prelude did not select 2-Set (${selected}: ${JSON.stringify(prelude.selected2Set.report)})`;
       writeFileSync(join(DIR, 'probe-prelude.json'), JSON.stringify(prelude, null, 1));
     }
   });
@@ -207,7 +209,7 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       const run = async () => {
         await startTrace(page);
         writeFileSync(join(DIR, `${name}.ready.json`), JSON.stringify({ case: name, policy: POLICY, steps: STEPS[name], ...where }, null, 1));
-        if (PROBE) await drive(name, where.page, probes);
+        if (PROBE && !DRY) await drive(name, where.page, probes);
         else {
           if (DRY) writeFileSync(join(DIR, `${name}.done`), 'dry run: no driver\n');
           await expect.poll(() => existsSync(join(DIR, `${name}.done`)), { timeout: WAIT_MS, intervals: [250] }).toBe(true);
@@ -222,7 +224,22 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       // Blink's own undo stack is empty, findings.txt finding 1, so the effect alone cannot tell).
       let menu: string[] = [];
       if (name === 'L8') await probeMenu();
-      const events = name === 'L8' ? await withNativeClipboard(launch!.app, ['Hello', ''], run).finally(async () => (menu = await restoreMenu())) : await run();
+      // a probe call that posted nothing or not all (the front window not MAWS's, a key refused, a source not selected)
+      // halts the case: recorded as halted, with the report, and skipped with its reason rather than judged on its text
+      let halted: string | null = null;
+      const events =
+        name === 'L8'
+          ? await withNativeClipboard(launch!.app, ['Hello', ''], run).finally(async () => (menu = await restoreMenu()))
+          : await run().catch(async (error: unknown) => {
+              if (!(error instanceof ProbeHalt)) throw error;
+              halted = error.message;
+              return stopTrace(page);
+            });
+      if (halted !== null) {
+        writeFileSync(join(DIR, `${name}.result.json`), JSON.stringify({ case: name, policy: POLICY, halted, probes, events }, null, 1));
+        if (name === 'L0') stopped = `L0 halted: ${halted}`;
+        test.skip(true, `${name} halted: ${halted}`);
+      }
       const out = await outcome(name, events, menu, probes);
       writeFileSync(join(DIR, `${name}.result.json`), JSON.stringify({ case: name, policy: POLICY, ...out, probes, events }, null, 1));
       if (DRY) return;
@@ -414,6 +431,10 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       }
       const last = calls_.at(-1);
       if (last && last.failure) throw new Error(`the probe failed at ${name}: ${last.failure} ${JSON.stringify(last.report)}`);
+      if (last && !('click' in step) && !('wait' in step)) {
+        const outcome = outcomeOf(last);
+        if (outcome !== 'posted' && outcome !== 'selected') throw new ProbeHalt(`${outcome} at ${last.args.join(' ')}; report ${JSON.stringify(last.report)}`);
+      }
     }
   }
 
@@ -441,6 +462,31 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
     writeFileSync(join(DIR, 'l1-hangul.json'), `${JSON.stringify(trace, null, 1)}\n`);
   }
 });
+
+/** A probe call that posted nothing or not all: the case stops there, recorded, and is skipped with the reason. */
+class ProbeHalt extends Error {}
+
+/**
+ * What a probe call did, from its report (one JSON line on every exit path): `exitStatus` first (the exit code, in
+ * hold 2a's build), else the report's shape. A keystroke posted all (`posted`), some or none with the front window
+ * not the named one (`aborted`: a field may hold part of the text, never a composition result), or refused before
+ * sending (`refused`: untypeable, usage); an input source selected or not (`selected`, `unselected`, `refused`: no such
+ * source); `unknown` with no report.
+ */
+function outcomeOf(call: ProbeCall): 'posted' | 'aborted' | 'refused' | 'selected' | 'unselected' | 'unknown' {
+  const r = call.report as { exitStatus?: number; error?: string; aborted?: boolean; selected?: boolean; postedAt?: unknown; presses?: unknown } | null;
+  if (!r || typeof r !== 'object') return 'unknown';
+  const source = call.args.includes('input-source');
+  if (typeof r.exitStatus === 'number') {
+    if (source) return r.exitStatus === 0 ? 'selected' : r.exitStatus === 3 ? 'unselected' : 'refused';
+    if (r.exitStatus === 0) return r.aborted ? 'aborted' : 'posted';
+    return r.exitStatus === 4 ? 'aborted' : 'refused';
+  }
+  if (source) return r.selected === true ? 'selected' : r.selected === false ? 'unselected' : 'refused';
+  if (r.aborted === true) return 'aborted';
+  if (typeof r.error === 'string') return /front window/.test(r.error) ? 'aborted' : 'refused';
+  return r.postedAt !== undefined || r.presses !== undefined ? 'posted' : 'unknown';
+}
 
 /** One call of cua's engine probe, kept in the case's result. */
 interface ProbeCall {
