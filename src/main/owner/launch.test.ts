@@ -60,6 +60,11 @@ describe('decideFlags: the decision table (Design §2; P2-C2 adds the supplement
     ['off', 'contract:2', { append: null, off: true, applied: 'off' }],
     ['off', SUPP, { append: null, off: true, applied: 'off' }],
     ['off', 'none', { append: null, off: false, applied: 'off' }],
+    // P4-A2: the alias recorded alone (a compatible style under hooks none) is what no other launch should reuse
+    ['off', 'alias', { append: null, off: true, applied: 'off' }],
+    ['external-compatible-style', 'alias', { append: null, off: true, applied: 'external-compatible-style' }], // hooks user: the group gives it
+    ['maws-contract', 'alias', { append: 'contract', off: true, applied: 'maws-contract' }],
+    ['external-style-plus-supplement', 'alias', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
   ] as const)('desired %s, recorded %s', (desired, recorded, expected) => {
     expect(cell(desired, recorded)).toEqual(expected);
   });
@@ -82,6 +87,10 @@ describe('decideFlags without the flag: applied stays what the snapshot keeps, u
     ['maws-contract', 'contract:5', 'maws-contract'],
     ['external-style-plus-supplement', 'supplement:1', 'external-style-plus-supplement'],
     ['external-style-plus-supplement', 'contract:5', 'maws-contract'],
+    // P4-A2: the alias alone carries none of MAWS's texts, so it keeps what none keeps
+    ['off', 'alias', 'off'],
+    ['maws-contract', 'alias', 'off'],
+    ['external-compatible-style', 'alias', 'external-compatible-style'],
   ] as const)('desired %s, recorded %s: no "off", applied %s', (desired, recorded, applied) => {
     expect(decideFlags(desired, recorded, false)).toEqual({ append: appends[desired] ?? null, off: false, offUnavailable: true, applied });
   });
@@ -412,6 +421,36 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     const off = await ownerChannelLaunch(s, resumeSpec(hooksNone), { kind: 'resume', transcriptOf: record });
     expect(off.spec.appendSystemPrompt ?? null).toBeNull();
     expect(off.spec.extraSettings).toEqual({ disableAllHooks: true });
+  });
+
+  // P4-A2: a compatible style under hooks none gets the alias alone, which the engine records as its own segment; a launch
+  // that no longer wants it in the prompt (the lane off, where the plugin's tool is real; or hooks user, where the group
+  // gives it) renders anew instead of reusing it
+  it('under hooks none with a compatible style: the alias alone, and its snapshot rendered anew once the lane is off or hooks are the user’s', async () => {
+    compatibleStyle(configHome);
+    const hooksNone = { extraSettings: { disableAllHooks: true } };
+    const fresh = await ownerChannelLaunch(s, spec(hooksNone), { kind: 'new', transcriptOf: null });
+    expect(fresh.spec.appendSystemPrompt).toBe(MESSAGE_TOOL_ALIAS);
+    expect(fresh.spec.extraSettings).toEqual({ disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+    expect(fresh.record).toMatchObject({ desired: 'external-compatible-style', appended: true, snapshotOff: false });
+    transcript(configHome, MESSAGE_TOOL_ALIAS);
+
+    appEnabled = false;
+    const resumed = await ownerChannelLaunch(s, resumeSpec(hooksNone), { kind: 'resume', transcriptOf: record });
+    expect(resumed.spec).toMatchObject({ systemPromptSnapshot: 'off', extraSettings: { disableAllHooks: true } });
+    expect(resumed.spec.appendSystemPrompt ?? null).toBeNull();
+    expect(resumed.record).toMatchObject({ laneOn: false, desired: 'off', recorded: 'alias', appended: false, snapshotOff: true, applied: 'off' });
+    const child = index.sessions.upsertFromSummary(summary({ directory: work })).record.appId;
+    const forked = await ownerChannelLaunch(s, spec({ ...hooksNone, appSessionId: child, resume: { sessionId: ENGINE_ID, fork: true }, inheritGrantsFrom: record }), { kind: 'fork', transcriptOf: record });
+    expect(forked.spec).toMatchObject({ systemPromptSnapshot: 'off', extraSettings: { disableAllHooks: true } });
+    expect(forked.spec.appendSystemPrompt ?? null).toBeNull();
+    expect(forked.record).toMatchObject({ laneOn: false, recorded: 'alias', snapshotOff: true, applied: 'off' });
+
+    appEnabled = true;
+    const user = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
+    expect(user.spec).toMatchObject({ systemPromptSnapshot: 'off', extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED }, hooks: HOOKS } });
+    expect(user.spec.appendSystemPrompt ?? null).toBeNull();
+    expect(user.record).toMatchObject({ desired: 'external-compatible-style', recorded: 'alias', snapshotOff: true, applied: 'external-compatible-style' });
   });
 
   it('without the owner channel (no index), the spec goes unchanged and nothing is recorded', async () => {

@@ -67,14 +67,16 @@ const APPENDS: Partial<Record<ContractSource, { text: AppendedText; records: Rec
 };
 
 // The decision table (Design §2; P2-C2 adds the supplement's row and column). P4-A2: `viaPrompt`, MAWS's start-time
-// context appended beside the desired text (the launch profile's hooks `none`): a recorded prompt carries no reliable
-// mark of it, so any reuse of one is rendered live.
+// context appended beside the desired text (the launch profile's hooks `none`): after the contract or the supplement a
+// recorded prompt carries no reliable mark of it, so any reuse of one is rendered live. Appended alone it records
+// `alias`, which no desired state records, so a launch without it (the lane off, hooks `user`) renders anew as well.
 export function decideFlags(desired: ContractSource, recorded: RecordedState, declares: boolean, viaPrompt = false): { append: AppendedText | null; off: boolean; offUnavailable: boolean; applied: ContractSource } {
   const appends = APPENDS[desired] ?? null;
   const wanted = recorded !== 'unrecorded' && (viaPrompt || recorded !== (appends?.records ?? 'none'));
   const off = wanted && declares;
   // what the snapshot keeps when it is reused: a recorded text stays in force (the contract, or the supplement beside its
-  // style); none leaves the desired state less the text it would append, missing until the prompt renders again
+  // style); none, or the alias alone (none of MAWS's texts), leaves the desired state less the text it would append,
+  // missing until the prompt renders again
   const kept: ContractSource = recorded.startsWith('contract:')
     ? 'maws-contract'
     : recorded.startsWith('supplement:')
