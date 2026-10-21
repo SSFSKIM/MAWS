@@ -4488,6 +4488,23 @@ a hub that connects into machines (§2).
   transcript (about 11 minutes of stalled uplink). Evidence:
   `sminos_plane.py` `page` and `rows_of`, `finish`; `sminos_uplink.py:685-691`;
   the survey's timing run (`python3 -I`, read-only, 2026-10-17).
+- Observation (2026-10-21): desk-open-fast has landed on the machine side
+  (doperpowers spec `docs/doperpowers/specs/2026-10-20-desk-open-fast-design.md`;
+  doperpowers PRs #301, #302 and #308; sminos 1.2.18, rolled to both Macs
+  2026-10-21 00:02Z). A session open's machine share on the owner's MacBook is
+  now 0.01–0.13 s: every open line reads `build: warm 0 ms` and `waits 0`. The
+  same morning's Resume open took 5.40 s. The rest of what the browser waits is
+  the web–hub–machine path. `view.first-rows` is 0.34–0.56 s for an in-app
+  reopen and 0.98–1.41 s on a fresh page load, and drawing accounts for only
+  0.02–0.11 s of either (`window.deskLatency()`, four doperpowers sessions of
+  up to 28,540 rows, 00:11–00:13Z). So the next open-latency gain is the hub's
+  (#52), not the machine's. The hub still ends each machine's stream every
+  23–96 minutes; reconnects take 1.35 s, occasionally 12–16 s. Residue on the
+  MAWS side: #88 (a machine POST's answer names the frames it refused) and #89
+  (`older()` dedupe within a page; an unnamed block over 64 KiB kept whole on
+  reconnect).
+  Evidence: that spec's Surprises & Discoveries (2026-10-21); the owner's
+  `daemon.log`; MAWS #52 issuecomment-6302972057.
 
 ## Decision Log
 
