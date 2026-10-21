@@ -23,7 +23,7 @@ import { isOutputTail, isTaskId, OUTPUT_TAIL_MAX, type AuditEntry, type PendingR
 import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, questionEffect, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
-import type { DownFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
+import type { DownFrame, RefusedFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
@@ -206,50 +206,57 @@ export class Project extends DurableObject<Env> {
    * not written (it threw, or answered 'offline': the stream went, or a write outlasted its bound), stops the call as
    * `failed`, uncounted, with the frames before it counted and none after it applied, so the POST's `503
    * delivery-failed` still says what was applied. The failure is logged (`frame-failed`, `reply-unwritten`).
+   *
+   * `refused` names the counted frames this project refused whole, by their place in `frames` (MAWS #88): the POST's
+   * answer names them, beside the refusal each still sends down the stream.
    */
-  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean; failed: boolean }> {
+  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean; failed: boolean; refused: RefusedFrame[] }> {
     this.remember(ctx.org, ctx.project);
+    const refused: RefusedFrame[] = [];
     let applied = 0;
     for (const frame of frames) {
-      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || this.isRevoked(ctx.machine, ctx.generation)) return { applied, stale: true, failed: false };
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || this.isRevoked(ctx.machine, ctx.generation)) return { applied, stale: true, failed: false, refused };
       try {
-        const owed = await this.fromMachineFrame(ctx, frame);
-        if (owed === 'stale') return { applied, stale: true, failed: false };
+        const taken = await this.fromMachineFrame(ctx, frame);
+        if (taken === 'stale') return { applied, stale: true, failed: false, refused };
         // None for most of a stream's frames. A reply that resolves 'offline' (the stream went, or a write outlasted its
         // bound) was not written, as surely as one that threw: the frame does not count, and nothing after it applies.
-        if ((await Promise.all(owed)).some((sent) => sent !== 'written')) {
+        if ((await Promise.all(taken.owed)).some((sent) => sent !== 'written')) {
           logged({ event: 'reply-unwritten', ...where(ctx, frame, applied) });
-          return { applied, stale: false, failed: true };
+          return { applied, stale: false, failed: true, refused };
         }
+        if (taken.refused) refused.push({ index: applied, reason: taken.refused.reason });
       } catch (error) {
         logged({ event: 'frame-failed', ...where(ctx, frame, applied), error: described(error) });
-        return { applied, stale: false, failed: true };
+        return { applied, stale: false, failed: true, refused };
       }
       applied++;
     }
-    return { applied, stale: false, failed: false };
+    return { applied, stale: false, failed: false, refused };
   }
 
   /** One frame from a machine: the writes it queued that its POST owes the machine before it counts as applied (a
-   * hello's `have`, an upload's `resend` and `refused`, a log frame's refusal), or 'stale' when a newer stream of the
-   * machine outlived it while it waited, before it changed anything. A session-plane frame owes nothing: what it sends
-   * the machine goes on the control lane, and its POST is held for this one call whatever the replies lane holds. */
-  private async fromMachineFrame(ctx: MachineContext, frame: UpFrame): Promise<'stale' | Promise<'written' | 'offline'>[]> {
+   * hello's `have`, an upload's `resend` and `refused`, a log frame's refusal), and the refusal when the frame was
+   * refused whole; or 'stale' when a newer stream of the machine outlived it while it waited, before it changed
+   * anything. A session-plane frame owes nothing: what it sends the machine goes on the control lane, and its POST is
+   * held for this one call whatever the replies lane holds. An upload some of whose events were refused was not refused
+   * whole: those refusals go down the stream alone. */
+  private async fromMachineFrame(ctx: MachineContext, frame: UpFrame): Promise<'stale' | Taken> {
     // A lease whose time ran out lapses before anything the machine sent is served, whether or not its alarm ran yet.
     this.sweepLeases();
     if (frame.t === 'hello') return this.hello(ctx, frame);
     if (!this.isOpen(ctx)) {
       const refusal: Refusal = { reason: 'not-open', message: 'send hello for this project on this stream first' };
-      if (frame.t === 'events') return [this.refusal(ctx, refusal)];
-      this.refuseMachine(ctx, refusal);
-      return [];
+      if (frame.t === 'events') return { owed: [this.refusal(ctx, refusal)], refused: refusal };
+      return { owed: [], refused: this.refuseMachine(ctx, refusal) };
     }
     if (frame.t === 'events') return this.upload(ctx, frame.events);
-    if (frame.t === 'rejected') this.rejected(ctx, frame);
-    else if (frame.t === 'rpc-result') this.rpcResult(ctx, frame);
-    else if (frame.t === 'pending') this.pendingSet(ctx, frame.raised);
-    else if (frame.t === 'session') this.session(ctx, frame.message);
-    return [];
+    let refused: Refusal | void = undefined;
+    if (frame.t === 'rejected') refused = this.rejected(ctx, frame);
+    else if (frame.t === 'rpc-result') refused = this.rpcResult(ctx, frame);
+    else if (frame.t === 'pending') refused = this.pendingSet(ctx, frame.raised);
+    else if (frame.t === 'session') refused = this.session(ctx, frame.message);
+    return refused ? { owed: [], refused } : { owed: [] };
   }
 
   /** The daemon answered a heartbeat on the stream this lease belongs to: the machine stays online, or is online again
@@ -321,7 +328,7 @@ export class Project extends DurableObject<Env> {
   // the machine lacks. The machine joins the fan-out in the same step the backlog is read, so an event stored after it
   // goes out live behind the backlog, and none falls between. The `hello` also starts the machine's lease here, a
   // follower's (`follow`) as a holder's, and says which the machine is.
-  private async hello(ctx: MachineContext, frame: Extract<UpFrame, { t: 'hello' }>): Promise<Promise<'written' | 'offline'>[]> {
+  private async hello(ctx: MachineContext, frame: Extract<UpFrame, { t: 'hello' }>): Promise<Taken> {
     const have = frame.have as unknown;
     const valid =
       typeof frame.name === 'string' &&
@@ -332,7 +339,10 @@ export class Project extends DurableObject<Env> {
       !Array.isArray(have) &&
       Object.values(have).every((seq) => Number.isSafeInteger(seq) && (seq as number) >= 0) &&
       (frame.follow === undefined || typeof frame.follow === 'boolean');
-    if (!valid) return [this.refusal(ctx, { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}, follow?: boolean}' })];
+    if (!valid) {
+      const refusal: Refusal = { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}, follow?: boolean}' };
+      return { owed: [this.refusal(ctx, refusal)], refused: refusal };
+    }
     const record = await this.register(ctx.project, frame.name, ctx.machine);
     // A newer stream of this machine may have opened the project while the registry answered: it keeps its place.
     this.ctx.storage.sql.exec(
@@ -340,7 +350,7 @@ export class Project extends DurableObject<Env> {
       ctx.machine,
       ctx.generation,
     );
-    if (!this.isOpen(ctx)) return [];
+    if (!this.isOpen(ctx)) return { owed: [] };
     this.startLease(ctx, frame.follow === true);
     const owed = this.toMachine(ctx.machine, ctx.generation, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine }, 'replies');
     // The backlog is the log as of now, read a page at a time as the stream takes it: a page is read once the page
@@ -349,14 +359,17 @@ export class Project extends DurableObject<Env> {
     // stream through the send's own failure.
     const pages = this.log.beyond(have as Vector, this.log.head());
     void this.toMachineAll(ctx.machine, ctx.generation, mapped(pages, (events): DownFrame => ({ t: 'events', project: ctx.project, events })), 'replies');
-    return [owed];
+    return { owed: [owed] };
   }
 
   // A machine's upload: each event stored once at the next seq of its writer, a copy of a stored one passed over, a
   // gap answered by `resend`, and a writer the machine may not write, or a different payload at a stored position,
   // refused, reported, and recorded. A writer stops at its first refusal or gap in a batch.
-  private async upload(ctx: MachineContext, events: unknown): Promise<'stale' | Promise<'written' | 'offline'>[]> {
-    if (!Array.isArray(events)) return [this.refusal(ctx, { reason: 'bad-shape', message: 'events is a list' })];
+  private async upload(ctx: MachineContext, events: unknown): Promise<'stale' | Taken> {
+    if (!Array.isArray(events)) {
+      const refusal: Refusal = { reason: 'bad-shape', message: 'events is a list' };
+      return { owed: [this.refusal(ctx, refusal)], refused: refusal };
+    }
     const owed: Promise<'written' | 'offline'>[] = [];
     const refuse = (refusal: Refusal) => void owed.push(this.refusal(ctx, refusal));
     let archive: string | null | undefined;
@@ -413,11 +426,11 @@ export class Project extends DurableObject<Env> {
       // The count holds the question this push announces while it is open: it is stored above (`waitingSessions`).
       this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
     }
-    return owed;
+    return { owed };
   }
 
   /** A daemon's report of an event it refused: recorded in the audit record and shown to every browser. */
-  private rejected(ctx: MachineContext, frame: Extract<UpFrame, { t: 'rejected' }>): void {
+  private rejected(ctx: MachineContext, frame: Extract<UpFrame, { t: 'rejected' }>): Refusal | void {
     const event = frame.event as unknown;
     const valid =
       REJECTION_REASONS.has(frame.reason) &&
@@ -438,7 +451,7 @@ export class Project extends DurableObject<Env> {
   // ---- The session plane, from machines ------------------------------------------------------------------------
 
   /** A DX4 message: the kinds the hub interprets are kept, the others relayed, a subscription's to its browser alone. */
-  private session(ctx: MachineContext, message: unknown): void {
+  private session(ctx: MachineContext, message: unknown): Refusal | void {
     const m = message as Record<string, unknown>;
     if (!isObject(m) || m.project !== ctx.project || m.machine !== ctx.machine) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'a session message names this project and this machine' });
     const kind = m.kind as SessionKind;
@@ -458,7 +471,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** A session's presence: the latest kept per session, for browsers that connect later, and sent to every browser. */
-  private presence(ctx: MachineContext, message: SessionMessage<'presence'>): void {
+  private presence(ctx: MachineContext, message: SessionMessage<'presence'>): Refusal | void {
     const body = message.body as unknown as Record<string, unknown> | null;
     if (!isObject(body) || typeof body.bridge !== 'boolean' || !(body.record === null || isObject(body.record))) {
       return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'presence is {record: object | null, bridge}' });
@@ -472,7 +485,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** The machine's own presence (DX4 `machine`): its policy and checkouts; `online` is the hub's, from the lease. */
-  private machinePresence(ctx: MachineContext, m: Record<string, unknown>): void {
+  private machinePresence(ctx: MachineContext, m: Record<string, unknown>): Refusal | void {
     const body = m.body as Record<string, unknown>;
     const policy = isObject(body) ? (body.policy as Record<string, unknown>) : undefined;
     const valid =
@@ -490,7 +503,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** A request raised: pending until settled, to every browser, and pushed to the members who are not looking. */
-  private raised(ctx: MachineContext, message: SessionMessage<'raised'>): void {
+  private raised(ctx: MachineContext, message: SessionMessage<'raised'>): Refusal | void {
     const problem = raisedShapeError(message.body);
     if (problem || message.body.session !== message.session) return this.refuseMachine(ctx, { reason: 'bad-shape', message: problem ?? 'raised names the session its envelope names' });
     const fresh = this.plane.raise(ctx.machine, message.body, deadlineOf(message.body));
@@ -501,7 +514,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** The machine's complete pending set: a request it no longer holds is dropped, a new one raised. */
-  private pendingSet(ctx: MachineContext, raised: unknown): void {
+  private pendingSet(ctx: MachineContext, raised: unknown): Refusal | void {
     if (!Array.isArray(raised)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'pending is {project, raised: [raised]}' });
     for (const r of raised) {
       const problem = raisedShapeError(r);
@@ -516,7 +529,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** A settlement: the request leaves the pending set, and the audit record keeps who won, from the bridge's word. */
-  private settled(ctx: MachineContext, message: SessionMessage<'settled'>): void {
+  private settled(ctx: MachineContext, message: SessionMessage<'settled'>): Refusal | void {
     const s = message.body as unknown as Record<string, unknown>;
     const valid =
       isObject(s) &&
@@ -543,7 +556,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** A delivery outcome: the latest per event and recipient kept, and sent to every browser. */
-  private delivery(ctx: MachineContext, message: SessionMessage<'delivery'>): void {
+  private delivery(ctx: MachineContext, message: SessionMessage<'delivery'>): Refusal | void {
     const d = message.body as unknown as Record<string, unknown>;
     const event = isObject(d) ? d.event : undefined;
     const valid =
@@ -562,7 +575,7 @@ export class Project extends DurableObject<Env> {
 
   /** A subscription's message, to the one browser that holds the sub; a message for a sub nobody holds unsubscribes it
    * at the machine. Relayed as the machine numbered it. */
-  private relay(ctx: MachineContext, m: Record<string, unknown>): void {
+  private relay(ctx: MachineContext, m: Record<string, unknown>): Refusal | void {
     const sub = m.sub;
     const n = m.n;
     if (typeof sub !== 'string' || !Number.isSafeInteger(n) || (n as number) < 0 || !isObject(m.body)) {
@@ -582,7 +595,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** An RPC's result from the daemon's ledger: kept, shown to its member, and acknowledged so it is not sent again. */
-  private rpcResult(ctx: MachineContext, frame: Extract<UpFrame, { t: 'rpc-result' }>): void {
+  private rpcResult(ctx: MachineContext, frame: Extract<UpFrame, { t: 'rpc-result' }>): Refusal | void {
     const outcome = frame.outcome as unknown as Record<string, unknown>;
     const error = isObject(outcome) ? (outcome.error as Record<string, unknown>) : undefined;
     const valid =
@@ -1055,9 +1068,11 @@ export class Project extends DurableObject<Env> {
     }
   }
 
-  /** A refusal of a session-plane frame: on the control lane, owed nothing by the POST that carried the frame. */
-  private refuseMachine(ctx: MachineContext, refusal: Refusal): void {
+  /** A refusal of a session-plane frame: on the control lane, owed nothing by the POST that carried the frame, and
+   * returned for that POST's answer to name the frame (MAWS #88). */
+  private refuseMachine(ctx: MachineContext, refusal: Refusal): Refusal {
     void this.refusal(ctx, refusal, 'control');
+    return refusal;
   }
 
   /** A refusal sent to the machine and recorded; by default one a log frame's POST owes the machine (the replies lane). */
@@ -1229,6 +1244,10 @@ export class Project extends DurableObject<Env> {
 
 /** A lane of a machine stream's queue (`toMachine`). */
 type Lane = 'replies' | 'control';
+
+/** What one frame from a machine came to (`fromMachineFrame`): the replies its POST owes the machine, and the refusal
+ * when the frame was refused whole. */
+type Taken = { owed: Promise<'written' | 'offline'>[]; refused?: Refusal };
 
 const queueKey = (machine: string, generation: number, lane: Lane) => `${machine}#${generation}#${lane}`;
 

@@ -43,11 +43,25 @@ export type Refusal = {
     | 'bad-shape'
     | 'too-large'
     | 'stale-generation'
-    | 'not-open'; // events (or a rejection) for a project this stream has not opened with `hello`
+    | 'not-open'; // any frame but `hello` for a project this stream has not opened with `hello`
   writer?: string;
   seq?: number;
   message: string;
 };
+
+/**
+ * A frame of a POST the hub refused whole, named in the POST's answer (MAWS #88). `index` is the frame's place among
+ * the POST's frames from 0, in the numbering `frames` counts: each non-blank line is one frame, each `part` one, and a
+ * set joined in this POST is named by its last part. The same refusal still goes down the stream.
+ */
+export type RefusedFrame = { index: number; reason: Refusal['reason'] };
+
+/**
+ * The answer to a POST the hub took up. `frames` counts the frames it applied, refused ones included; `refused` names
+ * those of them it refused whole, in POST order, and is empty when it refused none (an answer without it is from a hub
+ * older than MAWS #88). A `409 stale-generation` or `503 delivery-failed` that counts `frames` carries `refused` too.
+ */
+export type PostAnswer = { ok: true; frames: number; refused: RefusedFrame[] };
 
 /** Hub → machine, one per SSE event (`event: <t>`, `data: <the frame's JSON>`). */
 export type DownFrame =
