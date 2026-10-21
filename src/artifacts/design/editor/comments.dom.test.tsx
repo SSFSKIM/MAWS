@@ -387,11 +387,46 @@ describe('the pin popover over the world', () => {
     const title = container.querySelector<HTMLElement>('[data-board-title="b2"]')!;
     fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
     fireEvent.pointerUp(title, { button: 0, pointerId: 1 });
-    fireEvent.click(title);
+    fireEvent.click(title, { detail: 1 });
     expect(popover()).toBeNull();
     expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual([null, 'b1']);
     await settle(); // the gesture over: its click is no longer swallowed
-    fireEvent.click(title);
+    fireEvent.click(title, { detail: 1 });
+    expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual(['b2', 'b2']);
+  });
+
+  // the review's P2: the swallower takes the click a pointer made, no other, and does not outlive a gesture whose end never comes
+  it('the swallower takes a click a pointer made only: a keyboard click on the focused pin, before the pointer’s end, still acts', async () => {
+    const { doc, session, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    act(() => session.show('b1'));
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    const pin = () => container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!;
+    const title = container.querySelector<HTMLElement>('[data-board-title="b2"]')!;
+    fireEvent.click(pin(), { detail: 1 });
+    // (a) the consumed press closes the popover and puts the keyboard on the pin; Enter on it, before the pointer's end, still acts
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
+    expect(popover()).toBeNull();
+    expect(document.activeElement).toBe(pin());
+    fireEvent.click(pin(), { detail: 0 });
+    expect(popover()).not.toBeNull();
+  });
+
+  it('a pointer whose end never arrives: the next press anywhere removes the swallower, so a later real click is the title’s', async () => {
+    const { doc, view, session, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    act(() => session.show('b1'));
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    const title = container.querySelector<HTMLElement>('[data-board-title="b2"]')!;
+    fireEvent.click(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!, { detail: 1 });
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 }); // consumed; no pointerup, no pointercancel, no click
+    expect(popover()).toBeNull();
+    fireEvent.pointerDown(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!, { button: 0, pointerId: 2 }); // the next press, anywhere (the title's own selects on a press): the swallower goes with it
+    fireEvent.click(title, { detail: 1 });
     expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual(['b2', 'b2']);
   });
 

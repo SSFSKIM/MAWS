@@ -164,25 +164,38 @@ function Open({ api, host, shownSlide, layoutKey, target }: Props & { target: Pi
 }
 
 /**
- * The click a consumed press's gesture ends in, swallowed at the frame: a cancelled pointerdown does not cancel it. Kept
- * until just after the gesture's pointerup (or pointercancel), so a click that never comes (a drag off the frame) leaves
- * the next one alone; outlives the popover, which the press closes.
+ * The click a consumed press's gesture ends in, swallowed at the frame: a cancelled pointerdown does not cancel it. Only a
+ * click a pointer made is taken (a keyboard activation, `detail` 0, acts), and the swallower goes at the earliest of that
+ * click, just after the gesture's pointerup (or pointercancel), or the next pointerdown anywhere (a gesture whose end never
+ * came); it leaves nothing attached, and outlives the popover, which the press closes. The consumed pointerdown itself
+ * stopped at the frame, past the window's capture, so the window's listener added here never sees it.
  */
 function swallowClick(host: HTMLElement, pointerId: number): void {
   const win = host.ownerDocument.defaultView ?? window;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const remove = () => {
+    clearTimeout(timer);
+    host.removeEventListener('click', onClick, { capture: true });
+    win.removeEventListener('pointerup', end, { capture: true });
+    win.removeEventListener('pointercancel', end, { capture: true });
+    win.removeEventListener('pointerdown', remove, { capture: true });
+  };
   const onClick = (e: MouseEvent) => {
+    if (e.detail === 0) return;
     e.stopPropagation();
     e.preventDefault();
+    remove();
   };
   const end = (e: PointerEvent) => {
     if (e.pointerId !== pointerId) return;
     win.removeEventListener('pointerup', end, { capture: true });
     win.removeEventListener('pointercancel', end, { capture: true });
-    setTimeout(() => host.removeEventListener('click', onClick, { capture: true }), 0);
+    timer = setTimeout(remove, 0);
   };
   host.addEventListener('click', onClick, { capture: true });
   win.addEventListener('pointerup', end, { capture: true });
   win.addEventListener('pointercancel', end, { capture: true });
+  win.addEventListener('pointerdown', remove, { capture: true });
 }
 
 /** P4-B2: the deck's slide shown, as the frame reads it. */
