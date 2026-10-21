@@ -49,8 +49,6 @@ export interface PresentationsSeam {
   dragProbe: { start(artifactId: string): void; remotes(): number; stop(): DragStats };
   /** Fix wave 1: another replica selecting elements (its awareness), until cleared. */
   presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
-  /** M5: an agent republishing one slide every `intervalMs` (the second slide on), until stopped; answers how many. */
-  agent: { start(artifactId: string, intervalMs: number): Promise<void>; stop(): Promise<number> };
 }
 
 declare global {
@@ -121,7 +119,6 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
         }),
     dragProbe: dragProbe(win),
     presence: remotePresence(host),
-    agent: agentRepublishing(host),
   };
 }
 
@@ -195,39 +192,6 @@ function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
       running = null;
       end();
       return summarizeDrag(record);
-    },
-  };
-}
-
-// An agent's one-slide publishes, on a replica of its own: the slide's file read, a line of its first text element
-// changed, published through the kind's three-way publish (A's tools do the same in the host); the editor's replica
-// takes each as a remote update through the host, as it takes an agent's.
-function agentRepublishing(host: () => ArtifactHost): PresentationsSeam['agent'] {
-  let running: { handle: DocumentHandle; timer: ReturnType<typeof setInterval>; count: number } | null = null;
-  return {
-    async start(artifactId, intervalMs) {
-      const handle = await host().open(artifactId);
-      const state = { handle, count: 0, timer: undefined as unknown as ReturnType<typeof setInterval> };
-      state.timer = setInterval(() => {
-        const order = slideOrder(handle.doc);
-        if (order.length < 2) return;
-        const id = order[1 + (state.count % (order.length - 1))]!;
-        const path = `project/slides/${id}.html`;
-        const before = slideFile(handle.doc, id);
-        const after = before.replace(/(<(?:h1|h2|p)\b[^>]*>)([^<]*)/, (_m, open: string, text: string) => `${open}${text.replace(/ \(rev \d+\)$/, '')} (rev ${state.count + 1})`);
-        publishDeck(handle.doc, { [path]: before }, { [path]: after }, false);
-        state.count++;
-      }, intervalMs);
-      running = state;
-    },
-    async stop() {
-      if (!running) return 0;
-      const { handle, timer, count } = running;
-      running = null;
-      clearInterval(timer);
-      await acknowledged(handle);
-      handle.close();
-      return count;
     },
   };
 }
