@@ -76,17 +76,22 @@ export async function onSessionReplica<T>(store: ArtifactStore, artifactId: stri
 
 const warming = new WeakSet<Doc>();
 
-/** Warms every block of `doc`'s index a few milliseconds at a time, one slice per event-loop turn, until all are. */
+/**
+ * Warms every block of `doc`'s index a few milliseconds at a time, one slice per event-loop turn, until all are, or
+ * until the replica is dropped (the document unloaded or evicted, or its session closed): its doc is destroyed, which
+ * the index does not notice, so each slice checks first.
+ */
 export function warmInSlices(doc: Doc, sliceMs = WARM_SLICE_MS): void {
   if (warming.has(doc)) return;
   warming.add(doc);
   const step = () => {
+    if (doc.isDestroyed) return void warming.delete(doc);
     const until = performance.now() + sliceMs;
     let done = true;
     try {
       done = timed('warm', () => DocIndex.of(doc).warm(() => performance.now() >= until)); // P4-R6: timed
     } catch {
-      // the replica was dropped (the document unloaded or evicted, or its session closed): nothing left to warm
+      // a warm that throws ends: the writer builds what its batch needs as it goes
     }
     if (done) warming.delete(doc);
     else setImmediate(step);
