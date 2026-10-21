@@ -20,6 +20,7 @@ import type { FaceAliases } from '../../slides/canvas/faces';
 import type { Guide, Handle, Pt } from '../../slides/geometry';
 import { HANDLES } from '../../slides/geometry';
 import type { DeckSession } from '../../slides/editor/session';
+import { describeElement, stageFocus } from '../../slides/editor/a11y';
 import { SlideView } from '../../slides/editor/SlideView';
 import { TextBox } from '../../slides/editor/TextBox';
 import { CLIPBOARD_TYPE, type ImportAsset } from '../../slides/editor/transform/clipboard';
@@ -331,15 +332,16 @@ export function World(props: WorldProps) {
     win.addEventListener('pointercancel', onUp, { capture: true });
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
+      // P4-B2 (D13): a frame drag still running when the world goes ends here, so the session's drag ends with it (D17:
+      // its hold released and its drop re-asserted, as a release does)
+      const d = drag.current;
+      drag.current = null;
       el.removeEventListener('scroll', onScroll);
       el.removeEventListener('pointerdown', onDown, { capture: true });
       win.removeEventListener('pointermove', onMove, { capture: true });
       win.removeEventListener('pointerup', onUp, { capture: true });
       win.removeEventListener('pointercancel', onUp, { capture: true });
       el.removeEventListener('wheel', onWheel);
-      // P4-B2 (D17): a frame drag the world unmounts in ends here, its hold, its step and `dragging` with it
-      const d = drag.current;
-      drag.current = null;
       if (d && d.kind !== 'pan' && d.moving) session.endDrag(reassertOf(d));
     };
   }, [surface, session, view]);
@@ -353,7 +355,7 @@ export function World(props: WorldProps) {
     const doc = el.ownerDocument;
     const onPaste = (e: ClipboardEvent) => {
       const data = e.clipboardData;
-      if (doc.activeElement !== el || !data) return;
+      if (!stageFocus(el, doc.activeElement) || !data) return; // P4-B2 (A3): the world or an element's node holding the focus
       if (data.getData(CLIPBOARD_TYPE) || /<section[\s>]/i.test(data.getData('text/html'))) return; // structured: C's
       const text = data.getData('text/plain');
       const { active: board, readOnly: ro } = latest.current;
@@ -378,7 +380,7 @@ export function World(props: WorldProps) {
     const el = surface.current;
     if (!el) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.target !== el || e.defaultPrevented) return;
+      if (!stageFocus(el, e.target) || e.defaultPrevented) return; // P4-B2 (A3): the world or an element's node holding the focus
       const { boards: all, readOnly: ro, fitAll, fitSelection, removeBoard, duplicateBoard } = latest.current;
       const mod = e.metaKey || e.ctrlKey;
       const done = () => {
@@ -452,6 +454,7 @@ export function World(props: WorldProps) {
       tabIndex={0}
       data-design-world
       data-stage-surface
+      aria-keyshortcuts="F6" // P4-B2 (D14): its keyboard exit
       data-panning={panning || undefined}
       data-space={spaceHeld || undefined}
     >
@@ -659,7 +662,7 @@ const Board = memo(function Board(props: {
       data-missing={board.missing || undefined}
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
     >
-      <SlideView doc={doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" />
+      <SlideView doc={doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" describe={describeElement} /* P4-B2 (D15, A1) */ />
       {board.missing && <div className="design-board-missing" />}
     </div>
   );

@@ -465,8 +465,8 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     return { session, stage, notes: screen.getByRole('textbox', { name: 'Speaker notes' }), user: userEvent.setup() };
   }
 
-  // P4-B2 (D1): a text element selected is ARMED, its box holding the focus; any other, the stage
-  const focusOf = (stage: HTMLElement, id: string) => (id === 'title' || id === 'body' ? stage.querySelector(`[data-eid="${id}"] .deck-textbox`) : stage);
+  // P4-B2 (D1, D15 A3): a text element selected is ARMED, its box holding the focus; any other, its own node
+  const focusOf = (stage: HTMLElement, id: string) => (id === 'title' || id === 'body' ? stage.querySelector(`[data-eid="${id}"] .deck-textbox`) : stage.querySelector(`[data-eid="${id}"]`));
 
   it('Tab walks the slide’s elements, then leaves for the next control; Shift+Tab walks back and leaves before the first', async () => {
     const { session, stage, notes, user } = mount(deck());
@@ -478,7 +478,7 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     expect(document.activeElement).toBe(notes);
     expect(session.snapshot().selection).toEqual(['b']); // leaving changes nothing on the slide
     await user.tab({ shift: true });
-    expect(document.activeElement).toBe(stage);
+    expect(document.activeElement).toBe(focusOf(stage, 'b')); // P4-B2 (A3): back on the stage, the focus is the selection's
     for (const id of ['a', 'body', 'title']) {
       await user.tab({ shift: true });
       expect([session.snapshot().selection, document.activeElement]).toEqual([[id], focusOf(stage, id)]);
@@ -873,6 +873,17 @@ describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () 
     key({ key: 'z' });
     expect(editing(session)).toBeNull();
     expect(plain(doc, 'title')).toBe('Hello world');
+  });
+
+  it('D13: the overlay going mid-drag ends the session’s drag, which the inspector’s settled version reads', () => {
+    const { session, node } = mount();
+    click(node('a'));
+    under = node('a');
+    pointer('pointerdown', node('a'), 10, 10);
+    pointer('pointermove', node('a'), 20, 10, { metaKey: true });
+    expect(session.snapshot().dragging).toBe(true);
+    cleanup();
+    expect(session.snapshot().dragging).toBe(false);
   });
 
   it('T22 on a design board: a key on the world reaches the selected heading’s armed box; a double-click on an inactive board’s heading edits it in one gesture', () => {

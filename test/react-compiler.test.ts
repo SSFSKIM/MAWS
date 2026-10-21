@@ -22,6 +22,12 @@ const FILES: Record<string, string[]> = {
   'src/artifacts/slides/editor/comments/Pins.tsx': ['CommentPins', 'Pins', 'PinButton'], // P4-B2 M5
   'src/artifacts/slides/editor/TextBox.tsx': ['TextBox', 'MarkBar'], // P4-B2 M1
   'src/artifacts/slides/editor/transform/Overlay.tsx': ['Overlay'], // P4-B2 M1
+  'src/artifacts/slides/editor/Inspector.tsx': ['Inspector'], // P4-B2 M4 (D13)
+  'src/artifacts/slides/editor/inspector/fields.tsx': ['NumberField', 'ColourField', 'SelectField', 'TextField'], // P4-B2 M4 (D13); SelectField compiled since (tracker row 212)
+  'src/artifacts/slides/editor/DeckEditor.tsx': ['DeckEditor'], // P4-B2 M4 (D14)
+  'src/artifacts/design/editor/DesignWorkbench.tsx': ['DesignWorkbench'], // P4-B2 M4 (D14)
+  'src/artifacts/slides/editor/Stage.tsx': ['Stage'], // P4-B2 M4 (D14, D15)
+  'src/artifacts/design/editor/World.tsx': ['World', 'Board'], // P4-B2 M4 (D13, D15)
 };
 
 /** The compiler's events for one file, compiled as plugin-react's transform does (its parser plugins for a .tsx). */

@@ -4,9 +4,10 @@
 // the open count, which reads the threads alone and follows them at once.
 //
 // P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): the open threads as the pins and the popover
-// read them, from the threads map alone and at once (B1's Decision Log 11 for the document's margin), so a reply, a
-// resolve or an agent's new thread reaches a pin in the task it was written in; whether an element is drawn is the
-// canvas's to say. And the open count per slide, orphans counted, for the filmstrip's badges (V10).
+// read them, a write to the threads at once (B1's Decision Log 11 for the document's margin), so a reply, a resolve or
+// an agent's new thread reaches a pin in the task it was written in, and their derived quotes as the list reads them;
+// whether an element is drawn is the canvas's to say. And the open count per slide, orphans counted, for the
+// filmstrip's badges (V10).
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { onUpdate, type Doc } from '../../../yjs';
 import { listThreads, observeThreads, openThreadCount, threadStates, type DeckThread, type DeckThreadState } from '../../threads';
@@ -42,7 +43,12 @@ export function useOpenThreadCount(doc: Doc): number {
   );
 }
 
-/** P4-B2: every open thread, oldest first, orphans included; the array and each thread's object are kept while unchanged. */
+/**
+ * P4-B2: every open thread, oldest first, orphans included; the array and each thread's object are kept while unchanged.
+ * A write to the threads is read at once; a quote, derived from its element's text or its board's title, changes with no
+ * write to the threads (a republish, a rename), so the deck's other updates read it again once the deck has been quiet
+ * a moment, as the list does.
+ */
 export function useOpenDeckThreads(doc: Doc): readonly DeckThread[] {
   const store = useMemo(() => {
     let dirty = true;
@@ -50,10 +56,24 @@ export function useOpenDeckThreads(doc: Doc): readonly DeckThread[] {
     return {
       subscribe: (listener: () => void) => {
         dirty = true; // a change while nothing listened is read again
-        return observeThreads(doc, () => {
+        const changed = () => {
           dirty = true;
           listener();
+        };
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const offThreads = observeThreads(doc, changed);
+        const offDoc = onUpdate(doc, () => {
+          if (timer !== null) clearTimeout(timer);
+          timer = setTimeout(() => {
+            timer = null;
+            changed();
+          }, LIST_QUIET_MS);
         });
+        return () => {
+          offThreads();
+          offDoc();
+          if (timer !== null) clearTimeout(timer);
+        };
       },
       snapshot: (): readonly DeckThread[] => {
         if (!dirty) return kept;

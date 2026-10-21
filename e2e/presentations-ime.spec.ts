@@ -74,7 +74,7 @@ interface Lab {
   state(): Promise<{ selection: string[]; editingText: string | null; keyboard: 'stage' | 'away' }>;
   /** the remote frames the tab's replica holds now (row 256) */
   held(): Promise<number>;
-  /** the focused element: a text box's element id, `stage`, or something else */
+  /** the focused element: a text box's element id, an element's own node on the stage (D15's A3), `stage`, or else */
   focus(): Promise<string>;
 }
 
@@ -130,6 +130,7 @@ async function lab(): Promise<Lab> {
       page.evaluate(() => {
         const a = document.activeElement as HTMLElement | null;
         if (a?.classList.contains('deck-textbox')) return `textbox:${a.closest('[data-eid]')?.getAttribute('data-eid')}`;
+        if (a?.hasAttribute('data-eid') && a.closest('[data-stage-surface]')) return `node:${a.getAttribute('data-eid')}`;
         if (a?.hasAttribute('data-stage-surface')) return 'stage';
         return a?.tagName.toLowerCase() ?? 'none';
       }),
@@ -191,12 +192,12 @@ test('ARMED: a selected text element’s box is focused and editable with its ca
   await expect.poll(() => l.state()).toEqual(expect.objectContaining({ selection: ['a', 'b'], editingText: null }));
   await expect(l.tab.locator('.deck-markbar')).toHaveCount(0);
   expect(await l.focus()).toBe('stage');
-  // a shape, a group, two elements: the stage
+  // a shape or a group: its own node (D15's A3, focus following the selection); two elements: the stage
   await l.click('s');
-  expect(await l.focus()).toBe('stage');
+  await expect.poll(() => l.focus()).toBe('node:s');
   await l.click('gh'); // the group, picked at the slide's level
   await expect(l.tab.locator('[data-overlay] [data-selected="g"]')).toHaveCount(1);
-  expect(await l.focus()).toBe('stage');
+  await expect.poll(() => l.focus()).toBe('node:g');
   await l.click('a');
   await l.page.keyboard.down('Shift');
   await l.click('b');

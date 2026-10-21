@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import type { Actor } from '@shared/artifacts/actor';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '../../../document/editor/comments/surface';
 import { newDoc, transact, type Doc } from '../../../yjs';
-import { deleteElementTree, importSlide, setStyle, writeDeckKeys } from '../../model';
+import { deleteElementTree, importSlide, setStyle, setText, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { addThread, getThread, listThreads, reply, resolve } from '../../threads';
 import { DeckEditor } from '../DeckEditor';
@@ -151,6 +151,17 @@ describe('the pins (V1, V13)', () => {
       ['false', 'dialog'],
     ]);
     expect(pin('lead')).toBeNull(); // slide 2's
+  });
+
+  // fix wave: a quote is derived from its element, so a republish of the element's text writes nothing to the threads
+  it('a pin’s name and its open popover’s follow its element’s text, which changes with no write to the threads', async () => {
+    const { doc, pin } = await mount();
+    expect(pin('title')!.getAttribute('aria-label')).toBe('Comment on “Plan”');
+    fireEvent.click(pin('title')!);
+    act(() => setText(doc, 's1', 'title', [{ type: 'p', inline: [{ text: 'Plan B', marks: {} }] }]));
+    await settle();
+    expect(pin('title')!.getAttribute('aria-label')).toBe('Comment on “Plan B”');
+    expect(dialog('Plan B')).toBeTruthy();
   });
 });
 
