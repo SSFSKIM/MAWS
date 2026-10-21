@@ -44,7 +44,7 @@ and see a third enrollment refused while the two stay, run `sminos hub leave` on
       of `hub check` is the boot's to retry.
 - [x] (2026-10-21) M1 — reviewed clean (task-reviewer and reviewer-high; commits `ccbb539b0`, fix `0602580be`). The hub: the key, its code, redemption through it, `uses`, revocation of a key, a machine's own record
       and self-revoke bound to its enrollment, the offline sweep, the stand-in's 401 (MAWS).
-- [ ] M2 — The web: provisioning keys on the Machines page (MAWS).
+- [x] (2026-10-21) M2 — reviewed clean (task-reviewer; commits `be133c3a3`, fix `d6195c5ce`). The web: provisioning keys on the Machines page (MAWS).
 - [ ] M3 — sminos: both codes decoded, `hub enroll` through a key, `hub check`, `hub leave`, `hub show`'s exit code,
       the parity vectors regenerated (doperpowers).
 - [ ] M4 — Acceptance across both repositories against the local hub; the record completed.
@@ -987,7 +987,11 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
 - No suite starts from a Registry stored before M1, so the `enrollments.key` column's `ADDED_COLUMNS` path is not run
   on workerd by the suite (the executor checked the statement against the system `sqlite3`). Worth a deploy-time look.
 - The full desk-hub suite under load once failed `session-plane.test.ts:746` (MAWS #88's presence assertion), a file
-  M1 does not touch; it passed alone twice.
+  M1 does not touch; it passed alone twice. Fixed on this branch at the orchestrator's request (`c2c4344cc`, a wait for the presence
+  frame before asserting it, a fix to #91's test).
+- `apps/desk-web/e2e-hub/session-plane.spec.ts` (outside the gate) failed five cases on M2's runs — the grid's
+  offline-latency bound (3845 ms against 2500 ms) and four session-view cases — none opening the Machines dialog;
+  whether they predate the branch is settled in M4.
 
 ## Decision Log
 
@@ -1104,6 +1108,19 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   `sweepOffline` (one failing candidate does not hold back the others); one `reserve()` helper inserts the pending
   machine and clears its orphan for both paths, each inside its own transaction.
   Date/Author: 2026-10-21, M1's executor on review findings; folded by the controller.
+- Decision: M2's executor's choices within the spec (commits `be133c3a3`, `d6195c5ce`), kept by the controller: the
+  dialog splits into `MachinesDialog.tsx`, `CodeSteps.tsx` (the confirm and code steps both kinds share) and
+  `ProvisioningKeys.tsx`; `ConfirmStep` takes `{question, meaning, issue, explain}` and keeps its test ids; the form's
+  defaults are 90 days, offline revoke never, max uses empty for no cap (else 1–10000), label and prefix trimmed,
+  `ttl_s` always sent; revoked keys list last, and an expired key never revoked stays among the active ones reading
+  `expired <date>`; a revoke answered `unknown-key` shows a notice as a removal's `unknown-machine` does;
+  `e2e-hub/session-plane.spec.ts`'s machine-removal case moved from 403 to 401 with M1's stand-in; a browser test of
+  the key flow against the real local hub joins `e2e-hub/local-hub.spec.ts`. On review, a confirmation left before
+  its code arrives asks the hub for nothing, for both kinds: the step tracks whether the owner is still on it, checks
+  that before the request and before publishing the answer, wipes the key bytes on every path, and disables Cancel
+  once the hub has been asked (a key the hub made cannot be unmade from the browser); closing the dialog during that
+  request leaves the key listed unused (`0 / ∞`), revocable, which a test pins.
+  Date/Author: 2026-10-21, M2's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
