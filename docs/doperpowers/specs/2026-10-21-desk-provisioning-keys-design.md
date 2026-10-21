@@ -264,7 +264,10 @@ the confirm step); storing the code anywhere in the browser (shown once, as the 
 ### 6. sminos: the machine side
 
 `sminos hub enroll` reads a code from its hidden prompt or stdin as today and decodes **either** prefix, in the hub's
-words (`decode_code` ports `decodeCode`; the parity vectors pin it, §M3). With a **provisioning code**:
+words (`decode_code` ports `decodeCode`; the parity vectors pin it, §M3). That is the only way a code reaches the
+machine: no file holds a provisioning key on a host, and there is no option to read one from a file (the owner's
+ruling, Decision Log 2026-10-21). The one file enrollment leaves is the per-machine credential, `daemon/hub.json`,
+which the daemon reads; the reusable key is used once, by the CLI, and kept nowhere. With a **provisioning code**:
 
 - The name is `--name`, else the machine's current name (`host_name()`), and the CLI refuses locally, before any
   request, a name that does not start with the code's prefix compared without case: `the name <n> does not start with
@@ -694,7 +697,9 @@ export const BOOT_COMMAND = (prefix: string) => `printf %s "$CODE" | sminos hub 
 
 - **The code:** `smns-provision-v1.<base64url>`; `smns-enroll-v1.` stays for one-time codes. The boot never decodes
   it; it pipes it whole: `printf %s "$CODE" | sminos hub enroll --name "$DEVCLOUD_NAME"`, as the image user in a login
-  shell, with `$DEVCLOUD_NAME` = `dc-<label>-<4 hex>` (e.g. `dc-build-7f3a`) under a key whose prefix is `dc-`.
+  shell, with `$DEVCLOUD_NAME` = `dc-<label>-<4 hex>` (e.g. `dc-build-7f3a`) under a key whose prefix is `dc-`. The
+  boot keeps nothing of the secret on the host: stdin (or the hidden prompt) is the CLI's only intake, and the only
+  file enrollment leaves is `daemon/hub.json` (0600), the machine's own credential.
 - **Skip on reboot:** `sminos hub show` exits 0 when enrolled; the boot then does not redeem again.
 - **Exit codes of `hub enroll`:** 0 enrolled; 3 `name-taken` (pick another suffix and run again, same code); 1 any
   other refusal or no answer (stderr has the hub's reason in one `sminos: ` line; `key-revoked`, `key-expired`,
@@ -743,6 +748,16 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   rejected and deferred with its future shape).
   Rationale: the boot consumes these; a fork the two specs disagree on would surface only at the first VM.
   Date/Author: 2026-10-21, the spec's author.
+- Decision: The provisioning key reaches a host through `sminos hub enroll`'s stdin or hidden prompt only. No file
+  holds the key on a host, and the CLI has no option to read a code from a file; the one file enrollment leaves is the
+  per-machine credential, `daemon/hub.json` (0600), which the daemon reads. Devcloud's boot pipes the secret from
+  Secret Manager into `hub enroll` and keeps nothing.
+  Rationale: the owner's ruling (Korean, 2026-10-21 ~03:05Z): a key file for the daemon is not needed. Enrollment is
+  a one-shot CLI step, not the daemon's; the daemon needs only the machine's own credential.
+  Rejected: a 0600 key file the daemon reads (and a `--code-file` option to point at it), offered in case the owner
+  wanted it — a reusable key left on every VM's disk widens what a compromised VM yields, from one machine's
+  credential to the power to mint machines until the key expires or is revoked.
+  Date/Author: 2026-10-21, the owner; recorded by the spec's author.
 
 ## Outcomes & Retrospective
 
