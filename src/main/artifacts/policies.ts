@@ -285,9 +285,12 @@ export function guardFrames(contents: WebContents, env: SeamEnv): void {
 
 // The app window's guard on its own navigations (`window.ts`): the page never navigates, so every one is refused, and
 // written to the seam log as a frame's is (P4 W2-C, tracker 2026-10-06): a PDF's link reaches here, since Chromium's
-// viewer navigates the window itself.
-export function guardWindowNavigation(contents: WebContents, env: SeamEnv): void {
+// viewer navigates the window itself. `reloads` (development, the dev server's page): a navigation to the page's own URL
+// is let through, since that is how a page's own `location.reload()` reaches `will-navigate` (Vite's full reload, and the
+// transcript store's on a hot update: tracker 2026-09-28); a built app's page never reloads itself this way.
+export function guardWindowNavigation(contents: WebContents, env: SeamEnv, { reloads = false }: { reloads?: boolean } = {}): void {
   contents.on('will-navigate', (event) => {
+    if (reloads && event.url === contents.getURL()) return;
     event.preventDefault();
     seam(env, `blocked-navigation ${event.url}`);
   });

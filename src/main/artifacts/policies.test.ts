@@ -378,6 +378,26 @@ describe('the policies installed on a session and a window', () => {
     await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation https://example.invalid/pdf-link', `blocked-navigation ${APP}`]));
   });
 
+  // P4 W2-C (tracker 2026-09-28, C6): in development a page's own `location.reload()` reaches `will-navigate` (a renderer
+  // navigation to its own URL), and the transcript store's hot update reloads that way
+  it('lets the dev server’s page reload itself, and refuses every other navigation there', async () => {
+    const DEV = 'http://localhost:5173/harness.html';
+    const contents = Object.assign(new EventEmitter(), { getURL: () => DEV });
+    guardWindowNavigation(contents as unknown as WebContents, e2e(), { reloads: true });
+    const reload = { url: DEV, isMainFrame: true, preventDefault: vi.fn() };
+    const away = { url: 'http://localhost:5173/index.html', isMainFrame: true, preventDefault: vi.fn() };
+    for (const event of [reload, away]) contents.emit('will-navigate', event);
+    const built = Object.assign(new EventEmitter(), { getURL: () => APP });
+    guardWindowNavigation(built as unknown as WebContents, e2e());
+    const rebuilt = { url: APP, isMainFrame: true, preventDefault: vi.fn() };
+    built.emit('will-navigate', rebuilt);
+    await settle();
+    expect(reload.preventDefault).not.toHaveBeenCalled();
+    expect(away.preventDefault).toHaveBeenCalled();
+    expect(rebuilt.preventDefault).toHaveBeenCalled(); // a built app's page never reloads itself this way
+    await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation http://localhost:5173/index.html', `blocked-navigation ${APP}`]));
+  });
+
   class PermissionSession {
     request: ((contents: unknown, permission: string, callback: (granted: boolean) => void, details: Record<string, unknown>) => void) | null = null;
     check: ((contents: unknown, permission: string, origin: string, details: Record<string, unknown>) => boolean) | null = null;

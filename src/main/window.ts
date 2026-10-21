@@ -89,7 +89,8 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
   // E2 end
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  guardWindowNavigation(win.webContents, process.env); // E2: refused, and on the seam log as a frame's (P4 W2-C)
+  // refused, and on the seam log as a frame's; the dev server's page may reload itself (P4 W2-C)
+  guardWindowNavigation(win.webContents, process.env, { reloads: devServerUrl !== null });
   win.once('ready-to-show', () => {
     if (placement?.maximized) win.maximize(); // C5
     showAppWindow(win, process.env); // quiet under MAWS_E2E unless MAWS_E2E_QUIET=0 (owner's rulings 2026-10-06, 2026-10-10)
