@@ -232,7 +232,10 @@ describe('two unlocks with no Lock between them', () => {
     let saves = 0;
     const store: KeyStore = {
       load: (org) => inner.load(org),
-      save: async (org, key) => (saves++, inner.save(org, key)),
+      save: async (org, key) => {
+        saves++;
+        return inner.save(org, key);
+      },
       forget: async (org) => (await held.promise, inner.forget(org)),
     };
     const locking = lock('org', store); // its deletion holds the chain

@@ -112,7 +112,11 @@ describe('addMethod', () => {
   it('posts nothing once the held key was locked while the confirmation opened its bytes', async () => {
     const held = await setUp();
     let asked = 0;
-    const locked = () => (asked++, false); // a Lock pressed while the confirmation ran
+    // a Lock pressed while the confirmation ran
+    const locked = () => {
+      asked++;
+      return false;
+    };
     const error = await rejection(addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), held, locked));
     expect(error).toMatchObject({ reason: 'locked' });
     expect(asked).toBeGreaterThan(0);

@@ -65,7 +65,10 @@ function vendorChunk(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), serviceWorker()],
+  // React as the Electron app builds its renderer (electron.vite.config.ts): under the React Compiler, with its defaults.
+  // The desk ships MAWS's renderer modules, so both apps ship one configuration of them; vitest.config.ts builds the
+  // suites with the same plugin, so they run the code that ships.
+  plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss(), serviceWorker()],
   resolve: {
     alias: {
       // MAWS's renderer modules the desk imports as they stand (the renderer survey) name src/shared as `@shared`; the
