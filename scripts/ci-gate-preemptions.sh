@@ -23,6 +23,11 @@ preempted_jobs() { # <the jobs>
   done <<<"$1"
 }
 
+# Whether a list of names, one a line, holds the name.
+listed() { # <list> <name>
+  [[ $'\n'$1 == *$'\n'"$2"$'\n'* ]]
+}
+
 # Waits for the run and reruns each preempted job alone, once per job per run, waiting again after each, until an
 # attempt leaves nothing to rerun; then sets run_attempt, conclusion, jobs (the final attempt's "conclusion<TAB>name" lines,
 # sorted by name) and preemptions, the line naming each preempted job and how it ended (empty when none was).
@@ -32,6 +37,7 @@ preempted_jobs() { # <the jobs>
 # still show the attempt before a rerun completed while the API shows the rerun's running, and a job not read has no id
 # to rerun it by. Anything else is read again once await_run returns; reads that keep failing end the gate red, as
 # await_run's do.
+# Its lists of names hold one whole name a line: a job's name can have spaces in it (unit's shards, `unit <k>/<n>`).
 settle_run() {
   local rows found id name pending='' retried='' twice='' refused='' next rerun_err started observed run_status unread=0
   while :; do
@@ -56,31 +62,33 @@ settle_run() {
     fi
     # Not settled yet.
     [[ $run_status == completed ]] || { sleep 1; continue; }
-    jobs=$(printf '%s\n' "$rows" | cut -f2,4 | sort -k2)
+    jobs=$(printf '%s\n' "$rows" | cut -f2,4 | sort -t$'\t' -k2)
     # In a cancelled run nothing is a preemption, and nothing found before is rerun.
     [[ $conclusion != cancelled ]] || break
     found=$(preempted_jobs "$rows")
     while IFS=$'\t' read -r id name; do
       [[ -n $name ]] || continue
-      case " $retried " in
-        *" $name "*) case " $twice " in *" $name "*) ;; *) twice+=" $name"; echo "ci-gate: $name preempted again in attempt $run_attempt; it stays red" ;; esac ;;
-        *) case " $pending $refused " in *" $name "*) ;; *) pending+=" $name"; echo "ci-gate: $name preempted in attempt $run_attempt" ;; esac ;;
-      esac
+      if listed "$retried" "$name"; then
+        listed "$twice" "$name" || { twice+=$name$'\n'; echo "ci-gate: $name preempted again in attempt $run_attempt; it stays red"; }
+      elif ! listed "$pending$refused" "$name"; then
+        pending+=$name$'\n'
+        echo "ci-gate: $name preempted in attempt $run_attempt"
+      fi
     done <<<"$found"
-    next=${pending# }; next=${next%% *}
+    next=${pending%%$'\n'*}
     [[ -n $next ]] || break
-    pending=${pending# "$next"}
+    pending=${pending#*$'\n'}
     id=$(printf '%s\n' "$rows" | awk -F'\t' -v name="$next" '$4 == name { print $1; exit }')
     # gh reruns the whole run on an empty --job: a job is rerun by an id read for it, or not at all.
     case $id in
       '' | *[!0-9]*)
         echo "ci-gate: $next has no job id in attempt $run_attempt to rerun it by; it stays red"
-        refused+=" $next"
+        refused+=$next$'\n'
         continue ;;
     esac
     if ! rerun_err=$(gh -R "$REPO" run rerun "$run_id" --job "$id" 2>&1); then
       echo "ci-gate: $next's rerun was refused: $rerun_err; it stays red"
-      refused+=" $next"
+      refused+=$next$'\n'
       continue
     fi
     echo "ci-gate: rerunning $next alone as attempt $((run_attempt + 1))"
@@ -93,18 +101,19 @@ settle_run() {
     done
     if [[ ${started:-0} -le $run_attempt ]]; then
       echo "ci-gate: run $run_id shows no attempt $((run_attempt + 1)) a minute after the rerun; $next stays red"
-      refused+=" $next"
+      refused+=$next$'\n'
       break
     fi
-    retried+=" $next"
+    retried+=$next$'\n'
   done
   preemptions=''
   [[ -n $retried$refused ]] || return 0
-  preemptions=$(printf '%s\n' "$jobs" | awk -F'\t' -v retried="$retried" -v twice="$twice" -v refused="$refused" '
+  # Through the environment, since awk's -v takes no newline.
+  preemptions=$(printf '%s\n' "$jobs" | retried=${retried%$'\n'} twice=${twice%$'\n'} refused=${refused%$'\n'} awk -F'\t' '
     BEGIN {
-      n = split(retried, names, " "); for (i = 1; i <= n; i++) isretried[names[i]] = 1
-      n = split(twice, names, " "); for (i = 1; i <= n; i++) istwice[names[i]] = 1
-      n = split(refused, names, " "); for (i = 1; i <= n; i++) isrefused[names[i]] = 1
+      n = split(ENVIRON["retried"], names, "\n"); for (i = 1; i <= n; i++) isretried[names[i]] = 1
+      n = split(ENVIRON["twice"], names, "\n"); for (i = 1; i <= n; i++) istwice[names[i]] = 1
+      n = split(ENVIRON["refused"], names, "\n"); for (i = 1; i <= n; i++) isrefused[names[i]] = 1
     }
     !($2 in isretried) && !($2 in isrefused) { next }
     { all = all " " $2; nall++ }
