@@ -104,6 +104,11 @@ Round 1, doperpowers:reviewer-medium over 7c5248920..b96347122: incorrect, with 
 - P2, `build` was the checkout, not the running app. Fixed: the app's own stamp, and a variant refuses to run on a mismatch.
 - P2, the last landing took the last call made, not the latest landing. Fixed.
 
+Round 2, the same reviewer over the fixes (b96347122..da5859ac6): the six fixes close their findings; the preparation's lifecycle had three new P2s, all real, fixed (see the commit after da5859ac6):
+- A head removed while being prepared left the next message queued in an idle, unpaused queue. Fixed: the next head goes.
+- A preparation ending after an exit saved the queue again, recreating a deleted state or overwriting a relaunch's. Fixed: nothing is saved there.
+- A read attached and then discarded (the entry edited meanwhile, or paused) kept its effect on the session's memory. Fixed: a preparation is settled by whether its content reached the pipe, and an attached read is undone when it did not.
+
 ## Surprises & Discoveries
 
 - The transcripts carry the whole request. Since engine 2.1.300 the `api-request-shape` (system and tools) and `api-request-blob` records (messages) let a request be rebuilt to the token. Assistant messages and tool results are not blobbed and come from the transcript's own records. This is what made the replay diagnosis possible without a run.
