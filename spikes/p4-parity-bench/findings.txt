@@ -564,6 +564,9 @@ opens the 12:00Z hold (quiet flag from 11:50Z, hard end 16:30Z), and the record 
      4 hours 15 minutes, still inside its 16:30Z hard end.
 - Desktop's version is re-read over ssh at the hold's start. If it moved, `bench.probe()` and `node
   driver_labels_test.mjs desktop-driver.js` run again (10 minutes).
+- Every `bench.probe()` report, and the tree lines a label was fixed from, are saved under RUN/ax/. Part A saved none,
+  so the Claude tab's recent-list label `recentItem` is still assumed; Part B's first `bench.probe()` reads it, and
+  driver_labels_test.mjs gains those lines.
 
 The record hold (a GUI hold with the quiet flag), about 2 hours 30 minutes:
 - Five rounds in §7's order, about 21 minutes each, 105 minutes in all. A round is:
