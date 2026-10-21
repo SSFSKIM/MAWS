@@ -54,6 +54,7 @@ import {
   typingReport,
   watchRemote,
   type CallAnswer,
+  type CallBackground, // P4-R6
   type ReadResult,
   type TypingReport,
 } from './support/document-scale';
@@ -779,4 +780,47 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
   rows.add('11 fork → live', 'host SIGKILL: re-fork → every replica live: both windows’ (live and synced) and both agents’ (their first read after the re-fork answered)', allLive - forkedAt, 'ms', 1000, '≤ 1,000 ms', `kill → re-fork ${forkedAt - killedAt} ms (the supervisor’s restart delay); kill → all live ${allLive - killedAt} ms; from the re-fork: windows ${liveAgain.map((t) => t - forkedAt).join(', ')} ms, agents ${agentLive.map((t) => t - forkedAt).join(', ')} ms`);
   rows.write({ sigkill: { load: load1() } });
   judged(rows, 'marginalSigkill');
+});
+
+// P4-R6 (the P4 composite spec's Decision Log 44): row 5's first batch after a read, repeated in one launch, so a stray
+// that one run meets about one time in six is met often enough to count and to name. Run only on purpose:
+//   pnpm e2e:document-scale-repeat     (the script sets MAWS_DOCUMENT_REPEAT; the scale gate's own run skips this test)
+// Each round is a fresh session's 200-block read (its replica made, as perf-agent-1's first read makes it) and at once
+// its five-op first batch, on the 200-page document open in two windows, then the session's end and a pause of 1.5 to
+// 3 s. Every round's loop max, wall and background (what shared the call's loop: CallBackground in
+// support/document-scale.ts) is kept in test-results/document-scale-repeat.json; the rows are recorded, with no bound.
+const REPEAT = Number(process.env.MAWS_DOCUMENT_REPEAT ?? 0);
+const REPEAT_RESULTS = join(REPO_ROOT, 'test-results', 'document-scale-repeat.json');
+
+test('5r: the first batch after a read, repeated in one launch (MAWS_DOCUMENT_REPEAT rounds)', async () => {
+  test.skip(!(REPEAT > 0), 'runs only under MAWS_DOCUMENT_REPEAT (pnpm e2e:document-scale-repeat)');
+  rmSync(REPEAT_RESULTS, { force: true });
+  const { large } = seedsOnce();
+  const { page, app, seam } = await start();
+  const rows = new Rows(REPEAT_RESULTS, { run: new Date().toISOString(), rounds: REPEAT });
+  const id = await seeded(page, seam, 'Scale 200', large.state);
+  await openTimed(page, id, 'Scale 200', large.stats.topBlocks - 20);
+  const [pageB] = await Promise.all([app.waitForEvent('window'), app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
+  await pageB.waitForLoadState('domcontentloaded');
+  await openTimed(pageB, id, 'Scale 200', large.stats.topBlocks - 20);
+  const sections = [...Array(SECTIONS).keys()].filter((s) => !KEPT_CLEAR(s) && s % 2 === 0); // perf-agent-1's (agentsFor)
+  const rounds: Array<{ round: number; max: number; wallMs: number; readMax: number; load: number; background?: CallBackground }> = [];
+  for (let round = 1; round <= REPEAT; round++) {
+    await sleep(1_500 + Math.random() * 1_500);
+    const agent = new Agent(`perf-repeat-${round}`, sections, prng(100 + round));
+    const read = await readFirst(seam, agent, id);
+    const { ops } = agent.firstBatch();
+    const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
+    expect(answer.isError, answer.text).toBe(false);
+    rounds.push({ round, max: +answer.loop.max.toFixed(2), wallMs: +answer.wallMs.toFixed(1), readMax: +read.loop.max.toFixed(2), load: load1(), background: answer.background });
+    await seam.release(agent.session);
+  }
+  const maxes = stats(rounds.map((r) => r.max));
+  const slowest = rounds.reduce((a, b) => (b.max > a.max ? b : a));
+  const over = rounds.filter((r) => r.max > 50);
+  rows.add('5r p50', `the first batch after a read, ${REPEAT} rounds in one launch: host loop max over the call, p50`, maxes.p50, 'ms', null, 'recorded');
+  rows.add('5r p95', 'the first batch after a read, repeated: p95', maxes.p95, 'ms', null, 'recorded');
+  rows.add('5r max', 'the first batch after a read, repeated: max (its record beside it)', maxes.max, 'ms', null, 'recorded', `round ${slowest.round}, wall ${slowest.wallMs} ms`, slowest.background);
+  rows.add('5r over 50', 'the first batch after a read, repeated: rounds over row 5’s 50 ms', over.length, 'rounds', null, 'recorded', over.map((r) => `round ${r.round} ${r.max} ms`).join('; ') || undefined);
+  rows.write({ repeat: rounds });
 });
