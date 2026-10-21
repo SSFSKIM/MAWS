@@ -3,7 +3,7 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Version 14 (P3-D): the design-system defaults. Migrations live in `src/shared/settings/defaults.ts`,
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Version 14 (P3-D): the design-system defaults. Version 15 (P4-B1): the documents' comments view. Version 16 (P4-R8): the MCP servers MAWS passes to the sessions it launches. Migrations live in `src/shared/settings/defaults.ts`,
 // run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
@@ -19,6 +19,7 @@ import { UsageSnapshotSchema } from '../../usage/types';
 // E4a start
 import { isSearchUrlTemplate } from '../../browser/url';
 // E4a end
+import { AppMcpServersSchema } from '../../engine/app-mcp-servers'; // P4-R8
 
 export const ThemeSettingSchema = z.enum(['light', 'dark', 'system']);
 export type ThemeSetting = z.infer<typeof ThemeSettingSchema>;
@@ -53,6 +54,9 @@ const EngineSettingsSchema = z.strictObject({
   // and engine processes never exit on their own; the two fields above are kept for when it is on again. An object, so
   // a patch replaces it whole.
   memoryBudget: z.strictObject({ enabled: z.boolean() }),
+  // P4-R8: version 16, the MCP servers MAWS passes to every session it launches (`--mcp-config`) and to no terminal
+  // session; an HTTP server by name and URL, replaced whole by a patch (src/shared/engine/app-mcp-servers.ts)
+  mcpServers: AppMcpServersSchema,
 });
 const GatewaySettingsSchema = z.strictObject({
   defaultRoute: z.enum(['gateway', 'direct']), // D-19: 'gateway'; seeds C10's intent.gateway
@@ -121,7 +125,7 @@ export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
 // P3-D end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(15), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView)
+  version: z.literal(16), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

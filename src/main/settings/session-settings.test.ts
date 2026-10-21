@@ -49,11 +49,11 @@ describe('the session service reads the settings store', () => {
     expect(h.host.launches.map((spec) => spec.subagentModel)).toEqual(['sonnet']);
   });
 
-  it('maps the four fields C10 reads and nothing else', () => { // W3: the auto fallback
+  it('maps the five fields C10 reads and nothing else', () => { // W3: the auto fallback; P4-R8: the app MCP servers
     const dir = mkdtempSync(join(tmpdir(), 'maws-c11-session-settings-'));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const store = openSettingsStore(join(dir, 'settings.json'));
-    store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', memoryBudgetMiB: 4096 } });
-    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku' }, permissions: { autoFallback: 'acceptEdits' } });
+    store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', memoryBudgetMiB: 4096, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } });
+    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku', mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] }, permissions: { autoFallback: 'acceptEdits' } });
   });
 });

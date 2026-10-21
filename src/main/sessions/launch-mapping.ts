@@ -7,6 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { EffortSchema, type Effort, type LaunchSpec } from '@shared/engine/launch-spec';
 import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
+import { appMcpConfig, type AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
 import { messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09); P4-R7y: the hook
 
 export type Attestation = { accepted: true; directory: string };
@@ -16,12 +17,12 @@ type Gateway = LaunchSpec['gateway'];
 // Settings v3 is C11's; until it lands C10 reads these defaults here, so nothing changes when C11 lands but the source.
 export interface C10Settings {
   gateway: { defaultRoute: Gateway; relayUnreachable: 'ask' | 'direct' | 'wait' };
-  engine: { subagentModel: string | null };
+  engine: { subagentModel: string | null; mcpServers: readonly AppMcpServer[] }; // P4-R8: the app's MCP servers (settings v16)
   permissions: { autoFallback: PermissionMode }; // W3: settings v6, the mode a refused auto falls back to
 }
 export const C10_SETTING_DEFAULTS: C10Settings = Object.freeze({
   gateway: Object.freeze({ defaultRoute: 'gateway', relayUnreachable: 'ask' }),
-  engine: Object.freeze({ subagentModel: null }),
+  engine: Object.freeze({ subagentModel: null, mcpServers: Object.freeze([]) }),
   permissions: Object.freeze({ autoFallback: 'acceptEdits' }),
 }) as C10Settings;
 
@@ -66,7 +67,7 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     resume: input.resume,
     sessionId: input.sessionId,
     trust: input.trust,
-    mcpConfig: null,
+    mcpConfig: appMcpConfig(settings.engine.mcpServers), // P4-R8: every launch MAWS owns passes the app's MCP servers
     // the engine's environment is an allowlist (engine-host/launch.ts): `--settings` env is the one way to add a variable
     extraSettings: input.browserBackend ? { env: { CUA_BROWSER_BACKENDS: input.browserBackend } } : null,
     maxBudgetUsd: null,
@@ -192,6 +193,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
 
 // The trust bootstrap (Trust, "Trust bootstrap"): an initialize-only launch that records trust for the key, under a
 // bootstrap id minted for it alone, never the conversation's, so no index record ever hears of it. C3 mints its pin.
+// P4-R8: it serves no turn, so it connects none of the app's MCP servers.
 export function bootstrapSpec(
   input: { bootstrapId: AppSessionId; cwd: string; additionalDirectories: readonly string[]; gateway: Gateway; trustKey: string; replay: string | null },
   settings: C10Settings = readSettings(),
@@ -211,6 +213,6 @@ export function bootstrapSpec(
       inheritGrantsFrom: null,
       replay: input.replay,
     },
-    settings,
+    { ...settings, engine: { ...settings.engine, mcpServers: [] } },
   );
 }
