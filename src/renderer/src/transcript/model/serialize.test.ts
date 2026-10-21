@@ -87,6 +87,20 @@ describe('serializeRows', () => {
     ].join('\n\n'));
   });
 
+  // P4-R7: a message tool's message copies as the span it stands in for, so a pasted turn reads as the model meant it
+  it('renders a message tool’s message as a `<message>` span with its Markdown verbatim, at the call’s place', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('c1', 'mcp__maws__message', { text: 'Stage 1 is done.\n\n- **37** labels missing' }, 'm1', 0);
+    b.result('c1', [{ type: 'text', text: 'sent' }]);
+    b.toolUse('t1', 'Bash', { command: 'sh stage.sh 2' }, 'm1', 1);
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('m2', 0, '<message>Both stages ran.</message>');
+    b.end(['u1']);
+    const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'to_human' || row.kind === 'cell' || row.kind === 'assistant_text'));
+    expect(markdown).toBe(['<message>Stage 1 is done.\n\n- **37** labels missing</message>', '- Ran `sh stage.sh 2` in 0s\n  ```\n  $ sh stage.sh 2\n  ok\n  ```', '<message>Both stages ran.</message>'].join('\n\n'));
+  });
+
   // E4c start
   it('renders a browser action as its line and its time, a refusal with its reason, a cancelled call as such', () => {
     const b = builder();

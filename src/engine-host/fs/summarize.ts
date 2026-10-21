@@ -5,7 +5,8 @@
 // millisecond and a parsed record cannot be fooled by a value inside a torn line.
 import { basename } from 'node:path';
 import type { MessageUuid, SessionId } from '@shared/graph/ids';
-import { previewLine } from '@shared/owner/preview';
+import { isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
+import { messageLine, previewLine } from '@shared/owner/preview';
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
@@ -35,7 +36,7 @@ export function summarize(
   const root = headRecords.find((r) => isUuidRecord(r) && r.parentUuid === null) ?? null;
   const lastUuid = tailReversed.find(isUuidRecord) ?? headReversed.find(isUuidRecord) ?? null;
   const leaf = tailReversed.find((r) => isUuidRecord(r) && r.type !== 'progress') ?? headReversed.find((r) => isUuidRecord(r) && r.type !== 'progress') ?? null;
-  const lastAssistant = tailReversed.map(assistantText).find((text) => text !== null) ?? headReversed.map(assistantText).find((text) => text !== null) ?? null;
+  const lastAssistant = lastAssistantLine(tailReversed) ?? lastAssistantLine(headReversed);
 
   // SPEC 35.14.3: the tail record, else the sidecar, else the head record.
   const customTitle = lastString(tailReversed, 'custom-title', 'customTitle') ?? sidecarTitle ?? lastString(headReversed, 'custom-title', 'customTitle');
@@ -227,6 +228,28 @@ function assistantText(record: TranscriptRecord): string | null {
   const text = content.find((block): block is { type: 'text'; text: string } => isBlock(block) && block.type === 'text' && typeof block.text === 'string');
   return text ? previewLine(text.text, TEXT_CAP) : null; // E11 F2b: the owner-aware preview, chosen before the cap
 }
+
+// The newest assistant line among `records` (given newest first): an assistant text's preview, or (P4-R7) an accepted
+// message tool call's message (`@shared/owner/message-call`), whichever is later. A call's result is written after
+// it, so walking newest first meets the result before the call; a call whose result the window does not hold is not
+// taken.
+function lastAssistantLine(records: TranscriptRecord[]): string | null {
+  const refused = new Map<string, boolean>(); // tool-use id → whether its result is an error
+  for (const record of records) {
+    const content = (record.message as { content?: unknown } | undefined)?.content;
+    const blocks = (Array.isArray(content) ? content.filter(isBlock) : []) as CallBlock[];
+    if (record.type === 'user') {
+      for (const block of blocks) if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') refused.set(block.tool_use_id, block.is_error === true);
+      continue;
+    }
+    const call = record.type === 'assistant' ? blocks.findLast((block) => block.type === 'tool_use' && isMessageTool(block.name)) : undefined;
+    const message = call !== undefined && typeof call.id === 'string' && refused.get(call.id) === false ? messageCallText(call.input) : null;
+    const line = (message === null ? null : messageLine(message, TEXT_CAP)) ?? assistantText(record);
+    if (line !== null) return line;
+  }
+  return null;
+}
+type CallBlock = { type: string; id?: unknown; name?: unknown; input?: unknown; tool_use_id?: unknown; is_error?: unknown };
 
 const isBlock = (value: unknown): value is { type: string; text?: unknown } =>
   typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';

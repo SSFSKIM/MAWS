@@ -18,6 +18,8 @@
 // P4-B4 (docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md; P4 ledger X33, the X9 amendment) appends
 // `artifact_search` after the document tools (`./search-tools`), points `artifact_list` to it, and gives `show_pane` an
 // `at` (`../artifacts/link`'s location); the listed artifact moved to the leaf `./listed-artifact`, re-exported here.
+// P4-R7 (the P4 spec's Decision Log 46, the X9 amendment) appends `message` after the search tool (`./message-tool`),
+// the one tool listed with `_meta` (always loaded).
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { ArtifactLocationSchema } from '../artifacts/link'; // P4-B4
@@ -28,6 +30,7 @@ import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './pan
 import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
 import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
 import { SEARCH_TOOL_NAMES, SEARCH_TOOLS } from './search-tools'; // P4-B4
+import { MESSAGE_TOOL_NAMES, MESSAGE_TOOLS } from './message-tool'; // P4-R7
 
 export { ARTIFACT_ID } from './artifact-id';
 export { ArtifactEditorSchema, ListedArtifactSchema, type ArtifactEditor, type ListedArtifact } from './listed-artifact'; // P4-B4
@@ -43,6 +46,8 @@ export const MAWS_TOOL_NAMES = [
   ...DOCUMENT_TOOL_NAMES,
   // P4-B4: the search tool (`./search-tools`: its schemas, description, limits, hints and refusals)
   ...SEARCH_TOOL_NAMES,
+  // P4-R7: the message tool (`./message-tool`: its schema, description, result and `_meta`)
+  ...MESSAGE_TOOL_NAMES,
 ] as const;
 export type MawsToolName = (typeof MAWS_TOOL_NAMES)[number];
 export const isMawsToolName = (name: unknown): name is MawsToolName => typeof name === 'string' && (MAWS_TOOL_NAMES as readonly string[]).includes(name);
@@ -525,7 +530,9 @@ export const MAWS_TOOLS = {
   ...DOCUMENT_TOOLS,
   // P4-B4
   ...SEARCH_TOOLS,
-} as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;
+  // P4-R7
+  ...MESSAGE_TOOLS,
+} as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean }; meta?: Record<string, unknown> }>;
 
 export interface MawsToolListEntry {
   name: MawsToolName;
@@ -533,13 +540,16 @@ export interface MawsToolListEntry {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: Record<string, unknown>;
+  _meta?: Record<string, unknown>; // P4-R7: the engine's keys on a listed tool (`message`'s alwaysLoad)
 }
 
 // The `tools/list` answer's entries, in MAWS_TOOL_NAMES order.
 export function mawsToolList(): MawsToolListEntry[] {
   return MAWS_TOOL_NAMES.map((name) => {
-    const { title, description, input, annotations } = MAWS_TOOLS[name];
-    return { name, title, description, inputSchema: z.toJSONSchema(input) as Record<string, unknown>, annotations: { ...annotations, title } };
+    const tool: (typeof MAWS_TOOLS)[MawsToolName] = MAWS_TOOLS[name];
+    const { title, description, input, annotations } = tool;
+    const meta = 'meta' in tool ? { _meta: { ...tool.meta } } : {};
+    return { name, title, description, inputSchema: z.toJSONSchema(input) as Record<string, unknown>, annotations: { ...annotations, title }, ...meta };
   });
 }
 

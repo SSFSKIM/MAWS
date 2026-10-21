@@ -1170,6 +1170,33 @@
         "openWorldHint": false,
         "title": "Search artifacts"
       }
+    },
+    {
+      "name": "message",
+      "title": "Send message",
+      "description": "Send the user a message now, word for word, shown in the session's report in MAWS where this call sits; without this tool, write the message inside <message>…</message>. Use it for a message you send before another tool call, called in the same response as that call: text written there comes back as a paraphrase that never reaches the user. A message at the end of your turn stays a <message> span.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The message, in Markdown: what you would write inside <message>…</message>."
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "title": "Send message"
+      },
+      "_meta": {
+        "anthropic/alwaysLoad": true
+      }
     }
   ]
 }

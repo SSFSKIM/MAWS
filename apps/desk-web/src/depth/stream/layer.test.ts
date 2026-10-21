@@ -30,7 +30,7 @@ describe('the streaming layer', () => {
       ['text', 'The answer is two.'],
       ['tool', '{"file_path":"/a"}'],
     ]);
-    expect(layer.blocks(null)[2].toolName).toBe('Read');
+    expect(layer.blocks(null)[2]).toMatchObject({ toolName: 'Read', toolUseId: 'toolu_1' });
   });
 
   it('keeps a block drawn after its block-row until the row it named lands, then drops that block alone', () => {
@@ -103,9 +103,9 @@ describe('the streaming layer', () => {
     const tool: StreamingBlock = { index: 1, kind: 'tool', id: 'toolu_1', name: 'Read', text: '{"file_pa', upTo: 5 };
     const entry: Streaming = { turnId: 't1', agentId: null, step: 0, model: 'm', upTo: 6, blocks: [text, tool] };
     layer.load([entry, { turnId: 't1', agentId: null, step: 1, upTo: -1, blocks: [] }]);
-    expect(layer.blocks(null).map((b) => [b.kind, b.text, b.toolName])).toEqual([
-      ['text', 'Reading.', null],
-      ['tool', '{"file_pa', 'Read'],
+    expect(layer.blocks(null).map((b) => [b.kind, b.text, b.toolName, b.toolUseId])).toEqual([
+      ['text', 'Reading.', null, null],
+      ['tool', '{"file_pa', 'Read', 'toolu_1'],
     ]);
     expect(layer.chunk(chunk(0, 6, { kind: 'input', index: 1, json: 'th"' }))).toBe(false); // at the watermark
     expect(layer.chunk(chunk(0, 7, { kind: 'input', index: 1, json: 'th":"/a"}' }))).toBe(true);

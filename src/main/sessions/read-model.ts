@@ -12,7 +12,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, restoreCost, withoutReleased, type CostLedger } from './digest'; // C12: withoutReleased
+import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, restoreCost, withoutReleased, type CostLedger, type MessageCalls } from './digest'; // C12: withoutReleased
 import type { LaunchMode } from './select-source';
 import { availabilityOf, type AcquisitionMemory } from './availability'; // P2-A
 
@@ -60,6 +60,7 @@ export class SessionReadModel {
   private readonly lastRevision = new Map<AppSessionId, number>();
   private readonly seen = new Map<AppSessionId, Set<string>>();
   private readonly ledgers = new Map<AppSessionId, CostLedger>(); // cost across the session's processes (digest.ts)
+  private readonly messageCalls = new Map<AppSessionId, MessageCalls>(); // P4-R7: message calls awaiting results (digest.ts)
   private readonly restoreReads = new WeakSet<object>(); // the ledger's `restoring` marks a transcript read was made for
   // C4 replay runs seen this app run: the host plays their events as a live session's, with no engine status. A run
   // stays live once seen, so its last batch (which may trail its `done` progress) still ends its turn.
@@ -278,6 +279,7 @@ export class SessionReadModel {
       this.digestsById.delete(appSessionId);
       this.seen.delete(appSessionId);
       this.ledgers.delete(appSessionId);
+      this.messageCalls.delete(appSessionId); // P4-R7
       this.replays.delete(appSessionId);
       this.costAtSeen.delete(appSessionId);
       this.statuses.delete(appSessionId);
@@ -327,8 +329,10 @@ export class SessionReadModel {
       if (!seen) this.seen.set(appSessionId, (seen = new Set()));
       let ledger = this.ledgers.get(appSessionId);
       if (!ledger) this.ledgers.set(appSessionId, (ledger = costLedger(this.current(appSessionId))));
+      let messages = this.messageCalls.get(appSessionId); // P4-R7
+      if (!messages) this.messageCalls.set(appSessionId, (messages = new Map()));
       const current = this.current(appSessionId);
-      this.commit(this.onceReleased(current, foldEvents(current, seen, events, ledger, this.live(appSessionId)))); // C12: onceReleased
+      this.commit(this.onceReleased(current, foldEvents(current, seen, events, ledger, this.live(appSessionId), messages))); // C12: onceReleased
       this.settleRestored(appSessionId, ledger);
     },
     applyEngineStatus: (s) => {

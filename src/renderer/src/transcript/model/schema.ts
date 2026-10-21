@@ -140,4 +140,5 @@ export const RowSchema = z.discriminatedUnion('kind', [
   }),
   // E4c end
   z.strictObject({ ...base, kind: z.literal('browser_activity'), toolUseId: nullable(z.string()), appSessionId: z.string(), tabId: z.string(), activity: BrowserActivitySchema }), // E13
+  z.strictObject({ ...base, kind: z.literal('to_human'), toolUseId: z.string(), text: z.string().min(1), pending: z.boolean() }), // P4-R7
 ]);

@@ -51,6 +51,7 @@ describe('X9: the maws server and its twelve tools', () => {
       // P3-B (M7): the document tools, appended after A's
       'artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve',
       'artifact_search', // P4-B4: the search tool, after B's
+      'message', // P4-R7: the message tool, after the search tool
     ]);
     expect(MAWS_TOOL_NAMES).not.toContain('artifact_update');
     expect(Object.keys(MAWS_TOOLS)).toEqual([...MAWS_TOOL_NAMES]);
@@ -82,9 +83,13 @@ describe('X9: the maws server and its twelve tools', () => {
     expect(list.map((t) => t.name)).toEqual([...MAWS_TOOL_NAMES]);
     for (const tool of list) {
       const spec = MAWS_TOOLS[tool.name as keyof typeof MAWS_TOOLS];
-      expect(tool).toEqual({ name: tool.name, title: spec.title, description: spec.description, inputSchema: z.toJSONSchema(spec.input), annotations: { ...spec.annotations, title: spec.title } });
+      const meta = 'meta' in spec ? { _meta: spec.meta } : {}; // P4-R7: only `message` carries one
+      expect(tool).toEqual({ name: tool.name, title: spec.title, description: spec.description, inputSchema: z.toJSONSchema(spec.input), annotations: { ...spec.annotations, title: spec.title }, ...meta });
       expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     }
+    // P4-R7: the message tool alone is always loaded, whatever tool search defers (P4-B4's probe: the engine honours the
+    // key for an SDK server's tool); a deferred one would cost a ToolSearch before the first message
+    expect(list.filter((t) => t._meta !== undefined).map((t) => [t.name, t._meta])).toEqual([['message', { 'anthropic/alwaysLoad': true }]]);
     // E2 (Decision Log 4): the two writers are not read-only, so the engine never batches them nor runs them in plan mode
     expect(list.map((t) => [t.name, t.annotations])).toEqual([
       ['send_file', { readOnlyHint: true, openWorldHint: false, title: 'Send file' }],
@@ -106,6 +111,7 @@ describe('X9: the maws server and its twelve tools', () => {
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }],
       ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
       ['artifact_search', { readOnlyHint: true, openWorldHint: false, title: 'Search artifacts' }], // P4-B4
+      ['message', { readOnlyHint: true, openWorldHint: false, title: 'Send message' }], // P4-R7: it changes no file, so plan mode runs it too
     ]);
     expect(list.find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({ properties: { pane: { enum: [...PANE_NAMES] } }, required: ['pane'] });
   });

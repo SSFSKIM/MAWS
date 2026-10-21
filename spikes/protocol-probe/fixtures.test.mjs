@@ -430,7 +430,11 @@ test('p4 deferral (for P4-A3): under tool search the maws tools are deferred and
  const rows=load4('p4-b4-instructions');const [first,second]=mainRequests4(rows);
  const names=first.tools.map(t=>t.name);assert.ok(names.includes('ToolSearch'));
  assert.ok(names.includes('mcp__maws__show_pane')); // listed with _meta["anthropic/alwaysLoad"]: true
- for(const tool of served4.tools.filter(t=>t.name!=='show_pane'))assert.ok(!names.includes('mcp__maws__'+tool.name),tool.name);
+ // P4-R7: MAWS's own message tool carries the key as MAWS lists it, so it is loaded beside show_pane
+ const alwaysLoaded=t=>t.name==='show_pane'||t._meta?.['anthropic/alwaysLoad']===true;
+ assert.deepEqual(served4.tools.filter(alwaysLoaded).map(t=>t.name),['show_pane','message']);
+ assert.ok(names.includes('mcp__maws__message'));
+ for(const tool of served4.tools.filter(t=>!alwaysLoaded(t)))assert.ok(!names.includes('mcp__maws__'+tool.name),tool.name);
  const context=contextText4(first);const from=context.indexOf('The following deferred tools are now available via ToolSearch');
  const listing=context.slice(from,context.indexOf('\n\n',from)).split('\n').slice(1); // the list alone, one name per line
  assert.ok(listing.includes('mcp__maws__artifact_search'));
@@ -444,4 +448,88 @@ test('p4 resume: a resumed session keeps the paragraph it was first given; the s
  const q=mainRequests4(load4('p4-b4-resume'))[0];const context=contextText4(q);
  assert.ok(context.includes('## maws\n'+served4.instructions));
  assert.ok(!JSON.stringify(q).includes('RESUMED-PARAGRAPH-CHANGED'));
+});
+// P4-R7 (docs/doperpowers/plans/2026-10-19-p4-smoothing.md, Decision Log 46; scenarios/pass3/p4-r7-message-tool.mjs): what a
+// message the model writes before a tool call becomes on MAWS's own wire, recorded on engine 2.1.304 and claude-opus-5-5
+// through the relay with a recorder between them, and what MAWS's message tool is there. Read from the recorder's
+// `api_exchanges` (each main request's fields and the blocks the API streamed back, in order), the engine's frames and
+// the transcript's records (`disk`).
+const R7=['p4-r7-loss-short','p4-r7-loss','p4-r7-tool','p4-r7-loss-mid','p4-r7-loss-notice','p4-r7-loss-dialog','p4-r7-loss-stages','p4-r7-tool-stages'];
+const exchanges7=name=>meta4(load4(name),'api_exchanges')[0].exchanges;
+const blocks7=name=>exchanges7(name).map(e=>e.response.blocks);
+const isMessageCall=b=>b.type==='tool_use'&&b.name==='mcp__maws__message';
+for(const name of R7)test('p4/'+name+' is ordered NDJSON with correlated replies, P4-R7 provenance on the pinned engine, the owner file unchanged and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R7');assert.equal(prov.engineVersion,'2.1.304');assert.equal(prov.model,'claude-opus-5-5');assert.equal(prov.pin,'08a31f8df08ed97911398057380acd9d3cd7e687');
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ assert.equal(meta4(rows,'turn')[0].result.subtype,'success');
+});
+test('p4 R7: MAWS\'s launch asks the API for adaptive thinking with display "updates" under its beta, so a progress note arrives with the API\'s paraphrase',()=>{
+ for(const name of R7)for(const {request} of exchanges7(name)){
+  assert.deepEqual(request.thinking,{type:'adaptive',display:'updates'},name);
+  assert.ok(request.beta.split(',').includes('thinking-display-updates-2026-08-18'),name);
+  assert.deepEqual(request.output_config,{effort:'high'},name);
+ }
+});
+test('p4 R7 the loss: under contract 5 a status written between stages, before the next call, comes back as a thinking block holding a paraphrase without its tags; the next call follows it in the same response',()=>{
+ const responses=blocks7('p4-r7-loss-stages');
+ const lost=responses.filter(bs=>bs.some(b=>b.type==='thinking'&&b.text.trim()!=='')&&bs.at(-1).type==='tool_use');
+ assert.equal(lost.length,1);
+ const [note,call]=lost[0];
+ assert.equal(note.type,'thinking');assert.ok(note.signatureChars>0);
+ assert.ok(!note.text.includes('<message>'));assert.match(note.text,/0412, 0977, and 1203/);assert.match(note.text,/manual labeling/); // a request to the human, lost
+ assert.equal(call.type,'tool_use');assert.equal(call.name,'Bash');assert.equal(call.input.command,'sh stage.sh 3');
+ // the other two statuses survived as spans, so the loss is per note, not per session
+ assert.equal(responses.flat().filter(b=>b.type==='text'&&b.text.includes('<message>')).length,3);
+ // what every reader sees: the transcript keeps the paraphrase in a thinking block and no text before the call
+ const disk=meta4(load4('p4-r7-loss-stages'),'disk')[0].records.filter(r=>r.type==='assistant').flatMap(r=>r.blocks);
+ assert.ok(disk.some(b=>b.type==='thinking'&&b.text===note.text));
+});
+test('p4 R7: a note asked for in the prompt stays a span, short or long, first or mid-turn; the model wrote no thinking-block note there',()=>{
+ for(const name of ['p4-r7-loss-short','p4-r7-loss','p4-r7-loss-mid']){
+  const responses=blocks7(name);
+  const before=responses.find(bs=>bs.some(b=>b.type==='text'&&b.text.includes('<message>'))&&bs.at(-1).type==='tool_use');
+  assert.ok(before,name);
+  assert.ok(!responses.flat().some(b=>b.type==='thinking'&&b.text.trim()!==''),name);
+ }
+});
+test('p4 R7 the tool: mcp__maws__message is loaded under tool search through its _meta, the only maws tool in the request\'s tools, and in default mode the engine asks a permission for it unless the launch allows it',()=>{
+ for(const name of ['p4-r7-tool','p4-r7-tool-stages'])for(const {request} of exchanges7(name))assert.deepEqual(request.maws,[{name:'mcp__maws__message',defer_loading:null}],name);
+ const asked=n=>meta4(load4(n),'permission_asked').map(p=>p.tool);
+ assert.ok(asked('p4-r7-tool').includes('mcp__maws__message')); // no allow: asked
+ assert.ok(!asked('p4-r7-tool-stages').includes('mcp__maws__message')); // --allowedTools mcp__maws__message, as MAWS launches
+ assert.deepEqual(meta4(load4('p4-r7-tool-stages'),'provenance')[0].allowed,['mcp__maws__message']);
+});
+test('p4 R7 the tool: each status is a call in the same response as the next stage\'s call, its text whole in the frames, the tools/call (with its tool-use id) and on disk, answered `sent`; the final message stays a span',()=>{
+ const responses=blocks7('p4-r7-tool-stages');
+ const calls=responses.flatMap(bs=>bs.filter(isMessageCall).map(call=>({call,next:bs[bs.indexOf(call)+1]})));
+ assert.equal(calls.length,3);
+ for(const {next} of calls){assert.equal(next.type,'tool_use');assert.equal(next.name,'Bash');assert.match(next.input.command,/^sh stage\.sh [234]$/);}
+ assert.match(calls[1].call.input.text,/0412, 0977 and 1203 could not be restored and need a person to label them/);
+ assert.ok(!responses.flat().some(b=>b.type==='thinking'&&b.text.trim()!==''));
+ const last=responses.at(-1);assert.equal(last.at(-1).type,'text');assert.match(last.at(-1).text,/^<message>/);
+ const frames=meta4(load4('p4-r7-tool-stages'),'frames')[0];
+ const framed=frames.assistant.flatMap(f=>f.blocks).filter(isMessageCall);
+ assert.deepEqual(framed.map(b=>b.input),calls.map(c=>c.call.input));
+ assert.deepEqual(frames.calls.map(c=>({name:c.name,arguments:c.arguments,toolUseId:c.toolUseId})),framed.map(b=>({name:'message',arguments:b.input,toolUseId:b.id})));
+ for(const b of framed){
+  const result=frames.toolResults.find(r=>r.tool_use_id===b.id);
+  assert.deepEqual({is_error:result.is_error,content:result.content},{is_error:false,content:[{type:'text',text:'sent'}]});
+ }
+ const disk=meta4(load4('p4-r7-tool-stages'),'disk')[0].records;
+ for(const b of framed){
+  assert.ok(disk.some(r=>r.type==='assistant'&&r.blocks.some(x=>isMessageCall(x)&&x.id===b.id&&x.input.text===b.input.text)));
+  assert.ok(disk.some(r=>r.type==='user'&&r.blocks.some(x=>x.type==='tool_result'&&x.tool_use_id===b.id&&x.is_error===false)));
+ }
+});
+test('p4 R7 the eval: before, 4 of 11 mid-turn messages lost to progress notes, each asking the human to act; after, 11 of 11 through the tool and none lost; every final message a span; under US$1',()=>{
+ const {summary,runs}=JSON.parse(readFileSync(new URL('p4-r7-eval.json',dir4),'utf8'));
+ assert.deepEqual([summary.before.midSpan,summary.before.lost,summary.before.lostNeedingAction,summary.before.midTurnMessages],[7,4,4,11]);
+ assert.deepEqual([summary.after.midTool,summary.after.midSpan,summary.after.lost,summary.after.midTurnMessages],[11,0,0,11]);
+ assert.deepEqual([summary.before.finalSpan,summary.after.finalSpan,summary.before.notesUnjudged,summary.after.notesUnjudged],[5,5,0,0]);
+ assert.equal(runs.length,10);assert.ok(summary.before.cost+summary.after.cost<1);
+ for(const r of runs.filter(r=>r.arm==='before'))for(const n of r.notes)assert.equal(n.addressed_to_human,true);
 });

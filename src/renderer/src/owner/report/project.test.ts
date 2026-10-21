@@ -182,6 +182,65 @@ describe('the report projection (the P2-C document, Design §7)', () => {
     expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
   });
 
+  // P4-R7: a message the model sent through a message tool is a mark as a span is
+  describe('a message tool’s message', () => {
+    const SENT = [{ type: 'text', text: 'sent' }];
+    function messagedTurn(result: 'sent' | 'refused' | 'none') {
+      const b = builder();
+      b.turn('u1');
+      b.text('m1', 0, 'Looking first.');
+      b.toolUse('c1', 'mcp__maws__message', { text: 'Stage 1 is done.' }, 'm2', 0);
+      if (result === 'sent') b.result('c1', SENT);
+      if (result === 'refused') b.result('c1', 'MCP error: the server went away', { isError: true });
+      b.toolUse('t1', 'Bash', { command: 'sh stage.sh 2' }, 'm2', 1);
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      return b;
+    }
+
+    it('marks its turn alone: level 0 is the prompt, the record counting the work and the words, then the message', () => {
+      const b = messagedTurn('sent');
+      b.text('m3', 0, 'All stages ran.');
+      b.end(['u1']);
+      const rows = project(stateOf(b.events));
+      expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'to_human']);
+      expect(rows[2]).toMatchObject({ kind: 'owner_record', open: false, working: false, toolCalls: 1, messages: 2 }); // the call is the message, not one of the calls
+      expect(rows[3]).toMatchObject({ toolUseId: 'c1', text: 'Stage 1 is done.' });
+      // opened, the turn as the full transcript draws it folded: the message stays in view there too
+      expect(kinds(project(stateOf(b.events, () => ({ reportOpenTurns: new Set([T1]) }))))).toEqual(['time', 'user', 'owner_record', 'divider', 'to_human', 'text:All stages ran.']);
+    });
+
+    it('sits at its place among the turn’s marked texts', () => {
+      const b = builder();
+      b.turn('u1');
+      b.text('m1', 0, '<message>Starting the stages.</message>');
+      b.toolUse('c1', 'mcp__to-human__message', { text: 'Stage 1 is done.' }, 'm2', 0);
+      b.result('c1', SENT);
+      b.toolUse('t1', 'Bash', { command: 'sh stage.sh 2' }, 'm2', 1);
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      b.text('m3', 0, '<message>Both stages ran.</message>');
+      b.end(['u1']);
+      expect(kinds(project(stateOf(b.events)))).toEqual(['time', 'user', 'owner_record', 'text:<message>Starting the stages.</message>', 'to_human', 'text:<message>Both stages ran.</message>']);
+    });
+
+    it('marks an open turn while it waits for its result: the record runs above the message about to be sent', () => {
+      const rows = project(stateOf(messagedTurn('none').events));
+      expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'to_human']);
+      expect(rows[2]).toMatchObject({ working: true, toolCalls: 1 });
+      expect(rows[3]).toMatchObject({ pending: true });
+    });
+
+    it('a refused call marks nothing: with no span either, the turn draws as the full transcript', () => {
+      const b = messagedTurn('refused');
+      b.text('m3', 0, 'All stages ran.');
+      b.end(['u1']);
+      const state = stateOf(b.events);
+      const rows = project(state);
+      expect(rows).toEqual(rowsOf(state));
+      expect(kinds(rows)).not.toContain('owner_record');
+      expect(rows.find((row) => row.kind === 'divider')).toMatchObject({ toolCalls: 2 });
+    });
+  });
+
   it('is the report only while the lane is on and the reader has not chosen the transcript', () => {
     const ui = createState(null, null).ui;
     expect(reportViewOf(ui)).toBe(false);
