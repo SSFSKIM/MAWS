@@ -1,7 +1,8 @@
 // The deck's scale seam (P3-C M10; docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, Acceptance 7): what
-// `e2e/presentations-scale.spec.ts` drives the engine host through, started only when the host runs under MAWS_E2E=1 and
-// MAWS_PRESENTATIONS_SCALE=1. Each command names an agent session, and A's own `artifact_read` and `artifact_publish`
-// run through their real `call` with that session as the context, so a publish is A's `publishDoc` over the deck's
+// `e2e/presentations-scale.spec.ts` (and, since P4-B2 M0, `e2e/presentations-drag.spec.ts`) drives the engine host
+// through, started only when the host runs under MAWS_E2E=1 and MAWS_PRESENTATIONS_SCALE=1. Each command names an agent
+// session, and A's own `artifact_read` and `artifact_publish` run through their real `call` with that session as the
+// context, so a publish is A's `publishDoc` over the deck's
 // three-way publish on the host's live document, with the session's base, its op ledger and its replica: the path an
 // agent's publish takes in the host, less the engine's wire. Around each call the seam answers the host loop's longest
 // gap (B's 1 ms tick sampler, which catches a call blocking the loop at once) and the loop's busy time over the call

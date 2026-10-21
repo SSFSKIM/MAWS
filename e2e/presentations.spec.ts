@@ -17,8 +17,8 @@
 // - M5 fix wave 1: an element drawn scaled picked, handled and resized where it is painted; a turned group ungrouped
 //   with each child kept where it was painted; another replica's selection outlined; a crop's focus read from pixels;
 //   a picture copied across decks drawn from the second deck's own store.
-// - M5, the scale gate's drag (Acceptance 7): a drag's move-to-frame p95 on the 100-slide deck while an agent
-//   republishes, measured through the seam, the 1-minute load average beside it.
+// - M5, the scale gate's drag (Acceptance 7): since P4-B2 M0 in e2e/presentations-drag.spec.ts, whose agent republishes
+//   through the host's `artifact_publish` (this group runs it too).
 // - P3-F wave S F3: the deck in the panel at its 280 px minimum, its toolbar wrapped by whole controls (the owner's
 //   obs 9: labels one letter a line over the canvas).
 // - P3-F wave S F9: words typed on a selected text element, and on a grouped heading after the first double-click, enter
@@ -54,8 +54,6 @@ interface Seam {
         | { op: 'setAttrs'; slideId: string; elementId: string; attrs: Record<string, string | null> },
     ): Promise<void>;
     presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
-    dragProbe: { start(artifactId: string): void; stop(): { moves: number; withTransaction: number; inputToTxMs: Stat; inputToFrameMs: Stat; longTasks: number } };
-    agent: { start(artifactId: string, intervalMs: number): Promise<void>; stop(): Promise<number> };
     order(artifactId: string): Promise<string[]>;
     files(artifactId: string): Promise<Record<string, string>>;
     slide(artifactId: string, slideId: string): Promise<SlideIR>;
@@ -63,7 +61,6 @@ interface Seam {
   };
 }
 type DeckSeam = Seam['__maws_presentations'];
-type Stat = { p50: number; p95: number; max: number };
 const order = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_presentations.order(a), id);
 const seed = (page: Page, id: string, files: Record<string, string>) => page.evaluate(([a, f]) => (window as unknown as Seam).__maws_presentations.seed(a, f), [id, files] as const);
 const editDeck = (page: Page, id: string, edit: Parameters<DeckSeam['edit']>[1]) => page.evaluate(([a, e]) => (window as unknown as Seam).__maws_presentations.edit(a, e), [id, edit] as const);
@@ -572,40 +569,6 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   await page.evaluate(() => (window as unknown as Seam).__maws_presentations.presence.clear());
   await expect(tab.locator('[data-overlay] [data-remote-selected]')).toHaveCount(0);
 
-  expect(launch!.consoleErrors()).toEqual([]);
-});
-
-// A measured bound inside a class-1 group: it runs only under MAWS_PRESENTATIONS_PERF=1, which the gate never sets (as
-// MAWS_DOCUMENT_PERF and MAWS_ARTIFACTS_PERF). The scale gate (presentations-scale.spec.ts, class 2, under the load rule)
-// owns the 16 ms; the transform layer's case keeps a drag's function in the gate.
-test('the scale gate’s drag: move to frame p95 within 16 ms on the 100-slide deck while an agent republishes', async () => {
-  test.skip(process.env.MAWS_PRESENTATIONS_PERF !== '1', 'measured only under MAWS_PRESENTATIONS_PERF=1');
-  test.setTimeout(150_000);
-  const page = await ready();
-  const id = await createDeck(page, 'Bench drag', benchDeckFiles(100));
-  const tab = await openFromLibrary(page, 'Bench drag', id);
-  await expect(tab.locator('[data-slide-thumb] .maws-slide')).toHaveCount(100);
-  // the first slide's pinned picture (S6's bench shape 1: an image pinned right and top)
-  const target = tab.locator('[data-stage-slide] img[data-eid]').first();
-  const box = (await target.boundingBox())!;
-  const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  await page.evaluate(([a]) => (window as unknown as Seam).__maws_presentations.agent.start(a!, 700), [id] as const);
-  await page.evaluate(([a]) => (window as unknown as Seam).__maws_presentations.dragProbe.start(a!), [id] as const);
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  for (let i = 1; i <= 200; i++) {
-    await page.mouse.move(from.x - i, from.y + (i % 40));
-    await page.waitForTimeout(16);
-  }
-  await page.mouse.up();
-  const drag = await page.evaluate(() => (window as unknown as Seam).__maws_presentations.dragProbe.stop());
-  const published = await page.evaluate(() => (window as unknown as Seam).__maws_presentations.agent.stop());
-  console.log(
-    `[deck scale] drag: ${drag.withTransaction}/${drag.moves} moves wrote; move → transaction p50 ${drag.inputToTxMs.p50} p95 ${drag.inputToTxMs.p95} ms; move → frame p50 ${drag.inputToFrameMs.p50} p95 ${drag.inputToFrameMs.p95} max ${drag.inputToFrameMs.max} ms; ${drag.longTasks} long tasks; the agent published ${published} slides (load ${loadavg()[0]!.toFixed(1)})`,
-  );
-  expect(published).toBeGreaterThan(2);
-  expect(drag.withTransaction).toBeGreaterThan(100); // a move that lands where the last did (held by a snap) writes nothing
-  expect(drag.inputToFrameMs.p95).toBeLessThanOrEqual(16);
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
