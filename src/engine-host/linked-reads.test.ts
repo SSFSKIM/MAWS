@@ -162,4 +162,23 @@ describe('a human message on an EngineSession (scripted, the real store)', () =>
     run.transport.exit(0);
     await run.session.exited;
   });
+
+  it('never undoes a read the agent made beside it: an artifact_read in flight while the message is prepared keeps its base', async () => {
+    const other = mawsTools({ bridge: new PaneBridge({ show: () => {} }), capture: new HostBridge({ send: () => {}, answerMs: 1_000 }), asks: new AskTable(), askCancelled: () => {}, artifacts: () => documents.store });
+    const made = await other.find((t) => t.name === 'artifact_create')!.call({ title: 'Page', content: `<p>${'x'.repeat(LINKED_READ_CAP_BYTES)}</p>` }, { appSessionId: 'app-other' as AppSessionId, cwd, toolUseId: 'toolu_big' as ToolUseId, requestId: 'rbig' as RequestId, signal: new AbortController().signal, fromSubagent: false });
+    const big = JSON.parse((made.content[0] as { text: string }).text) as { artifactId: string; revision: number };
+    const run = scriptedSession({ spec: { cwd }, session: { appVersion: '0.9.0', artifacts: () => documents.store } });
+    await run.session.start();
+    const answerOf = (id: string) => run.transport.writes.find((f) => f.type === 'control_response' && (f as { response: { request_id: string } }).response.request_id === id) as { response: { response: { mcp_response: { result: { isError?: boolean; content: { text: string }[] } } } } } | undefined;
+    const call = (id: string, name: string, args: unknown) => run.transport.push({ type: 'control_request', request_id: id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args, _meta: { 'claudecode/toolUseId': `toolu_${id}` } } } } });
+    // the agent's own read (a background agent's, the main turn idle) and the human's message linking the same page, at once
+    call('own-read', 'artifact_read', { artifact: big.artifactId });
+    await run.session.send(`Look at [it](maws-artifact:${big.artifactId}).`);
+    for (let i = 0; i < 2000 && !answerOf('own-read'); i++) await new Promise((r) => setTimeout(r, 5));
+    call('publish', 'artifact_publish', { artifact: big.artifactId, baseRevision: big.revision, files: { 'index.html': '<p>mine</p>' } });
+    for (let i = 0; i < 2000 && !answerOf('publish'); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(answerOf('publish')!.response.response.mcp_response.result.isError).toBeUndefined(); // the agent's read still stands
+    run.transport.exit(0);
+    await run.session.exited;
+  });
 });

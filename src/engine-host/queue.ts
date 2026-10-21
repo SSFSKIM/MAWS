@@ -646,16 +646,19 @@ export class MessageQueue {
       this.preparing = null;
     }
     let written = false;
+    let usedPrepared = false;
     try {
       if (!this.deps.canWrite() || this.releasePaused) return false;
       if (entry.state !== 'queued' || !this.entries.includes(entry)) {
         await this.releaseHead(trigger);
         return false;
       }
-      written = await this.write(entry, trigger, failReason, entry.content === from ? prepared.content : entry.content);
+      // decided once, before the write: an edit whose save then fails puts the old content back during it
+      usedPrepared = entry.content === from;
+      written = await this.write(entry, trigger, failReason, usedPrepared ? prepared.content : entry.content);
       return written;
     } finally {
-      prepared.settle(written && entry.content === from);
+      prepared.settle(written && usedPrepared);
     }
   }
 

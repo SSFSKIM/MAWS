@@ -1548,6 +1548,38 @@ describe('a prepared submission', () => {
     expect(p.settled).toEqual([['first', false]]);
   });
 
+  it('settles by the content it chose: an edit whose save fails while the edited content goes still undoes the preparation', async () => {
+    const g = gate();
+    const p = preparer({ first: g.opened });
+    let failing: { held: Promise<void> } | null = null;
+    const store = new (class extends MemorySessionStateStore {
+      override async saveQueue(id: AppSessionId, queue: QueueState): Promise<void> {
+        const f = failing;
+        if (f) {
+          failing = null;
+          await f.held;
+          throw new Error('disk full');
+        }
+        return super.saveQueue(id, queue);
+      }
+    })();
+    const { queue, writes, held } = await harness({ store, prepare: p.prepare, holdWrites: true });
+    const first = queue.send('first');
+    await flush();
+    const hold = gate();
+    failing = { held: hold.opened };
+    const editing = queue.edit(queue.state.entries[0]!.queueId, 'edited').catch((e: unknown) => e);
+    await flush();
+    g.open(); // the preparation ends while the edit's save is still out: the edited content is chosen
+    for (let i = 0; i < 20 && held.length === 0; i++) await flush();
+    hold.open(); // the edit's save fails during the write: the entry reads 'first' again
+    expect(await editing).toBeInstanceOf(Error);
+    held.splice(0).forEach((release) => release());
+    await first;
+    expect(writes.map((w) => w.message.content)).toEqual(['edited']);
+    expect(p.settled).toEqual([['first', false]]); // the read never went, whatever the entry reads now
+  });
+
   it('saves nothing when the process exits while it prepares: what the exit saved stays', async () => {
     const g = gate();
     const p = preparer({ first: g.opened });
