@@ -25,6 +25,10 @@ const isCreate = (request: Request) => request.method === 'POST' && new URL(requ
 const machines = async () => ((await (await hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: Array<{ name: string; state: string; client_id: string | null }> }).machines;
 const listed = async (name: string) => (await machines()).find((m) => m.name === name);
 const gone = (name: string, ms = 10_000) => waitFor(async () => ((await listed(name)) ? undefined : true), ms);
+/** Until Access no longer holds the machine's service token. A revocation deletes the record first (the Worker refuses
+ * the credential `403 not-enrolled` from then) and the token after, so a sweep's revocation, which the suite does not
+ * await, can be seen gone from the list before Access refuses the credential itself (`401`). */
+const tokenGone = (name: string) => waitFor(() => (tokensNamed(name).length === 0 ? true : undefined));
 const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
 const self = (creds: Credentials) => hub.fetchAs(creds, '/machine/enrollment');
 let projects = 0;
@@ -103,7 +107,7 @@ describe('the offline sweep', () => {
     // Once the API answers (the next redemption sweeps the orphan), Access refuses it before the Worker.
     hub.faults.length = 0;
     await enroll(hub, ADMIN, 'sweeper-1');
-    await waitFor(() => (tokensNamed('dc-gone-1').length === 0 ? true : undefined));
+    await tokenGone('dc-gone-1');
     expect(await refusal(await self(machine.creds))).toBe('401 access');
   });
 
@@ -150,6 +154,7 @@ describe('the offline sweep', () => {
 
     await hub.releaseRevoke('dc-race-a');
     await gone('dc-race-a');
+    await tokenGone('dc-race-a');
     expect(await refusal(await self(first))).toBe('401 access');
     expect(await listed('dc-race-b')).toMatchObject({ state: 'active', client_id: replacement.creds.clientId });
     expect(tokensNamed('dc-race-b').map((t) => t.client_id)).toEqual([replacement.creds.clientId]);
@@ -167,6 +172,7 @@ describe('the offline sweep', () => {
     expect((await leased('dc-late-1', creds, true)).machines.find((m) => m.name === 'dc-late-1')?.online).toBe(true);
     await hub.releaseRevoke('dc-late-1');
     await gone('dc-late-1');
+    await tokenGone('dc-late-1');
     expect(await refusal(await self(creds))).toBe('401 access');
   });
 
@@ -203,7 +209,7 @@ describe('the offline sweep', () => {
     } finally {
       await hub.offlineRetry(null);
     }
-    await waitFor(() => (tokensNamed('dc-fenced-1').length === 0 ? true : undefined));
+    await tokenGone('dc-fenced-1');
     expect(await refusal(await self(creds))).toBe('401 access');
   });
 

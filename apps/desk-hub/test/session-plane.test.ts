@@ -785,10 +785,16 @@ describe('presence and machine leases', () => {
 
   it('hb-acks of the current generation keep the machine online past its lease', async () => {
     const project = newProject();
-    const m = await machine(project, { heartbeatMs: 200, leaseMs: 1200 });
+    // A lease of 15 heartbeats (the deployed one is 3 of 15 s). Each renewal goes from the hub's timer through the
+    // suite's proxy and client and back through the Worker to the project, and on a loaded box one can land more than a
+    // second late: under a lease of 1.2 s the machine flapped offline (MAWS's pool, run 39568222090). What this proves is
+    // that renewals carry the machine past its lease, so the wait ends a second after the lease the hello started.
+    const leaseMs = 3000;
+    const m = await machine(project, { heartbeatMs: 200, leaseMs });
+    const helloed = Date.now(); // machine()'s hello started the lease before this
     const b = await browser(project);
     await m.postOk([{ t: 'session', message: envelope(m, project, 'machine', machinePresence, null) }]);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await new Promise((resolve) => setTimeout(resolve, helloed + leaseMs + 1000 - Date.now()));
     expect(ofType(b, 'machines').flatMap((f) => f.machines).filter((x) => x.machine === m.name && !x.online)).toEqual([]);
     b.close();
     await m.close();
