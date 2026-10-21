@@ -810,6 +810,11 @@ export class Registry extends DurableObject<Env> {
     const retries = [...this.unfinished].filter(([, u]) => u.began + this.offlineRetryMs() <= now).map(([enrollment, u]) => ({ name: u.name, enrollment }));
     const overdue = this.offlineDeadlines().filter((c) => c.deadline <= now && !this.unfinished.has(c.enrollment));
     for (const { name, enrollment } of [...retries, ...overdue]) {
+      // Read again at dispatch: while this sweep awaited an earlier candidate, another may have begun this one, failed it
+      // (its retry not yet due), or finished it (a retry whose entry is gone). A row already revoked is the revoker's to
+      // answer as gone, before any fence.
+      const live = this.unfinished.get(enrollment);
+      if (live ? live.began + this.offlineRetryMs() > Date.now() : retries.some((r) => r.enrollment === enrollment)) continue;
       this.unfinished.set(enrollment, { name, began: Date.now() });
       try {
         await this.revokeMachine(name, { enrollment });

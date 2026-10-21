@@ -206,4 +206,23 @@ describe('the offline sweep', () => {
     await waitFor(() => (tokensNamed('dc-fenced-1').length === 0 ? true : undefined));
     expect(await refusal(await self(creds))).toBe('401 access');
   });
+
+  it("does not retry a candidate from a stale list: one a concurrent sweep failed meanwhile waits its minute", async () => {
+    const { token } = await provisioningKey(hub, ADMIN, { label: 'pair', prefix: 'dc-', offline_revoke_s: HOUR });
+    await confirmed(token, 'dc-pair-a');
+    await confirmed(token, 'dc-pair-b');
+    hub.expectRuntimeLog(/a revocation answer the suite lost/);
+    // The alarm's sweep lists both and waits on the first; a redemption's sweep meanwhile skips the first and fails the second.
+    await hub.faultNextRevoke('dc-pair-a', 'hold');
+    await hub.faultNextRevoke('dc-pair-b', 'lose');
+    await hub.backdate({ machines: [{ name: 'dc-pair-a', confirmed: ago(2 * HOUR) }, { name: 'dc-pair-b', confirmed: ago(2 * HOUR) }] });
+    await waitFor(async () => ((await hub.revokeHeld('dc-pair-a')) ? true : undefined), 10_000);
+    await enroll(hub, ADMIN, 'pair-sweeper-1');
+    expect(hub.runtimeLogs.some((l) => l.message.includes('"desk":"offline-revoke"') && l.message.includes('dc-pair-b'))).toBe(true);
+    // The first sweep resumes: it completes the first, and leaves the second to its retry a minute on.
+    await hub.releaseRevoke('dc-pair-a');
+    await gone('dc-pair-a');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await listed('dc-pair-b')).toMatchObject({ state: 'active' });
+  });
 });
