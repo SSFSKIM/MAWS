@@ -18,7 +18,7 @@ import { applyV1, diffV1, stateV2, transact } from '@artifacts/yjs';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import committedFingerprint from '@artifacts/document/fingerprint.json';
-import { onSessionReplica, isWarming } from '../documents/kinds/document-host';
+import { onSessionReplica, isWarming, warmInSlices } from '../documents/kinds/document-host';
 import { registerDocumentKind } from '../documents/kinds/document';
 import { HUMAN, openDocumentWorld, type DocumentWorld } from '../documents/kinds/document-world.fixture';
 import { DocumentService } from '../documents/service';
@@ -168,6 +168,23 @@ describe('artifact_read of a document', () => {
     for (let i = 0; i < 50 && isWarming(replica); i++) await settle();
     const index = DocIndex.of(replica);
     expect(index.tabIds().flatMap((tab) => index.tops(tab)).every((top) => top.textCache !== null)).toBe(true);
+  });
+
+  // P4-R6: a replica dropped mid-warm is destroyed, and its index warms on regardless (nothing throws), so the warm
+  // checks the doc before each slice. The index's warm stands in for twenty slices' worth of blocks.
+  it('stops warming a replica once it is dropped: no slice runs on its destroyed doc', async () => {
+    const id = await world.seeded();
+    const replica = await onSessionReplica(world.store, id, { kind: 'session', appSessionId: SELF }, (doc) => doc);
+    let slices = 0;
+    vi.spyOn(DocIndex.of(replica), 'warm').mockImplementation(() => ++slices >= 20);
+    warmInSlices(replica);
+    await settle();
+    expect(slices).toBe(1);
+    world.service.closeSession(SELF); // the session's process ended: its host replica goes
+    expect(replica.isDestroyed).toBe(true);
+    for (let i = 0; i < 30; i++) await settle();
+    expect(slices).toBe(1);
+    expect(isWarming(replica)).toBe(false);
   });
 
   it('sinceRevision returns only the blocks changed since, and the blocks deleted', async () => {

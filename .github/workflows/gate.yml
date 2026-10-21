@@ -81,8 +81,9 @@ env:
   # use, and after 15 minutes refuses it with ci-kit's `ci-kit: … rerun` line, which scripts/ci-gate.sh counts as refused
   # and relaunches. Their job timeout adds those 15 minutes to the usual 30. tool-time-heavy-live (P4-A2, X34) holds
   # per-call bounds too: its 24-board design's create and publish ran 463 to 727 ms at a load of 18 to 25 on the MacBook,
-  # and one of them passed the 1,000 ms bound at a load of about 75.
-  MEASURED_E2E: artifacts-perf document-scale presentations-scale tool-time-heavy-live
+  # and one of them passed the 1,000 ms bound at a load of about 75. document-scale-repeat (P4-R6) repeats row 5's first
+  # batch after a read in one launch, recorded with no bound, so its strays are counted and named in the same posture.
+  MEASURED_E2E: artifacts-perf document-scale document-scale-repeat presentations-scale tool-time-heavy-live
 
 defaults:
   run:

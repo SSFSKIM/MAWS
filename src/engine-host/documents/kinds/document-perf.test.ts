@@ -12,6 +12,7 @@ import { DocIndex } from '@artifacts/document/block-index';
 import { stateV2 } from '@artifacts/yjs';
 import { HUMAN, openDocumentWorld, type DocumentWorld } from './document-world.fixture';
 import { DocumentPerfSeam, documentPerfSeamRequested, startDocumentPerfSeam, type CallAnswer } from './document-perf';
+import { hostWorkBetween, timed } from '../host-work'; // P4-R6
 
 let world: DocumentWorld;
 beforeEach(() => {
@@ -77,6 +78,77 @@ describe('the seam’s commands', () => {
     const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: blocking, artifact_edit: blocking }) as never });
     const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: {} })) as CallAnswer;
     expect(answer.loop.max).toBeGreaterThanOrEqual(70);
+    seam.close();
+  });
+
+  // P4-R6: a slow row names what shared its loop. The work inside the call's longest gap is listed (when it began, how
+  // long, what it did); the call's work is summed by kind; work before the call is not counted.
+  it('names the host’s work that shared a call’s longest gap, and sums the call’s work by kind', async () => {
+    const spin = (ms: number) => {
+      const until = performance.now() + ms;
+      while (performance.now() < until);
+    };
+    const tool = {
+      call: async () => {
+        timed('warm', () => spin(4));
+        await new Promise((resolve) => setTimeout(resolve, 10)); // the loop turns: a gap of its own
+        timed('mirror', () => spin(60), () => 'a document’s text');
+        timed('commit', () => spin(5));
+        return { content: [{ type: 'text' as const, text: '{"revision":1}' }] };
+      },
+    };
+    const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: tool, artifact_edit: tool }) as never });
+    timed('head', () => spin(20)); // before the call: not its
+    const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: {} })) as CallAnswer;
+    const { longest, call } = answer.background;
+    expect(longest?.ms).toBeCloseTo(answer.loop.max, 0);
+    expect(longest?.ms).toBeGreaterThanOrEqual(60);
+    const named = longest!.work.filter((entry) => entry.what !== 'gc'); // V8's collections land where they land
+    expect(named.map((entry) => entry.what)).toEqual(['mirror', 'commit']);
+    expect(named[0]).toMatchObject({ what: 'mirror', detail: 'a document’s text' });
+    expect(named[0]!.ms).toBeGreaterThanOrEqual(59);
+    expect(named[0]!.at).toBeGreaterThanOrEqual(10); // after the call's turn
+    expect(Object.keys(call).filter((what) => what !== 'gc').sort()).toEqual(['commit', 'mirror', 'warm']);
+    expect(call.warm).toMatchObject({ count: 1 });
+    // the main thread ran through the gap, where the platform tells it (Node 23.9 and later)
+    if (longest?.cpuMs !== null) expect(longest!.cpuMs!).toBeGreaterThan(0.8 * longest!.ms - 5);
+    seam.close();
+  });
+
+  // P4-R6 (the review's P2): a call longer than the record's two-second horizon keeps its whole window
+  it('keeps a long call’s work in its record past the record’s horizon', { timeout: 10_000 }, async () => {
+    const spin = (ms: number) => {
+      const until = performance.now() + ms;
+      while (performance.now() < until);
+    };
+    const tool = {
+      call: async () => {
+        timed('mirror', () => spin(60));
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        timed('commit', () => spin(5));
+        return { content: [{ type: 'text' as const, text: '{"revision":1}' }] };
+      },
+    };
+    const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: tool, artifact_edit: tool }) as never });
+    const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: {} })) as CallAnswer;
+    expect(answer.background.longest?.work.filter((entry) => entry.what !== 'gc').map((entry) => entry.what)).toEqual(['mirror']);
+    expect(Object.keys(answer.background.call).filter((what) => what !== 'gc').sort()).toEqual(['commit', 'mirror']);
+    expect(answer.background.partial).toBeUndefined();
+    seam.close();
+  });
+
+  // P4-R6: a first read's replica applies the whole document from the host after the read, a stretch the record names
+  it('records a first read’s replica sync, the whole document applied on the agent’s replica, as the host’s work', async () => {
+    const id = await emptyDocument();
+    const seam = new DocumentPerfSeam(world.store);
+    await seam.run({ cmd: 'seed', artifactId: id, state: Buffer.from(stateV2(seedDoc())).toString('base64') });
+    const from = performance.now();
+    await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: { artifact: id } });
+    await settle();
+    const { work } = hostWorkBetween(from, performance.now());
+    expect(work.some((entry) => entry.what === 'replica' && /^step2, \d+ bytes$/.test(entry.detail ?? ''))).toBe(true);
+    expect(work.some((entry) => entry.what === 'frame' && /^step1, \d+ bytes from session:perf-agent-1$/.test(entry.detail ?? ''))).toBe(true);
+    expect(work.some((entry) => entry.what === 'commit')).toBe(true);
     seam.close();
   });
 

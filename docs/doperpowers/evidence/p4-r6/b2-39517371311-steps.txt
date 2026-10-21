@@ -1,0 +1,32 @@
+result start 2026-10-20T23:57:08.276Z duration 198101
+ Before Hooks start 2026-10-20T23:57:08.276Z ms 2
+ Launch electron start 2026-10-20T23:57:08.279Z ms 334
+ Wait for event "window" start 2026-10-20T23:57:08.613Z ms 196
+ the engine host is ready start 2026-10-20T23:57:08.811Z ms 6
+ the host started the scale seam start 2026-10-20T23:57:08.817Z ms 354
+ Evaluate start 2026-10-20T23:57:09.203Z ms 10
+ the host wrote the first tab start 2026-10-20T23:57:09.213Z ms 2
+ Evaluate start 2026-10-20T23:57:09.379Z ms 7
+ the host wrote the first tab start 2026-10-20T23:57:09.387Z ms 1
+ Evaluate start 2026-10-20T23:57:09.406Z ms 28
+ 6: first sync to interactive, cold and warm, at 20 and at 200 pages start 2026-10-20T23:58:15.578Z ms 1910
+ Wait for event "window" start 2026-10-20T23:58:17.488Z ms 80
+ Evaluate start 2026-10-20T23:58:17.489Z ms 16
+ Wait for load state "domcontentloaded" start 2026-10-20T23:58:17.568Z ms 275
+ Click start 2026-10-20T23:58:17.844Z ms 787
+ Expect "toBeVisible" start 2026-10-20T23:58:18.631Z ms 2
+ Evaluate start 2026-10-20T23:58:18.633Z ms 2
+ Click start 2026-10-20T23:58:18.635Z ms 308
+ Evaluate start 2026-10-20T23:58:18.943Z ms 1
+ Evaluate start 2026-10-20T23:58:18.944Z ms 2017
+ Expect "toBe" start 2026-10-20T23:58:20.231Z ms 0
+ a five-op batch start 2026-10-20T23:58:20.231Z ms 0
+ Expect "toBe" start 2026-10-20T23:58:20.576Z ms 0
+ a five-op batch start 2026-10-20T23:58:20.576Z ms 0
+ 1 to 5: typing in A, painted in B, two agents writing, the host loop start 2026-10-20T23:58:20.746Z ms 42342
+ 10: Korean composed under load into a block an agent edits; the hold, its merged flush, no start 2026-10-20T23:59:03.088Z ms 12884
+ 7: the history preview’s enter and leave, three times; the renderers after start 2026-10-20T23:59:15.972Z ms 3758
+ 8: the host’s heap loaded and, after close and unload, against idle; the renderers start 2026-10-20T23:59:19.730Z ms 66429
+ bounds failed (a miss of 20 percent or more, or a miss at load under 10; the loads are in  start 2026-10-21T00:00:26.160Z ms 1
+ After Hooks start 2026-10-21T00:00:26.162Z ms 221
+ Worker Cleanup start 2026-10-21T00:00:26.383Z ms 1

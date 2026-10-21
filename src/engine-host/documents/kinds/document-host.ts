@@ -5,7 +5,8 @@
 //   session as actor, which records the tool's op in the write's own savepoint, A's Decision Log 26c). A read reaches
 //   the same replica through A's `readAs` (`onSessionReplica`), so it warms the block index the
 //   writer plans with: the range it renders at once, every other block in slices off the host's loop (`warmInSlices`).
-//   The replica lives as long as the document is loaded, which A keeps while the session's agent replica is attached.
+//   The replica lives until the document unloads (A keeps it loaded while the session's agent replica is attached) or
+//   the session's process ends (A's `closeSession` drops it, and the session's views go with its tool state).
 // - A session's views (`DocumentViews`): for each revision the session has seen of a replica (a read, its own write,
 //   a refusal that showed it the targets' current text), the block index's epoch then and the block ids then. A batch's
 //   `baseRevision` maps to the latest view at or before it: the epoch the writer validates targets against, the ids a
@@ -18,6 +19,7 @@ import { DocIndex, type TopBlock } from '@artifacts/document/block-index';
 import { blockIdsOf, deletedSince, touchedBlocks } from '@artifacts/document/since';
 import { applyV1, applyV2, decodeMap, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
+import { timed } from '../host-work'; // P4-R6
 import type { ArtifactStore } from '../store';
 
 const VIEWS_KEPT = 8; // per replica: the session's recent revisions
@@ -74,17 +76,22 @@ export async function onSessionReplica<T>(store: ArtifactStore, artifactId: stri
 
 const warming = new WeakSet<Doc>();
 
-/** Warms every block of `doc`'s index a few milliseconds at a time, one slice per event-loop turn, until all are. */
+/**
+ * Warms every block of `doc`'s index a few milliseconds at a time, one slice per event-loop turn, until all are, or
+ * until the replica is dropped (the document unloaded or evicted, or its session closed): its doc is destroyed, which
+ * the index does not notice, so each slice checks first.
+ */
 export function warmInSlices(doc: Doc, sliceMs = WARM_SLICE_MS): void {
   if (warming.has(doc)) return;
   warming.add(doc);
   const step = () => {
+    if (doc.isDestroyed) return void warming.delete(doc);
     const until = performance.now() + sliceMs;
     let done = true;
     try {
-      done = DocIndex.of(doc).warm(() => performance.now() >= until);
+      done = timed('warm', () => DocIndex.of(doc).warm(() => performance.now() >= until)); // P4-R6: timed
     } catch {
-      // the replica was dropped (the document unloaded or evicted): nothing left to warm
+      // a warm that throws ends: the writer builds what its batch needs as it goes
     }
     if (done) warming.delete(doc);
     else setImmediate(step);

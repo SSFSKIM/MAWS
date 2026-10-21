@@ -4,7 +4,7 @@
 // E10: one bundle, two modes, decided at load: `process.parentPort` present → `utility` (an Electron utility process
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
-import { hostPing, runHost, type HostRegister } from '@shared/host/runtime';
+import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
 // C3 start
 import { join } from 'node:path';
 import { registerEngineIpc, type EngineIpc } from './ipc';
@@ -26,6 +26,7 @@ import { openSupervisorLog } from './supervisor-log';
 // E10 end
 // P3-A start
 import { openDocuments, type Documents } from './documents';
+import { timed } from './documents/host-work'; // P4-R6
 import { registerArtifacts } from './documents/register'; // M4
 // P3-A end
 // P3-L start
@@ -71,7 +72,9 @@ let supervision: Supervision | null = null; // the host.* commands and the super
 // E10 end
 let documents: Documents | null = null; // P3-A: the artifact store (M4's IPC and document ports; M5 and M6 serve it too)
 
-const register: HostRegister = (on, emit, client) => {
+const register: HostRegister = (untimedOn, emit, client) => {
+  // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
+  const on: HostOn = (name, handler) => untimedOn(name, (input) => timed('request', () => handler(input), () => name));
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).

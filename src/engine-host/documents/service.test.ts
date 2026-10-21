@@ -528,6 +528,55 @@ describe('DocumentService: host-originated writes', () => {
     await kept;
     expect(seen).toEqual([{ artifactId: 'a1', revision: service.revision('a1'), actors: [human] }]);
   });
+
+  // P4-R6: a document open in a window never unloads, so a host replica left to the unload stays a whole mirror,
+  // taking every later update, for each session that ever used it.
+  it('drops a session’s host replicas at its end, main and suggestion docs alike, keeping the others’; its next process reads and writes on fresh ones, as itself', async () => {
+    make({}, true);
+    const other: Actor = { kind: 'session', appSessionId: sid('app-2') };
+    const replicaOf = (key: string, actor: Actor) => service.readAs(key, actor, (doc) => doc);
+    const text = (doc: Doc) => doc.get('t').toString();
+    const watcher = service.replica(sid('app-9'), 'a1'); // a window's connection, as far as the doc can tell
+    await watcher.whenSynced();
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'hello'));
+    const key = service.suggestionDoc('a1');
+    expect(service.readAs('a1', agent, text)).toBe('hello');
+    await service.writeAs('a1', agent, (doc) => doc.get('t').insert(5, '!'));
+    await service.writeAs(key, agent, (doc) => doc.get('t').insert(6, ' (draft)'));
+    const [main, suggestion, humans, others] = [replicaOf('a1', agent), replicaOf(key, agent), replicaOf('a1', human), replicaOf('a1', other)];
+    const bound = main.clientID;
+
+    service.closeSession(sid('app-1'));
+    expect([main.isDestroyed, suggestion.isDestroyed]).toEqual([true, true]);
+    expect(replicaOf('a1', human)).toBe(humans);
+    expect(replicaOf('a1', other)).toBe(others);
+    expect(humans.isDestroyed || others.isDestroyed).toBe(false);
+    // the others' writes go on: committed, mirrored into the replicas kept, sent to the connections
+    const revision = await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, '# '));
+    expect(revision).toBe(service.revision('a1'));
+    expect(text(others)).toBe('# hello!');
+    await until(() => text(watcher.doc) === '# hello!');
+
+    // the session's next process: fresh replicas from the live docs, its main doc's under its bound clientID
+    const fresh = replicaOf('a1', agent);
+    expect(fresh).not.toBe(main);
+    expect(fresh.clientID).toBe(bound);
+    expect(text(fresh)).toBe('# hello!');
+    await service.writeAs('a1', agent, (doc) => {
+      expect(doc).toBe(fresh);
+      doc.get('t').insert(0, 'Re: ');
+    });
+    expect(replicaOf(key, agent)).not.toBe(suggestion);
+    expect(service.readAs(key, agent, text)).toBe('Re: # hello! (draft)');
+    await service.writeAs(key, agent, (doc) => doc.get('t').insert(20, '.'));
+    await until(() => text(watcher.doc) === 'Re: # hello!');
+    expect(committed('SELECT artifactId, actor FROM artifact_updates ORDER BY seq').slice(-2)).toEqual([{ artifactId: 'a1', actor: 'session:app-1' }, { artifactId: 'a1:suggest', actor: 'session:app-1' }]);
+    expect(insertedBy(service.provenance('a1'), idAt(service.live('a1').get('t'), 0)!)?.actor).toBe('session:app-1');
+    expect(committed("SELECT clientId, actor FROM client_actors WHERE artifactId = 'a1' AND host = 1 ORDER BY actor")).toEqual([
+      { clientId: expect.any(Number), actor: 'human' },
+      { clientId: bound, actor: 'session:app-1' }, // one host clientID per actor, as across a reload
+    ]);
+  });
 });
 
 describe('DocumentService: suggestion docs (M8; Decision Log 23e)', () => {

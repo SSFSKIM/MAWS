@@ -1,0 +1,63 @@
+// SCRATCH (P4-R6, not committed): what a session's host replica, kept after the session ends, costs every later write.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
+import { it } from 'vitest';
+import { tabBody } from '@artifacts/document/tabs';
+import { applyV2 } from '@artifacts/yjs';
+import type { AppSessionId } from '@shared/graph/ids';
+import { openDocuments } from '../index';
+import { registerDocumentKind } from './document';
+import { seedDocument } from '../../../../e2e/support/document-seed';
+import { TABS } from '@artifacts/document/tabs';
+
+const HUMAN = { kind: 'human' } as const;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+it('probe2', { timeout: 600_000 }, async () => {
+  setFlagsFromString('--expose-gc');
+  const gc = runInNewContext('gc') as () => void;
+  const heap = () => {
+    gc();
+    gc();
+    return process.memoryUsage().heapUsed / 1048576;
+  };
+  const dir = mkdtempSync(join(tmpdir(), 'r6-probe2-'));
+  const docs = openDocuments(dir, () => {})!;
+  const kind = registerDocumentKind(docs.store);
+  try {
+    const a = await docs.store.create({ kind: 'document', title: 'Scale 200' }, HUMAN);
+    for (let k = 0; k < 100 && docs.store.revision(a.id) === 0; k++) await sleep(10);
+    const { state } = seedDocument(160);
+    await docs.service.writeAs(a.id, HUMAN, (doc) => {
+      const tabs = doc.get(TABS);
+      for (const [key] of [...tabs.attrEntries()]) tabs.deleteAttr(String(key));
+      applyV2(doc, state);
+    });
+    const keystroke = async () => {
+      const t = performance.now();
+      await docs.service.writeAs(a.id, HUMAN, (doc) => {
+        const body = tabBody(doc, 't1')!;
+        const first = body.toArray()[1] as { toArray(): unknown[] } & { insert(i: number, c: unknown[]): void };
+        const text = first.toArray().find((c) => typeof c !== 'string' && (c as { insert?: unknown }).insert) as { insert(i: number, s: string): void } | undefined;
+        text?.insert(0, 'x');
+      });
+      return performance.now() - t;
+    };
+    for (const n of [0, 10, 30]) {
+      const have = (docs.service as unknown as { docs: Map<string, { replicas: Map<string, unknown> }> }).docs.get(a.id)!.replicas.size;
+      for (let k = have; k < n + 1; k++) docs.service.readAs(a.id, { kind: 'session', appSessionId: `gone-${k}` as AppSessionId }, () => 0);
+      const h = heap();
+      const ms: number[] = [];
+      for (let i = 0; i < 30; i++) ms.push(await keystroke());
+      ms.sort((x, y) => x - y);
+      console.log(`replicas ${(docs.service as unknown as { docs: Map<string, { replicas: Map<string, unknown> }> }).docs.get(a.id)!.replicas.size}: heap ${h.toFixed(0)} MB, a write p50 ${ms[15]!.toFixed(2)} ms, p90 ${ms[27]!.toFixed(2)} ms`);
+    }
+  } finally {
+    kind.close();
+    docs.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

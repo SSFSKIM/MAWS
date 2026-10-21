@@ -7,6 +7,9 @@
 // the path an agent's `artifact_edit` takes in the host, less the engine's wire. The host's own event-loop delay is
 // sampled around each call (a histogram of this seam's, running all along, reset before the call and read once the loop
 // has turned after it): the longest the call kept the loop, its first synchronous stretch included. A's `artifacts.testLoopDelay` stays the run-wide measure.
+// P4-R6: each call's answer also says what shared its loop (`background`): the main thread's CPU time inside the longest
+// gap (where the platform tells it), the host's own work and V8's collections that overlapped that gap, and all of it
+// over the call by kind (`./host-work.ts`), so a slow row names its cause from its record.
 //
 // Commands arrive as JSON files in `<dir>/in` (written beside and renamed in, so a file is whole when seen) and run one
 // at a time in name order; each answer is written to `<dir>/out` under the command's name (again by rename). No IPC
@@ -36,6 +39,7 @@ import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { artifactEditTool, artifactReplyTool /* P4-B1 */, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
 import { ProvisionalEmitter } from '../../tool-server/provisional';
 import type { McpToolDefinition } from '../../tool-server/server';
+import { holdHostWork, hostWorkBetween, watchHostWork, type HostWork } from '../host-work'; // P4-R6
 import type { ArtifactStore } from '../store';
 
 const HUMAN: Actor = { kind: 'human' };
@@ -50,11 +54,17 @@ const STREAM_TICK_MS = 20; // P4-A2: `stream`'s default pace, a little over the 
  */
 export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/engine-host/presentations/scale-seam.ts)
   private last = performance.now();
+  private lastCpu = threadCpuMs();
   private gaps: number[] = [];
+  private longest: LongestGap | null = null; // P4-R6
   private readonly timer = setInterval(() => {
     const now = performance.now();
-    this.gaps.push(now - this.last);
+    const cpu = threadCpuMs();
+    const gap = now - this.last;
+    this.gaps.push(gap);
+    if (!this.longest || gap > this.longest.ms) this.longest = { at: this.last, ms: gap, cpuMs: cpu === null || this.lastCpu === null ? null : cpu - this.lastCpu };
     this.last = now;
+    this.lastCpu = cpu;
   }, LOOP_TICK_MS);
 
   constructor() {
@@ -63,7 +73,16 @@ export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/
 
   reset(): void {
     this.gaps = [];
+    this.longest = null;
     this.last = performance.now();
+    this.lastCpu = threadCpuMs();
+  }
+
+  // P4-R6: the longest gap since the reset (the one `stats().max` reads), when it began, and the main thread's CPU time
+  // inside it: near its length, the thread ran (script, a collection, a synchronous call); well under it, the thread
+  // waited (an fsync, the scheduler).
+  longestGap(): LongestGap | null {
+    return this.longest;
   }
 
   stats(): LoopStats {
@@ -98,6 +117,27 @@ export interface LoopStats {
   mean: number;
 }
 
+// P4-R6: the main thread's CPU time so far (user and system), where the platform tells it (Node 23.9 and later).
+function threadCpuMs(): number | null {
+  if (typeof process.threadCpuUsage !== 'function') return null;
+  const { user, system } = process.threadCpuUsage();
+  return (user + system) / 1000;
+}
+
+export interface LongestGap {
+  at: number; // performance.now() when the gap began
+  ms: number;
+  cpuMs: number | null; // the main thread's CPU time inside it; null where the platform does not tell it
+}
+
+/** P4-R6: what shared a call's loop. `at` is ms after the call's start; entries may nest; `partial` when the record
+ * dropped some of the call's window (a call far past the host's usual load). */
+export interface CallBackground {
+  longest: { at: number; ms: number; cpuMs: number | null; work: Array<{ what: HostWork; at: number; ms: number; detail?: string }> } | null;
+  call: Partial<Record<HostWork, { count: number; ms: number }>>;
+  partial?: true;
+}
+
 /** A tool call's answer: its result (or, refused, the tool's text), its wall time and the loop's delay around it. */
 export interface CallAnswer {
   ok: true;
@@ -106,6 +146,31 @@ export interface CallAnswer {
   text: string;
   wallMs: number;
   loop: LoopStats;
+  background: CallBackground; // P4-R6
+}
+
+const tenth = (ms: number) => Math.round(ms * 10) / 10;
+
+/** P4-R6: the host's work over [from, to), and inside the sampler's longest gap. */
+export function backgroundOf(sampler: LoopSampler, from: number, to: number): CallBackground {
+  const { work, partial } = hostWorkBetween(from, to);
+  const call: CallBackground['call'] = {};
+  for (const entry of work) {
+    const sum = (call[entry.what] ??= { count: 0, ms: 0 });
+    sum.count += 1;
+    sum.ms = tenth(sum.ms + entry.ms);
+  }
+  const gap = sampler.longestGap();
+  const longest =
+    gap === null
+      ? null
+      : {
+          at: tenth(gap.at - from),
+          ms: tenth(gap.ms),
+          cpuMs: gap.cpuMs === null ? null : tenth(gap.cpuMs),
+          work: work.filter((entry) => entry.at < gap.at + gap.ms && entry.at + entry.ms > gap.at).map((entry) => ({ what: entry.what, at: tenth(entry.at - from), ms: tenth(entry.ms), ...(entry.detail !== undefined && { detail: entry.detail }) })),
+        };
+  return { longest, call, ...(partial && { partial: true as const }) };
 }
 
 export type PerfAnswer =
@@ -136,6 +201,7 @@ export class DocumentPerfSeam {
   private readonly sessions = new Map<string, PerfSession>();
   private readonly loop = new LoopSampler();
   private readonly runLoop = new LoopSampler(); // the `loop` command's, over a whole run
+  private readonly unwatch = watchHostWork(); // P4-R6: the host's work recorded while the seam runs
   private gc: (() => void) | null = null;
 
   constructor(
@@ -178,6 +244,7 @@ export class DocumentPerfSeam {
   close(): void {
     this.loop.close();
     this.runLoop.close();
+    this.unwatch(); // P4-R6
   }
 
   // The tabs a document has (the host's first tab) removed and the seed's applied, in one write as the human.
@@ -235,10 +302,13 @@ export class DocumentPerfSeam {
     await turned(LOOP_TICK_MS * 3);
     this.loop.reset();
     const started = performance.now();
-    const result = await definition.call(input, ctx);
-    const wallMs = performance.now() - started;
-    await turned(LOOP_TICK_MS * 5); // the gap the call left closes once the loop turns after it
-    const loop = this.loop.stats();
+    const release = holdHostWork(started); // P4-R6: the call's window kept however long it runs
+    const { result, wallMs, loop, background } = await (async () => {
+      const result = await definition.call(input, ctx);
+      const wallMs = performance.now() - started;
+      await turned(LOOP_TICK_MS * 5); // the gap the call left closes once the loop turns after it
+      return { result, wallMs, loop: this.loop.stats(), background: backgroundOf(this.loop, started, performance.now()) /* P4-R6 */ };
+    })().finally(release);
     const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
     const isError = result.isError === true;
     let parsed: unknown;
@@ -247,7 +317,7 @@ export class DocumentPerfSeam {
       const revision = (parsed as { revision?: unknown }).revision;
       if (typeof revision === 'number') session.lastRevision = revision;
     }
-    return { ok: true, isError, ...(parsed !== undefined && { result: parsed }), text: isError ? text : '', wallMs, loop };
+    return { ok: true, isError, ...(parsed !== undefined && { result: parsed }), text: isError ? text : '', wallMs, loop, background };
   }
 
   private heap(): PerfAnswer {
