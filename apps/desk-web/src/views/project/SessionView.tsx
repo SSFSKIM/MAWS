@@ -15,8 +15,8 @@
 // session whose machine serves no transcript for it (its subscription ended at n 0, `shell/transcript-served.ts`)
 // draws the channel built from the log instead, saying why, and that an ended one is not offered Resume (`fallback`).
 // A tapped notification lands on its request's card at the tail, brought into the virtualized list wherever the reader
-// was, or on its `<message>`'s row in the transcript, or, for an async question with no request waiting (MAWS's own
-// ask), on its call's row. A send's row draws without its delivery frame line, a peer's send labelled with who sent it
+// was, or on its message's row in the transcript (a `<message>`'s, or a message tool's call drawn as the message), or,
+// for an async question with no request waiting (MAWS's own ask), on its call's row. A send's row draws without its delivery frame line, a peer's send labelled with who sent it
 // (`conversation/delivery-frame.ts`).
 //
 // Two decorations of MAWS's view are the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps
@@ -59,7 +59,8 @@ type Props = {
   events?: ReadonlyArray<{ offset: number; event: LogEvent }>;
   /** The request a tapped notification landed on, when this channel is the one it opened. */
   landedRequest?: string | null;
-  /** The `src` of the `<message>` a tapped notification landed on (`<row uuid>#<span>`), when this channel is the one it opened. */
+  /** The `src` of the message a tapped notification landed on (a `<message>`'s `<row uuid>#<span>`, a message tool's call
+   * id), when this channel is the one it opened. */
   landedMessage?: string | null;
   /** The call's id of the async question a tapped notification landed on, when no request of it waits at the tail. */
   landedQuestion?: string | null;

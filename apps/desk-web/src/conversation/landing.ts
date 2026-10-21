@@ -16,8 +16,8 @@ const NOWHERE: EventLanding = { request: null, message: null, question: null };
 
 /**
  * Where the session view, which draws the transcript's rows and the pending requests' cards rather than the log's items,
- * lands the log event a notification named: a `<message>` on its transcript row (`message`, the event's `src`); a
- * `question` on the card of the request a bridge raised for the same ask (`request`, the pending request whose id or
+ * lands the log event a notification named: a `message` on its transcript row (`message`, the event's `src`: a
+ * `<message>`'s span or a message tool's call, which `landed-message.ts` tells apart); a `question` on the card of the request a bridge raised for the same ask (`request`, the pending request whose id or
  * tool-use id is the event's `src`), and with no such request (MAWS's own async ask is never raised, and an answered
  * ask's request is settled) on its call's row (`question`, the call's id) — but only once the pending set is checked,
  * so a request not checked yet does not send the view to the call first. `pending` is the session's pending requests.

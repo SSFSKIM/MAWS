@@ -69,6 +69,10 @@ describe('eventLanding', () => {
     expect(eventLanding(logged('message', 'row-uuid#0'), [pending('row-uuid#0')], false)).toEqual({ ...nowhere, message: 'row-uuid#0' });
   });
 
+  it("lands a message tool's message as a message, by its call's id (the session view finds the call's row)", () => {
+    expect(eventLanding(logged('message', 'toolu_msg'), [], false)).toEqual({ ...nowhere, message: 'toolu_msg' });
+  });
+
   it("lands a question on the card of the request a bridge raised for the same ask, by its id or its call's id", () => {
     expect(eventLanding(logged('question', 'toolu_ask'), [pending('toolu_other'), pending('toolu_ask')], false)).toEqual({ ...nowhere, request: 'toolu_ask' });
     expect(eventLanding(logged('question', 'toolu_ask'), [pending('request-7', 'toolu_ask')], true)).toEqual({ ...nowhere, request: 'request-7' });
