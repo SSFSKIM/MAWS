@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
-import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, MESSAGE_TOOL_ALIAS, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import { slugOf } from '../../engine-host/fs/paths';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
@@ -89,6 +89,23 @@ describe('decideFlags without the flag: applied stays what the snapshot keeps, u
     expect(decideFlags('maws-contract', CURRENT, false)).toEqual({ append: 'contract', off: false, offUnavailable: false, applied: 'maws-contract' });
     expect(decideFlags('external-style-plus-supplement', SUPP, false)).toEqual({ append: 'supplement', off: false, offUnavailable: false, applied: 'external-style-plus-supplement' });
     expect(decideFlags('off', 'none', false)).toEqual({ append: null, off: false, offUnavailable: false, applied: 'off' });
+  });
+});
+
+// P4-A2: under the launch profile's hooks `none` MAWS's start-time context is appended to the system prompt, which a
+// reused snapshot would leave out, so every launch reusing a recorded prompt renders it live where the binary can
+describe('decideFlags with the alias appended (the launch profile’s hooks none)', () => {
+  it.each([
+    ['maws-contract', CURRENT],
+    ['external-style-plus-supplement', SUPP],
+    ['external-compatible-style', 'none'],
+  ] as const)('desired %s over its own recorded %s: "off" all the same', (desired, recorded) => {
+    expect(decideFlags(desired, recorded, true)).toMatchObject({ off: false });
+    expect(decideFlags(desired, recorded, true, true)).toMatchObject({ off: true, offUnavailable: false, applied: desired });
+    expect(decideFlags(desired, recorded, false, true)).toMatchObject({ off: false, offUnavailable: true });
+  });
+  it('a new session (nothing recorded) renders live anyway: no "off"', () => {
+    expect(decideFlags('maws-contract', 'unrecorded', true, true)).toEqual({ append: 'contract', off: false, offUnavailable: false, applied: 'maws-contract' });
   });
 });
 
@@ -371,6 +388,30 @@ describe('ownerChannelLaunch over a scratch config home', () => {
         expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
       }
     }
+  });
+
+  // P4-A2: the launch profile's hooks `none` (`disableAllHooks` in the spec's settings) silences MAWS's SessionStart
+  // group, so the alias rides the appended prompt, rendered live at every launch that would reuse a recorded one
+  it('under hooks none: the alias after the contract and no SessionStart group, and "off" over a resumed or forked transcript, lane on only', async () => {
+    const hooksNone = { extraSettings: { disableAllHooks: true } };
+    const fresh = await ownerChannelLaunch(s, spec(hooksNone), { kind: 'new', transcriptOf: null });
+    expect(fresh.spec.appendSystemPrompt).toBe(`${TO_HUMAN_CONTRACT}\n\n${MESSAGE_TOOL_ALIAS}`);
+    expect(fresh.spec.systemPromptSnapshot ?? null).toBeNull();
+    expect(fresh.spec.extraSettings).toEqual({ disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+    expect(fresh.record).toMatchObject({ desired: 'maws-contract', appended: true, snapshotOff: false });
+    transcript(configHome, TO_HUMAN_CONTRACT); // recorded under the current contract, without the alias
+    expect((await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record })).spec.systemPromptSnapshot ?? null).toBeNull(); // hooks on: reused as before
+    const resumed = await ownerChannelLaunch(s, resumeSpec(hooksNone), { kind: 'resume', transcriptOf: record });
+    expect(resumed.spec).toMatchObject({ appendSystemPrompt: `${TO_HUMAN_CONTRACT}\n\n${MESSAGE_TOOL_ALIAS}`, systemPromptSnapshot: 'off' });
+    expect(resumed.record).toMatchObject({ recorded: CURRENT, snapshotOff: true, applied: 'maws-contract' });
+    const child = index.sessions.upsertFromSummary(summary({ directory: work })).record.appId;
+    const forked = await ownerChannelLaunch(s, spec({ ...hooksNone, appSessionId: child, resume: { sessionId: ENGINE_ID, fork: true }, inheritGrantsFrom: record }), { kind: 'fork', transcriptOf: record });
+    expect(forked.spec).toMatchObject({ systemPromptSnapshot: 'off' });
+    expect(forked.spec.appendSystemPrompt).toContain(MESSAGE_TOOL_ALIAS);
+    appEnabled = false; // the plugin's tool is real again: no alias, and the recorded contract leaves as before
+    const off = await ownerChannelLaunch(s, resumeSpec(hooksNone), { kind: 'resume', transcriptOf: record });
+    expect(off.spec.appendSystemPrompt ?? null).toBeNull();
+    expect(off.spec.extraSettings).toEqual({ disableAllHooks: true });
   });
 
   it('without the owner channel (no index), the spec goes unchanged and nothing is recorded', async () => {
