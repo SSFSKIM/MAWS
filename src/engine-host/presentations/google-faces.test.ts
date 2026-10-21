@@ -201,6 +201,11 @@ describe('the host’s Google Fonts fetch', () => {
     expect(faceOf(other, 'lora').google).toBeUndefined();
     expect(calls.filter((url) => url === LORA)).toHaveLength(2);
     expect(timers.filter((t) => !t.cancelled).map((t) => t.ms)).toEqual([30_000]);
+    // the backoff grows across failed writes as across failed fetches (the second round's P2)
+    timers.at(-1)!.run();
+    await f.idle();
+    expect(calls.filter((url) => url === LORA)).toHaveLength(3);
+    expect(timers.filter((t) => !t.cancelled).map((t) => t.ms)).toEqual([60_000]);
   });
 
   it('fetches on a document’s load: a deck named before this run, opened in it', async () => {

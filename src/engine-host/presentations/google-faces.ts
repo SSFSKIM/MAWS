@@ -277,11 +277,11 @@ export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>
         continue;
       }
       log(fetched.kind === 'saved' ? `${family}: saved ${fetched.files.length} file(s) under OFL` : `${family}: refused ${fetched.refused} (${fetched.detail})`);
-      settle(url, null);
       const unwritten = new Map<string, Target>();
       for (const [k, target] of job.targets) if (!(await land(target, job.request, fetched))) unwritten.set(k, target);
-      // never a loop: a target its write could not record waits out the backoff (a commit or load past the pause retries)
-      if (unwritten.size > 0) settle(url, { request: job.request, targets: unwritten });
+      // never a loop: a target its write could not record waits out the backoff, its attempts counted on (a commit or load
+      // past the pause retries); the request's wait ends once every target is written, discarded or gone
+      settle(url, unwritten.size > 0 ? { request: job.request, targets: unwritten } : null);
     }
   }
 
