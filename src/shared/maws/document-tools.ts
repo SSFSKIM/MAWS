@@ -3,9 +3,10 @@
 // `artifact_edit`, `artifact_comments`, `artifact_reply` and `artifact_resolve`, the fields a document's
 // `artifact_read` adds, and a document's `artifact_create`, with their descriptions, the limits the tools enforce and
 // the refusals an agent can act on. `./tools` appends these names and entries after A's (its P3-B blocks); this file
-// imports only the leaf `./artifact-id`, so the two never import each other. The read and create fields live in `./tools`.
+// imports only the leaves `./artifact-id` and `./message-tool`, so the two never import each other. The read and create fields live in `./tools`.
 import * as z from 'zod';
 import { ARTIFACT_ID } from './artifact-id';
+import { ALWAYS_LOAD } from './message-tool'; // P4-A3: the edit tool is always loaded (a leaf: it imports only zod)
 import type { DashboardDatasetSummary, DashboardViewWarning } from './dashboard-tools'; // P3-E
 
 export const DOCUMENT_TOOL_NAMES = ['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
@@ -168,6 +169,7 @@ export const DOCUMENT_TOOLS = {
       'Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.',
     input: ArtifactEditInputSchema,
     annotations: WRITER,
+    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_comments: {
     title: 'List document comments',
@@ -190,7 +192,7 @@ export const DOCUMENT_TOOLS = {
     input: ArtifactResolveInputSchema,
     annotations: WRITER,
   },
-} as const satisfies Record<DocumentToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;
+} as const satisfies Record<DocumentToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean }; meta?: Record<string, unknown> }>;
 
 function issuesText(error: z.ZodError): string {
   return error.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`).join('; ');

@@ -430,14 +430,17 @@ test('p4 deferral (for P4-A3): under tool search the maws tools are deferred and
  const rows=load4('p4-b4-instructions');const [first,second]=mainRequests4(rows);
  const names=first.tools.map(t=>t.name);assert.ok(names.includes('ToolSearch'));
  assert.ok(names.includes('mcp__maws__show_pane')); // listed with _meta["anthropic/alwaysLoad"]: true
- // P4-R7: MAWS's own message tool carries the key as MAWS lists it, so it is loaded beside show_pane
+ // P4-R7: MAWS's own message tool carries the key as MAWS lists it; P4-A3: so do the tools an edit needs (re-recorded
+ // with them): every one is loaded beside show_pane, in the request's tools with no defer_loading, and none is named
+ // for ToolSearch; every other maws tool stays deferred
  const alwaysLoaded=t=>t.name==='show_pane'||t._meta?.['anthropic/alwaysLoad']===true;
- assert.deepEqual(served4.tools.filter(alwaysLoaded).map(t=>t.name),['show_pane','message']);
- assert.ok(names.includes('mcp__maws__message'));
+ assert.deepEqual(served4.tools.filter(alwaysLoaded).map(t=>t.name),['show_pane','artifact_describe_type','artifact_read','artifact_publish','artifact_edit','message']);
+ for(const tool of served4.tools.filter(alwaysLoaded)){const listed=first.tools.find(t=>t.name==='mcp__maws__'+tool.name);assert.ok(listed,tool.name);assert.equal(listed.defer_loading,null,tool.name);}
  for(const tool of served4.tools.filter(t=>!alwaysLoaded(t)))assert.ok(!names.includes('mcp__maws__'+tool.name),tool.name);
  const context=contextText4(first);const from=context.indexOf('The following deferred tools are now available via ToolSearch');
  const listing=context.slice(from,context.indexOf('\n\n',from)).split('\n').slice(1); // the list alone, one name per line
  assert.ok(listing.includes('mcp__maws__artifact_search'));
+ for(const tool of served4.tools.filter(alwaysLoaded))assert.ok(!listing.includes('mcp__maws__'+tool.name),tool.name);
  const calls=meta4(rows,'server_calls')[0].calls;assert.deepEqual(calls,[{name:'artifact_search',arguments:{query:'로드맵'}}]);
  const result=second.messages.flatMap(m=>m.blocks).find(b=>b.type==='tool_result'&&b.tool_use_id==='toolu_stub_search');
  assert.equal(result.is_error,false);assert.equal(JSON.parse(result.content[0].text).status,'found');
