@@ -37,4 +37,12 @@ describe('the compiled renderer suites', () => {
     expect(project.test!.env).toEqual({ MAWS_REACT_COMPILER: '1', LC_ALL: 'ko_KR.UTF-8', LANG: 'ko_KR.UTF-8' }); // P4-W2L: under the owner's Korean locale
     expect(JSON.stringify(project.plugins?.flat(Infinity).map((p) => (p as { name?: string }).name))).toContain('vite:react-babel');
   });
+
+  it('have the portable artifact layer’s React suites beside them, under the same compiler and locale (P4 W2-D)', () => {
+    const projects = (config.test?.projects ?? []) as unknown as { test?: { name?: string; include?: string[]; env?: Record<string, string> }; plugins?: unknown[] }[];
+    const project = projects.find((p) => typeof p === 'object' && p.test?.name === 'artifacts-dom-compiled')!;
+    expect(project.test!.include).toEqual(['src/artifacts/**/*.dom.test.tsx']);
+    expect(project.test!.env).toEqual({ MAWS_REACT_COMPILER: '1', LC_ALL: 'ko_KR.UTF-8', LANG: 'ko_KR.UTF-8' });
+    expect(JSON.stringify(project.plugins?.flat(Infinity).map((p) => (p as { name?: string }).name))).toContain('vite:react-babel');
+  });
 });

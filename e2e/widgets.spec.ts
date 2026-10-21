@@ -18,6 +18,7 @@ import type { OperationEvent } from '@shared/engine/operations';
 import type { WidgetsHarnessApi, WidgetsPane } from '../src/renderer/src/harness/widgets/api';
 import type { WidgetBackend } from '../test/support/widget-backend';
 import { ownerShapedState, scratchMarketplace, stubCalls, writePluginCliStub, type PluginCliStub, type StubState } from '../test/support/plugin-cli-stub';
+import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -110,6 +111,16 @@ async function openPage(page: Page, pane: WidgetsPane): Promise<void> {
 }
 
 const widget = (page: Page, name: string): Locator => page.locator(`[data-widget="${name}"]`);
+// Whether a process group still has a member: `kill(-pgid, 0)` sends nothing and throws ESRCH once none remains.
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
 // The value beside a key of a widget's key/value list.
 const valueOf = (scope: Locator, label: string): Locator => scope.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
 const pick = (page: Page, name: string) => page.evaluate((n) => (window as unknown as WidgetsWindow).__maws_widgets.open(n), name);
@@ -1015,6 +1026,40 @@ test.describe('plugin management (E8)', () => {
     await expectListed(w, 'e8-probe@e8-scratch');
     expect(mutations(backend)).toEqual([argv]); // G4: exactly the argument list the sheet showed
     expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  // P4 W2-D (tracker 2026-10-06): the runner's kill path in Electron's utility process (the engine host's default under
+  // e2e, src/main/hosts/mode.ts). The CLI and a member it started in its group ignore SIGTERM, so only the SIGKILL at the
+  // grace ends them; the run ends only once the group is empty.
+  test('Stop on a CLI that ignores SIGTERM: its whole process group is gone after the SIGKILL grace, and the card reads cancelled', async ({ backend }) => {
+    const { page } = backend;
+    const w = await openPlugins(backend);
+    await openBrowse(w);
+    const card = cardOf(w, 'e8-probe@e8-scratch');
+    await card.getByRole('button', { name: 'Install', exact: true }).click();
+    backend.cli.hold(true);
+    backend.cli.stubborn(true);
+    try {
+      await sheetOf(page, 'install').getByRole('button', { name: 'Install', exact: true }).click();
+      await expect(lineOf(card)).toHaveText('Holding install e8-probe@e8-scratch --scope user (plugin CLI stub)');
+      await expect.poll(() => backend.cli.group(), { message: 'the stubborn CLI names its group' }).not.toBeNull();
+      const group = backend.cli.group()!;
+      expect(group, 'a detached spawn: the CLI leads its own group, its member in it').toEqual({ pgid: group.leader, leader: group.leader, member: group.member, memberPgid: group.leader });
+      expect(groupAlive(group.pgid)).toBe(true);
+
+      const stopped = Date.now();
+      await card.getByRole('button', { name: 'Stop' }).click();
+      await expect.poll(() => backend.cli.signals().sort(), { message: 'SIGTERM reached the CLI and its member' }).toEqual([`${group.leader} SIGTERM`, `${group.member} SIGTERM`].sort());
+      expect(groupAlive(group.pgid), 'both ignore SIGTERM').toBe(true);
+      await expect.poll(() => groupAlive(group.pgid), { timeout: KILL_GRACE_MS + 4_000, intervals: [100], message: 'the group is gone after the SIGKILL grace' }).toBe(false);
+      expect(Date.now() - stopped, 'it outlived SIGTERM until the grace').toBeGreaterThanOrEqual(KILL_GRACE_MS - 100);
+      await expect(lineOf(card)).toHaveText('cancelled before the CLI finished · cancelled');
+      await expect(card.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+      expect(backend.cli.state().installed.map((p) => p.id)).toEqual(['e8-tools@e8-scratch']); // the install never completed
+      expect(backend.consoleErrors()).toEqual([]);
+    } finally {
+      backend.cli.hold(false);
+    }
   });
 
   test('install at project and at local scope from a card’s detail: the argv carries the scope and the sheet names the project’s settings file', async ({ backend }) => {

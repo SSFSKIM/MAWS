@@ -28,7 +28,8 @@
 // carries that amount, less what the case holds back, as its `--max-budget-usd` (a row Resume takes none, and S6's run
 // no turn). That budget is reserved in `charges.jsonl` before the launch, against the session's own receipts (the
 // session counts as spent at the larger of the two), and settled at the case's end once its process is gone: to its
-// receipts, or kept whole when a prompt went unreceipted (a timeout or a crash before its result). So the next case,
+// receipts, or kept whole when a paid call went unreceipted (a timeout or a crash before its result; a side question
+// without a reservation of its own). So the next case,
 // or a fresh Playwright worker reading the run root, never sees a remainder a running session may still spend.
 // Case 2's side thread is a fork of the parent and takes the parent's own `--max-budget-usd` (Q12 as the owner ruled at
 // P2-F's sitting, D7; src/engine-host/launcher.ts): that number bounds each session, not their sum, so the test still
@@ -43,7 +44,8 @@
 // allocation once it settled are logged as the finding `fork overspend: <cost> > 0.08 (uncapped fork, Q12)` (the
 // helper's wording, from before D7) and fail case 2's spend assertion.
 // A paid call no receipt shows is charged, never left free: case 4's `/btw` side question is answered by a control
-// response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent. US$0.05: the side question of
+// response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent, as the parent's (which lets the
+// parent's launch reservation settle to its receipts rather than wait on that answer). US$0.05: the side question of
 // the recorded fixture (spikes/protocol-probe/fixtures/pass3/p1-side-question-session.jsonl) carried a context of about
 // 22,700 tokens (the cache reads of the main calls beside it); S3's parent at case 4 holds more (case 1's artifact turn
 // with its screenshot, case 3's Bash turn, the maws tools), about 30,000 to 35,000 tokens, which at Haiku 4.5's
@@ -70,8 +72,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
+import { JournalReader } from '../src/engine-host/journal';
 import { RELAY_URL } from '../src/engine-host/launch';
-import { assertConfigHomeSafe, journalCost, redactJournal } from '../test/live/support/live';
+import { assertConfigHomeSafe, redactJournal } from '../test/live/support/live';
 import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { relayText } from '../src/renderer/src/tools/agents/model/relay';
@@ -83,6 +86,7 @@ import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { sessionSpent } from './support/live-budget';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
 import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
@@ -141,16 +145,13 @@ function charge(note: (line: string) => void, c: Charge): void {
   note(`  charged US$${c.usd.toFixed(4)} to ${CASE_SITTING[c.case].toUpperCase()} for ${c.label}${c.against ? ` (counted beyond ${c.against}'s receipts)` : ''} [${c.key}]; ${spendLine(CASE_SITTING[c.case])}`);
 }
 
-// One session's receipts, each of its launch journals summed as journalSpend sums them.
-function sessionReceipts(name: CaseName, id: string): number {
-  const dir = join(ROOT, name, 'user-data', 'engine-host', 'journal', id);
-  if (!existsSync(dir)) return 0;
-  return readdirSync(dir).filter((file) => file.endsWith('.jsonl')).reduce((usd, file) => usd + journalCost(journal(join(dir, file))).costUsd, 0);
-}
+// One session's receipts, its launches read as journalSpend reads them (live-budget.ts, sessionSpent).
+const sessionReceipts = (name: CaseName, id: string): number => sessionSpent(join(ROOT, name, 'user-data', 'engine-host', 'journal', id));
 
-// What each sitting and the run have spent: every journal of every case's profile under the run's root (a resumed or
-// forked process may restore its session's cost, so summing journals can only over-count, the safe side of a cap),
-// plus the charges, a launch reservation counted beyond its session's receipts.
+// What each sitting and the run have spent: every session of every case's profile under the run's root (its launches
+// one cumulative stream where a resume restored the figure, each counted whole where that is unknown; a fork may still
+// restore its source's cost, which can only over-count, the safe side of a cap), plus the charges, a launch reservation
+// counted beyond its session's receipts.
 function spent() {
   const receipts: Partial<Record<CaseName, number>> = {};
   for (const name of Object.keys(CASE_SITTING) as CaseName[]) {
@@ -285,12 +286,9 @@ const idleNow = async (live: Live, id: string) => {
 const events = (live: Live, id: string) => eventsOf(live.page, id);
 const mainTurnsEnded = (all: SessionEvent[]) => ofKind(all, 'turn.ended').filter((e) => e.parentToolUseId === null && !e.isEchoReceipt);
 
-// Every row of every launch of the session (one journal file per launch), in launch order.
-function sessionRows(live: Live, id: string): JournalRow[] {
-  const dir = join(live.sc.userData, 'engine-host', 'journal', id);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort().flatMap((name) => journal(join(dir, name)));
-}
+// Every row of every launch of the session, in launch order (JournalReader: by each launch's first row, its rotations
+// after it), not by the launch ids' names.
+const sessionRows = (live: Live, id: string): JournalRow[] => JournalReader.forSession(join(live.sc.userData, 'engine-host', 'journal', id)).flatMap(journal);
 const outUsers = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
 
 // A session launched under the record `id` as the app launches (C7's X6 fields; Haiku, default mode, the gateway),
@@ -410,7 +408,7 @@ function descendants(pid: number): number[] {
 }
 
 // The case's end: every session still running stopped, the app closed, the A-15 reading after it, every launch budget
-// settled to its session's receipts once no process of the case is left (kept whole for a prompt gone unreceipted), no
+// settled to its session's receipts once no process of the case is left (kept whole for a paid call gone unreceipted), no
 // breach in any of the case's readings (no key of the run's own), the owner plugins none, and no process of the app or
 // its engines left.
 // Every step runs whatever an earlier one threw (a session that would not stop, the app's cleanup rejecting): the
@@ -444,7 +442,7 @@ async function closeLive(live: Live): Promise<void> {
       }
     },
     ...[...live.reservations].map(([id, reserved]) => () => {
-      charge(live.note, settledReservation(reserved, sessionRows(live, id)));
+      charge(live.note, settledReservation(reserved, sessionRows(live, id), charges()));
       live.reservations.delete(id);
     }),
     () => live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`),
@@ -735,7 +733,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
     // charged before it is asked: its answer comes as a control response, with no result frame to receipt it
-    charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD });
+    charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD, sideQuestionOf: parent });
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
     const view = l.panel.locator(`[data-side-btw-view="${parent}"]`);
     await expect(view).toBeVisible({ timeout: 30_000 });

@@ -13,8 +13,11 @@ import * as Y from '@y/y'
 const idsOf = doc => Y.createContentIdsFromDoc(doc, true)
 const EMPTY = Y.encodeStateAsUpdateV2(new Y.Doc())
 
-export const revertUpdateFixed = (oldState, liveState) => {
+// `clientID` (P4) authors the restore's update; without one the scratch takes Yjs's random id, as a live restore must.
+// The deck soak passes one of its own so a seeded run repeats (deck/sim.ts `restoreFrom`).
+export const revertUpdateFixed = (oldState, liveState, clientID) => {
   const scratch = new Y.Doc({ gc: false })
+  if (clientID !== undefined) scratch.clientID = clientID
   Y.applyUpdateV2(scratch, oldState)
   const oldIds = idsOf(scratch)
   Y.applyUpdateV2(scratch, liveState)

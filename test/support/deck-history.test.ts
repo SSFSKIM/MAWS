@@ -1,11 +1,12 @@
 // P3-F W-E: the deck scale gate's in-job heavy deck (e2e/support/deck-history.ts). The soak itself never runs here (it
 // runs once, inside the gate's job): a stand-in script takes its place for the generation's outcomes, and the export's
 // check reads small files written for each case (no binary fixture).
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as Y from '@y/y';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkDeckHistory, DECK_HISTORY_FILES, DECK_HISTORY_SOAK, DECK_HISTORY_SOAK_ARGS, DECK_HISTORY_SOAK_SCRIPT, generateDeckHistory, nodeStripsTypes } from '../../e2e/support/deck-history';
+import { checkDeckHistory, DECK_HISTORY_FILES, DECK_HISTORY_SOAK, DECK_HISTORY_SOAK_ARGS, DECK_HISTORY_SOAK_SCRIPT, deckHistoryLogic, generateDeckHistory, nodeStripsTypes } from '../../e2e/support/deck-history';
 
 let scratch: string;
 let exported: string;
@@ -101,4 +102,29 @@ describe('the heavy deck’s generation', () => {
   it('reads whether Node strips `.ts` types from Node’s own report', () => {
     expect(['strip', 'transform', false, null].map((typescript) => nodeStripsTypes(typescript))).toEqual([true, true, false, false]);
   });
+});
+
+describe('the soak’s repeatability', () => {
+  // P4 (the tracker's fixed-descriptor row): the repository's soak at a short descriptor with a restore (the normal
+  // profile restores on day 9), generated twice. The two agree on the logic the gate's runs are compared by, and their
+  // states hold the same authors (client ids and clocks): restores authored under Yjs's random ids made the heavy
+  // descriptor's runs part.
+  const SHORT = ['--kind', 'deck', '--profile', 'normal', '--encoding', 'delta', '--months', '1', '--no-truth'];
+  const authors = (file: string) => [...Y.decodeStateVector(Y.encodeStateVectorFromUpdateV2(readFileSync(file)))].sort(([a], [b]) => a - b);
+
+  it('generates the same logical history twice for one descriptor', async () => {
+    const [a, b] = await Promise.all(
+      ['a', 'b'].map(async (run) => {
+        const dir = join(scratch, run);
+        mkdirSync(dir);
+        const generation = await generateDeckHistory(dir, { root: join(import.meta.dirname, '../..'), timeoutMs: 150_000, args: [...SHORT, '--suffix', `repeat-${run}`] });
+        expect(generation).toMatchObject({ ok: true });
+        const check = checkDeckHistory(dir, { generated: false });
+        if (!check.ok) throw new Error(check.reason);
+        return { logic: deckHistoryLogic(check.meta), authors: { prev: authors(join(dir, 'prev.bin')), next: authors(join(dir, 'next.bin')) } };
+      }),
+    );
+    expect(a!.logic.restores).toHaveLength(1); // the descriptor still restores
+    expect(b).toEqual(a);
+  }, 300_000);
 });

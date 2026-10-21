@@ -87,6 +87,18 @@ export interface PluginCliStub {
   state(): StubState;
   setState(next: StubState): void;
   hold(on: boolean): void; // while held, a mutation prints one progress line and waits
+  // P4 W2-D (tracker 2026-10-06): while set, a held mutation ignores SIGTERM and starts a member in its process group
+  // that ignores it too; `group` answers their ids once the member listens, `signals` each SIGTERM they noted (`<pid> SIGTERM`)
+  stubborn(on: boolean): void;
+  group(): StubbornGroup | null;
+  signals(): string[];
+}
+
+export interface StubbornGroup {
+  pgid: number;
+  leader: number; // the CLI the runner spawned
+  member: number;
+  memberPgid: number;
 }
 
 export function writePluginCliStub(userData: string, state: StubState): PluginCliStub {
@@ -101,7 +113,8 @@ export function writePluginCliStub(userData: string, state: StubState): PluginCl
   const bin = join(dir, 'claude');
   const quote = (path: string) => `'${path.replaceAll("'", `'\\''`)}'`;
   writeFileSync(bin, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(script)} "$@"\n`, { mode: 0o755 });
-  const holdFile = join(dir, 'hold');
+  const flag = (name: string) => (on: boolean) => (on ? writeFileSync(join(dir, name), '') : rmSync(join(dir, name), { force: true }));
+  const read = (name: string) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), 'utf8') : null);
   return {
     bin,
     dir,
@@ -109,7 +122,13 @@ export function writePluginCliStub(userData: string, state: StubState): PluginCl
     callsLog,
     state: () => JSON.parse(readFileSync(stateFile, 'utf8')) as StubState,
     setState,
-    hold: (on) => (on ? writeFileSync(holdFile, '') : rmSync(holdFile, { force: true })),
+    hold: flag('hold'),
+    stubborn: flag('stubborn'),
+    group: () => {
+      const text = read('stubborn.json');
+      return text ? (JSON.parse(text) as StubbornGroup) : null;
+    },
+    signals: () => (read('signals.log') ?? '').split('\n').filter(Boolean),
   };
 }
 

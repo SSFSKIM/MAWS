@@ -118,4 +118,90 @@ describe('spentUnder', () => {
     }
     expect(spentUnder(userData)).toBeCloseTo(0.05);
   });
+
+  // One launch's journal as the host writes it: the spawn row (resuming `resume` or fresh), a main result per cumulative
+  // figure, then the exit row (clean unless given; none for a launch whose exit was never journaled; at `exitMinute`
+  // when given, else just after its other rows), its rows split across the base file and the rotations
+  // `<id>.<n>.jsonl` at `rotate` (the indexes rotations start at).
+  interface Launch { id: string; minute: number; resume?: string; costs: number[]; exit?: { code: number | null; signal: string | null } | null; exitMinute?: number; rotate?: { n: number; at: number }[] }
+  function writeSession(userData: string, appId: string, launches: Launch[]): void {
+    const dir = join(userData, 'engine-host', 'journal', appId);
+    mkdirSync(dir, { recursive: true });
+    for (const { id, minute, resume, costs, exit = { code: 0, signal: null }, exitMinute, rotate = [] } of launches) {
+      const at = (m: number, k: number) => new Date(Date.UTC(2026, 9, 21, 10, m, k)).toISOString();
+      const frames = [
+        { direction: 'meta', frame: { event: 'spawn', launchId: id, args: ['-p', '--input-format', 'stream-json', ...(resume ? ['--resume', resume] : [])] } },
+        ...costs.map((cost) => ({ direction: 'in', frame: { type: 'result', subtype: 'success', parent_tool_use_id: null, total_cost_usd: cost, num_turns: 1 } })),
+        ...(exit ? [{ direction: 'meta', frame: { event: 'exit', ...exit, reason: exit.signal ? 'crash' : 'stop' } }] : []),
+      ].map((row, i) => JSON.stringify({ seq: i + 1, at: (row.frame as { event?: string }).event === 'exit' && exitMinute !== undefined ? at(exitMinute, 0) : at(minute, i), ...row }));
+      const cuts = [0, ...rotate.map((r) => r.at), frames.length];
+      const names = [`${id}.jsonl`, ...rotate.map((r) => `${id}.${r.n}.jsonl`)];
+      names.forEach((name, k) => writeFileSync(join(dir, name), `${frames.slice(cuts[k], cuts[k + 1]).join('\n')}\n`));
+    }
+  }
+
+  it('counts a resumed session’s cumulative spend once, its launches read in launch order rather than by name', () => {
+    const userData = scratch();
+    // the admitted p2-to-human-new/-resume pair: US$0.0017, then US$0.0042 cumulative in the resume (once summed to 0.0059)
+    writeSession(userData, 'app-1', [
+      { id: 'zz000001', minute: 0, costs: [0.0017] },
+      { id: 'aa000002', minute: 5, resume: 'engine-1', costs: [0.0042] },
+    ]);
+    expect(spentUnder(userData)).toBeCloseTo(0.0042, 10);
+  });
+
+  it('counts a rotated launch once, its rotations in index order after its base file', () => {
+    const userData = scratch();
+    writeSession(userData, 'app-1', [{ id: 'L1', minute: 0, costs: [0.01, 0.02, 0.03, 0.04], rotate: [{ n: 2, at: 3 }, { n: 10, at: 4 }] }]);
+    expect(spentUnder(userData)).toBeCloseTo(0.04, 10);
+  });
+
+  it('still opens a segment where the figure drops (/clear), within a launch and across a resume', () => {
+    const userData = scratch();
+    writeSession(userData, 'app-1', [
+      { id: 'L1', minute: 0, costs: [0.01, 0.02, 0.005, 0.007] }, // `/clear` after US$0.02: the fresh session starts at 0
+      { id: 'L2', minute: 5, resume: 'engine-cleared', costs: [0.009] }, // resumes the cleared session at its US$0.007
+    ]);
+    expect(spentUnder(userData)).toBeCloseTo(0.02 + 0.009, 10);
+  });
+
+  it('counts each launch whole where the restored figure is unknown: a fresh launch, or one after an exit not seen clean', () => {
+    const pair = (first: Partial<Launch>, second: Partial<Launch>) => {
+      const userData = scratch();
+      writeSession(userData, 'app-1', [{ id: 'L1', minute: 0, costs: [0.0017], ...first }, { id: 'L2', minute: 5, resume: 'engine-1', costs: [0.0042], ...second }]);
+      return spentUnder(userData);
+    };
+    expect(pair({ exit: { code: null, signal: 'SIGKILL' } }, {})).toBeCloseTo(0.0059, 10); // no cost-state written at a kill
+    expect(pair({ exit: null }, {})).toBeCloseTo(0.0059, 10); // the exit never journaled (the host gone with it)
+    expect(pair({ exit: { code: 1, signal: null } }, {})).toBeCloseTo(0.0059, 10);
+    expect(pair({}, { resume: undefined, costs: [0.003] })).toBeCloseTo(0.0047, 10); // fresh: its figure starts at 0
+    // two host lifetimes over one profile: the resume spawned while the launch before still ran (the engine allows a
+    // concurrent resume, pass2/resume-live-second.jsonl), so it restored nothing of that launch's later spend
+    expect(pair({ costs: [0.02], exitMinute: 9 }, { costs: [0.03] })).toBeCloseTo(0.05, 10);
+    expect(pair({ costs: [0.02], exitMinute: 4 }, { costs: [0.03] })).toBeCloseTo(0.03, 10); // exited before it: continued
+    // the overlap beyond the adjacent pair: B ran inside A's lifetime and exited first, so the cost-state on disk when C
+    // resumed was A's (US$0.02, C reaching US$0.04): US$0.07 spent, and C must not continue B, the launch before it
+    const overlapped = scratch();
+    writeSession(overlapped, 'app-1', [
+      { id: 'A', minute: 0, costs: [0.02], exitMinute: 9 },
+      { id: 'B', minute: 5, resume: 'engine-1', costs: [0.03], exitMinute: 6 },
+      { id: 'C', minute: 10, resume: 'engine-1', costs: [0.04] },
+    ]);
+    expect(spentUnder(overlapped)).toBeCloseTo(0.02 + 0.03 + 0.04, 10);
+    // the launch just before decides: an earlier launch's clean exit does not vouch for a later one's
+    const userData = scratch();
+    writeSession(userData, 'app-1', [
+      { id: 'L1', minute: 0, costs: [0.0017] },
+      { id: 'L2', minute: 5, resume: 'engine-1', costs: [0.0042], exit: null },
+      { id: 'L3', minute: 9, resume: 'engine-1', costs: [0.005] }, // restored L1's stale US$0.0017, spent its own US$0.0033
+    ]);
+    expect(spentUnder(userData)).toBeCloseTo(0.0042 + 0.005, 10);
+  });
+
+  it('adds the sessions of a profile', () => {
+    const userData = scratch();
+    writeSession(userData, 'app-1', [{ id: 'L1', minute: 0, costs: [0.0017] }, { id: 'L2', minute: 5, resume: 'engine-1', costs: [0.0042] }]);
+    writeSession(userData, 'app-2', [{ id: 'L3', minute: 1, costs: [0.001, 0.002], rotate: [{ n: 1, at: 2 }] }]);
+    expect(spentUnder(userData)).toBeCloseTo(0.0062, 10);
+  });
 });

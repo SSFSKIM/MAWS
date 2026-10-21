@@ -12,12 +12,12 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { captureShellEnvironment } from '@shared/host/shell-env';
-import type { JournalRow } from '@shared/wire/journal';
 import { RELAY_URL } from '../../src/engine-host/launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // FX4: the resolved live engine
-import { assertConfigHomeSafe, journalCost } from '../../test/live/support/live';
+import { assertConfigHomeSafe } from '../../test/live/support/live';
 import { invoke, value } from './c7-replay';
 import { REPO_ROOT } from './launch';
+import { spentUnder } from './live-budget';
 import { printArgs, ptyArgs, terminalEnvironment } from './scratch-env';
 
 const SCRATCH_PREFIX = '/private/tmp/maws-c12-prerun-';
@@ -292,21 +292,12 @@ export function transcriptUsdEstimate(file: string, sinceMs: number): number {
 
 export const transcriptFile = (config: string, cwd: string, sessionId: string): string => join(config, 'projects', realpathSync(cwd).replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
 
-// What the run spent: every journal under the profile (each process's cost, `/clear` segments summed) plus the
-// terminal runs the tests recorded under `terminalUsd` (a `-p` run reports its cost; a PTY run's cost is read from the
-// relay's usage by the owner, and here counted from its `--resume` journal only when MAWS later runs it).
+// What the run spent: every session under the profile (its launches one cumulative stream, `/clear` segments summed;
+// live-budget.ts, spentUnder) plus the terminal runs the tests recorded under `terminalUsd` (a `-p` run reports its
+// cost; a PTY run's cost is read from the relay's usage by the owner, and here counted from its `--resume` journal only
+// when MAWS later runs it). `journals` counts the journal files.
 export function journalSpend(userData: string): { usd: number; journals: number } {
   const dir = join(userData, 'engine-host', 'journal');
-  let usd = 0;
-  let journals = 0;
-  if (existsSync(dir)) {
-    for (const id of readdirSync(dir)) {
-      for (const file of readdirSync(join(dir, id)).filter((f) => f.endsWith('.jsonl'))) {
-        const rows = readFileSync(join(dir, id, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow);
-        usd += journalCost(rows).costUsd;
-        journals += 1;
-      }
-    }
-  }
-  return { usd: Number(usd.toFixed(4)), journals };
+  const journals = existsSync(dir) ? readdirSync(dir).reduce((n, id) => n + readdirSync(join(dir, id)).filter((f) => f.endsWith('.jsonl')).length, 0) : 0;
+  return { usd: Number(spentUnder(userData).toFixed(4)), journals };
 }

@@ -1,5 +1,5 @@
-// The end of a paid live run (P3-C M10, extracted from the form P3-L's and P3-D's live specs share: e2e/library-live.spec.ts,
-// e2e/design-systems-live.spec.ts; P3-F's tracker row covers their adoption).
+// The end of a paid live run (P3-C M10, extracted from the form P3-L's and P3-D's live specs shared: e2e/library-live.spec.ts,
+// e2e/design-systems-live.spec.ts, which end through it since P4 W2-D, as the other live specs do).
 //
 // Contract. `endLiveRun` runs every step whatever an earlier one threw, notes each failure as "<what>: <message>" and
 // answers them in order (the caller fails the test on the first, after its own bookkeeping):
