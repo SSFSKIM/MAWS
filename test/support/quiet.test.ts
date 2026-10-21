@@ -54,6 +54,10 @@ describe('the quiet admission', () => {
     const loud = await quietWait({ clock: fake([12]) });
     expect(loud).toMatchObject({ quiet: false, waitedMs: 180_000 });
     expect(loud.reads).toHaveLength(7);
+    // a sleep that wakes past the budget reads nothing more: the pair it would have completed is not admitted
+    const lateWake = await quietWait({ clock: fake([9, 9, 9, 9, 9, 4, 4], (k) => (k === 5 ? 1_000 : 0)) });
+    expect(lateWake).toMatchObject({ quiet: false, waitedMs: 181_000, endLoad: 4 });
+    expect(lateWake.reads.map((r) => r.atMs)).toEqual([0, 30_000, 60_000, 90_000, 120_000, 150_000]);
   });
 
   it('records the rule it applied and when it started', async () => {

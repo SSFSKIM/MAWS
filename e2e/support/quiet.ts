@@ -50,19 +50,21 @@ export async function quietWait({ budgetMs = QUIET_BUDGET_MS, clock = SYSTEM }: 
     under = read.load < QUIET_LOAD_BELOW ? under + 1 : 0;
     if (under >= 2 || read.atMs + QUIET_READ_EVERY_MS > budgetMs) break;
     await clock.sleep(QUIET_READ_EVERY_MS);
+    if (clock.now() - start > budgetMs) break; // a sleep that woke past the budget: no read after it
   }
   const quiet = under >= 2;
+  const waitedMs = clock.now() - start;
   const last = reads.at(-1)!;
   const loads = reads.map((r) => r.load).join(', ');
   return {
     rule: `the 1-minute load under ${QUIET_LOAD_BELOW} on two consecutive reads ${QUIET_READ_EVERY_MS / 1000} s apart, waited for at most ${budgetMs / 1000} s (gate-offload Decision Log 75, ci-kit's mac/settle)`,
     quiet,
-    waitedMs: last.atMs,
+    waitedMs,
     budgetMs,
     startedAt: new Date(start).toISOString(),
     startLoad: reads[0]!.load,
     endLoad: last.load,
     reads,
-    summary: quiet ? `quiet after ${last.atMs / 1000} s (loads ${loads})` : `not quiet within ${budgetMs / 1000} s (loads ${loads}): the trials run, each recording its load`,
+    summary: quiet ? `quiet after ${+(waitedMs / 1000).toFixed(1)} s (loads ${loads})` : `not quiet within ${budgetMs / 1000} s (loads ${loads}): the trials run, each recording its load`,
   };
 }
