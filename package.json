@@ -13,6 +13,7 @@
     "dev": "electron-vite dev",
     "dev:stub": "node scripts/dev-stub.js",
     "build": "electron-vite build && pnpm --filter desk-web build && pnpm --filter desk-hub build",
+    "build:main-preload": "MAWS_BUILD_RENDERER=0 electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json --tsBuildInfoFile /dev/null && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --tsBuildInfoFile /dev/null && pnpm --filter desk-hub typecheck && pnpm --filter desk-web typecheck",
     "lint": "eslint .",
     "test": "NODE_OPTIONS=\"$NODE_OPTIONS --disable-warning=ExperimentalWarning\" vitest run",
