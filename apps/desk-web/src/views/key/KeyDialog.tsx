@@ -4,10 +4,10 @@
 // method loses the key. A key the device failed to forget is reported whatever the state, with a retry, since a reload
 // would load it again.
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import type { OrgKey, WrappedKeyRecord, WrappedKeys } from 'desk-hub/protocol';
 import type { Me } from '../../hub/me';
-import { checkFingerprint, passphraseWork } from '../../key/derive';
+import { checkFingerprint, passphraseWork, subscribePassphraseWork } from '../../key/derive';
 import { lock, stillHolds, useKeyHolder } from '../../key/holder';
 import { addMethod, prepareMethod, rememberedMethod, removeMethod, type NewMethod, type OrgMethod, type PreparedMethod } from '../../key/unlock';
 import { listWrappedKeys, WRAPPED_KEYS_QUERY } from '../../key/wrapped-keys';
@@ -50,7 +50,8 @@ export function KeyDialog({ me, onClose }: { me: Me; onClose: () => void }) {
 /** The org key's methods, for a browser that holds the key. */
 /** What the passphrase cost this device, once it was used in this tab (Argon2id: the phone's time is the owner's to read). */
 function PassphraseWork() {
-  const work = passphraseWork();
+  // Subscribed, so a derivation made while the dialog is open (a passphrase method added) shows here at once.
+  const work = useSyncExternalStore(subscribePassphraseWork, passphraseWork);
   if (!work) return null;
   return (
     <p className="m-0 text-ui-sm text-fg-muted" data-testid="passphrase-work">
