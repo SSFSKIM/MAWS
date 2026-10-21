@@ -80,9 +80,28 @@ browser's chrome)
   - H: not measurable through cua. g k s r m f on the object-selected box gave "Helloㅎㅏㄴㄱㅡㄹ" (s5), and the control,
     the same keys in Chrome's address bar, gave "ㅎㅏㄴ": cua's local keys carry the current layout's characters and skip
     the input method's composition (on the mini they carried ASCII, findings §4). The breakage is cua's, not Slides'.
-- Canva: not run. canva.com in the profile `main` was signed out (a cookie dialog and the signed-out page) and opened a
-  Google account-chooser tab for Canva's OAuth (`prompt=consent`); a sign-in is the owner's, so nothing was made there
-  and both tabs were closed.
+- Canva, first attempt (17:40Z): not run. canva.com in the profile `main` was signed out (a cookie dialog and the
+  signed-out page) and opened a Google account-chooser tab for Canva's OAuth (`prompt=consent`); a sign-in is the
+  owner's, so nothing was made there and both tabs were closed.
+- Canva, after the owner signed in (2026-10-21, 18:44Z to 18:50Z; ABC selected): the folder "MAWS UX check" (Projects,
+  id FAHYqni1zio) and in it the Presentation design "LC-2 typing" (id DAHYqi3F1UA) with one text box (Text ▸ Add a text
+  box, its placeholder typed over with "Hello"). The page's focus was read through the Playwright extension
+  (document.activeElement, the selection) and its keys through a recorder installed in the page:
+  - Check 4's first half: a first click on the unselected box selects the object (handles, the element toolbar with copy
+    and delete), no caret. The focus goes to a hidden `<input role="application" aria-label="Canvas">`, an editable
+    focus held while an object is selected, so the canvas has an input context before any text editor exists
+    (c3-first-click-object-selected.jpg).
+  - P: a printable key on the object-selected box is ignored. x went into that hidden input (its value read "x", then
+    "xx"; keydown at the INPUT, not cancelled, then beforeinput and input insertText x there) and the box's text stayed
+    "Hello", with no edit entered (c4-key-x-ignored.jpg).
+  - Enter on the object-selected box enters editing: the focus moves to a contenteditable "Text editor in Text" with a
+    collapsed caret (c-enter-edits.jpg).
+  - Check 4: a second single click on the selected box gives a caret (the same contenteditable focused, a collapsed
+    caret; c3-second-click-caret.jpg), which is MAWS's T3.
+  - H: not run; cua's keys skip the input method's composition (the Slides half above), so it would read nothing.
+  - Nothing shared, nothing deleted; the design's text left "Hello"; the hidden input keeps "xx" in the page only.
+- Made in Canva, nothing deleted: the folder "MAWS UX check" (id FAHYqni1zio) and in it the design "LC-2 typing" (id
+  DAHYqi3F1UA). Its tabs are left open in Chrome's "Playwright · Claude Code (2)" group.
 - Made, nothing deleted: the Drive folder "MAWS UX check" in My Drive (id 1gcMqtz7EQVFBoG6Mq03MUquGwhHr-gph) and in it the
   Google Slides presentation "LC-2 typing" (id 1bVhs9SKEaa18EpEc8KipwMdXjgzSW2EtCXT7gSay-0k: the blank title layout and
   one text box reading "Hello", the typed tests undone). Nothing shared. The input source read ABC at 17:35:14Z and 2-Set

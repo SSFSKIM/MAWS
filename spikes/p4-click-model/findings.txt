@@ -303,7 +303,12 @@ LC-2 (the owner's correction, relayed 2026-10-21: L0 to L7 stay skipped and LC-2
 lc2-steps.txt's Results): Google Slides appends a printable key typed on an object-selected text box at the end of its
 text and enters editing, it does not replace; the first syllable there could not be measured through cua, whose keys
 skip the input method's composition on the MacBook too (the control in Chrome's address bar gave ㅎㅏㄴ); Canva was not run,
-the profile being signed out of Canva. The architect's ruling (2026-10-21, at LC-2's acceptance): T10 stays as §4.4
+the profile being signed out of Canva. Canva's half ran once the owner signed in (18:44Z to 18:50Z): a first click
+selects the box with no caret and moves the focus to a hidden editable input (`<input role="application"
+aria-label="Canvas">`), Canva's own armed arrangement for an input context; a printable key typed then is swallowed by
+that input and ignored (the box's text unchanged, no edit entered); Enter enters editing with a caret; a second single
+click on the selected box gives a caret (MAWS's T3). So the three references split three ways on T10: PowerPoint and
+Keynote replace, Slides appends, Canva ignores. The architect's ruling (2026-10-21, at LC-2's acceptance): T10 stays as §4.4
 writes it, a printable key on ARMED clears and inserts. "Typing replaces" is a design item the owner approved and the
 rule of PowerPoint and Keynote; Slides' append at the end is one host's divergence, recorded here with research check
 1's evidence (Slides' first click on a box's text gives a caret, so Slides has no object-selected state reached by one
