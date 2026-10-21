@@ -23,6 +23,7 @@ import { ownTitles } from './support/library';
 import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
 import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // M5b
 import { closeScene, launchScene, scratchProject, seedArtifact, seedRecord, show, viewerOf, type Scratch } from './support/maws-tools'; // M6b
+import { sidebarRow } from './support/sidebar'; // P4 W2-D
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -471,6 +472,42 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   await expect.poll(() => (existsSync(pdf) ? readFileSync(pdf).subarray(0, 5).toString('latin1') : ''), { timeout: 60_000, message: 'the exported PDF saved' }).toBe('%PDF-');
   await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
   expect(c.maws.consoleErrors()).toEqual([]);
+});
+
+// P4 W2-D (tracker 2026-10-19; P3-F wave S, F16): Move to tab's mirror, from the artifact main tab's context menu, over
+// C8a's synthetic sessions (main serves them, so a session's panel holds tools).
+test('an artifact main tab’s Show in panel, from its context menu, shows the record in the session’s panel and the tab is gone', async () => {
+  launch = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json' } });
+  const { app, page } = launch;
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
+  const { id } = await createHtml(page, 'Quarterly page', HEADING_PAGE('IN_PANEL'));
+  const main = page.locator('[data-region="main"]');
+  const panel = page.locator('[data-region="panel"]');
+  const tab = main.getByRole('tab', { name: 'Quarterly page', exact: true });
+  const record = panel.locator(`[data-artifact-record="${id}"]`);
+
+  // Harness A shown; the page from its panel's Artifacts tool (All) into a main tab beside it by the record's Move to tab
+  await (await sidebarRow(page, 'Harness A')).click();
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click({ timeout: 15_000 });
+  await expect(record).toBeVisible();
+  await panel.getByRole('button', { name: 'Move to tab' }).click();
+  await expect(main.locator(`[data-artifact-tab="${id}"] [data-artifact-viewer]`)).toBeVisible();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  await expect(record).toHaveCount(0);
+
+  // the tab's context menu: Show in panel
+  await tab.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Show in panel', exact: true }).click();
+  await expect(record).toBeVisible();
+  await expect(record.frameLocator('[data-artifact-frame="html"]').locator('#version')).toHaveText('IN_PANEL');
+  await expect(tab).toHaveCount(0);
+  await expect(main.locator(`[data-artifact-tab="${id}"]`)).toHaveCount(0);
+  await expect(main.getByRole('tab', { name: /^Harness A/ })).toHaveAttribute('aria-selected', 'true');
+  expect(launch.consoleErrors()).toEqual([]);
 });
 
 test('a PDF, a video and an audio file artifact play in their viewers from the library', async () => {
