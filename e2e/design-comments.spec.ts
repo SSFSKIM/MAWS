@@ -24,7 +24,7 @@ import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
 import { AgentSeam, refusalOf } from './support/dashboards';
 import { openFromLibrary, plain } from './support/design';
-import { AGENT_SESSION, asAgent, createDesign, derivedIdOf, DESIGN_FILES, editDesign, elementOf, filesOf, ok, pinOffset, seamInstalled, seed, threadsOf, viewOf } from './support/design';
+import { AGENT_SESSION, asAgent, createDesign, derivedIdOf, DESIGN_FILES, editDesign, elementOf, filesOf, FRAMES, ok, pinOffset, seamInstalled, seed, threadsOf, viewOf } from './support/design';
 
 let launch: MawsLaunch | null = null;
 let repo: ScratchRepo | null = null;
@@ -216,8 +216,16 @@ test('comments on a design’s boards and elements: the card, the pins through m
   });
 
   await test.step('deleting the element orphans its thread with its last text; Undo brings it back', async () => {
+    // the move left it selected, and a press on the element selected alone edits it at the press (P4-B2's T3), so the
+    // Delete would take a character: a press on the phone's empty ground (right of the squatter, above the element)
+    // first selects nothing, then the press on it selects it ARMED, where Delete removes it (T14)
+    const phone = (await ws.locator('[data-board-id="phone"]').boundingBox())!;
+    const zoom = phone.width / FRAMES.phone!.w;
+    await page.mouse.click(phone.x + 300 * zoom, phone.y + 600 * zoom);
+    await expect.poll(async () => (await viewOf(page, id, 'panel')).selection).toEqual([]);
     await pressOn(page, ws.locator(`[data-board-id="phone"] [data-eid="${onPhone}"]`)); // the world takes the keys
     await expect.poll(async () => (await viewOf(page, id, 'panel')).selection).toEqual([onPhone]);
+    await expect(ws.locator('[data-design-world][data-armed]')).toHaveCount(1);
     await page.keyboard.press('Delete');
     await expect.poll(async () => await threadOf((t) => t.id === noteThread)).toMatchObject({ orphan: true, live: false, quote: 'Edit me, revised' });
     await toggleRail();

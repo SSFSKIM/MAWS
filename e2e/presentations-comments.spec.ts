@@ -183,9 +183,16 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   // element's last text, stored by the host from the text just before the deletion; no pin; still counted open
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(rail).toHaveCount(0);
+  // the drag left the body selected, and a click on the element selected alone edits it at the click (P4-B2's T3), so the
+  // Delete would take a character: a press on the empty slide first selects nothing, then the click selects it ARMED,
+  // where Delete removes it (T14)
+  const empty = (await stageAt(deck)).at(1800, 1000);
+  await page.mouse.click(empty.x, empty.y);
+  await expect(deck.locator('[data-overlay] [data-selected]')).toHaveCount(0);
   const box = (await deck.locator('[data-stage-slide] [data-eid="body"]').boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
+  await expect(deck.locator('[data-stage-surface][data-armed]')).toHaveCount(1);
   await page.keyboard.press('Delete');
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(thread).toHaveAttribute('data-orphan', '');
