@@ -3,7 +3,8 @@
 // far as DC3's M2 carries it (sign-in, the Worker serving the app, resume across a reload, a web `human` acknowledged)
 // and M2's with its M2b ruling: the org key drawn at random at first setup and kept at the hub wrapped once per method,
 // every method opening the same key, a method added and removed, the hub's `not-key-holder` in both its meanings, and
-// an enrollment code the browser made with that key, which enrolls a machine whose events the browser then verifies.
+// an enrollment code the browser made with that key, which enrolls a machine whose events the browser then verifies;
+// and a provisioning key (the provisioning-keys spec, §5) made, listed with the machines it enrolled, and revoked.
 // The machine here is a DX7/DX2 test client (test/local/machine.ts); the grid's counts and M3's proofs against DC3's
 // session plane and fake machine are session-plane.spec.ts.
 //
@@ -13,7 +14,20 @@
 // One browser page for the suite: its virtual authenticator holds the org's passkey from the setup on.
 import { randomUUID } from 'node:crypto';
 import { expect, test, type BrowserContext, type CDPSession, type Page, type WebSocket } from '@playwright/test';
-import { keyCheck, seal, verify, type DownFrame, type HumanDraft, type LogEvent, type ProjectDown, type ProjectUp } from 'desk-hub/protocol';
+import {
+  base64urlDecode,
+  decodeCode,
+  importOrgKey,
+  keyCheck,
+  seal,
+  verify,
+  type DownFrame,
+  type HumanDraft,
+  type LogEvent,
+  type ProjectDown,
+  type ProjectUp,
+  type ProvisioningKeys,
+} from 'desk-hub/protocol';
 import { checkFingerprint } from '../src/key/derive';
 import { ProjectClient } from '../src/hub/project-client';
 import { clearOrigin, virtualAuthenticator } from '../e2e/authenticator';
@@ -203,6 +217,80 @@ test('the code the browser builds, confirmed by opening the key once more, enrol
   await dialog.getByLabel(/machine's name/).fill(MACHINE.toUpperCase());
   await dialog.getByRole('button', { name: 'Continue' }).click();
   await expect(dialog.getByRole('alert')).toContainText('already enrolled');
+  await page.keyboard.press('Escape');
+});
+
+test('a provisioning key made in the browser, its code shown once with the boot line, enrolls machines under its prefix; revoked, it enrolls no more', async () => {
+  test.setTimeout(60_000);
+  const label = `pk-${randomUUID().slice(0, 8)}`;
+  const prefix = `${label}-`;
+  await page.goto(hub.localhost);
+  await expect(page.getByTestId('key-state')).toHaveText('Unlocked');
+  const dialog = page.getByRole('dialog', { name: 'Machines' });
+  const reopen = async () => {
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Machines', exact: true }).click();
+  };
+  await page.getByRole('button', { name: 'Machines', exact: true }).click();
+
+  // The key described, checked in the browser, and confirmed with the org key.
+  await dialog.getByRole('button', { name: 'Create a key' }).click();
+  const form = dialog.getByTestId('key-form');
+  await form.getByLabel('Label').fill(label);
+  await form.getByLabel('Prefix').fill('hub');
+  await form.getByRole('button', { name: 'Continue' }).click();
+  await expect(form.getByRole('alert')).toContainText('not "hub" or "legacy"');
+  await form.getByLabel('Prefix').fill(prefix);
+  await form.getByLabel('Revoke a machine offline for').selectOption('21600');
+  await form.getByRole('button', { name: 'Continue' }).click();
+  await expect(dialog.getByTestId('confirm-key')).toHaveText(label);
+  if (setUpHere) {
+    await dialog.getByRole('button', { name: 'Confirm with passkey' }).click();
+  } else {
+    const confirm = dialog.getByRole('form', { name: 'Passphrase', exact: true });
+    await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
+    await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
+  }
+
+  // Shown once, with the line each machine runs at boot; it carries the org's key.
+  const shown = dialog.getByTestId('enroll-code');
+  await expect(shown.getByTestId('boot-command')).toHaveText(`printf %s "$CODE" | sminos hub enroll --name ${prefix}<machine>`, { timeout: 30_000 });
+  const code = decodeCode((await shown.getByTestId('enrollment-code').textContent())!);
+  expect(code).toMatchObject({ kind: 'provision', hub: hub.localhost, org: 'local', prefix });
+  expect(checkFingerprint(await keyCheck(await importOrgKey(base64urlDecode(code.key))))).toBe(checkFingerprint((await orgKeys()).key_check!));
+  const listed = (await (await fetch(`${hub.url}/api/provisioning-keys`)).json()) as ProvisioningKeys;
+  expect(listed.keys.find((k) => k.label === label)).toMatchObject({ prefix, uses: 0, max_uses: null, offline_revoke_s: 21_600, revoked: null });
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(dialog.getByTestId('enrollment-code')).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText('smns-provision-v1.');
+  const row = dialog.locator(`[data-key-label="${label}"]`);
+  await expect(row).toContainText(`${label} · ${prefix} · 0 / ∞`);
+
+  // Two machines enroll through it, each as its `sminos hub enroll` redeems the code; a name off the prefix is refused.
+  const redeem = (name: string) =>
+    fetch(`${hub.url}/machine/enroll`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: code.token, machine: name }) });
+  for (const name of [`${prefix}a`, `${prefix}b`]) expect((await redeem(name)).status).toBe(200);
+  expect(await (await redeem(`other-${label}`)).json()).toMatchObject({ error: 'prefix-mismatch' });
+  await reopen();
+  await expect(row).toContainText(`${label} · ${prefix} · 2 / ∞`);
+  await expect(row.getByTestId(`key-machine-${prefix}a`)).toHaveText(`${prefix}a enrolling…`);
+  await expect(dialog.locator(`[data-machine="${prefix}a"]`)).toContainText(`via ${label}`);
+
+  // Revoked: no new machine enrolls through it, and the two it enrolled stay.
+  await row.getByRole('button', { name: `Revoke ${label}` }).click();
+  const revoke = dialog.getByTestId('revoke-key-confirm');
+  await expect(revoke.getByTestId('revoke-key-meaning')).toContainText('The 2 machines enrolled through it stay');
+  await revoke.getByRole('button', { name: `Revoke ${label}` }).click();
+  await expect(dialog.getByTestId('machines-notice')).toContainText(`Revoked ${label}`);
+  await expect(row).toContainText('revoked');
+  await expect(row.getByRole('button')).toHaveCount(0);
+  const refused = await redeem(`${prefix}c`);
+  expect([refused.status, await refused.json()]).toMatchObject([410, { error: 'key-revoked' }]);
+  await expect(dialog.locator(`[data-machine="${prefix}a"]`)).toBeVisible();
+  await expect(dialog.locator(`[data-machine="${prefix}b"]`)).toBeVisible();
+
+  // Removed by hand as any machine is, so the tests after this one see the org as it was.
+  for (const name of [`${prefix}a`, `${prefix}b`]) expect((await fetch(`${hub.url}/api/machines/${name}`, { method: 'DELETE' })).status).toBe(200);
   await page.keyboard.press('Escape');
 });
 

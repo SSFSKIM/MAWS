@@ -5,9 +5,10 @@ import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
 import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/maws/tools'; // E1
 import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
+import { MESSAGE_TOOLS } from '@shared/owner/message-call'; // P4-R7
 import type { ToolCategory, ToolClassification } from './rows';
 
-export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action';
+export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action' | /* P4-R7 */ 'message';
 
 // E1 start: the names the engine gives the `maws` server's tools (X9), as tool uses carry them
 export const MAWS_TOOL_USE = Object.fromEntries(MAWS_TOOL_NAMES.map((name) => [name, `mcp__${MAWS_SERVER_NAME}__${name}`])) as Readonly<Record<MawsToolName, string>>;
@@ -65,7 +66,10 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   // E4c end
 };
 
-export function presentationOf(toolName: string): Presentation {
+// P4-R7: a call of a message tool the host reads (`messageTools`; MAWS's own unless the host names others, the
+// transcript source's `messageTools`) is the message it sends (derive.ts's `to_human` row).
+export function presentationOf(toolName: string, messageTools: readonly string[] = MESSAGE_TOOLS): Presentation {
+  if (messageTools.includes(toolName)) return 'message';
   return Object.hasOwn(ROW_KIND_TOOLS, toolName) ? ROW_KIND_TOOLS[toolName] : 'cell';
 }
 
@@ -107,6 +111,8 @@ const TABLE: Record<string, TableRow> = {
   [MAWS_TOOL_USE.artifact_resolve]: standalone('other'),
   // P3-E (E2 M2): a dashboard's dataset bind is a cell of its own, as the namespace's other writers are
   [MAWS_TOOL_USE.artifact_dataset]: standalone('other'),
+  // P4-B4: the library search is a cell of its own, as the namespace's other readers are
+  [MAWS_TOOL_USE.artifact_search]: standalone('other'),
   // E13 start: a cua_repl `js` call is a cell of its own, never folded into a group of MCP calls, so the browser
   // activity under it is in view without opening a group (it folds with the turn's work, as every cell does)
   [CUA_JS_TOOLS[0]]: standalone('mcp'),

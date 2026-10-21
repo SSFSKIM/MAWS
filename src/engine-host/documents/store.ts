@@ -26,6 +26,7 @@ import { ArtifactFiles, safeName, type ContentRef } from './bytes';
 import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreTooNewError
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
+import { timed } from './host-work'; // P4-R6
 import { restoreArtifact } from './restore';
 import { datasetRefsOf, isQuerySnapshotName, SnapshotRetention, type AssetHold } from './retention'; // E3
 import { mainOf, type Committed, type DocumentService, type WriteOptions } from './service';
@@ -848,8 +849,8 @@ export class ArtifactStore {
           if (actor.kind === 'session') this.linkInFrame(artifactId, actor.appSessionId, 'edited', at);
         },
         afterWrite: options?.afterWrite && ((doc) => (refused ? undefined : options.afterWrite!(doc))),
-        inFrame: (reached) => {
-          if (!refused) options?.inFrame?.(reached);
+        inFrame: (reached, write) => {
+          if (!refused) options?.inFrame?.(reached, write);
         },
       });
       if (refused) throw (refused as { error: unknown }).error;
@@ -1451,6 +1452,24 @@ export class ArtifactStore {
     return grant.mode === 'read' ? 'held' : 'wrongMode';
   }
 
+  // P4-B5 start: an owner's delivery's fence (route D's direct send, which no grant authorizes): only the artifact's
+  // deletion asked for breaks it, at once and synchronously, as it breaks a call's; no tool's revoke or grant touches it
+  // (its key names no tool). Released with `releaseConnectorFence`; `deliveryFenceHolds` is the send's check at its write.
+  deliveryFence(artifactId: string, onBreak?: () => void): ConnectorFence {
+    const fence: ConnectorFence = { artifactId, key: DELIVERY_FENCE_KEY, fingerprint: '', mode: 'once', broken: false, onBreak };
+    let held = this.fences.get(artifactId);
+    if (!held) this.fences.set(artifactId, (held = new Set()));
+    held.add(fence);
+    return fence;
+  }
+
+  deliveryFenceHolds(fence: ConnectorFence): boolean {
+    if (fence.broken || fence.key !== DELIVERY_FENCE_KEY || !this.fences.get(fence.artifactId)?.has(fence)) return false;
+    const row = this.closed ? undefined : this.entity(fence.artifactId);
+    return row !== undefined && row.deletedAt === null;
+  }
+  // P4-B5 end
+
   // A revoke of `tool` (null: a delete of the artifact), or a grant replacing it, asked for: every fence held of it
   // breaks now, but those the replacing grant still `admits`.
   private breakFences(artifactId: string, tool: ConnectorToolRef | null, admits?: (fence: ConnectorFence) => boolean): void {
@@ -1533,7 +1552,7 @@ export class ArtifactStore {
     const row = this.entity(artifactId);
     if (!row || row.deletedAt !== null || !isDocKind(row.kind) || this.closed) return;
     if (this.versions.latest(artifactId)?.seq === this.service.revision(artifactId)) return;
-    const id = await this.service.inBatch(() => this.versionInFrame(row, { kind: 'auto', actor: this.lastWriter(artifactId) }));
+    const id = await this.service.inBatch(() => timed('auto version', () => this.versionInFrame(row, { kind: 'auto', actor: this.lastWriter(artifactId) }), () => artifactId)); // P4-R6: timed
     if (id !== null) this.emit(artifactId, 'updated');
   }
 
@@ -1709,6 +1728,9 @@ function toSpace(row: { id: string; name: string; linkedDir: string | null; crea
 const GRANT_INPUT = z.object(ConnectorGrantRequestSchema.shape);
 const TOOL_INPUT = z.object(ConnectorToolRefSchema.shape);
 const CALL_INPUT = z.object(ConnectorCallRefSchema.shape);
+
+// P4-B5: a delivery fence's key, which no tool's key (`connectorToolKey`, never empty) equals.
+const DELIVERY_FENCE_KEY = '';
 
 // H3b: a connector call's dispatch fence (`connectorFence`): its tool and authority, and whether a revoke, a replacing
 // grant or a delete broke it.

@@ -6,6 +6,8 @@
 // draws exactly as the full transcript does, the record row above it as the way back; its divider expanded is level 2.
 // A turn with no mark draws as the full transcript, so untagged history and a turn the model forgot to mark are never
 // hidden. A streaming block is told apart by its live buffer (`liveMarkedRowIds`), which the rows do not carry.
+// P4-R7: a message tool's message (a `to_human` row) is a mark as a span is: it marks its turn and draws at level 0, at
+// its place among the marked texts.
 import { expandedTurnRows, isPersistentRow, turnRows } from '../../transcript/model/derive';
 import { rowId } from '../../transcript/model/keys';
 import { marksOfText } from '../../transcript/model/owner-marks';
@@ -54,7 +56,7 @@ export function reportRows(rows: readonly Row[], state: TranscriptState, ui: Pic
   const recordAfter = new Map<Row, Row>();
   const hidden = new Set<Row>();
   for (const [turn, own] of turns) {
-    if (!own.some((row) => row.kind === 'assistant_text' && isMarked(row, live))) continue;
+    if (!own.some((row) => (row.kind === 'assistant_text' && isMarked(row, live)) || row.kind === 'to_human' /* P4-R7 */)) continue;
     const fold = foldOf(own, turn, state, ui.reportOpenTurns?.has(turn) ?? false);
     if (fold === null) continue;
     if (fold.prompt > 0) recordAfter.set(own[fold.prompt - 1], fold.record);

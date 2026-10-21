@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
 import { currentSet } from './layout-model';
@@ -116,6 +116,113 @@ describe('layout persistence', () => {
     expect(again.store.getState().main).toEqual(written);
   });
 
+  // P4-B3 (X37; its Decision Log 1): a floating split is written beside its ratio and comes back floating at the next
+  // launch; docked again, the value is byte-identical to the one it floated from.
+  it('writes a floating split to main.tabs, reads it back floating, and docks to the value it left', async () => {
+    const artifactId = '00000000-0000-4000-8000-000000000001';
+    const { store, hydrate, sets } = setup();
+    await hydrate();
+    store.getState().openTab({ kind: 'artifact', artifactId });
+    store.getState().openSession(A, { split: true });
+    store.getState().setSplitRatio(0.4);
+    vi.advanceTimersByTime(1000);
+    const before = JSON.stringify(sets().at(-1)!.value);
+    store.getState().floatSplit(`session:${A}`);
+    vi.advanceTimersByTime(1000);
+    const floating = sets().at(-1)!.value as LayoutMain;
+    expect(currentSet(floating)).toMatchObject({ floating: { sessionTabId: `session:${A}` }, splitRatio: 0.4 });
+    const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(floating)) });
+    await again.hydrate();
+    expect(again.store.getState().main).toEqual(floating); // relaunch restores the float
+    store.getState().dockSplit();
+    vi.advanceTimersByTime(1000);
+    expect(JSON.stringify(sets().at(-1)!.value)).toBe(before);
+  });
+
+  // P4-B3x (P4 Decision Log 40): Expand's fold persists as its float does, so leaving Expand after a relaunch opens the
+  // panel it folded; hydration keeps the rule between the two keys.
+  describe('Expand’s fold of the right panel', () => {
+    const artifactId = '00000000-0000-4000-8000-000000000001';
+    const S = `session:${A}`;
+    const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+    const last = (sets: { key: string; value: unknown }[], key: string) => sets.filter((s) => s.key === key).at(-1)?.value;
+    // layout.json after a launch: what it held, then each write in order.
+    const after = (held: Record<string, unknown>, sets: { key: string; value: unknown }[]) => clone({ ...held, ...Object.fromEntries(sets.map((s) => [s.key, s.value])) });
+    const expanded = async () => {
+      const { store, hydrate, sets } = setup();
+      await hydrate();
+      store.getState().openTab({ kind: 'artifact', artifactId });
+      store.getState().openSession(A, { split: true });
+      vi.advanceTimersByTime(1000);
+      store.getState().floatSplit(S, { foldPanel: true });
+      vi.advanceTimersByTime(1000);
+      return { main: last(sets(), 'main.tabs') as LayoutMain, regions: last(sets(), 'regions') as LayoutRegions };
+    };
+
+    it('writes the fold on the float and the folded panel, reads both back, and leaving Expand then opens the panel', async () => {
+      const { main, regions } = await expanded();
+      expect(currentSet(main).floating).toEqual({ sessionTabId: S, foldedPanel: true });
+      expect(regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, collapsed: true });
+      const again = setup({ 'main.tabs': clone(main), regions: clone(regions) });
+      await again.hydrate();
+      expect([again.store.getState().main, again.store.getState().regions]).toEqual([main, regions]);
+      expect(again.sets(), 'nothing to write back').toEqual([]);
+      again.store.getState().dockSplit();
+      vi.advanceTimersByTime(1000);
+      expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+      expect(currentSet(last(again.sets(), 'main.tabs') as LayoutMain).floating).toBeUndefined();
+    });
+
+    it('a stored fold whose float the reader drops (its session gone) opens the panel, both written back', async () => {
+      const { main, regions } = await expanded();
+      const held = { 'main.tabs': clone(main), regions: clone(regions) };
+      const again = setup(held);
+      await again.hydrate(() => false);
+      expect(currentSet(again.store.getState().main).floating).toBeUndefined();
+      expect(again.store.getState().regions.panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+      expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(again.store.getState().main);
+      // the owner closes the panel and quits with no tab change: the launch after keeps it closed
+      const written = after(held, again.sets());
+      const third = setup(written);
+      await third.hydrate(() => false);
+      third.store.getState().setPanel({ collapsed: true });
+      vi.advanceTimersByTime(1000);
+      const fourth = setup(after(written, third.sets()));
+      await fourth.hydrate(() => false);
+      expect(fourth.store.getState().regions.panel.collapsed).toBe(true);
+    });
+
+    it('a panel opened and closed again before hydration lands drops the stored fold, so leaving Expand leaves it closed', async () => {
+      const { main, regions } = await expanded();
+      const held = { 'main.tabs': clone(main), regions: clone(regions) };
+      const again = setup(held);
+      again.store.getState().setPanel({ maximized: true }); // Maximize, then the toggle, racing the first layout.get
+      again.store.getState().setPanel({ collapsed: true });
+      await again.hydrate();
+      expect(currentSet(again.store.getState().main).floating).toEqual({ sessionTabId: S });
+      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(again.store.getState().main);
+      again.store.getState().dockSplit();
+      expect(again.store.getState().regions.panel.collapsed).toBe(true);
+      // with its session gone the reader drops the float too, and the panel stays as the owner left it
+      const gone = setup(held);
+      gone.store.getState().setPanel({ maximized: true });
+      gone.store.getState().setPanel({ collapsed: true });
+      await gone.hydrate(() => false);
+      expect(gone.store.getState().regions.panel.collapsed).toBe(true);
+    });
+
+    it('a stored fold beside an open panel is dropped, the float kept, and main.tabs written back', async () => {
+      const { main } = await expanded();
+      const again = setup({ 'main.tabs': clone(main) }); // regions at their default: the panel open
+      await again.hydrate();
+      expect(currentSet(again.store.getState().main).floating).toEqual({ sessionTabId: S });
+      expect(currentSet(last(again.sets(), 'main.tabs') as LayoutMain).floating).toEqual({ sessionTabId: S });
+      again.store.getState().dockSplit();
+      expect(again.store.getState().regions.panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
+    });
+  });
+
   it('writes nothing for hydration alone when layout.json holds every key', async () => {
     const { hydrate, sets } = setup();
     await hydrate();
@@ -204,12 +311,28 @@ describe('layout persistence', () => {
     expect(sets()).toHaveLength(1); // flushed, not written twice
   });
 
-  it('never writes the transient no-session selection', async () => {
-    const { store, hydrate, sets } = setup({ 'panel.pinned': [{ id: 'p1', toolId: 'terminal', pinned: true }, { id: 'p2', toolId: 'files', pinned: true }] });
+  // P4-B3 (M3): the pin selection while no session is in view was transient (no key held it), so a pinned tab selected
+  // with no session came back as the Session overview at a relaunch (tracker row 290). It has a key of its own now.
+  it('writes the no-session selection to its own key and reads it back among the pins', async () => {
+    const pins = [{ id: 'p1', toolId: 'terminal', pinned: true }, { id: 'p2', toolId: 'files', pinned: true }];
+    const { store, hydrate, sets } = setup({ 'panel.pinned': pins });
     await hydrate();
     store.getState().setPanelTabs(null, { tabs: store.getState().panelPinned, activeTabId: 'p2' });
     vi.advanceTimersByTime(1000);
-    expect(sets()).toEqual([]);
+    expect(sets()).toEqual([{ key: 'panelTools.activeNoSession', value: { version: 1, activeTabId: 'p2' } }]);
+    const again = setup({ 'panel.pinned': pins, 'panelTools.activeNoSession': sets()[0].value });
+    await again.hydrate();
+    expect(again.store.getState().panelActiveNoSession).toBe('p2');
+    vi.advanceTimersByTime(1000);
+    expect(again.sets()).toEqual([]);
+    // a selection naming no pin any more (or a malformed value) reads as none
+    for (const stored of [{ version: 1, activeTabId: 'gone' }, { activeTabId: 'p2' }]) {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const stale = setup({ 'panel.pinned': pins, 'panelTools.activeNoSession': stored });
+      await stale.hydrate();
+      expect(stale.store.getState().panelActiveNoSession).toBeNull();
+      warn.mockRestore();
+    }
   });
 
   it('flushes on stop and then stops listening', async () => {
@@ -222,6 +345,119 @@ describe('layout persistence', () => {
     vi.advanceTimersByTime(1000);
     window.dispatchEvent(new Event('beforeunload'));
     expect(sets()).toHaveLength(1);
+  });
+});
+
+// P4-B3 (M3; its Decision Log 22, X5 as amended): what a panel tool persists of a tab (the Artifacts tool's record) in
+// `panelTools.params`, kept for the panel tabs that exist.
+describe('panel tools’ params', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
+  const pin = { id: 'artifacts:pinned01', toolId: 'artifacts', pinned: true };
+  const own = { id: 'artifacts:session1', toolId: 'artifacts', pinned: false };
+
+  it('writes a tab’s params to their key, a null clearing them, and reads them back at the next launch', async () => {
+    const { store, hydrate, sets } = setup({ 'panel.pinned': [pin], 'panel.app-a': { tabs: [own], activeTabId: own.id } });
+    await hydrate((id) => id === A);
+    store.getState().setPanelParams(pin.id, { target: 'x' });
+    store.getState().setPanelParams(own.id, { target: 'y' });
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    const written = { version: 1, params: { [pin.id]: { target: 'x' }, [own.id]: { target: 'y' } } };
+    expect(sets()).toEqual([{ key: 'panelTools.params', value: written }]);
+    const again = setup({ 'panel.pinned': [pin], 'panel.app-a': { tabs: [own], activeTabId: own.id }, 'panelTools.params': written });
+    await again.hydrate((id) => id === A);
+    expect(again.store.getState().panelParams).toEqual(written.params);
+    store.getState().setPanelParams(own.id, null);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(sets().at(-1)).toEqual({ key: 'panelTools.params', value: { version: 1, params: { [pin.id]: { target: 'x' } } } });
+  });
+
+  it('writes nothing for params equal to the ones held', async () => {
+    const { store, hydrate, sets } = setup({ 'panel.pinned': [pin], 'panelTools.params': { version: 1, params: { [pin.id]: { target: 'x' } } } });
+    await hydrate();
+    const held = store.getState().panelParams;
+    store.getState().setPanelParams(pin.id, { target: 'x' });
+    store.getState().setPanelParams('artifacts:never-01', null);
+    expect(store.getState().panelParams).toBe(held);
+    vi.advanceTimersByTime(1000);
+    expect(sets()).toEqual([]);
+  });
+
+  it('keeps only the params of panel tabs that exist, at hydration and at each write; the tab written is kept before its ref lands', async () => {
+    const stored = { version: 1, params: { [pin.id]: { target: 'x' }, [own.id]: { target: 'y' }, 'artifacts:closed01': { target: 'z' } } };
+    // B's list is not read (an unknown session), so its tab's params go with the closed tab's
+    const { store, hydrate, sets } = setup({ 'panel.pinned': [pin], 'panel.app-b': { tabs: [own], activeTabId: null }, 'panelTools.params': stored });
+    await hydrate((id) => id === A);
+    expect(store.getState().panelParams).toEqual({ [pin.id]: { target: 'x' } });
+    store.getState().setPanelTabs(null, { tabs: [], activeTabId: null }); // the pin closed
+    store.getState().setPanelParams('artifacts:new00001', { target: 'w' }); // a tab whose instance exists before its ref is written
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(sets().filter((s) => s.key === 'panelTools.params')).toEqual([{ key: 'panelTools.params', value: { version: 1, params: { 'artifacts:new00001': { target: 'w' } } } }]);
+  });
+
+  it('reads an invalid value as no params', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { store, hydrate } = setup({ 'panel.pinned': [pin], 'panelTools.params': { params: { [pin.id]: { target: 'x' } } } });
+    await hydrate();
+    expect(store.getState().panelParams).toEqual({});
+    expect(warn.mock.calls.map(([line]) => line)).toEqual(['[layout] panelTools.params is not a valid value; using the default']);
+    warn.mockRestore();
+  });
+});
+
+// P4-B3 (M3; its Decision Log 23, tracker row 126): a stored main.tabs the reader rewrote (a tab of an unknown or retired
+// kind dropped, a deliverable tab converted) is written back once at hydration, so the next launch reads it unchanged
+// and warns nothing.
+describe('the reader’s write-back of main.tabs', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
+  const session = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false };
+  const stored = (tabs: unknown[], closedTabs: unknown[] = []) => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: session.id }] } }, closedTabs });
+
+  it.each([
+    ['a later build’s kind', stored([session, { id: 'canvas:1', kind: 'canvas', pinned: false }]), 1],
+    ['a retired kind', stored([session], [{ id: 'overview', kind: 'overview', pinned: true }]), 0],
+    ['a deliverable tab', stored([session, { id: 'deliverable:app-a:d1', kind: 'deliverable', appSessionId: A, deliverableId: 'd1', pinned: false }]), 0],
+  ])('rewrites %s once; the next launch reads what was written unchanged, warning nothing', async (_, value, warnings) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { store, hydrate, sets } = setup({ 'main.tabs': value });
+    await hydrate((id) => id === A);
+    expect(warn).toHaveBeenCalledTimes(warnings);
+    const written = sets().filter((s) => s.key === 'main.tabs');
+    expect(written).toEqual([{ key: 'main.tabs', value: store.getState().main }]);
+    vi.advanceTimersByTime(1000);
+    expect(sets()).toHaveLength(1);
+    warn.mockClear();
+    const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(written[0].value)) });
+    await again.hydrate((id) => id === A);
+    vi.advanceTimersByTime(1000);
+    expect(again.sets()).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('writes nothing for a value the reader keeps, whatever order its keys were written in', async () => {
+    const value = stored([{ pinned: true, appSessionId: A, kind: 'session', id: session.id }]);
+    const reordered = { closedTabs: [], sets: { [NO_PROJECT]: { splitRatio: 0.5, focusedPane: 0, panes: value.sets[NO_PROJECT].panes } }, current: NO_PROJECT, version: 2 };
+    const { hydrate, sets } = setup({ 'main.tabs': reordered });
+    await hydrate((id) => id === A);
+    vi.advanceTimersByTime(1000);
+    expect(sets()).toEqual([]);
+  });
+
+  it('never writes the default over a value it could not read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { hydrate, sets } = setup({ 'main.tabs': stored([{ ...session, pinned: 'yes' }]) });
+    await hydrate((id) => id === A);
+    vi.advanceTimersByTime(1000);
+    expect(sets()).toEqual([]);
+    warn.mockRestore();
   });
 });
 

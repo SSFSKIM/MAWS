@@ -18,6 +18,7 @@ import { connectAgentWorkEvents } from '../../../ipc/events';
 import * as query from '../../../ipc/query';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useSessions } from '../../../stores/sessions';
+import { useSetup } from '../../../sessions/store';
 import { setAgentWorkClient, type AgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
 import { openLog } from '../log/LogTool';
@@ -613,6 +614,50 @@ describe('background work', () => {
     expect(text()).not.toContain('Nothing running');
   });
 
+  // P4 (the sitting's candidate 3): main refuses the runs read until it has registered the session, which a new chat's
+  // start does a moment after the section asks; while the session starts that answer reads Starting…, muted
+  describe('while the session starts', () => {
+    afterEach(() => useSetup.setState({ invoking: new Set(), phases: new Map() }));
+    const summary = () => document.querySelector<HTMLElement>('[data-summary="background"]')!;
+    const unregistered = () => useSessions.setState((s) => ({ records: new Map(), engine: new Map(), digests: new Map(), recordsVersion: s.recordsVersion + 1 }));
+
+    it('the runs read’s refusal reads Starting…, not the refusal in the danger colour, through the setup and the launch', async () => {
+      unregistered();
+      useSetup.setState({ invoking: new Set([A]) }); // a new chat's first send: C10's start in flight, nothing registered
+      render(<BackgroundSummary appSessionId={A} open={vi.fn()} />);
+      await act(async () => {
+        await fake.answer('subagents', []);
+        await fake.fail('workflows', 'unknown app session: A');
+      });
+      expect(summary().textContent).toContain('Starting…');
+      expect(summary().textContent).not.toContain('unknown app session');
+      expect(summary().querySelector('.text-danger')).toBeNull();
+      act(() => useSetup.setState({ invoking: new Set() }));
+      setStatus(live({ process: 'initializing' })); // the engine launching it
+      expect(summary().textContent).toContain('Starting…');
+      expect(summary().querySelector('.text-danger')).toBeNull();
+      setStatus(live()); // ready: the graph's counts
+      expect(summary().textContent).toContain('Nothing running');
+    });
+
+    it('the runs are read again once the session is registered, so a start that ends exited says nothing stale', async () => {
+      unregistered();
+      useSetup.setState({ invoking: new Set([A]) });
+      render(<BackgroundSummary appSessionId={A} open={vi.fn()} />);
+      await act(async () => {
+        await fake.answer('subagents', []);
+        await fake.fail('workflows', 'unknown app session: A');
+      });
+      act(() => seedSessions(null)); // main registered the record
+      expect(fake.pending('workflows')).toBe(1);
+      act(() => useSetup.setState({ invoking: new Set() }));
+      setStatus(live({ process: 'exited' })); // the start failed into exited
+      await act(() => fake.answer('workflows', workflowRunsOf()));
+      expect(summary().textContent).toContain('1 workflow run on disk');
+      expect(summary().textContent).not.toContain('unknown app session');
+    });
+  });
+
   it('the summary of a disk-only session whose runs could not be read says why', async () => {
     seedSessions(null);
     render(<BackgroundSummary appSessionId={A} open={vi.fn()} />);
@@ -720,7 +765,7 @@ describe('scheduled jobs', () => {
   const callOf = (prompt: string) => CRON.find((e) => e.kind === 'tool.use' && e.toolName === 'CronCreate' && (e.input as { prompt?: string }).prompt === prompt) as Extract<SessionEvent, { kind: 'tool.use' }>;
   const ONE_SHOT = callOf('E7 one-shot');
   const next = (cron: string, from: number) => nextCronMatch(parseCron(cron)!, from)!;
-  const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+  const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
 
   const scheduled = () =>
     Array.from(section('scheduled')?.querySelectorAll<HTMLElement>('[data-scheduled]') ?? []).map((row) => ({
@@ -759,7 +804,7 @@ describe('scheduled jobs', () => {
       { id: '8d1a2582', schedule: '15 4 6 10 *', kind: 'one-shot · session-only', prompt: 'E7 one-shot', link: 'Open creating turn' },
     ]);
     const tick = next('*/2 * * * *', now);
-    expect(rows[1]!.when).toBe(`Next ≈ ${TIME.format(tick)} (${formatIn(tick - now)}) · Expires ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(Date.parse(callOf('E7 cron tick').at) + RECURRING_MAX_AGE_MS)}`);
+    expect(rows[1]!.when).toBe(`Next ≈ ${TIME.format(tick)} (${formatIn(tick - now)}) · Expires ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(Date.parse(callOf('E7 cron tick').at) + RECURRING_MAX_AGE_MS)}`);
     const fire = next('15 4 6 10 *', Date.parse(ONE_SHOT.at));
     expect(rows[2]!.when).toContain(`(${formatIn(fire - now)})`); // a one-shot: its one fire, no expiry
     expect(rows[2]!.when).not.toContain('Expires');

@@ -1,0 +1,59 @@
+P4-R8: MCP servers MAWS passes to the sessions it launches, through --mcp-config, on MAWS's own wire
+(docs/doperpowers/plans/2026-10-19-p4-smoothing.md, routed by the architect as P4-R8; parent pin blob
+bd54d325b4c967eeafb98fb6426049bff1c55669 at master 559ec731a; 2026-10-21)
+
+Question (D-1). With MAWS's launch plus `--mcp-config {"mcpServers":{"notion":{"type":"http","url":
+"https://mcp.notion.com/mcp"}}}`: what does mcp_status report for the server; is the login made under the owner's
+user-scope entry (removed from ~/.claude.json at about 06:10Z, the login left in place) reused; what does a server that
+needs auth look like on the wire; what does mcp_authenticate answer there; and when the user's or a project's own config
+names the same server, which entry runs.
+
+Method. scenarios/pass3/p4-r8-mcp-servers.mjs. Engine 2.1.306, the realpath of ~/.local/bin/claude, which is what MAWS's
+sessions run (the owner's MAWS Settings name no binary; src/engine-host/binary-info.ts). MAWS's launch line, its
+environment's constants and the gateway route, its initialize with the `maws` server served, `--disallowedTools
+AskUserQuestion --allowedTools mcp__maws__message`. No prompt in either arm, so no model was called.
+- owner: the owner's config home (CLAUDE_CONFIG_DIR unset), cwd this worktree (its project key, the MAWS repository
+  root, is already trusted, so no project entry is added), `--settings` with the to-human lane's env as MAWS passes it.
+  SMNS_MEMBER is left out so sminos never admits the probe as a member: the one difference from a MAWS session's
+  environment. The raw recording was kept under /tmp and deleted after curating fixtures/p4/p4-r8-owner.jsonl: the
+  probe's control exchanges, the maws server's and meta rows; every other server reduced to its name, status, scope and
+  type, the initialize answer to its key names, the engine's debug lines about notion with anything token-shaped removed.
+- scratch: a scratch config home naming `notion` in user scope, local scope and the project's .mcp.json (approved), at
+  three distinct paths of a local server, and the same --mcp-config plus `probe-oauth`, an OAuth-protected local server
+  (RFC 9728 resource metadata, RFC 8414 server metadata, RFC 7591 registration; /authorize and /token never reached).
+  Fixture fixtures/p4/p4-r8-scratch.jsonl. Tests in fixtures.test.mjs ("p4 R8").
+
+1. A --mcp-config server reads in mcp_status as scope "dynamic" (and `source: "dynamic"`), config {type, url}, the same
+   scope label the plugins' servers and `maws` carry: `pending` while it connects, then `connected` or `needs-auth`.
+2. The login is reused. owner: notion `connected` in 552 ms with 65 tools, serverInfo "Notion MCP"; the engine's own
+   lines read "Returning tokens", "Expires in: 6478s", "Successfully connected (transport: http)". The engine keys a
+   server's OAuth entry by its name, type, URL and headers, never by its scope (`${name}|` + sha256 of
+   JSON.stringify({type, url, headers}) to 16 hex; 2.1.304 cli.pretty.js:362220-362223), so an entry with the same name
+   and URL and no headers finds the grant the user-scope entry made. The engine reads the keychain item through
+   /usr/bin/security as every session does: no dialog appeared. The auth repair (the brief's step 3) is therefore left
+   out. Renaming the entry, changing its URL or adding a header would orphan that grant (needs-auth until a new login).
+3. Precedence: the --mcp-config entry wins over user, local and project scope of the same name, and only it is
+   connected. scratch: one `notion` in mcp_status, scope dynamic, the --mcp-config URL; the local server was never asked
+   for /user/mcp, /local/mcp or /project/mcp. Source: `Go = {...configured, ...dynamic}` (2.1.304 cli.pretty.js:444104),
+   the configured set itself plugin < user < project < local < managed (808176-808200), and a dynamic name also
+   suppresses a plugin server that duplicates it (808175). MAWS passes its list and leaves the resolution to the engine.
+4. A server that needs auth: `status: "needs-auth"` with name, config, scope and source only (no tools, no error).
+   At connect the engine saves the server's discovery state and defers registration ("deferring client registration to
+   authentication time"). An mcp_call to it answers "MCP server not connected: probe-oauth", which mcp-call.ts reads as
+   `not_connected`; its `needs_auth` text comes from a call whose server answers 401 mid-session (88556).
+5. mcp_authenticate {serverName} on it: success {authUrl, requiresUserAction: true, callbackExpected: true,
+   redirectScheme: "localhost", state, callbackPort}. Before answering, the engine registered its client (POST /register);
+   it listens on localhost:<callbackPort>/callback itself and never opens the browser (skipBrowserOpen), so a host
+   opens authUrl and waits for the server's status to change. mcp_status still read needs-auth right after (the callback
+   was not exercised). On a name no server has: error "Server not found: no-such-server".
+6. What the runs left. owner: ~/.claude.json's user-scope servers (openaiDeveloperDocs alone, notion still absent), the
+   project entry's key set and the project count unchanged; no transcript was written for the session. scratch: the
+   scratch home's keychain item (Claude Code-credentials-8e824fb9, holding the discovery state and the registration) was
+   created by the run and removed by the scenario by that exact name; the owner's /tmp project keys unchanged.
+7. From source, for the setting's validation: a --mcp-config that fails validation as a whole exits the engine
+   ("Error: Invalid MCP configuration"); an entry with a skippable problem is skipped with a warning (cli.pretty.js:
+   443450-443480). The engine's own rule for a name (`claude mcp add`, 807826): letters, digits, hyphens and
+   underscores.
+
+Not covered: the callback's completion and the reconnect after it (a browser sign-in); a claude.ai connector with the
+same URL beside the entry (the gateway launch lists none); entries with headers.

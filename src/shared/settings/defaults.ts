@@ -1,17 +1,18 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14), the one migration from every earlier version, and the one patch merge
+// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17), the one migration from every earlier version, and the one patch merge
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { BrowserSettingsSchema, ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
+import { userScopeProfile } from '../engine/launch-profile'; // P4-A2
 
-export const SETTINGS_DEFAULTS_V14: Settings = {
-  version: 14, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14
+export const SETTINGS_DEFAULTS_V17: Settings = {
+  version: 17, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
-  engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // W13: binaryPath null, the installed Claude Code
+  engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8: MAWS's code names no server */, launchProfile: userScopeProfile() /* P4-A2: the user scope */ }, // W13: binaryPath null, the installed Claude Code
   gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true }, // D-19
   usage: { nearLimitPercent: 90 },
   appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
@@ -20,7 +21,7 @@ export const SETTINGS_DEFAULTS_V14: Settings = {
   supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: ruled by A-29 (residue 10 and 11)
   browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a: the default partition; Google (Decision Log 10); new-window links in the app (Decision Log 11); cua #90: the bookmarks bar shown
   mods: { toHuman: { enabled: true } }, // P2-C: the to-human lane on (the P2-C document, §9)
-  artifacts: { defaultDesignSystem: null, spaceDesignSystems: {} }, // P3-D: the house system, no Space defaults (D9)
+  artifacts: { defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1: Docs' default, the cards in the margin */ }, // P3-D: the house system, no Space defaults (D9)
 };
 
 // The earlier files, as their versions wrote them: C1's and C5's.
@@ -32,8 +33,22 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
+// P4-A2 start (2026-10-21): P4-R8's version 16, as it wrote it: version 17's sections less the launch profile
+const SettingsV16Schema = SettingsSchema.extend({ version: z.literal(16), engine: SettingsSchema.shape.engine.omit({ launchProfile: true }) });
+type SettingsV16 = z.infer<typeof SettingsV16Schema>;
+// P4-A2 end
+// P4-R8 start (2026-10-21): P4-B1's version 15, as it wrote it: version 16's sections less the app's MCP servers (P4-A2:
+// re-based on version 16)
+const SettingsV15Schema = SettingsV16Schema.extend({ version: z.literal(15), engine: SettingsV16Schema.shape.engine.omit({ mcpServers: true }) });
+type SettingsV15 = z.infer<typeof SettingsV15Schema>;
+// P4-R8 end
+// P4-B1 start (2026-10-20): P3-D's version 14, as it wrote it: version 15's sections less the comments view (P4-R8:
+// re-based on version 15)
+const SettingsV14Schema = SettingsV15Schema.extend({ version: z.literal(14), artifacts: SettingsSchema.shape.artifacts.omit({ commentsView: true }) });
+type SettingsV14 = z.infer<typeof SettingsV14Schema>;
+// P4-B1 end
 // P3-D start (2026-10-13): P2-C's version 13, as it wrote it: version 14's sections less the design-system defaults
-const SettingsV13Schema = SettingsSchema.omit({ artifacts: true }).extend({ version: z.literal(13) });
+const SettingsV13Schema = SettingsV14Schema.omit({ artifacts: true }).extend({ version: z.literal(13) });
 type SettingsV13 = z.infer<typeof SettingsV13Schema>;
 // P3-D end
 
@@ -96,10 +111,20 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V14);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V17);
 
-// P3-D: v13 → v14, the design-system defaults empty: the house system, no Space defaults
-const fromV13 = (v13: SettingsV13): Settings => ({ ...v13, version: 14, artifacts: defaults().artifacts });
+// P4-A2: v16 → v17, the user scope (nothing changes until the owner sets a profile in Settings › Engine)
+const fromV16 = (v16: SettingsV16): Settings => ({ ...v16, version: 17, engine: { ...v16.engine, launchProfile: defaults().engine.launchProfile } });
+// P4-R8: v15 → v16, no app MCP servers (the owner adds theirs in Settings › Engine); P4-A2: then v16 → v17
+const fromV15 = (v15: SettingsV15): Settings => fromV16({ ...v15, version: 16, engine: { ...v15.engine, mcpServers: [] } });
+// P4-B1: v14 → v15, the comments view at its default (the cards in the margin); P4-R8: then v15 → v16
+const fromV14 = (v14: SettingsV14): Settings => fromV15({ ...v14, version: 15, artifacts: { ...v14.artifacts, commentsView: defaults().artifacts.commentsView } });
+// P3-D: v13 → v14, the design-system defaults empty: the house system, no Space defaults; P4-B1: then v14 → v15
+const fromV13 = (v13: SettingsV13): Settings => {
+  const { commentsView: _view, ...artifacts } = defaults().artifacts;
+  void _view;
+  return fromV14({ ...v13, version: 14, artifacts });
+};
 // P2-C: v12 → v13, the mods section with the to-human lane on, and the owner channel's two notification groups on;
 // P3-D: then v13 → v14
 const fromV12 = (v12: SettingsV12): Settings => {
@@ -135,7 +160,8 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 // defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback) → v7 (W7's budget switch) → v8
 // (W13: the pin dropped) → v9 (E9: the voice section) → v10 (E10: the supervisor section) → v11 (E4a: the browser
 // section) → v12 (cua #90: the bookmarks bar's switch) → v13 (P2-C: the mods section and two notification groups) → v14
-// (P3-D: the design-system defaults). A version 14 object is validated and returned as it is;
+// (P3-D: the design-system defaults) → v15 (P4-B1: the comments view) → v16 (P4-R8: the app's MCP servers) → v17 (P4-A2:
+// the launch profile). A version 17 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
 export function migrateSettings(input: unknown): Settings {
@@ -178,6 +204,12 @@ export function migrateSettings(input: unknown): Settings {
       return fromV12(SettingsV12Schema.parse(raw)); // P2-C
     case 13:
       return fromV13(SettingsV13Schema.parse(raw)); // P3-D
+    case 14:
+      return fromV14(SettingsV14Schema.parse(raw)); // P4-B1
+    case 15:
+      return fromV15(SettingsV15Schema.parse(raw)); // P4-R8
+    case 16:
+      return fromV16(SettingsV16Schema.parse(raw)); // P4-A2
     default:
       return SettingsSchema.parse(raw);
   }
@@ -202,7 +234,7 @@ export function applySettingsPatch(state: Settings, patch: SettingsPatch): Setti
     const { kinds, ...fields } = notifications;
     next.notifications = { ...state.notifications, ...defined(fields), kinds: { ...state.notifications.kinds, ...defined(kinds ?? {}) } };
   }
-  if (engine) next.engine = { ...state.engine, ...defined(engine) };
+  if (engine) next.engine = { ...state.engine, ...defined(engine) }; // P4-R8: the MCP servers' list replaced whole; P4-A2: the profile too
   if (gateway) next.gateway = { ...state.gateway, ...defined(gateway) };
   if (usage) next.usage = { ...state.usage, ...defined(usage) };
   if (appearance) next.appearance = { ...state.appearance, ...defined(appearance) };

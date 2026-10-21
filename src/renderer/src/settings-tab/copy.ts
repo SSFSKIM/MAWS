@@ -1,6 +1,7 @@
 // The Settings tab's words (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04). Every row says
 // where its value comes from and what MAWS will not touch.
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
+import { MAX_APP_MCP_SERVERS } from '@shared/engine/app-mcp-servers'; // P4-R8
 
 export const SECTIONS = {
   engine: 'Engine',
@@ -46,6 +47,42 @@ export const ENGINE = {
   autoFallback: 'When auto mode is unavailable',
   autoFallbackNote: "Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS then sets this mode for the session and says so; the next resume asks for auto again.",
 };
+
+// P4-A2 start: Settings › Engine, the launch profile every session MAWS launches runs under (settings version 17)
+export const LAUNCH_PROFILE = {
+  plugins: 'Plugins in sessions',
+  pluginsNote: 'The plugins your Claude Code settings turn on, as a terminal session loads them. Switch one off to keep it out of the sessions MAWS starts, forks and resumes; your own settings files are never changed.',
+  pluginsReading: 'Reading your plugins…',
+  pluginsNone: 'Your settings turn on no plugins.',
+  pluginOn: (id: string) => `Load ${id} in MAWS sessions`,
+  style: 'Output style in sessions',
+  styleNote: "Yours: the style your settings select. MAWS's: Claude Code's default style, with MAWS's own instructions for messaging you.",
+  styleYours: 'Yours',
+  styleMaws: "MAWS's",
+  hooks: 'Hooks in sessions',
+  hooksNote: "None turns off every hook from your settings and your plugins in MAWS's sessions; MAWS still tells each session how to message you. Each change on this page applies at a session's next launch, never to a terminal session.",
+  hooksYours: 'Yours',
+  hooksNone: 'None',
+};
+// P4-A2 end
+
+// P4-R8 start: Settings › Engine › MCP servers (settings version 16)
+export const MCP_SERVERS = {
+  label: 'MCP servers',
+  note: "Loaded by every session MAWS starts, forks or resumes, never by a terminal session. An entry wins over a server of the same name in your own or a project's config, and a Claude Code sign-in for an HTTP server of the same name and URL without custom headers carries over. A change applies at each session's next launch.",
+  name: 'Server name',
+  url: 'Server URL',
+  namePlaceholder: 'name',
+  urlPlaceholder: 'https://…/mcp',
+  add: 'Add',
+  remove: (name: string) => `Remove ${name}`,
+  badName: 'A name takes letters, digits, hyphens and underscores, up to 64 of them.',
+  reservedName: 'That name is reserved by Claude Code or MAWS.',
+  badUrl: "Enter the server's http or https URL.",
+  duplicate: (name: string) => `${name} is already in the list.`,
+  full: `The list holds at most ${MAX_APP_MCP_SERVERS} servers.`,
+};
+// P4-R8 end
 
 // C12 start: the memory budget's rows in Settings › Engine (C12 execution document, "Surfaces of the budget")
 export const BUDGET_SETTINGS = {

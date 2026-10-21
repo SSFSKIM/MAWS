@@ -175,7 +175,8 @@ export async function* readJournalLines(file: string, start = 0): AsyncIterable<
 }
 
 // Where recovery stopped inside a launch its budget cut: the fold so far (its facts and the requests still awaiting
-// their answers) and the next byte to read. Host memory only; a host restart reads the launch from its start again.
+// their answers) and the next byte to read; or, past its last file, a finished launch held unlisted (`awaitingIssues`).
+// Host memory only; a host restart reads the launch from its start again.
 interface Cursor {
   fold: ObservedFactsFold;
   file: number; // index into the launch's files
@@ -191,7 +192,8 @@ const latestBefore = (issues: Issues[], at: string): Issues | null =>
 export class ObservedFactsService {
   private readonly cursors = new Map<AppSessionId, Map<string, Cursor>>();
   // launches whose plugins fact is a reload_plugins answer with no init before it in the launch: its errors and warnings
-  // are an earlier launch's last init's, filled in once recovery has folded that init
+  // are an earlier launch's last init's, filled in once recovery has folded that init. Host memory only, so while its
+  // fact is current such a launch is listed in the file only once that init is found or no older launch is left to read
   private readonly awaitingIssues = new Map<AppSessionId, Set<string>>();
   // session.forget's coordination: a recovery commits only under the generation it began in, and none begins while
   // an erase runs; the erase first waits for the recoveries in flight
@@ -250,7 +252,8 @@ export class ObservedFactsService {
     this.awaitingIssues.set(appSessionId, awaiting);
     const inits: Issues[] = [];
     let recovered = emptyObservedFacts(appSessionId, writtenAt, 'journal');
-    const folded: string[] = [];
+    let folded: string[] = [];
+    const finished = new Map<string, Cursor>(); // this pass's complete folds, each as a cursor past its last file
     let complete = true;
     // the plugins fact waits for an earlier init's errors and warnings that this pass has not folded yet
     const pluginsUnsettled = () => recovered.plugins !== null && awaiting.has(recovered.plugins.launchId) && latestBefore(inits, recovered.plugins.at) === null;
@@ -273,6 +276,7 @@ export class ObservedFactsService {
         complete = false;
         break;
       }
+      finished.set(launch.launchId, { fold, file: launch.files.length, offset: 0 });
       folded.push(launch.launchId);
     }
     // A reload with no init before it in its launch: the errors and warnings of the latest init before it, from this
@@ -286,6 +290,11 @@ export class ObservedFactsService {
         recovered = { ...recovered, plugins: { ...current, value: { ...current.value, errors: source.errors, warnings: source.warnings } } };
         awaiting.delete(current.launchId);
         learnt = true;
+      } else if (!complete && finished.has(current.launchId)) {
+        // older launches are still unread: not listed yet, so a restarted host folds it again and knows it waits; this
+        // host keeps its finished fold as its cursor and does not read it again
+        folded = folded.filter((launchId) => launchId !== current.launchId);
+        this.cursors.get(appSessionId)!.set(current.launchId, finished.get(current.launchId)!);
       }
     }
     if (folded.length === 0 && !learnt) return { ...(stored ?? emptyObservedFacts(appSessionId, writtenAt, 'journal')), complete };

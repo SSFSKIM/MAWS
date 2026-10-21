@@ -7,7 +7,8 @@
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, type RecentTurn, type RecentTurns } from '@shared/ipc/schema/session';
-import { previewLine } from '@shared/owner/preview';
+import { isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
+import { messageLine, previewLine } from '@shared/owner/preview';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, withResponseGroups, type Delivery, type TranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, isHumanPrompt, isTaskNotification, localCommandKind, recordToEvents } from '../../engine-host/fs/backfill';
@@ -82,6 +83,15 @@ export function recentTurnsOf(text: string, limit: number, cut: boolean): Recent
   const sessionId = (chain.find((r) => typeof r.sessionId === 'string')?.sessionId ?? 'unknown') as SessionId;
   const ctx = createBackfillContext({ sessionId, agent: null });
   const turns: RecentTurn[] = [];
+  // P4-R7: message calls awaiting their results, each with its own turn. One still pending when that turn closes sent
+  // nothing: it is a tool call of the turn, as the transcript draws it (the engine's cell, which its divider counts). A
+  // turn closes at the next turn's start or at its end, and every pending call is in the turn that closes then; one
+  // still pending when the walk ends stays uncounted, since its turn may still be running.
+  const messages = new Map<string, { line: string | null; at: string; turn: RecentTurn }>();
+  const closeMessages = () => {
+    for (const message of messages.values()) message.turn.toolCalls += 1;
+    messages.clear();
+  };
   let open: Building | null = null;
   const current = (): Building => {
     if (open === null) {
@@ -95,6 +105,7 @@ export function recentTurnsOf(text: string, limit: number, cut: boolean): Recent
     const commandOutput = localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output';
     for (const event of recordToEvents(record, ctx)) {
       if (event.kind === 'turn.started') {
+        closeMessages();
         open = { turn: { prompt: null, answer: null, toolCalls: 0 } };
         turns.push(open.turn);
       } else if (event.kind === 'user.message') {
@@ -109,7 +120,18 @@ export function recentTurnsOf(text: string, limit: number, cut: boolean): Recent
         const line = previewLine(event.block.text, RECENT_TURN_ANSWER_MAX);
         if (line !== null) current().turn.answer = { text: line, at: event.at };
       } else if (event.kind === 'tool.use') {
-        current().turn.toolCalls += 1;
+        // P4-R7: a message tool's call is the turn's message, not one of its tool calls; it counts once accepted
+        const message = isMessageTool(event.toolName) ? messageCallText(event.input) : null;
+        if (message !== null) messages.set(event.toolUseId, { line: messageLine(message, RECENT_TURN_ANSWER_MAX), at: event.at, turn: current().turn });
+        else current().turn.toolCalls += 1;
+      } else if (event.kind === 'tool.result') {
+        const message = messages.get(event.toolUseId);
+        if (message === undefined) continue;
+        messages.delete(event.toolUseId);
+        if (event.isError) message.turn.toolCalls += 1; // refused: the engine's tool row, as the transcript draws it
+        else if (message.line !== null) message.turn.answer = { text: message.line, at: message.at };
+      } else if (event.kind === 'turn.ended') {
+        closeMessages();
       }
     }
   }

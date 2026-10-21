@@ -213,20 +213,6 @@
   },
   {
     "at": "2026-10-06T06:35:41.137Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:c36b75ca-a621-4c8c-8bed-bc9e5a87298a",
-    "kind": "user",
-    "lines": 18,
-    "messageUuid": "c36b75ca-a621-4c8c-8bed-bc9e5a87298a",
-    "placeholders": [],
-    "steer": false,
-    "text": "[MAWS ask toolu_016zBCDTWVXbAqbGdLyd1Zzj] The user answered the questions you asked:\n1. Proceed? — Yes\n```json\n{\n  \"status\": \"answered\",\n  \"askId\": \"toolu_016zBCDTWVXbAqbGdLyd1Zzj\",\n  \"answers\": [\n    {\n      \"id\": \"q1\",\n      \"question\": \"Proceed?\",\n      \"status\": \"answered\",\n      \"value\": [\n        \"Yes\"\n      ]\n    }\n  ]\n}\n```",
-    "turnId": "turn:c36b75ca-a621-4c8c-8bed-bc9e5a87298a"
-  },
-  {
-    "at": "2026-10-06T06:35:41.137Z",
     "autoDenied": 0,
     "denied": 0,
     "endedAt": "2026-10-06T06:35:44.695Z",

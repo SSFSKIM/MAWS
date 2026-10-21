@@ -268,6 +268,31 @@ export class ConnectorStatusCache {
     });
   }
 
+  // P4-B5: the servers an owner's delivery may look up for `tool`, from memory alone and verified by nothing: per
+  // directory, every server some positive report of a context names (a failed context, a refused directory and a
+  // contested server excluded), whether an agreeing report lists `tool`, and whether one reported it over HTTP. Each is
+  // still resolved (`resolveSource`) before it is offered; a directory two config homes report stays the lookup's to refuse.
+  candidates(tool: string): { cwd: string; server: string; listed: boolean; http: boolean }[] {
+    if (this.saturated) return [];
+    const found = new Map<string, { cwd: string; server: string; listed: boolean; http: boolean }>();
+    for (const state of this.contexts.values()) {
+      if (state.failed || this.refused.has(state.cwd)) continue;
+      for (const server of state.names) {
+        if (state.contested.has(server)) continue;
+        for (const snapshot of state.snapshots.values()) {
+          const observation = snapshot.servers.get(server);
+          if (observation?.kind !== 'positive') continue;
+          const key = `${state.cwd}\0${server}`;
+          const entry = found.get(key) ?? { cwd: state.cwd, server, listed: false, http: false };
+          entry.listed ||= observation.tools.has(tool);
+          entry.http ||= observation.transport === 'http';
+          found.set(key, entry);
+        }
+      }
+    }
+    return [...found.values()];
+  }
+
   // Main detached, or the host shuts down: every observation goes, and nothing begun before lands.
   clear(): void {
     this.epoch += 1;

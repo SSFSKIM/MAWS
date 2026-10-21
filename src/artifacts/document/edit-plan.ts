@@ -306,7 +306,7 @@ function runsOf(quote: string): string[] {
   return plain.match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
-function needleOf(quote: string): string | null {
+export function needleOf(quote: string): string | null {
   let best: string | null = null;
   for (const run of runsOf(quote)) if (!best || run.length > best.length) best = run;
   return best;

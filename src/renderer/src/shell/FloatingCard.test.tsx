@@ -103,9 +103,11 @@ describe('the floating card in the Shell', () => {
     expect(useComposerStore.getState().focusTargets.size).toBe(1);
     expect(region('main').querySelector('[data-session-in-card]')).not.toBeNull();
     expect(focused).toEqual([A]);
-    // The card sits 16 px from the panel body's left and bottom edges (its top: the anchoring case below)
-    expect(shown.style.left).toBe('16px');
+    // The card sits 16 px from the panel body's right and bottom edges (its top: the anchoring case below). P4-B3: the
+    // corner moved from the bottom left (parent Decision Log 15.7: both floating cards at the bottom right)
+    expect(shown.style.right).toBe('16px');
     expect(shown.style.bottom).toBe('16px');
+    expect(shown.style.left).toBe('');
     expect(shown.closest('[role="dialog"]')).toBeNull();
     expect(shown.closest('#root, [data-region="panel"]')).toBe(region('panel'));
   });
@@ -134,7 +136,7 @@ describe('the floating card in the Shell', () => {
     ['a browser chrome’s row’s', true],
   ])('after Close, %s pill has the keyboard', async (_, hosted) => {
     const user = userEvent.setup();
-    if (hosted) registerSlot('panelHost', () => <ChromePill />);
+    if (hosted) registerSlot('panelHost', () => <ChromePill surface="panel" />);
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
@@ -300,7 +302,9 @@ describe('the floating card in the Shell', () => {
     expect(document.activeElement).toBe(within(card()!).getByRole('group', { name: 'Permission' }));
   });
 
-  it('resizes from the top and right edges and writes the size once, on release, for the panel tab under it', () => {
+  // P4-B3 (parent Decision Log 15.7): anchored at the bottom right, the card is resized by its top and left edges and the
+  // top-left corner (the mirror of P3-G's top, right and top-right)
+  it('resizes from the top and left edges and writes the size once, on release, for the panel tab under it', () => {
     // happy-dom lays nothing out: the panel body the layer measures is 1000 × 700
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
@@ -310,19 +314,21 @@ describe('the floating card in the Shell', () => {
     const width = Number.parseInt(shown.style.width);
     const height = Number.parseInt(shown.style.height);
     expect([width, height]).toEqual([420, 420]); // 420 × 60 % of 700
-    const corner = shown.querySelector<HTMLElement>('[data-card-resize="top-right"]')!;
+    expect([...shown.querySelectorAll<HTMLElement>('[data-card-resize]')].map((handle) => handle.dataset.cardResize)).toEqual(['top', 'left', 'top-left']);
+    const corner = shown.querySelector<HTMLElement>('[data-card-resize="top-left"]')!;
     act(() => void fireEvent.pointerDown(corner, { pointerId: 1, button: 0, clientX: 500, clientY: 500 }));
-    act(() => void fireEvent.pointerMove(corner, { pointerId: 1, clientX: 540, clientY: 470 }));
+    act(() => void fireEvent.pointerMove(corner, { pointerId: 1, clientX: 460, clientY: 470 }));
     expect([shown.style.width, shown.style.height]).toEqual([`${width + 40}px`, `${height + 30}px`]);
     expect(useLayout.getState().regions.floatingCard).toEqual({});
-    act(() => void fireEvent.pointerUp(corner, { pointerId: 1, clientX: 540, clientY: 470 }));
+    act(() => void fireEvent.pointerUp(corner, { pointerId: 1, clientX: 460, clientY: 470 }));
     expect(useLayout.getState().regions.floatingCard).toEqual({ summary: { w: width + 40, h: height + 30 } });
   });
 
   // M2 (§D3): a pane over a native view (the browser's) reserves a column; the card lies on the column's rect, full
-  // height, and is resized by its right edge only. The live width goes to the store the pane reads (the page moves with
+  // height, and is resized by its inner edge only. The live width goes to the store the pane reads (the page moves with
   // the drag); on release the column's measured width (what the page's floor left it) is written for the panel tab.
-  it('over a reserved column the card lies on the column’s rect and resizes from its right edge only', () => {
+  // P4-B3 (parent Decision Log 15.7, its Decision Log 9 and 26): the column is on the right, its inner edge the left one.
+  it('over a reserved column the card lies on the column’s rect and resizes from its left edge only', () => {
     let columnWidth = 430;
     mockColumnLayout(() => columnWidth);
     const column = probeColumn();
@@ -332,23 +338,24 @@ describe('the floating card in the Shell', () => {
     render(<Shell />);
     const shown = card()!;
     expect([shown.style.left, shown.style.top, shown.style.width, shown.style.height]).toEqual(['0px', '40px', '430px', '560px']);
-    expect([...shown.querySelectorAll<HTMLElement>('[data-card-resize]')].map((handle) => handle.dataset.cardResize)).toEqual(['right']);
+    expect([...shown.querySelectorAll<HTMLElement>('[data-card-resize]')].map((handle) => handle.dataset.cardResize)).toEqual(['left']);
+    expect(shown.classList).toContain('border-l');
 
-    const edge = shown.querySelector<HTMLElement>('[data-card-resize="right"]')!;
+    const edge = shown.querySelector<HTMLElement>('[data-card-resize="left"]')!;
     act(() => void fireEvent.pointerDown(edge, { pointerId: 1, button: 0, clientX: 730, clientY: 500 }));
-    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 790, clientY: 400 }));
+    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 670, clientY: 400 }));
     expect(useFloatingCard.getState().columnDrag).toBe(490);
-    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 500, clientY: 400 }));
+    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 960, clientY: 400 }));
     expect(useFloatingCard.getState().columnDrag, 'no narrower than the card’s minimum').toBe(360);
-    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 790, clientY: 400 }));
+    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 670, clientY: 400 }));
     expect(useLayout.getState().regions.floatingCard).toEqual({});
     columnWidth = 470; // the page's 280 px floor held the column narrower than the drag
-    act(() => void fireEvent.pointerUp(edge, { pointerId: 1, clientX: 790, clientY: 400 }));
+    act(() => void fireEvent.pointerUp(edge, { pointerId: 1, clientX: 670, clientY: 400 }));
     expect(useFloatingCard.getState().columnDrag).toBeNull();
     expect(useLayout.getState().regions.floatingCard).toEqual({ summary: { w: 470, h: 420 } }); // the height kept for a floating card
 
     act(() => release());
-    expect([card()!.style.left, card()!.style.bottom]).toEqual(['16px', '16px']);
+    expect([card()!.style.right, card()!.style.bottom]).toEqual(['16px', '16px']);
     column.remove();
   });
   // M2 review: a column is layout only. A reservation arriving re-lays the card before paint, the card and its session
@@ -386,12 +393,12 @@ describe('the floating card in the Shell', () => {
     useLayout.setState({ panelBySession: new Map([[A, { tabs, activeTabId: 'browser:1' }]]) });
     useLayout.getState().setFloatingCardSize('browser:2', { w: 512, h: 400 });
     useLayout.getState().setPanel({ floating: true });
-    const width = renderHook(() => useColumnWidth());
+    const width = renderHook(() => useColumnWidth('panel'));
     render(<Shell />);
     const drag = () => {
-      const edge = card()!.querySelector<HTMLElement>('[data-card-resize="right"]')!;
+      const edge = card()!.querySelector<HTMLElement>('[data-card-resize="left"]')!; // P4-B3: the column's inner edge (parent Decision Log 15.7)
       act(() => void fireEvent.pointerDown(edge, { pointerId: 1, button: 0, clientX: 730, clientY: 500 }));
-      act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 790, clientY: 500 }));
+      act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 670, clientY: 500 }));
       expect(useFloatingCard.getState().columnDrag).toBe(490);
       return edge;
     };
@@ -403,7 +410,7 @@ describe('the floating card in the Shell', () => {
     const edge = drag();
     act(() => release());
     expect(useFloatingCard.getState().columnDrag).toBeNull();
-    act(() => void fireEvent.pointerUp(edge, { pointerId: 1, clientX: 790, clientY: 500 }));
+    act(() => void fireEvent.pointerUp(edge, { pointerId: 1, clientX: 670, clientY: 500 }));
     expect(useLayout.getState().regions.floatingCard).toEqual({ 'browser:2': { w: 512, h: 400 } });
 
     // the panel tab under the card changed mid-drag: over the other Browser tab its stored width wins

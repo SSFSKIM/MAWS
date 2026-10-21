@@ -18,12 +18,13 @@
 // holds or claims the view and registered as the tab's dock while it holds it (`comment/dock.ts`). An open card grows
 // the strip and the page's element shrinks by as much: the view is never under the card and no cover is raised.
 //
-// P3-G (§D3, M2): the floating session card's column. In the panel, while the card is up, a spacer at the pane's left
-// (`data-browser-reserved-column`, beside the column above) leaves the card its column: the page's element excludes it,
-// so the view lies beside the card, live, and the existing reports carry every change of the column's width. The spacer
-// is registered as the card's column while the pane holds the view, before paint, so the card moves onto it in the same
-// frame. Closed to its pill, the card asks nothing of the pane: the chrome's row draws the pill. A main tab reserves
-// nothing (the main region is at 0 px while floating).
+// P3-G (§D3, M2): the floating session card's column. In the panel, while the card is up, a spacer at the pane's right
+// (`data-browser-reserved-column`, beside the column above; P4-B3, its Decision Log 9 and 26: the column follows the
+// card to the bottom-right corner's side) leaves the card its column: the page's element excludes it, so the view lies
+// beside the card, live, and the existing reports carry every change of the column's width. The spacer is registered as
+// the card's column while the pane holds the view, before paint, so the card moves onto it in the same frame. Closed to
+// its pill, the card asks nothing of the pane: the chrome's row draws the pill. P4-B3 (its Decision Log 10): a main tab
+// does the same under the main split's card (the panel's card has the main region at 0 px, so it asks nothing there).
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
 import { COLUMN_PAGE_MIN, useColumnWidth, useFloatingCard } from '../../shell/floating';
@@ -67,7 +68,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   const element = useRef<HTMLDivElement>(null);
   const placement = useRef<Placement | null>(null);
   const [mode, setMode] = useState<PlacementMode>('claiming');
-  const { tabId } = tab;
+  const { tabId, appSessionId } = tab;
   const owner = tab.placedIn?.paneId ?? null;
   const [ownerAtMount] = useState(owner);
 
@@ -88,7 +89,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
       onMode: setMode,
     });
     placement.current = control;
-    cover = coverPane(() => control.ownedRect());
+    cover = coverPane(() => control.ownedRect(), appSessionId); // P4 W2-C: whose browser it shows
     control.report();
 
     const report = () => control.report();
@@ -112,7 +113,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
       cover.release();
       placement.current = null;
     };
-  }, [tabId, surface, ownerAtMount]);
+  }, [tabId, appSessionId, surface, ownerAtMount]);
 
   useEffect(() => placement.current?.observe(owner), [owner]);
   // the overflow menu's "Open in tab" or "Show in panel" naming this pane's tab and surface: as "Show here"
@@ -143,25 +144,25 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   // P3-G (§D4.1): Mark-up over the page, while this pane holds the view in a panel tab
   useBrowserMarkupSurface(tab, element, mode === 'owner');
 
-  // P3-G: the floating card's column, while this pane shows the page in the panel (another pane holding the view leaves
-  // a DOM page here, which the card floats over as it does over any tool)
-  const width = useColumnWidth();
-  const column = surface === 'panel' && mode !== 'elsewhere' ? width : null;
+  // P3-G: the floating card's column, while this pane shows the page under the card of its region (another pane holding
+  // the view leaves a DOM page here, which the card floats over as it does over any tool)
+  const width = useColumnWidth(surface);
+  const column = mode !== 'elsewhere' ? width : null;
   const reserving = column !== null && mode === 'owner';
   const spacer = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => (reserving && spacer.current ? useFloatingCard.getState().reserveColumn(spacer.current) : undefined), [reserving]);
 
   return (
     <div className="flex h-full w-full">
-      {column !== null && (
-        <div ref={spacer} aria-hidden data-browser-reserved-column="" className="shrink-0" style={{ width: column, maxWidth: `calc(100% - ${COLUMN_PAGE_MIN}px)` }} />
-      )}
       <div data-browser-column="" className="flex h-full min-w-0 flex-1 flex-col">
         <div ref={element} data-browser-pane="" className={PAGE}>
           {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
         </div>
         {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} />}
       </div>
+      {column !== null && (
+        <div ref={spacer} aria-hidden data-browser-reserved-column="" className="shrink-0" style={{ width: column, maxWidth: `calc(100% - ${COLUMN_PAGE_MIN}px)` }} />
+      )}
     </div>
   );
 }

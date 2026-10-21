@@ -6,7 +6,6 @@
 // background shells and monitors, which its subscription carries, stand above its transcript while it has any, each
 // with Stop (DC10, `JobsPane`'s agent scope).
 import { useRef, useState, type ReactNode } from 'react';
-import type { JsonObject } from 'desk-hub/protocol';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import { SUBAGENTS_COPY } from '../../../../../src/renderer/src/tools/agents/copy';
 import { elapsedOf, formatElapsed, formatTokens } from '../../../../../src/renderer/src/tools/agents/model/elapsed';
@@ -33,15 +32,6 @@ type Props = {
   onBack: () => void;
 };
 
-/** The model the agent's latest response ran on, from its own rows (a meta names one only when it was asked for). */
-function modelOf(rows: readonly JsonObject[]): string | null {
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const model = (rows[i].message as JsonObject | undefined)?.model;
-    if (rows[i].type === 'assistant' && typeof model === 'string' && model !== '') return model;
-  }
-  return null;
-}
-
 export function SubagentDetail({ project, session, plane, agentId, node, actions, onBack }: Props) {
   const [controller] = useState(() => new DeskTranscript({ plane, project, target: { machine: session.machine, session: session.session, agentId }, store: useTranscriptStore }));
   const state = useDeskTranscript(controller, session);
@@ -49,8 +39,10 @@ export function SubagentDetail({ project, session, plane, agentId, node, actions
 
   const now = useTicker(node !== undefined && elapsedOf(node, 0)?.live === true);
   const elapsed = node ? elapsedOf(node, now) : null;
+  // A meta names the model only when the Agent call asked for one; otherwise the agent's own latest response says it,
+  // which the transcript's state publishes (read from its store, so the header follows the rows as they arrive).
   const meta = SUBAGENTS_COPY.header(
-    node?.agent?.model ?? modelOf(controller.heldRows()) ?? SUBAGENTS_COPY.modelUnknown,
+    node?.agent?.model ?? state.model ?? SUBAGENTS_COPY.modelUnknown,
     elapsed ? formatElapsed(elapsed.ms) : SUBAGENTS_COPY.elapsedUnavailable,
     node?.usage ? formatTokens(node.usage.totalTokens) : SUBAGENTS_COPY.tokensUnavailable,
   );

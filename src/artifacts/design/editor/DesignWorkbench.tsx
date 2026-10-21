@@ -13,6 +13,8 @@
 // "Move to board…" in the inspector (MoveToBoard.tsx, the one cross-board move), and version history (history.tsx: C's
 // controller and B's rail, the design's projection, bar and read-only world in place of the live one while a version
 // shows; the pill and the restore banner as C's).
+// P4-B4: a place asked from outside (a link's `#slide=` naming a board, `#v<id>`) through C's `useDeckReveal`: the board
+// selected and brought into view, as a shown thread's is; a version previewed in the history rail.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
@@ -33,6 +35,7 @@ import { Inspector } from '../../slides/editor/Inspector';
 import { TextStyleMenu } from '../../slides/editor/menus/TextStyle';
 import { ThemePanel, type DeckThemeChoice } from '../../slides/editor/menus/Theme';
 import { useCanvasCss, useDeckFaces } from '../../slides/editor/page-styles';
+import { useDeckReveal, type DeckRevealProps } from '../../slides/editor/reveal'; // P4-B4
 import type { DeckSession } from '../../slides/editor/session';
 import type { ImportAsset } from '../../slides/editor/transform/clipboard';
 import { measureInHost } from '../../slides/editor/transform/Overlay';
@@ -56,7 +59,7 @@ import '../../slides/editor/chrome.css';
 import '../../slides/editor/deck.css';
 import './workbench.css';
 
-export interface DesignWorkbenchProps {
+export interface DesignWorkbenchProps extends DeckRevealProps /* P4-B4 */ {
   session: DeckSession;
   /** The tab's view (its viewport and frame selection outlive this body). */
   view: DesignView;
@@ -270,6 +273,17 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const openComments = useCallback(() => void (session.snapshot().rail !== 'comments' && session.toggleRail('comments')), [session]);
   const railLabels = useMemo(() => designRailLabels(boards), [boards]);
   const commentsApi = useDesignComments({ session, view, surface: comments, author: commentAuthor, readOnly, openRail: openComments, reveal });
+  // P4-B4: a board a link names, selected and brought into view as a shown thread's board is
+  const showBoard = useCallback(
+    (boardId: string) => {
+      session.show(boardId);
+      session.select([]);
+      view.selectFrame(boardId);
+      reveal(boardId);
+    },
+    [session, view, reveal],
+  );
+  useDeckReveal({ reveal: props.reveal, onRevealed: props.onRevealed, session, history, showSlide: showBoard });
 
   // ---- M4: a version's preview: the projection, ↑ ↓ over it, its own view, its faces and assets
   // keyed by the comparison (its docs and change set), not the preview object, which Show changes and ↑ ↓ remake

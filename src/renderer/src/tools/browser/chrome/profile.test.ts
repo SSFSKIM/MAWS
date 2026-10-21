@@ -19,10 +19,10 @@ describe('avatarTone', () => {
 
 describe('accountLine', () => {
   it('names the signed-in account, or says the profile is not signed in', () => {
-    expect(accountLine({ gaiaName: 'Probe Owner', userName: 'probe@example.test' })).toBe('로그인: Probe Owner · probe@example.test');
-    expect(accountLine({ gaiaName: 'Probe Owner', userName: null })).toBe('로그인: Probe Owner');
-    expect(accountLine({ gaiaName: null, userName: 'probe@example.test' })).toBe('로그인: probe@example.test');
-    expect(accountLine({ gaiaName: null, userName: null })).toBe('Chrome에 로그인되지 않은 프로필');
+    expect(accountLine({ gaiaName: 'Probe Owner', userName: 'probe@example.test' })).toBe('Signed in as Probe Owner · probe@example.test');
+    expect(accountLine({ gaiaName: 'Probe Owner', userName: null })).toBe('Signed in as Probe Owner');
+    expect(accountLine({ gaiaName: null, userName: 'probe@example.test' })).toBe('Signed in as probe@example.test');
+    expect(accountLine({ gaiaName: null, userName: null })).toBe('Not signed in to Chrome');
   });
 });
 
@@ -32,13 +32,14 @@ describe('syncLine', () => {
   const state = (over: object) => ({ consentedAt: at(600), syncedAt: at(5), count: 46, error: null, errorAt: null, ...over });
 
   it('says when the last sync was', () => {
-    expect(syncLine(state({}), NOW)).toBe('마지막 동기화 5 minutes ago');
+    expect(syncLine(state({}), NOW)).toBe('Last synced 5 minutes ago');
+    expect(syncLine(state({ syncedAt: at(0.5) }), NOW)).toBe('Last synced now'); // the age is the date module's, in English (P4 DL 4)
     expect(syncLine(state({ syncedAt: null }), NOW)).toBeNull();
   });
 
   it('says the file could not be read, with the last good sync, or that the index is unavailable', () => {
-    expect(syncLine(state({ error: 'missing', errorAt: at(1) }), NOW)).toBe('Chrome의 북마크 파일을 읽지 못함 · 마지막 동기화 5 minutes ago');
-    expect(syncLine(state({ error: 'unreadable', errorAt: at(1), syncedAt: null }), NOW)).toBe('Chrome의 북마크 파일을 읽지 못함 · 마지막 동기화 없음');
+    expect(syncLine(state({ error: 'missing', errorAt: at(1) }), NOW)).toBe('Couldn’t read Chrome’s bookmarks file · Last synced 5 minutes ago');
+    expect(syncLine(state({ error: 'unreadable', errorAt: at(1), syncedAt: null }), NOW)).toBe('Couldn’t read Chrome’s bookmarks file · Never synced');
     expect(syncLine(state({ error: 'indexUnavailable', errorAt: at(1) }), NOW)).toBe('Unavailable in this build');
   });
 });

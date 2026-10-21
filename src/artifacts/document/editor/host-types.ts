@@ -6,8 +6,8 @@ import type { ArtifactHost, DocumentHandle } from '../../host';
 /** The handle as the editor drives it: X24's `DocumentHandle`, the provider's composition hold on it since A's M4. */
 export type { DocumentHandle };
 
-/** The part of `ArtifactHost` the editor calls: an image's URL, an upload, and who is typing. */
-export type EditorHost = Pick<ArtifactHost, 'assetUrl' | 'uploadAsset' | 'identity' | 'openExternal'>; // P3-F (F1): openExternal
+/** The part of `ArtifactHost` the editor calls: an image's URL, an upload, a copy, and who is typing. */
+export type EditorHost = Pick<ArtifactHost, 'assetUrl' | 'uploadAsset' | 'copyAsset' | 'identity' | 'openExternal'>; // P3-F (F1): openExternal; P4: copyAsset, an image pasted from another document (asset-paste.ts)
 
 /**
  * A colour as CSS reads it. `actorDisplay` and `identity()` name the author colours by their custom property

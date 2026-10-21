@@ -2,7 +2,8 @@
 // signal: only a project that waits on the owner carries a numeral and a tint. A project whose machines are all
 // offline reads as absent, not quiet. On a phone's two columns (05-phone.html, 2) a long name takes two lines and the
 // machine dots stand without their words. A machine project (the project of a machine's sessions that no repository's
-// `.smns` claims: smns org directory §3) is labelled by its kind.
+// `.smns` claims: smns org directory §3) is labelled by its kind. A project online with nothing working or waiting says
+// how many of its sessions are idle, and "Quiet" when none has a process.
 import type { ProjectSummary } from 'desk-hub/protocol';
 
 export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOpen(): void }) {
@@ -16,6 +17,7 @@ export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOp
       data-kind={project.kind}
       data-waiting={project.waiting}
       data-working={project.working}
+      data-live={project.live}
       className={[
         'flex min-h-[122px] w-full flex-col gap-3 rounded-md border p-3 text-left transition-colors md:min-h-[132px] md:p-4',
         offline ? 'border-dashed border-border-strong bg-transparent' : waiting ? 'border-warning bg-bg-waiting' : 'border-border bg-bg-raised hover:bg-bg-hover',
@@ -38,7 +40,7 @@ export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOp
             <span className="text-ui-sm text-warning">waiting on you</span>
           </div>
         ) : offline || project.working === 0 ? (
-          <span className="text-ui-sm text-fg-muted">{offline ? 'Offline' : 'Quiet'}</span>
+          <span className="text-ui-sm text-fg-muted">{offline ? 'Offline' : project.live > 0 ? `${project.live} idle` : 'Quiet'}</span>
         ) : null}
         {!offline && project.working > 0 && (
           <span className="flex items-center gap-1.5 text-ui-sm text-fg" data-testid="working">

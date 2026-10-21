@@ -47,6 +47,19 @@ describe('copying an asset between artifacts', () => {
     expect(await store.copyAsset(from.id, source.ref, to.id, human)).toEqual(copied);
   });
 
+  // P4 (the tracker's 2026-10-19 "P4 document paste" row): an image pasted from one document into another stores the
+  // copy's ref (src/artifacts/document/editor/asset-paste.ts), so the picture is the target's own row and bytes
+  it('leaves the copy whole once the source is deleted', async () => {
+    const from = await store.create({ kind: 'document', title: 'From' }, human);
+    const to = await store.create({ kind: 'document', title: 'To' }, human);
+    const source = await store.uploadAsset(from.id, SVG, { name: 'mark.svg', mime: 'image/svg+xml' }, human);
+    const copied = await store.copyAsset(from.id, source.ref, to.id, human);
+    await store.delete(from.id);
+    const asset = store.listAssets(to.id).find((a) => a.ref === copied.ref)!;
+    expect(asset).toMatchObject({ assetId: copied.assetId, mime: 'image/svg+xml', size: SVG.length });
+    expect(Buffer.from(store.files.readAsset(to.id, asset.sha256)).equals(Buffer.from(SVG))).toBe(true);
+  });
+
   it('refuses a missing ref, and a deleted or missing artifact on either side, by name', async () => {
     const from = await store.create({ kind: 'document', title: 'From' }, human);
     const to = await store.create({ kind: 'document', title: 'To' }, human);

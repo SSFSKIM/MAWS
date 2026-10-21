@@ -45,7 +45,7 @@ The other 43 P4-DESIGN rows are design items in their own right: contract change
 
 ## The proposed wave (wave 1: four opus workers, about a day each)
 
-Each worker takes its batch in an isolated worktree, one commit per row, with class 1a through `scripts/ci-gate.sh <worktree>` and the named e2e groups on the mini.
+Each worker takes its batch in an isolated worktree, one commit per row, with class 1a through `scripts/ci-gate.sh <worktree> --gates static,unit,probes` and the named e2e groups on the mini.
 
 ### W1-A: Renderer shell, transcript and cards
 

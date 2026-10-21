@@ -46,13 +46,14 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // with no engine pin. E9: to version 9, with the system locale for dictation. E10: to version 10, with the
       // supervisor's defaults. E4a: to version 11, with the browser's defaults. cua #90: to version 12, the bookmarks bar shown.
       // P2-C: to version 13, with the to-human lane and its two notification groups on. P3-D: to version 14, with the
-      // house design system as the default and no Space defaults.
+      // house design system as the default and no Space defaults. P4-B1: to version 15, with the comments view expanded.
+      // P4-R8: to version 16, with no app MCP servers. P4-A2: to version 17, with the launch profile at the user scope.
       expect(readSettings(userData)).toMatchObject({
-        version: 14, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14
+        version: 17, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
-        engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // W13: no pinnedVersion
+        engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8 */, launchProfile: { plugins: { off: [] }, outputStyle: 'user', hooks: 'user' } /* P4-A2 */ }, // W13: no pinnedVersion
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
         appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
@@ -61,7 +62,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
         supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10
         browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a; cua #90
         mods: { toHuman: { enabled: true } }, // P2-C
-        artifacts: { defaultDesignSystem: null, spaceDesignSystems: {} }, // P3-D
+        artifacts: { defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' }, // P3-D; P4-B1
       });
       expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13
 
@@ -241,7 +242,7 @@ test('settings: Engine shows the resolved binary, its version and the tested one
     const update = panel(page).getByRole('group', { name: 'Update' });
     await expect(update.getByRole('button', { name: 'Update Claude Code…' })).toBeVisible();
     await expect(update).toContainText('New sessions start on the new version; running sessions keep theirs.');
-    await expect(panel(page).getByRole('group', { name: 'Plugins' })).toContainText('Plugin hooks run in MAWS sessions as in the terminal'); // R1
+    await expect(panel(page).getByRole('group', { name: 'Plugins', exact: true })).toContainText('Plugin hooks run in MAWS sessions as in the terminal'); // R1
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();

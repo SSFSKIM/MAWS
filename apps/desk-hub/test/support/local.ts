@@ -9,12 +9,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse, type V4WorkerOptions } from 'miniflare';
 import { inject } from 'vitest';
+import { codeHelpers } from '../../local/helpers.ts';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import type { OrgFrame } from '../../src/protocol/machine';
 import { generateVapidKey } from '../../src/push/web-push';
 import {
   ABORT_REASON,
+  ALARM_PATH,
+  BACKDATE_PATH,
+  LEAVE_HELD_PATH,
+  LEAVE_HOLD_PATH,
+  LEAVE_RELEASE_PATH,
+  OFFLINE_RETRY_PATH,
   MACHINE_ABORT_PATH,
   MACHINE_FETCH_FAULT_PATH,
   MACHINE_PROBE_PATH,
@@ -39,8 +46,12 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   REPORT_PATH,
+  SUMMARIES_BEFORE_LIVE_PATH,
+  SUMMARY_AS_PREVIOUS_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
+  WRITE_STALL_PATH,
+  PROJECT_MACHINES_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -98,10 +109,11 @@ export async function startLocalHub() {
   };
 
   // workerd's own log lines. A line a suite said it expects (`expectRuntimeLog`) is kept for it to assert and not
-  // printed, as is the hub's own record of a machine's stream (`{"desk":"machine-stream",…}`, a few per test); every
+  // printed, as is the hub's own record of a machine's stream and of a project's failed frame or send
+  // (`{"desk":"machine-stream",…}`, `{"desk":"project",…}`, a few per test, many where a suite injects failures); every
   // other goes out as Miniflare's default handler would print it, so an unexpected error stays visible.
   const runtimeLogs: Array<{ level: string; message: string }> = [];
-  const expectedLogs: RegExp[] = [/^\{"desk":"machine-stream"/];
+  const expectedLogs: RegExp[] = [/^\{"desk":"(machine-stream|project)"/];
   const handleStructuredLogs = ({ level, message }: { level: string; message: string }) => {
     if (expectedLogs.some((pattern) => pattern.test(message))) return void runtimeLogs.push({ level, message });
     if (level === 'error' || level === 'warn') console.error(message);
@@ -144,7 +156,11 @@ export async function startLocalHub() {
     return mf;
   };
   let mf = await start();
-  const proxy: Proxy = await startProxy({ standin, upstream: () => `http://127.0.0.1:${port}` });
+  const proxy: Proxy = await startProxy({
+    standin,
+    upstream: () => `http://127.0.0.1:${port}`,
+    extra: codeHelpers({ origin: () => proxy.url, org: ORG, standin, admin: ADMIN }),
+  });
 
   /** A request to an object's own fetch, which only Miniflare reaches: the suites' seams. */
   const seam = async (binding: 'MACHINE' | 'PROJECT' | 'REGISTRY', name: string, path: string, body?: unknown): Promise<string> => {
@@ -195,7 +211,7 @@ export async function startLocalHub() {
     },
     /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given, and its probe); set before
      * its stream opens (the suites' Worker only). */
-    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number }) {
+    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number; writeTimeoutMs?: number }) {
       const query = new URLSearchParams(Object.entries(timing).map(([name, value]) => [name, String(value)]));
       await seam('MACHINE', machine, `${TIMING_PATH}?${query}`);
     },
@@ -256,6 +272,15 @@ export async function startLocalHub() {
     async holdSend(machine: string, kind: string) {
       await seam('MACHINE', machine, `${SEND_HOLD_PATH}?kind=${kind}`);
     },
+    /** Stalls the machine's next write of a `kind` frame for good, as a stream whose client stopped reading never takes
+     * it (the suites' Worker only); the write bound ends the stream. */
+    async stallNextWrite(machine: string, kind: string) {
+      await seam('MACHINE', machine, `${WRITE_STALL_PATH}?kind=${kind}`);
+    },
+    /** The machine streams a project fans out to: its `machines` rows. */
+    async projectMachines(project: string): Promise<Array<{ name: string; generation: number }>> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_MACHINES_PATH)) as Array<{ name: string; generation: number }>;
+    },
     /** Releases the machine's held send, once it is held (waiting for it to be). */
     async releaseSend(machine: string) {
       const deadline = Date.now() + 10_000;
@@ -281,11 +306,43 @@ export async function startLocalHub() {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     },
+    /** Moves a machine's `seen` or `confirmed`, a provisioning key's expiry, or a machine's pending enrollment's expiry
+     * back, as the time having passed would leave them; the Registry schedules its alarm after, and the alarm is
+     * answered (ms, or null). */
+    async backdate(change: { machines?: Array<{ name: string; seen?: string; confirmed?: string }>; key?: { id: string; expires: string }; enrollment?: { machine: string; expires: string } }): Promise<number | null> {
+      return (JSON.parse(await seam('REGISTRY', ORG, BACKDATE_PATH, change)) as { alarm: number | null }).alarm;
+    },
+    /** The Registry's alarm (ms, or null); with `clear`, deleted first. */
+    async registryAlarm(clear = false): Promise<number | null> {
+      return (JSON.parse(await seam('REGISTRY', ORG, ALARM_PATH, clear ? { clear } : undefined)) as { alarm: number | null }).alarm;
+    },
+    /** Sets how long an unfinished offline revocation waits before it is tried again (null: the deployed minute), and
+     * wakes the Registry's alarm. */
+    async offlineRetry(ms: number | null) {
+      await seam('REGISTRY', ORG, OFFLINE_RETRY_PATH, { ms });
+    },
+    /** Holds the Registry's next `leave` (a machine's `DELETE /machine/enrollment`, once the Worker resolved it) until
+     * `releaseLeave`. */
+    async holdNextLeave() {
+      await seam('REGISTRY', ORG, LEAVE_HOLD_PATH);
+    },
+    /** Whether a `leave` is held. */
+    async leaveHeld(): Promise<boolean> {
+      return (await seam('REGISTRY', ORG, LEAVE_HELD_PATH)) === 'held';
+    },
+    /** Releases the held `leave`, once it is held (waiting for it to be). */
+    async releaseLeave() {
+      const deadline = Date.now() + 10_000;
+      while ((await seam('REGISTRY', ORG, LEAVE_RELEASE_PATH)) !== 'released') {
+        if (Date.now() > deadline) throw new Error('no leave was held');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
     /** Holds, or releases, a project's lookups of its archive machine (an upload of a legacy/ feed makes one). */
     async holdArchiveLookups(project: string, hold: boolean) {
       await seam('PROJECT', project, PROJECT_ARCHIVE_HOLD_PATH, { hold });
     },
-    /** A project's send queues, `<machine>#<generation>`. */
+    /** A project's send queues, `<machine>#<generation>#<lane>`. */
     async projectQueues(project: string): Promise<string[]> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_QUEUES_PATH)) as string[];
     },
@@ -316,6 +373,16 @@ export async function startLocalHub() {
     /** Hands the Registry a project's summary report, as one delivered late would arrive; the org's directory after. */
     async report(project: string, report: unknown): Promise<OrgFrame> {
       return JSON.parse(await seam('REGISTRY', ORG, REPORT_PATH, { project, report })) as OrgFrame;
+    },
+    /** Drops `live` from the Registry's `summaries`, as a registry stored before it; evict the Registry next, and its
+     * construction adds the column again. */
+    async summariesBeforeLive() {
+      await seam('REGISTRY', ORG, SUMMARIES_BEFORE_LIVE_PATH);
+    },
+    /** Has the Registry take its next summary report as the version before `live` did: stored without it, answered with
+     * nothing. */
+    async nextSummaryAsPrevious() {
+      await seam('REGISTRY', ORG, SUMMARY_AS_PREVIOUS_PATH);
     },
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {

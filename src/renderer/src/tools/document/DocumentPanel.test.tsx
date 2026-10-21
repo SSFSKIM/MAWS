@@ -8,7 +8,8 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { setDsOverrides } from '@artifacts/document/meta';
-import { createDocument } from '@artifacts/document/tabs';
+import { addTab, createDocument } from '@artifacts/document/tabs';
+import { schemaFor } from '@artifacts/document/schema';
 import type { ArtifactHost } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
@@ -18,6 +19,7 @@ import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
 import { useLayout } from '../../stores/layout';
 import { resetShellStores } from '../../test-support/shell-stores';
+import { requestArtifactOpen, resetOpenRequests, takeOpenRequest } from '../artifacts/viewers/requests';
 import { PageSystemProvider, provideDocumentDesignSystem, SystemPage, type DesignSystemScopeProps } from './design-system';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
@@ -37,6 +39,7 @@ beforeEach(() => {
   window.maws = fakeClient({ 'session.intent.get': null }).client;
   sent = [];
   noContentMs = undefined;
+  versions = [];
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' })); // the host's first tab (kinds/document.ts)
 });
@@ -59,10 +62,11 @@ const until = async (check: () => boolean, what: string) => {
 // The commands the tab sent, by name.
 let sent: string[] = [];
 let noContentMs: number | undefined;
+let versions: unknown[] = []; // what `artifacts.versions` answers
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const editor = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
@@ -97,6 +101,32 @@ function mount({ visible = true, onShown = vi.fn<() => void>() }: { visible?: bo
   return { state: hold.state as DocumentTabState, onShown, view, setVisible: (now: boolean) => view.rerender(tree(now)), remount: (now: boolean) => (view.unmount(), render(tree(now))) };
 }
 const shown = () => until(() => document.querySelector('.ds-doc .ProseMirror') !== null, 'the page');
+
+// P4-B4: an open's place (a link's fragment, show_pane's at) is the open request for this artifact on this surface; the
+// body hands it to the editor, which reveals it and takes it once, so a later remount shows the document as it was left
+describe('an open at a place', () => {
+  afterEach(() => resetOpenRequests());
+
+  it('reveals the block a link names in its tab and takes the request', async () => {
+    const body = schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b9' }, content: [{ type: 'text', text: 'The answer' }] }] });
+    memory.write((doc) => addTab(doc, { title: 'Findings', id: 't2', body }));
+    const serial = requestArtifactOpen(A, 'latest', 'panel', { block: 'b9' });
+    mount();
+    await shown();
+    await until(() => screen.queryByRole('tab', { selected: true })?.textContent?.includes('Findings') === true, 'the block’s tab');
+    const page = document.querySelector('.ds-doc .ProseMirror') as unknown as { editor?: { state: { selection: { head: number } } } };
+    await until(() => page.editor?.state.selection.head === 1, 'the caret at the block’s start');
+    expect(takeOpenRequest(serial), 'taken by the editor').toBe(false);
+  });
+
+  it('opens the history rail previewing a retained version a link names, after the request is taken', async () => {
+    versions = [{ id: 3, seq: 1, at: Date.now(), actor: { kind: 'human' }, kind: 'named', label: 'Draft', assetRefs: [] }];
+    requestArtifactOpen(A, 'latest', 'panel', { version: 3 });
+    mount();
+    await shown();
+    await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null, 'the history rail');
+  });
+});
 
 describe('the document editor in L’s registry', () => {
   it('registers Panel and Main with the tab’s state, and opens the document there', async () => {
@@ -136,6 +166,32 @@ describe('the document editor in L’s registry', () => {
     first.remount(true);
     await shown();
     await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+    expect(first.onShown).toHaveBeenCalledOnce();
+  });
+
+  // P4 W1-B (tracker L274; sitting candidate 28): the body stays mounted while it is hidden (the panel closed, the main
+  // region behind the panel), so each return to it is a look of the rail's: an agent's version since the last look
+  // raises the pill, and the view is recorded, as at the first showing; `onShown`, the surface's view, stays once
+  it('looks again at each return to a body that stayed mounted: the pill for each away-edit, the view recorded', async () => {
+    const looks = () => sent.filter((name) => name === 'artifacts.markViewed').length;
+    const pause = () => act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+    const first = mount();
+    await shown();
+    await until(() => looks() === 1, 'the first look');
+    for (const n of [1, 2]) {
+      first.setVisible(false);
+      await pause();
+      versions = [...versions, { id: n, seq: n, at: Date.now(), actor: { kind: 'session', appSessionId: SESSION }, kind: 'turn', assetRefs: [], summary: `Edit ${n}` }];
+      await pause();
+      first.setVisible(true);
+      await until(() => screen.queryByRole('button', { name: 'Dismiss new changes' }) !== null, `the pill at return ${n}`);
+      await until(() => looks() === n + 1, `the look at return ${n}`);
+      act(() => screen.getByRole('button', { name: 'Dismiss new changes' }).click());
+    }
+    first.setVisible(false);
+    first.setVisible(true); // nothing new: no pill, the look recorded
+    await until(() => looks() === 4, 'the third look');
+    expect(screen.queryByRole('button', { name: 'Dismiss new changes' })).toBeNull();
     expect(first.onShown).toHaveBeenCalledOnce();
   });
 

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrgKeysDouble } from '../../../test/double/org-keys';
 import { ME } from '../../../test/me';
 import { VECTOR_KEY } from '../../../test/vectors';
+import { wrappingKeyFromPassphrase } from '../../key/derive';
 import { beginUnlock, lock, unlock, useKeyHolder } from '../../key/holder';
 import { memoryKeyStore, type KeyStore } from '../../key/org-key';
 import { prepareMethod, setUpOrgKey } from '../../key/unlock';
@@ -158,5 +159,14 @@ describe('KeyDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(hub.keys.map((k) => k.label)).toEqual(['Second passphrase']));
     await screen.findByTestId('one-method');
+  });
+
+  it('shows the passphrase work of a derivation made while it is open, without being opened again', async () => {
+    await setUp();
+    render(withQueries(<KeyDialog me={ME} onClose={() => {}} />));
+    expect((await screen.findByTestId('passphrase-work')).textContent).toContain('0 MiB'); // setUp's, at the suite's cost
+    // A passphrase method being added derives anew, here at another cost, while nothing the dialog reads changes.
+    await act(() => wrappingKeyFromPassphrase(SECOND, ME.org.id, { t: 1, m: 2048, p: 1 }));
+    expect(screen.getByTestId('passphrase-work').textContent).toContain('2 MiB');
   });
 });

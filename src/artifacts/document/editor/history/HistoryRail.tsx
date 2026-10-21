@@ -2,15 +2,16 @@
 // the page, the versions grouped by day newest first with runs of automatic versions folded under an expander, each
 // row titled by its name or time with its author's chip (`--author-N` by `actorDisplay`) and one line of summary;
 // "Named only"; "Save version" with a name and a note. A click previews a version in the editor in place; a
-// shift-click compares it with the selected one. App chrome, so it reads the app's tokens (chrome.css).
+// shift-click compares it with the selected one. App chrome, so it reads the app's tokens (chrome.css). P4 W1-B: a
+// turn's line names its blocks and comments by the controller's `words`, the live document's, read once per list.
 import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { actorKey } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { HistoryController, HistorySnapshot } from './controller';
-import { authorOf, groupVersions, versionSummary, versionTitle, type Entry } from './model';
+import { authorOf, groupVersions, versionSummary, versionTitle, type Entry, type SummaryWords } from './model';
 
 interface Props {
-  controller: Pick<HistoryController, 'select' | 'save' | 'now'>; // P3-C (M8): what the rail drives, so a deck's controller drives it too; `now` names the list's days (gate-offload Decision Log 41)
+  controller: Pick<HistoryController, 'select' | 'save' | 'now'> & Partial<Pick<HistoryController, 'words'>>; // P3-C (M8): what the rail drives, so a deck's controller drives it too; `now` names the list's days (gate-offload Decision Log 41); `words` the lines' blocks and comments (P4 W1-B; without it "a block", "a comment")
   snapshot: Pick<HistorySnapshot, 'versions' | 'selected' | 'loading' | 'status' | 'error'>; // P3-C (M8): the list fields it reads
   sessionTitle?: (appSessionId: string) => string | undefined;
   /** Whether the Save version form is open (the editor holds it, so the header's Save version can open it). */
@@ -23,8 +24,11 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
   const [namedOnly, setNamedOnly] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const groups = useMemo(() => groupVersions(snapshot.versions ?? [], { now: controller.now(), namedOnly }), [controller, snapshot.versions, namedOnly]);
+  // the document's words as of this list (a new list reads them again)
+  const words = controller.words;
+  const read = useMemo(() => (snapshot.versions && words ? words() : undefined), [snapshot.versions, words]);
   const select = (version: ArtifactVersion, event: MouseEvent) => void controller.select(version.id, { extend: event.shiftKey });
-  const row = (version: ArtifactVersion) => <VersionRow key={version.id} version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} onSelect={select} />;
+  const row = (version: ArtifactVersion) => <VersionRow key={version.id} version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} words={read} onSelect={select} />;
   const entry = (item: Entry) => {
     if (item.kind === 'version') return row(item.version);
     const [newest, ...rest] = item.versions;
@@ -90,10 +94,10 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
   );
 }
 
-function VersionRow({ version, selected, sessionTitle, onSelect }: { version: ArtifactVersion; selected: boolean; sessionTitle?: (id: string) => string | undefined; onSelect(version: ArtifactVersion, event: MouseEvent): void }) {
+function VersionRow({ version, selected, sessionTitle, words, onSelect }: { version: ArtifactVersion; selected: boolean; sessionTitle?: (id: string) => string | undefined; words?: SummaryWords; onSelect(version: ArtifactVersion, event: MouseEvent): void }) {
   const author = authorOf(actorKey(version.actor), sessionTitle);
   const title = versionTitle(version);
-  const summary = versionSummary(version);
+  const summary = versionSummary(version, words);
   return (
     <button
       type="button"

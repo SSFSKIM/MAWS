@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 import { SUPERVISOR_NOTICES } from './app/copy';
 import { updatedStatus } from './test-support/host-status';
 
@@ -45,7 +45,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
     send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
     markEchoed();
   };
-  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V14, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V17, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -349,3 +349,27 @@ describe("C7's registrations from the app", () => {
   });
 });
 // C7 end
+
+// P3-F wave S (F14 review 2): App.tsx installs `openArtifactTab` into the host actions at its module load, so a Markdown
+// surface outside any Transcript (the Side tool's answer, the ask sheet's previews, the Code tool's preview, a plugin
+// surface) draws a working artifact chip; links.test.tsx covers the mechanism, this case the app's own line.
+describe('host actions from the app', () => {
+  afterEach(() => {
+    cleanup();
+    delete (window as { maws?: MawsBridge }).maws;
+  });
+
+  it("gives a Markdown surface outside any Transcript an artifact chip whose click opens the artifact's main tab", async () => {
+    const ARTIFACT = '0b4f3c1e-6a2d-4c8e-9f1a-2b3c4d5e6f70';
+    fakeMain('light');
+    vi.resetModules();
+    await import('./App');
+    // the module instances the app's load configured
+    const [{ Markdown }, { useLayout }, { activeTab }] = await Promise.all([import('./transcript/view/markdown/Markdown'), import('./stores/layout'), import('./stores/layout-model')]);
+    render(<Markdown markdown={`See [the plan](maws-artifact:${ARTIFACT}).`} live={false} />);
+    const chip = screen.getByRole('button', { name: 'the plan' });
+    expect(chip.getAttribute('data-chip')).toBe('artifact');
+    act(() => void fireEvent.click(chip));
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: ARTIFACT });
+  });
+});

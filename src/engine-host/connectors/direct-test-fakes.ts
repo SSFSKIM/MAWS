@@ -93,7 +93,7 @@ export function fakeFetch(server: FakeMcpServer, respond?: (message: Message | n
     if (message === null) return new Response(null, { status: init?.method === 'DELETE' ? 200 : 405 });
     const reply = await server.answer(message, init?.signal);
     if (reply === null) return new Response(null, { status: 202 });
-    const session = message.method === 'initialize' && server.sessionId ? { 'mcp-session-id': server.sessionId } : {};
+    const session: Record<string, string> = message.method === 'initialize' && server.sessionId ? { 'mcp-session-id': server.sessionId } : {};
     return new Response(JSON.stringify(reply), { status: 200, headers: { 'content-type': 'application/json', ...session } });
   };
   return { fetch, seen, calls: () => seen.filter((entry) => entry.message?.method === 'tools/call') };

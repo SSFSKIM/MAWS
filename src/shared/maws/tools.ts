@@ -15,15 +15,25 @@
 // `design_system` with its `allowCreate`, answered `{designSystemId, name?}` or `{create: true}`. E1's ask schemas are
 // declared before A's blocks and read at module load, so its lines sit in them, each marked `P3-D`; so does the export
 // format `claude` (D12: a design system as a zip of Claude's design-system files), in A's list of formats.
+// P4-B4 (docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md; P4 ledger X33, the X9 amendment) appends
+// `artifact_search` after the document tools (`./search-tools`), points `artifact_list` to it, and gives `show_pane` an
+// `at` (`../artifacts/link`'s location); the listed artifact moved to the leaf `./listed-artifact`, re-exported here.
+// P4-R7 (the P4 spec's Decision Log 46, the X9 amendment) appends `message` after the search tool (`./message-tool`),
+// the one tool listed with `_meta` (always loaded).
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
+import { ArtifactLocationSchema } from '../artifacts/link'; // P4-B4
 import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
 import { ARTIFACT_ID } from './artifact-id';
+import { ArtifactEditorSchema, ListedArtifactSchema } from './listed-artifact'; // P4-B4
 import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
 import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
 import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
+import { SEARCH_TOOL_NAMES, SEARCH_TOOLS } from './search-tools'; // P4-B4
+import { MESSAGE_TOOL_NAMES, MESSAGE_TOOLS } from './message-tool'; // P4-R7
 
 export { ARTIFACT_ID } from './artifact-id';
+export { ArtifactEditorSchema, ListedArtifactSchema, type ArtifactEditor, type ListedArtifact } from './listed-artifact'; // P4-B4
 
 export const MAWS_SERVER_NAME = 'maws';
 export const MAWS_TOOL_NAMES = [
@@ -34,6 +44,10 @@ export const MAWS_TOOL_NAMES = [
   ...DASHBOARD_TOOL_NAMES,
   // P3-B (M7): the document tools (`./document-tools`: their schemas, descriptions, limits and refusals)
   ...DOCUMENT_TOOL_NAMES,
+  // P4-B4: the search tool (`./search-tools`: its schemas, description, limits, hints and refusals)
+  ...SEARCH_TOOL_NAMES,
+  // P4-R7: the message tool (`./message-tool`: its schema, description, result and `_meta`)
+  ...MESSAGE_TOOL_NAMES,
 ] as const;
 export type MawsToolName = (typeof MAWS_TOOL_NAMES)[number];
 export const isMawsToolName = (name: unknown): name is MawsToolName => typeof name === 'string' && (MAWS_TOOL_NAMES as readonly string[]).includes(name);
@@ -146,9 +160,11 @@ export const ShowPaneInputSchema = z
     pane: PaneSchema,
     target: z.string().max(4096).optional(),
     line: z.number().int().min(1).optional(),
+    at: ArtifactLocationSchema.optional(), // P4-B4: the place an artifact opens at
   })
   .superRefine((input, ctx) => {
     if (input.line !== undefined && input.pane !== 'file') ctx.addIssue({ code: 'custom', path: ['line'], message: 'line is for the file pane only' });
+    if (input.at !== undefined && input.pane !== 'artifact') ctx.addIssue({ code: 'custom', path: ['at'], message: 'at is for the artifact pane only' }); // P4-B4
   });
 export type ShowPaneInput = z.infer<typeof ShowPaneInputSchema>;
 
@@ -353,15 +369,8 @@ export const ArtifactCreateResultSchema = z.strictObject({
   spaceId: z.uuid().optional(), spaceName: z.string().optional(), // F5: the Space it was made in
 });
 export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
-// Who wrote an artifact last: the user, the calling session, or another session (named).
-export const ArtifactEditorSchema = z.strictObject({ by: z.enum(['user', 'this session', 'another session']), appSessionId: AppSessionIdSchema.optional(), at: IsoTimeSchema });
-export type ArtifactEditor = z.infer<typeof ArtifactEditorSchema>;
-export const ListedArtifactSchema = z.strictObject({
-  id: z.uuid(), handle: z.string().optional(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0), updatedAt: IsoTimeSchema,
-  lastEditor: ArtifactEditorSchema.nullable(),
-  spaceId: z.uuid().optional(), spaceName: z.string().optional(), // F5 (obs 6): the Space it is in
-});
-export type ListedArtifact = z.infer<typeof ListedArtifactSchema>;
+// The listed artifact and who wrote it last (`ArtifactEditorSchema`, `ListedArtifactSchema`) are `./listed-artifact`'s
+// (P4-B4: `artifact_search`'s hit extends the row), re-exported above.
 export const ArtifactListResultSchema = z.strictObject({ status: z.literal('listed'), artifacts: z.array(ListedArtifactSchema) });
 export type ArtifactListResult = z.infer<typeof ArtifactListResultSchema>;
 export const ArtifactScreenshotResultSchema = z.strictObject({
@@ -446,7 +455,7 @@ export const MAWS_TOOLS = {
   show_pane: {
     title: 'Show pane',
     description:
-      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
     input: ShowPaneInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -461,7 +470,7 @@ export const MAWS_TOOLS = {
   artifact_list: {
     title: 'List artifacts',
     description:
-      'List MAWS artifacts with their ids, handles, kinds, titles, revisions and who edited them last; without this tool, keep your own list of what you made. An artifact in a Space also carries its spaceId and spaceName. By default the artifacts this session and the sessions it was opened from created, edited or viewed; scope "all" lists the whole library. Filter by kind, Space (spaceId) or a title substring (query). To name one to the user, write a Markdown link [its title](maws-artifact:<artifactId>), which opens it in MAWS with a click.',
+      'List MAWS artifacts with their ids, handles, kinds, titles, revisions and who edited them last; without this tool, keep your own list of what you made. An artifact in a Space also carries its spaceId and spaceName. By default the artifacts this session and the sessions it was opened from created, edited or viewed; scope "all" lists the whole library. Filter by kind, Space (spaceId) or a title substring (query). To find artifacts by what they contain, use artifact_search. To name one to the user, write a Markdown link [its title](maws-artifact:<artifactId>), which opens it in MAWS with a click.',
     input: ArtifactListInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -519,7 +528,11 @@ export const MAWS_TOOLS = {
   ...DASHBOARD_TOOLS, // P3-E (E2 M2)
   // P3-B (M7)
   ...DOCUMENT_TOOLS,
-} as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;
+  // P4-B4
+  ...SEARCH_TOOLS,
+  // P4-R7
+  ...MESSAGE_TOOLS,
+} as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean }; meta?: Record<string, unknown> }>;
 
 export interface MawsToolListEntry {
   name: MawsToolName;
@@ -527,13 +540,16 @@ export interface MawsToolListEntry {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: Record<string, unknown>;
+  _meta?: Record<string, unknown>; // P4-R7: the engine's keys on a listed tool (`message`'s alwaysLoad)
 }
 
 // The `tools/list` answer's entries, in MAWS_TOOL_NAMES order.
 export function mawsToolList(): MawsToolListEntry[] {
   return MAWS_TOOL_NAMES.map((name) => {
-    const { title, description, input, annotations } = MAWS_TOOLS[name];
-    return { name, title, description, inputSchema: z.toJSONSchema(input) as Record<string, unknown>, annotations: { ...annotations, title } };
+    const tool: (typeof MAWS_TOOLS)[MawsToolName] = MAWS_TOOLS[name];
+    const { title, description, input, annotations } = tool;
+    const meta = 'meta' in tool ? { _meta: { ...tool.meta } } : {};
+    return { name, title, description, inputSchema: z.toJSONSchema(input) as Record<string, unknown>, annotations: { ...annotations, title }, ...meta };
   });
 }
 

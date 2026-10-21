@@ -16,6 +16,11 @@ export function assistantPresentation(text: string) {
   } : null;
 }
 
+// P4-R7: a message tool's message, drawn as the one to-human span it is (no working record of its own to fold).
+export function messagePresentation(text: string) {
+  return <Presenter parts={[{ kind: 'to-human', text }]} showRecord={false} live={false} recordKey="" />;
+}
+
 function Presenter({ parts, showRecord, live, recordKey, hasWorkFold = true, answerable = false }: Drawing & { parts: Part[] }) {
   const [recordOpen, toggleRecord] = useDisclosure(`owner-report:${recordKey}`);
   // A text-only answer has no turn work divider. Keep its record reachable without changing transcript derivation.

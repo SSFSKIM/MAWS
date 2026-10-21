@@ -43,12 +43,32 @@ const ONE_SCHEMA = [
 ];
 const mawsSchemaPlugin = { rules: { 'one-schema': builtinRules.get('no-restricted-syntax') } };
 // P3-B end
+// P4-W2L start: English throughout (P4 Decision Log 4). Every age, date and time MAWS shows is written by one module in
+// one display locale, src/shared/app/date-format.ts; a date formatter built elsewhere, or a date's toLocaleDateString or
+// toLocaleTimeString, writes the system's locale into English copy. The same core rule under its own name, as the
+// one-schema check. A Date's toLocaleString is not told from a number's here; the module's header names it too.
+const ONE_LOCALE_MESSAGE =
+  'Ages, dates and times are written by @shared/app/date-format in its one display locale (P4 Decision Log 4): use its named shapes, or dateTimeFormat for a shape of your own.';
+const ONE_LOCALE = [
+  { selector: "NewExpression[callee.object.name='Intl'][callee.property.name=/^(?:DateTimeFormat|RelativeTimeFormat|DurationFormat)$/]", message: ONE_LOCALE_MESSAGE },
+  { selector: "CallExpression[callee.object.name='Intl'][callee.property.name=/^(?:DateTimeFormat|RelativeTimeFormat|DurationFormat)$/]", message: ONE_LOCALE_MESSAGE },
+  { selector: "CallExpression[callee.property.name=/^toLocale(?:Date|Time)String$/]", message: ONE_LOCALE_MESSAGE },
+];
+const mawsDatesPlugin = { rules: { 'one-locale': builtinRules.get('no-restricted-syntax') } };
+// P4-W2L end
 const DESK_WEB = 'apps/desk-web/src/ runs in a browser (the DC5 plan): no Node or Electron module.'; // DC5
 const DESK_WEB_NO_PRELOAD = 'apps/desk-web/src/ runs in a browser with no MAWS preload: `window.maws` does not exist there (the desk composite, DC6).'; // DC6
 const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
+// L154 (P2-F W-V): code built under the React Compiler (the renderer; the desk's web app) never reads a postfix ++/--.
+const COMPILED_POSTFIX = {
+  selector: 'UpdateExpression[prefix=false]:not(ExpressionStatement > UpdateExpression):not(ForStatement > UpdateExpression.update):not(ForStatement > SequenceExpression.update > UpdateExpression)',
+  message: 'A postfix ++/-- whose value is read can compile to the prefix form under the React Compiler (L154): save the value you need first (const old = n), then increment or decrement as its own statement (n++).',
+};
 
 module.exports = defineConfig(
-  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/', 'apps/*/dist/', 'apps/*/.wrangler/'] }, // DC3: the desk apps' build and wrangler state
+  // electron-vite bundles its config to electron.vite.config.<ms>.mjs beside it for the moment it loads it; the gate's
+  // static job lints while it builds, and a file listed then gone failed the lint (ENOENT, run 39599150487).
+  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/', 'apps/*/dist/', 'apps/*/.wrangler/', 'electron.vite.config.*.mjs'] }, // DC3: the desk apps' build and wrangler state
   js.configs.recommended,
   tseslint.configs.recommended,
   {
@@ -77,10 +97,7 @@ module.exports = defineConfig(
     rules: {
       'no-restricted-syntax': [
         'error',
-        {
-          selector: 'UpdateExpression[prefix=false]:not(ExpressionStatement > UpdateExpression):not(ForStatement > UpdateExpression.update):not(ForStatement > SequenceExpression.update > UpdateExpression)',
-          message: 'A postfix ++/-- whose value is read can compile to the prefix form under the React Compiler (L154): save the value you need first (const old = n), then increment or decrement as its own statement (n++).',
-        },
+        COMPILED_POSTFIX,
         YJS_DYNAMIC, // P3-A
       ],
     },
@@ -145,6 +162,14 @@ module.exports = defineConfig(
     rules: { 'maws-schema/one-schema': ['error', ...ONE_SCHEMA] },
   },
   // P3-B end
+  // P4-W2L start: the one-locale rule (above); tests build their own English oracles.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/shared/app/date-format.ts', 'src/**/*.test.{ts,tsx}', 'src/renderer/src/test-support/**'],
+    plugins: { 'maws-dates': mawsDatesPlugin },
+    rules: { 'maws-dates/one-locale': ['error', ...ONE_LOCALE] },
+  },
+  // P4-W2L end
   // DC3 start: the desk hub's protocol module (apps/desk-hub/src/protocol/) is imported by the Worker, the web app, and
   // the fake machine as it stands, so it imports no runtime's module; apps/desk-hub/tsconfig.protocol.json holds its
   // globals to WebCrypto, text encoding, and URL.
@@ -168,6 +193,8 @@ module.exports = defineConfig(
     languageOptions: { globals: globals.browser },
     ...reactHooks.configs.flat.recommended,
   },
+  // The desk builds under the React Compiler as the renderer does (vite.config.ts), so the renderer's L154 rule holds here.
+  { files: ['apps/desk-web/src/**/*.{ts,tsx}'], rules: { 'no-restricted-syntax': ['error', COMPILED_POSTFIX] } },
   {
     files: ['apps/desk-web/src/**/*.{ts,tsx}'],
     ignores: ['apps/desk-web/src/**/*.test.{ts,tsx}'],

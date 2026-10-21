@@ -27,6 +27,7 @@ export const QUESTION = {
   queued: 'Queued — sends when the agent reaches a pause',
   cancel: 'Cancel',
   unconfirmed: 'Sent — not confirmed',
+  unconfirmedUnreadable: 'Sent — not confirmed: MAWS can’t read the session’s transcript', // X18's reason 'transcript-unreadable'
   answerAgain: 'Answer again',
   answered: 'Answered:',
   terminal: 'This session is open in a terminal',

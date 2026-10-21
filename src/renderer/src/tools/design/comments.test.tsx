@@ -101,7 +101,7 @@ describe('a design opened as its own tab', () => {
 
   function handleOf(): DocumentHandle {
     const doc = design([{ id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 }, title: 'Phone' }]);
-    const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+    const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
     return { doc, awareness: new Awareness(doc), state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
   }
   // L's main tab: the kind's Main with the state held for the tab's scope, the design's row as the library answers it

@@ -4,10 +4,11 @@
 // evict), which drops a `Project`'s memory and keeps its sockets open; a `Machine` holding a stream is an active
 // reference workerd will not evict, so its termination is `ctx.abort()` through a suite seam.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { FakeMachine, loadRecording, TWO_SUBAGENTS } from '../fake-machine';
 import type { GridDown, ProjectDown, ProjectSummary, ProjectUp } from '../src/protocol/browser';
-import { FRAME_LIMIT } from '../src/protocol/parts';
+import { FRAME_LIMIT, toWire } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
-import type { DownFrame } from '../src/protocol/machine';
+import type { DownFrame, UpFrame } from '../src/protocol/machine';
 import type { Rpc, RpcDraft } from '../src/protocol/rpc';
 import type { Delivery, Raised, SessionMessage, Settled } from '../src/protocol/session';
 import { BrowserClient, enroll, GridClient, MachineClient, waitFor, type Credentials } from './support/clients';
@@ -293,7 +294,7 @@ describe('RPCs', () => {
     const m = await machine(project);
     await m.connect();
     await m.sync(project);
-    const current = m.name + '#' + m.generation;
+    const current = m.name + '#' + m.generation + '#replies';
     expect(await hub.projectQueues(project)).toContain(current);
     await hub.projectSend(project, m.name, m.generation - 1, { t: 'refused', project, refusal: { reason: 'not-open', message: 'late' } });
     expect(await hub.projectQueues(project)).toContain(current);
@@ -691,6 +692,78 @@ describe('the pending set, decisions, and deliveries', () => {
   });
 });
 
+describe("a POST's answer names the frames it refused (MAWS #88)", () => {
+  it('names a settlement for a project its stream has not opened, in the same answer; an applied one names none', async () => {
+    const open = newProject();
+    const closed = newProject();
+    const m = await machine(open);
+    const response = await m.post([{ t: 'session', message: envelope(m, closed, 'settled', await settled(closed, 'toolu_closed', 'web', 'allow', memberId)) }]);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, frames: 1, refused: [{ index: 0, reason: 'not-open' }] });
+
+    const applied = await m.post([{ t: 'session', message: envelope(m, open, 'presence', presence('idle')) }]);
+    expect(await applied.json()).toEqual({ ok: true, frames: 1, refused: [] });
+    await m.close();
+  });
+
+  it("applies an open project's frames and names only the others, across runs, a part set, and a frame naming no project", async () => {
+    const open = newProject();
+    const closed = newProject();
+    const other = newProject();
+    const m = await machine(open);
+    const b = await browser(open);
+    await b.next((f) => f.t === 'pending', 'pending on connect');
+    const request = await raised(open, 'toolu_mixed');
+    // A settlement of a project not open, sent as parts: named by its last part.
+    const parts = toWire({ t: 'session', message: envelope(m, other, 'settled', await settled(other, 'toolu_parts', 'web', 'allow', memberId)) }, 200).map((line) => JSON.parse(line) as UpFrame);
+    expect(parts.length).toBeGreaterThan(1);
+    const frames: UpFrame[] = [
+      { t: 'session', message: envelope(m, open, 'raised', request) },
+      { t: 'session', message: envelope(m, closed, 'settled', await settled(closed, 'toolu_elsewhere', 'web', 'allow', memberId)) },
+      // An empty upload, the uplink's probe: refused on the replies lane, which this POST waits for.
+      { t: 'events', project: closed, events: [] },
+      { t: 'session', message: envelope(m, open, 'presence', presence('busy')) },
+      ...parts,
+      { t: 'pending', project: 'not-a-project-id', raised: [] },
+      { t: 'pending', project: open, raised: [request] },
+    ];
+    const last = 3 + parts.length;
+    const response = await m.post(frames);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      frames: frames.length,
+      refused: [
+        { index: 1, reason: 'not-open' },
+        { index: 2, reason: 'not-open' },
+        { index: last, reason: 'not-open' },
+        { index: last + 1, reason: 'bad-shape' },
+      ],
+    });
+
+    await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+    await waitFor(() => (sessionKinds(b).some((x) => x.kind === 'presence') ? true : undefined));
+    expect(lastPending(b)).toEqual([{ machine: m.name, raised: request, terminal_only: false }]);
+    expect(sessionKinds(b).filter((x) => x.kind === 'presence').map((x) => x.body)).toEqual([presence('busy')]);
+    b.close();
+    await m.close();
+  });
+
+  it('still refuses the frame down the stream, on the control lane, for a machine that reads only the stream', async () => {
+    const open = newProject();
+    const closed = newProject();
+    const m = await machine(open);
+    const from = m.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, closed, 'settled', await settled(closed, 'toolu_stream', 'web', 'allow', memberId)) }]);
+    expect(await m.next((f) => f.t === 'refused' && f.project === closed, 'the refusal on the stream', from)).toEqual({
+      t: 'refused',
+      project: closed,
+      refusal: { reason: 'not-open', message: 'send hello for this project on this stream first' },
+    });
+    await m.close();
+  });
+});
+
 describe('presence and machine leases', () => {
   it('machines go offline when the lease lapses with no hb-ack, and an hb-ack of an older generation renews nothing', async () => {
     const project = newProject();
@@ -712,10 +785,16 @@ describe('presence and machine leases', () => {
 
   it('hb-acks of the current generation keep the machine online past its lease', async () => {
     const project = newProject();
-    const m = await machine(project, { heartbeatMs: 200, leaseMs: 1200 });
+    // A lease of 15 heartbeats (the deployed one is 3 of 15 s). Each renewal goes from the hub's timer through the
+    // suite's proxy and client and back through the Worker to the project, and on a loaded box one can land more than a
+    // second late: under a lease of 1.2 s the machine flapped offline (MAWS's pool, run 39568222090). What this proves is
+    // that renewals carry the machine past its lease, so the wait ends a second after the lease the hello started.
+    const leaseMs = 3000;
+    const m = await machine(project, { heartbeatMs: 200, leaseMs });
+    const helloed = Date.now(); // machine()'s hello started the lease before this
     const b = await browser(project);
     await m.postOk([{ t: 'session', message: envelope(m, project, 'machine', machinePresence, null) }]);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await new Promise((resolve) => setTimeout(resolve, helloed + leaseMs + 1000 - Date.now()));
     expect(ofType(b, 'machines').flatMap((f) => f.machines).filter((x) => x.machine === m.name && !x.online)).toEqual([]);
     b.close();
     await m.close();
@@ -1206,6 +1285,126 @@ describe('the grid', () => {
     expect((await hub.fetchAs(ADMIN, `/api/machines/${m.name}`, { method: 'DELETE' })).status).toBe(200);
     expect(await listed()).toBe(false);
     await gridReached(grid, project, from, { machines: 0, machines_online: 0 }, 'the removed machine no longer counted');
+    grid.close();
+    await m.close();
+  });
+});
+
+// smns remote identity §5 (owner, 2026-10-19): the web shows a project with a live session or waiting on the owner.
+describe("the grid's live count", () => {
+  const ended = { record: null, bridge: false };
+
+  it('counts each session whose presence names a process, never a null record, and keeps them while the lease lapses', async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await m.postOk([
+      { t: 'session', message: envelope(m, project, 'presence', presence('busy')) },
+      { t: 'session', message: envelope(m, project, 'presence', ended, SECOND) },
+    ]);
+    await gridReached(grid, project, 0, { working: 1, live: 1 }, 'the one session with a process');
+    let from = grid.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', presence('idle'), SECOND) }]);
+    await gridReached(grid, project, from, { working: 1, live: 2 }, 'the second session running');
+    from = grid.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', ended, SECOND) }]);
+    await gridReached(grid, project, from, { working: 1, live: 1 }, 'the second session ended');
+    // The stream closes and the lease lapses: nothing works on an offline machine, and its session is still live there.
+    from = grid.frames.length;
+    await m.close();
+    await gridReached(grid, project, from, { machines: 1, machines_online: 0, working: 0, live: 1 }, 'the machine offline, its session kept');
+    grid.close();
+  });
+
+  it('counts no session of a machine that only follows the project, its presence kept from when it held it', async () => {
+    const project = newProject();
+    const holder = await machine(project, CLOSES);
+    const other = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await holder.postOk([{ t: 'session', message: envelope(holder, project, 'presence', presence('busy')) }]);
+    await other.postOk([{ t: 'session', message: envelope(other, project, 'presence', presence('idle'), SECOND) }]);
+    await gridReached(grid, project, 0, { machines: 2, live: 2 }, 'both sessions');
+    const from = grid.frames.length;
+    await other.postOk([{ t: 'hello', project, name: 'demo', have: other.vector(project), follow: true }]);
+    await gridReached(grid, project, from, { machines: 1, machines_online: 1, live: 1 }, 'the follower out of the count');
+    grid.close();
+    await other.close();
+    await holder.close();
+  });
+
+  it('is played by the fake machine: its only session ends, the machine still online, and the project counts none live', async () => {
+    const project = newProject();
+    const name = `sp-${++machines}`;
+    const fake = new FakeMachine({ hub: hub.url, machine: name, credentials: await enroll(hub, ADMIN, name), orgKey: new Uint8Array(32).fill(9), project, recordings: [loadRecording(TWO_SUBAGENTS)] });
+    const grid = await GridClient.open(hub, ADMIN);
+    await fake.connect();
+    await gridReached(grid, project, 0, { machines_online: 1, live: 1 }, 'its session live');
+    const from = grid.frames.length;
+    await fake.end();
+    await gridReached(grid, project, from, { machines_online: 1, live: 0 }, 'its session ended');
+    grid.close();
+    await fake.close();
+  });
+
+  it("drops a revoked machine's sessions from the count", async () => {
+    const project = newProject();
+    const kept = await machine(project, CLOSES);
+    const revoked = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await kept.postOk([{ t: 'session', message: envelope(kept, project, 'presence', presence('busy')) }]);
+    await revoked.postOk([{ t: 'session', message: envelope(revoked, project, 'presence', presence('idle'), SECOND) }]);
+    await gridReached(grid, project, 0, { live: 2 }, 'both sessions');
+    const from = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${revoked.name}`, { method: 'DELETE' })).status).toBe(200);
+    await gridReached(grid, project, from, { machines: 1, live: 1 }, 'the revoked machine no longer counted');
+    grid.close();
+    await revoked.close();
+    await kept.close();
+  });
+
+  it('is added to a registry stored before it, read as none until a report carries it; a report without it keeps the count', async () => {
+    const prefix = `live-${projects}`;
+    await hub.addProjects(2, prefix);
+    const [project, fresh] = [0, 1].map((i) => `${prefix}-${String(i).padStart(12, '0')}`);
+    const counts = { machines: 1, machines_online: 1, working: 0, waiting: 0 };
+    await hub.report(project, { ...counts, live: 2, seq: 1 });
+    let grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { live: 2 }, 'the stored count');
+    grid.close();
+
+    // The registry as it stood before the column, constructed again.
+    await hub.summariesBeforeLive();
+    await hub.evict('Registry', ORG);
+    grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines: 1, live: 0 }, 'the column added, the older row read as none live');
+    let from = grid.frames.length;
+    await hub.report(project, { ...counts, live: 3, seq: 2 });
+    await gridReached(grid, project, from, { live: 3 }, 'a report carrying the count');
+    // A `Project` on the version before `live` sends neither it nor a sequence: its counts are taken, the live count kept;
+    // for a project the registry holds no counts of yet, none live.
+    from = grid.frames.length;
+    await hub.report(project, { ...counts, working: 1 });
+    await hub.report(fresh, { ...counts, working: 1 });
+    await gridReached(grid, project, from, { working: 1, live: 3 }, 'the older report, the count kept');
+    await gridReached(grid, fresh, from, { working: 1, live: 0 }, "the older report of a project with no counts yet");
+    grid.close();
+  });
+
+  it('is sent again after a registry on the version before it took a report without it, though the counts are the same', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines_online: 1, live: 0 }, 'the machine online, no session yet');
+    // During a deploy, the Registry still on the previous version takes the report's counts but not `live`, and answers nothing.
+    await hub.nextSummaryAsPrevious();
+    const running = { t: 'session', message: envelope(m, project, 'presence', presence('busy')) } as const;
+    let from = grid.frames.length;
+    await m.postOk([running]);
+    await gridReached(grid, project, from, { working: 1, live: 0 }, 'the counts taken without live');
+    // The same presence again: no count changes, and the unacknowledged report goes out again.
+    from = grid.frames.length;
+    await m.postOk([running]);
+    await gridReached(grid, project, from, { working: 1, live: 1 }, 'the counts sent again, live with them');
     grid.close();
     await m.close();
   });

@@ -188,6 +188,29 @@ describe('panel host registry and instances', () => {
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus 3$/);
   });
 
+  // P4-B3x: leaving an Expand that folded the panel opens it again; the dock hands the keyboard to the session's composer,
+  // so no tool is asked for it then. The owner opening the panel while expanded is an opening like any other.
+  it('the panel opening as an Expand that folded it ends asks no tool for the keyboard; the owner opening it does', () => {
+    connect();
+    register(probeTool('t').tool);
+    render(<TestHost />);
+    let id = '';
+    act(() => void (id = panelHost.addTool('t', { appSessionId: A })));
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/visible · focus 1$/);
+    const S = mainShowing(A).sets.none!.panes[0];
+    const split = { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [S, { tabs: [{ id: 'diagnostics', kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }] as [typeof S, typeof S], focusedPane: 0 as const, splitRatio: 0.5 } } };
+    act(() => useLayout.setState({ main: split }));
+    const expand = () => act(() => useLayout.getState().floatSplit(S.activeTabId, { foldPanel: true }));
+    expand();
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    act(() => useLayout.getState().dockSplit());
+    expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/visible · focus 1$/);
+    expand();
+    act(() => useLayout.getState().setPanel({ collapsed: false }));
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/visible · focus 2$/);
+  });
+
   it('passive selection keeps a collapsed panel and keyboard focus; user selection reveals it', () => {
     connect();
     register(probeTool('t').tool);
@@ -365,6 +388,28 @@ describe('panel host transitions', () => {
     expect(screen.getByTestId('body:s:cccccccc')).toBeTruthy();
     show(B);
     expect(probe.created).toHaveLength(2); // showing the sessions creates no second instance
+  });
+
+  // P4-B3 (its Decision Log 22; X5 as amended): a restored tab's state is created with what its tool persisted for it
+  // (`setPanelParams`), shown or re-targeted first; a tab its tool persisted nothing for gets no params, as before.
+  it('creates a restored tab’s state with the params its tool persisted for it, shown or re-targeted first', () => {
+    const { tool, probe } = probeTool('s', { multiInstance: false });
+    const pinned = probeTool('p');
+    register(tool, pinned.tool);
+    useLayout.setState({
+      panelPinned: [ref('p:pinned01', true)],
+      panelBySession: new Map([
+        [A, { tabs: [ref('s:aaaaaaaa')], activeTabId: 's:aaaaaaaa' }],
+        [B, { tabs: [ref('s:bbbbbbbb')], activeTabId: null }],
+      ]),
+      panelParams: { 's:aaaaaaaa': { target: 'a' }, 's:bbbbbbbb': { target: 'b' } },
+    });
+    render(<TestHost />);
+    expect(pinned.probe.created).toEqual([expect.objectContaining({ instanceId: 'p:pinned01', params: undefined, restored: true })]);
+    expect(probe.created).toEqual([expect.objectContaining({ instanceId: 's:aaaaaaaa', params: { target: 'a' }, restored: true })]);
+    act(() => void panelHost.addTool('s', { appSessionId: B, params: 'p', activate: false }));
+    expect(probe.created.at(-1)).toEqual(expect.objectContaining({ instanceId: 's:bbbbbbbb', params: { target: 'b' }, restored: true }));
+    expect(probe.opens.at(-1)).toEqual({ id: 's:bbbbbbbb', params: 'p' });
   });
 
   it('activate: false writes a target not shown through updatePanelTabs with the pins passed through, and switches nothing', () => {

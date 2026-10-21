@@ -11,6 +11,10 @@
 // An async question with no request waiting at the tail (MAWS's own ask, never raised; or one answered already) lands
 // the same way on its call's row: the log's `question` event's `src` is the call's tool-use id, by which MAWS keys the
 // row (a question's `question:<id>`, MAWS's ask capsule `ask:<id>`), so the view jumps to it as its store's `jumpTo` does.
+// So does a message sent through a message tool (MAWS's or the to-human plugin's, which the desk reads alike,
+// `../../depth/message-tools`; doperpowers' to-human message tool spec, its cross-repo contract): its `message` event's
+// `src` is the call's tool-use id, not a span, and MAWS's store, under the desk's reading, draws the call as the message
+// it sends, a `to_human` row keyed `to-human:<id>` (P4-R7).
 import { useEffect, useRef, useState } from 'react';
 import type { JsonObject } from 'desk-hub/protocol';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
@@ -19,13 +23,17 @@ import { rowId } from '../../../../../src/renderer/src/transcript/model/keys';
 import { marksOfText } from '../../../../../src/renderer/src/transcript/model/owner-marks';
 import type { RowId } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { MessageUuid, ToolUseId } from '@shared/graph/ids';
+import { DESK_MESSAGE_TOOLS } from '../../depth/message-tools';
 import { watchReaderIntent } from '../../depth/view/reader-intent';
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 
 type Anchor = { messageUuid: MessageUuid; blockIndex: number };
 
-/** What a landing lands on: a `<message>` (`src` `<row uuid>#<span>`) or an async question's call (`src` its tool-use id). */
+/**
+ * What a landing lands on: a message (`src` `<row uuid>#<span>` for a `<message>`, the call's tool-use id for a message
+ * tool's) or an async question's call (`src` its tool-use id).
+ */
 export type LandingKind = 'message' | 'question';
 
 /**
@@ -53,15 +61,24 @@ export function messageAnchor(src: string, rows: readonly JsonObject[]): Anchor 
 }
 
 /**
- * The row of an async question's call in MAWS's transcript, once a held row holds the call (`src`, its tool-use id):
- * MAWS's ask capsule for its own `ask`, a question row for the ask mod's. Null while no held row holds it.
+ * The row of a call in MAWS's transcript, once a held row holds the call (`src`, its tool-use id): MAWS's ask capsule
+ * for its own `ask`, the message's row for a message tool's call, a question row for the ask mod's. Null while no held
+ * row holds it.
  */
 export function callRow(src: string, rows: readonly JsonObject[]): RowId | null {
   for (const row of rows) {
     const content = object(row.message)?.content;
     if (row.type !== 'assistant' || !Array.isArray(content)) continue;
     const use = content.map(object).find((block) => block?.type === 'tool_use' && block.id === src);
-    if (use) return presentationOf(String(use.name)) === 'ask' ? rowId.ask(src as ToolUseId) : rowId.question(src as ToolUseId);
+    if (!use) continue;
+    switch (presentationOf(String(use.name), DESK_MESSAGE_TOOLS)) {
+      case 'ask':
+        return rowId.ask(src as ToolUseId);
+      case 'message':
+        return rowId.toHuman(src as ToolUseId);
+      default:
+        return rowId.question(src as ToolUseId);
+    }
   }
   return null;
 }
@@ -79,14 +96,13 @@ export function landingStep(input: { held: boolean; live: boolean; more: boolean
 
 /**
  * The jump to a landing's row in MAWS's store under `key`, once a held row holds it (null before), answering whether
- * the store found the row: it may not have derived it yet.
+ * the store found the row: it may not have derived it yet. A message's `src` names a span of a held row's text, or else
+ * the call of a message tool: a tool-use id is never a row's uuid.
  */
 function rowJump(kind: LandingKind, src: string, key: string, rows: readonly JsonObject[]): (() => boolean) | null {
   const store = () => useTranscriptStore.getState();
-  if (kind === 'message') {
-    const anchor = messageAnchor(src, rows);
-    return anchor && (() => store().jumpToMessage(key, anchor));
-  }
+  const anchor = kind === 'message' ? messageAnchor(src, rows) : null;
+  if (anchor) return () => store().jumpToMessage(key, anchor);
   const row = callRow(src, rows);
   return (
     row &&

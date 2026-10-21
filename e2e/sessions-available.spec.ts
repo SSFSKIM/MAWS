@@ -17,6 +17,7 @@ import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { seedTranscript, SideJournal, transcript } from './support/side-replay';
 import { sidebarRow } from './support/sidebar';
+import { MESSAGE_TOOL_ALIAS } from '../src/shared/owner/contract'; // P4-A2
 
 const SKILLS_SESSION = 'a2a20000-0000-4000-8000-00000000000a';
 const SEND_SESSION = 'a2a20000-0000-4000-8000-00000000000b';
@@ -24,7 +25,7 @@ const SKILL = { name: 'e8-probe:e8-hello', display_name: 'e8-probe:e8-hello', de
 const REPLY = 'OK';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
-  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<CommandResult<N>>;
+  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
 }
 function value<N extends CommandName>(result: CommandResult<N>) {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
@@ -135,12 +136,23 @@ test.describe('sessions available on demand (P2-A)', () => {
     await expect(control).toHaveText('Send');
     await expect(control).toHaveAttribute('aria-description', 'Starts this session');
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on open').toBe(false);
+    value(await invoke(page, 'settings.set', { engine: { mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } })); // P4-R8
+    value(await invoke(page, 'settings.set', { engine: { launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } } })); // P4-A2
     await control.click();
     await expect(control).toHaveText('Starting…');
     await expect(mainRegion(page).getByText(REPLY, { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(composer).toHaveText('');
     expect(spawns(maws, appId)).toHaveLength(1);
     expect(spawns(maws, appId)[0]!.frame.args, 'the same conversation').toEqual(expect.arrayContaining(['--resume', SEND_SESSION]));
+    const resumed = spawns(maws, appId)[0]!.frame.args!;
+    expect(JSON.parse(resumed[resumed.indexOf('--mcp-config') + 1]!), "the resume carries the app's MCP servers (P4-R8)").toEqual({ mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
+    // P4-A2: the launch profile set in Settings reaches the resume as flag-level keys, `user` kept among the sources; with
+    // every hook off, MAWS's start-time context rides the appended prompt rather than a SessionStart group
+    const flags = JSON.parse(resumed[resumed.indexOf('--settings') + 1]!) as Record<string, unknown>;
+    expect(flags, 'the launch profile (P4-A2)').toMatchObject({ enabledPlugins: { 'ptc@ptc-tool': false }, outputStyle: 'default', disableAllHooks: true });
+    expect(flags).not.toHaveProperty('hooks');
+    expect(resumed[resumed.indexOf('--setting-sources') + 1]).toBe('user,project,local');
+    expect(resumed[resumed.indexOf('--append-system-prompt') + 1], 'the alias in the appended prompt').toContain(MESSAGE_TOOL_ALIAS);
     expect(writtenUsers(maws, appId).map((r) => (r.frame as { message?: { content?: unknown } }).message?.content), 'sent once').toEqual(['Reply with OK']);
 
     // stopped: what the engine reported is kept, labelled with when

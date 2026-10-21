@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'; // E5: a window's webContents, as th
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults'; // P2-F L113
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults'; // P2-F L113
 import { humanTurn, record, status } from '../../../test/support/builders';
 
 // Electron's `app` as the guard sees it: `before-quit` listeners, and `quit()` firing `before-quit` again, as it does.
@@ -1143,14 +1143,24 @@ describe('keeping sessions running at quit', () => {
       defaultId: 0,
       cancelId: 3,
       message: '2 sessions mid-turn',
-      detail: 'Quitting stops them. Transcripts stay on disk and can be resumed.',
+      detail: 'Kept running, sessions carry on and MAWS reconnects to them when it opens again. Quit stops them; transcripts stay on disk and can be resumed.',
     });
     expect(quitQuestion(report, 'Quit', new Map(), offer(false))).toMatchObject({ defaultId: 1, cancelId: 3 });
     expect(quitQuestion(report, 'Quit', new Map(), null)).toEqual(quitQuestion(report, 'Quit')); // not offered: as before
   });
 
+  // P4 (sitting candidate 70): the detail under the keep default said only that quitting stops the sessions; it names
+  // what each answer does, keeping the keep-running default (the owner's P2 choice)
+  it('says what keeping and quitting each do, under the keep default', () => {
+    const asked = quitQuestion({ ...NONE, midTurn: 1, backgroundWork: 1 }, 'Quit', new Map(), offer(true));
+    expect(asked.buttons![asked.defaultId!]).toBe('Quit and keep sessions running'); // the default stays keep
+    expect(asked.detail).toMatch(/^Kept running, sessions carry on and MAWS reconnects to them when it opens again\./); // keep's outcome
+    expect(asked.detail).toContain('Quit stops them; transcripts stay on disk and can be resumed.'); // Quit's outcome
+    expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit').detail).toBe('Quitting stops them. Transcripts stay on disk and can be resumed.'); // keep not offered: as before
+  });
+
   it('says terminals close with the app when a terminal is busy (or did not answer) and keep is offered', () => {
-    const detail = 'Quitting stops them. Transcripts stay on disk and can be resumed.\nTerminals close with the app.';
+    const detail = 'Kept running, sessions carry on and MAWS reconnects to them when it opens again. Quit stops them; transcripts stay on disk and can be resumed.\nTerminals close with the app.';
     expect(quitQuestion({ ...NONE, midTurn: 1, busyTerminals: 2 }, 'Quit', new Map(), offer(true)).detail).toBe(detail);
     expect(quitQuestion({ ...NONE, busyTerminals: 1, terminalsUnknown: true }, 'Quit', new Map(), offer(true)).detail).toBe(detail);
     expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit', new Map(), offer(true)).detail).not.toContain('Terminals');
@@ -1220,7 +1230,7 @@ describe('keeping sessions running at quit', () => {
       expect(hostModeFromEnv(env)).toBe(mode);
       const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: mode }) };
       const ask = vi.fn(async (): Promise<'cancel'> => 'cancel');
-      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V14) });
+      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V17) });
       electron.app.attempt();
       await settle();
       const keep = (ask.mock.calls[0] as unknown[])[2] as Parameters<typeof quitQuestion>[3];

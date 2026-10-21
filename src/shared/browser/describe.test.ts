@@ -415,3 +415,70 @@ describe('describeElement and a11yPath', () => {
     expect(path.endsWith('navigation “Level 39” > button “Deep”')).toBe(true);
   });
 });
+
+// P4 W2-C (tracker 2026-10-07, E4d Decision Log 29(c)): a web component's open shadow root makes a content name doubt,
+// so the exact `name` stays empty; a best-effort `displayName` beside it labels the badge and the sheet
+describe('the display label beside the exact name', () => {
+  // a Lit-style element: its rendering in an open shadow root
+  const render = (host: HappyElement, html: string) => {
+    host.attachShadow({ mode: 'open' }).innerHTML = html;
+  };
+  const shadowed = (html: string, shadow: string) => {
+    const el = fragment(html);
+    render(el.querySelector('[data-host]')!, shadow);
+    return el;
+  };
+  const SVG = '<svg viewBox="0 0 16 16"><path d="M0 0h16v16H0z"></path></svg>';
+
+  it('names a button holding a web-component icon by the icon, its exact name staying empty', () => {
+    expect(describeElement(shadowed('<button data-t><sl-icon data-host name="gear"></sl-icon></button>', SVG))).toMatchObject({ role: 'button', name: '', displayName: 'gear' });
+    expect(describeElement(shadowed('<button data-t><x-icon data-host icon="trash"></x-icon></button>', SVG))!.displayName).toBe('trash');
+  });
+
+  it('prefers the rendered text, then the button’s own title, then a label, an alt or an SVG title inside, then an icon attribute', () => {
+    const display = (el: HappyElement) => describeElement(el)!.displayName;
+    expect(display(shadowed('<button data-t><x-label data-host></x-label></button>', '<style>b{}</style><b>Save  draft</b>'))).toBe('Save draft');
+    expect(display(shadowed('<button data-t>Go <x-icon data-host name="arrow"></x-icon></button>', `<svg><title>Arrow</title></svg>`))).toBe('Go');
+    expect(display(shadowed('<button data-t><x-chip data-host>Archive</x-chip></button>', '<b><slot></slot></b>'))).toBe('Archive'); // a slot reads what it places
+    expect(display(shadowed('<button data-t title="Settings"><sl-icon data-host name="gear"></sl-icon></button>', SVG))).toBe('Settings');
+    expect(display(shadowed('<button data-t><sl-icon data-host name="x"></sl-icon></button>', '<svg><title>Close</title></svg>'))).toBe('Close');
+    expect(display(shadowed('<button data-t><x-icon data-host name="bin"></x-icon></button>', '<span aria-label="Delete">' + SVG + '</span>'))).toBe('Delete');
+    expect(display(shadowed('<button data-t><x-icon data-host name="bin"></x-icon></button>', '<img alt="Trash can" src="x.png">'))).toBe('Trash can');
+    expect(display(shadowed('<a data-t href="#"><x-icon data-host label="Home"></x-icon></a>', SVG))).toBe('Home');
+  });
+
+  it('reads nothing a person typed, nothing hidden, and nothing for an element whose role takes no name from its content', () => {
+    const typed = shadowed('<button data-t><x-field data-host></x-field></button>', '<input value="hunter2"><span contenteditable>typed</span><textarea>draft</textarea><span role="textbox">box</span>');
+    (typed.querySelector('[data-host]')!.shadowRoot!.querySelector('input') as unknown as { value: string }).value = 'hunter3';
+    expect(describeElement(typed)).toMatchObject({ name: '' });
+    expect(describeElement(typed)!.displayName).toBeUndefined();
+    expect(JSON.stringify(describeElement(typed))).not.toMatch(/hunter|typed|draft|box/);
+    expect(describeElement(shadowed('<button data-t><x-tip data-host name="gear"></x-tip></button>', '<span hidden>Tooltip</span>'))!.displayName).toBe('gear');
+    expect(describeElement(shadowed('<div data-t><sl-icon data-host name="gear"></sl-icon></div>', SVG))).not.toHaveProperty('displayName');
+    expect(describeElement(shadowed('<button data-t><x-blank data-host></x-blank></button>', SVG))).not.toHaveProperty('displayName');
+  });
+
+  // the review (P4 W2-C): editability is inherited, so an editable element or one inside an editable region is what a
+  // person typed, whatever its role; the nearest `contenteditable` decides, `false` making an island that is not
+  it('reads nothing of an editable element or one inside an editable region, and reads a non-editable island in one', () => {
+    const root = shadowed('<div data-t role="cell" contenteditable>private draft<x-icon data-host name="gear"></x-icon></div>', SVG);
+    expect(describeElement(root)).toMatchObject({ role: 'cell', name: '' });
+    expect(describeElement(root)).not.toHaveProperty('displayName');
+    expect(JSON.stringify(describeElement(root))).not.toMatch(/private|draft|gear/);
+    const inside = shadowed('<div contenteditable="true"><p><span data-t role="heading" aria-level="2">edited title<x-icon data-host name="gear"></x-icon></span></p></div>', SVG);
+    expect(describeElement(inside)).not.toHaveProperty('displayName');
+    expect(JSON.stringify(describeElement(inside))).not.toMatch(/edited|gear/);
+    const plain = shadowed('<div contenteditable="plaintext-only"><span><button data-t>typed<x-icon data-host name="gear"></x-icon></button></span></div>', SVG);
+    expect(describeElement(plain)).not.toHaveProperty('displayName');
+    const island = shadowed('<div contenteditable><div contenteditable="false"><button data-t>Insert<x-icon data-host name="gear"></x-icon></button></div></div>', SVG);
+    expect(describeElement(island)).toMatchObject({ name: '', displayName: 'Insert' });
+    const nested = shadowed('<div contenteditable="false"><div contenteditable><button data-t>typed<x-icon data-host name="gear"></x-icon></button></div></div>', SVG);
+    expect(describeElement(nested)).not.toHaveProperty('displayName'); // the nearest decides
+  });
+
+  it('carries none beside a name the page’s own tree gives', () => {
+    expect(describeElement(fragment('<button data-t>Save</button>'))).not.toHaveProperty('displayName');
+    expect(describeElement(shadowed('<button data-t aria-label="Open menu"><sl-icon data-host name="menu"></sl-icon></button>', SVG))).toMatchObject({ name: 'Open menu' });
+    expect(describeElement(shadowed('<button data-t aria-label="Open menu"><sl-icon data-host name="menu"></sl-icon></button>', SVG))).not.toHaveProperty('displayName');
+  });
+});

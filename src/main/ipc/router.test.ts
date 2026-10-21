@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 import type { HostDispatch } from './router';
 
 // Electron is faked: `ipcMain.handle` records one handler per channel, and each fake window is the one whose
@@ -47,7 +47,7 @@ const invoke = (event: unknown, name: string, input?: unknown) => {
   return handler(event, input);
 };
 
-const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V14, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V17, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('main ipc router', () => {
   beforeEach(async () => {

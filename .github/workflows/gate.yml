@@ -5,6 +5,9 @@
 # trailer keeps a green run's e2e reports (Decision Log 48); a `Live: yes` trailer runs the LIVE_E2E groups, and only
 # them, with their run flags on, a paid run each spec caps itself (Decision Log 75). On a Mac a MEASURED_E2E group first
 # waits for ci-kit's measured-job guard to find the desktop settled, and is refused, to be relaunched, when it has not.
+# A `Selection: affected` trailer (ci-gate.sh --affected) makes an iteration run: unit and unit:darwin test only what the
+# change its `Affected:` trailers list can reach, or the whole suite where vitest's module graph cannot see (the plan
+# says which, and why, in its summary). Such a run is never landing evidence (ci-kit's test-history spec, M4).
 name: gate
 
 on:
@@ -51,7 +54,7 @@ env:
   CLASS1_E2E: >-
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
-    design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth
+    design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
@@ -64,18 +67,29 @@ env:
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
   # The paid live groups, each one spec that skips itself unless its run flag is `1` (MAWS_LIBRARY_LIVE for library-live,
-  # MAWS_LIVE_DOCUMENT for document-live, MAWS_LIVE for the rest; design-live and dashboard-live set theirs in their
+  # MAWS_LIVE_DOCUMENT for document-live and document-provisional-live (P4-A2, the edit seen as it is written on the installed
+  # engine), MAWS_LIVE for the rest; design-live and dashboard-live set theirs in their
   # package scripts) and caps its own spend. A `Live: yes` run sets the three flags on the e2e job and takes these groups
   # alone, since `default`'s bare `pnpm e2e` collects every one of their specs; any other run refuses them, since
-  # design-live and dashboard-live would spend under their scripts' own flag (Decision Log 75).
-  LIVE_E2E: library-live document-live presentations-live design-systems-live send-to-live design-live dashboard-live
+  # design-live and dashboard-live would spend under their scripts' own flag (Decision Log 75). tool-time-heavy-live
+  # (P4-A2, X34) is the tool-time guard's heavy-case fixture, a vitest file of the `live` project that sets MAWS_LIVE in
+  # its script and spends nothing; LIVE_GUARD_E2E adds it to every live run, so every gate that runs the live specs holds
+  # the heaviest known cases under the guard's bound.
+  LIVE_E2E: library-live document-live document-provisional-live presentations-live design-systems-live design-live dashboard-live tool-time-heavy-live
+  LIVE_GUARD_E2E: tool-time-heavy-live
   # The timing-measured groups, whose bounds were calibrated on the mini at @2x with no viewer and no foreign load, so a
   # result read under another posture is void (Decision Log 75's posture go). On a Mac each job's first step is ci-kit's
   # measured-job guard (SSFSKIM/ci-kit/mac/settle, ci-kit's docs/mac-lane.md): it releases the job once two reads 30 s
   # apart each show the 1-minute load under 5, the display at @2x, no Parsec viewer or screensharingd and no computer
   # use, and after 15 minutes refuses it with ci-kit's `ci-kit: … rerun` line, which scripts/ci-gate.sh counts as refused
-  # and relaunches. Their job timeout adds those 15 minutes to the usual 30.
-  MEASURED_E2E: artifacts-perf document-scale presentations-scale
+  # and relaunches. Their job timeout adds those 15 minutes to the usual 30. tool-time-heavy-live (P4-A2, X34) holds
+  # per-call bounds too: its 24-board design's create and publish ran 463 to 727 ms at a load of 18 to 25 on the MacBook,
+  # and one of them passed the 1,000 ms bound at a load of about 75. document-scale-repeat (P4-R6) repeats row 5's first
+  # batch after a read in one launch, recorded with no bound, so its strays are counted and named in the same posture.
+  # dashboard-scale and design-scale admit any trial started below a load of 10, looser than their bounds hold:
+  # dashboard-scale's replace row read 432 ms against its 500 at a load under 3, and beside foreign load at 5 to 6 its
+  # replace read 510 and its cold open 1,299 against 1,000 (p4-r6-func, 2026-10-21; 634 relaunched quiet).
+  MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat presentations-scale tool-time-heavy-live
 
 defaults:
   run:
@@ -104,6 +118,9 @@ jobs:
       evidence: ${{ steps.plan.outputs.evidence }}
       live: ${{ steps.plan.outputs.live }}
       default_beside: ${{ steps.plan.outputs.default_beside }}
+      selection: ${{ steps.plan.outputs.selection }}
+      related: ${{ steps.plan.outputs.related }}
+      unit_shards: ${{ steps.plan.outputs.unit_shards }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -138,32 +155,94 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
-      - if: ${{ !cancelled() }}
-        run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
-      # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts), seconds and no lane: vitest collects
-      # no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec or a
-      # group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
-      - if: ${{ !cancelled() }}
-        run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
+      # The checks run at once (gate-bg.sh), each still a step of its own below, with its log and its gate-run summary:
+      # tsc and eslint are single-threaded, and in series they held class 1a's critical path on a box whose other cores
+      # sat idle. Each project of `pnpm typecheck` is a process of its own, read from the script. At once only on a
+      # machine of 24 GiB or more, the pool's 16-core box: together they peak at about 15 GB, so on the hosted runner
+      # and the Mac the start step runs them one at a time.
+      # The whole `pnpm build` (verify's step) is class 1a's proof that the renderer and the apps build; it ran in unit
+      # until 2026-10-21, where it held the critical path (unit builds main and the preloads alone now).
+      # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts) have no lane of their own: vitest
+      # collects no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec
+      # or a group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
+      - run: |
+          bg=.github/scripts/gate-bg.sh
+          $bg start-parts typecheck 'error TS|problems?\b' typecheck
+          $bg start lint 'error TS|problems?\b' pnpm lint
+          $bg start build 'built in|error' pnpm build
+          $bg start gate-scripts '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
+      - name: pnpm typecheck
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait typecheck
+      - name: pnpm lint
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait lint
+      - name: pnpm build
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait build
+      - name: the gate scripts' tests
+        if: ${{ !cancelled() }}
+        run: .github/scripts/gate-bg.sh wait gate-scripts
 
+  # On the pool the whole suite runs in shards, `unit <k>/<n>`, each its own box (gate-plan.mjs's UNIT_SHARDS); a
+  # selected run that tests the related suites, and a run off the pool, is the one job `unit`.
   unit:
+    name: ${{ matrix.shard && format('unit {0}', matrix.shard) || 'unit' }}
     needs: plan
     if: needs.plan.outputs.unit == 'true'
     runs-on: ${{ fromJSON(needs.plan.outputs.unit_runner) }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.unit_shards) }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shell suites start /bin/zsh, macOS's login shell
-      # The bundle guard among the unit suites reads the built engine-host chunk.
-      - run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      # The two suites that read a build, the engine-host bundle guard (out/main) and the preload bundle suite
+      # (out/preload), need electron-vite's main and preloads only; static runs the whole `pnpm build`.
+      - run: .github/scripts/gate-run.sh 'built in|error' pnpm build:main-preload
       # vitest's workers at the job's cores: on Linux `nproc`, a container's cpuset (`getconf` reports the host's cores
       # there and over-forks; Decision Log 35); macOS has no stock `nproc`.
-      - run: |
+      # MAWS_TEST_JUNIT: the run's JUnit report beside vitest's own output (vitest.config.ts), uploaded below for ci-kit's
+      # test history (ci-kit docs/doperpowers/specs/2026-10-21-test-history-design.md), a shard's under a name of its own
+      # that the collector reads with the other shards' as one `unit` report. It never decides the job: the upload runs
+      # only after this step ran (so never another job's report from a persistent checkout), and its failure is not the
+      # job's.
+      # SHARD: this job's vitest --shard, <k>/<n>, or empty for the whole suite in one job.
+      # UNIT_RELATED: a selected run's paths (`Selection: affected`, the same spec's M4), when the plan found nothing there
+      # vitest's module graph cannot see; the suites they reach then run in vitest's related mode, with the test script's
+      # own NODE_OPTIONS (unit-related.mjs). Empty, the whole suite runs, as in every run that is not selected.
+      # --fsModuleCache (and unit-related.mjs's own option): vitest writes each module it transforms under
+      # node_modules/.vitest-cache, and a project whose plugins and resolve config match another's reads it there rather
+      # than transforming it again. Each `-timing` project has a Vite server of its own, so without it the whole app was
+      # transformed again at the end of the run while the two App.test.tsx waited (42-52 s of their tests, 7-9 s with
+      # it); the whole suite in one job ran about 45 s shorter (ci-kit's test-history spec, M5, arm C0), and each shard
+      # takes it as well. The cache starts empty in every job: nothing restores it, and the checkout's clean removes
+      # node_modules, so a job reads only what it wrote.
+      - id: test
+        env:
+          MAWS_TEST_JUNIT: ci-results/unit.xml
+          UNIT_RELATED: ${{ needs.plan.outputs.related }}
+          SHARD: ${{ matrix.shard }}
+        run: |
           cores=$(if [[ $RUNNER_OS == Linux ]]; then nproc; else getconf _NPROCESSORS_ONLN; fi)
-          .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$cores"
+          rm -rf ci-results
+          if [[ -n $UNIT_RELATED ]]; then
+            NODE_OPTIONS="$NODE_OPTIONS --disable-warning=ExperimentalWarning" .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL |^unit-related: ' node .github/scripts/unit-related.mjs "$cores"
+          else
+            .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$cores" --fsModuleCache ${SHARD:+--shard="$SHARD"}
+          fi
+      - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-unit${{ matrix.slug }}-${{ github.run_attempt }}
+          path: ci-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   unit-darwin:
     name: unit:darwin
@@ -176,7 +255,27 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shared setup skips apt on macOS
-      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+      # The unit job's JUnit report, its selection and its module cache, as there; a selected run takes only the related
+      # suites among its own files.
+      - id: test
+        env:
+          MAWS_TEST_JUNIT: ci-results/unit-darwin.xml
+          UNIT_RELATED: ${{ needs.plan.outputs.related }}
+        run: |
+          rm -rf ci-results
+          if [[ -n $UNIT_RELATED ]]; then
+            .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL |^unit-related: ' node .github/scripts/unit-related.mjs "$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+          else
+            .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" --fsModuleCache $(scripts/darwin-unit-files.sh)
+          fi
+      - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-unit-darwin-${{ github.run_attempt }}
+          path: ci-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   probes:
     needs: plan
@@ -301,7 +400,8 @@ jobs:
           # default's own specs, when the step above derived them (macOS's bash 3.2 has no mapfile).
           specs=()
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
-          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
+          # Playwright's count lines, and vitest's for the one group that runs a vitest file (tool-time-heavy-live, P4-A2).
+          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: |^ +(Test Files|Tests) +[0-9]' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
       - if: (failure() || needs.plan.outputs.evidence == 'true') && steps.checkout.outcome == 'success'

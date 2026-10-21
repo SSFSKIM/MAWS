@@ -15,11 +15,12 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { DesignSystemRef } from '../../../design-system/apply';
 import type { HistoryApi } from '../../../document/editor/history/api';
 import type { ShownEditor } from '../../../document/editor/history/controller';
-import { authorOf, formatWhen, newChangesBase, versionTitle } from '../../../document/editor/history/model';
+import { authorOf, formatWhen, newChangesBase, quoted, versionTitle, type SummaryWords } from '../../../document/editor/history/model';
 import type { DocumentHandle } from '../../../host';
 import { decodeMap, stateV2, type Doc } from '../../../yjs';
 import { changeStops, deckChanges, elementEditors, elementHistory, openDeckDiff, type ChangeStop, type DeckChanges, type DeckDiff, type ElementPlace, type KeyChange, type Touch } from '../../history'; // P3-E: elementHistory
 import { slideOrder } from '../../model';
+import { getThread } from '../../threads';
 
 export type DeckPreviewTarget = { kind: 'version'; versionId: number } | { kind: 'compare'; versionIds: [number, number] } | { kind: 'since'; versionId: number | null };
 
@@ -107,6 +108,9 @@ export class DeckHistoryController {
   };
   getSnapshot = (): DeckHistorySnapshot => this.snapshot;
 
+  /** P4 W1-B: what B's rail names the deck's comments by in a turn's lines: each thread's quote in the live deck. */
+  words = (): SummaryWords => ({ block: () => null, thread: (id) => quoted(getThread(this.handle.doc, id)?.quote ?? '') });
+
   /**
    * The editor opened: follow restores (the banner) and new versions; the first time, read the list and the last view,
    * offer "See N new changes" when an agent changed the deck since, then mark it viewed. Returns the detach, which drops
@@ -172,6 +176,12 @@ export class DeckHistoryController {
     const [first] = this.snapshot.selected;
     if (extend && first !== undefined && first !== versionId) return this.open({ kind: 'compare', versionIds: [first, versionId] });
     return this.open({ kind: 'version', versionId });
+  }
+
+  /** P4-B4: whether the artifact retains the version with `versionId` (a link's `#v`): the list read, else read now. */
+  async hasVersion(versionId: number): Promise<boolean> {
+    const versions = this.snapshot.versions ?? (await this.api.versions());
+    return versions.some((version) => version.id === versionId);
   }
 
   /** The pill: the live deck against the version at the last view. */

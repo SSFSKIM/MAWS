@@ -13,13 +13,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
-import { dateFormats, formatClock } from '../../../../../src/renderer/src/app/date-format';
+import { dateFormats, formatClock } from '@shared/app/date-format';
 import { askModAnswers } from '../../../../../src/renderer/src/transcript/model/ask-mod';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
 import { MessageIcon } from '../../../../../src/renderer/src/transcript/view/rows/icons';
 import { chatBlocks, dayOf, type ChatBlock, type HumanItem, type QuietLine, type RunItem } from '../../conversation/chat';
-import { byWhom, crossProject, type StreamItem } from '../../conversation/stream';
+import { broadcastLabel, byWhom, crossProject, type StreamItem } from '../../conversation/stream';
 import { settledText, DELIVERY_TEXT } from '../../conversation/words';
 import { deliveryKey, type OutboxItem, type RequestRecord } from '../../project/conversation';
 import { useProjectName } from '../../state/grid';
@@ -342,20 +342,25 @@ function sendState(outcomes: Array<string | null>): string {
 }
 
 /**
- * Where a `human` went, as the bubble's foot: a copy of one sent into another project names that project and its
- * recipients, and has no delivery outcome of its own (the delivering event in that project's log has them); any
+ * Where a `human` went, as the bubble's foot: a copy of one sent into other projects names each project and its
+ * recipients there, and has no delivery outcome of its own (the delivering event in that project's log has them); any
  * other, its recipients' outcomes, and its origin when it came from another project.
  */
 function HumanEnds({ event, to, wake, outcomes }: { event: LogEvent; to: '*' | Recipient[]; wake: boolean; outcomes: Record<string, { outcome: string; reason: string }> | undefined }) {
   const { connection } = useDesk();
   const name = useProjectName();
   const other = crossProject(event, connection.project);
-  if (other !== null && 'to' in other)
+  if (other !== null && 'to' in other) {
+    const aliases = (project: string | null) =>
+      to === '*' ? 'record' : to.filter((r) => project === null || (r as { project?: unknown }).project === project).map((r) => r.alias).join(', ');
+    // One destination takes every recipient, as a copy of one project's event always did.
+    const ends = other.to.length === 1 ? [`${name(other.to[0])}: ${aliases(null)}`] : other.to.map((p) => `${name(p)}: ${aliases(p)}`);
     return (
       <div className="desk-delivery-foot" data-testid="cross-project">
-        → {name(other.to)}: {to === '*' ? 'record' : to.map((r) => r.alias).join(', ')}
+        → {ends.join(' · ')}
       </div>
     );
+  }
   return (
     <>
       {other !== null && (
@@ -363,7 +368,7 @@ function HumanEnds({ event, to, wake, outcomes }: { event: LogEvent; to: '*' | R
           from {name(other.from)}
         </div>
       )}
-      <Deliveries to={to} wake={wake} outcomes={outcomes} />
+      <Deliveries to={to} broadcast={wake ? broadcastLabel(event.scope, name) : null} outcomes={outcomes} />
     </>
   );
 }
@@ -371,9 +376,10 @@ function HumanEnds({ event, to, wake, outcomes }: { event: LogEvent; to: '*' | R
 /**
  * Each recipient's DX4 delivery outcome for a `human` this browser can see, kept by the hub across a reload: a glyph
  * (the stylesheet's, by outcome), the alias and the words. An outcome other than delivered carries the machine's reason
- * on its line (why it was only recorded, held back, or failed); a delivered one keeps it on hover.
+ * on its line (why it was only recorded, held back, or failed); a delivered one keeps it on hover. A broadcast first
+ * says whom it named (`broadcast`: `@all`, or its scope's label), its recipients being who that was at sending.
  */
-function Deliveries({ to, wake, outcomes }: { to: '*' | Recipient[]; wake: boolean; outcomes: Record<string, { outcome: string; reason: string }> | undefined }) {
+function Deliveries({ to, broadcast, outcomes }: { to: '*' | Recipient[]; broadcast: string | null; outcomes: Record<string, { outcome: string; reason: string }> | undefined }) {
   if (to === '*')
     return (
       <div className="desk-delivery-foot" data-testid="record">
@@ -382,7 +388,7 @@ function Deliveries({ to, wake, outcomes }: { to: '*' | Recipient[]; wake: boole
     );
   return (
     <ul className="desk-delivery-foot desk-chat-deliveries" data-testid="deliveries">
-      {wake && <li data-wake="">@all at sending</li>}
+      {broadcast !== null && <li data-wake="">{broadcast} at sending</li>}
       {to.map((r) => {
         // The latest outcome per recipient: a `recorded` one turns `delivered` when Resume brings the session back.
         const delivery = outcomes?.[r.session];
@@ -526,8 +532,9 @@ function Chevron() {
 }
 
 /**
- * Where a message from or to another project went (the org directory's §6): the sender's copy names its destination
- * (`→ <project>`), the delivering event its origin (`from <project>`), each by the name the grid shows.
+ * Where a message from or to another project went (the org directory's §6): the sender's copy names its destinations
+ * (`→ <project>, …`, as sminos's `chat` does), the delivering event its origin (`from <project>`), each by the name the
+ * grid shows.
  */
 function CrossProject({ event }: { event: LogEvent }) {
   const { connection } = useDesk();
@@ -536,7 +543,7 @@ function CrossProject({ event }: { event: LogEvent }) {
   if (other === null) return null;
   return (
     <span className="desk-chat-elsewhere" data-testid="cross-project">
-      {'to' in other ? `→ ${name(other.to)}` : `from ${name(other.from)}`}
+      {'to' in other ? `→ ${other.to.map(name).join(', ')}` : `from ${name(other.from)}`}
     </span>
   );
 }
@@ -547,8 +554,9 @@ function CrossProject({ event }: { event: LogEvent }) {
  */
 function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }) {
   const [open, setOpen] = useState(false);
+  const name = useProjectName();
   const line = (event: LogEvent) => {
-    const to = event.to === '*' ? 'record' : Array.isArray(event.to) ? (event.wake ? '@all' : event.to.map((r) => str((r as { alias?: unknown }).alias)).join(', ')) : '';
+    const to = event.to === '*' ? 'record' : Array.isArray(event.to) ? (event.wake ? broadcastLabel(event.scope, name) : event.to.map((r) => str((r as { alias?: unknown }).alias)).join(', ')) : '';
     return (
       <>
         <span className="transcript-peer-who">{str(event.from)}</span> → <span className="transcript-peer-who">{to}</span>

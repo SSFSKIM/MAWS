@@ -312,6 +312,9 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
           sessions.subscribe((state, previous) => {
             const next = state.engine.get(id);
             if (next !== previous.engine.get(id)) applyStatus(id, next ?? null);
+            // P4: main refuses the runs read until it has registered the session (a new chat's start registers it a
+            // moment after the watch asked); a refused read is asked again once the record arrives
+            if (state.records.has(id) && !previous.records.has(id) && read(id).disk.runsError !== null) readRuns(id);
           }),
         );
         w.offs.push(client.onSubagentsChanged(({ appSessionId, agents }) => appSessionId === id && applyDisk(id, { agents, error: null })));

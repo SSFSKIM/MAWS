@@ -43,7 +43,7 @@ import {
   type PickRect,
   type PreloadMessage,
 } from '@shared/browser/comment-protocol';
-import { accessibleNameOf, describeElement, roleOf, type DomDocument, type DomElement } from '@shared/browser/describe';
+import { accessibleNameOf, describeElement, displayNameOf, roleOf, type DomDocument, type DomElement } from '@shared/browser/describe';
 
 // --- the slice of the page this module reads (a browser window, and happy-dom's, satisfy it) ---
 
@@ -225,7 +225,10 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   // runs once per pick, Decision Log 27(n)); the first element hovered in an arm carries the hint under its name.
   let named: { element: PageElement; label: string } | null = null; // the last element named, so a drag names it once
   const nameOf = (element: PageElement) => {
-    if (named?.element !== element) named = { element, label: elementLabel({ role: roleOf(element), name: accessibleNameOf(element), tag: element.localName }, BADGE_LABEL_MAX) };
+    if (named?.element !== element) {
+      const name = accessibleNameOf(element);
+      named = { element, label: elementLabel({ role: roleOf(element), name, displayName: name === '' ? displayNameOf(element) : '', tag: element.localName }, BADGE_LABEL_MAX) };
+    }
     return named.label;
   };
   let hoverLabel = '';

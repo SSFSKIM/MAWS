@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Delivery, LogEvent, Raised, Settled } from 'desk-hub/protocol';
-import { dateFormats } from '../../../../../src/renderer/src/app/date-format';
+import { dateFormats } from '@shared/app/date-format';
 import { VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';
@@ -316,7 +316,7 @@ it('tints a send reaching none of its recipients as failed when any failed, else
 it("marks the sender's copy with its destination and the delivering event with its origin, by the projects' names", () => {
   const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
   const [THERE, ELSEWHERE] = ['a5c3c1de-7a5e-5d2b-9f3a-2c6b7e1d4f20', 'c0ffee00-0000-4000-8000-000000000000'];
-  useGrid.setState({ projects: [{ id: THERE, name: 'mini', kind: 'machine', machines: 1, machines_online: 1, working: 0, waiting: 0 }] });
+  useGrid.setState({ projects: [{ id: THERE, name: 'mini', kind: 'machine', machines: 1, machines_online: 1, working: 0, waiting: 0, live: 0 }] });
   const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
   const at = (seq: number, kind: string, fields: Record<string, unknown>) =>
     ({ ts: '2026-10-18T08:00:00.000Z', writer: `macbook/${S1}`, seq, kind, mac: { nonce: `n${seq}`, value: 'v' }, from: 'maws-45', text: `text ${seq}`, ...fields }) as LogEvent;
@@ -346,6 +346,58 @@ it("marks the sender's copy with its destination and the delivering event with i
   const human = screen.getByText('text 4').closest('li')!;
   expect(human.querySelector('[data-testid="cross-project"]')?.textContent).toBe('→ mini: mini-7c');
   expect(human.querySelector('[data-testid="deliveries"]')).toBeNull();
+  connection.stop();
+  useGrid.setState({ projects: [] });
+});
+
+// sminos 1.2.0's scoped broadcast (the org directory's §5a): a broadcast is named by its scope where a bare one says
+// @all, and the sender's copy of one several projects' events deliver names each of those projects.
+it("names a scoped broadcast by its scope, and every project a broadcast's copy went to", () => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  const [THERE, YONDER] = ['a5c3c1de-7a5e-5d2b-9f3a-2c6b7e1d4f20', '7d3b9e40-52c4-4f1e-8f0a-2b6c5d4e3f22'];
+  const grid = (id: string, name: string) => ({ id, name, kind: 'machine' as const, machines: 1, machines_online: 1, working: 0, waiting: 0, live: 0 });
+  useGrid.setState({ projects: [grid(THERE, 'mini'), grid(YONDER, 'projB')] });
+  const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
+  const at = (seq: number, kind: string, fields: Record<string, unknown>) =>
+    ({ ts: '2026-10-20T08:00:00.000Z', writer: `macbook/${S1}`, seq, kind, mac: { nonce: `n${seq}`, value: 'v' }, from: 'maws-45', text: `text ${seq}`, ...fields }) as LogEvent;
+  const me = [{ session: S1, alias: 'maws-45' }];
+  const both = [
+    { session: 'x', alias: 'mini-7c', project: THERE },
+    { session: 'y', alias: 'rb', project: YONDER },
+  ];
+  const scoped = at(1, 'say', { to: me, from: 'doperpowers-2a', wake: true, scope: { projects: [THERE], machines: ['beta'], states: ['waiting'] } });
+  const bare = at(2, 'say', { to: me, from: 'maws-fe', wake: true });
+  const copy = at(3, 'say', { to: both, wake: true, scope: {}, copy: [`${THERE}:macbook/${S1}:7`, `${YONDER}:macbook/${S1}:2`] });
+  const humanScoped = at(4, 'human', { from: 'human', to: me, wake: true, scope: { machines: ['mini'] } });
+  const humanBare = at(5, 'human', { from: 'human', to: me, wake: true });
+  const humanCopy = at(6, 'human', { from: 'human', to: both, wake: true, scope: { here: 'macbook' }, copy: [`${THERE}:macbook/human:3`, `${YONDER}:macbook/human:9`] });
+  const human = (event: LogEvent) => ({ kind: 'human' as const, key: `h${event.seq}`, offset: event.seq, event, text: String(event.text), to: event.to as never, wake: true });
+  render(
+    <DeskContext.Provider value={{ connection, member: 'm', sessions: new Map() }}>
+      <StreamView
+        items={[
+          { kind: 'agents', key: 'a1', says: [{ offset: 1, event: scoped }] },
+          { kind: 'agents', key: 'a2', says: [{ offset: 2, event: bare }] },
+          { kind: 'agents', key: 'a3', says: [{ offset: 3, event: copy }] },
+          human(humanScoped),
+          human(humanBare),
+          human(humanCopy),
+        ]}
+        outbox={[]}
+      />
+    </DeskContext.Provider>,
+  );
+  const runs = screen.getAllByTestId('agent-run');
+  expect(runs[0].textContent).toContain('doperpowers-2a → @all in mini on beta (waiting)');
+  expect(runs[1].textContent).toContain('maws-fe → @all');
+  expect(runs[2].textContent).toContain('maws-45 → @org');
+  expect(runs[2].querySelector('[data-testid="cross-project"]')?.textContent).toBe('→ mini, projB');
+  const bubble = (text: string) => screen.getByText(text).closest('li')!;
+  expect(bubble('text 4').querySelector('[data-wake]')?.textContent).toBe('@all on mini at sending');
+  expect(bubble('text 5').querySelector('[data-wake]')?.textContent).toBe('@all at sending');
+  // A human's copy of a broadcast into two projects: each project with its recipients there, and no outcome of its own.
+  expect(bubble('text 6').querySelector('[data-testid="cross-project"]')?.textContent).toBe('→ mini: mini-7c · projB: rb');
+  expect(bubble('text 6').querySelector('[data-testid="deliveries"]')).toBeNull();
   connection.stop();
   useGrid.setState({ projects: [] });
 });

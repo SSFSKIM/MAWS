@@ -5,7 +5,7 @@ import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { isActionable, isOpen } from './derive';
 
 export type Glyph = { char: string; tone: 'accent' | 'warning' | 'info' | 'danger' | 'faint'; label: string; pulse: boolean };

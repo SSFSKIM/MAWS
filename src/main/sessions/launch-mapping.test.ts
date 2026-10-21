@@ -5,8 +5,11 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { record } from '../../../test/support/builders';
 import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
-import { withOwnerChannel } from './launch-mapping'; // P2-C
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement
+import { hooksOff, withOwnerChannel } from './launch-mapping'; // P2-C; P4-A2: hooksOff
+import { CONTRACT_HEADER, MESSAGE_TOOL_ALIAS, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement; P4-R7y: the hook; P4-A2: the alias
+import { buildLaunch } from '../../engine-host/launch'; // P4-R8: the launch line a spec becomes
+import type { AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
+import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
 
 const APP = 'a0000000-0000-4000-8000-000000000001' as AppSessionId;
 const BOOT = 'b0000000-0000-4000-8000-000000000002' as AppSessionId;
@@ -42,8 +45,8 @@ describe('launch mapping', () => {
 
   it('fills subagentModel from the settings seam (null until C11 lands settings v3)', () => {
     expect(readSettings()).toEqual(C10_SETTING_DEFAULTS);
-    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null }, permissions: { autoFallback: 'acceptEdits' } });
-    const settings: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { subagentModel: 'sonnet' } };
+    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' } });
+    const settings: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, subagentModel: 'sonnet' } };
     expect(toLaunchSpec(base, settings).subagentModel).toBe('sonnet');
   });
 
@@ -95,7 +98,7 @@ describe('launch mapping', () => {
     expect(resumeLaunchSpec(r, { gateway: 'direct', model: 'sonnet', effort: null }, { trust: null, replay: null })).toMatchObject({ gateway: 'direct', model: 'sonnet', effort: null });
     // an effort the record holds that is not an X6 effort launches with none; a record without an engine id is a fresh pinned session
     expect(resumeLaunchSpec(record(APP, { effort: 'ultra', engineSessionId: null }), {}, { trust: null, replay: null })).toMatchObject({ effort: null, resume: null, sessionId: null });
-    expect(resumeLaunchSpec(r, {}, { trust: null, replay: null }, { ...C10_SETTING_DEFAULTS, engine: { subagentModel: 'haiku' } }).subagentModel).toBe('haiku');
+    expect(resumeLaunchSpec(r, {}, { trust: null, replay: null }, { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, subagentModel: 'haiku' } }).subagentModel).toBe('haiku');
   });
 
   it('runs the trust bootstrap under its own id: attested, resuming nothing, pinned by C3', () => {
@@ -117,6 +120,66 @@ describe('launch mapping', () => {
   });
 });
 
+// P4-R8: the app's MCP servers (settings v16, `engine.mcpServers`) reach the engine as one `--mcp-config` on every launch
+// MAWS owns; the engine resolves a server of the same name in the user's or a project's own config (the entry wins).
+describe('the app\'s MCP servers', () => {
+  const SOURCE_APP = 'e0000000-0000-4000-8000-000000000005' as AppSessionId;
+  const SERVERS: AppMcpServer[] = [
+    { name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' },
+    { name: 'local-docs', type: 'http', url: 'http://127.0.0.1:7777/mcp' },
+  ];
+  const CONFIG = { mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' }, 'local-docs': { type: 'http', url: 'http://127.0.0.1:7777/mcp' } } };
+  const withServers: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, mcpServers: SERVERS } };
+  const source = { appSessionId: SOURCE_APP, engineSessionId: SOURCE_ENGINE, rewindTo: null };
+  const ctx = { cwd: REPO, trust: null, replay: null };
+  // the four launches a session can take: new, fork, side thread (a fork in place with its lineage) and resume
+  const launches = (settings: C10Settings) => ({
+    new: intentLaunchSpec(intent(), ctx, settings),
+    fork: intentLaunchSpec(intent({ kind: 'fork', source }), ctx, settings),
+    sideThread: intentLaunchSpec(intent({ kind: 'fork', source, lineage: { kind: 'side-thread', parentAppSessionId: SOURCE_APP, parentEngineSessionId: SOURCE_ENGINE, openedBy: 'btw' } }), ctx, settings),
+    resume: resumeLaunchSpec(record(APP, { engineSessionId: SOURCE_ENGINE }), {}, { trust: null, replay: null }, settings),
+  });
+  const argsOf = (spec: ReturnType<typeof toLaunchSpec>) => buildLaunch(spec, {}, { relayUrl: 'http://127.0.0.1:8641', bin: '/bin/claude', engineVersion: '2.1.306', spawnerPid: 1 }).args;
+
+  it('passes them to a new session, a fork, a side thread and a resume as one --mcp-config, never with --strict-mcp-config', () => {
+    for (const [kind, spec] of Object.entries(launches(withServers))) {
+      expect(LaunchSpecSchema.parse(spec), kind).toEqual(spec);
+      expect(spec.mcpConfig, kind).toEqual(CONFIG);
+      const args = argsOf(spec);
+      expect(args.filter((arg) => arg === '--mcp-config'), kind).toHaveLength(1);
+      expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual(CONFIG);
+      expect(args, kind).not.toContain('--strict-mcp-config'); // the user's and the projects' servers load beside them
+    }
+    expect(argsOf(launches(withServers).sideThread)).toEqual(expect.arrayContaining(['--resume', SOURCE_ENGINE, '--fork-session']));
+  });
+
+  it('passes no --mcp-config when the list is empty, the default', () => {
+    for (const [kind, spec] of Object.entries(launches(C10_SETTING_DEFAULTS))) {
+      expect(spec.mcpConfig, kind).toBeNull();
+      expect(argsOf(spec), kind).not.toContain('--mcp-config');
+    }
+  });
+
+  it('leaves them out of the trust bootstrap, which serves no turn, and keeps them through the owner channel\'s decision', () => {
+    const boot = bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers);
+    expect(boot.mcpConfig).toBeNull();
+    expect(withOwnerChannel(launches(withServers).new, { laneOn: true, append: 'contract', snapshotOff: true }).mcpConfig).toEqual(CONFIG);
+  });
+
+  // beside P4-R7y: a lane-on launch carries both the app's servers and MAWS's SessionStart hook; the bootstrap neither
+  it('gives a lane-on launch with app servers both --mcp-config and the SessionStart hook in --settings, and the bootstrap neither', () => {
+    const settingsOf = (args: string[]) => JSON.parse(args[args.indexOf('--settings') + 1]!) as { hooks?: unknown };
+    for (const [kind, spec] of Object.entries(launches(withServers))) {
+      const args = argsOf(withOwnerChannel(spec, { laneOn: true, append: 'contract', snapshotOff: false }));
+      expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual(CONFIG);
+      expect(settingsOf(args).hooks, kind).toEqual({ SessionStart: [messageToolHookGroup()] });
+    }
+    const boot = argsOf(bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers));
+    expect(boot).not.toContain('--mcp-config');
+    expect(settingsOf(boot).hooks).toBeUndefined();
+  });
+});
+
 describe('home directory attests without a bootstrap', () => {
   it('maps an accepted decision for ~ to the home realpath on the real launch, and reports no bootstrap', () => {
     const home = trustState({ directory: HOME, trustKey: HOME, keyKind: 'directory', isHome: true });
@@ -130,17 +193,18 @@ describe('home directory attests without a bootstrap', () => {
 describe('withOwnerChannel', () => {
   const socket = '/u/browser/cua/a.sock';
   const spec = (extraSettings: Record<string, unknown> | null) => ({ ...toLaunchSpec({ ...base, browserBackend: null }), extraSettings });
+  const HOOKS = { SessionStart: [messageToolHookGroup()] }; // P4-R7y
 
   it('advertises the contract version beside the browser socket while the lane is on, and sets the two keys as decided', () => {
     const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { laneOn: true, append: 'contract', snapshotOff: true });
-    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, enableWorkflows: true });
+    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: HOOKS, enableWorkflows: true });
     expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off' });
     expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
   });
 
-  it('sets the variable alone when the lane is on and a compatible style carries the instructions', () => {
+  it('sets the variable and the hook alone when the lane is on and a compatible style carries the instructions', () => {
     const decided = withOwnerChannel(spec(null), { laneOn: true, append: null, snapshotOff: false });
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: HOOKS });
     expect(decided).not.toHaveProperty('appendSystemPrompt');
     expect(decided).not.toHaveProperty('systemPromptSnapshot');
   });
@@ -149,6 +213,17 @@ describe('withOwnerChannel', () => {
     expect(withOwnerChannel(spec(null), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull();
     expect(withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket } }), { laneOn: false, append: null, snapshotOff: true })).toMatchObject({ extraSettings: { env: { CUA_BROWSER_BACKENDS: socket } }, systemPromptSnapshot: 'off' });
     expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull(); // a retried spec
+  });
+  // P4-R7y: MAWS's SessionStart group after the caller's hooks, once; out again with the lane off
+  it('adds MAWS’s SessionStart group after the caller’s hooks once, a retried spec included, and takes only it out with the lane off', () => {
+    const own = { hooks: [{ type: 'command', command: 'echo own' }] };
+    const caller = { SessionStart: [own], PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo post' }] }] };
+    const on = withOwnerChannel(spec({ hooks: caller }), { laneOn: true, append: null, snapshotOff: false });
+    expect(on.extraSettings?.hooks).toEqual({ ...caller, SessionStart: [own, messageToolHookGroup()] });
+    expect(withOwnerChannel(on, { laneOn: true, append: null, snapshotOff: false }).extraSettings?.hooks).toEqual(on.extraSettings?.hooks); // a retried spec
+    expect(withOwnerChannel(on, { laneOn: false, append: null, snapshotOff: false }).extraSettings).toEqual({ hooks: caller });
+    expect(withOwnerChannel(withOwnerChannel(spec(null), { laneOn: true, append: null, snapshotOff: false }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull();
+    expect(LaunchSpecSchema.parse(on)).toEqual(on);
   });
   // P2-C2 (Decision Log 31): a message-tool style gets the supplement, the advertisement unchanged
   it('appends the supplement in place of the contract beside a message-tool style, the variable still the contract version', () => {
@@ -159,3 +234,93 @@ describe('withOwnerChannel', () => {
   });
 });
 // P2-C end
+
+// P4-A2 start (2026-10-21; P4 §4.2 "The per-session launch profile", X6's amendment; the owner's ruling: one profile in
+// Settings › Engine, settings version 17): the profile reaches the engine as flag-level `--settings` keys alone
+describe('the launch profile', () => {
+  const SOURCE_APP = 'e0000000-0000-4000-8000-000000000005' as AppSessionId;
+  const source = { appSessionId: SOURCE_APP, engineSessionId: SOURCE_ENGINE, rewindTo: null };
+  const ctx = { cwd: REPO, trust: null, replay: null };
+  const withProfile = (launchProfile: LaunchProfile): C10Settings => ({ ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, launchProfile } });
+  const BOOTSTRAP = { bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway' as const, trustKey: REPO, replay: null };
+  // every launch MAWS owns: new, fork, side thread, resume and the trust bootstrap
+  const launches = (settings: C10Settings, browserBackend: string | null = null) => ({
+    new: intentLaunchSpec(intent(), { ...ctx, browserBackend }, settings),
+    fork: intentLaunchSpec(intent({ kind: 'fork', source }), { ...ctx, browserBackend }, settings),
+    sideThread: intentLaunchSpec(intent({ kind: 'fork', source, lineage: { kind: 'side-thread', parentAppSessionId: SOURCE_APP, parentEngineSessionId: SOURCE_ENGINE, openedBy: 'btw' } }), { ...ctx, browserBackend }, settings),
+    resume: resumeLaunchSpec(record(APP, { engineSessionId: SOURCE_ENGINE, effort: 'high' }), {}, { trust: null, replay: null, browserBackend }, settings),
+    bootstrap: bootstrapSpec(BOOTSTRAP, settings),
+  });
+  const argsOf = (spec: ReturnType<typeof toLaunchSpec>) => buildLaunch(spec, {}, { relayUrl: 'http://127.0.0.1:8641', bin: '/bin/claude', engineVersion: '2.1.306', spawnerPid: 1 }).args;
+  const flagOf = (args: string[]) => args[args.indexOf('--settings') + 1]!;
+  const OFF = { 'cua@cua': false, 'ptc@ptc-tool': false };
+  const PROFILE: LaunchProfile = { plugins: { off: ['ptc@ptc-tool', 'cua@cua', 'ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' };
+
+  it('is the user scope by default, and the user scope gives today’s launch byte for byte', () => {
+    expect(C10_SETTING_DEFAULTS.engine.launchProfile).toEqual(userScopeProfile());
+    const today = launches(C10_SETTING_DEFAULTS);
+    const explicit = launches(withProfile({ plugins: { off: [] }, outputStyle: 'user', hooks: 'user' }));
+    for (const kind of Object.keys(today) as (keyof typeof today)[]) {
+      expect(explicit[kind], kind).toEqual(today[kind]);
+      expect(today[kind].extraSettings, kind).toBeNull();
+      // the host's keys alone, as before the profile existed
+      expect(flagOf(argsOf(today[kind])), kind).toBe(kind === 'bootstrap' ? '{"dialogExpiry":"never"}' : '{"dialogExpiry":"never","effortLevel":"high"}');
+    }
+    expect(launches(C10_SETTING_DEFAULTS, '/u/cua.sock').new.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } });
+    expect(withOwnerChannel(today.new, { laneOn: true, append: 'contract', snapshotOff: false })).toMatchObject({
+      appendSystemPrompt: TO_HUMAN_CONTRACT,
+      extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: { SessionStart: [messageToolHookGroup()] } },
+    });
+  });
+
+  it('turns each plugin in `off` off at flag level, sorted and once, leaving every other plugin to the user’s settings', () => {
+    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: ['ptc@ptc-tool', 'cua@cua', 'ptc@ptc-tool'] }, outputStyle: 'user', hooks: 'user' })))) {
+      expect(spec.extraSettings, kind).toEqual({ enabledPlugins: OFF });
+      expect(flagOf(argsOf(spec)), kind).toContain('"enabledPlugins":{"cua@cua":false,"ptc@ptc-tool":false}');
+    }
+  });
+
+  it('selects the engine’s built-in default style for MAWS’s own, and turns every hook off with disableAllHooks', () => {
+    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: [] }, outputStyle: 'maws', hooks: 'user' })))) expect(spec.extraSettings, kind).toEqual({ outputStyle: 'default' });
+    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: [] }, outputStyle: 'user', hooks: 'none' })))) expect(spec.extraSettings, kind).toEqual({ disableAllHooks: true });
+  });
+
+  it('keeps `user` among the setting sources, the effort, the browser socket and the app’s MCP servers, and adds no effort of its own', () => {
+    const servers: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, launchProfile: PROFILE, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } };
+    for (const [kind, spec] of Object.entries(launches(servers, '/u/cua.sock'))) {
+      expect(LaunchSpecSchema.parse(spec), kind).toEqual(spec);
+      const args = argsOf(spec);
+      expect(args[args.indexOf('--setting-sources') + 1], kind).toBe('user,project,local');
+      const flag = JSON.parse(flagOf(args)) as Record<string, unknown>;
+      expect(flag, kind).toMatchObject({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true, ...(kind === 'bootstrap' ? {} : { env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } }) }); // the bootstrap has no socket
+      expect(flag.effortLevel ?? null, kind).toBe(spec.effort); // the spec's effort as before; the profile names none
+      // turning plugins off leaves the app's servers alone (the bootstrap takes none, as before)
+      if (kind !== 'bootstrap') expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual({ mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
+    }
+  });
+
+  // P4 Decision Log 50 (P4-R7y): `disableAllHooks` silences the flag JSON's own command hooks too (the engine keeps only
+  // policy hooks; spikes/protocol-probe/findings-p4-a2p-profile.txt), so MAWS's start-time context goes through the
+  // appended prompt instead of its SessionStart group
+  it('under hooks none gives MAWS’s start-time context through the appended prompt, after the contract or the supplement, and no SessionStart group', () => {
+    const off = launches(withProfile(PROFILE)).new;
+    const lane = String(TO_HUMAN_CONTRACT_VERSION);
+    const contract = withOwnerChannel(off, { laneOn: true, append: 'contract', snapshotOff: false });
+    expect(contract.extraSettings).toEqual({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: lane } });
+    expect(contract.appendSystemPrompt).toBe(`${TO_HUMAN_CONTRACT}\n\n${MESSAGE_TOOL_ALIAS}`);
+    expect(withOwnerChannel(off, { laneOn: true, append: 'supplement', snapshotOff: true })).toMatchObject({ appendSystemPrompt: `${TO_HUMAN_SUPPLEMENT}\n\n${MESSAGE_TOOL_ALIAS}`, systemPromptSnapshot: 'off' });
+    const alone = withOwnerChannel(off, { laneOn: true, append: null, snapshotOff: false });
+    expect(alone.appendSystemPrompt).toBe(MESSAGE_TOOL_ALIAS);
+    expect(alone.extraSettings).not.toHaveProperty('hooks');
+    expect(LaunchSpecSchema.parse(contract)).toEqual(contract);
+    // with the lane off the plugin's tool is real: no alias, nothing appended
+    const laneOff = withOwnerChannel(off, { laneOn: false, append: null, snapshotOff: false });
+    expect(laneOff).not.toHaveProperty('appendSystemPrompt');
+    expect(laneOff.extraSettings).toEqual({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true });
+    // a retried spec carries the alias once
+    expect(withOwnerChannel(contract, { laneOn: true, append: 'contract', snapshotOff: false }).appendSystemPrompt).toBe(contract.appendSystemPrompt);
+    expect(hooksOff(off)).toBe(true);
+    expect(hooksOff(launches(C10_SETTING_DEFAULTS).new)).toBe(false);
+  });
+});
+// P4-A2 end

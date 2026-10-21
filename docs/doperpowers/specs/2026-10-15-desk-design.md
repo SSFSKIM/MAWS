@@ -106,7 +106,9 @@ the hub deployed, checked by hand and recorded with evidence in Outcomes.
    working/waiting counts match `sminos list` run on each machine (but for
    a session holding an open async question, which `sminos list` reads as
    busy and the grid counts as waiting too: DX3's grid, 2026-10-18), within
-   2 seconds of a change.
+   2 seconds of a change, but for a machine whose stream dropped, which
+   reads offline within two heartbeats, about 15 seconds on the deployed
+   hub (MAWS #57's grace; the owner, 2026-10-21).
 2. **Messages.** A `<message>` span written by a session on machine A is in
    the project's group chat within 2 seconds of the session's turn writing
    it, attributed to the session's alias and machine.
@@ -348,6 +350,13 @@ February 2026 terms. The bridge keeps every session an ordinary Claude Code
 session and reaches nearly the same control (§5), with more streaming than
 the SDK wire gives.
 
+*Revised 2026-10-19 (owner; Decision Log):* the terms leg no longer holds.
+The owner confirmed that an SDK product on subscription credentials is fine
+under the terms as of October. The terminal-holdable leg stands, and it is
+why the bridge stays: it is how the web reaches sessions that the engine or
+a terminal holds (lane A). Under #52 the web also serves MAWS's SDK-host
+sessions (lane B), controlled by the MAWS daemon.
+
 **Web client.** React, its skeleton copied from MAWS's renderer (React 19,
 Zustand stores, TanStack Query; the transcript and its presentation model,
 the request card, the composer, the attention model, the subagents panel,
@@ -476,6 +485,15 @@ unavailable; everything they sent the human is still in the log.
 ### 4. The web, phase 1
 
 - **Projects.** The home is the grid of the org's projects.
+  **[2026-10-19, owner]** By default it shows the active ones: a project
+  with a live session (`live`, DX3's grid) or waiting on you. Below the
+  tiles, "Show all (N)", N every project, reveals the rest and becomes
+  "Show active"; the browser keeps the choice in `localStorage`
+  (`desk.grid.all`, beside `desk.depth`). The sort, "All sessions", the
+  org's waiting count and the badge read every project either way, and a
+  machine project follows the same rule. A tile online with nothing
+  working or waiting says how many of its sessions are idle ("Quiet" with
+  none).
 - **A project.** Left: `# <project>`, then the sessions as direct
   channels, grouped by waiting on you / working / idle / ended (a session
   holding a pending request, or an open async question while its process
@@ -2334,8 +2352,8 @@ default) [2026-10-15, DC3, from DC5's real-hub suite]. A half-open client is bou
 
 `Refusal` is `{reason, writer?, seq?, message}`, `reason` one of `writer-not-yours` (a writer outside `<machine>/`,
 or `legacy/` from a machine that is not the project's archive machine), `conflict` (a payload at an existing
-`(writer, seq)` whose canonical form differs), `bad-shape`, `too-large`, `not-open` (events, or a `rejected` report,
-for a project the current stream has not opened with `hello`), `stale-generation`, and `gap` (kept in the type, never
+`(writer, seq)` whose canonical form differs), `bad-shape`, `too-large`, `not-open` (any frame but `hello` for a
+project the current stream has not opened with `hello`), `stale-generation`, and `gap` (kept in the type, never
 sent: a gap is answered by `resend`). The hub reports a refusal down the stream and records it in the project's audit
 record (DX3), `gap` excepted.
 
@@ -2395,8 +2413,19 @@ opened on: a newer stream receives nothing of a project until the machine sends 
 
 **The POST's answer and the replies.** The hub writes its replies to a POST's frames — `have` and the backlog after a
 `hello`, `resend`, `refused` — down the stream, in frame order, and answers the POST only after they are written:
-`200 {"ok": true, "frames": <frames applied>}`. So when a POST returns, its replies are already on the stream ahead of
-anything later. The POST itself is refused whole, with nothing applied, as `409 {"error": "stale-generation"}` when
+`200 {"ok": true, "frames": <frames applied>, "refused": [{"index": <n>, "reason": <reason>}]}`. So when a POST
+returns, its replies are already on the stream ahead of anything later. **[2026-10-20, MAWS #88; `test/session-plane.test.ts`]** `refused` names, in
+POST order, each frame the hub refused whole: one for a project the stream has not opened (`not-open`), and one it
+cannot read (`bad-shape`, a frame naming no project id among them). `index` is the frame's place among the POST's
+frames from 0, in the numbering `frames` counts (each non-blank line is one frame, each `part` one, and a set joined in
+this POST is named by its last part); `reason` is the stream refusal's. `refused` is `[]` when the hub refused none, so
+a machine tells that from a hub older than #88, whose answer has no `refused`; `frames` counts refused frames as
+applied, as before. Each such frame is still refused down the stream too (a session-plane frame's refusal on the
+control lane, unawaited), for machines that read only the stream; the answer is what lets a machine act on a refusal in
+the same exchange rather than whenever the stream's arrives. An upload some of whose events were refused
+(`writer-not-yours`, `conflict`, one event's `bad-shape`) is not refused whole: those go down the stream alone. The
+`409` and `503` answers below that count `frames` carry `refused` for those frames too. The POST itself is refused
+whole, with nothing applied, as `409 {"error": "stale-generation"}` when
 `X-Desk-Generation` is not the machine's current stream (or it has none: open the stream first), `413 {"error":
 "too-large"}` over 4 MiB or for a frame over 1 MiB (with its `line`), and `400 {"error": "bad-shape", "line":
 <0-based>}` for a line that is not a JSON object with a string `t`. Blank lines are skipped. A frame naming no `.smns`
@@ -2626,7 +2655,7 @@ the web draws it as waiting in the terminal, without Allow or Deny. The web read
 
 **Grid** (`GridDown`, registry socket): `grid {projects: [ProjectSummary]}` on connect, then `summary {project}` for
 each change — a project registered, or a project's counts moving. `ProjectSummary` is `{id, name, machines,
-machines_online, working, waiting}`: `machines` every machine that has opened the project or reported its presence
+machines_online, working, waiting, live}`: `machines` every machine that has opened the project or reported its presence
 there, `machines_online` those with a fresh lease, `working` the sessions of online machines whose presence `status` is
 `busy` or `shell`, `waiting` those whose `status` is `waiting` (the session record's own words, as `sminos list`
 reads them). **[2026-10-18, owner]** `waiting` also counts, once, a session of an online machine holding an open async
@@ -2639,7 +2668,12 @@ retires) is not counted for it, and counts again once it runs, as a bridge's ask
 the web reads it the same way and keeps such a session under ended. The hub keeps the log's open questions as it
 stores each event (`log-store.ts` `open_questions`; events stored before that table are not read into it), and reports
 the summary again when a `question`, `answered` or `retired` moves them, or the pending set moves. Blocking questions
-and permission requests count as before, by presence. Each `Project` reports its counts to the `Registry` when they change. The grid takes nothing up. A frame above the frame bound (a `grid` of many
+and permission requests count as before, by presence. **[2026-10-19, owner]** `live` counts the sessions whose kept
+presence names a process (`record` not null) on every machine that holds the project, online or offline: a sleeping
+laptop's sessions are still where they are (its tile reads Offline), and a machine gone for good is revoked, which drops
+its sessions. A follower's presence is not counted. The Registry keeps it in `summaries.live`; a report without it (a
+`Project` on the version before) leaves the stored count. The web shows a project with `live` or `waiting` by default
+(§4). Each `Project` reports its counts to the `Registry` when they change. The grid takes nothing up. A frame above the frame bound (a `grid` of many
 projects) comes down as DX2 `part` frames, which the browser reassembles as it does on the project socket.
 
 **Built at M2:** the socket's admission (a registered project), `welcome.head`, `resume`, `log`, `caught-up`, `human`
@@ -3982,6 +4016,9 @@ What it does, as DX2 and DX4 have it:
   - `drop()` and `reconnect()` end the stream, as a daemon losing its network does; the hub ends its subscriptions
     and marks forwarded RPCs `uncertain`;
   - `answerHeartbeats = false` is a suspended daemon, whose lease lapses within 45 s;
+  - **[2026-10-19]** `end(session?)`: a session's process gone while the machine stays connected, its presence
+    published as null, as the daemon publishes a member whose process it no longer sees (every session, or the one
+    named);
   - `crashAfterEffect(match?)`: the next RPC it admits stops the machine after its effect (the request settled,
     the log event written) and before its outcome is recorded. A `FakeMachine` constructed with the same `memory` (and `fm.credentials`) then answers a retry of the
     nonce from the trace, without running it again;
@@ -4464,6 +4501,23 @@ a hub that connects into machines (§2).
   transcript (about 11 minutes of stalled uplink). Evidence:
   `sminos_plane.py` `page` and `rows_of`, `finish`; `sminos_uplink.py:685-691`;
   the survey's timing run (`python3 -I`, read-only, 2026-10-17).
+- Observation (2026-10-21): desk-open-fast has landed on the machine side
+  (doperpowers spec `docs/doperpowers/specs/2026-10-20-desk-open-fast-design.md`;
+  doperpowers PRs #301, #302 and #308; sminos 1.2.18, rolled to both Macs
+  2026-10-21 00:02Z). A session open's machine share on the owner's MacBook is
+  now 0.01–0.13 s: every open line reads `build: warm 0 ms` and `waits 0`. The
+  same morning's Resume open took 5.40 s. The rest of what the browser waits is
+  the web–hub–machine path. `view.first-rows` is 0.34–0.56 s for an in-app
+  reopen and 0.98–1.41 s on a fresh page load, and drawing accounts for only
+  0.02–0.11 s of either (`window.deskLatency()`, four doperpowers sessions of
+  up to 28,540 rows, 00:11–00:13Z). So the next open-latency gain is the hub's
+  (#52), not the machine's. The hub still ends each machine's stream every
+  23–96 minutes; reconnects take 1.35 s, occasionally 12–16 s. Residue on the
+  MAWS side: #88 (a machine POST's answer names the frames it refused) and #89
+  (`older()` dedupe within a page; an unnamed block over 64 KiB kept whole on
+  reconnect).
+  Evidence: that spec's Surprises & Discoveries (2026-10-21); the owner's
+  `daemon.log`; MAWS #52 issuecomment-6302972057.
 
 ## Decision Log
 
@@ -5227,6 +5281,17 @@ a hub that connects into machines (§2).
   gate-offload plan §3.5–3.6). Rejected: a shorter local heartbeat (DC3's to set, and nothing needs it); keeping
   the MacBook pass at `3de8a15e` (it predates the panel's fixes to resume and routing, and passed by timing).
   Date/Author: 2026-10-16, design session (DC5).
+  Amended 2026-10-20: the bound is two configured heartbeats plus 500 ms. Since MAWS #57 (merged as #58, 2026-10-18)
+  a closed stream's lease holds the machine online for a grace of one heartbeat, so the machine reads offline once the
+  close is seen (within one heartbeat locally) and the grace has run: 3,815 to 3,861 ms on the MacBook against the old
+  2,500 ms bound, which failed at #58's merge and on every master after it, unseen, since the suite runs in no default
+  gate set. The same grace means a dropped machine reads offline on the deployed hub after 15 s, not within the 2 s this
+  entry claimed for acceptance 1; #57 chose that over a flap at every reconnect, and acceptance 1's reading of it is
+  the owner's.
+  Ruled 2026-10-21 by the owner: acceptance 1 reads a dropped machine as offline within two heartbeats, about 15 s on
+  the deployed hub, and the grace stays, so the hub's routine stream ends (every 23–96 minutes) never flash a machine
+  offline. Acceptance 1's text says so. Rejected: back to 2 s (a 1–16 s offline flash at every reconnect); two speeds,
+  a clean close at once and only a drop graced (the hub would first have to tell the two apart; not needed now).
 - Decision: The web names a session by its title (§4): the harness's "Session name" (`/rename`'s `custom-title`,
   else the generated `ai-title`), carried through the log as sminos's `titled` (smns §3, §5, §8), which the session's
   machine writes into its file when the value changes. The owner, working a day from the desk, could not tell sessions
@@ -6119,6 +6184,107 @@ a hub that connects into machines (§2).
   Rejected then: fixing each protocol failure as it appears. Each fix would be rewritten by the rebuild, and the
   baseline the benchmark needs would move under it.
   Date/Author: 2026-10-19, the owner; folded by the design session.
+- Decision: The grid shows the active projects by default, those with a
+  live session or waiting on the owner, and the rest behind "Show all
+  (N)" (owner, 2026-10-19; doperpowers' smns remote identity design, §5,
+  its MAWS milestone). That design makes every repository a project by
+  its remote, so the grid would otherwise list every repository the org
+  has used. The count is the hub's: `Project.reportSummary` counts as
+  `live` each presence row whose `record` is not null on the project's
+  holders, online or offline, and carries it as `SummaryReport.live`, the
+  Registry's `summaries.live`, and `ProjectSummary.live` (DX3's grid).
+  Offline machines count because a laptop that sleeps nightly would make
+  an online-only grid flap; a revoked machine's rows drop out. One Durable
+  Object storage change, the owner's approval given with the brief:
+  `summaries` gains `live INTEGER NOT NULL DEFAULT 0` through
+  `ADDED_COLUMNS`. A report without `live` keeps the stored count. The
+  upsert binds the count twice, `COALESCE(?, 0)` in its values and
+  `COALESCE(?, summaries.live)` in its update, because SQLite checks NOT
+  NULL before the conflict: the design's `COALESCE(excluded.live,
+  summaries.live)` refuses an older report's first insert (proved on
+  workerd: `NOT NULL constraint failed: summaries.live`). After the deploy
+  a project's `live` reads 0 until its `Project` reports again. In the
+  deploy's overlap a `Project` already on this version can report to the
+  Registry still on the previous one, which keeps the counts but not
+  `live` and answers nothing. The new `Registry.summary` answers `true`; a
+  report not so acknowledged leaves the `Project` no copy of it, so the
+  `Project` sends its counts again at its next change of any kind, though
+  they are the same. A project whose last such change landed on the old
+  Registry, or whose every machine is offline at the deploy, still reads
+  0, behind Show all, until its next change. The filter is the web's, a
+  view preference kept in `localStorage` (`desk.grid.all`); the `grid`
+  frame is unchanged. Rejected: the hub filtering the `grid` frame (Show
+  all would need a second frame); the grid acquiring every project's
+  socket and grouping sessions from the logs (the grid is the home and the
+  phone, drawn before any log loads). Not built: the design's optional cut
+  of the org view's sockets to active projects.
+  Date/Author: 2026-10-19, the remote identity design's MAWS milestone
+  (branch `desk-grid-active`).
+- Decision: MAWS itself, ported to the web as fully as possible, is #52's yardstick for features. On the evening of
+  2026-10-19 the owner refined the protocol phase's target, as recorded by the RC research session on #52 (its
+  comment of 21:51Z, as edited):
+  - **Features:** MAWS. Claude Desktop's SSH mode is the reference design for remoting only. In it, a daemon on the
+    machine owns the session processes and re-adopts them after a disconnect, the same split as MAWS's E10
+    supervisor.
+  - **Reach and performance:** still benchmarked against the Claude Code binary's Remote Control and claude.ai's RC
+    client.
+
+  The research for the phase is on #52 (comment 6279243598) and in MAWS PR #79 (`research/desk-remote/`).
+  - It leaves three first-order decisions to the phase's design and the owner:
+    - whether to reverse the desk's "bridge, not SDK host" call (§2), since web MAWS hosts sessions;
+    - the trust design for carrying MAWS's X2 surface over the hub, which the machine does not trust;
+    - the hub's storage.
+  - It recommends:
+    - keeping the 60 s freshness window for discrete actions, re-sealing an answer or decision while its request is
+      pending (the 20:15Z diagnosis's rule);
+    - application-level pings between browser and hub;
+    - cursors keyed by session, launch epoch and seq.
+
+  Rejected then: Remote Control's feature range as the yardstick. RC is the narrowest of Desktop's session kinds,
+  because the client is a guest on a CLI it does not own, and the desk is meant to reach past it.
+  Date/Author: 2026-10-19, the owner (through the RC research session); folded by the design session.
+- Decision: the web serves both lanes of sessions, which settles the first of the three decisions the entry above left
+  open. The design is in the research note `~/claude-code-bundle/2.1.300/notes/web-maws-remote-research.ko.md` §3.7
+  (the research session's machine; its gist goes on #52 with the bridge benchmark).
+  - **Lane A:** engine-supervised `--bg` sessions and terminal sessions, controlled through the bridge mod (this
+    spec's §2 and §5).
+  - **Lane B:** MAWS's SDK-host sessions (stdio stream-json), controlled by the MAWS daemon.
+  - **One plane for both:** one cursor, one trust channel and one X1 vocabulary, plus a per-session capability list
+    that says what the web can do with each session.
+    - A session moves between lanes by a resume handoff.
+    - In a session MAWS spawns, the bridge only observes.
+    - §5's control table gains a row for the SDK host owning the process.
+
+  §2's "bridge, not an SDK host" binding loses its terms leg. The owner confirmed that an SDK product on subscription
+  credentials is fine under the terms as of October. The terminal-holdable leg stays, as the reason lane A exists.
+  The owner's remaining worry is whether lane A's connection is fast enough. The research session is benchmarking the
+  bridge hop and will post the numbers with this decision on #52.
+
+  The first live sample, a desk Resume at 2026-10-20 05:07Z on the MacBook (#52 comment 6283891796), came from the
+  plane's per-open log line added by doperpowers #283. The bridged open reached its snapshot after 5.40 s, and the
+  bridge's own snapshot was ready at 1.43 s. So the engine-to-bridge leg is not where most of the time goes.
+
+  Rejected: lane A only, the research's first recommendation (§3.6 of the note). The owner chose both, so that web
+  MAWS can host sessions as the desktop app does.
+  Date/Author: 2026-10-19, the owner (relayed by the RC research session, `2-1-300-19`); folded by the design session
+  2026-10-20.
+- Decision: DX7 gains a child, **provisioning keys**
+  (`docs/doperpowers/specs/2026-10-21-desk-provisioning-keys-design.md`, standalone, with its own execution section).
+  A machine joins the desk today only through a one-time code an admin carries by hand, live an hour at most; the
+  owner's automated VM provisioning (devcloud, boot step 11) needs a credential that can wait in Secret Manager and
+  enroll each new VM at boot with no human. The child adds a reusable, revocable **provisioning key** (a name
+  prefix, an expiry, an optional cap on uses, an optional offline auto-revoke), whose code `smns-provision-v1.` an
+  admin's browser builds around the key's secret and the org key as it builds a one-time code; its secret is
+  redeemed at the same unguarded path, `POST /machine/enroll`, and becomes an ordinary pending enrollment, so DX7's
+  confirmation, expiry, rotation, orphan and revocation machinery carry over unchanged; a machine can end its own
+  enrollment (`DELETE /machine/enrollment`, `sminos hub leave`); and the Registry revokes a key's machine once it has
+  been offline for the key's time, through the revocation path an admin's removal uses. Storage: one new table and an
+  `enrollments.key` column, through `CREATE TABLE IF NOT EXISTS` and `ADDED_COLUMNS` (approved). The copy of the org
+  key this puts in Secret Manager is readable by a project owner of that GCP project, the same class as every enrolled
+  machine's `hub.json` (the child's §7). Rejected there: a second redemption path (an Access policy edit at deploy for
+  the same lookup), `smns-enroll-v1.` with a flag (an older sminos would read `machine` for a meaning it lacks), and a
+  browserless admin revoke (a member credential outside Access; deferred with its future shape).
+  Date/Author: 2026-10-21, the owner (design approved) and the spec's author.
 
 ## Outcomes & Retrospective
 
@@ -6178,7 +6344,12 @@ the Tracking Map and the Decision Log:
   - the desk benchmarks the Claude Code binary's Remote Control and claude.ai's RC surfaces;
   - the destination is one web workspace where a single client controls agents on every machine and project.
 
-  The evidence gathered for it so far is on #52: the baseline table, and the diagnosed failures of 2026-10-19.
+  Later that evening the owner set MAWS itself, ported to the web, as the feature yardstick, with Claude Desktop's
+  SSH mode as the reference design for remoting (the Decision Log's last 2026-10-19 entry). The evidence is on #52:
+  the baseline table and the diagnosed failures of 2026-10-19. The research is in MAWS PR #79. The platform direction
+  of 2026-10-19 is on #52 too: a machine as the unit of connection, the org as the unit of access, IAM the machine
+  verifies, and accounts in several orgs. Its first step, repositories becoming projects by their remote, is being
+  built.
 - Its likely prerequisites: MAWS #36 (sign-in and hosting), #37 (machine join tokens) and #38 (the org key's split).
 - Phase 1 residue: MAWS #43, #44 and #45, and doperpowers #94, #95 and #96.
 - The sminos org directory (doperpowers #93) is specced and being built.

@@ -11,7 +11,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 
 async function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>) {
-  const result = await page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as CommandResult<N>;
+  const result = await page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as CommandResult<N>;
   if (!result.ok) throw new Error(`${name}: ${result.error.message}`);
   return result.value;
 }

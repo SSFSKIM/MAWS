@@ -1,0 +1,42 @@
+// W2-A no-spend probe: does a `--resume X --fork-session --session-id Y` launch write Y's transcript before any message?
+// Scratch config home; the source is a committed real transcript; no user message is ever sent (no model request).
+import { spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, existsSync, realpathSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+const [bin, sourceFile, X] = process.argv.slice(2);
+const config = realpathSync(mkdtempSync('/tmp/w2a-probe-config-'));
+writeFileSync(join(config, 'settings.json'), '{}\n');
+const repo = realpathSync(mkdtempSync('/tmp/w2a-probe-repo-'));
+const slug = (p) => p.replace(/[^a-zA-Z0-9]/g, '-');
+const projects = join(config, 'projects', slug(repo));
+mkdirSync(projects, { recursive: true });
+copyFileSync(sourceFile, join(projects, X + '.jsonl'));
+const Y = randomUUID();
+const env = { ...process.env, CLAUDE_CONFIG_DIR: config };
+for (const k of Object.keys(env)) if (k.startsWith('CLAUDE') && k !== 'CLAUDE_CONFIG_DIR') delete env[k];
+delete env.ANTHROPIC_BASE_URL;
+delete env.ANTHROPIC_AUTH_TOKEN;
+delete env.ANTHROPIC_API_KEY;
+env.CLAUDE_CODE_ENTRYPOINT = 'sdk-ts';
+const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio', '--setting-sources', 'user,project,local', '--permission-mode', 'default', '--resume', X, '--fork-session', '--session-id', Y];
+const child = spawn(bin, args, { cwd: repo, env, stdio: ['pipe', 'pipe', 'pipe'] });
+const yPath = join(projects, Y + '.jsonl');
+let out = '';
+child.stdout.on('data', (d) => (out += d));
+let err = '';
+child.stderr.on('data', (d) => (err += d));
+const note = (label) => console.log(JSON.stringify({ label, yExists: existsSync(yPath), listing: readdirSync(projects) }));
+const send = (o) => child.stdin.write(JSON.stringify(o) + '\n');
+note('spawned');
+send({ type: 'control_request', request_id: 'init-1', request: { subtype: 'initialize' } });
+const t0 = Date.now();
+while (Date.now() - t0 < 30000 && !out.includes('"request_id":"init-1"')) await new Promise((r) => setTimeout(r, 100));
+note('initialize answered=' + out.includes('"request_id":"init-1"'));
+await new Promise((r) => setTimeout(r, 3000));
+note('3 s after initialize');
+child.stdin.end();
+await new Promise((r) => child.on('close', r));
+note('after exit (stdin closed, no message ever sent)');
+console.log(JSON.stringify({ Y, config, stderrTail: err.slice(-600), stdoutKinds: [...new Set(out.split('\n').filter(Boolean).map((l) => { try { const f = JSON.parse(l); return f.type + (f.subtype ? '/' + f.subtype : ''); } catch { return 'unparsed'; } }))] }));

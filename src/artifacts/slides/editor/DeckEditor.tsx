@@ -11,6 +11,7 @@
 // M8: version history (history/): B's rail on the session's rail, the preview in place of the editor while a version
 // shows (its bar for the toolbar, the version's slides read-only with their changes), "See N new changes", the restore
 // banner, and Show editors on a right-click over the selected element.
+// P4-B4: a place asked from outside (a link's `#slide=` and `#v<id>`, `show_pane`'s `at`) through `useDeckReveal`.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
@@ -45,10 +46,11 @@ import { Notes } from './Notes';
 import { ZOOM_STEPS, type DeckSession, type Zoom } from './session';
 import { SLIDE_H, SLIDE_W } from './SlideView';
 import { Stage } from './Stage';
+import { useDeckReveal, type DeckRevealProps } from './reveal'; // P4-B4
 import './chrome.css';
 import './deck.css';
 
-export interface DeckEditorProps {
+export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked from outside (a slide, a version) */ {
   session: DeckSession;
   assetUrl: AssetUrl;
   /** The deck's governing design system (D's chain); null draws the slides' own fallbacks. */
@@ -88,7 +90,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -189,6 +191,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     if (!historyOpen && previewing) history?.close(); // the rail closed: back to the live deck
   }, [historyOpen, previewing, history]);
   const showEditors = useShowEditors(history, session, slideShown);
+  const showSlide = useCallback((slideId: string) => session.show(slideId), [session]); // P4-B4
+  useDeckReveal({ reveal, onRevealed, session, history, showSlide });
   const requestedAt = preview?.requestedAt ?? 0;
   const previewDrawn = useCallback(() => onPreviewDrawn?.(performance.now() - requestedAt), [onPreviewDrawn, requestedAt]);
 

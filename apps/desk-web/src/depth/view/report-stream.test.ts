@@ -23,7 +23,7 @@ type Store = ReturnType<typeof createTranscriptStore>;
 
 /** The recording's first turn, still open: its prompt, the two `Agent` calls and their results, an unmarked answer. */
 const FIRST_TURN = recording.session.slice(0, 12);
-const block = (index: number, text: string, kind: StreamBlock['kind'] = 'text'): StreamBlock => ({ turnId: 'bridge-turn', agentId: null, step: 3, index, kind, text, toolName: null, settledBy: null });
+const block = (index: number, text: string, kind: StreamBlock['kind'] = 'text'): StreamBlock => ({ turnId: 'bridge-turn', agentId: null, step: 3, index, kind, text, toolName: null, toolUseId: null, settledBy: null });
 const marked = (uuid: string, text: string): JsonObject => ({
   ...recording.session[11],
   uuid,
@@ -63,6 +63,16 @@ describe('streaming in the report', () => {
     expect(texts(rows).some((text) => text.startsWith('Both subagents are running'))).toBe(false); // folded into the record
     expect(rows.filter((row) => row.kind === 'subagent')).toEqual([]); // so are the Agent calls
     expect(rows.findIndex((row) => row.kind === 'owner_record')).toBe(rows.findIndex((row) => row.kind === 'user') + 1); // right after its prompt
+  });
+
+  it("a message tool's call folds its turn as a mark does, its message in view as it streams", async () => {
+    const store = await storeOf(FIRST_TURN);
+    const message: StreamBlock = { ...block(0, '{"text": "Both started; I will repo', 'tool'), toolName: 'mcp__to-human__message', toolUseId: 'toolu_streamed' };
+    const rows = report(store, [message]);
+    const turn = latestTurn(store.getState().entries[KEY]!.rows);
+    expect(record(rows)).toMatchObject([{ turnId: turn, open: false, working: true }]);
+    expect(streamed(rows)).toMatchObject([{ kind: 'to_human', turnId: turn, toolUseId: 'toolu_streamed', text: 'Both started; I will repo' }]);
+    expect(texts(rows).some((text) => text.startsWith('Both subagents are running'))).toBe(false); // folded into the record
   });
 
   it('unmarked streaming text later in an already-marked turn stays inside the record, and shows once it is opened', async () => {

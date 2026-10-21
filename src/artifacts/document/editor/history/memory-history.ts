@@ -5,6 +5,7 @@
 // restore (an `auto` version first when the document moved, the revert since the version keeping conversations
 // through the document adapter's `revertScope`, a `restore` version "Restored from …", then `restored` to every
 // replica), Make a copy (recorded), markViewed (an `auto` version when the document moved, then the time). Portable.
+import { formatDayTime } from '@shared/app/date-format';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import { applyV2, attributionMap, carryAttribution, contentIdsOf, encodeMap, mergeMaps, newDoc, revertUpdate, stateV2, type Carry, type ContentMap } from '../../../yjs';
@@ -14,7 +15,6 @@ import type { MemoryDocumentHost } from '../memory-host';
 import type { HistoryApi } from './api';
 
 const HUMAN: Actor = { kind: 'human' };
-const WHEN = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 interface Stored extends ArtifactVersion {
   state: Uint8Array;
@@ -33,9 +33,11 @@ export class MemoryHistory implements HistoryApi {
   /** The artifacts "Make a copy" made, by the version each copied. */
   readonly copies: number[] = [];
   viewedAt: number | null = null;
-  private readonly rows: Array<{ seq: number; map: ContentMap }> = [];
+  /** Attribution rows over the seqs they span (one update's seq until `compact` merges rows, as A's tiers do). */
+  private readonly rows: Array<{ fromSeq: number; toSeq: number; map: ContentMap }> = [];
   private readonly stored: Stored[] = [];
   private readonly listeners = new Set<() => void>();
+  private readonly returns = new Set<() => void>();
   private readonly offLanded: () => void;
   /** The option's clock, else the wall clock; also the rail's (`HistoryApi.now`). */
   readonly now: () => number;
@@ -47,7 +49,7 @@ export class MemoryHistory implements HistoryApi {
     this.now = options.now ?? Date.now;
     this.offLanded = host.onLanded(({ update, actor, revision }) => {
       const key = actorKey(actor);
-      this.rows.push({ seq: revision, map: attributionMap(contentIdsOf(update), { insertActor: key, deleteActor: key, at: this.now() }) });
+      this.rows.push({ fromSeq: revision, toSeq: revision, map: attributionMap(contentIdsOf(update), { insertActor: key, deleteActor: key, at: this.now() }) });
     });
     if (options.designTokens) this.designTokens = async (ref) => options.designTokens?.[`${ref.id}@${ref.versionSeq}`] ?? {};
   }
@@ -66,9 +68,23 @@ export class MemoryHistory implements HistoryApi {
     if (row) row.map = carryAttribution(row.map, mergeMaps(this.rows.slice(0, -1).map((r) => r.map)), carries);
   }
 
+  /** Merges the rows within [fromSeq, toSeq] into one spanning their seqs, as A's tiered compaction does (P4, tracker L238). */
+  compact(fromSeq: number, toSeq: number): void {
+    const inside = this.rows.filter((row) => row.fromSeq >= fromSeq && row.toSeq <= toSeq);
+    if (inside.length < 2) return;
+    const merged = { fromSeq: inside[0].fromSeq, toSeq: inside[inside.length - 1].toSeq, map: mergeMaps(inside.map((row) => row.map)) };
+    this.rows.splice(this.rows.indexOf(inside[0]), inside.length, merged);
+  }
+
+  /** The owner came back to the document while its editor stayed open (`HistoryApi.onReturn`). */
+  returned(): void {
+    for (const listener of [...this.returns]) listener();
+  }
+
   destroy(): void {
     this.offLanded();
     this.listeners.clear();
+    this.returns.clear();
   }
 
   // ── HistoryApi ──
@@ -89,7 +105,8 @@ export class MemoryHistory implements HistoryApi {
   }
 
   async attributions(fromSeq: number, toSeq: number): Promise<Uint8Array> {
-    return encodeMap(mergeMaps(this.rows.filter((row) => row.seq >= fromSeq && row.seq <= toSeq).map((row) => row.map)));
+    // every row overlapping the range, as A's store reads them (Decision Log 23a)
+    return encodeMap(mergeMaps(this.rows.filter((row) => row.fromSeq <= toSeq && row.toSeq >= fromSeq).map((row) => row.map)));
   }
 
   async saveVersion({ label, note }: { label: string; note?: string }): Promise<{ versionId: number }> {
@@ -104,7 +121,7 @@ export class MemoryHistory implements HistoryApi {
     const update = revertUpdate(target.state, stateV2(this.host.doc), revertScope(this.host.doc, old).keep);
     old.destroy();
     this.host.write((doc) => applyV2(doc, update));
-    const restored = this.version('restore', HUMAN, { label: `Restored from ${target.label ?? WHEN.format(target.at)}` });
+    const restored = this.version('restore', HUMAN, { label: `Restored from ${target.label ?? formatDayTime(target.at)}` });
     this.host.announceRestored(restored.id);
     return { revision: this.host.revision, versionId: restored.id };
   }
@@ -135,6 +152,11 @@ export class MemoryHistory implements HistoryApi {
   onVersions(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onReturn(listener: () => void): () => void {
+    this.returns.add(listener);
+    return () => this.returns.delete(listener);
   }
 
   private autoVersion(): void {

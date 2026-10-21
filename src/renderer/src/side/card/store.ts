@@ -10,7 +10,7 @@ import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseDeliverableUrl } from '@shared/maws/deliverable'; // P3-L (M6b): a legacy anchor's page URL
 import { parseArtifactUrl, type ArtifactUrlRevision } from '@shared/artifacts/scheme'; // P3-L (M5b)
-import type { CardRect, CommentContext } from '../../tools/code/anchor/anchor';
+import type { CardRect, CommentContext, CommentPlacement /* P4-B1 */ } from '../../tools/code/anchor/anchor';
 
 // What the card is about, as a host recognises it: (P2-E2) a browser page by its URL, or (P3-L M5b, Decision Log 10) an
 // HTML artifact's page on the store's scheme at a revision, whose host is the artifact viewer's. P3-L M6b: E2's
@@ -65,9 +65,10 @@ export function targetOf(anchor: Anchor): CardTarget | null {
 }
 
 // The seam's opener for a card placement (`register.ts`), and the re-dock's (no `hostId`, a `claimMode`). Without a
-// card placement the host is the target's kind.
+// card placement the host is the target's kind. P4-B1 (M4): a document's margin placement is its artifact card host's.
 export function openCard(anchor: Anchor, context: CommentContext & { phase?: CardPhase; claimMode?: CardHostMode }): void {
-  const placement = context.placement?.kind === 'card' ? context.placement : null;
+  const given = context.placement;
+  const placement: Extract<CommentPlacement, { kind: 'card' }> | null = given?.kind === 'card' ? given : given?.kind === 'margin' ? { kind: 'card', host: 'artifact', hostId: given.hostId } /* P4-B1 */ : null;
   const target = targetOf(anchor);
   const serial = ++serials;
   const card: OpenCard = {
@@ -100,6 +101,13 @@ export function claimCard(serial: number, hostId: string): boolean {
   if (open.hostId !== null) return open.hostId === hostId;
   useCommentCard.setState({ open: { ...open, hostId } });
   return true;
+}
+
+// P4-B3 (its Decision Log 39): the card drawn by another host of the same record from now on (a move that activates
+// another view of a document hands its card there before its own view closes).
+export function handCardTo(serial: number, hostId: string): void {
+  const { open } = useCommentCard.getState();
+  if (open?.serial === serial && open.hostId !== hostId) useCommentCard.setState({ open: { ...open, hostId } });
 }
 
 // The open card, or only that card when a serial is given.

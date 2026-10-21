@@ -856,10 +856,11 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     await t.service.hostStreaming(); // the first read fails: confirmation is still possible
     expect(t.evidenceReads).toHaveLength(1);
     expect(t.question(q)).toMatchObject({ state: 'queued', members: [{ kind: 'uuid', id: messageUuid, life: 'alive' }] });
-    // the retries fail too (the cadence unchanged): after three failed reads the answer reads unconfirmed, and says so
+    expect(t.question(q)).not.toHaveProperty('reason');
+    // the retries fail too (the cadence unchanged): after three failed reads the answer reads unconfirmed, and says why
     await vi.waitFor(() => expect(t.question(q).state).toBe('unconfirmed'));
     expect(t.evidenceReads.length).toBeGreaterThanOrEqual(3);
-    expect(t.states.at(-1)!.marks.find((m) => m.id === q)!.question).toMatchObject({ state: 'unconfirmed', members: [{ kind: 'uuid', id: messageUuid, life: 'alive' }] });
+    expect(t.states.at(-1)!.marks.find((m) => m.id === q)!.question).toMatchObject({ state: 'unconfirmed', reason: 'transcript-unreadable', members: [{ kind: 'uuid', id: messageUuid, life: 'alive' }] });
     // shown, not stored: the table keeps the answer queued and its not-taken verdict unset, so the reads go on
     expect(index.ownerChannel.mark(q)).toMatchObject({ state: 'queued', answerAttempts: [expect.objectContaining({ unconfirmed: false })] });
     const reads = t.evidenceReads.length;
@@ -886,9 +887,13 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     transcript = dir.path;
     await t.service.hostStreaming();
     await vi.waitFor(() => expect(t.question(q).state).toBe('unconfirmed'));
+    expect(t.question(q)).toMatchObject({ reason: 'transcript-unreadable' });
     transcript = file;
     await vi.waitFor(() => expect(index.ownerChannel.mark(q)).toMatchObject({ state: 'unconfirmed', answerAttempts: [expect.objectContaining({ unconfirmed: true })] }));
     expect(t.question(q).state).toBe('unconfirmed');
+    // the transcript was read: the card no longer says it could not be, in the state main reports and the one it sent
+    expect(t.question(q)).not.toHaveProperty('reason');
+    await vi.waitFor(() => expect(t.states.at(-1)!.marks.find((m) => m.id === q)!.question).not.toHaveProperty('reason'));
   });
 
   it('a restart restores open answers from the table and folds the history before anything else', async () => {

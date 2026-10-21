@@ -1,0 +1,70 @@
+{
+  "arm": "maws",
+  "task": "B5",
+  "rep": 2,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "presentation",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T12:03:10.630Z",
+  "prompt": "In the slide deck [Autumn Workshops 2026](maws-artifact:bfda6b67-f597-496e-8e75-6f7aefa41deb), on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "promptMatch": ", on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "artifactId": "bfda6b67-f597-496e-8e75-6f7aefa41deb",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/d8d6b9c3-61e9-4d86-ac63-4cdcc7f4748e.jsonl",
+  "journal": "/tmp/maws-parity-bench/run-20261021/maws-profile/engine-host/journal/34f11b3f-f211-41d1-a687-c50709e66fb2/kepizb6w.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "d8d6b9c3-61e9-4d86-ac63-4cdcc7f4748e",
+  "appSessionId": "34f11b3f-f211-41d1-a687-c50709e66fb2",
+  "load": {
+    "before": [
+      4.16,
+      3.72,
+      3.22
+    ],
+    "after": [
+      3.75,
+      3.65,
+      3.2
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "slide 2: the session lead date -> 21 October, nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.3839808,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 16,
+      "toolUseId": "toolu_01Uo1D3y3zSKqoYA9kyVUtsN"
+    },
+    {
+      "name": "artifact_describe_type",
+      "ms": 12,
+      "toolUseId": "toolu_012SD4B1mpW6YKYiGZhML6at"
+    },
+    {
+      "name": "artifact_publish",
+      "ms": 31,
+      "toolUseId": "toolu_01M7aPjR2b46UNXJhNHu9J2q"
+    },
+    {
+      "name": "artifact_read",
+      "ms": 14,
+      "toolUseId": "toolu_01QvpJxRWHBQ4RNg49bBtg4E"
+    }
+  ]
+}

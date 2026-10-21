@@ -12,7 +12,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, withoutReleased, type CostLedger } from './digest'; // C12: withoutReleased
+import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, restoreCost, withoutReleased, type CostLedger, type MessageCalls } from './digest'; // C12: withoutReleased
 import type { LaunchMode } from './select-source';
 import { availabilityOf, type AcquisitionMemory } from './availability'; // P2-A
 
@@ -47,6 +47,10 @@ const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing'
 const FOLD_LIVE = new Set<EngineSessionStatus['process']>([...LIVE, 'exiting']);
 const LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
 
+// What a session's resumed process restored, by its transcript's last `cost-state` (restored-cost.ts): 0 for none, null
+// when it cannot be read. Absent, the cost ledger's own rule stands (digest.ts).
+export type RestoredCostReader = (record: SessionRecord) => Promise<number | null>;
+
 export class SessionReadModel {
   private readonly records = new Map<AppSessionId, SessionRecord>();
   private readonly projects = new Map<ProjectId, ProjectRecord>();
@@ -56,6 +60,8 @@ export class SessionReadModel {
   private readonly lastRevision = new Map<AppSessionId, number>();
   private readonly seen = new Map<AppSessionId, Set<string>>();
   private readonly ledgers = new Map<AppSessionId, CostLedger>(); // cost across the session's processes (digest.ts)
+  private readonly messageCalls = new Map<AppSessionId, MessageCalls>(); // P4-R7: message calls awaiting results (digest.ts)
+  private readonly restoreReads = new WeakSet<object>(); // the ledger's `restoring` marks a transcript read was made for
   // C4 replay runs seen this app run: the host plays their events as a live session's, with no engine status. A run
   // stays live once seen, so its last batch (which may trail its `done` progress) still ends its turn.
   private readonly replays = new Set<AppSessionId>();
@@ -75,7 +81,10 @@ export class SessionReadModel {
     record: new Set(), digest: new Set(), engine: new Set(), attention: new Set(),
   };
 
-  constructor(private readonly mode: LaunchMode) {}
+  constructor(
+    private readonly mode: LaunchMode,
+    private readonly restoredCost?: RestoredCostReader,
+  ) {}
 
   register(source: SessionSource): () => void {
     if (this.mode === 'scenario') {
@@ -214,6 +223,26 @@ export class SessionReadModel {
     return this.digestsById.get(appSessionId) ?? emptyDigest(appSessionId);
   }
 
+  // A resumed process whose restored part the ledger cannot place alone (digest.ts, `restoring`): its transcript is read
+  // once, and the figure lands as a correction of the session's cost, only while the ledger still waits on that process.
+  private settleRestored(appSessionId: AppSessionId, ledger: CostLedger): void {
+    const restoring = ledger.restoring;
+    const record = this.records.get(appSessionId);
+    if (restoring === null || this.restoredCost === undefined || record === undefined || this.restoreReads.has(restoring)) return;
+    this.restoreReads.add(restoring);
+    void this.restoredCost(record)
+      .catch((error: unknown) => {
+        console.warn(`[sessions] ${appSessionId}: the transcript's cost-state could not be read: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      })
+      .then((restoredUsd) => {
+        if (this.ledgers.get(appSessionId) !== ledger || ledger.restoring !== restoring) return;
+        Object.assign(ledger, restoreCost(ledger, restoredUsd));
+        const current = this.digestsById.get(appSessionId);
+        if (current?.cost) this.commit({ ...current, cost: { ...current.cost, totalUsd: costOf(ledger) } });
+      });
+  }
+
   // C12 start: the released mark once per release. `clearRelease` remembers the launch whose mark goes; `onceReleased`
   // leaves the digest as it was (its phase, no mark) when a status or event of that launch would mark it again.
   private launchOf(appSessionId: AppSessionId): string | null {
@@ -250,6 +279,7 @@ export class SessionReadModel {
       this.digestsById.delete(appSessionId);
       this.seen.delete(appSessionId);
       this.ledgers.delete(appSessionId);
+      this.messageCalls.delete(appSessionId); // P4-R7
       this.replays.delete(appSessionId);
       this.costAtSeen.delete(appSessionId);
       this.statuses.delete(appSessionId);
@@ -299,8 +329,11 @@ export class SessionReadModel {
       if (!seen) this.seen.set(appSessionId, (seen = new Set()));
       let ledger = this.ledgers.get(appSessionId);
       if (!ledger) this.ledgers.set(appSessionId, (ledger = costLedger(this.current(appSessionId))));
+      let messages = this.messageCalls.get(appSessionId); // P4-R7
+      if (!messages) this.messageCalls.set(appSessionId, (messages = new Map()));
       const current = this.current(appSessionId);
-      this.commit(this.onceReleased(current, foldEvents(current, seen, events, ledger, this.live(appSessionId)))); // C12: onceReleased
+      this.commit(this.onceReleased(current, foldEvents(current, seen, events, ledger, this.live(appSessionId), messages))); // C12: onceReleased
+      this.settleRestored(appSessionId, ledger);
     },
     applyEngineStatus: (s) => {
       if (!this.records.has(s.appSessionId)) return;

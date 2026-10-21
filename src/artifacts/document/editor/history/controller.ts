@@ -15,7 +15,7 @@ import { dsOverrides, type TokenOverrides } from '../../meta';
 import { tabBody } from '../../tabs';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { HistoryApi } from './api';
-import { authorOf, formatWhen, newChangesBase, versionTitle } from './model';
+import { authorOf, documentWords, formatWhen, newChangesBase, versionTitle, type SummaryWords } from './model';
 
 export type PreviewTarget = { kind: 'version'; versionId: number } | { kind: 'compare'; versionIds: [number, number] } | { kind: 'since'; versionId: number | null };
 
@@ -123,17 +123,23 @@ export class HistoryController {
   getSnapshot = (): HistorySnapshot => this.snapshot;
   /** The time the list's days are named against: the history's clock, else the wall clock. */
   now = (): number => this.api.now?.() ?? Date.now();
+  /** P4 W1-B (tracker L272): what the rail's lines name blocks and comments by, the live document's words. */
+  words = (): SummaryWords => documentWords(this.handle.doc);
 
   /**
-   * The editor opened: follow restores (the banner) and new versions; the first time, read the list and the last view,
-   * offer "See N new changes" when an agent changed the document since, then mark it viewed. Returns the detach, which
-   * also drops any preview and its docs (an attach after it starts from the live document).
+   * The editor opened: follow restores (the banner), new versions and the owner's returns; the first time, and at each
+   * return, a look (`look`). Returns the detach, which also drops any preview and its docs (an attach after it starts
+   * from the live document).
    */
   attach(): () => void {
-    const stops = [this.handle.onRestored(({ versionId }) => void this.restored(versionId)), this.api.onVersions?.(() => void this.refresh()) ?? (() => {})];
+    const stops = [
+      this.handle.onRestored(({ versionId }) => void this.restored(versionId)),
+      this.api.onVersions?.(() => void this.refresh()) ?? (() => {}),
+      this.api.onReturn?.(() => void this.look()) ?? (() => {}), // P4 (tracker L274)
+    ];
     if (!this.begun) {
       this.begun = true;
-      void this.begin();
+      void this.look();
     }
     return () => {
       for (const stop of stops) stop();
@@ -145,12 +151,18 @@ export class HistoryController {
     };
   }
 
-  private async begin(): Promise<void> {
+  // A look, the editor's first showing or a return to it (P4, tracker L274; amends L's Decision Log 15 for this rail, a
+  // look per return rather than per showing): read the list and the last view, offer "See N new changes" when an agent
+  // changed the document since (an offer not yet taken counts again from its own view, which it covers), then mark it
+  // viewed.
+  private async look(): Promise<void> {
     try {
       const [versions, lastViewedAt] = await Promise.all([this.api.versions(), this.api.lastViewedAt()]);
-      this.set({ versions });
-      const base = newChangesBase(versions, lastViewedAt);
-      if (base) {
+      this.set({ versions, ...this.headingFrom(versions) });
+      const offered = this.snapshot.pill;
+      const base = offered ? null : newChangesBase(versions, lastViewedAt);
+      if (offered) void this.count(offered.since);
+      else if (base) {
         this.set({ pill: { since: base.since, count: null, failed: null } });
         void this.count(base.since);
       }
@@ -187,6 +199,12 @@ export class HistoryController {
     const [first] = this.snapshot.selected;
     if (extend && first !== undefined && first !== versionId) return this.open({ kind: 'compare', versionIds: [first, versionId] });
     return this.open({ kind: 'version', versionId });
+  }
+
+  /** P4-B4: whether the document retains the version with `versionId` (a link's `#v`): the list read, else read now. */
+  async hasVersion(versionId: number): Promise<boolean> {
+    const versions = this.snapshot.versions ?? (await this.api.versions());
+    return versions.some((version) => version.id === versionId);
   }
 
   /** The pill: the live document against the version at the last view. */

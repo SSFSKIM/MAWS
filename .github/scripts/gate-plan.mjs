@@ -22,11 +22,18 @@
 // `default`'s bare `pnpm e2e` collects every live spec and would run them all under those flags, and that no other
 // group's spec reads them is only today's convention, MAWS_LIVE being the name a new live case most likely gates on.
 // It refuses a LIVE_E2E group in a run that is not live too: design-live and dashboard-live set MAWS_LIVE in their own
-// scripts and would spend, the others would build and skip (Decision Log 75).
+// scripts and would spend, the others would build and skip (Decision Log 75). Every live run also takes the
+// LIVE_GUARD_E2E groups (P4-A2, X34: the tool-time guard's heavy-case fixture), whichever live groups it names.
+// `Selection: affected` (a push only; ci-gate.sh --affected): an iteration run whose unit and unit:darwin test only what
+// its change, listed in the commit's `Affected:` trailers, can reach (gate-affected.mjs; ci-kit's test-history spec, M4).
+// It adds `selection` and `related` (the paths for vitest related as JSON, or empty for the full suite) to the outputs
+// and one line saying which to the summary; a run without the trailer writes neither. Such a run is never landing
+// evidence.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
 import process from 'node:process';
+import { affected } from './gate-affected.mjs';
 
 const env = process.env;
 const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -51,11 +58,20 @@ const trailer = (key) =>
 
 const RUNNERS = { linux: 'ubuntu-24.04', macos: ['self-hosted', 'macOS', 'ARM64'] };
 const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
+// On the pool the whole unit suite runs as UNIT_SHARDS jobs, `unit <k>/<n>`, each vitest's --shard=<k>/<n> on a box of
+// UNIT_CPUS. One vitest process keeps its box's cores only 55-70% busy (its main process transforms for every worker),
+// so more processes on more boxes end the suite sooner than more cores on one. Five or more shards, or 16-core shards,
+// turned suites red that wait on those transforms cold (TranscriptSlot's hooks under renderer-compiled); four shards of
+// eight cores did not (CI-opt's critical-path arms, 2026-10-21). A selected run that tests only the related suites, and
+// a run off the pool, is the one job `unit`.
+const UNIT_SHARDS = 4;
+const UNIT_CPUS = 8;
 const CLASS1A_RUNNERS = {
   linux: { static: RUNNERS.linux, unit: RUNNERS.linux, probes: RUNNERS.linux },
   macos: { static: RUNNERS.macos, unit: RUNNERS.macos, probes: RUNNERS.macos },
-  // unit at 8 cores leaves one 16-core box room for static's 4 and probes' 2, so the three start together.
-  pool: { static: poolBox(4), unit: poolBox(8), probes: poolBox(2) },
+  // Each pool job is a GCE VM of its own (Decision Log 52). static runs its checks at once and needs the 16-core box's
+  // 32 GB (about 15 GB at its peak); unit's box is each shard's (UNIT_SHARDS).
+  pool: { static: poolBox(16), unit: poolBox(UNIT_CPUS), probes: poolBox(2) },
 };
 const gateRunner = (env.GATE_RUNNER ?? '').toLowerCase();
 const class1a = ((dispatched ? env.INPUT_CLASS1A : trailer('Class1a')) || gateRunner || 'linux').toLowerCase();
@@ -69,6 +85,9 @@ const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCa
 const asked = dispatched ? env.INPUT_GATES : trailer('Gates');
 const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? ['unit:darwin', ...words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`)] : [])];
 const gates = new Set(words(asked).length > 0 ? words(asked) : defaults);
+// P4-A2 (X34): a live run takes the tool-time guard's heavy-case fixture beside the live groups it names (LIVE_GUARD_E2E,
+// LIVE_E2E groups that spend nothing), so every gate that runs live specs holds the heaviest known cases under the bound.
+if (live) for (const group of words(env.LIVE_GUARD_E2E)) gates.add(`e2e:${group}`);
 
 const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes', 'packaged'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
 if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, unit:darwin, probes, packaged, e2e:default or e2e:<group> with a package.json script)`);
@@ -108,6 +127,10 @@ const e2e = [...gates]
 // Group names; an `e2e:` prefix, as --gates writes them, is read as the group.
 const defaultBeside = dispatched ? [] : [...new Set(words(trailer('DefaultBeside')).map((name) => name.replace(/^e2e:/, '')))].filter((group) => group !== 'default');
 
+const selectionAsked = dispatched ? undefined : trailer('Selection')?.toLowerCase();
+if (selectionAsked !== undefined && selectionAsked !== 'affected') refuse(`no such selection: ${selectionAsked} (affected, through ci-gate.sh --affected)`);
+const selection = selectionAsked && affected(env.HEAD_MESSAGE ?? '');
+
 const has = (gate) => String(gates.has(gate));
 const runners = CLASS1A_RUNNERS[class1a];
 const pool = class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)));
@@ -117,6 +140,12 @@ appendFileSync(
     `static_runner=${JSON.stringify(runners.static)}\nunit_runner=${JSON.stringify(runners.unit)}\nprobes_runner=${JSON.stringify(runners.probes)}\npool=${pool}\n`,
 );
 appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\nlive=${live}\ndefault_beside=${JSON.stringify(defaultBeside)}\n`);
+// The unit job's matrix: its shards, each with the `--shard` value and the suffix of its JUnit artifact's name
+// (test-results-unit-<k>of<n>-<attempt>, which ci-kit's test-history collector reads as one `unit` report), or the one
+// unsharded job.
+const shards = class1a === 'pool' && !selection?.related ? UNIT_SHARDS : 1;
+const unitShards = shards > 1 ? Array.from({ length: shards }, (_, i) => ({ shard: `${i + 1}/${shards}`, slug: `-${i + 1}of${shards}` })) : [{ shard: '', slug: '' }];
+appendFileSync(env.GITHUB_OUTPUT, `unit_shards=${JSON.stringify(unitShards)}\n`);
 const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
 const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
 // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
@@ -124,3 +153,11 @@ const moved = e2e.filter((entry) => offMac.has(entry.group) && entry.runner !== 
 const pooledNote = moved.length > 0 ? ` (${class1a === 'pool' ? 'on the pool' : 'on the hosted Linux runner'}: ${moved.join(', ')})` : '';
 appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}\n`);
 process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}`);
+if (selection) {
+  const line = selection.related
+    ? `Selection: affected — ${selection.paths} paths, unit runs vitest related`
+    : `Selection: affected — full suite: ${selection.reason}`;
+  appendFileSync(env.GITHUB_OUTPUT, `selection=affected\nrelated=${selection.related ? JSON.stringify(selection.related) : ''}\n`);
+  appendFileSync(env.GITHUB_STEP_SUMMARY, `\n${line}\n`);
+  process.stdout.write(`${line}\n${(selection.related ?? []).map((path) => `  ${path}\n`).join('')}`);
+}

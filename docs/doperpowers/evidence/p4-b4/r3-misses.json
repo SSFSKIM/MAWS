@@ -1,0 +1,788 @@
+{
+  "about": "R-3 (P4-B4 M5): test/fixtures/search/r3-labelled-set.json through the shipped artifact_search (scope all, limit 10) over a real store seeded by test/artifacts/r3-labelled-set.test.ts. found: an expected artifact among the ten hits; rank: the first right answer’s place; designed: the literal oracle’s verdict (every word of the query in an expected artifact’s title or text), asserted only when found.",
+  "limit": 10,
+  "found": 21,
+  "queries": 40,
+  "byClass": {
+    "title": {
+      "queries": 5,
+      "found": 5,
+      "missed": 0,
+      "designedMisses": 0
+    },
+    "body": {
+      "queries": 6,
+      "found": 6,
+      "missed": 0,
+      "designedMisses": 0
+    },
+    "particle": {
+      "queries": 4,
+      "found": 1,
+      "missed": 3,
+      "designedMisses": 3
+    },
+    "short-term": {
+      "queries": 3,
+      "found": 3,
+      "missed": 0,
+      "designedMisses": 0
+    },
+    "phrase": {
+      "queries": 4,
+      "found": 4,
+      "missed": 0,
+      "designedMisses": 0
+    },
+    "cross-language": {
+      "queries": 9,
+      "found": 0,
+      "missed": 9,
+      "designedMisses": 9
+    },
+    "concept": {
+      "queries": 6,
+      "found": 0,
+      "missed": 6,
+      "designedMisses": 6
+    },
+    "mixed": {
+      "queries": 3,
+      "found": 2,
+      "missed": 1,
+      "designedMisses": 1
+    }
+  },
+  "misses": [
+    {
+      "q": "슬라이드를 편집",
+      "class": "particle",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "더블클릭",
+      "class": "particle",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "채팅을 축소",
+      "class": "particle",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "참석자 슬라이드",
+      "class": "cross-language",
+      "expected": [
+        "deck"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "리스크",
+      "class": "cross-language",
+      "expected": [
+        "note"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "예산 승인",
+      "class": "cross-language",
+      "expected": [
+        "launch"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "발표자 노트",
+      "class": "cross-language",
+      "expected": [
+        "deck"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "정부 디자인 시스템",
+      "class": "cross-language",
+      "expected": [
+        "govuk"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "Google Docs comments",
+      "class": "cross-language",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "accessibility tree",
+      "class": "cross-language",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "double click",
+      "class": "cross-language",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "deadline reminder",
+      "class": "cross-language",
+      "expected": [
+        "design"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "concurrent editing test",
+      "class": "concept",
+      "expected": [
+        "note",
+        "deck",
+        "design"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "mobile layout",
+      "class": "concept",
+      "expected": [
+        "design"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "workload per person",
+      "class": "concept",
+      "expected": [
+        "dash"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "release date moved",
+      "class": "concept",
+      "expected": [
+        "launch"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "stale data",
+      "class": "concept",
+      "expected": [
+        "dash"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "cross-origin iframe",
+      "class": "concept",
+      "expected": [
+        "oopif"
+      ],
+      "designed": "miss",
+      "hits": []
+    },
+    {
+      "q": "Canva 슬라이드 편집",
+      "class": "mixed",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "hits": []
+    }
+  ],
+  "outcomes": [
+    {
+      "q": "Console",
+      "class": "title",
+      "expected": [
+        "console-check"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "console-check"
+      ],
+      "more": false
+    },
+    {
+      "q": "Notion route check",
+      "class": "title",
+      "expected": [
+        "route-check"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "route-check",
+        "obs"
+      ],
+      "more": false
+    },
+    {
+      "q": "GOV.UK sample",
+      "class": "title",
+      "expected": [
+        "govuk"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "govuk",
+        "official"
+      ],
+      "more": false
+    },
+    {
+      "q": "P3 sitting deck",
+      "class": "title",
+      "expected": [
+        "deck"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "deck",
+        "note",
+        "dash",
+        "obs",
+        "ds-p3"
+      ],
+      "more": false
+    },
+    {
+      "q": "Additional observations",
+      "class": "title",
+      "expected": [
+        "obs"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "obs"
+      ],
+      "more": false
+    },
+    {
+      "q": "Japanese price",
+      "class": "body",
+      "expected": [
+        "note"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "note"
+      ],
+      "more": false
+    },
+    {
+      "q": "tasks.csv",
+      "class": "body",
+      "expected": [
+        "dash"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "dash"
+      ],
+      "more": false
+    },
+    {
+      "q": "Note taker",
+      "class": "body",
+      "expected": [
+        "dash"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "dash",
+        "deck",
+        "note"
+      ],
+      "more": false
+    },
+    {
+      "q": "접근성 트리",
+      "class": "body",
+      "expected": [
+        "obs"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "obs"
+      ],
+      "more": false
+    },
+    {
+      "q": "마감일 전에 알려",
+      "class": "body",
+      "expected": [
+        "design"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "design"
+      ],
+      "more": false
+    },
+    {
+      "q": "Space precedence",
+      "class": "body",
+      "expected": [
+        "untitled-space"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "untitled-space"
+      ],
+      "more": false
+    },
+    {
+      "q": "코멘트",
+      "class": "particle",
+      "expected": [
+        "obs"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "obs"
+      ],
+      "more": false
+    },
+    {
+      "q": "슬라이드를 편집",
+      "class": "particle",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "더블클릭",
+      "class": "particle",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "채팅을 축소",
+      "class": "particle",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "일정",
+      "class": "short-term",
+      "expected": [
+        "design"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "design"
+      ],
+      "more": false
+    },
+    {
+      "q": "P3 DS",
+      "class": "short-term",
+      "expected": [
+        "ds-p3"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "ds-p3",
+        "note",
+        "obs"
+      ],
+      "more": false
+    },
+    {
+      "q": "문서 옆",
+      "class": "short-term",
+      "expected": [
+        "obs"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "obs"
+      ],
+      "more": false
+    },
+    {
+      "q": "\"Tell the Space owner first\"",
+      "class": "phrase",
+      "expected": [
+        "deck"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "deck"
+      ],
+      "more": false
+    },
+    {
+      "q": "\"Next steps and owners\"",
+      "class": "phrase",
+      "expected": [
+        "deck"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "deck"
+      ],
+      "more": false
+    },
+    {
+      "q": "\"accent appears once\"",
+      "class": "phrase",
+      "expected": [
+        "ds-p3",
+        "maws-ds"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "maws-ds",
+        "ds-p3"
+      ],
+      "more": false
+    },
+    {
+      "q": "\"follow-up sitting\"",
+      "class": "phrase",
+      "expected": [
+        "note"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "note"
+      ],
+      "more": false
+    },
+    {
+      "q": "참석자 슬라이드",
+      "class": "cross-language",
+      "expected": [
+        "deck"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "리스크",
+      "class": "cross-language",
+      "expected": [
+        "note"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "예산 승인",
+      "class": "cross-language",
+      "expected": [
+        "launch"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "발표자 노트",
+      "class": "cross-language",
+      "expected": [
+        "deck"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "정부 디자인 시스템",
+      "class": "cross-language",
+      "expected": [
+        "govuk"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "Google Docs comments",
+      "class": "cross-language",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "accessibility tree",
+      "class": "cross-language",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "double click",
+      "class": "cross-language",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "deadline reminder",
+      "class": "cross-language",
+      "expected": [
+        "design"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "concurrent editing test",
+      "class": "concept",
+      "expected": [
+        "note",
+        "deck",
+        "design"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "mobile layout",
+      "class": "concept",
+      "expected": [
+        "design"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "workload per person",
+      "class": "concept",
+      "expected": [
+        "dash"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "release date moved",
+      "class": "concept",
+      "expected": [
+        "launch"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "stale data",
+      "class": "concept",
+      "expected": [
+        "dash"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "cross-origin iframe",
+      "class": "concept",
+      "expected": [
+        "oopif"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    },
+    {
+      "q": "Artifact Search 툴",
+      "class": "mixed",
+      "expected": [
+        "obs"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "obs"
+      ],
+      "more": false
+    },
+    {
+      "q": "settings.json 건드리지",
+      "class": "mixed",
+      "expected": [
+        "catalogue"
+      ],
+      "designed": "found",
+      "found": true,
+      "rank": 1,
+      "hits": [
+        "catalogue"
+      ],
+      "more": false
+    },
+    {
+      "q": "Canva 슬라이드 편집",
+      "class": "mixed",
+      "expected": [
+        "obs"
+      ],
+      "designed": "miss",
+      "found": false,
+      "rank": null,
+      "hits": [],
+      "more": false,
+      "hint": "No match; try fewer or other words, or the other language."
+    }
+  ]
+}

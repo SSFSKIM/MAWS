@@ -7,6 +7,9 @@
 // the path an agent's `artifact_edit` takes in the host, less the engine's wire. The host's own event-loop delay is
 // sampled around each call (a histogram of this seam's, running all along, reset before the call and read once the loop
 // has turned after it): the longest the call kept the loop, its first synchronous stretch included. A's `artifacts.testLoopDelay` stays the run-wide measure.
+// P4-R6: each call's answer also says what shared its loop (`background`): the main thread's CPU time inside the longest
+// gap (where the platform tells it), the host's own work and V8's collections that overlapped that gap, and all of it
+// over the call by kind (`./host-work.ts`), so a slow row names its cause from its record.
 //
 // Commands arrive as JSON files in `<dir>/in` (written beside and renamed in, so a file is whole when seen) and run one
 // at a time in name order; each answer is written to `<dir>/out` under the command's name (again by rename). No IPC
@@ -14,9 +17,15 @@
 //
 //   seed     {artifactId, state (base64 V2)}       the document's tabs replaced by the state's, as the human
 //   call     {session, tool, args}                 artifact_read or artifact_edit as `session`; `baseRevision: 'last'`
-//                                                  stands for the revision the session last saw (its read or its batch)
+//                                                  stands for the revision the session last saw (its read or its batch);
+//                                                  `args.toolUseId`, when given, is the call's tool-use id (P4-A2)
+//   stream   {session, toolUseId, name, deltas,    P4-A2 (X35; the child's R12): the pieces of a call's input fed to the
+//             tickMs?}                             session's provisional emitter one per `tickMs` (20), as the engine's
+//                                                  deltas would; answered once the last tick ran, with how many
+//                                                  streaming frames the call sent. A `call` under the same id commits it
+//   drop     {session, toolUseId}                  P4-A2: the call's layer dropped, as an ending without a commit drops it
 //   heap     {}                                    the heap after two collections
-//   release  {session}                             the session's replicas closed (its end)
+//   release  {session}                             the session's replicas closed (its end), its layers dropped first
 //   loop     {reset?}                              the loop's gaps since the last reset (a run-wide measure beside A's)
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
@@ -25,13 +34,17 @@ import { runInNewContext } from 'node:vm';
 import { TABS } from '@artifacts/document/tabs';
 import { applyV2 } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
+import { PROVISIONAL_TICK_MS, type ProvisionalTool } from '@shared/artifacts/provisional';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
-import { artifactEditTool, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
+import { artifactEditTool, artifactReplyTool /* P4-B1 */, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
+import { ProvisionalEmitter } from '../../tool-server/provisional';
 import type { McpToolDefinition } from '../../tool-server/server';
+import { holdHostWork, hostWorkBetween, watchHostWork, type HostWork } from '../host-work'; // P4-R6
 import type { ArtifactStore } from '../store';
 
 const HUMAN: Actor = { kind: 'human' };
 const LOOP_TICK_MS = 1;
+const STREAM_TICK_MS = 20; // P4-A2: `stream`'s default pace, a little over the emitter's tick, so each piece is a frame
 
 /**
  * The host loop's occupancy, sampled by a 1 ms interval timer reading `performance.now()`: each gap between two ticks is
@@ -41,11 +54,17 @@ const LOOP_TICK_MS = 1;
  */
 export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/engine-host/presentations/scale-seam.ts)
   private last = performance.now();
+  private lastCpu = threadCpuMs();
   private gaps: number[] = [];
+  private longest: LongestGap | null = null; // P4-R6
   private readonly timer = setInterval(() => {
     const now = performance.now();
-    this.gaps.push(now - this.last);
+    const cpu = threadCpuMs();
+    const gap = now - this.last;
+    this.gaps.push(gap);
+    if (!this.longest || gap > this.longest.ms) this.longest = { at: this.last, ms: gap, cpuMs: cpu === null || this.lastCpu === null ? null : cpu - this.lastCpu };
     this.last = now;
+    this.lastCpu = cpu;
   }, LOOP_TICK_MS);
 
   constructor() {
@@ -54,7 +73,16 @@ export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/
 
   reset(): void {
     this.gaps = [];
+    this.longest = null;
     this.last = performance.now();
+    this.lastCpu = threadCpuMs();
+  }
+
+  // P4-R6: the longest gap since the reset (the one `stats().max` reads), when it began, and the main thread's CPU time
+  // inside it: near its length, the thread ran (script, a collection, a synchronous call); well under it, the thread
+  // waited (an fsync, the scheduler).
+  longestGap(): LongestGap | null {
+    return this.longest;
   }
 
   stats(): LoopStats {
@@ -76,15 +104,38 @@ export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/
 
 export type PerfCommand =
   | { cmd: 'seed'; artifactId: string; state: string }
-  | { cmd: 'call'; session: string; tool: 'artifact_read' | 'artifact_edit'; args: Record<string, unknown> }
+  | { cmd: 'call'; session: string; tool: PerfTool; args: Record<string, unknown> }
   | { cmd: 'heap' }
   | { cmd: 'release'; session: string }
-  | { cmd: 'loop'; reset?: boolean };
+  | { cmd: 'loop'; reset?: boolean }
+  | { cmd: 'stream'; session: string; toolUseId: string; name: ProvisionalTool; deltas: string[]; tickMs?: number } // P4-A2
+  | { cmd: 'drop'; session: string; toolUseId: string }; // P4-A2
 
 export interface LoopStats {
   max: number;
   p99: number;
   mean: number;
+}
+
+// P4-R6: the main thread's CPU time so far (user and system), where the platform tells it (Node 23.9 and later).
+function threadCpuMs(): number | null {
+  if (typeof process.threadCpuUsage !== 'function') return null;
+  const { user, system } = process.threadCpuUsage();
+  return (user + system) / 1000;
+}
+
+export interface LongestGap {
+  at: number; // performance.now() when the gap began
+  ms: number;
+  cpuMs: number | null; // the main thread's CPU time inside it; null where the platform does not tell it
+}
+
+/** P4-R6: what shared a call's loop. `at` is ms after the call's start; entries may nest; `partial` when the record
+ * dropped some of the call's window (a call far past the host's usual load). */
+export interface CallBackground {
+  longest: { at: number; ms: number; cpuMs: number | null; work: Array<{ what: HostWork; at: number; ms: number; detail?: string }> } | null;
+  call: Partial<Record<HostWork, { count: number; ms: number }>>;
+  partial?: true;
 }
 
 /** A tool call's answer: its result (or, refused, the tool's text), its wall time and the loop's delay around it. */
@@ -95,6 +146,31 @@ export interface CallAnswer {
   text: string;
   wallMs: number;
   loop: LoopStats;
+  background: CallBackground; // P4-R6
+}
+
+const tenth = (ms: number) => Math.round(ms * 10) / 10;
+
+/** P4-R6: the host's work over [from, to), and inside the sampler's longest gap. */
+export function backgroundOf(sampler: LoopSampler, from: number, to: number): CallBackground {
+  const { work, partial } = hostWorkBetween(from, to);
+  const call: CallBackground['call'] = {};
+  for (const entry of work) {
+    const sum = (call[entry.what] ??= { count: 0, ms: 0 });
+    sum.count += 1;
+    sum.ms = tenth(sum.ms + entry.ms);
+  }
+  const gap = sampler.longestGap();
+  const longest =
+    gap === null
+      ? null
+      : {
+          at: tenth(gap.at - from),
+          ms: tenth(gap.ms),
+          cpuMs: gap.cpuMs === null ? null : tenth(gap.cpuMs),
+          work: work.filter((entry) => entry.at < gap.at + gap.ms && entry.at + entry.ms > gap.at).map((entry) => ({ what: entry.what, at: tenth(entry.at - from), ms: tenth(entry.ms), ...(entry.detail !== undefined && { detail: entry.detail }) })),
+        };
+  return { longest, call, ...(partial && { partial: true as const }) };
 }
 
 export type PerfAnswer =
@@ -103,14 +179,20 @@ export type PerfAnswer =
   | CallAnswer
   | { ok: true; heapUsed: number; rss: number; collected: boolean }
   | { ok: true; loop: LoopStats }
+  | { ok: true; frames: number } // P4-A2: `stream`
   | { ok: true };
 
 export const documentPerfSeamRequested = (env: Record<string, string | undefined>): boolean => env.MAWS_E2E === '1' && env.MAWS_DOCUMENT_PERF === '1';
 
+/** P4-B1: the tools the seam runs as a session; `artifact_reply` for the margin's e2e (an agent's reply growing a card). */
+export type PerfTool = 'artifact_read' | 'artifact_edit' | 'artifact_reply';
+
 interface PerfSession {
-  tools: Record<'artifact_read' | 'artifact_edit', McpToolDefinition>;
+  tools: Record<PerfTool, McpToolDefinition>;
   calls: number;
   lastRevision: number;
+  provisional: ProvisionalEmitter; // P4-A2: the session's layers, which its edits commit or drop
+  streamed: Map<string, number>; // P4-A2: the streaming frames each call sent
 }
 
 const turned = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -119,11 +201,12 @@ export class DocumentPerfSeam {
   private readonly sessions = new Map<string, PerfSession>();
   private readonly loop = new LoopSampler();
   private readonly runLoop = new LoopSampler(); // the `loop` command's, over a whole run
+  private readonly unwatch = watchHostWork(); // P4-R6: the host's work recorded while the seam runs
   private gc: (() => void) | null = null;
 
   constructor(
     private readonly store: ArtifactStore,
-    private readonly options: { tools?: (deps: { artifacts: () => ArtifactStore; session: DocumentToolSession }) => PerfSession['tools'] } = {},
+    private readonly options: { tools?: (deps: { artifacts: () => ArtifactStore; session: DocumentToolSession; provisional: ProvisionalEmitter }) => PerfSession['tools'] } = {},
   ) {}
 
   async run(command: PerfCommand): Promise<PerfAnswer> {
@@ -141,8 +224,14 @@ export class DocumentPerfSeam {
           return { ok: true, loop: stats };
         }
         case 'release':
+          this.sessions.get(command.session)?.provisional.processExited(); // P4-A2
           this.store.service.closeSession(command.session as AppSessionId);
           this.sessions.delete(command.session);
+          return { ok: true };
+        case 'stream':
+          return await this.stream(command.session, command.toolUseId as ToolUseId, command.name, command.deltas, command.tickMs ?? STREAM_TICK_MS);
+        case 'drop':
+          this.session(command.session).provisional.dropped(command.toolUseId as ToolUseId);
           return { ok: true };
         default:
           return { ok: false, error: `unknown command ${JSON.stringify((command as { cmd: unknown }).cmd)}` };
@@ -155,6 +244,7 @@ export class DocumentPerfSeam {
   close(): void {
     this.loop.close();
     this.runLoop.close();
+    this.unwatch(); // P4-R6
   }
 
   // The tabs a document has (the host's first tab) removed and the seed's applied, in one write as the human.
@@ -170,29 +260,55 @@ export class DocumentPerfSeam {
   private session(name: string): PerfSession {
     let session = this.sessions.get(name);
     if (!session) {
-      const deps = { artifacts: () => this.store, session: new DocumentToolSession() };
-      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps) }, calls: 0, lastRevision: 0 };
+      const streamed = new Map<string, number>();
+      const provisional = new ProvisionalEmitter({
+        store: () => this.store, appSessionId: name as AppSessionId,
+        onFrame: (frame) => {
+          if (frame.state === 'streaming') streamed.set(frame.toolUseId, (streamed.get(frame.toolUseId) ?? 0) + 1);
+        },
+      });
+      const deps = { artifacts: () => this.store, session: new DocumentToolSession(), provisional };
+      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps), artifact_reply: artifactReplyTool(deps) /* P4-B1 */ }, calls: 0, lastRevision: 0, provisional, streamed };
       this.sessions.set(name, session);
     }
     return session;
   }
 
-  private async call(name: string, tool: 'artifact_read' | 'artifact_edit', args: Record<string, unknown>): Promise<PerfAnswer> {
+  // P4-A2 (R12): a call's input fed as the engine's deltas would arrive, one piece per `tickMs`; answered once the
+  // emitter's tick after the last piece ran.
+  private async stream(name: string, toolUseId: ToolUseId, tool: ProvisionalTool, deltas: string[], tickMs: number): Promise<PerfAnswer> {
+    const session = this.session(name);
+    for (const piece of deltas) {
+      session.provisional.delta(toolUseId, tool, piece);
+      await turned(tickMs);
+    }
+    await turned(2 * PROVISIONAL_TICK_MS);
+    return { ok: true, frames: session.streamed.get(toolUseId) ?? 0 };
+  }
+
+  private async call(name: string, tool: PerfTool, args: Record<string, unknown>): Promise<PerfAnswer> {
     const session = this.session(name);
     const definition = session.tools[tool];
     if (!definition) return { ok: false, error: `no tool ${JSON.stringify(tool)}` };
-    const input = args.baseRevision === 'last' ? { ...args, baseRevision: session.lastRevision } : args;
+    const { toolUseId, ...rest } = args; // P4-A2: the id a `stream` used, so the call commits or drops its layer
+    const input = rest.baseRevision === 'last' ? { ...rest, baseRevision: session.lastRevision } : rest;
     session.calls += 1;
-    const ctx = { appSessionId: name as AppSessionId, cwd: '/', toolUseId: `toolu_perf_${name}_${session.calls}` as ToolUseId, requestId: `perf-${name}-${session.calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false };
+    const ctx = {
+      appSessionId: name as AppSessionId, cwd: '/', toolUseId: (typeof toolUseId === 'string' ? toolUseId : `toolu_perf_${name}_${session.calls}`) as ToolUseId,
+      requestId: `perf-${name}-${session.calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false,
+    };
     // the sampler runs all along, so a call blocking the loop at once is caught by the gap it leaves; the gaps before
     // the call, the command's own parsing among them, are dropped by the reset
     await turned(LOOP_TICK_MS * 3);
     this.loop.reset();
     const started = performance.now();
-    const result = await definition.call(input, ctx);
-    const wallMs = performance.now() - started;
-    await turned(LOOP_TICK_MS * 5); // the gap the call left closes once the loop turns after it
-    const loop = this.loop.stats();
+    const release = holdHostWork(started); // P4-R6: the call's window kept however long it runs
+    const { result, wallMs, loop, background } = await (async () => {
+      const result = await definition.call(input, ctx);
+      const wallMs = performance.now() - started;
+      await turned(LOOP_TICK_MS * 5); // the gap the call left closes once the loop turns after it
+      return { result, wallMs, loop: this.loop.stats(), background: backgroundOf(this.loop, started, performance.now()) /* P4-R6 */ };
+    })().finally(release);
     const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
     const isError = result.isError === true;
     let parsed: unknown;
@@ -201,7 +317,7 @@ export class DocumentPerfSeam {
       const revision = (parsed as { revision?: unknown }).revision;
       if (typeof revision === 'number') session.lastRevision = revision;
     }
-    return { ok: true, isError, ...(parsed !== undefined && { result: parsed }), text: isError ? text : '', wallMs, loop };
+    return { ok: true, isError, ...(parsed !== undefined && { result: parsed }), text: isError ? text : '', wallMs, loop, background };
   }
 
   private heap(): PerfAnswer {

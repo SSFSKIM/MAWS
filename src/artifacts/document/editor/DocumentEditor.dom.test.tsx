@@ -8,15 +8,19 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
+import { importMarkdown } from '../import/markdown';
 import { schemaFor } from '../schema';
 import { addTab, createDocument, listTabs, tabBody } from '../tabs';
-import { DocumentEditor } from './DocumentEditor';
+import { DocumentEditor, type DocumentReveal } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import type { MentionSource, MentionTarget } from './MentionPicker';
 import type { CommentOverlayProps, DocumentComments } from './comments/surface';
 import { getThread, liveThreadIds } from '../threads';
 import { MemoryHistory } from './history/memory-history';
+import { TextSelection } from '@tiptap/pm/state'; // P4-B4 at the B1 merge
+import { activeThread, commentSelection } from './comments/plugins'; // P4-B4 at the B1 merge
+import { now, owner as ownerActor, select } from './comments/test-support'; // P4-B4 at the B1 merge
 import { TAB, World, doc, endOf, para, readOnlySwitch, ticks, until } from './test-world';
 
 let world: World | null = null;
@@ -553,6 +557,120 @@ describe('tabs', () => {
     await until(() => editor().getText() === '', 'the remaining tab’s body shown');
     expect(screen.queryByLabelText('Delete Second'), 'a × on the last tab').toBeNull();
   });
+
+  // P4 W1-B (tracker L300): a Mac has no context-menu key and the × is outside the tab order, so a focused tab takes the
+  // menu's actions from the keyboard: F2 renames, Delete or ⌫ deletes (the same question and last-tab guard), ⌥⇧← and
+  // ⌥⇧→ move it, Shift+F10 opens its menu; the focus stays on the tab acted on, or after a deletion its neighbour's
+  it('take rename, delete and move from the keyboard on the focused tab, and open its menu', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => {
+      addTab(handle.doc, { title: 'Bravo', id: 'tab00002' });
+      addTab(handle.doc, { title: 'Charlie', id: 'tab00003' });
+    });
+    await until(() => screen.getAllByRole('tab').length === 3, 'three tabs');
+    const tab = (name: string) => screen.getByRole('tab', { name });
+    const key = (name: string, init: KeyboardEventInit) => {
+      act(() => tab(name).focus());
+      act(() => void fireEvent.keyDown(tab(name), init));
+    };
+    const titles = () => listTabs(handle.doc).map((t) => t.title);
+    const focused = () => document.activeElement?.getAttribute('aria-label');
+
+    key('Bravo', { key: 'F2' });
+    act(() => fireEvent.change(screen.getByLabelText('Tab title'), { target: { value: 'Beta' } }));
+    act(() => fireEvent.keyDown(screen.getByLabelText('Tab title'), { key: 'Enter' }));
+    expect(titles()).toEqual(['Main', 'Beta', 'Charlie']);
+    await until(() => focused() === 'Beta', 'the focus back on the renamed tab');
+
+    key('Charlie', { key: 'ArrowLeft', altKey: true, shiftKey: true });
+    expect(titles()).toEqual(['Main', 'Charlie', 'Beta']);
+    await until(() => focused() === 'Charlie', 'the focus on the moved tab');
+    key('Main', { key: 'ArrowLeft', altKey: true, shiftKey: true }); // already first
+    key('Main', { key: 'ArrowRight', altKey: true, shiftKey: true });
+    expect(titles()).toEqual(['Charlie', 'Main', 'Beta']);
+    key('Charlie', { key: 'ArrowRight', shiftKey: true }); // not the chord
+    expect(titles()).toEqual(['Charlie', 'Main', 'Beta']);
+
+    key('Charlie', { key: 'F10', shiftKey: true });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Rename', 'Move left', 'Move right', 'Delete']);
+    act(() => void fireEvent.keyDown(menu, { key: 'Escape' }));
+    await until(() => screen.queryByRole('menu') === null, 'the menu closed');
+
+    key('Charlie', { key: 'Backspace' }); // empty: no question
+    await until(() => titles().length === 2, 'Charlie deleted');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await until(() => focused() === 'Main', 'the focus on its neighbour');
+
+    key('Main', { key: 'Delete' }); // the tab with content asks first
+    const asked = await screen.findByRole('alertdialog');
+    act(() => fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' })));
+    await until(() => screen.queryByRole('alertdialog') === null && focused() === 'Main', 'the focus back on the tab kept');
+    expect(titles()).toEqual(['Main', 'Beta']);
+    key('Main', { key: 'Delete' });
+    const ask = await screen.findByRole('alertdialog');
+    act(() => fireEvent.click(within(ask).getByRole('button', { name: 'Delete tab' })));
+    await until(() => titles().length === 1, 'Main deleted once confirmed');
+    expect(titles()).toEqual(['Beta']);
+    await until(() => focused() === 'Beta', 'the focus on the last tab');
+    key('Beta', { key: 'Delete' }); // the last tab stays
+    key('Beta', { key: 'Backspace' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(titles()).toEqual(['Beta']);
+  });
+
+  // P4 W1-B review (tracker L300): the menu Shift+F10 opens leaves the focus as the keys do; its own focus return goes to
+  // the tab it opened on, which Rename replaces with the title field and Delete takes away
+  it('leave the focus as the keys do after Rename, Move and Delete from the menu the keyboard opened', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => {
+      addTab(handle.doc, { title: 'Bravo', id: 'tab00002' });
+      addTab(handle.doc, { title: 'Charlie', id: 'tab00003' });
+    });
+    await until(() => screen.getAllByRole('tab').length === 3, 'three tabs');
+    const titles = () => listTabs(handle.doc).map((t) => t.title);
+    const focused = () => document.activeElement?.getAttribute('aria-label');
+    const fromMenu = async (name: string, item: string) => {
+      const tab = screen.getByRole('tab', { name });
+      act(() => tab.focus());
+      act(() => void fireEvent.keyDown(tab, { key: 'F10', shiftKey: true }));
+      const entry = within(await screen.findByRole('menu')).getByRole('menuitem', { name: item });
+      act(() => entry.focus());
+      act(() => void fireEvent.keyDown(entry, { key: 'Enter' }));
+      await until(() => screen.queryByRole('menu') === null, 'the menu closed');
+      await ticks(3); // the menu's focus return
+    };
+
+    await fromMenu('Bravo', 'Rename');
+    act(() => fireEvent.change(screen.getByLabelText('Tab title'), { target: { value: 'Beta' } }));
+    act(() => fireEvent.keyDown(screen.getByLabelText('Tab title'), { key: 'Enter' }));
+    expect(titles()).toEqual(['Main', 'Beta', 'Charlie']);
+    await until(() => focused() === 'Beta', 'the focus back on the renamed tab');
+
+    await fromMenu('Charlie', 'Move left');
+    expect(titles()).toEqual(['Main', 'Charlie', 'Beta']);
+    await until(() => focused() === 'Charlie', 'the focus on the tab moved left');
+    await fromMenu('Charlie', 'Move right');
+    expect(titles()).toEqual(['Main', 'Beta', 'Charlie']);
+    await until(() => focused() === 'Charlie', 'the focus on the tab moved right');
+
+    await fromMenu('Beta', 'Delete'); // empty: no question
+    await until(() => titles().length === 2, 'Beta deleted');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await until(() => focused() === 'Charlie', 'the focus on its neighbour');
+
+    await fromMenu('Main', 'Delete'); // the tab with content asks first
+    const asked = await screen.findByRole('alertdialog');
+    act(() => fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' })));
+    await until(() => screen.queryByRole('alertdialog') === null && focused() === 'Main', 'the focus back on the tab kept');
+    await fromMenu('Main', 'Delete');
+    const ask = await screen.findByRole('alertdialog');
+    await until(() => document.activeElement === within(ask).getByRole('button', { name: 'Cancel' }), 'the focus in the question');
+    act(() => fireEvent.click(within(ask).getByRole('button', { name: 'Delete tab' })));
+    await until(() => titles().length === 1, 'Main deleted once confirmed');
+    expect(titles()).toEqual(['Charlie']);
+    await until(() => focused() === 'Charlie', 'the focus on the last tab');
+  });
 });
 
 describe('find', () => {
@@ -762,6 +880,38 @@ describe('the mention picker', () => {
 
 // M8 fix wave 1: a new document's first tab is the host's; two editors open on the empty document wait for it, both bind
 // that one body, and what each types lands in it.
+// P4 W1-B (tracker L286; sitting candidate 8): an agent's note, made from markdown, is shown and stored from its first
+// sentence: an editor bound to it, before its create or after, writes no block before it. The trailing node (an empty
+// paragraph after a closing table, the mirror's last `&#160;`) is the editor's and stays.
+describe('a document made from markdown', () => {
+  const NOTE = 'This note follows the P3 sitting.\n\n## Next steps\n\n- [ ] Book the room\n\n| Owner | Due date |\n| --- | --- |\n| Kim | Friday |';
+  it.each(['made, then opened', 'opened, then made'])('starts with its content, %s', async (order) => {
+    const host = new MemoryDocumentHost();
+    const made = () => host.write((d) => void createDocument(d, { title: 'P3 sitting note', id: 'tab00001', body: importMarkdown(NOTE) }), { kind: 'session', appSessionId: '00000000-0000-4000-8000-0000000000a1' as never });
+    try {
+      if (order === 'made, then opened') made();
+      const handle = openMemoryHandle(host, { log: () => {} });
+      handles.push(handle);
+      await whenSynced(handle);
+      let editor: Editor | null = null;
+      render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} onEditor={(e) => (editor = e)} />);
+      if (order === 'opened, then made') made();
+      await until(() => editor !== null && editor.getText().length > 0, 'the editor bound');
+      const stored = () => {
+        const out: string[] = [];
+        ynodeToPmnode(tabBody(host.doc, 'tab00001')!, schemaFor()).forEach((block) => out.push(`${block.type.name}:${block.textContent}`));
+        return out;
+      };
+      await until(() => stored().length === 5, 'the trailing node at the host');
+      expect(stored()).toEqual(['paragraph:This note follows the P3 sitting.', 'heading:Next steps', 'taskList:Book the room', 'table:OwnerDue dateKimFriday', 'paragraph:']);
+      expect(editor!.state.doc.firstChild!.textContent).toBe('This note follows the P3 sitting.');
+    } finally {
+      cleanup();
+      host.destroy();
+    }
+  });
+});
+
 describe('an empty document', () => {
   it('shows Loading… in every editor until the host’s first tab, then both bind it and both typings land', async () => {
     const host = new MemoryDocumentHost();
@@ -923,5 +1073,103 @@ describe('a control drawn before the store turned read-only', () => {
       kept.discard(threadId);
     });
     expect(getThread(handle.doc, threadId)).toMatchObject({ status: 'open', messages: [] });
+  });
+});
+
+// P4-B4 (the link grammar; "Opening at a place"): a reveal asked from outside the editor (a link's fragment, show_pane's
+// at) selects the block's tab, puts the caret at the block's start and scrolls it into view once that tab's editor has
+// bound; a tab alone is selected; a version opens the history rail previewing it; a place the document does not have
+// opens it as a plain open does. Each reveal is taken once (`onRevealed`).
+describe('a reveal asked from outside', () => {
+  const restores: Array<() => void> = [];
+  afterEach(() => restores.splice(0).forEach((restore) => restore()));
+  async function mountRevealing(first: DocumentReveal | null) {
+    world = new World(doc(para('a1', 'First tab text')));
+    world.host.write((d) => addTab(d, { title: 'Appendix', id: 't2', body: schemaFor().nodeFromJSON(doc(para('b1', 'Appendix opening'), para('b2', 'The answer is here'))) }));
+    history = new MemoryHistory(world.host);
+    history.version('named', { kind: 'human' }, { label: 'Before' });
+    const handle = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(handle);
+    await whenSynced(handle);
+    let current: Editor | null = null;
+    const revealed = vi.fn();
+    // the elements scrolled into view, with what held the keyboard then (the owner's field: a reveal never takes it)
+    const scrolled: Array<{ text: string; focus: Element | null }> = [];
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      scrolled.push({ text: this.textContent ?? '', focus: document.activeElement });
+    });
+    restores.push(() => scroll.mockRestore());
+    const field = document.body.appendChild(document.createElement('textarea'));
+    restores.push(() => field.remove());
+    field.focus();
+    const onEditor = (editor: Editor | null) => {
+      current = editor;
+    };
+    const view = (reveal: DocumentReveal | null) => <DocumentEditor artifactId="doc1" handle={handle} host={owner} history={history!} reveal={reveal} onRevealed={revealed} onEditor={onEditor} />;
+    const rendered = render(view(first));
+    return { editor: () => current, handle, revealed, scrolled, rerender: (reveal: DocumentReveal | null) => rendered.rerender(view(reveal)) };
+  }
+  const selectedTab = () => screen.getByRole('tab', { selected: true }).textContent;
+  const startOf = (editor: Editor, id: string) => {
+    let at = -1;
+    editor.state.doc.forEach((node, offset) => {
+      if (node.attrs.id === id) at = offset + 1; // inside the paragraph, before its first character
+    });
+    return at;
+  };
+
+  it('selects a block’s tab from the block alone, the caret at its start, scrolled into view', async () => {
+    const { editor, revealed, scrolled } = await mountRevealing({ serial: 1, location: { block: 'b2' } });
+    await until(() => editor()?.getText().includes('The answer is here') === true && editor()!.state.selection.head === startOf(editor()!, 'b2'), 'the block revealed');
+    expect(selectedTab()).toContain('Appendix');
+    const field = document.querySelector('textarea');
+    expect(scrolled, 'the block’s own element, the owner’s field keeping the keyboard').toContainEqual({ text: 'The answer is here', focus: field });
+    expect(document.activeElement).toBe(field);
+    expect(revealed).toHaveBeenCalledWith(1);
+  });
+
+  it('reveals in an editor already showing the document, and a tab alone selects that tab', async () => {
+    const { editor, revealed, rerender } = await mountRevealing(null);
+    await until(() => editor()?.getText() === 'First tab text', 'the first tab');
+    rerender({ serial: 2, location: { tab: 't2' } });
+    await until(() => editor()?.getText().startsWith('Appendix opening') === true, 'the second tab');
+    expect(selectedTab()).toContain('Appendix');
+    rerender({ serial: 3, location: { tab: 't2', block: 'a1' } }); // the block names its own tab
+    await until(() => editor()?.getText() === 'First tab text' && editor()!.state.selection.head === startOf(editor()!, 'a1'), 'the first tab’s block');
+    expect(revealed.mock.calls).toEqual([[2], [3]]);
+  });
+
+  // At the merge with P4-B1: a reveal leaves B1's active thread alone even when its block starts inside an open passage
+  // (the caret lands at the block's start, where the comment mark, not inclusive, is not yet the caret's), so a link or
+  // show_pane never opens a margin card by itself.
+  it('puts the caret in a commented passage without activating its thread', async () => {
+    const { editor, handle, rerender } = await mountRevealing(null);
+    await until(() => editor()?.getText() === 'First tab text', 'the first tab');
+    act(() => {
+      select(editor()!, 'First tab text');
+      commentSelection(editor()!, handle.doc, { threadId: 'r1', tabId: TAB, by: ownerActor, at: now(), body: 'About the first tab' });
+    });
+    act(() => void editor()!.commands.setActiveThread(null));
+    act(() => editor()!.view.dispatch(editor()!.state.tr.setSelection(TextSelection.atEnd(editor()!.state.doc))));
+    expect(activeThread(editor()!.state)).toBeNull();
+    rerender({ serial: 6, location: { block: 'a1' } });
+    await until(() => editor()!.state.selection.head === startOf(editor()!, 'a1'), 'the caret at the block');
+    await ticks(5);
+    expect(activeThread(editor()!.state)).toBeNull();
+  });
+
+  it('opens the history rail previewing a version named by its id', async () => {
+    await mountRevealing({ serial: 4, location: { version: 1 } });
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null, 'the version previewed');
+    expect(screen.getByRole('complementary', { name: 'Version history' })).toBeTruthy();
+  });
+
+  it('opens a place the document does not have as a plain open: the first tab, no rail', async () => {
+    const { editor, revealed } = await mountRevealing({ serial: 5, location: { block: 'gone', tab: 'nope', version: 9 } });
+    await until(() => editor()?.getText() === 'First tab text', 'the first tab');
+    await ticks(20);
+    expect(selectedTab()).toContain('Main');
+    expect(screen.queryByRole('complementary', { name: 'Version history' })).toBeNull();
+    expect(revealed).toHaveBeenCalledWith(5);
   });
 });

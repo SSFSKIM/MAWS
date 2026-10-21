@@ -8,6 +8,7 @@
 // repository's head or refs move or a session's setup records trust (the app-level listener, `connectPanelEvents`), and
 // on demand by Refresh. The card hands this row its session and that session's checkout (E11 W-D).
 import { useEffect, useState } from 'react';
+import { formatClock } from '@shared/app/date-format';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
 import { queryClient } from '../../ipc/query';
@@ -99,7 +100,7 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
         <button
           type="button"
           aria-label={SUMMARY_COPY.refreshPrState}
-          title={checkedAt ? SUMMARY_COPY.checkedAt(new Date(checkedAt).toLocaleTimeString()) : SUMMARY_COPY.refreshPrState}
+          title={checkedAt ? SUMMARY_COPY.checkedAt(formatClock(Date.parse(checkedAt))) : SUMMARY_COPY.refreshPrState}
           disabled={refreshing}
           onClick={() => void refresh()}
           className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"

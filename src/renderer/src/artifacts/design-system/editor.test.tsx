@@ -11,7 +11,7 @@ import { writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -37,9 +37,9 @@ function systemDoc(law = '# Harbor\n'): Doc {
   return doc;
 }
 function handleOf(doc: Doc) {
-  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const close = vi.fn<() => void>();
-  const handle: DocumentHandle = { doc, awareness: null as never, state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close };
+  const handle: DocumentHandle = { doc, awareness: null as never, state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote: () => {}, close };
   return Object.assign(handle, { close });
 }
 function fakeHost(open: () => Promise<DocumentHandle>) {
@@ -75,7 +75,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetComposerStore();
-  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V14, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V17, resolvedTheme: 'light' } });
   useNotices.setState({ notices: [] });
   // main's library reads, which the editor's title asks for (Decision Log 29); a case that needs more installs its own
   installFakeMain((name, input) => (name === 'library.get' ? ok({ row: ROWS.find((r) => r.id === input.artifactId) ?? null }) : listed(input)));
@@ -147,12 +147,12 @@ describe('the header’s app actions', () => {
   }
 
   it('Set as my default writes settings 14, and is disabled once it is the default', async () => {
-    const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V14, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {} } }, resolvedTheme: 'light' }) : listed(input)));
+    const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V17, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' }) : listed(input)));
     await opened();
     expect(action('Set as my default').disabled).toBe(false);
     await act(async () => action('Set as my default').onSelect());
     expect(main.callsOf('settings.set')).toEqual([{ artifacts: { defaultDesignSystem: DS } }]);
-    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V14, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {} } }, resolvedTheme: 'light' } }));
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V17, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' } }));
     expect(action('Set as my default').disabled).toBe(true);
   });
 

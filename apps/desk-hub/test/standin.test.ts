@@ -1,11 +1,20 @@
 // The local stand-in for Access (local/): what DC4 and DC5 meet in front of the local hub. It admits what Access would
 // admit, as Access would (a signed assertion added, anything a client sent in its place dropped), and answers the
 // certificate endpoint and the service-token API the Worker calls.
+import { request as httpRequest } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AccessStandin, enrollmentCode, REDEEM_PATH } from '../local/standin.ts';
+import { AccessStandin, enrollmentCode, provisioningCode, REDEEM_PATH } from '../local/standin.ts';
 import { base64urlEncode } from '../src/protocol/base64url';
-import { decodeEnrollmentCode, encodeEnrollmentCode, REDEEM_PATH as PROTOCOL_REDEEM_PATH } from '../src/protocol/identity';
-import { ADMIN, startLocalHub, type LocalHub } from './support/local';
+import {
+  decodeEnrollmentCode,
+  decodeProvisioningCode,
+  encodeEnrollmentCode,
+  encodeProvisioningCode,
+  REDEEM_PATH as PROTOCOL_REDEEM_PATH,
+  type ProvisioningKeyRecord,
+} from '../src/protocol/identity';
+import { enroll, refusal } from './support/clients';
+import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
 beforeAll(async () => {
@@ -35,8 +44,33 @@ describe('the stand-in for Access', () => {
     expect(((await me.json()) as { member: { email: string } }).member.email).toBe(ADMIN);
   });
 
-  it('refuses a service token it did not mint, or one with the wrong secret', async () => {
-    expect((await hub.fetchAs({ clientId: 'nobody.access', clientSecret: 'x' }, '/machine/stream')).status).toBe(403);
+  it("refuses a service token it does not hold, or one with the wrong secret, as production Access does: 401 and its own page (the deploy probe's A4)", async () => {
+    const bogus = await hub.fetchAs({ clientId: 'nobody.access', clientSecret: 'x' }, '/machine/stream');
+    expect(bogus.headers.get('content-type')).toMatch(/^text\/html/);
+    expect(await refusal(bogus)).toBe('401 access');
+    const held = await enroll(hub, ADMIN, 'standin-1');
+    expect(await refusal(await hub.fetchAs({ clientId: held.clientId, clientSecret: 'wrong' }, '/machine/stream'))).toBe('401 access');
+    // A WebSocket's upgrade is refused the same.
+    const url = new URL('/api/registry/socket', hub.url);
+    const upgrade = await new Promise<{ status: number; type: string; body: string }>((resolve, reject) => {
+      const request = httpRequest({
+        host: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        headers: { 'CF-Access-Client-Id': 'nobody.access', 'CF-Access-Client-Secret': 'x', Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==' },
+      });
+      request.on('response', (response) => {
+        let body = '';
+        response.on('data', (chunk: Buffer) => (body += chunk.toString('utf8')));
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, type: response.headers['content-type'] ?? '', body }));
+      });
+      request.on('upgrade', () => reject(new Error('the upgrade was admitted')));
+      request.on('error', reject);
+      request.end();
+    });
+    expect(upgrade.status).toBe(401);
+    expect(upgrade.type).toMatch(/^text\/html/);
+    expect(upgrade.body).toContain('Cloudflare Access');
   });
 
   it('lets the redeem path through bare, as the Bypass policy will', async () => {
@@ -68,6 +102,34 @@ describe('the stand-in for Access', () => {
     const code = { hub: 'http://127.0.0.1:8747', org: 'local', token: 'tok', machine: 'mini', key: base64urlEncode(new Uint8Array(32).fill(3)) };
     expect(decodeEnrollmentCode(enrollmentCode(code))).toEqual(code);
     expect(enrollmentCode(code)).toBe(encodeEnrollmentCode(code));
+  });
+
+  it("builds a provisioning code the protocol module's decoder reads", () => {
+    const code = { hub: 'http://127.0.0.1:8747', org: 'local', token: 'secret', prefix: 'dc-', key: base64urlEncode(new Uint8Array(32).fill(4)) };
+    expect(decodeProvisioningCode(provisioningCode(code))).toEqual(code);
+    expect(provisioningCode(code)).toBe(encodeProvisioningCode(code));
+  });
+
+  it('hands out an enrollment code and a provisioning code without a browser, the org key reused when given', async () => {
+    const one = await fetch(`${hub.url}/standin/enrollment-code`, { method: 'POST', body: JSON.stringify({ machine: 'helper-1' }) });
+    expect(one.status).toBe(200);
+    const enrollment = (await one.json()) as { code: string; key: string; token: string };
+    expect(decodeEnrollmentCode(enrollment.code)).toEqual({ hub: hub.url, org: ORG, token: enrollment.token, machine: 'helper-1', key: enrollment.key });
+
+    const response = await fetch(`${hub.url}/standin/provisioning-code`, { method: 'POST', body: JSON.stringify({ prefix: 'dc-', offline_revoke_s: 3600, key: enrollment.key }) });
+    expect(response.status).toBe(200);
+    const { code, key, id } = (await response.json()) as { code: string; key: string; id: string };
+    expect(key).toBe(enrollment.key);
+    const decoded = decodeProvisioningCode(code);
+    expect(decoded).toMatchObject({ hub: hub.url, org: ORG, prefix: 'dc-', key });
+    const listed = ((await (await hub.fetchAs(ADMIN, '/api/provisioning-keys')).json()) as { keys: ProvisioningKeyRecord[] }).keys.find((k) => k.id === id);
+    expect(listed).toMatchObject({ prefix: 'dc-', offline_revoke_s: 3600, max_uses: null, uses: 0 });
+    // The code's secret enrolls a machine under the prefix.
+    expect((await hub.fetchAs(null, REDEEM_PATH, { body: { token: decoded.token, machine: 'dc-helper-1' } })).status).toBe(200);
+    // A fresh org key when none is given; the hub's refusal passed on.
+    const fresh = (await (await fetch(`${hub.url}/standin/provisioning-code`, { method: 'POST', body: JSON.stringify({ prefix: 'dc-' }) })).json()) as { key: string };
+    expect(fresh.key).not.toBe(key);
+    expect(await refusal(await fetch(`${hub.url}/standin/provisioning-code`, { method: 'POST', body: JSON.stringify({ prefix: 'hub' }) }))).toBe('400 bad-shape');
   });
 
   it('keeps its key and tokens in a state it can resume from', async () => {

@@ -31,6 +31,7 @@ import { RequestSlotRow } from './RequestSlot';
 import { SubagentRow } from './Subagent';
 import { ThinkingRow } from './Thinking';
 import { TimeRow } from './Time';
+import { ToHumanMessageRow } from '../../../owner/to-human/MessageRow'; // P4-R7
 
 function body(row: Row) {
   switch (row.kind) {
@@ -61,6 +62,7 @@ function body(row: Row) {
     case 'browser_action': return <BrowserActionRow row={row} />; // E4c
     case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
     case 'owner_record': return <OwnerRecordRow row={row} />; // P2-C (2026-10-09): placed by the report projection
+    case 'to_human': return <ToHumanMessageRow row={row} />; // P4-R7: a message tool's message
   }
 }
 

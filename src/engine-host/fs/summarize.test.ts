@@ -311,3 +311,37 @@ describe('the transcript’s root uuid', () => {
     expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').rootUuid).toBe('u3');
   });
 });
+
+// P4-R7: a message the model sent through a message tool is the transcript's last assistant line, as a text is, once
+// the window holds its result and the result is no error. Records are read newest first, so the result comes first.
+describe('the last assistant line and a message tool’s call', () => {
+  const SENT = [{ type: 'text', text: 'sent' }];
+  let n = 0;
+  const record = (type: 'user' | 'assistant', content: unknown[]) => line({ type, uuid: `${type}-${++n}`, parentUuid: null, timestamp: '2026-10-20T10:00:00.000Z', message: { role: type, content } });
+  const said = (text: string) => record('assistant', [{ type: 'text', text }]);
+  const call = (id: string, text: string, name = 'mcp__maws__message') => record('assistant', [{ type: 'tool_use', id, name, input: { text } }]);
+  const result = (id: string, content: unknown = SENT, isError = false) => record('user', [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }]);
+  const bash = (id: string) => record('assistant', [{ type: 'tool_use', id, name: 'Bash', input: { command: 'sh stage.sh 2' } }]) + result(id, 'ok');
+  const lastLine = (...records: string[]) => {
+    const bytes = Buffer.from(records.join(''), 'utf8');
+    return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').lastAssistantText;
+  };
+
+  it('an accepted call after the last text is the line, its message’s first line', () => {
+    expect(lastLine(said('Looking first.'), call('c1', '\nStage 1 is done.\nMoving on.'), result('c1'), bash('b1'))).toBe('Stage 1 is done.');
+  });
+
+  // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
+  it('an accepted call of the to-human plugin’s message tool is an ordinary tool call: the text before it stays the line', () => {
+    expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.', 'mcp__to-human__message'), result('c1'))).toBe('Looking first.');
+  });
+
+  it('a text written after the call is the newer line', () => {
+    expect(lastLine(call('c1', 'Stage 1 is done.'), result('c1'), bash('b1'), said('<message>All stages ran.</message>'))).toBe('All stages ran.');
+  });
+
+  it('a call whose result the window lacks, or whose result is an error, is passed over for the text before it', () => {
+    expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.'))).toBe('Looking first.');
+    expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.'), result('c1', 'MCP error: the server went away', true), bash('b1'))).toBe('Looking first.');
+  });
+});

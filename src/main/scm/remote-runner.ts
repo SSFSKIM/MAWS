@@ -59,7 +59,7 @@ export interface RemoteRunnerDeps {
 
 export interface RemoteRunStart {
   appSessionId: AppSessionId;
-  key: string; // the checkout's realpath: one run at a time per key
+  key: string; // the checkout's key, its worktree's top level (ScmService.keysOf): one run at a time per key
   plan: RemotePlan;
   captured: Record<string, string>; // the login-shell capture
 }

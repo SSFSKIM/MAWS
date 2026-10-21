@@ -124,6 +124,7 @@ export function readOnlySwitch(handle: DocumentHandle): { handle: DocumentHandle
       };
     },
     onRestored: (listener) => handle.onRestored(listener),
+    onProvisional: (listener) => handle.onProvisional(listener), // P4-A2
     holdRemote: (on) => handle.holdRemote(on),
     close: () => handle.close(),
   };

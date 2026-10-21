@@ -57,6 +57,13 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // loader), so a spec can observe what main does from its first moment (P2-C's restart check records notifications
   // from there). The built app only: the packaged one's fuses refuse Node switches.
   requireFirst?: string;
+  // P4-A1: the parity bench's arm of record runs on the owner's user scope like any MAWS session (P4 §4.2, X39), so its
+  // launch names no CLAUDE_CONFIG_DIR at all: the engine and main then read `~/.claude` and `~/.claude.json` as the
+  // owner's own MAWS does (a CLAUDE_CONFIG_DIR of `~/.claude` would move the global config file inside it).
+  ownerConfigHome?: boolean;
+  // P4-W2L: the app's Chromium locale for this launch instead of en-US (`ko-KR`, the owner's), for a spec showing that
+  // every age, date and time stays English whatever the system's (P4 Decision Log 4).
+  lang?: string;
 }
 // C5 end
 
@@ -105,6 +112,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const shellHome = writeScratchShellHome(join(userData, 'shell-home'));
   Object.assign(env, shellHome.env);
   Object.assign(env, opts.env); // C3
+  if (opts.ownerConfigHome) delete env.CLAUDE_CONFIG_DIR; // P4-A1
 
   let app: ElectronApplication | null = null;
   let closed = false;
@@ -125,9 +133,10 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   try {
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     const launchedAt = Date.now();
+    const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
     app = executable
-      ? await _electron.launch({ executablePath: executable, args: E2E_APP_ARGS, env, cwd: REPO_ROOT })
-      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...E2E_APP_ARGS, main], env, cwd: REPO_ROOT });
+      ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
+      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: REPO_ROOT });
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();

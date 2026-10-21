@@ -61,10 +61,27 @@ function onSet(main: LayoutMain, key: TabSetKey, fn: (view: View) => View): Layo
   const before: View = { ...(main.sets[key] ?? EMPTY_TAB_SET), closedTabs: main.closedTabs };
   const after = fn(before);
   if (after === before) return main;
-  return tidy({ ...main, sets: { ...main.sets, [key]: asSet(after) }, closedTabs: after.closedTabs });
+  return tidy({ ...main, sets: { ...main.sets, [key]: keptFloat(before, asSet(after)) }, closedTabs: after.closedTabs });
 }
 
-const asSet = ({ panes, focusedPane, splitRatio }: TabSet): TabSet => ({ panes, focusedPane, splitRatio });
+// P4-B3 (X37): a float belongs to the pane that collapsed. A transition that leaves its session tab active in the other
+// pane (⌘\, "Open in split", a drag between the strips) docks the split rather than floating the pane beside it.
+function keptFloat(before: TabSet, after: TabSet): TabSet {
+  const was = floatingPane(before);
+  const now = floatingPane(after);
+  return was === null || now === null || was === now ? after : asSet({ ...after, floating: undefined });
+}
+
+// P4-B3 (X37; its Decision Log 6): the float is normalised rather than policed. Every set written back keeps `floating`
+// only while it names the active session tab of one of two panes, so every transition docks a float its change ended:
+// A's last tab closing (one pane, S full width), S's tab closing or changing (docked at the ratio, or A alone), the
+// session removed; `keptFloat` adds S's tab leaving its pane. A float in a set the strip does not show stays stored
+// with it.
+const asSet = ({ panes, focusedPane, splitRatio, floating }: TabSet): TabSet => {
+  const set: TabSet = { panes, focusedPane, splitRatio };
+  if (!floating || floatingPane({ ...set, floating }) === null) return set;
+  return { ...set, floating: floating.foldedPanel ? { sessionTabId: floating.sessionTabId, foldedPanel: true } : { sessionTabId: floating.sessionTabId } };
+};
 
 const onCurrent = (main: LayoutMain, fn: (view: View) => View): LayoutMain => onSet(main, main.current, fn);
 
@@ -88,6 +105,21 @@ function moveToSet(main: LayoutMain, at: { set: TabSetKey; pane: Pane; index: nu
 
 // The pane at an index the caller knows exists (the focused pane, or one `locate` found).
 const paneAt = (view: TabSet, pane: Pane): PaneState => view.panes[pane] as PaneState;
+
+// P4-B3 (X37): the pane that has yielded into the floating card: the one whose active tab is the set's floating session
+// tab, while the set has two panes; null while docked.
+export function floatingPane(set: TabSet): Pane | null {
+  const id = set.floating?.sessionTabId;
+  if (id === undefined || set.panes.length !== 2) return null;
+  const pane = set.panes.findIndex((p) => p.activeTabId === id);
+  return pane !== -1 && paneShowsSession(set, pane as Pane) ? (pane as Pane) : null;
+}
+
+// Whether pane `pane`'s active tab is a session tab: the pane that may float (an agent tab has no composer).
+export function paneShowsSession(set: TabSet, pane: Pane): boolean {
+  const p = set.panes[pane];
+  return p?.tabs.some((t) => t.id === p.activeTabId && t.kind === 'session') ?? false;
+}
 
 // The active tab of the current set's focused pane: what the toolbar titles and the right panel follows.
 export function activeTab(main: LayoutMain): TabRef | null {
@@ -201,13 +233,14 @@ function openIn(view: View, target: TabTarget, pane: PaneTarget, activate: boole
   return place(view, toRef(target), paneOf(view, pane), 'afterActive', activate);
 }
 
-// Removes tab `id`, remembered for ⌘⇧T.
-function closeIn(view: View, id: string): View {
+// Removes tab `id`, remembered for ⌘⇧T unless `remember` is false (P4-B3: a tab moved to the panel did not close).
+function closeIn(view: View, id: string, remember = true): View {
   const found = locate(view, id);
   if (!found) return view;
   const tab = paneAt(view, found.pane).tabs[found.index];
   const panes = view.panes.map((p, i) => (i === found.pane ? without(p, id) : p));
-  return { ...withPanes(view, panes, view.focusedPane), closedTabs: [...view.closedTabs.filter((t) => t.id !== id), tab].slice(-CLOSED_MAX) };
+  const next = withPanes(view, panes, view.focusedPane);
+  return remember ? { ...next, closedTabs: [...view.closedTabs.filter((t) => t.id !== id), tab].slice(-CLOSED_MAX) } : next;
 }
 
 function moveIn(view: View, id: string, toPane: Pane, index: number): View {
@@ -319,9 +352,13 @@ export function focusPane(main: LayoutMain, pane: Pane): LayoutMain {
   return onCurrent(main, (v) => (pane < v.panes.length && pane !== v.focusedPane ? { ...v, focusedPane: pane } : v));
 }
 
-export function closeTab(main: LayoutMain, id: string): LayoutMain {
+// `remember: false` (P4-B3, its Decision Log 32): a move is not a close, so the tab leaves no ⌘⇧T entry.
+export interface CloseOptions {
+  remember?: boolean;
+}
+export function closeTab(main: LayoutMain, id: string, opts: CloseOptions = {}): LayoutMain {
   const found = locateTab(main, id);
-  return found ? onSet(main, found.set, (v) => closeIn(v, id)) : main;
+  return found ? onSet(main, found.set, (v) => closeIn(v, id, opts.remember ?? true)) : main;
 }
 
 // Within the current set (the strips show only it).
@@ -394,8 +431,54 @@ export function dropSession(main: LayoutMain, appSessionId: AppSessionId): Layou
   return closedTabs.length === next.closedTabs.length ? next : { ...next, closedTabs };
 }
 
+// P4-B3 (its Decision Log 3): the pixel floors are the divider's and the render's (`main/split.ts`), so the model only
+// keeps the ratio sane.
 export function setSplitRatio(main: LayoutMain, ratio: number): LayoutMain {
-  return onCurrent(main, (v) => ({ ...v, splitRatio: Math.min(0.75, Math.max(0.25, ratio)) }));
+  const splitRatio = Number.isFinite(ratio) ? Math.min(0.99, Math.max(0.01, ratio)) : 0.5;
+  return onCurrent(main, (v) => ({ ...v, splitRatio }));
+}
+
+// P4-B3 (X37; its Decision Log 1, 2, 4): the current set's pane showing session tab `sessionTabId` yields into the
+// floating card; `splitRatio` is left as it was, so Dock returns the ratio at pointer-down. Nothing changes unless the
+// set is a split with that session tab active in a pane. P4-B3x: `foldedPanel` marks the float as Expand's with the
+// right panel folded by it (the layout store folds the panel in the same change).
+export function floatSplit(main: LayoutMain, sessionTabId: string, opts: { foldedPanel?: boolean } = {}): LayoutMain {
+  return onCurrent(main, (v) => {
+    if (v.floating?.sessionTabId === sessionTabId) return v;
+    const next: View = { ...v, floating: opts.foldedPanel ? { sessionTabId, foldedPanel: true } : { sessionTabId } };
+    return floatingPane(next) === null ? v : next;
+  });
+}
+
+// P4-B3x (P4 Decision Log 40): the float whose Expand folded the right panel, and its set; null when no fold stands.
+// The store keeps at most one: a fold is made only over an open panel and dropped whenever the panel opens.
+export function foldOf(main: LayoutMain): { set: TabSetKey; sessionTabId: string } | null {
+  for (const key of setKeys(main)) {
+    const floating = main.sets[key]?.floating;
+    if (floating?.foldedPanel) return { set: key, sessionTabId: floating.sessionTabId };
+  }
+  return null;
+}
+
+// Whether the fold standing in `before` ended with its float in `after` (a dock, Restore split, or any transition that
+// ended the float), rather than by the mark being dropped while the float stays.
+export function foldEnded(before: LayoutMain, after: LayoutMain): boolean {
+  const fold = foldOf(before);
+  return fold !== null && after.sets[fold.set]?.floating?.sessionTabId !== fold.sessionTabId;
+}
+
+// Every fold mark dropped, the floats kept (the owner opened the panel: leaving Expand then leaves it as they set it);
+// `main` itself when none stands.
+export function unfold(main: LayoutMain): LayoutMain {
+  const fold = foldOf(main);
+  if (fold === null) return main;
+  const set = main.sets[fold.set] as TabSet;
+  return unfold({ ...main, sets: { ...main.sets, [fold.set]: { ...set, floating: { sessionTabId: fold.sessionTabId } } } });
+}
+
+// The floating pane comes back beside the other at the stored ratio; `floating` goes from the value.
+export function dockSplit(main: LayoutMain): LayoutMain {
+  return onCurrent(main, (v) => (v.floating ? { ...v, floating: undefined } : v));
 }
 
 // W12: a tab whose session's project changed (a New chat given its project, a record refolded into another project)

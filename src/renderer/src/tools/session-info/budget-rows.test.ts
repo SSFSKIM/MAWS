@@ -4,7 +4,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { BudgetState } from '@shared/ipc/schema/engine';
 import { digest } from '../../../../../test/support/builders';
 import { budgetRows } from './model';
-import { formatClock } from '../../app/date-format'; // L129
+import { formatClock } from '@shared/app/date-format'; // L129
 
 const GiB = 1024 * 1024;
 const A = 'app-a' as AppSessionId;

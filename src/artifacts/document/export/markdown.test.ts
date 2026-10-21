@@ -23,6 +23,22 @@ describe('exportMarkdown', () => {
     expect(md.endsWith('\n')).toBe(true);
   });
 
+  // P4 W1-B (tracker L226): the export drops comments, but a comment's edge still splits the text into runs; markup the
+  // edge splits is escaped as a whole, on a reader's new line too
+  it('escapes markup a comment’s edge splits, so it renders as the text it is', () => {
+    const comment = [{ type: 'comment', attrs: { threadId: 't1' } }];
+    const md = exportMarkdown(
+      sourceOf([
+        { type: 'paragraph', content: [{ type: 'text', text: '1', marks: comment }, { type: 'text', text: '. x' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'a\n#', marks: comment }, { type: 'text', text: ' b\n-' }, { type: 'text', text: ' c', marks: comment }] },
+      ]),
+    );
+    const html = new Marked().parse(md) as string;
+    expect(html).not.toMatch(/<(ol|ul|li|h1)>/);
+    expect(html).toContain('<p>1. x</p>');
+    expect(html).toMatch(/<p>a<br>\s*# b<br>\s*- c<\/p>/);
+  });
+
   it('round-trips the every-kind fixture through the import', () => {
     const source = everyKindSource();
     const back = importMarkdown(exportMarkdown(source, { tab: 'tab-1' }));

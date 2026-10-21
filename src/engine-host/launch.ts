@@ -39,6 +39,7 @@ export function getBinaryConfig(): BinaryConfig {
 // P2-C2: the server whose `ask` replaces the native tool, and the native tool's name (the engine's `--disallowedTools`)
 const MAWS_SERVER = 'maws';
 export const NATIVE_ASK_TOOL = 'AskUserQuestion';
+export const MAWS_MESSAGE_TOOL = `mcp__${MAWS_SERVER}__message`; // P4-R7
 
 export const GATEWAY_AUTH_TOKEN = 'claudeusage-local-gateway'; // D-19: a non-secret marker; the relay substitutes the real token
 export const CHARTER_PIN = '87f8c7881119ea670901205dae35917d3751459c'; // the parent pin this child was authored against
@@ -114,6 +115,12 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   env.CLAUDE_CODE_FORK_SUBAGENT = 'true'; // C12: kept (D9, ruled at M5): the terminal's interactive default; probe fixtures pass3/launch-env-{terminal,fork,unset}
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = '1';
   env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1'; // C12: session_state_changed on the wire (a host-facing option, C12 M5 probe)
+  // P4-A2 (X35; the architect's pre-landing ruling): the API streams a tool input's text as it is written only under
+  // this variable; without it a string value arrives whole once it closes, and the provisional layer draws once, after
+  // the call (the live runs of 2026-10-20, the execution document's Surprise 10). Claude Desktop sets it for every
+  // session (~/claude-desktop-re/readable/app-2.42304.0/main-process/index.chunk-CB6cNSrW.js:19623-19625, behind its
+  // gate 714014285). A host-facing wire option, as the one above; an explicit value from the owner's environment is kept.
+  env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING ??= '1';
   // E1 (P1 A-17; E0a Q4): AskUserQuestion previews as HTML fragments, which the request card draws in its scriptless
   // sandboxed frame and the engine validates before any permission request; set over an owner's export, since nothing
   // on the wire tells the host which format is in effect
@@ -239,7 +246,9 @@ export function buildLaunch(
   // P2-C2 (the P2 spec's Decision Log 33): where the launch offers the `maws` server, its `ask` is the one ask, so the
   // native AskUserQuestion is withdrawn from the model's view; without the server the native tool stays, the only ask.
   // The request-card path for native asks is untouched (imported and taken-over transcripts carry them).
-  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL);
+  // P4-R7: and its message tool is allowed, since the engine otherwise asks a permission for each call
+  // (pass3/p4-r7-tool), and a message must never wait on one
+  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL, '--allowedTools', MAWS_MESSAGE_TOOL);
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {

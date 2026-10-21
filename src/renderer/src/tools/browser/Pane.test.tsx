@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
 import { useFloatingCard } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { browserTab, T1 } from '../../test-support/browser';
@@ -293,10 +293,11 @@ describe('the comment card’s dock', () => {
   });
 });
 
-// P3-G (§D3, M2): with the floating card up over a Browser tab in the panel, the pane reserves a left column for it: a
+// P3-G (§D3, M2): with the floating card up over a Browser tab in the panel, the pane reserves a column for it: a
 // spacer beside the page's column, outside the element the placement measures (so the view's bounds exclude it), and
 // registered as the card's column while the pane holds the view. Closed to its pill, the pane leaves nothing: the page
-// keeps its whole box (the chrome's row draws the pill, the coordinator's ruling on M2).
+// keeps its whole box (the chrome's row draws the pill, the coordinator's ruling on M2). P4-B3 (parent Decision Log 15.7,
+// its Decision Log 9 and 26): the column is at the pane's right, with the card at the bottom right.
 describe('the floating card’s column', () => {
   const BROWSER_TAB = 'browser:1';
   const float = (over: Partial<{ closed: boolean }> = {}) =>
@@ -319,7 +320,7 @@ describe('the floating card’s column', () => {
     expect(column).not.toBeNull();
     const page = container.querySelector<HTMLElement>('[data-browser-pane]')!;
     expect(page.contains(column) || column.contains(page), 'the placement measures the page alone').toBe(false);
-    expect(column.nextElementSibling!.matches('[data-browser-column]')).toBe(true);
+    expect(column.previousElementSibling!.matches('[data-browser-column]'), 'at the pane’s right (parent Decision Log 15.7)').toBe(true);
     expect([column.style.width, column.style.maxWidth]).toEqual(['420px', 'calc(100% - 280px)']);
     expect(places()[0]!.rect).toEqual({ x: 10, y: 21, width: 300, height: 199 }); // the page's box, as before
     expect(useFloatingCard.getState().column?.element).toBe(column);
@@ -364,6 +365,30 @@ describe('the floating card’s column', () => {
     expect(spacer(container)).not.toBeNull();
     act(() => useLayout.getState().setPanel({ collapsed: true }));
     expect(spacer(container)).toBeNull();
+    expect(useFloatingCard.getState().column).toBeNull();
+  });
+
+  // P4-B3 (its Decision Log 10): under the main split's card, a main tab's pane reserves the column as the panel's does
+  // under the panel's card (the page is a native view the card cannot float over); the panel's pane then reserves none
+  it('under the split’s card a main tab reserves the column, at the stored width of the tab the card sits over; the panel’s none', async () => {
+    const session = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false } as const;
+    const beside = { id: 'diagnostics', kind: 'diagnostics', pinned: false } as const;
+    act(() => {
+      useLayout.setState({
+        main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [session], activeTabId: session.id }, { tabs: [beside], activeTabId: beside.id }], focusedPane: 1, splitRatio: 0.5, floating: { sessionTabId: session.id } } } },
+        regions: LAYOUT_DEFAULTS.regions,
+      });
+      useLayout.getState().setFloatingCardSize('main:diagnostics', { w: 480, h: 400 });
+    });
+    const main = render(<BrowserPane tab={tab()} surface="main" />);
+    await frames();
+    const column = spacer(main.container)!;
+    expect(column.style.width).toBe('480px');
+    expect(useFloatingCard.getState().column?.element).toBe(column);
+    main.unmount();
+    const panel = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    expect(spacer(panel.container)).toBeNull();
     expect(useFloatingCard.getState().column).toBeNull();
   });
 

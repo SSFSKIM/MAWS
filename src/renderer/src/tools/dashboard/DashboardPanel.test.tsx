@@ -116,8 +116,8 @@ describe('the dashboard editor in L’s registry', () => {
     await until(() => onShown.mock.calls.length > 0, 'the owner’s view');
 
     const ids = header().actions!.map((a) => a.id);
-    expect(ids.at(-1)).toBe('datasets');
-    expect(ids.slice(0, -1)).toEqual(['history', 'save-version', 'comments', 'suggestions']);
+    expect(ids.at(-1)).toBe('sendTo'); // P4-B5: Send to, pinned, after every other action
+    expect(ids.slice(0, -1)).toEqual(['history', 'save-version', 'comments', 'suggestions', 'datasets']);
 
     // the label opens the sheet on its own dataset; Datasets closes it, and opens it on the shown document's datasets
     act(() => label.click());

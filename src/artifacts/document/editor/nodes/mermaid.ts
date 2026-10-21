@@ -2,18 +2,22 @@
 // loads it), through `@streamdown/mermaid`'s plugin as the transcript loads it (M3 of
 // docs/doperpowers/plans/2026-10-12-p3-b-documents.md). Mermaid's `base` theme takes its palette from the element the
 // diagram is drawn in, whose computed colours are the document's `--ds-*` tokens or their app fallbacks, so a diagram
-// follows the document's design system.
+// follows the document's design system; one whose author names a theme keeps that theme's colours (the owner's ruling,
+// 2026-10-21), in the page's face.
 // P3-F (sitting candidate 20): mermaid is one module-wide instance, and the transcript configures it too, in the app's
-// palette. A configuration holds until the next one, so a render waiting in mermaid's queue behind a transcript diagram
-// was drawn in the dark app's colours on a light page. The page's colours therefore also ride in the diagram's own init
-// directive, which mermaid applies over whatever configuration it holds at the start of that render; an init directive
-// the source writes itself comes after it and wins. A front matter's `config` is the author's too, but mermaid applies
-// any directive over it, so a source whose front matter configures it gets no palette directive and its own settings
-// win over the configuration's palette, as before. The face stays in the configuration alone: mermaid blanks a
-// directive's theme value holding a `-` (`-apple-system`).
-type MermaidPlugin = ReturnType<(typeof import('@streamdown/mermaid'))['createMermaidPlugin']>;
+// palette and face. A configuration holds until the next one, so a render waiting in mermaid's queue behind a transcript
+// diagram was drawn in the dark app's colours on a light page. The face and the palette therefore also ride in the
+// diagram's own source (mermaid-source.ts), which mermaid reads over whatever configuration it holds at the start of that
+// render: under the author's front matter config, and before an init directive the source writes itself, so both win. A
+// named theme computes its colours over the last configuration's (mermaid's config.ts, updateCurrentConfig), so its
+// source pins every colour of its own.
+import type { Mermaid } from 'mermaid';
+import type { Page } from './mermaid-source';
 
-let plugin: Promise<MermaidPlugin> | null = null;
+type MermaidPlugin = ReturnType<(typeof import('@streamdown/mermaid'))['createMermaidPlugin']>;
+type Source = typeof import('./mermaid-source');
+
+let loaded: Promise<[MermaidPlugin, Mermaid, Source]> | null = null;
 let n = 0;
 
 function themeOf(into: HTMLElement): Record<string, string> {
@@ -33,23 +37,48 @@ function themeOf(into: HTMLElement): Record<string, string> {
   };
 }
 
-// mermaid's own front matter pattern: a front matter must open the source, so the directive goes after it
-const FRONT_MATTER = /^([^\S\n\r]*)-{3}\s*[\n\r](.*?)[\n\r]\1-{3}\s*[\n\r]+/s;
+const SETTINGS = { securityLevel: 'strict', suppressErrorRendering: true } as const;
 
-function withPalette(source: string, palette: Record<string, string>): string {
-  const colours = Object.fromEntries(Object.entries(palette).filter(([name]) => name !== 'fontFamily'));
-  const front = FRONT_MATTER.exec(source);
-  // a top-level `config` key at the front matter's own indent (mermaid reads its lines with that indent removed)
-  if (front && new RegExp(`^${front[1]}["']?config["']?[^\\S\\n\\r]*:`, 'm').test(front[2])) return source;
-  const head = front?.[0] ?? '';
-  return `${head}%%{init: ${JSON.stringify({ theme: 'base', themeVariables: colours })}}%%\n${source.slice(head.length)}`;
+// The page for a diagram whose author names a theme: that theme's own colours as the author's variables colour it, read
+// from mermaid. Best-effort: null when the author names none, and on any failure, the diagram then drawn as before the
+// ruling. Mermaid's own parse reads the author's theme and variables (merged and checked as its render will), and only
+// the strings a directive can carry come back out, so nothing the author wrote reaches mermaid's configuration.
+async function themedPage(source: string, fontFamily: string, plugin: MermaidPlugin, mermaid: Mermaid, module: Source, configure: () => void): Promise<Page | null> {
+  if (!/\btheme\b/.test(source)) return null;
+  try {
+    const parsed = await mermaid.parse(module.besideInit(source), { suppressErrors: true });
+    const theme = parsed ? module.namedTheme(parsed.config) : null;
+    if (!parsed || !theme) return null;
+    try {
+      plugin.getMermaid({ ...SETTINGS, theme, themeVariables: { fontFamily, ...parsed.config.themeVariables } });
+      return { theme, fontFamily, themeVariables: module.pinnable(mermaid.mermaidAPI.getSiteConfig().themeVariables) };
+    } finally {
+      // the page's configuration back in the same turn, so no render starts under the theme's, and the transcript's
+      // diagrams, which configure mermaid only on their plugin's first, draw in what they did before the ruling
+      configure();
+    }
+  } catch {
+    return null;
+  }
 }
 
 export async function renderMermaid(source: string, into: HTMLElement): Promise<string> {
-  plugin ??= import('@streamdown/mermaid').then((module) => module.createMermaidPlugin());
+  loaded ??= Promise.all([
+    import('@streamdown/mermaid').then((module) => module.createMermaidPlugin()),
+    import('mermaid').then((module) => module.default),
+    import('./mermaid-source'),
+  ]);
   const themeVariables = themeOf(into);
-  const mermaid = (await plugin).getMermaid({ securityLevel: 'strict', suppressErrorRendering: true, theme: 'base', themeVariables });
-  n += 1;
-  const { svg } = await mermaid.render(`doc-diagram-${n}`, withPalette(source, themeVariables));
-  return svg;
+  const { fontFamily, ...colours } = themeVariables;
+  const [plugin, mermaid, module] = await loaded;
+  const configure = () => plugin.getMermaid({ ...SETTINGS, theme: 'base', themeVariables });
+  const before: Page = { theme: 'base', fontFamily, themeVariables: colours };
+  const draw = async (page: Page) => (await configure().render(`doc-diagram-${(n += 1)}`, module.withPage(source, page))).svg;
+  const themed = await themedPage(source, fontFamily, plugin, mermaid, module, configure);
+  if (!themed) return draw(before);
+  try {
+    return await draw(themed);
+  } catch {
+    return draw(before); // as before the ruling; its rejection, if any, is mermaid's own
+  }
 }

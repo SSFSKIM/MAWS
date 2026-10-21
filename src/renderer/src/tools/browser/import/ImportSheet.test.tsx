@@ -9,14 +9,14 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImportedExtension, ImportReport } from '@shared/browser/import';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 import { CANCELLED_REPORT, NO_SKIPS, WRONG_KEY_REPORT } from '../../../../../../test/support/import-reports';
 import { useSettings } from '../../../stores/settings';
 import { CHROME, DISABLED_ID, DONE, FAILS_ID, IMPORT_ID, importBridge, INSPECTION, INSPECTION_ID, PROFILES_ANSWER, RECORD, WALLET_ID, type ImportBridge } from '../../../test-support/browser-import';
 import { IMPORT_COPY } from './copy';
 import { ImportSheet } from './ImportSheet';
 import { browserImport, connectBrowserImport, openImport, resetBrowserImport, showReport } from './store';
-import { formatDate } from '../../../app/date-format';
+import { formatDate } from '@shared/app/date-format';
 
 let b: ImportBridge;
 let disconnect = () => {};
@@ -323,7 +323,7 @@ describe('report', () => {
   });
 
   it('the wrong key: the summary names it and the Keychain line says the password did not match', async () => {
-    useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V14, resolvedTheme: 'light' } });
+    useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V17, resolvedTheme: 'light' } });
     showReport(WRONG_KEY_REPORT);
     renderSheet();
     expect(sheet().querySelector('[data-import-summary]')!.textContent).toMatch(/^0 cookies, 4 history entries, 3 extensions · 7 skipped: 5 could not be decrypted/);

@@ -26,7 +26,8 @@
 //
 // Memory (Decision Log 29b; parent Decision Log 37). A document nobody holds (no renderer and no agent replica attached)
 // stays loaded for `IDLE_UNLOAD_MS` after its last connection closes or its last committed write, so a window reopened
-// within that time gets the same doc without a reload; then it is unloaded. Shutdown unloads at once.
+// within that time gets the same doc without a reload; then it is unloaded. Shutdown unloads at once. A session's host
+// replicas go at the session's end (`closeSession`), not with the doc, which a window may hold open all day.
 //
 // The artifact store (store.ts, M3) writes its own rows (entities, versions, ops) through `inBatch` and a write's
 // `inFrame`, inside the same batch, so they too commit before anything reveals them.
@@ -71,6 +72,7 @@ import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { StoreTooNewError } from './errors';
+import { frameLabel, timed } from './host-work'; // P4-R6
 import { fromNodePort, type HostPort } from './ports';
 import { AgentReplica, type Presence } from './replica';
 
@@ -146,11 +148,12 @@ export interface Committed {
 // stands on before it (a copy's entity row, Decision Log 37c: the doc's kind, and so its adapter, is read after it);
 // `afterWrite` writes through the same host replica after the edit and its `afterUpdate` (a restore's `afterRestore`),
 // its thread rows landing in the batch; `inFrame` writes rows that must commit with the write or not at all (a version,
-// an op), given the revision reached.
+// an op), given the revision reached. P4-A2 (X35): and given `edited`, the row the edit's own transaction is (its seq),
+// or null when the edit changed nothing and so appended none; the kind's hooks and `afterWrite` may append rows after it.
 export interface WriteOptions {
   prepare?: () => void;
   afterWrite?: (doc: Doc) => void | { threads?: ThreadChange };
-  inFrame?: (revision: number) => void;
+  inFrame?: (revision: number, write: { edited: number | null }) => void;
 }
 
 export interface ServiceStats {
@@ -203,6 +206,7 @@ export class DocumentService {
   private readonly agentReplicas = new Map<string, AgentReplica>(); // by `${appSessionId}\0${artifactId}`
   private readonly heldPresence = new WeakMap<AgentReplica, { turnEnded: boolean }>(); // P3-F (F19): outlines inside their hold
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private writing: { artifactId: string; mark: number } | null = null; // P4-A2: the write in progress and where its frames start in the outbox
   private flushScheduled = false;
   private nextConnId = 1;
   private closed = false;
@@ -267,7 +271,7 @@ export class DocumentService {
     this.cancelIdle(hostDoc);
     const conn: Connection = { kind: 'connection', id: this.nextConnId++, artifactId, actor, key: actorKey(actor), received: 0, ackDue: false, closed: false, awarenessClients: new Set(), port };
     hostDoc.conns.add(conn);
-    port.onMessage((data) => this.receive(conn, data));
+    port.onMessage((data) => timed('frame', () => this.receive(conn, data), () => `${frameLabel(data)} from ${actorKey(actor)}`)); // P4-R6
     port.onClose(() => this.detach(conn));
     this.queue(conn, encodeFrame({ type: 'step1', sv: stateVector(hostDoc.doc) }));
     const states = [...hostDoc.awareness.getStates().keys()];
@@ -310,21 +314,26 @@ export class DocumentService {
     if (this.closed) return Promise.reject(new Error('the document service is closed'));
     if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
     const hostDoc = this.open(artifactId);
+    const writing = this.writing;
+    this.writing = { artifactId, mark: this.outbox.length }; // P4-A2: `announceWrite` goes in ahead of this write's frames
     const failed = this.inFrame(hostDoc, () => {
       if (options.prepare) {
         options.prepare();
         hostDoc.kind ??= this.kindOf(artifactId); // a doc opened before its entity row was written (a frame that fails evicts it)
       }
       const adapter = this.adapterOf(hostDoc);
+      const before = hostDoc.revision;
       const applied = this.applyOwn(hostDoc, () => this.writeThrough(hostDoc, actor, edit));
+      const edited = hostDoc.revision === before ? null : hostDoc.revision; // P4-A2 (X35): the edit's own row, if it wrote one
       this.afterUpdate(hostDoc, adapter, actor, applied);
       if (options.afterWrite) {
         const after: { outcome?: void | { threads?: ThreadChange } } = {};
         this.writeThrough(hostDoc, actor, (doc) => (after.outcome = options.afterWrite!(doc)));
         if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
       }
-      options.inFrame?.(hostDoc.revision);
+      options.inFrame?.(hostDoc.revision, { edited });
     });
+    this.writing = writing;
     if (failed) return Promise.reject(new Error(`the write to ${artifactId} failed and the document was reset: ${failed}`));
     const revision = hostDoc.revision;
     return new Promise((resolve, reject) => {
@@ -403,11 +412,7 @@ export class DocumentService {
       return result;
     } finally {
       replica.reading = false;
-      if (replica.editedWhileReading) {
-        replica.off();
-        replica.doc.destroy();
-        if (hostDoc.replicas.get(replica.key) === replica) hostDoc.replicas.delete(replica.key);
-      }
+      if (replica.editedWhileReading) this.dropReplica(hostDoc, replica);
     }
   }
 
@@ -496,6 +501,28 @@ export class DocumentService {
     for (const conn of hostDoc.conns) this.queue(conn, frame);
   }
 
+  // P4-A2 (X35 rule 2; the child's R3): a host-only frame sent to every connection of `artifactId` ahead of the frames
+  // the write in progress has queued, revealed with its commit: the provisional layer's `committed` notice, which names
+  // the write's seq, so a replica reads it before the row and withdraws the layer in the same step as the row's
+  // application. Valid only inside a host-originated write (`writeAs`'s edit, `afterWrite` or `inFrame`); the doc must
+  // be the one being written. Nothing when no connection holds the doc.
+  announceWrite(artifactId: string, frame: Uint8Array): void {
+    if (this.writing === null || this.writing.artifactId !== artifactId) throw new Error(`announceWrite(${artifactId}) outside a write of that doc`);
+    const hostDoc = this.docs.get(artifactId);
+    if (!hostDoc) return;
+    const entries = [...hostDoc.conns].filter((conn) => !conn.closed).map((conn) => ({ conn, frame }));
+    this.outbox.splice(this.writing.mark, 0, ...entries);
+    this.writing.mark += entries.length;
+  }
+
+  // P4-A2 (X35): a host-only frame sent now to every connection of a loaded doc, outside any commit (a `streaming` or
+  // `dropped` provisional frame, which reveals nothing of the store). Nothing when the doc is not loaded.
+  broadcast(artifactId: string, frame: Uint8Array): void {
+    const hostDoc = this.docs.get(artifactId);
+    if (!hostDoc) return;
+    for (const conn of [...hostDoc.conns]) this.send(conn, frame);
+  }
+
   // The agent session's replica of the artifact (Decision Log 9), made on first use, reconnected if the host closed it.
   replica(appSessionId: AppSessionId, artifactId: string): AgentReplica {
     if (this.closed) throw new Error('the document service is closed');
@@ -519,22 +546,34 @@ export class DocumentService {
     return replica;
   }
 
-  // At the session's end (Decision Log 9): nothing is lost, every write already waited for its durable ack.
+  // At the session's end (Decision Log 9; its process exited, session-maws.ts): nothing is lost, every write already
+  // waited for its durable ack. Its agent replicas close, and its host replicas leave every loaded doc, main and
+  // suggestion docs alike. Nothing of the session's tool state outlives its process, and a document open in a window
+  // never unloads, so a host replica kept to the unload would be a whole mirror of the doc, taking every later update,
+  // for each session that ever read or wrote it (P4-R6: about 7.7 MB of host heap apiece on the 200-page seed). A later
+  // process of the same session gets a fresh one at its first read or write, under its bound clientID, as after an unload.
   closeSession(appSessionId: AppSessionId): void {
     for (const [key, replica] of this.agentReplicas) {
       if (!key.startsWith(`${appSessionId}\u0000`)) continue;
       replica.close();
       this.agentReplicas.delete(key);
     }
+    const key = actorKey({ kind: 'session', appSessionId });
+    for (const hostDoc of this.docs.values()) {
+      const replica = hostDoc.replicas.get(key);
+      if (replica) this.dropReplica(hostDoc, replica);
+    }
   }
 
   closeIdleReplicas(): void {
-    const cutoff = this.now() - this.replicaIdleMs;
-    for (const [key, replica] of this.agentReplicas) {
-      if (replica.lastUsed > cutoff) continue;
-      replica.close();
-      this.agentReplicas.delete(key);
-    }
+    timed('replica sweep', () => { // P4-R6
+      const cutoff = this.now() - this.replicaIdleMs;
+      for (const [key, replica] of this.agentReplicas) {
+        if (replica.lastUsed > cutoff) continue;
+        replica.close();
+        this.agentReplicas.delete(key);
+      }
+    });
   }
 
   // The host's shutdown: the open batch commits and what it reveals is sent, then every replica and connection closes.
@@ -628,7 +667,7 @@ export class DocumentService {
     try {
       switch (frame.type) {
         case 'step1':
-          this.queue(conn, encodeFrame({ type: 'step2', update: diffV1(hostDoc.doc, frame.sv) }));
+          this.queue(conn, encodeFrame({ type: 'step2', update: diffV1(hostDoc.doc, frame.sv), revision: hostDoc.revision })); // P4-A2: the revision the diff reaches
           // The catch-up for a replica that was away across a restore (Decision Log 16): directly after the step 2, on
           // the same connection, with no frame between them; the provider recognises it by that position.
           if (hostDoc.restored) this.queue(conn, encodeFrame({ type: 'restored', ...hostDoc.restored }));
@@ -646,6 +685,7 @@ export class DocumentService {
           return;
         case 'ack':
         case 'restored':
+        case 'provisional': // P4-A2 (X35)
           return this.reject(conn, `a host-only frame (${frame.type}) from a replica`);
       }
     } catch (error) {
@@ -887,6 +927,14 @@ export class DocumentService {
     return replica;
   }
 
+  // A host replica torn down before its doc unloads (a refused read's, a closed session's): the actor's next use makes a
+  // fresh one from the live doc.
+  private dropReplica(hostDoc: HostDoc, replica: HostReplica): void {
+    replica.off();
+    replica.doc.destroy();
+    if (hostDoc.replicas.get(replica.key) === replica) hostDoc.replicas.delete(replica.key);
+  }
+
   // Inside the live doc's transaction cleanup: the row joins the open batch; what reveals it waits for the commit.
   private integrated(hostDoc: HostDoc, update: Uint8Array, origin: unknown): void {
     if (origin === LOAD) return;
@@ -923,9 +971,11 @@ export class DocumentService {
     if (suggestion) this.inStep(suggestion, update);
   }
 
-  // An integrated update goes to every connection (after the commit) and every host replica but its writer's.
+  // An integrated update goes to every connection (after the commit) and every host replica but its writer's. P4-A2:
+  // with the seq of the row it is (`integrated` set it just before), so a replica knows which rows it has integrated; a
+  // main doc's update flowing into its suggestion doc has no row of that doc and carries none.
   private relay(hostDoc: HostDoc, update: Uint8Array, writer: Writer | null): void {
-    const frame = encodeFrame({ type: 'update', update });
+    const frame = encodeFrame({ type: 'update', update, seq: writer ? hostDoc.revision : 0 });
     for (const conn of hostDoc.conns) if (conn !== writer) this.queue(conn, frame);
     for (const replica of hostDoc.replicas.values()) if (replica !== writer) applyV1(replica.doc, update, MIRROR);
   }
@@ -961,7 +1011,7 @@ export class DocumentService {
       }
     }
     try {
-      this.storage.commit();
+      timed('commit', () => this.storage.commit(), () => (this.dirty.size === 1 ? '1 document' : `${this.dirty.size} documents`)); // P4-R6
     } catch (error) {
       return this.batchFailed(`commit failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1019,6 +1069,10 @@ export class DocumentService {
   // The head checkpoint at the doc's committed revision (an open doc's live state, else read from the store).
   private rewriteHead(target: HostDoc | string): void {
     const artifactId = typeof target === 'string' ? target : target.id;
+    timed('head', () => this.rewriteHeadOf(target, artifactId), () => artifactId); // P4-R6
+  }
+
+  private rewriteHeadOf(target: HostDoc | string, artifactId: string): void {
     try {
       const { revision, state } = typeof target === 'string' ? this.readState(target) : { revision: target.revision, state: stateV2(target.doc) };
       this.storage.writeHead(artifactId, revision, state);
@@ -1074,6 +1128,10 @@ export class DocumentService {
   }
 
   private unload(hostDoc: HostDoc): void {
+    timed('unload', () => this.unloadDoc(hostDoc), () => hostDoc.id); // P4-R6
+  }
+
+  private unloadDoc(hostDoc: HostDoc): void {
     this.cancelIdle(hostDoc);
     for (const conn of [...hostDoc.conns]) this.closeConn(conn);
     for (const replica of hostDoc.replicas.values()) {

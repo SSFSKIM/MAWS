@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { mawsToolList, TOOL_ERRORS } from '@shared/maws/tools';
+import { MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import { defineMawsTool, MawsToolServer, toolText, type McpToolContext, type McpToolDefinition } from './server';
 
@@ -25,11 +26,11 @@ function harness(tools: McpToolDefinition[] = []) {
 }
 
 describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
-  it('answers initialize with the offered protocol version, the listChanged capability and its info', async () => {
+  it('answers initialize with the offered protocol version, the listChanged capability, its info and the link instructions (P4-B4)', async () => {
     const { send, rpcOf } = harness();
     const id = send({ method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } }, jsonrpc: '2.0', id: 0 });
     await flush();
-    expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: 0, result: { protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: '0.9.0' } } });
+    expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: 0, result: { protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: '0.9.0' }, instructions: MAWS_SERVER_INSTRUCTIONS } });
     expect(JSON.stringify(rpcOf(id)).startsWith('{"jsonrpc":"2.0","id":0,"result"')).toBe(true); // the key order the engine echoes
   });
 
@@ -73,8 +74,8 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     await flush();
     expect(rpcOf(unknown)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true } });
     expect(TOOL_ERRORS.unknownTool('echo_file')).toBe(
-      'unknown tool "echo_file"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, artifact_describe_type, artifact_read, artifact_publish, artifact_upload_asset, artifact_list_assets, artifact_export, artifact_dataset, artifact_edit, artifact_comments, artifact_reply, artifact_resolve',
-    ); // E2: seven; E4c: thirteen; P1 A-54 (2026-10-08): seven again; P3-A (M6): twelve, artifact_update retired; P3-B (M7): sixteen
+      'unknown tool "echo_file"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, artifact_describe_type, artifact_read, artifact_publish, artifact_upload_asset, artifact_list_assets, artifact_export, artifact_dataset, artifact_edit, artifact_comments, artifact_reply, artifact_resolve, artifact_search, message',
+    ); // E2: seven; E4c: thirteen; P1 A-54 (2026-10-08): seven again; P3-A (M6): twelve, artifact_update retired; P3-B (M7): sixteen; P4-B4: eighteen
     expect(rpcOf(thrown)).toEqual({ jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: 'show_pane: disk on fire' }], isError: true } });
     expect(logs.join('\n')).toContain('disk on fire');
   });

@@ -14,6 +14,7 @@ import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
 import { OwnerChannelLaunches } from '../owner/launch'; // P2-C
 import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT } from '@shared/owner/contract'; // P2-C
+import { userScopeProfile } from '@shared/engine/launch-profile'; // P4-A2
 
 // The service is Electron-free (its handlers are service-register.ts's).
 vi.mock('electron', () => {
@@ -253,7 +254,7 @@ describe('session service', () => {
 
     it("falls back to direct for a Claude model when settings say so, with the session's notice", async () => {
       h.dispose();
-      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
+      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
       h.trustDirectory(h.work);
       h.host.relay = DOWN_RELAY;
       const id = await create();
@@ -1034,7 +1035,7 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     expect(bootstrap!.appSessionId).not.toBe(id);
     expect(bootstrap).not.toHaveProperty('appendSystemPrompt');
     expect(bootstrap!.extraSettings).toBeNull();
-    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_CONTRACT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '5' } } }); // P2-C2: contract 5
+    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_CONTRACT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '7' } } }); // P2-C2: contract 5; P4-R7: 7
     expect(launch).not.toHaveProperty('systemPromptSnapshot');
     const row = h.index.ownerChannel.session(id);
     expect(row).toMatchObject({ desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract' });
@@ -1052,7 +1053,7 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     const launch = h.host.launches.at(-1)!;
     expect(launch).toMatchObject({ appSessionId: record.appId, systemPromptSnapshot: 'off', extraSettings: null });
     expect(launch).not.toHaveProperty('appendSystemPrompt');
-    expect(h.index.ownerChannel.session(record.appId)).toMatchObject({ override: 'off', desired: 'off', recorded: 'contract:5', snapshotOff: true, applied: 'off', enabledAt: null });
+    expect(h.index.ownerChannel.session(record.appId)).toMatchObject({ override: 'off', desired: 'off', recorded: 'contract:7', snapshotOff: true, applied: 'off', enabledAt: null });
   });
 
   it('a fork takes its parent’s override with its record and reads the parent’s transcript', async () => {
@@ -1065,7 +1066,7 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     expect(await h.settled(outcome.appSessionId)).toMatchObject({ phase: 'ready' });
     expect(h.index.ownerChannel.override(outcome.appSessionId)).toBe('off');
     expect(h.host.launches.at(-1)).toMatchObject({ appSessionId: outcome.appSessionId, resume: { sessionId: SID, fork: true }, systemPromptSnapshot: 'off' });
-    expect(h.index.ownerChannel.session(outcome.appSessionId)).toMatchObject({ recorded: 'contract:5', applied: 'off' });
+    expect(h.index.ownerChannel.session(outcome.appSessionId)).toMatchObject({ recorded: 'contract:7', applied: 'off' });
   });
 });
 // P2-C end

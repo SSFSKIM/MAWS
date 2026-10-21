@@ -8,10 +8,11 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HistoryApi } from '../../../document/editor/history/api';
-import { formatWhen } from '../../../document/editor/history/model';
+import { formatWhen, versionSummary } from '../../../document/editor/history/model';
 import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../../../yjs';
 import { importSlide, setNotes, setStyle, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
+import { addThread } from '../../threads';
 import { DeckHistoryController } from './controller';
 
 const SESSION = '00000000-0000-4000-8000-0000000000a1' as AppSessionId;
@@ -225,5 +226,16 @@ describe('the deck’s history controller (D11)', () => {
     const editors = await controller.editorsOf('a', 'title');
     expect(editors.map((e) => e.name)).toEqual(['Deck agent', 'You']);
     expect(editors[0]!.color).toMatch(/^--author-\d$/);
+  });
+
+  // P4 W1-B (the tracker's "P4 version history lines"): a turn's thread lines (artifact_reply's, artifact_resolve's) read
+  // "replied on c:<id>" in B's rail; the deck names the comment by its element's words in the live deck instead
+  it('names a comment in the rail’s lines by its element’s live words', () => {
+    const h = deckHost(['a']);
+    h.write(HUMAN, (d) => addThread(d, { threadId: 't1', slideId: 'a', elementId: 'title', quote: 'An older title', by: HUMAN, at: 1, body: 'Bigger?' }));
+    const controller = attach(h);
+    const turn = (summary: string) => versionSummary({ id: 1, seq: 1, at: 0, actor: AGENT, kind: 'turn', assetRefs: [], summary }, controller.words());
+    expect(turn('replied on c:t1')).toBe('Replied to the comment on “Title a”');
+    expect(turn('resolved c:gone')).toBe('Resolved a comment');
   });
 });

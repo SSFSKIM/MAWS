@@ -223,6 +223,7 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
       copy,
       '<!-- made by the agent; a <head> in a comment --><!doctype html><html><head><title>E2</title></head><body style="margin:0">' +
         '<h1 id="hero" style="margin:0;height:200px">Sales overview</h1><p class="lead">more</p>' +
+        '<a id="away" href="https://example.invalid/away" style="position:absolute;left:0;top:440px">away</a>' +
         "<script>document.addEventListener('click', () => parent.postMessage('e2-page-click', '*'));</script></body></html>",
     );
     const at = new Date().toISOString();
@@ -244,12 +245,16 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
       element.contentWindow!.postMessage({ type: 'maws:pick', on: true }, '*');
     });
     const posted = () => maws.page.evaluate(() => (window as unknown as { __e2Posted: unknown[] }).__e2Posted);
-    // The move that shows the overlay is dispatched in the frame, again until the overlay is up (L64): the pick-on
-    // message is a task in the frame that a move sent as input can overtake, leaving no later move to place the overlay,
-    // and the desktop's own pointer still reaches an e2e window. The bridge hears mousemove at the window's capture phase.
+    // The overlay is shown by the pointer, moved again (a pixel back and forth) until the overlay is up, as the owner
+    // sees the highlight before they click. The pick-on message is a task in the frame that a move can overtake (L64);
+    // and Chromium routes input into a frame of another process only once the window's compositor has placed it, so in
+    // a run's first moments after the frame loaded an input event can still go to the app's document, where it reaches
+    // the iframe element and nothing in the frame (a click sent then was lost, with the overlay a move dispatched inside
+    // the frame had already put up). An overlay a real move placed is both settled, so the click below picks.
+    let nudge = 0;
     await expect
       .poll(async () => {
-        await frame.evaluate(() => document.getElementById('hero')!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 100 })));
+        await maws.page.mouse.move(100 + (nudge++ % 2), 100);
         return frame.locator('[data-maws-pick-overlay]').count();
       })
       .toBe(1);
@@ -286,6 +291,19 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
     expect(await frame.locator('[data-maws-pick-overlay]').count()).toBe(0);
     await maws.page.mouse.click(100, 300);
     await expect.poll(posted).toHaveLength(7); // the page still hears its clicks: no picking started
+
+    // P4 W2-C (tracker 2026-10-06): a link to the web stays on the page. The bridge keeps the frame from a navigation the
+    // app's `frame-src` would refuse (a delivered file, which has no bridge, is left on Chromium's blocked page: case 3);
+    // the page still hears the click, so it landed in the frame
+    const navigations = await recordNavigations(maws);
+    const pageUrl = frame.url();
+    await frame.locator('#away').click();
+    await expect.poll(posted).toHaveLength(8);
+    expect((await posted())[7]).toBe('e2-page-click');
+    await maws.page.waitForTimeout(1_000);
+    expect((await navigations()).filter((line) => line.includes('example.invalid')), 'no navigation began').toEqual([]);
+    expect(frame.url()).toBe(pageUrl);
+    await expect(frame.locator('#hero')).toHaveText('Sales overview');
   } finally {
     await maws.cleanup();
   }
@@ -340,8 +358,8 @@ async function darkIn(s: Scene, element: Locator): Promise<{ dark: number; centr
 }
 
 // What main saw the app window navigate, from now on: starts and failed loads of any frame, and top-level commits.
-async function recordNavigations(s: Scene): Promise<() => Promise<string[]>> {
-  await s.maws.app.evaluate(({ BrowserWindow }) => {
+async function recordNavigations(maws: MawsLaunch): Promise<() => Promise<string[]>> {
+  await maws.app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
     const log: string[] = [];
     (globalThis as unknown as { __e2Navigations: string[] }).__e2Navigations = log;
@@ -349,7 +367,7 @@ async function recordNavigations(s: Scene): Promise<() => Promise<string[]>> {
     win.webContents.on('did-fail-load', (_event, code, _description, url, main) => log.push(`fail ${main ? 'window' : 'frame'} ${code} ${url}`));
     win.webContents.on('did-navigate', (_event, url) => log.push(`navigated window ${url}`));
   });
-  return () => s.maws.app.evaluate(() => [...(globalThis as unknown as { __e2Navigations: string[] }).__e2Navigations]);
+  return () => maws.app.evaluate(() => [...(globalThis as unknown as { __e2Navigations: string[] }).__e2Navigations]);
 }
 
 // Every frame URL in the app window, and the window's own URL.
@@ -510,7 +528,7 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
 // P3-L M6b: the tab's case after its record is deleted (the restored tab showing the session's list headed by "No
 // deliverable … in this session") was the Deliverables tool's alone and is gone with it; an `artifact` tab's Gone notice
 // is M3's (ArtifactTab's units).
-test('the Artifacts tool: groups newest first, Back to the list’s scroll, the version switcher, Open in tab, the tab across a reload', async () => {
+test('the Artifacts tool: groups newest first, Back to the list’s scroll, the version switcher, Move to tab, the tab across a reload', async () => {
   await scene({ titles: ['E2: the tool'] }, async (s) => {
     const [id] = s.ids;
     const userData = s.maws.userData;
@@ -529,10 +547,14 @@ test('the Artifacts tool: groups newest first, Back to the list’s scroll, the 
     const list = listOf(s);
     await expect(list.locator('[data-artifacts-group]')).toHaveCount(2);
     expect(await list.locator('[data-artifacts-group]').evaluateAll((els) => els.map((el) => el.getAttribute('data-artifacts-group')))).toEqual(['html', 'file']);
-    await expect(list.locator('[data-artifacts-group="html"] [data-part="title"]')).toHaveText(['Sales dashboard']);
+    // L134: the list is virtualised, so a group's rows are lines after its heading, not inside it; a row names its kind
+    await expect(list.locator('[data-artifact-row][data-kind="html"] [data-part="title"]')).toHaveText(['Sales dashboard']);
     // P3-L M6b: the Deliverables list's version count on the row's line ("v2 · …") is gone with it (the line is the
     // library's "Edited … by …")
-    await expect(list.locator('[data-artifacts-group="file"] [data-part="title"]')).toHaveText(notes.map((n) => n.title!).reverse());
+    // The rows mounted are the list's first, newest first; the rest mount as the list scrolls (L134)
+    const newestFirst = notes.map((n) => n.title!).reverse();
+    const fileTitles = () => list.locator('[data-artifact-row][data-kind="file"] [data-part="title"]').allTextContents();
+    await expect.poll(async () => { const shown = await fileTitles(); return shown.length > 0 && shown.every((title, i) => title === newestFirst[i]); }).toBe(true);
     // P3-L M6b: the row's caption ("the first note") is gone with the Deliverables list (Decision Log 18e: the caption is
     // the transcript's delivery row's)
 
@@ -567,11 +589,12 @@ test('the Artifacts tool: groups newest first, Back to the list’s scroll, the 
     await expect.poll(() => s.page.frames().some((f) => f.url() === v2), { message: 'the v2 frame is gone' }).toBe(false);
     await shoot(s, 'versions');
 
-    // Open in tab: the same viewer as a main tab, on the record's latest version
-    await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+    // Move to tab (P4-B3: it was "Open in tab"): the same viewer as a main tab, its state carried with it (the version
+    // the switcher shows comes across; the reload below starts it afresh on the latest)
+    await s.panel.getByRole('button', { name: 'Move to tab' }).click();
     const tab = s.page.locator('[data-region="main"] [data-artifact-tab]');
     await expect(viewerOf(tab)).toHaveAttribute('data-artifact-viewer', artifact.id);
-    await expect(tab.getByRole('button', { name: 'Open in tab' })).toHaveCount(0);
+    await expect(tab.getByRole('button', { name: 'Move to tab' })).toHaveCount(0);
     await expect(tab.getByRole('button', { name: 'Back' })).toHaveCount(0);
     await shoot(s, 'tab');
 
@@ -683,8 +706,10 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(userData, (name) => name === 'e2-download.txt' || name.endsWith('.crdownload'))).toEqual([]);
     // a link to the web: the app's own `frame-src` refuses the frame's navigation before any request is made (so main's
-    // frame guard is never asked); the frame is left on Chromium's blocked page until Reload, the window stays put
-    const navigations = await recordNavigations(s);
+    // frame guard is never asked); the frame is left on Chromium's blocked page until Reload, the window stays put. A
+    // delivered file is served byte for byte, without the bridge script, so it keeps this; an HTML artifact's link stays
+    // on its page (the bridge script's case)
+    const navigations = await recordNavigations(s.maws);
     const appUrl = s.page.url();
     await page.locator('#away').click();
     await expect.poll(navigations).toContain('fail frame -30 https://example.invalid/away'); // ERR_BLOCKED_BY_CSP
@@ -700,11 +725,13 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     await expect(pdfFrame).not.toHaveAttribute('sandbox');
     await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
     await shoot(s, 'viewer-pdf');
-    // its link: Chromium's viewer asks to navigate the window itself; main's top-level guard (`window.ts`) refuses it, so
-    // the app stays put and no frame holds anything outside the scheme, the viewer and its resources
+    // its link: Chromium's viewer asks to navigate the window itself; main's top-level guard (`window.ts`) refuses it and
+    // writes the seam line a frame's refusal writes, so the app stays put and no frame holds anything outside the scheme,
+    // the viewer and its resources
     const square = (await darkIn(s, pdfFrame)).centre!;
     await s.page.mouse.click(square.x, square.y);
     await expect.poll(navigations, { timeout: 10_000 }).toContain('start window https://example.invalid/pdf-link');
+    await expect.poll(() => seamLines(s)).toContain('blocked-navigation https://example.invalid/pdf-link');
     await s.page.waitForTimeout(1_000);
     expect((await navigations()).filter((line) => line.startsWith('navigated window'))).toEqual([]);
     const after = await framesOfWindow(s);
@@ -856,7 +883,7 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
       await rowOf(list, record).click();
       await expect(panelViewer).toHaveAttribute('data-body', body);
       await sizes(panelViewer, media, natural);
-      await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+      await s.panel.getByRole('button', { name: 'Move to tab' }).click();
       await expect(tabViewer(record)).toBeVisible();
       await sizes(tabViewer(record), media, natural);
     }
@@ -1020,7 +1047,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
 
     // the same pick in the artifact's main tab opens the card inside that tab's viewer
-    await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+    await s.panel.getByRole('button', { name: 'Move to tab' }).click();
     const tabViewer = viewerOf(s.page.locator('[data-region="main"] [data-artifact-tab]'));
     await expect(tabViewer).toHaveAttribute('data-artifact-viewer', record.id);
     await s.page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
@@ -1039,7 +1066,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
 
     // an element at the bottom of its frame: the card opens above it, its bottom edge 4 px over the element's top
     await show(s, id); // P3-L M6b: the session again, its panel tools with it (an `artifact` main tab is the library's)
-    // Open in tab moved the artifact (P3-F wave S, F16): the session's Artifacts tool is back on its list
+    // Move to tab moved the artifact (P3-F wave S, F16): the session's Artifacts tool is back on its list
     await expect(listOf(s)).toBeVisible();
     await expect(viewer).toHaveCount(0);
     await rowOf(listOf(s), notes).click();
@@ -1118,7 +1145,7 @@ test('a relaunch over the same profile lists every deliverable; the All scope sh
 
       await list.getByRole('button', { name: 'All', exact: true }).click();
       // the case's own three among the whole library (P3-D seeds default design systems: Decision Log 32c)
-      await expect(list.locator('[data-artifacts-group="html"] [data-artifact-row], [data-artifacts-group="file"] [data-artifact-row]')).toHaveCount(3);
+      await expect(list.locator('[data-artifact-row][data-kind="html"], [data-artifact-row][data-kind="file"]')).toHaveCount(3);
       await rowOf(list, report).click();
       await expect(viewer).toHaveAttribute('data-artifact-viewer', report.id);
       await expect((await frameAt(second.page, await pageUrlOf(second.page, report.id))).locator('#heading')).toHaveText('OTHER_REPORT');

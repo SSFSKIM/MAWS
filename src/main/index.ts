@@ -32,7 +32,7 @@ import { LayoutFileStore } from './layout/store';
 import { registerChatPanels } from './sessions/panel-lifetime';
 import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
-import { registerOpenExternal } from './open-external';
+import { openExternalUrl, registerOpenExternal } from './open-external'; // P4-B5: openExternalUrl
 import { startSessions } from './sessions';
 import { registerObservedFacts } from './sessions/observed'; // P2-A
 import { startYield } from './sessions/yield'; // W7
@@ -67,6 +67,7 @@ import { startOwnerChannel } from './owner/register'; // P2-C (2026-10-09)
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 import { transcriptPathOf } from './sessions/context'; // P2-D
 import { readRecentTurns } from './sessions/recent-turns'; // P2-D
+import { readRestoredCost } from './sessions/restored-cost'; // tracker 2026-09-29
 // C10 end
 // C11 start
 // (electron's `shell` comes with C8c's imports above, `onEmitted` with C7's)
@@ -141,6 +142,7 @@ import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 import { startConnectors } from './connectors'; // P3-H H3b
 import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
 import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
+import { startDelivery } from './delivery'; // P4-B5: the owner's Send to
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -221,7 +223,8 @@ void startWithProfileLock(app, () => {
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
-  // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace
+  // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
+  // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
   const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields), and main's attention service answers `attention.*` over the hosts' events (C3 execution document, M5).
@@ -266,10 +269,20 @@ void startWithProfileLock(app, () => {
   // ---- C5: layout store and the read side (launch mode, read model, stub source in scenario mode) ----
   const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
   registerOpenExternal();
+  // The engine's environment (its config directory, where it writes a session's transcript): C7's services below read it too.
+  const home = app.getPath('home');
+  const engineEnv = captureShellEnvironment();
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({
     env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource,
+    // tracker 2026-09-29: what a resumed process restored, by its transcript's last `cost-state` (the cost ledger), from
+    // the transcript the index knows for the session, else where the engine writes a launched session's
+    restoredCost: async ({ appId, directory, engineSessionId }) => {
+      if (engineSessionId === null) return null;
+      const known = index.unavailable === null ? index.sessions.summaryOf(appId)?.transcriptPath : null;
+      return readRestoredCost(known || (await transcriptPathOf(await engineEnv, directory, engineSessionId)), engineSessionId);
+    },
     // E3: a parent's side-thread rows, re-synthesised from the index (none while the index is unavailable)
     appEventsExtra: (appSessionId) => {
       if (index.unavailable !== null) return [];
@@ -303,8 +316,6 @@ void startWithProfileLock(app, () => {
 
   // C7 start: the composer's main services (C7 execution document, M1): ClaudeUsage's files for the status line (read
   // only), the prompt history (MAWS's own file; the terminal's read only), the `@` menu's file listing and the picker.
-  const home = app.getPath('home');
-  const engineEnv = captureShellEnvironment();
   const engineConfigDir = engineEnv.then((env) => claudeConfigDir(env, env.HOME || home));
   const userDefaults = async () => readUserEngineDefaults(await engineConfigDir);
   // P2-D (2026-10-09): the resume chooser's preview read, from the transcript path the index keeps, else where the
@@ -540,7 +551,8 @@ void startWithProfileLock(app, () => {
 
   // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over
   // <userData>/browser/tabs.json, the partitions, the views and browser.*, after the index (a deleted session closes its
-  // tabs) and before any window, so the first page finds its handlers. Its will-quit write runs before the hosts stop.
+  // tabs) and before any window, so the first page finds its handlers. Its will-quit write runs once the hosts' drain has
+  // settled (P4 W2-B).
   // Settings 11's browser section is read from the service at each use: the profile when a tab opens, the link target
   // when a page opens a window.
   const browser = startBrowser({
@@ -596,13 +608,27 @@ void startWithProfileLock(app, () => {
   });
   shutdown.add('artifacts', artifacts.stop);
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
-  // engine host's main-only commands). Its stop runs before the hosts' (steps run in the order added): every lease,
-  // watch and pending operation ends, each operation withdrawn from the host, while the host can still hear it.
+  // engine host's main-only commands). At will-quit every lease, watch and pending operation ends. P4 W2-B: the stop runs
+  // after the hosts' drain, so its withdrawals answer host_unavailable in main; the host ends every operation of a main
+  // that leaves on its own (src/engine-host/connectors/register.ts, onClientGone), which the withdrawals only repeated.
   // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
   // P3-HD (Decision Log 14): the root supplies route D, which the service composes after route E; the engine stays preferred.
   // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
   const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
   shutdown.add('connectors', connectors.stop);
+  // P4-B5: the owner's Send to, no Claude turn: Notion through route D (MAWS's own connection), Drive through the gws CLI
+  // the owner installed, run with the login shell's environment (the CLI keeps its sign-in; MAWS holds no Google
+  // credential); the export is X31's, as the library's
+  const delivery = startDelivery({
+    register: registerMainHandler,
+    emit: (name, payload) => emit(name, payload),
+    exportArtifact: (input, options) => artifacts.exports.exportForLibrary(input, options),
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    connectors: connectors.delivery ?? null,
+    shellEnv: () => engineEnv,
+    openExternal: (url) => openExternalUrl(url),
+  });
+  shutdown.add('delivery', delivery.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
@@ -738,8 +764,11 @@ void startWithProfileLock(app, () => {
   };
   // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a
   // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting). E11:
-  // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound)
-  shutdown.add('hosts', () => hosts.stop());
+  // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound).
+  // P4 W2-B (tracker 2026-10-07 "The keep-quit drain…"): a drain, so it runs before every other step and those stop only
+  // once it has settled or the bound passed; the lines it reads are folded by services still running (the index, side
+  // threads, attention, the read model), where they once reached services already stopped
+  shutdown.drain('hosts', () => hosts.stop());
   // E9 start: push-to-talk dictation (E9 execution document, M2): voice.* over the bundled helper, spawned on first use
   // (or, under the harness, the scripted backend or the probe-only helper); the helper is asked to quit at will-quit.
   const voice = startVoice({

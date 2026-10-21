@@ -42,17 +42,16 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import type { JournalRow } from '@shared/wire/journal';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../src/engine-host/binary-info';
 import { RELAY_URL } from '../src/engine-host/launch';
-import { journalCost } from '../test/live/support/live';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { forwardingScript } from './support/live-budget';
+import { forwardingScript, spentUnder } from './support/live-budget';
 import { mcpCalls } from './support/maws-tools';
 import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
@@ -77,9 +76,9 @@ function capUsd(): number {
 const OUT = resolve(REPO_ROOT, process.env.MAWS_C_LIVE_OUT ?? 'docs/doperpowers/evidence/p2-c');
 const OWNER_PLUGIN = 'doperpowers@doperpowers';
 const STYLE = 'doperpowers:to-human';
-const HEADER = CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION); // P2-C2: contract 5
+const HEADER = CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION); // P2-C2: contract 5; P4-R7: 7
 const OLD_HEADER = CONTRACT_HEADER(1); // what sessions recorded before contract 5
-const SUPPLEMENT = SUPPLEMENT_HEADER(1); // P2-C2
+const SUPPLEMENT = SUPPLEMENT_HEADER(TO_HUMAN_SUPPLEMENT_VERSION); // P2-C2; P4-R7: supplement 2
 const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION); // MAWS_NATIVE_TO_HUMAN's value
 const HAIKU = /^(Haiku|claude-haiku)/;
 const DRAFT = 'my own draft, not for sending';
@@ -105,17 +104,31 @@ const PROMPTS = {
 
 // ---- the scratch root ------------------------------------------------------------------------------------------------
 
-const root = skip === null ? realpathSync(mkdtempSync('/tmp/maws-p2c-live-')) : '/tmp/maws-p2c-live-skipped'; // made only for a run
-const config = join(root, 'claude-config');
-const userData = join(root, 'user-data');
-const repo = join(root, 'p2c-repo');
+// Made in the worker that runs the test (beforeAll, which a skipped test never reaches), not when the module loads:
+// Playwright's runner loads the spec too, to list it, and a root made there was left behind empty.
 const REPO_NAME = 'p2c-repo';
-const market = join(root, 'doperpowers-market');
-const engineScript = join(root, 'engine', 'claude');
-const budgetFile = join(root, 'budget-usd');
-const probeLog = join(root, 'probe.log');
-const notifyHook = join(root, 'notify-hook.cjs');
-const db = join(userData, 'index.sqlite');
+let root = '';
+let config = '';
+let userData = '';
+let repo = '';
+let market = '';
+let engineScript = '';
+let budgetFile = '';
+let probeLog = '';
+let notifyHook = '';
+let db = '';
+test.beforeAll(() => {
+  root = realpathSync(mkdtempSync('/tmp/maws-p2c-live-'));
+  config = join(root, 'claude-config');
+  userData = join(root, 'user-data');
+  repo = join(root, REPO_NAME);
+  market = join(root, 'doperpowers-market');
+  engineScript = join(root, 'engine', 'claude');
+  budgetFile = join(root, 'budget-usd');
+  probeLog = join(root, 'probe.log');
+  notifyHook = join(root, 'notify-hook.cjs');
+  db = join(userData, 'index.sqlite');
+});
 
 const line = (text: string) => {
   appendFileSync(join(OUT, 'live-run.txt'), `${text}\n`);
@@ -205,15 +218,9 @@ function cli(args: string[]): string {
 // ---- journals, the index, the transcript, the probe ------------------------------------------------------------------
 
 const journal = (id: string): JournalRow[] => sessionJournal(userData, id);
-function spent(): number {
-  const dir = join(userData, 'engine-host', 'journal');
-  if (!existsSync(dir)) return 0;
-  let usd = 0;
-  for (const id of readdirSync(dir)) {
-    for (const file of readdirSync(join(dir, id)).filter((f) => f.endsWith('.jsonl'))) usd += journalCost(readFileSync(join(dir, id, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow)).costUsd;
-  }
-  return usd;
-}
+// What the run has spent: each session's launches read as one cumulative stream (live-budget.ts), so the resume case's
+// session counts its first launch's spend once.
+const spent = (): number => spentUnder(userData);
 // Before every launch: the session process may spend what the run's cap leaves.
 function budget(cap: number): number {
   const left = cap - spent();
@@ -234,7 +241,7 @@ function spawns(id: string): Spawn[] {
     });
 }
 const spawnWords = (s: Spawn) =>
-  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? `contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte` : s.append === TO_HUMAN_SUPPLEMENT ? 'supplement 1, byte for byte' : s.append.startsWith(HEADER) ? 'the contract header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
+  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? `contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte` : s.append === TO_HUMAN_SUPPLEMENT ? `supplement ${TO_HUMAN_SUPPLEMENT_VERSION}, byte for byte` : s.append.startsWith(HEADER) ? 'the contract header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
 
 interface OwnerRow { launch_id: string | null; desired: string | null; recorded: string | null; appended: number; snapshot_off: number; off_unavailable: number; applied: string | null; style: string | null; observed_style: string | null; style_mismatch: number; override: string; enabled_at: string | null }
 function ownerRow(id: string): OwnerRow | null {
@@ -833,7 +840,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
       expect(probe).toBe('<unset>');
       expect(row.applied).toBe('off');
-      expect(row.recorded, 'the supplement the session recorded (P2-C2)').toBe('supplement:1');
+      expect(row.recorded, 'the supplement the session recorded (P2-C2)').toBe(`supplement:${TO_HUMAN_SUPPLEMENT_VERSION}`);
       expect(spawn.snapshotOff, 'the recorded supplement dropped at once where the binary declares the flag').toBe(declares);
       line(`style arm, lane off: ${spawnWords(spawn)}; ${decisionWords(row)}; ${NATIVE_TO_HUMAN_ENV}=<unset> logged; the mod draws its band "${bandText.slice(0, 60)}"`);
       await stop(page, s2);

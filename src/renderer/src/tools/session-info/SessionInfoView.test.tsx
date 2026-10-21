@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { digest } from '../../../../../test/support/builders';
 import { useReadLoads } from '../../widgets/read';
@@ -29,6 +29,8 @@ import { useUsage } from '../../stores/usage';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import { builder, tool } from '../../transcript/model/test-events';
 import { sessionInfoTool } from '.';
+import { heldModel, resetModelRequests, useModelRequests, type HeldModel } from '../../widgets/model';
+import { liveBindings } from '../../composer/frame/bindings';
 // E4a start
 import { browserTab, T1, T2, T3 } from '../../test-support/browser';
 import { browser, resetBrowser } from '../browser/store';
@@ -135,6 +137,38 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Main')).not.toContain('set · the next init frame confirms it'); // the alias resolved: confirmed
     expect(valueOf('Main')).toMatch(/^claude-sonnet-5\[1m\]/);
     useComposerStore.setState({ models: new Map() });
+  });
+
+  // P2-F wave S (S-chip; the fixer's note): the row marks a request pending by the chip's rule (`modelAsk`) over the
+  // request this renderer holds, so it sees an explicit Default and a choice the session is still starting for, and it
+  // reads pending exactly when the composer's chip does.
+  describe('the Main row over the request this renderer holds, as the composer’s chip reads it', () => {
+    const PENDING = 'set · the next init frame confirms it';
+    afterEach(() => {
+      resetModelRequests();
+      useComposerStore.setState({ models: new Map() });
+    });
+    const cases: { name: string; held: HeldModel | null; model: EngineSessionStatus['model']; main: RegExp; pending: boolean }[] = [
+      // the catalogue's Default runs Opus (auto-routed seq 143)
+      { name: 'an explicit Default with nothing reported yet', held: { value: null, starting: false, basis: null, resolved: null }, model: { requested: null, resolved: null }, main: /^claude-opus-5-5\[1m\]/, pending: true },
+      { name: 'an explicit Default while Sonnet still runs', held: { value: null, starting: false, basis: 'sonnet', resolved: 'claude-sonnet-5[1m]' }, model: { requested: null, resolved: 'claude-sonnet-5[1m]' }, main: /^claude-opus-5-5\[1m\]/, pending: true },
+      { name: 'a choice of the model last reported, its start not through yet', held: { value: 'sonnet', starting: true, basis: null, resolved: null }, model: { requested: null, resolved: 'claude-sonnet-5[1m]' }, main: /^sonnet/, pending: true },
+      { name: 'an explicit Default the engine runs', held: { value: null, starting: false, basis: 'sonnet', resolved: 'claude-opus-5-5[1m]' }, model: { requested: null, resolved: 'claude-opus-5-5[1m]' }, main: /^claude-opus-5-5\[1m\]/, pending: false },
+      { name: 'no request held, the reported model', held: null, model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' }, main: /^claude-sonnet-5\[1m\]/, pending: false },
+    ];
+    it.each(cases)('$name', ({ held, model, main, pending }) => {
+      const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
+      rememberListedModels(READY, catalogue);
+      const status = { ...backend.status(READY), model };
+      useSessions.setState({ engine: new Map([[READY, status]]) });
+      if (held) useModelRequests.setState({ model: new Map([[READY, held]]) });
+      mount(ctxOf(READY));
+      expect(valueOf('Main')).toMatch(main);
+      expect(valueOf('Main').endsWith(PENDING)).toBe(pending);
+      // the composer's chip over the same status and the same held request
+      const chip = liveBindings(status, record, { models: catalogue, asked: heldModel(useModelRequests.getState(), READY, status) ?? null }).model;
+      expect(chip.requested).toBe(pending);
+    });
   });
 
   it('counts the reviews only while the transcript holds rows for the session', async () => {
@@ -254,7 +288,7 @@ describe('session info of a session with no live process', () => {
 
 // W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
 describe('the route switch and the Direct poll, re-homed from the status line', () => {
-  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V14, gateway: { ...SETTINGS_DEFAULTS_V14.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
+  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V17, gateway: { ...SETTINGS_DEFAULTS_V17.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
   const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
 
   it('a routed session’s Route offers Switch to Direct…, which opens the switch’s confirm', async () => {

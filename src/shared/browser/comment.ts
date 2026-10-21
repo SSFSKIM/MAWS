@@ -30,6 +30,7 @@ const ElementDescriptionSchema = z.strictObject({
   css: z.string().min(1).max(CSS_PATH_MAX),
   role: z.string().min(1).max(REPORT_TOKEN_MAX).nullable(),
   name: z.string().max(REPORT_NAME_MAX),
+  displayName: z.string().min(1).max(REPORT_NAME_MAX).optional(), // P4 W2-C: a label beside an empty name, never the name
   a11y: z.string().max(REPORT_A11Y_MAX),
   tag: z.string().min(1).max(REPORT_TOKEN_MAX),
   confident: z.boolean(),
@@ -83,13 +84,14 @@ export function browserElementAnchor(input: { report: PickReport; pageUrl: strin
   const pageUrl = anchorPageUrl(input.pageUrl);
   if (pageUrl === null) return null;
   const name = oneLine(description.name);
+  const displayName = oneLine(description.displayName ?? ''); // P4 W2-C: the label's alone
   const tag = oneLine(description.tag);
   const a11y = oneLine(description.a11y);
   const confident = description.confident;
   const anchor: Anchor = {
     kind: 'browser-element',
     locator: description.css,
-    label: elementLabel({ role: description.role, name, tag }, LABEL_MAX),
+    label: elementLabel({ role: description.role, name, displayName, tag }, LABEL_MAX),
     ...(pageUrl !== undefined && { pageUrl }),
     ...(screenshot !== null && { screenshot }),
     css: description.css,

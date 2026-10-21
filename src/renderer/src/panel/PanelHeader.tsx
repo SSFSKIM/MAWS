@@ -10,7 +10,7 @@ import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { FloatIcon, Icon, IconButton, MaximizeIcon, PanelIcon, PenIcon, RestoreIcon } from '../app/IconButton';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { cardSession, FLOAT_COPY, useFloatingCard } from '../shell/floating'; // P3-F L129; FLOAT_COPY: wave S (F6)
+import { cardHost, cardSession, FLOAT_COPY, useFloatingCard } from '../shell/floating'; // P3-F L129; FLOAT_COPY: wave S (F6); cardHost: P4-B3
 import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
 import { SAVED_COPY, useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
@@ -50,8 +50,9 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   const listed = comments ? actions.filter((a) => a !== comments) : actions;
   const exports = registration?.exports ?? [];
   const breadcrumb = registration?.breadcrumb ?? [];
-  const shown = narrow ? [] : listed.slice(0, SHOWN_ACTIONS);
-  const overflow = narrow ? listed : listed.slice(SHOWN_ACTIONS);
+  const counted = listed.filter((a) => !a.pinned); // P4-B5: a pinned action is drawn beside the three, never folded but narrow
+  const shown = narrow ? [] : [...counted.slice(0, SHOWN_ACTIONS), ...listed.filter((a) => a.pinned)];
+  const overflow = narrow ? listed : counted.slice(SHOWN_ACTIONS);
   const folded = narrow ? exports : [];
   const plain = suffix ? `${title} · ${suffix}` : title;
   const hasEditorControls = listed.length > 0 || exports.length > 0 || Boolean(markup);
@@ -163,17 +164,18 @@ function MarkupButton({ scope }: { scope: EditorHostScope }) {
 
 // Float's label names what a click does (`togglePanelFloat`): floats a docked panel; over a floating one, brings a card
 // closed to its pill back (P3-F L129), else docks. With no session in front there is nothing to float: disabled, the
-// label saying why (P3-F wave S, F6).
+// label saying why (P3-F wave S, F6). P4-B3 (its Decision Log 8): with the main split's card up, a click docks that card.
 function RegionControls() {
   const { maximized, floating } = useLayout((s) => s.regions.panel);
   const closed = useFloatingCard((s) => s.closed);
   const shown = useLayout(cardSession);
+  const split = useLayout((s) => cardHost(s) === 'split');
   const pill = closed && shown !== null;
-  const nothing = useLayout((s) => !s.regions.panel.floating && shownSession(s.main) === null);
+  const nothing = useLayout((s) => !s.regions.panel.floating && cardHost(s) === null && shownSession(s.main) === null);
   return (
     <>
       <IconButton
-        label={nothing ? FLOAT_COPY.noSession : !floating ? 'Float session over panel' : pill ? 'Open session card' : 'Dock session'}
+        label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float session over panel' : pill ? 'Open session card' : 'Dock session'}
         action="panel.float"
         pressed={floating}
         disabled={nothing}

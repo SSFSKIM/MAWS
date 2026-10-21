@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
 import { addTab, createDocument, deleteTab, renameTab, tabBody } from '../../tabs';
+import { addThread } from '../../threads';
 import { isBindingTransaction, newDoc, stateV2 } from '../../../yjs';
 import { ynodeToPmnode } from '../../../yjs/prosemirror';
 import { DesignSystemHostContext, DesignSystemScope } from '../../../design-system/apply';
@@ -170,6 +171,47 @@ describe('the list', () => {
   });
 });
 
+// P4 W1-B (the tracker's "P4 version history lines"; §4.7's one-line summary): a turn's stored summary is the tools' own
+// lines, which name blocks as ^id and comments as c:id; the row names them by the live document's words instead, from
+// any of its tabs, and says "a block" for one the document no longer holds. The stored summary is left as it is.
+describe('a row’s line', () => {
+  const cell = (type: 'tableHeader' | 'tableCell', id: string, text: string) => ({ type, attrs: { id, colspan: 1, rowspan: 1, colwidth: null }, content: [{ type: 'paragraph', attrs: { id: `${id}p` }, content: [{ type: 'text', text }] }] });
+  const table = {
+    type: 'table',
+    attrs: { id: 'tb1' },
+    content: [
+      { type: 'tableRow', attrs: { id: 'tr0' }, content: [cell('tableHeader', 'th1', 'Region'), cell('tableHeader', 'th2', 'Q1')] },
+      { type: 'tableRow', attrs: { id: 'tr1' }, content: [cell('tableCell', 'td1', 'North'), cell('tableCell', 'td2', '4.2')] },
+    ],
+  };
+
+  it('names the blocks and the comment a turn touched by their words, not their ids', async () => {
+    const clock = { value: new Date(2026, 9, 15, 12).getTime() };
+    await setup(
+      ({ host: h, history: hist }) => {
+        h.write((doc) => {
+          addTab(doc, { title: 'Figures', id: 't2', body: schemaFor().nodeFromJSON({ type: 'doc', content: [table] }) });
+          addThread(doc, { threadId: 'c1', tabId: TAB, blockId: 'p1', quote: 'The first paragraph.', anchor: { kind: 'block' }, by: HUMAN, at: 1, body: 'Shorter?' });
+        });
+        for (const summary of ['replaced 1 occurrence(s) in ^p2', 'set cell (1, 0) of ^tb1', 'replied on c:c1', 'replaced 2 occurrence(s) in ^gone']) {
+          clock.value += 60_000;
+          hist.version('turn', AGENT, { summary });
+        }
+      },
+      { now: () => clock.value },
+    );
+    await openHistory();
+    const rows = within(rail()).getAllByRole('button', { name: /^Version / });
+    expect(rows.map((button) => button.querySelector('.doc-version-summary')?.textContent)).toEqual([
+      'Edited a block in 2 places',
+      'Replied to the comment on “The first paragraph.”',
+      'Edited row 2, column 1 of the table “Region, Q1”',
+      'Edited “The second paragraph.”',
+    ]);
+    expect(rows[0].getAttribute('aria-label')).toMatch(/ by Fix the build: Edited a block in 2 places$/);
+  });
+});
+
 describe('the preview', () => {
   // M9 (the scale gate: the preview's enter and leave re-rendered the live tab through `@y/prosemirror`'s binding, 1.2 s
   // and 0.9 s at 200 pages): the version is drawn in an editor of its own, read-only, while the live editor stays bound,
@@ -294,6 +336,32 @@ describe('the preview', () => {
       ['retype', 'Retyped', 'The second paragraph.'],
       ['move', 'Moved', 'The first paragraph.'],
     ]);
+  });
+
+  // P4 W1-B (tracker L238): once compaction merges the rows, the one spanning a comparison's start brings an earlier
+  // move's carry with it, and the rows as written do too (the range's start is inclusive: the row of the start
+  // version's own seq, here the move's); a block the comparison did not change is not labelled, a block it moved still is
+  it.each([true, false])('labels only the blocks the comparison changed when a row reaches back past its start (compacted: %s)', async (compacted) => {
+    await setup(async ({ host: h, history: hist, agentWrites }) => {
+      hist.version('named', HUMAN, { label: 'Before' });
+      let carries: ReturnType<typeof applyEdit>['carries'] = [];
+      await agentWrites((agent) => (carries = applyEdit(agent.doc, [{ op: 'move', id: 'p1', after: 'p3' }]).carries));
+      hist.carryLast(carries);
+      hist.version('turn', AGENT, { summary: 'Moved the first' });
+      await agentWrites(agentAppends(' Later.')); // the third paragraph, second after the move
+      hist.version('turn', AGENT, { summary: 'Added a word' });
+      if (compacted) hist.compact(0, h.revision);
+    });
+    await openHistory();
+    const labels = () => [...document.querySelectorAll<HTMLElement>('.ProseMirror [data-carry]')].map((el) => [el.dataset.carryLabel, el.textContent]);
+    click(row('.*Added a word'));
+    await previewing();
+    await until(() => document.querySelector('.ProseMirror [data-change-block]')?.textContent === 'The third paragraph. Later.', 'the change');
+    expect(labels()).toEqual([]);
+    click(row('.*Moved the first'));
+    await previewing();
+    await until(() => labels().length > 0, 'the label');
+    expect(labels()).toEqual([['Moved', 'The first paragraph.']]);
   });
 
   it('draws a version with the design-system tokens it pinned', async () => {

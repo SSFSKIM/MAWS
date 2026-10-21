@@ -10,13 +10,15 @@ import { importSlide, setStyle, writeDeckKeys } from '@artifacts/slides/model';
 import { deleteSlide } from '@artifacts/yjs/slides'; // P3-F (L203)
 import { loadSlide } from '@artifacts/slides/parse';
 import { addThread, resolve } from '@artifacts/slides/threads'; // M7
+import { adoptStagedArtifactEditorState, artifactEditorFor, heldArtifactEditorState, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors, stageArtifactEditorState } from '../../artifacts/registry'; // P4-B3 M5
+import { registerPresentationEditor } from './index'; // P4-B3 M5
 import { DeckTabState } from './tab-state';
 
 class FakeHandle implements DocumentHandle {
   readonly doc = newDoc();
   readonly awareness = new Awareness(this.doc);
   closed = false;
-  private current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  private current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   private readonly listeners = new Set<(state: DocumentState) => void>();
   private readonly restoredListeners = new Set<(restored: Restored) => void>();
   constructor() {
@@ -32,6 +34,7 @@ class FakeHandle implements DocumentHandle {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
+  onProvisional = () => () => {}; // P4-A2
   onRestored = (listener: (restored: Restored) => void) => {
     this.restoredListeners.add(listener);
     return () => this.restoredListeners.delete(listener);
@@ -188,5 +191,40 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     expect(handle.closed).toBe(false);
     send();
     expect(handle.closed).toBe(true);
+  });
+});
+
+// P4-B3 M5 (X38's carry table): a deck moved between the panel and a main tab carries its tab state through the hold
+// (the registry's hand-off, M4): the slide shown, the selection, the zoom and the deck session's one undo stack, with the
+// state's surface following it.
+describe('a deck moved between the panel and a main tab', () => {
+  it('comes across on the same slide, with its selection, zoom and undo, its surface the target’s', async () => {
+    const handle = new FakeHandle();
+    const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
+    const off = registerPresentationEditor(() => ({ host, log: () => {}, confirmDiscard: async () => false, savingShownMs: 10 }));
+    const panel = { surface: 'panel', tabId: 'p1' } as const;
+    const main = { surface: 'main', tabId: 'artifact:deck-1' } as const;
+    const { state } = holdArtifactEditorState<DeckTabState>(panel, 'deck-1', 'presentation', artifactEditorFor('presentation') as never);
+    await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
+    const session = state.snapshot().session!;
+    session.select(['p']);
+    session.setZoom(1.5);
+    session.edit((origin) => setStyle(handle.doc, 'a', 'p', { 'font-size': '40px' }, origin));
+    expect(state.surface).toBe('panel');
+
+    stageArtifactEditorState(panel);
+    releaseArtifactEditorState(panel); // the source lets go
+    adoptStagedArtifactEditorState('deck-1', main);
+    expect(heldArtifactEditorState(main)?.state).toBe(state);
+    expect(state.surface).toBe('main');
+    expect(state.snapshot().session).toBe(session);
+    expect(session.snapshot()).toMatchObject({ currentSlide: 'a', selection: ['p'], zoom: 1.5, canUndo: true });
+    session.undoStep();
+    expect(JSON.stringify(handle.doc.toJSON())).not.toContain('40px');
+    expect(handle.closed).toBe(false);
+
+    releaseArtifactEditorState(main);
+    off();
+    resetArtifactEditors();
   });
 });

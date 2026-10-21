@@ -8,7 +8,7 @@ import { PROJECT, S, stageProject, summary } from './scene';
 import { VECTOR_KEY } from '../test/vectors';
 
 test('the grid lists the org\'s projects and follows each change within 2 seconds', async ({ page, hub }) => {
-  hub.setGrid([summary({ waiting: 0, working: 2 }), { id: 'arkho', name: 'arkho', kind: 'hub', machines: 1, machines_online: 0, working: 0, waiting: 0 }]);
+  hub.setGrid([summary({ waiting: 0, working: 2 }), { id: 'arkho', name: 'arkho', kind: 'hub', machines: 1, machines_online: 0, working: 0, waiting: 0, live: 1 }]);
   await page.goto(hub.url);
   const card = page.locator(`[data-project="${PROJECT}"]`);
   await expect(card).toContainText('MAWS');
@@ -21,6 +21,36 @@ test('the grid lists the org\'s projects and follows each change within 2 second
   expect(Date.now() - changed).toBeLessThan(2_000);
   await expect(card).toContainText('1 of 2 machines online');
   await expect(page.getByTestId('grid').locator('li').first()).toContainText('MAWS'); // waiting sorts first
+});
+
+// smns remote identity §5: by default the projects with a live session or waiting on the owner; the rest behind a toggle.
+test('the grid shows the active projects, Show all reveals the rest and outlives a reload, and an ended project drops behind it', async ({ page, hub }) => {
+  const scratch = { id: 'scratch', name: 'acceptance-scratch', kind: 'hub', machines: 1, machines_online: 1, working: 0, waiting: 0, live: 0 } as const;
+  // A stopped seat's open question: no process, still the owner's to answer.
+  const asks = { id: 'mini', name: 'mini', kind: 'machine', machines: 1, machines_online: 1, working: 0, waiting: 1, live: 0 } as const;
+  hub.setGrid([summary({ waiting: 0, working: 1, live: 2 }), scratch, asks]);
+  await page.goto(hub.url);
+  const tile = (id: string) => page.locator(`[data-project="${id}"]`);
+  await expect(tile(PROJECT)).toContainText('1 working');
+  await expect(tile('mini').getByTestId('waiting')).toContainText('1');
+  await expect(tile('scratch')).toHaveCount(0);
+  const show = page.getByTestId('grid-show');
+  await expect(show).toHaveText('Show all (3)');
+
+  await show.click();
+  await expect(tile('scratch')).toContainText('Quiet');
+  await expect(show).toHaveText('Show active');
+  await page.reload();
+  await expect(tile('scratch')).toBeVisible();
+  await expect(show).toHaveText('Show active');
+  await show.click();
+  await expect(tile('scratch')).toHaveCount(0);
+
+  // MAWS's last session ends: its tile goes behind Show all with the quiet ones.
+  hub.updateSummary(summary({ waiting: 0, working: 0, live: 0 }));
+  await expect(tile(PROJECT)).toHaveCount(0);
+  await expect(tile('mini')).toBeVisible();
+  await expect(show).toHaveText('Show all (3)');
 });
 
 test('the grid draws its empty and reconnecting states as the approved mockup does', async ({ page, hub }) => {

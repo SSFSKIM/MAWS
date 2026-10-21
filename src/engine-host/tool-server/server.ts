@@ -3,7 +3,7 @@
 // `mcp_message` round trip. The engine is the MCP client: each JSON-RPC message arrives wrapped in a `control_request
 // {subtype: 'mcp_message', server_name, message}` and is answered `{mcp_response: <the JSON-RPC response>}` (E0a Q1,
 // pass3/p1-sdk-mcp-roundtrip seqs 5 to 14). The handshake interleaves with the host's own initialize, so the server
-// answers from construction on. A tool's failure is an MCP result with `isError: true`, which the model reads as an
+// answers from construction on; its initialize answer carries MAWS's always-on `instructions` (P4-B4). A tool's failure is an MCP result with `isError: true`, which the model reads as an
 // ordinary failed call; JSON-RPC errors answer only an unknown method or a malformed message (residue 4). A call the
 // engine withdrew (its control request cancelled, or the call abandoned by its MCP client's `notifications/cancelled`,
 // as when the user interrupts the turn), or one still running when the process ended, is aborted (its signal's reason
@@ -13,6 +13,7 @@
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { cancelledCallOf, readMcpMessage, toolCallOf, type RpcId } from '@shared/maws/rpc';
 import { mawsServerInfo, mawsToolList, TOOL_ERRORS, type MawsToolName } from '@shared/maws/tools';
+import { MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions'; // P4-B4
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { WriteOptions } from '../outbound-writer';
 
@@ -45,6 +46,7 @@ export interface McpToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: Record<string, unknown>;
+  _meta?: Record<string, unknown>; // P4-R7: listed as the tool's `_meta` (`message`'s alwaysLoad)
   call(args: unknown, ctx: McpToolContext): Promise<McpToolResult>;
 }
 
@@ -110,14 +112,15 @@ export class MawsToolServer {
     switch (message.method) {
       case 'initialize': {
         const protocolVersion = typeof params.protocolVersion === 'string' ? params.protocolVersion : FALLBACK_PROTOCOL_VERSION;
-        this.result(requestId, id, { protocolVersion, capabilities: { tools: { listChanged: true } }, serverInfo: mawsServerInfo(this.deps.version) });
+        // P4-B4 (route (b), its Decision Log 1): the always-on link paragraph, which the engine renders to the model
+        this.result(requestId, id, { protocolVersion, capabilities: { tools: { listChanged: true } }, serverInfo: mawsServerInfo(this.deps.version), instructions: MAWS_SERVER_INSTRUCTIONS });
         return;
       }
       case 'ping':
         this.result(requestId, id, {});
         return;
       case 'tools/list':
-        this.result(requestId, id, { tools: [...this.tools.values()].map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })) });
+        this.result(requestId, id, { tools: [...this.tools.values()].map(({ name, title, description, inputSchema, annotations, _meta }) => ({ name, title, description, inputSchema, annotations, ...(_meta !== undefined && { _meta }) })) });
         return;
       case 'tools/call':
         void this.call(requestId, id, params);

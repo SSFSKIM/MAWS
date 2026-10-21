@@ -7,7 +7,9 @@
 //                      transaction, so a refusal writes nothing; the writer's carries go to the adapter's registry in
 //                      the same transaction, before A's service runs the adapter's hooks; `answering` posts the result
 //                      lines into the thread in the same transaction; the session's presence names the blocks while
-//                      the batch lands and drops them 4 s after (D11; P3-F wave S F19, was 1.5 s).
+//                      the batch lands and drops them 4 s after (D11; P3-F wave S F19, was 1.5 s). P4-A2 (X35): while
+//                      its input streams the batch is shown provisionally (`./provisional.ts`); the write's frame
+//                      announces the commit to that layer, and any other ending of the call drops it.
 //   artifact_comments  the threads, open (orphans included), resolved or all, with their messages.
 //   artifact_reply     a message into a thread as the session.
 //   artifact_resolve   resolve or reopen a thread as the session.
@@ -69,6 +71,7 @@ import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
 import { spaceFields, spaceNamed } from './artifact-tools'; // P3-F wave S (F5)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
+import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
 
 // D11: the agent's editing blocks stay outlined this long after its batch commits. P3-F wave S (F19, sitting candidate
 // 21): 4 s, was 1.5 s, which the owner missed in two passes; a turn that ends sooner leaves the outline to this hold.
@@ -93,6 +96,7 @@ export interface DocumentToolDeps {
   log?: (line: string) => void;
   now?: () => number;
   presenceEditingMs?: number;
+  provisional?: ProvisionalEmitter; // P4-A2 (X35): the session's provisional layer, ended by `artifact_edit`'s commit or its drop
 }
 
 type Tool = DocumentToolName | 'artifact_read' | 'artifact_create';
@@ -259,7 +263,8 @@ const SUGGESTED_ANSWER =
 export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
   const TOOL = 'artifact_edit';
   const now = deps.now ?? Date.now;
-  return definition(TOOL, (args, ctx) =>
+  // P4-A2 (X35, R8): the call's provisional layer ends with it: committed from the write's frame, dropped otherwise
+  return definition(TOOL, (args, ctx) => withProvisional(deps.provisional, ctx.toolUseId, () =>
     answering(TOOL, async () => {
       const parsed = parseDocumentArguments(TOOL, ArtifactEditInputSchema, args);
       if (!parsed.ok) return toolError(parsed.error);
@@ -340,7 +345,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                 }
               },
               {
-                inFrame: (at) => {
+                inFrame: (at, { edited }) => {
                   if (!outcome.result || !outcome.doc) return;
                   outcome.result.revision = suggesting ? store.service.revision(id) : at;
                   deps.session.views.record(outcome.doc, outcome.result.revision); // the session's own write is a revision it knows
@@ -352,6 +357,12 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                   clearTimeout(deps.session.presence.get(writeId));
                   agent.setPresence({ ...presence, ...(cursor && { cursor }), editing: { blocks } });
                   store.service.holdPresence(agent); // P3-F (F19): a turn end leaves it to the hold
+                  // P4-A2 (X35 rule 2): the layer's committed notice, ahead of this write's frames, names the batch's own
+                  // row; a batch that changed nothing has none to wait for, and its layer goes now
+                  if (ctx.toolUseId !== null) {
+                    if (edited !== null) deps.provisional?.committed(ctx.toolUseId, writeId, edited);
+                    else deps.provisional?.uncommitted(ctx.toolUseId, writeId);
+                  }
                   shown.agent = agent;
                   shown.id = writeId;
                 },
@@ -372,13 +383,14 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
       if (agent && id) {
         const timer = setTimeout(() => {
           deps.session.presence.delete(id);
+          if (deps.provisional?.presenting(id)) return; // P4-A2 (R6): a later call streaming here shows its outline; its ending releases it
           store.service.releasePresence(agent, presence); // nothing at all once the session's turn ended
         }, deps.presenceEditingMs ?? PRESENCE_EDITING_MS);
         timer.unref?.();
         deps.session.presence.set(id, timer);
       }
       return toolText(result);
-    }),
+    })),
   );
 }
 

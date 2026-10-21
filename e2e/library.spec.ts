@@ -6,7 +6,7 @@
 // killed and restarted (M7: with a write main's index had missed, through main's e2e seam). M7's upgrade case: an index rewound
 // to version 9 beside a populated host store migrates to 10 at launch and the first connection's snapshot fills it. M5b:
 // an HTML artifact a session made (on C3's replay transport, `support/library-session.ts`) in the panel's Artifacts
-// tool, its versions, P2's comment card and its Side thread, Open in tab and Export to PDF; a PDF, a video and an audio
+// tool, its versions, P2's comment card and its Side thread, Move to tab and Export to PDF; a PDF, a video and an audio
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // P3-H (P3 Decision Log 92): a row menu's Export on its first opening.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
@@ -23,6 +23,7 @@ import { ownTitles } from './support/library';
 import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
 import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // M5b
 import { closeScene, launchScene, scratchProject, seedArtifact, seedRecord, show, viewerOf, type Scratch } from './support/maws-tools'; // M6b
+import { sidebarRow } from './support/sidebar'; // P4 W2-D
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -236,6 +237,23 @@ function rewindIndexTo9(path: string): void {
   }
 }
 
+// P4-W2L (the owner's sitting candidates 4 and 7; P4 Decision Log 4, English throughout): on the owner's Korean app
+// locale the library still reads English, "Edited now by You" under Today, never "Edited 지금 by You".
+test('on a Korean app locale the library’s ages and date group read English', async () => {
+  test.setTimeout(60_000);
+  launch = await launchMaws({ lang: 'ko-KR' });
+  const { page } = launch;
+  expect(await page.evaluate(() => new Intl.DateTimeFormat().resolvedOptions().locale)).toMatch(/^ko/);
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  await ok(page, 'artifacts.create', { kind: 'document', title: 'Launch plan' });
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  const library = page.locator('[data-library]');
+  const row = library.getByRole('article', { name: 'Launch plan', exact: true });
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await expect(row).toContainText(/Edited (now|\d+ minutes? ago) by You/);
+  expect(await library.getByRole('heading', { level: 2 }).allTextContents()).toEqual(['Make something new', 'Today']);
+});
+
 test('an index at version 9 beside a populated host store migrates to 10 at launch, and the first connection’s snapshot fills the library', async () => {
   test.setTimeout(120_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-upgrade-'));
@@ -391,7 +409,7 @@ async function pinnedUnder(element: Locator, card: Locator): Promise<boolean> {
   return box !== null && placed !== null && Math.abs(placed.y - (box.y + box.height + 4)) <= 1 && Math.abs(placed.x - box.x) <= 1;
 }
 
-test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Comment opens P2’s card and its Side thread, Open in tab shows it in a main tab, and Export to PDF saves a PDF', async () => {
+test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Comment opens P2’s card and its Side thread, Move to tab shows it in a main tab, and Export to PDF saves a PDF', async () => {
   test.setTimeout(180_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-viewer-'));
   const saved = join(scratch, 'saved');
@@ -457,8 +475,8 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   await expect(card.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
   await expect(card.getByText(CARD_COMMENT, { exact: true })).toBeVisible();
 
-  // Open in tab: the same artifact in a main tab of its own
-  await panel.getByRole('button', { name: 'Open in tab' }).click();
+  // Move to tab: the same artifact in a main tab of its own
+  await panel.getByRole('button', { name: 'Move to tab' }).click();
   const tab = page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
   await expect(tab.locator('[data-artifact-viewer]')).toBeVisible();
   await expect(tab.frameLocator('[data-artifact-frame="html"]').locator('#version')).toHaveText('VERSION_TWO');
@@ -471,6 +489,42 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   await expect.poll(() => (existsSync(pdf) ? readFileSync(pdf).subarray(0, 5).toString('latin1') : ''), { timeout: 60_000, message: 'the exported PDF saved' }).toBe('%PDF-');
   await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
   expect(c.maws.consoleErrors()).toEqual([]);
+});
+
+// P4 W2-D (tracker 2026-10-19; P3-F wave S, F16): Move to tab's mirror, from the artifact main tab's context menu, over
+// C8a's synthetic sessions (main serves them, so a session's panel holds tools).
+test('an artifact main tab’s Show in panel, from its context menu, shows the record in the session’s panel and the tab is gone', async () => {
+  launch = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json' } });
+  const { app, page } = launch;
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
+  const { id } = await createHtml(page, 'Quarterly page', HEADING_PAGE('IN_PANEL'));
+  const main = page.locator('[data-region="main"]');
+  const panel = page.locator('[data-region="panel"]');
+  const tab = main.getByRole('tab', { name: 'Quarterly page', exact: true });
+  const record = panel.locator(`[data-artifact-record="${id}"]`);
+
+  // Harness A shown; the page from its panel's Artifacts tool (All) into a main tab beside it by the record's Move to tab
+  await (await sidebarRow(page, 'Harness A')).click();
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click({ timeout: 15_000 });
+  await expect(record).toBeVisible();
+  await panel.getByRole('button', { name: 'Move to tab' }).click();
+  await expect(main.locator(`[data-artifact-tab="${id}"] [data-artifact-viewer]`)).toBeVisible();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  await expect(record).toHaveCount(0);
+
+  // the tab's context menu: Show in panel
+  await tab.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Show in panel', exact: true }).click();
+  await expect(record).toBeVisible();
+  await expect(record.frameLocator('[data-artifact-frame="html"]').locator('#version')).toHaveText('IN_PANEL');
+  await expect(tab).toHaveCount(0);
+  await expect(main.locator(`[data-artifact-tab="${id}"]`)).toHaveCount(0);
+  await expect(main.getByRole('tab', { name: /^Harness A/ })).toHaveAttribute('aria-selected', 'true');
+  expect(launch.consoleErrors()).toEqual([]);
 });
 
 test('a PDF, a video and an audio file artifact play in their viewers from the library', async () => {

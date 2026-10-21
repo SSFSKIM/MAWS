@@ -10,25 +10,37 @@
 // E11 (tracker row E6 "two short windows"): a stage or discard of an untracked file moves the selection out of
 // Untracked once `git.changed` arrives; an untracked read asked before that mutation went out and answered after it
 // says nothing about the file (C4 may already refuse it), so its answer is dropped and the file read again once the
-// mutation answered, rather than flashing "No diff for this entry" before the selection follows the file.
+// mutation answered, rather than flashing "No diff for this entry" before the selection follows the file. The held
+// diffs are Review's cache (../code/review/held-diffs, P4 W2-B); this rule is its `overtaken` hook, Source control's alone.
 //
 // The status and the watch that keeps it current are C8a's `useGit`; the tool's body holds its watch while mounted.
 import type { StoreApi } from 'zustand/vanilla';
 import { create, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
-import type { GitDiff, GitDiffInput } from '@shared/ipc/schema/git';
+import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
+import type { GitDiffInput } from '@shared/ipc/schema/git';
 import type { RemotePlan, ScmDiscardInput, ScmMutation, ScmRemoteOutput } from '@shared/ipc/schema/scm';
 import { ipc } from '../../ipc/client';
 import { queryClient } from '../../ipc/query';
 import { useGit } from '../../stores/git';
-import { REVIEW_SCOPE_BYTES_CAP, splitPatch } from '../code/review/review-model';
-import type { FileDiff, ScopeDiff } from '../code/review/review-store';
+import {
+  createHeldDiffs,
+  diffKeys,
+  followGitStatus,
+  HELD_DIFF_REFRESH_MS,
+  mapWith,
+  mapWithout,
+  settled,
+  type FileDiff,
+  type ScopeDiff,
+} from '../code/review/held-diffs';
 import { PR_STATE_QUERIES } from './queries';
 import { advanceRun, runFromSnapshot, runStarted, type RemoteRun } from './remote-run';
 import type { ScmUi } from './view-state';
 
-export const SCM_REFRESH_MS = 250; // trailing, as Review's
+export { settled };
+
+export const SCM_REFRESH_MS = HELD_DIFF_REFRESH_MS; // trailing, as Review's
 
 export type ScmDiffTarget = { directory: string; scope: 'staged' | 'worktree' } | { directory: string; scope: 'untracked'; path: string };
 export type ScmMutationResult = CommandResult<'scm.stage'>; // every mutation answers ScmMutation
@@ -49,37 +61,13 @@ export interface ScmStore {
   reset(): void; // tests
 }
 
-const diffKey = (t: ScmDiffTarget) => `${t.directory}\0${t.scope}${t.scope === 'untracked' ? `\0${t.path}` : ''}`;
-const fileKey = (t: ScmDiffTarget, path: string) => `${diffKey(t)}\0\0${path}`;
+const keys = diffKeys<ScmDiffTarget>((t) => `${t.directory}\0${t.scope}${t.scope === 'untracked' ? `\0${t.path}` : ''}`, '\0\0');
 
-export const diffOf = (s: Pick<ScmStore, 'diffs'>, t: ScmDiffTarget) => s.diffs.get(diffKey(t));
-export const fileDiffOf = (s: Pick<ScmStore, 'files'>, t: ScmDiffTarget, path: string) => s.files.get(fileKey(t, path));
+export const diffOf = (s: Pick<ScmStore, 'diffs'>, t: ScmDiffTarget) => s.diffs.get(keys.diff(t));
+export const fileDiffOf = (s: Pick<ScmStore, 'files'>, t: ScmDiffTarget, path: string) => s.files.get(keys.file(t, path));
 
 const diffInput = (t: ScmDiffTarget, path?: string): GitDiffInput =>
   t.scope === 'untracked' ? { directory: t.directory, scope: 'untracked', path: t.path } : { directory: t.directory, scope: t.scope, ...(path !== undefined ? { path } : {}) };
-
-// The whole patch is kept split per file within the cap; past it, only the list (each file fetched on selection).
-function answered(diff: GitDiff): ScopeDiff {
-  if (diff.patch.length > REVIEW_SCOPE_BYTES_CAP) return { status: 'ok', files: diff.files, patch: null };
-  return { status: 'ok', files: diff.files, patch: new Map(splitPatch(diff.patch).map((file) => [file.path, file])) };
-}
-
-// A bridge that throws (not a command's failure answer) is a failure too, so nothing stays in flight.
-export async function settled<N extends CommandName>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
-  try {
-    return await call;
-  } catch (error) {
-    return { ok: false, error: { code: 'internal', message: error instanceof Error ? error.message : String(error) } };
-  }
-}
-
-interface Held {
-  target: ScmDiffTarget;
-  count: number;
-  timer: ReturnType<typeof setTimeout> | null;
-  reading: boolean;
-  again: boolean;
-}
 
 interface Resumed {
   count: number;
@@ -87,61 +75,27 @@ interface Resumed {
   pending: ScmRemoteOutput[] | null; // events that came before the snapshot answered
 }
 
-function mapWith<K, V>(map: ReadonlyMap<K, V>, key: K, value: V): Map<K, V> {
-  return new Map(map).set(key, value);
-}
-function mapWithout<K, V>(map: ReadonlyMap<K, V>, drop: (key: K) => boolean): Map<K, V> {
-  return new Map([...map].filter(([key]) => !drop(key)));
-}
-
 export interface ScmStoreOptions {
   git?: typeof useGit; // C8a's store, whose new statuses re-read the held diffs
 }
 
 export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}): UseBoundStore<StoreApi<ScmStore>> {
-  const held = new Map<string, Held>();
   let mutations = 0; // E11: stages and discards sent, counted
   const moved = new Map<string, number>(); // E11: a path's last stage or discard, by that count
-  const fileLoads = new Map<string, symbol>();
   const resumed = new Map<AppSessionId, Resumed>();
 
   const store = create<ScmStore>()((set, get) => {
-    const read = async (key: string) => {
-      const h = held.get(key);
-      if (!h) return;
-      if (h.reading) {
-        h.again = true;
-        return;
-      }
-      h.reading = true;
-      const asked = mutations;
-      const result = await settled(client.invoke('git.diff', diffInput(h.target)));
-      h.reading = false;
-      if (held.get(key) !== h) return; // released meanwhile
-      const untracked = h.target.scope === 'untracked' ? h.target.path : null;
-      if (untracked !== null && (moved.get(untracked) ?? -1) >= asked) {
-        if (h.again) {
-          h.again = false;
-          void read(key);
-        }
-        return; // E11: the file was staged or discarded since: the mutation's answer reads it again
-      }
-      const next: ScopeDiff = result.ok ? answered(result.value) : { status: 'error', message: result.error.message };
-      set((s) => ({ diffs: mapWith(s.diffs, key, next), files: mapWithout(s.files, (k) => k.startsWith(`${key}\0\0`)) }));
-      for (const k of [...fileLoads.keys()]) if (k.startsWith(`${key}\0\0`)) fileLoads.delete(k);
-      if (h.again) {
-        h.again = false;
-        void read(key);
-      }
-    };
-
-    const schedule = (h: Held, key: string) => {
-      if (h.timer !== null) clearTimeout(h.timer);
-      h.timer = setTimeout(() => {
-        h.timer = null;
-        void read(key);
-      }, SCM_REFRESH_MS);
-    };
+    const heldDiffs = createHeldDiffs(client, set, {
+      keys,
+      input: diffInput,
+      // E11: an untracked read asked before a stage or discard of its file went out is dropped (the mutation's answer
+      // reads it again); a tracked scope's read is never overtaken.
+      overtaken(target) {
+        if (target.scope !== 'untracked') return () => false;
+        const asked = mutations;
+        return () => (moved.get(target.path) ?? -1) >= asked;
+      },
+    });
 
     // A mutation's answer is for the session it was asked for: a pinned tool that moved on meanwhile keeps its own, and
     // only `elsewhere` (the commit's parked draft) touches the state then. `ok` clears the last notice; a refusal or a
@@ -176,7 +130,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
       try {
         return await call();
       } finally {
-        for (const [key, h] of held) if (h.target.scope === 'untracked' && paths.includes(h.target.path)) schedule(h, key);
+        heldDiffs.reread((t) => t.scope === 'untracked' && paths.includes(t.path));
       }
     };
 
@@ -189,44 +143,14 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
       files: new Map(),
       runs: new Map(),
 
-      hold(target) {
-        const key = diffKey(target);
-        let h = held.get(key);
-        if (h) h.count += 1;
-        else {
-          h = { target, count: 1, timer: null, reading: false, again: false };
-          held.set(key, h);
-          set((s) => ({ diffs: mapWith(s.diffs, key, { status: 'loading' }) }));
-          void read(key);
-        }
-        const mine = h;
-        let released = false;
-        return () => {
-          if (released) return;
-          released = true;
-          if (--mine.count > 0) return;
-          if (mine.timer !== null) clearTimeout(mine.timer);
-          held.delete(key);
-          for (const k of [...fileLoads.keys()]) if (k.startsWith(`${key}\0\0`)) fileLoads.delete(k);
-          set((s) => ({ diffs: mapWithout(s.diffs, (k) => k === key), files: mapWithout(s.files, (k) => k.startsWith(`${key}\0\0`)) }));
-        };
-      },
+      hold: heldDiffs.hold,
 
       statusChanged(directory) {
-        for (const [key, h] of held) if (h.target.directory === directory) schedule(h, key);
+        heldDiffs.reread((t) => t.directory === directory);
       },
 
       loadFile(target, path) {
-        const key = fileKey(target, path);
-        if (target.scope === 'untracked' || !held.has(diffKey(target)) || fileLoads.has(key)) return;
-        const generation = Symbol();
-        fileLoads.set(key, generation);
-        set((s) => ({ files: mapWith(s.files, key, { status: 'loading' }) }));
-        void settled(client.invoke('git.diff', diffInput(target, path))).then((result) => {
-          if (fileLoads.get(key) !== generation) return; // the scope re-read or was released meanwhile
-          const next: FileDiff = result.ok ? { status: 'ok', file: splitPatch(result.value.patch)[0] ?? null } : { status: 'error', message: result.error.message };
-          set((s) => ({ files: mapWith(s.files, key, next) }));
-        });
+        if (target.scope !== 'untracked') heldDiffs.loadFile(target, path); // an untracked diff is whole
       },
 
       stage: (ui, appSessionId, paths) => moving(paths, () => mutate(ui, appSessionId, client.invoke('scm.stage', { appSessionId, paths }))),
@@ -297,10 +221,8 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
       },
 
       reset() {
-        for (const h of held.values()) if (h.timer !== null) clearTimeout(h.timer);
+        heldDiffs.clear();
         for (const r of resumed.values()) r.off();
-        held.clear();
-        fileLoads.clear();
         moved.clear();
         resumed.clear();
         set({ diffs: new Map(), files: new Map(), runs: new Map() });
@@ -308,19 +230,8 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
     };
   });
 
-  // A new status C8a's store took for a directory (its git.changed) re-reads the diffs held over that directory; a
-  // watch's first answer does not, since the holds read on their own when they start (as Review's). Its status objects
-  // are replaced, never mutated, so a reference change is a new status.
-  if (options.git) {
-    const git = options.git;
-    git.subscribe((state, prev) => {
-      if (state.entries === prev.entries) return;
-      for (const [directory, entry] of state.entries) {
-        const before = prev.entries.get(directory);
-        if (entry.status && before?.status && entry.status !== before.status) store.getState().statusChanged(directory);
-      }
-    });
-  }
+  // A new status C8a's store took for a directory re-reads the diffs held over that directory.
+  if (options.git) followGitStatus(options.git, (directory) => store.getState().statusChanged(directory));
   return store;
 }
 

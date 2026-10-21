@@ -1,7 +1,8 @@
 // The Worker as the suites load it: the deployed Worker, with seams the deployed one does not have, each reached
 // through an object's own fetch at a `/__test/…` path, which only Miniflare reaches (`LocalHub`), never the Worker:
 //   - a `Machine` armed to throw on its next send of one frame kind, as a failed RPC from a `Project` would, or to hold
-//     it until the suite releases it, as a slow one would;
+//     it until the suite releases it, as a slow one would, and one armed to stall its next write of a kind, as a stream
+//     whose client stopped reading never takes it;
 //   - a `Machine` whose heartbeat and lease are shortened, so a lease can lapse within a test;
 //   - a `Machine` the suite terminates (`ctx.abort()`), as a crash or a runtime's reset would: no `closed` reaches its
 //     projects, only the lease's lapse;
@@ -17,21 +18,35 @@
 //     takes a shorter window for a socket's visibility, so one can expire within a test;
 //   - a `Project` that counts the calls machines make to it and the frames they carry, and the pages of `hello` backlogs
 //     it has read;
-//   - a `Project` that holds its archive lookups, lists its send queues, and queues a frame for any generation;
+//   - a `Project` that holds its archive lookups, lists its send queues and the machine streams it fans out to, and
+//     queues a frame for any generation;
 //   - a `Project` armed to fail its next `forget`, as a failed RPC from the Registry would;
 //   - a `Registry` whose org record can be rewritten, as an object still on a deploy's previous version would make it;
 //   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand;
 //   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's, and takes a
-//     project's summary report straight, as a late one would arrive.
-import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
+//     project's summary report straight, as a late one would arrive;
+//   - a `Registry` whose `summaries` lose their `live` column, as a registry stored before it had them, and one armed to
+//     take its next summary report as the version before `live` took it;
+//   - a `Registry` whose machines' `seen` and `confirmed`, keys' expiry and enrollments' expiry are moved back, as the
+//     time having passed would leave them, and whose alarm is read or cleared;
+//   - a `Registry` armed to hold its next `leave` until the suite releases it, as the Worker held between resolving a
+//     machine's credential and asking for its revocation would be;
+//   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again.
+import { Machine as DeployedMachine, type Stream, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 import type { MachineContext } from '../../src/objects/project';
 import type { Env } from '../../src/env';
-import type { ProjectRecord } from '../../src/protocol/identity';
+import type { MachineRecord, ProjectRecord } from '../../src/protocol/identity';
 import {
   ABORT_REASON,
+  ALARM_PATH,
+  BACKDATE_PATH,
+  LEAVE_HELD_PATH,
+  LEAVE_HOLD_PATH,
+  LEAVE_RELEASE_PATH,
+  OFFLINE_RETRY_PATH,
   MACHINE_ABORT_PATH,
   MACHINE_FETCH_FAULT_PATH,
   MACHINE_PROBE_PATH,
@@ -56,16 +71,88 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   REPORT_PATH,
+  SUMMARIES_BEFORE_LIVE_PATH,
+  SUMMARY_AS_PREVIOUS_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
+  WRITE_STALL_PATH,
+  PROJECT_MACHINES_PATH,
 } from './send-fault';
 
 export { default } from '../../src/worker';
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
+  private asPrevious = false;
+  private leaveRelease: (() => void) | undefined;
+
+  /** A suite's wait before an unfinished offline revocation is tried again, over the deployed minute. */
+  protected offlineRetryMs(): number {
+    return this.ctx.storage.kv.get<number>('offline-retry-ms') ?? super.offlineRetryMs();
+  }
+
+  /** Armed, the next leave waits for the suite's release before the Registry's own. */
+  async leave(machine: MachineRecord): ReturnType<DeployedRegistry['leave']> {
+    if (this.ctx.storage.kv.get<boolean>('leave-hold')) {
+      this.ctx.storage.kv.delete('leave-hold');
+      await new Promise<void>((resolve) => (this.leaveRelease = resolve));
+    }
+    return super.leave(machine);
+  }
+
+  /** Armed, the next report is taken as the version before `live` took it, once: its counts stored without `live`, and
+   * nothing answered. */
+  summary(project: string, report: SummaryReport): true {
+    if (!this.asPrevious) return super.summary(project, report);
+    this.asPrevious = false;
+    super.summary(project, { ...report, live: undefined });
+    return undefined as unknown as true;
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === OFFLINE_RETRY_PATH) {
+      const { ms } = (await request.json()) as { ms: number | null };
+      if (ms === null) this.ctx.storage.kv.delete('offline-retry-ms');
+      else this.ctx.storage.kv.put('offline-retry-ms', ms);
+      await this.ctx.storage.setAlarm(Date.now() + 100);
+      return new Response('set');
+    }
+    if (url.pathname === LEAVE_HOLD_PATH) {
+      this.ctx.storage.kv.put('leave-hold', true);
+      return new Response('armed');
+    }
+    if (url.pathname === LEAVE_HELD_PATH) return new Response(this.leaveRelease ? 'held' : 'none');
+    if (url.pathname === LEAVE_RELEASE_PATH) {
+      const release = this.leaveRelease;
+      this.leaveRelease = undefined;
+      release?.();
+      return new Response(release ? 'released' : 'none');
+    }
+    if (url.pathname === BACKDATE_PATH) {
+      const { machines, key, enrollment } = (await request.json()) as {
+        machines?: Array<{ name: string; seen?: string; confirmed?: string }>;
+        key?: { id: string; expires: string };
+        enrollment?: { machine: string; expires: string };
+      };
+      const sql = this.ctx.storage.sql;
+      for (const machine of machines ?? []) {
+        if (machine.seen !== undefined) sql.exec('UPDATE machines SET seen = ? WHERE name = ?', machine.seen, machine.name);
+        if (machine.confirmed !== undefined) sql.exec('UPDATE machines SET confirmed = ? WHERE name = ?', machine.confirmed, machine.name);
+      }
+      if (key) sql.exec('UPDATE provisioning_keys SET expires = ? WHERE id = ?', key.expires, key.id);
+      if (enrollment) sql.exec('UPDATE enrollments SET expires = ? WHERE id = (SELECT enrollment FROM machines WHERE name = ?)', enrollment.expires, enrollment.machine);
+      await this.scheduleAlarm();
+      return Response.json({ alarm: await this.ctx.storage.getAlarm() });
+    }
+    if (url.pathname === ALARM_PATH) {
+      if (request.method === 'POST' && ((await request.json()) as { clear?: boolean }).clear) await this.ctx.storage.deleteAlarm();
+      return Response.json({ alarm: await this.ctx.storage.getAlarm() });
+    }
+    if (url.pathname === SUMMARY_AS_PREVIOUS_PATH) {
+      this.asPrevious = true;
+      return new Response('armed');
+    }
     if (url.pathname === PROJECTS_PATH) {
       const { count, prefix } = (await request.json()) as { count: number; prefix: string };
       const created = new Date().toISOString();
@@ -81,6 +168,10 @@ export class Registry extends DeployedRegistry {
       const { project, report } = (await request.json()) as { project: string; report: SummaryReport };
       this.summary(project, report);
       return Response.json(this.orgFrame().frame);
+    }
+    if (url.pathname === SUMMARIES_BEFORE_LIVE_PATH) {
+      this.ctx.storage.sql.exec('ALTER TABLE summaries DROP COLUMN live');
+      return new Response('dropped');
     }
     if (url.pathname === UNREGISTER_PATH) {
       const { id } = (await request.json()) as { id: string };
@@ -132,9 +223,13 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.put('send-fault', url.searchParams.get('kind') ?? '');
       return new Response('armed');
     }
+    if (url.pathname === WRITE_STALL_PATH) {
+      this.ctx.storage.kv.put('write-stall', url.searchParams.get('kind') ?? '');
+      return new Response('armed');
+    }
     if (url.pathname === TIMING_PATH) {
       const number = (name: string) => (url.searchParams.has(name) ? { [name]: Number(url.searchParams.get(name)) } : {});
-      this.ctx.storage.kv.put('timing', { ...number('heartbeatMs'), ...number('leaseMs'), ...number('graceMs'), ...number('probeMs') });
+      this.ctx.storage.kv.put('timing', { ...number('heartbeatMs'), ...number('leaseMs'), ...number('graceMs'), ...number('probeMs'), ...number('writeTimeoutMs') });
       return new Response('timed');
     }
     if (url.pathname === MACHINE_REPLACE_PATH) {
@@ -179,6 +274,15 @@ export class Machine extends DeployedMachine {
     return generation;
   }
 
+  /** Armed, the next write of the frame kind is never taken, as by a stream whose client stopped reading. */
+  protected put(stream: Stream, frame: DownFrame): Promise<void> {
+    if (this.ctx.storage.kv.get<string>('write-stall') === frame.t) {
+      this.ctx.storage.kv.delete('write-stall');
+      return new Promise<void>(() => {});
+    }
+    return super.put(stream, frame);
+  }
+
   async send(frame: DownFrame, generation?: number): Promise<'written' | 'offline'> {
     if (this.ctx.storage.kv.get<string>('send-fault') === frame.t) {
       this.ctx.storage.kv.delete('send-fault');
@@ -219,7 +323,7 @@ export class Project extends DeployedProject {
     return super.archiveMachine(project);
   }
 
-  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean; failed: boolean }> {
+  async fromMachine(ctx: MachineContext, frames: UpFrame[]): ReturnType<DeployedProject['fromMachine']> {
     const calls = this.ctx.storage.kv.get<{ calls: number; frames: number }>('calls') ?? { calls: 0, frames: 0 };
     this.ctx.storage.kv.put('calls', { calls: calls.calls + 1, frames: calls.frames + frames.length });
     return super.fromMachine(ctx, frames);
@@ -273,9 +377,10 @@ export class Project extends DeployedProject {
       return new Response('held');
     }
     if (url.pathname === PROJECT_QUEUES_PATH) return Response.json([...this.queues.keys()]);
+    if (url.pathname === PROJECT_MACHINES_PATH) return Response.json(this.ctx.storage.sql.exec('SELECT name, generation FROM machines').toArray());
     if (url.pathname === PROJECT_SEND_PATH) {
       const { machine, generation, frame } = (await request.json()) as { machine: string; generation: number; frame: DownFrame };
-      void this.toMachine(machine, generation, frame).catch(() => {});
+      void this.toMachine(machine, generation, frame, 'replies').catch(() => {});
       return new Response('queued');
     }
     if (url.pathname === PROJECT_BACKLOG_PATH) return Response.json(this.backlogPages);

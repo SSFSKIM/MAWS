@@ -42,6 +42,7 @@ export interface Row {
   verdict: Verdict;
   load: number;
   note?: string;
+  background?: CallBackground; // P4-R6: what shared the measured call's loop (the seam's answer)
 }
 
 /**
@@ -63,9 +64,9 @@ export class Rows {
   readonly rows: Row[] = [];
   constructor(private readonly path: string, private readonly meta: Record<string, unknown>) {}
 
-  add(row: string, measure: string, value: number, unit: string, limit: number | null, bound: string, note?: string): Row {
+  add(row: string, measure: string, value: number, unit: string, limit: number | null, bound: string, note?: string, background?: CallBackground /* P4-R6 */): Row {
     const load = load1();
-    const entry: Row = { row, measure, bound, limit, value: +value.toFixed(2), unit, pass: limit === null ? null : value <= limit, verdict: verdictOf(value, limit, load), load, ...(note && { note }) };
+    const entry: Row = { row, measure, bound, limit, value: +value.toFixed(2), unit, pass: limit === null ? null : value <= limit, verdict: verdictOf(value, limit, load), load, ...(note && { note }), ...(background && { background }) };
     this.rows.push(entry);
     this.write();
     return entry;
@@ -86,6 +87,14 @@ export interface LoopStats {
   p99: number;
   mean: number;
 }
+// P4-R6: what shared a call's loop, as the host's seam answers it (`CallBackground` in
+// src/engine-host/documents/kinds/document-perf.ts): the longest gap (`loop.max`; `at` ms after the call's start), the main
+// thread's CPU time inside it (null where the platform does not tell it: near the gap's length the thread ran, well
+// under it the thread waited), the host's work and V8's collections that overlapped it, and the call's work by kind.
+export interface CallBackground {
+  longest: { at: number; ms: number; cpuMs: number | null; work: Array<{ what: string; at: number; ms: number; detail?: string }> } | null;
+  call: Record<string, { count: number; ms: number }>;
+}
 export interface CallAnswer<R = unknown> {
   ok: true;
   isError: boolean;
@@ -93,6 +102,7 @@ export interface CallAnswer<R = unknown> {
   text: string;
   wallMs: number;
   loop: LoopStats;
+  background?: CallBackground; // P4-R6
 }
 
 export class PerfSeam {
@@ -122,8 +132,19 @@ export class PerfSeam {
   seed(artifactId: string, state: Uint8Array): Promise<{ revision: number }> {
     return this.send({ cmd: 'seed', artifactId, state: Buffer.from(state).toString('base64') });
   }
-  call<R>(session: string, tool: 'artifact_read' | 'artifact_edit', args: Record<string, unknown>, timeoutMs?: number): Promise<CallAnswer<R>> {
+  // P4-A2: `args.toolUseId`, when given, is the call's tool-use id (the one a `stream` used, so the call commits or
+  // drops that layer); the tool never sees it
+  call<R>(session: string, tool: 'artifact_read' | 'artifact_edit' | 'artifact_reply' /* P4-B1 */, args: Record<string, unknown>, timeoutMs?: number): Promise<CallAnswer<R>> {
     return this.send({ cmd: 'call', session, tool, args }, timeoutMs);
+  }
+  // P4-A2 (X35; R12): a call's input fed to the session's provisional emitter one piece per `tickMs` (20 by default), as
+  // the engine's deltas would arrive; answered once the last tick ran, with the streaming frames the call sent
+  stream(session: string, toolUseId: string, name: 'artifact_edit' | 'artifact_publish' | 'artifact_dataset', deltas: string[], tickMs?: number): Promise<{ frames: number }> {
+    return this.send({ cmd: 'stream', session, toolUseId, name, deltas, ...(tickMs !== undefined && { tickMs }) });
+  }
+  // P4-A2: the call's layer dropped, as a call ending without a commit drops it
+  drop(session: string, toolUseId: string): Promise<unknown> {
+    return this.send({ cmd: 'drop', session, toolUseId });
   }
   heap(): Promise<{ heapUsed: number; rss: number }> {
     return this.send({ cmd: 'heap' });
@@ -164,7 +185,7 @@ export class Agent {
   private deleting: { run: number; id: string } | null = null;
   private lastInsertedText: string | null = null;
   readonly blocks = new Map<string, string>(); // what this agent knows of each block's markdown
-  readonly applied: Array<{ run: number; revision: number; wallMs: number; loop: LoopStats; firstAfterRead: boolean; load: number }> = [];
+  readonly applied: Array<{ run: number; revision: number; wallMs: number; loop: LoopStats; background?: CallBackground /* P4-R6 */; firstAfterRead: boolean; load: number }> = [];
   readonly refused: string[] = [];
   private readSince = true;
 
@@ -262,7 +283,7 @@ export class Agent {
     if (deleting) this.deleted.add(deleting);
     const insert = answer.result!.results[2];
     if (insert?.newIds?.[0]) this.inserted.push(insert.newIds[0]);
-    this.applied.push({ run, revision: answer.result!.revision, wallMs: answer.wallMs, loop: answer.loop, firstAfterRead: this.readSince, load: load1() });
+    this.applied.push({ run, revision: answer.result!.revision, wallMs: answer.wallMs, loop: answer.loop, background: answer.background, firstAfterRead: this.readSince, load: load1() });
     this.readSince = false;
   }
 }

@@ -1,9 +1,10 @@
 import type { SessionEvent } from '@shared/graph/events';
+import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { afterEach, describe, expect, it } from 'vitest';
-import { heldRow, rowsOf, turnSummary, withAllExpanded, withQueueTail } from './derive';
+import { heldRow, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withQueueTail } from './derive';
 import { cellId, rowId, turnId } from './keys';
-import { applyEvents, createState } from './reduce';
-import type { Row } from './rows';
+import { applyEvents, createState, withAgents, type AgentLookup } from './reduce';
+import type { Row, SubagentRef } from './rows';
 import { api, BASH_RESULT, builder, task, tool, uuid } from './test-events';
 import { configureTime } from './time';
 
@@ -377,7 +378,7 @@ describe('receipts aggregate successful edits only', () => {
 
 describe('time separators', () => {
   it('separate human turns after an hour and engine turns after ten minutes, labelled', () => {
-    configureTime({ now: '2026-09-28T15:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-09-28T15:00:00.000Z', timeZone: 'UTC' });
     const b = builder('2026-09-28T10:00:00.000Z');
     b.turn('u1');
     b.text('m1', 0, 'One');
@@ -715,6 +716,73 @@ describe('cross-session rows (E7)', () => {
       ['from_child', 'Message from Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
     ]);
     expect(messages(rowsOf(reduce(b.events))).map((row) => row.text)).toEqual(['Report from Survey src']);
+  });
+
+  // L197 (DC9 M5): an agent whose Agent call is not among the loaded turns (an older page; a nested agent, spawned in its
+  // parent's transcript) is named from the host's agent lookup (MAWS: the session's task graph; the desk: its tree)
+  // before a message to it falls to between sessions. A lookup arriving after the rows derived re-derives the turns that
+  // read it, and those alone.
+  describe('an agent the loaded turns do not know', () => {
+    const SURVEY: SubagentRef = { taskId: 'a912e224' as TaskId, agentId: 'a912e224' as AgentId, toolUseId: 'ag9' as ToolUseId, name: 'Survey src', glyph: 3, kind: 'agent', subagentType: 'Explore' };
+    const LOOKUP: AgentLookup = new Map([['a912e224', SURVEY], ['surveyor', SURVEY]]);
+    const unknownAgent = () => {
+      const b = builder();
+      b.turn('u1');
+      b.text('m1', 0, 'Nothing to send yet.');
+      b.end(['u1']);
+      b.turn('u2');
+      b.toolUse('s1', 'SendMessage', { to: 'a912e224', message: 'by id' });
+      b.result('s1', '{"success":true}', { structured: { success: true } });
+      b.toolUse('s2', 'SendMessage', { to: 'surveyor', message: 'by name' });
+      b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a912e224' as never, toAgentId: null, text: 'a note back' });
+      b.end(['u2']);
+      return b;
+    };
+
+    it('reads a SendMessage to it between without a lookup, and to_child named by the lookup with one, by id or name; so does its message back', () => {
+      const bare = messages(rows(unknownAgent().events));
+      expect(bare.map((row) => [row.direction, row.text])).toEqual([
+        ['between', 'Sent to a912e224: by id'],
+        ['between', 'Sent to surveyor: by name'],
+        ['from_child', 'Message from a912e224: a note back'],
+      ]);
+      const named = messages(rowsOf(withAllExpanded(withAgents(reduce(unknownAgent().events), LOOKUP))));
+      expect(named.map((row) => [row.direction, row.text, row.to ?? row.from])).toEqual([
+        ['to_child', 'Sent message to Survey src: by id', SURVEY],
+        ['to_child', 'Sent message to Survey src: by name', SURVEY],
+        ['from_child', 'Message from Survey src: a note back', SURVEY],
+      ]);
+    });
+
+    it('names an agent a loaded turn launched by its own ref, whatever the lookup says', () => {
+      const b = builder();
+      agentTurn(b);
+      b.turn('u2');
+      b.toolUse('s1', 'SendMessage', { to: 'a1', message: 'by id' });
+      b.end(['u2']);
+      const other: SubagentRef = { ...SURVEY, taskId: 'a1' as TaskId, agentId: 'a1' as AgentId, name: 'Someone else' };
+      const list = messages(rowsOf(withAllExpanded(withAgents(reduce(b.events), new Map([['a1', other]])))));
+      expect(list.map((row) => [row.text, row.to?.toolUseId])).toEqual([['Sent message to Survey src: by id', 'ag1']]);
+    });
+
+    it('a lookup arriving after the rows derived re-derives the turn that read it, and no other', () => {
+      const b = unknownAgent();
+      const before = reduce(b.events);
+      const [first, second] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
+      expect(messages(rowsOf(before))).toEqual([]); // folded: outbound rows are work
+      const firstRows = turnRows(before, first);
+      const secondRows = turnRows(before, second);
+      const derived = turnDerivations.count;
+      const after = withAgents(before, LOOKUP);
+      expect(turnRows(after, first)).toBe(firstRows); // read no lookup: kept
+      const secondAfter = turnRows(after, second);
+      expect(secondAfter).not.toBe(secondRows);
+      expect(turnDerivations.count - derived).toBe(1);
+      expect(withAgents(after, LOOKUP)).toBe(after); // the same lookup changes nothing
+      expect(turnRows(after, second)).toBe(secondAfter);
+      expect(turnDerivations.count - derived).toBe(1);
+      expect(messages(rowsOf(withAllExpanded(after))).map((row) => row.text)).toEqual(['Sent message to Survey src: by id', 'Sent message to Survey src: by name', 'Message from Survey src: a note back']);
+    });
   });
 
   // scale-review C scalpel-1#1, as the delivery and artifact rows (Decision Log 29): the turn's closed state is the only

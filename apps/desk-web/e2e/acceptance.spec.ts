@@ -6,7 +6,8 @@
 // history paged to the first row across a compaction, live and after the session ended; the tail's send cases, each
 // framed row drawn without its frame line and a peer's labelled with who sent it; a desk Interrupt's rows, in both of
 // the bridge's shapes, drawing no bubble and ending the turn; a notification's landing on a `<message>`; the column's
-// tabs. Where a milestone's suite already proves a clause, the M6 report cites it.
+// tabs. Where a milestone's suite already proves a clause, the M6 report cites it. Beside them, a message sent through
+// a message tool: its landing, and its drawing while its input streams.
 //
 // With DESK_SHOTS set to a directory, the report and the transcript at one point are saved there at desktop width.
 import type { Locator, Page } from '@playwright/test';
@@ -610,4 +611,79 @@ test("a landing on a <message> whose row is in no page of the transcript says so
   await expect(view.locator('[data-row-id][data-landed]')).toHaveCount(0);
   await notice.getByRole('button', { name: 'Dismiss' }).click();
   await expect(notice).toHaveCount(0);
+});
+
+// A message sent through the to-human plugin's message tool (doperpowers' to-human message tool spec; MAWS's P4-R7): the
+// call is the message, MAWS's `to_human` row once its row lands, drawn as the message while its input streams, and the
+// log's `message` for it names the call (`src`, its tool-use id), so a push lands on that row.
+const MESSAGE_TOOL = 'mcp__to-human__message';
+const STAGE = 'Stage 2 of 4 is done: 34 of the 37 missing labels are restored.';
+/** Rows written after `parent`, each on the chain after the one before, in the recording's envelope. */
+function chainAfter(replay: FakeMachineReplay, parent: string): (row: JsonObject) => JsonObject {
+  const last = replay.recording.rows.main.at(-1)!;
+  let n = 0;
+  return (row) => {
+    const uuid = `5e55a9e0-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+    const written = { uuid, parentUuid: parent, timestamp: new Date().toISOString(), sessionId: replay.session, isSidechain: false, userType: 'external', cwd: last.cwd, version: last.version, entrypoint: 'cli', ...row };
+    parent = uuid;
+    return written;
+  };
+}
+const ownerPrompt = (text: string): JsonObject => ({ type: 'user', origin: { kind: 'human' }, promptId: 'p-message-tool', message: { role: 'user', content: text } });
+const messageCall = (id: string, text: string): JsonObject => ({
+  type: 'assistant',
+  message: { id: `msg_${id}`, role: 'assistant', model: 'claude-haiku-5-5', type: 'message', content: [{ type: 'tool_use', id, name: MESSAGE_TOOL, input: { text } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } },
+});
+const messageSent = (id: string): JsonObject => ({ type: 'user', promptId: 'p-message-tool', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: 'sent' }] }] }, toolUseResult: [{ type: 'text', text: 'sent' }] });
+
+test("a notification's landing on a message sent through a message tool opens the session view at its call's message row, marked", async ({ page, hub }) => {
+  const id = 'toolu_01LandedMessageToolCall';
+  const { view } = await openSession(page, hub, {
+    before: async (replay) => {
+      replay.step(endOf(replay.recording));
+      const next = chainAfter(replay, replay.rowsSoFar().at(-1)!);
+      for (const row of [ownerPrompt('How far along is the relabelling?'), messageCall(id, STAGE), messageSent(id)]) replay.depth.appendRow(null, next(row) as never);
+      const { event } = await hub.append(PROJECT, { writer: `${MACHINE}/${replay.session}`, kind: 'message', from: ALIAS, to: 'host', text: STAGE, src: id } as never);
+      return `?writer=${encodeURIComponent(event.writer)}&seq=${event.seq}`;
+    },
+  });
+  const row = view.locator(`[data-row-id="to-human:${id}"]`);
+  await expect(row).toHaveAttribute('data-landed', '');
+  await expect(row.locator('[data-owner-card="to-human"]')).toContainText(STAGE);
+  await expect(row).toBeInViewport();
+  await expect(page.getByTestId('landing')).toHaveCount(0); // found: nothing to say
+});
+
+test('a message sent through a message tool draws as the message while its input streams, then as its row, never twice', async ({ page, hub }) => {
+  const { fm, view } = await openSession(page, hub);
+  fm.step(endOf(fm.recording));
+  const id = 'toolu_01StreamedMessageToolCall';
+  const turnId = 'turn-message-tool';
+  const next = chainAfter(fm, fm.rowsSoFar().at(-1)!);
+  const land = (row: JsonObject) => fm.depth.apply({ at: 0, k: 'row', agentId: null, row: row as never });
+  const chunk = (chunkIndex: number, body: JsonObject) => fm.depth.apply({ at: 0, k: 'chunk', turnId, agentId: null, step: 0, chunkIndex, chunk: body });
+  land(next(ownerPrompt('How far along is the relabelling?')));
+  await expect(view).toContainText('How far along is the relabelling?');
+
+  chunk(0, { kind: 'tool', index: 0, id, name: MESSAGE_TOOL });
+  chunk(1, { kind: 'input', index: 0, json: '' });
+  chunk(2, { kind: 'input', index: 0, json: '{"text": "Stage 2 of 4 is done:' });
+  const live = streamingRows(view).locator(`[data-to-human-call="${id}"] [data-owner-card="to-human"]`);
+  await expect(live).toContainText('Stage 2 of 4 is done:');
+  await expect(live).not.toContainText('{"text"');
+  chunk(3, { kind: 'input', index: 0, json: ' 34 of the 37 missing labels are restored."}' });
+  await expect(live).toContainText(STAGE);
+
+  // Its row is written: the live drawing stays until that row lands, then the row is the message, drawn once.
+  const call = next(messageCall(id, STAGE));
+  fm.depth.apply({ at: 0, k: 'block-row', body: { uuid: String(call.uuid), turnId, agentId: null, step: 0, index: 0 } });
+  await expect(live).toContainText(STAGE);
+  land(call);
+  await expect(streamingRows(view)).toHaveCount(0);
+  const row = view.locator(`[data-row-id="to-human:${id}"]`);
+  await expect(row.locator('[data-owner-card="to-human"]')).toContainText(STAGE);
+  await expect.poll(() => occurrences(view, STAGE)).toBe(1);
+  land(next(messageSent(id)));
+  await expect(row.locator('[data-owner-card="to-human"]')).toContainText(STAGE);
+  await expect.poll(() => occurrences(view, STAGE)).toBe(1);
 });

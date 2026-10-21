@@ -1,0 +1,21 @@
+{
+  "arm": "desktop",
+  "task": "B1",
+  "rep": 1,
+  "attempt": 1,
+  "kind": "document",
+  "surface": "code",
+  "host": "Mac-mini.local",
+  "armDir": "/tmp/maws-parity-bench/MAWS parity bench",
+  "prompt": "In the document doc.md, change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "promptMatch": ", change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "startedAt": "2026-10-21T11:57:36.042291+00:00",
+  "loadBefore": [
+    3.49,
+    3.36,
+    2.93
+  ],
+  "seedId": null,
+  "seedTranscript": null,
+  "seedUrl": null
+}

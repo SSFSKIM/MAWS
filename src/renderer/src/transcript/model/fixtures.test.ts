@@ -72,7 +72,7 @@ describe('synthetic journals', () => {
   });
 
   it('transcript/boundaries: a retraction boundary, the retracted text absent, two time rows, a retry row updated in place, compaction and a notice', () => {
-    configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' });
     const state = stateOf(journal('boundaries'));
     const rows = rowsOf(withAllExpanded(state));
     const times = ofKind(rows, 'time');
@@ -414,7 +414,7 @@ describe('FX8 disk conversation history', () => {
   }
 
   it('a real fork persists outside folded work, without a second-writer notice', async () => {
-    configureTime({ now: '2026-10-04T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    configureTime({ now: '2026-10-04T00:00:00.000Z', timeZone: 'UTC' });
     const state = await fx8('fork');
     const rows = rowsOf(state);
     const boundaries = ofKind(rows, 'boundary');
@@ -616,6 +616,23 @@ describe('cross-session rows (E7)', () => {
     expect(ofKind(rows, 'user').filter((row) => row.text.includes('cross-session-message'))).toEqual([]);
     expect(cellsOf(rows).filter((cell) => cell.toolName === 'ListAgents' || cell.toolName === 'SendMessage')).toEqual([]);
     expect(messages(rowsOf(state)).filter((row) => row.sender !== null)).toEqual([EXPECTED[0], EXPECTED[3]]);
+  });
+
+  // E11 S2(d): the lead of a team an interactive terminal formed (2.1.293), from disk. Its teammate's report, a plain user
+  // record carrying a <teammate-message> envelope, draws one row from the teammate and never the owner's bubble too.
+  it("a terminal team lead from disk: the teammate's report is one message from scout, with no Reply, in a peer turn", async () => {
+    const SESSION = 'b4b10738-4b3f-4539-906b-fcb5da9669a5';
+    const events: SessionEvent[] = [];
+    const bytes = readFileSync(join(FIXTURE_DIR, 'pass3', 'e7-team-terminal', `${SESSION}.jsonl`));
+    const follower = new ChainFollower(new MemoryFileReader(bytes), SESSION as SessionId, null, (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 0 });
+    await follower.start();
+    follower.stop();
+    const rows = rowsFor(events);
+    expect(messages(rows)).toEqual([
+      { direction: 'between', text: 'Message from scout: one.txt contains a single line: "ONE" (followed by a trailing newline).', sender: { name: 'scout', address: '', session: null }, recipient: null, replyTo: null, result: null, resultText: null },
+    ]);
+    expect(ofKind(rows, 'user').map((row) => row.text)).toEqual([expect.stringMatching(/^Spawn a general-purpose Agent named "scout"/)]);
+    expect(ofKind(rows, 'divider').map((row) => row.origin)).toEqual(['human', 'peer']);
   });
 });
 // E7 end

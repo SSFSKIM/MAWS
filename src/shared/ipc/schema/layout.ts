@@ -137,14 +137,22 @@ export const StoredRegionsSchema = z.union([
 export const NO_PROJECT = 'none';
 export const TabSetKeySchema = z.union([z.literal(NO_PROJECT), ProjectIdSchema]);
 export type TabSetKey = z.infer<typeof TabSetKeySchema>;
-export const TabSetSchema = z.strictObject({
-  panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number() });
+const TabSetShape = {
+  panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number() };
+// P4-B3 (X37; its Decision Log 1): `floating` names the session tab whose pane has yielded into the floating card; absent
+// while docked (never written as null or undefined, so a docked set is the value it was before), and `splitRatio`, which
+// a float never writes, is the ratio Dock returns. Version 2 is kept: an older build reading a set that floats rejects
+// `main.tabs` and falls back to its default tabs. P4-B3x (P4 Decision Log 40): `foldedPanel` marks a float Expand made
+// by also folding the right panel (`regions.panel.collapsed`), present only while that fold stands: the panel comes
+// back when the float ends, unless the owner opened it meanwhile, which drops the mark (the layout store's
+// `reconcileFold`). It persists as the float does, at the same downgrade cost.
+export const TabSetSchema = z.strictObject({ ...TabSetShape, floating: z.strictObject({ sessionTabId: z.string(), foldedPanel: z.literal(true).optional() }).optional() });
 export type TabSet = z.infer<typeof TabSetSchema>;
 const ClosedTabsSchema = z.array(TabRefSchema).max(10);
 export const LayoutMainSchema = z.strictObject({ version: z.literal(2), current: TabSetKeySchema,                // key `main.tabs`
   sets: z.partialRecord(TabSetKeySchema, TabSetSchema), closedTabs: ClosedTabsSchema });
 export type LayoutMain = z.infer<typeof LayoutMainSchema>;
-export const LayoutMainV1Schema = z.strictObject({ version: z.literal(1), ...TabSetSchema.shape, closedTabs: ClosedTabsSchema });
+export const LayoutMainV1Schema = z.strictObject({ version: z.literal(1), ...TabSetShape, closedTabs: ClosedTabsSchema });
 export type LayoutMainV1 = z.infer<typeof LayoutMainV1Schema>;
 // What hydration reads from `main.tabs`, either version: a tab whose kind this build does not name is dropped from the
 // panes and the closed-tab history (a pane it leaves empty goes, focusing pane 0; a pane whose active tab it was
@@ -316,8 +324,20 @@ export type AttachTab = z.infer<typeof AttachTabSchema>;
 export const AttachTabsSchema = z.strictObject({ version: z.literal(1), tabs: z.array(AttachTabSchema) });   // key `sessions.attachTabs`
 // C10 end
 
+// P4-B3 start (its Decision Log 22; X5 as amended, additive): what a panel tool persists of a tab, by panel tab id
+// (`setPanelParams`; the Artifacts tool's record, so a relaunch shows it again), opaque here and validated by the tool that
+// reads it back as a restored instance's `init.params`; and the pin selection while no session is in view, which no
+// `panel.<appSessionId>` key holds. Both outside the `panel.` namespace (hydration reads every `panel.<x>` key as a
+// session's list), each at its own version 1, no X15 slot.
+export const PanelParamsSchema = z.strictObject({ version: z.literal(1), params: z.record(z.string(), z.unknown()) });   // key `panelTools.params`
+export const PanelActiveNoSessionSchema = z.strictObject({ version: z.literal(1), activeTabId: z.string().nullable() });   // key `panelTools.activeNoSession`
+// P4-B3 end
+
 export const LayoutKeySchema = z.union([
   z.literal('regions'), z.literal('main.tabs'), z.literal('panel.pinned'), z.string().regex(/^panel\.[^.]+$/), z.literal('window.main'),
+  // P4-B3 start
+  z.literal('panelTools.params'), z.literal('panelTools.activeNoSession'),
+  // P4-B3 end
   // C8a start
   z.literal('summary.sections'),
   // C8a end

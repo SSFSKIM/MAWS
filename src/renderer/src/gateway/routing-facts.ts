@@ -8,7 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { Settings } from '@shared/ipc/schema';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { UsageSnapshot, UsageWindow } from '@shared/usage/types';
-import { formatClock, formatWeekdayHour } from '../app/date-format';
+import { formatClock, formatWeekdayHour } from '@shared/app/date-format';
 import { PACE, ROUTE, type Route } from './copy';
 
 export type DirectLogin = { login: string; email: string | null; organization: string | null };
@@ -100,7 +100,7 @@ export function paceRunsOutAt(window: UsageWindow | null, kind: PaceKind, now: n
 
 const spaced = (s: string) => s.replace(/\s/g, ' '); // ICU writes a narrow no-break space before AM/PM
 
-// The time in the system locale (`app/date-format.ts`): "2:05 PM", "Tue 2 PM" (오후 2:05).
+// The time in the display locale (`@shared/app/date-format`): "2:05 PM", "Tue 2 PM".
 export function paceLine(window: UsageWindow | null, kind: PaceKind, now: number): string | null {
   const at = paceRunsOutAt(window, kind, now);
   if (at === null) return null;

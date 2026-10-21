@@ -27,15 +27,21 @@ describe('scm service stages, unstages, discards and commits against a real repo
   let git: GitService;
   let refresh: ReturnType<typeof vi.fn<(directory: string) => void>>;
   let directory: string;
+  let others: Map<AppSessionId, string>; // sessions beside ID, by directory
+  let mutating: string[]; // where each mutating git call ran, as it started
 
   function service(): ScmService {
     // the system PATH: enough for the hooks here, and no gh on it, so `status` never probes the owner's gh
     const captured = { PATH: '/usr/bin:/bin', HOME: repo.home, CLAUDE_CONFIG_DIR: trust.configHome };
+    const mutate = createMutatingRunner({ env: {}, captured: async () => captured });
     return new ScmService({
-      records: (id) => (id === ID ? { directory, worktree: null } : null),
+      records: (id) => (id === ID ? { directory, worktree: null } : others.has(id) ? { directory: others.get(id)!, worktree: null } : null),
       read: createGitRunner({ env: repo.serviceEnv() }),
       status: (d) => git.status(d),
-      mutate: createMutatingRunner({ env: {}, captured: async () => captured }),
+      mutate: (d, args, options) => {
+        mutating.push(d);
+        return mutate(d, args, options);
+      },
       refresh,
       captured: async () => captured,
       env: {},
@@ -57,12 +63,49 @@ describe('scm service stages, unstages, discards and commits against a real repo
     trust.write({ [repo.root]: { hasTrustDialogAccepted: true } });
     git = new GitService({ env: repo.serviceEnv() });
     refresh = vi.fn();
+    others = new Map();
+    mutating = [];
   });
   afterEach(() => {
     git.dispose();
     trust.dispose();
     repo.dispose();
   });
+
+  // P4 W2-B (tracker 2026-10-06 "The mutation chain and admission queue are keyed by the checkout's realpath…"): a
+  // session at the root and one in its subdirectory write one index under two directories; a linked worktree has an
+  // index of its own but shares the repository's refs, and takes its turn too
+  it('runs the mutations of a root, its subdirectory and a linked worktree one at a time, so none meets index.lock', async () => {
+    const SUB = 'c3333333-3333-4333-8333-333333333333' as AppSessionId;
+    const SIDE = 'd4444444-4444-4444-8444-444444444444' as AppSessionId;
+    const side = await repo.addWorktree('side');
+    others.set(SUB, repo.path('sub')).set(SIDE, side);
+    // `git add` holds index.lock while it runs this clean filter, which waits for the test's release
+    const started = repo.path('.git/filter-started');
+    const release = repo.path('.git/filter-release');
+    const filter = await repo.write('.git/slow-filter.sh', `touch '${started}'\ni=0\nwhile [ ! -e '${release}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\ncat\n`);
+    await repo.git('config', 'filter.slow.clean', `/bin/sh '${filter}'`);
+    await repo.write('.git/info/attributes', 'slow.txt filter=slow\n');
+    await repo.write('slow.txt', 's\n');
+    await repo.write('sub/b.txt', 'b\n');
+    writeFileSync(join(side, 'w.txt'), 'w\n');
+    const scm = service();
+
+    const first = scm.stage({ appSessionId: ID, paths: ['slow.txt'] });
+    await vi.waitFor(() => expect(existsSync(started)).toBe(true), { timeout: 10_000 });
+    const sub = scm.stage({ appSessionId: SUB, paths: ['sub/'] });
+    const linked = scm.stage({ appSessionId: SIDE, paths: ['w.txt'] });
+    await new Promise((resolve) => setTimeout(resolve, 1_000)); // time for either to reach git, were it not waiting
+    const during = [...mutating];
+    writeFileSync(release, '');
+    ok(await first);
+    ok(await sub);
+    ok(await linked);
+    expect(during).toEqual([directory]); // nothing else ran while the first held the index
+    expect(mutating.slice(1).sort()).toEqual([repo.path('sub'), side].sort());
+    expect(await porcelain()).toEqual(expect.arrayContaining(['A  slow.txt', 'A  sub/b.txt']));
+    expect(await runGit(side, ['status', '--porcelain'])).toBe('A  w.txt\n');
+  }, 20_000);
 
   it('stages and unstages a modification, an untracked directory and a rename, answering the status after', async () => {
     const scm = service();

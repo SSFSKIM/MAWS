@@ -123,6 +123,44 @@ describe('useDeliveredReplies', () => {
       expect([...result.current.delivered]).toEqual([uuid('u5')]);
     });
 
+    // tech debt (L111): each reply's watch is its own; another reply joining, failing or settling neither restarts its
+    // events read nor moves its retry deadline
+    it('keeps an unaffected reply\'s read and retry deadline while another reply joins, fails and settles', async () => {
+      vi.useFakeTimers();
+      let down = false; // the events read fails while set
+      const client = spied({
+        ...fake.client,
+        invoke: ((name: CommandName, input: unknown) =>
+          name === 'session.events' && down ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'down' } }) : fake.client.invoke(name as never, input as never)) as MawsBridge['invoke'],
+      });
+      const subscriptions = () => fake.calls.filter((c) => c === 'on session.eventBatch').length;
+      const { result } = renderHook(() => useDeliveredReplies(CHILD, client));
+      act(() => result.current.track({ disposition: 'sent', started: false, messageUuid: uuid('u8') }));
+      await act(async () => {});
+      down = true;
+      act(() => result.current.track({ disposition: 'sent', started: false, messageUuid: uuid('u7') }));
+      await act(async () => {});
+      down = false;
+      expect(reads(client), 'u8 read once, u7 failed once').toBe(2);
+      expect(subscriptions(), 'u7 joining and failing left u8\'s watch alone').toBe(2);
+      await act(async () => vi.advanceTimersByTimeAsync(DELIVERY_RETRY_MS[0] - 400));
+      const b = builder();
+      b.turn('u8', 'Also the subtitle');
+      b.emit('command.lifecycle', { commandUuid: uuid('u8'), state: 'started' });
+      push(b.events); // u8 settles 400 ms before u7's retry is due
+      await act(async () => {});
+      expect([...result.current.delivered]).toEqual([uuid('u8')]);
+      expect(reads(client), 'u8 settling started no read').toBe(2);
+      await act(async () => vi.advanceTimersByTimeAsync(400));
+      expect(reads(client), 'u7 retried at its own deadline').toBe(3);
+      const from = b.events.length;
+      b.turn('u7', 'Later then');
+      b.emit('command.lifecycle', { commandUuid: uuid('u7'), state: 'started' });
+      push(b.events.slice(from));
+      await act(async () => {});
+      expect(new Set(result.current.delivered)).toEqual(new Set([uuid('u7'), uuid('u8')]));
+    });
+
     it('is not what the card closing is: an unmount aborts the watch and retries nothing', async () => {
       vi.useFakeTimers();
       fake = fakeClient(); // the events read stays pending until the card closes

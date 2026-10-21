@@ -1,10 +1,9 @@
 // The Artifacts tab's sheets (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M4), one at a time: an artifact's
-// Rename and Delete, the design-system-in-use answer to a Delete, the Spaces' New, Rename and Delete, and P3-H's Send
-// to. Opening one replaces the one shown; the tab's `LibraryDialogs` draws it.
+// Rename and Delete, the design-system-in-use answer to a Delete, the Spaces' New, Rename and Delete. Opening one
+// replaces the one shown; the tab's `LibraryDialogs` draws it. P4-B5: Send to is the app's own sheet (../delivery/).
 import { create } from 'zustand';
-import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
+import type { LibrarySpace } from '@shared/ipc/schema/library';
 import { toast } from '../stores/notices';
-import type { SendTarget, SendToRun } from './send-to';
 
 export interface ArtifactRef {
   id: string;
@@ -17,8 +16,7 @@ export type LibraryDialog =
   | { kind: 'inUse'; artifact: ArtifactRef; artifactIds: string[] } // a design system the listed artifacts still use
   | { kind: 'newSpace'; moveArtifact?: ArtifactRef } // "Move to Space › New Space…" moves the artifact into it
   | { kind: 'renameSpace'; space: LibrarySpace }
-  | { kind: 'deleteSpace'; space: LibrarySpace }
-  | { kind: 'sendTo'; artifact: LibraryRow; target: SendTarget; run: SendToRun }; // P3-H: its run outlives the sheet's mount
+  | { kind: 'deleteSpace'; space: LibrarySpace };
 
 export const useLibraryDialog = create<{ open: LibraryDialog | null }>()(() => ({ open: null }));
 

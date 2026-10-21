@@ -10,10 +10,10 @@ import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { hostStatus, supervisorStatus, updatedStatus, waitingStatus } from '../test-support/host-status';
 import { describeSupervisor, SupervisorRow } from './SupervisorRow';
-import { formatClock } from './date-format'; // L129
+import { formatClock } from '@shared/app/date-format'; // L129
 
 const AT = new Date(2026, 9, 6, 14, 2).toISOString();
-const CLOCK = formatClock(Date.parse(AT)); // L129: the system locale's clock
+const CLOCK = formatClock(Date.parse(AT)); // L129: the display locale's clock
 const crashed = (over: Partial<HostStatus> = {}) => hostStatus({ state: 'crashed', supervisor: null, matches: null, ...over });
 
 describe('the supervisor row’s text', () => {

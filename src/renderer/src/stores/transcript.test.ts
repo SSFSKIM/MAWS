@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { EventId } from '@shared/graph/ids';
+import type { AgentId, EventId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { cellId, rowId, turnId } from '../transcript/model/keys';
 import type { Row } from '../transcript/model/rows';
@@ -319,6 +319,33 @@ describe('transcript store', () => {
     expect(jump).toMatchObject({ rowId: group!.id, focus: target, align: 'center' });
   });
 
+  // L197: the host's agent lookup for a key names an agent no loaded turn launched; set before the key attaches, it
+  // applies at the attach, and a key that starts over (a remount's staged restart, a source's reset) keeps it.
+  it('applies a key’s agent lookup to its rows, before or after the attach, and keeps it when the key starts over', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('s1', 'SendMessage', { to: 'a912e224', message: 'hi' });
+    b.end(['u1']);
+    const survey = { taskId: 'a912e224' as TaskId, agentId: 'a912e224' as AgentId, toolUseId: 'ag9' as ToolUseId, name: 'Survey src', glyph: 3, kind: 'agent' as const, subagentType: 'Explore' };
+    const lookup = new Map([['a912e224', survey]]);
+    const sent = () => {
+      store.getState().expandAll(KEY);
+      return store.getState().rows(KEY).find((row): row is Extract<Row, { kind: 'agent_message' }> => row.kind === 'agent_message')?.text;
+    };
+    const store = createTranscriptStore();
+    store.getState().setAgents(KEY, lookup);
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    expect(sent()).toBe('Sent message to Survey src: hi');
+    store.getState().setAgents(KEY, undefined);
+    expect(sent()).toBe('Sent to a912e224: hi');
+    store.getState().setAgents(KEY, lookup);
+    expect(sent()).toBe('Sent message to Survey src: hi');
+    store.getState().detach(KEY);
+    await store.getState().attach(KEY, pushSource(b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))).source); // staged restart
+    expect(store.getState().entries[KEY].state.seen.has(`disk:${b.events[0].id}` as EventId)).toBe(true);
+    expect(sent()).toBe('Sent message to Survey src: hi');
+  });
+
   it('drops a duplicate event id in a live batch', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();
@@ -477,3 +504,37 @@ describe('transcript store: the report view', () => {
   });
 });
 // P2-C end
+
+// P4-R7: a key's state reads the message tools its source names (the transcript source's `messageTools`). MAWS's
+// sources name none, and MAWS reads its own alone, so a call of the to-human plugin's tool is the MCP cell it is; the
+// desk's sources name the plugin's too.
+describe('transcript store: the message tools a source names', () => {
+  const PLUGIN = 'mcp__to-human__message';
+  const BOTH = ['mcp__maws__message', PLUGIN];
+  function pluginMessageTurn() {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('m1', PLUGIN, { text: 'Stage 1 is done.' });
+    b.result('m1', [{ type: 'text', text: 'sent' }]);
+    b.text('a1', 0, 'Done.');
+    b.end(['u1']);
+    return b;
+  }
+  const source = (events: SessionEvent[], messageTools?: readonly string[]): TranscriptSource => ({ subscribe: () => () => {}, snapshot: async () => events, ...(messageTools && { messageTools }) });
+
+  it('reads MAWS’s own when the source names none, the names it gives when it does, and a re-attached key its new source’s', async () => {
+    const { events } = pluginMessageTurn();
+    const store = createTranscriptStore();
+    const read = (key: string) => {
+      store.getState().expandAll(key, { cells: true });
+      return store.getState().rows(key).flatMap((row) => (row.kind === 'to_human' ? [`message ${row.toolUseId}`] : row.kind === 'group' ? row.cells.map((cell) => `cell ${cell.toolName}`) : row.kind === 'cell' ? [`cell ${row.toolName}`] : []));
+    };
+    await store.getState().attach('maws', source(events));
+    await store.getState().attach('desk', source(events, BOTH));
+    expect(read('maws')).toEqual([`cell ${PLUGIN}`]);
+    expect(read('desk')).toEqual(['message m1']);
+    store.getState().detach('maws');
+    await store.getState().attach('maws', source(events, BOTH)); // a kept key started over: staged, then installed
+    expect(read('maws')).toEqual(['message m1']);
+  });
+});

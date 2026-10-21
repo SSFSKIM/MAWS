@@ -3,7 +3,7 @@
 // upgrades included. Its own paths (/standin/…) it answers itself. Node only; run by the local command and the suites.
 // Each request to the hub gets a connection of its own (`agent: false`), so requests share nothing: a conservative
 // choice after a 502 of unknown cause was seen once on the CI runner, on a request that needed nothing beyond the hub.
-import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, request as httpRequest, STATUS_CODES, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import type { AccessStandin } from './standin.ts';
 
@@ -20,7 +20,7 @@ export async function startProxy(options: {
   upstream: () => string;
   port?: number;
   host?: string;
-  /** Extra /standin/ paths answered before the stand-in's own (the local command's enrollment-code helper). */
+  /** Extra /standin/ paths answered before the stand-in's own (the code helpers, ./helpers.ts). */
   extra?: (request: Request) => Promise<Response | null>;
 }): Promise<Proxy> {
   const { standin, upstream } = options;
@@ -43,8 +43,8 @@ export async function startProxy(options: {
     }
     const admission = await standin.admit(url.pathname, req.headers);
     if (admission.kind === 'refuse') {
-      res.writeHead(admission.status, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify(admission.body));
+      res.writeHead(admission.status, { 'content-type': admission.contentType });
+      return res.end(admission.body);
     }
     const target = new URL(upstream());
     const forwarded = req.pipe(
@@ -74,8 +74,8 @@ export async function startProxy(options: {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? host}`);
       const admission = await standin.admit(url.pathname, req.headers);
       if (admission.kind === 'refuse') {
-        const body = JSON.stringify(admission.body);
-        socket.end(`HTTP/1.1 ${admission.status} Forbidden\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+        const { status, contentType, body } = admission;
+        socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: ${contentType}\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
         return;
       }
       const target = new URL(upstream());

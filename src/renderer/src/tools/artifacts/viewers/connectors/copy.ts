@@ -1,5 +1,6 @@
 // P3-H H4: every sentence of an HTML artifact's Connectors action and sheet. A refusal's reason is a closed word
 // (P3 Decision Log 84), so each has its sentence here; no server's or route's own words are shown.
+import { formatClock } from '@shared/app/date-format';
 import type { ConnectorCallOutcome, ConnectorRefusal } from '@shared/artifacts/connectors';
 import type { ConnectorOwnerFailure, ConnectorServerRow } from '@shared/ipc/schema/connectors';
 
@@ -29,7 +30,7 @@ export const CONNECTORS_COPY = {
   allowedOnce: 'Allowed once',
   notAllowed: 'Not allowed',
   changed: 'Changed since you allowed it',
-  readAt: (at: number) => `Read at ${new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`,
+  readAt: (at: number) => `Read at ${formatClock(at)}`,
   // the detail under a tool's state: a gesture's refusal or the page's latest outcome; null: nothing to add
   detail(outcome: ConnectorCallOutcome | null): string | null {
     if (outcome === null) return null;

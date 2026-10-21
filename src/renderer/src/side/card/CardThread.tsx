@@ -179,15 +179,17 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
   const { target } = card;
   return useMemo(
     () => ({
-      openArtifact(appSessionId, id, at) {
+      openArtifact(appSessionId, id, at, location) {
         const show = showVersion.current;
-        // the row's id is the artifact's, and the version it asks for (by revision, else by number, else the latest) is
-        // shown in this card's viewer
+        // the row's id is the artifact's, and the version it asks for (by revision, else by number, else the latest; P4-B4:
+        // a link's place, by the version id it names) is shown in this card's viewer
         if (target?.kind === 'artifact-page' && show !== undefined && id === target.artifactId) {
-          show(at ?? 'latest');
+          if (location) show(at ?? 'latest', location);
+          else show(at ?? 'latest');
           return;
         }
-        registeredActions().openArtifact(appSessionId, id, at);
+        if (location) registeredActions().openArtifact(appSessionId, id, at, location); // P4-B4: a link's place
+        else registeredActions().openArtifact(appSessionId, id, at);
       },
       userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
       editAndResubmit: (row) => editRowOf(child, row, 'edit'),
@@ -223,7 +225,7 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     const outcome = replyOutcomeOf(result);
     settled?.(outcome.kind !== 'refused'); // P3-F (L154)
     if (outcome.kind === 'refused' && cardGone(serial)) {
-      toast({ level: 'warning', text: COPY.replyRefusedAfterClose(outcome.reason), actions: [{ label: COPY.copyReply, run: () => void navigator.clipboard.writeText(content) }], dismissible: true });
+      offerReply(content, COPY.replyRefusedAfterClose(outcome.reason));
       return;
     }
     setSending(false);
@@ -240,4 +242,11 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     void send();
   };
   return { text, setText, sending, refusal, canSend, send, onKeyDown };
+}
+
+// A late refusal's toast, the reply one click from the clipboard. Acting on a toast dismisses it (ToastHost), so a
+// write the clipboard refuses is said in a toast that offers the reply again (tech debt L117).
+function offerReply(content: string, text: string) {
+  const copy = () => navigator.clipboard.writeText(content).catch((error: unknown) => offerReply(content, COPY.replyNotCopied(error instanceof Error ? error.message : String(error))));
+  toast({ level: 'warning', text, actions: [{ label: COPY.copyReply, run: () => void copy() }], dismissible: true });
 }

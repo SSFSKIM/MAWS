@@ -13,6 +13,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { EditorHostScopeContext, editorHostOf, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { requestArtifactOpen, resetOpenRequests, takeOpenRequest } from '../artifacts/viewers/requests';
 import { DeckPanel } from './DeckBody';
 import { DeckTabState } from './tab-state';
 
@@ -46,7 +47,7 @@ afterEach(() => {
 });
 
 async function mount(doc: Doc) {
-  const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
   const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
   const state = new DeckTabState({ artifactId: DECK, kind: 'presentation', surface: 'panel' }, { host, log: () => {}, confirmDiscard: async () => true });
@@ -76,6 +77,23 @@ describe('the deck body', () => {
     cleanup();
     resetEditorHosts();
     expect((await mount(deckOf([]))).present()?.disabled).toBe(true);
+  });
+
+  // P4-B4: an open's place (a link's `#slide=`) is the open request for this deck on this surface: the slide is selected
+  // in a body already showing the deck, and the request taken once
+  it('selects the slide a link names, taking the open request', async () => {
+    resetOpenRequests();
+    const { state } = await mount(deckOf(['a', 'b', 'c']));
+    const session = state.snapshot().session!;
+    expect(session.snapshot().currentSlide).toBe('a');
+    const serial = requestArtifactOpen(DECK, 'latest', 'main', { slide: 'c' }); // another surface's: this body leaves it
+    await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(session.snapshot().currentSlide).toBe('a');
+    expect(takeOpenRequest(serial)).toBe(true);
+    let asked = 0;
+    act(() => void (asked = requestArtifactOpen(DECK, 'latest', 'panel', { slide: 'c' })));
+    await waitFor(() => expect(session.snapshot().currentSlide).toBe('c'));
+    expect(takeOpenRequest(asked)).toBe(false);
   });
 
   // scalpel-2#2: the empty deck's stage draws no slide canvas, so it never reported drawn and whenShown never resolved

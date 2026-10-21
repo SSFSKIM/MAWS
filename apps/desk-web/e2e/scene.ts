@@ -12,7 +12,7 @@ export const S = {
   gone: 'e0ad139c-18bc-45bd-9489-be8653145f80', // doperpowers-1e on SK.local, retired
 };
 
-export const summary = (over: Partial<ProjectSummary> = {}): ProjectSummary => ({ id: PROJECT, name: 'MAWS', kind: 'hub', machines: 2, machines_online: 2, working: 1, waiting: 1, ...over });
+export const summary = (over: Partial<ProjectSummary> = {}): ProjectSummary => ({ id: PROJECT, name: 'MAWS', kind: 'hub', machines: 2, machines_online: 2, working: 1, waiting: 1, live: 3, ...over });
 
 const joined = (session: string, alias: string, machine: string) => ({
   writer: `${machine}/${session}`,
@@ -30,7 +30,7 @@ const joined = (session: string, alias: string, machine: string) => ({
 const charge = (session: string, machine: string, text: string) => ({ writer: `${machine}/${session}`, kind: 'in-charge', session, text, source: 'set' });
 
 export async function stageProject(hub: HubDouble): Promise<void> {
-  hub.setGrid([summary(), { id: 'arkho', name: 'arkho', kind: 'hub', machines: 1, machines_online: 0, working: 0, waiting: 0 }]);
+  hub.setGrid([summary(), { id: 'arkho', name: 'arkho', kind: 'hub', machines: 1, machines_online: 0, working: 0, waiting: 0, live: 1 }]);
   await hub.append(PROJECT, joined(S.gone, 'doperpowers-1e', 'SK.local'));
   await hub.append(PROJECT, joined(S.rests, 'cua_repl', 'mini'));
   await hub.append(PROJECT, charge(S.rests, 'mini', 'cua_repl browser and GUI tool'));

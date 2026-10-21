@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V14 } from '../../settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '../../settings/defaults';
 import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
+import { LaunchProfileSchema, userScopeProfile } from '../../engine/launch-profile'; // P4-A2
 
-const base = SETTINGS_DEFAULTS_V14;
+const base = SETTINGS_DEFAULTS_V17;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
@@ -23,7 +24,12 @@ describe('settings keymap is a partial record', () => {
     expect(issueCodes({ ...base, keymap: { 'tab.close': 'Cmd J!' } })).toEqual(['invalid_format']);
   });
 
-  it('is version 11 (W13: no engine pin; E9: the voice section; E10: the supervisor section; E4a: the browser section) and carries the notification policy', () => {
+  it('is version 17 and carries the notification policy (P4-R8: the app MCP servers; P4-A2: the launch profile)', () => {
+    expect(base.version).toBe(17);
+    expect(SettingsSchema.safeParse({ ...base, version: 16 }).success).toBe(false); // P4-A2
+    expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, launchProfile: undefined } }).success).toBe(false); // P4-A2: required, even at the user scope
+    expect(SettingsSchema.safeParse({ ...base, version: 15 }).success).toBe(false); // P4-R8
+    expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, mcpServers: undefined } }).success).toBe(false); // P4-R8: required, even when empty
     expect(SettingsSchema.safeParse({ ...base, version: 10 }).success).toBe(false); // E4a
     expect(SettingsSchema.safeParse({ ...base, browser: undefined }).success).toBe(false); // E4a
     expect(SettingsSchema.safeParse({ ...base, version: 9 }).success).toBe(false); // E10
@@ -43,6 +49,42 @@ describe('settings keymap is a partial record', () => {
     expect(SettingsPatchSchema.safeParse({ version: 3 }).success).toBe(false);
   });
 });
+
+// P4-A2 start (2026-10-21): the launch profile, held to the engine's plugin keys and its two switches' values
+describe('settings engine.launchProfile', () => {
+  const profile = (plugins: unknown, rest: object = {}) => ({ ...userScopeProfile(), plugins: { off: plugins }, ...rest });
+
+  it('takes the user scope and plugin ids as the engine keys them, name@marketplace', () => {
+    expect(LaunchProfileSchema.safeParse(userScopeProfile()).success).toBe(true);
+    expect(LaunchProfileSchema.safeParse(profile(['cc-plugin-diff@builtin', 'ptc@ptc-tool'], { outputStyle: 'maws', hooks: 'none' })).success).toBe(true);
+    expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, launchProfile: profile(['cc-plugin-diff@builtin']) } }).success).toBe(true);
+    expect(SettingsPatchSchema.safeParse({ engine: { launchProfile: profile(['cc-plugin-diff@builtin']) } }).success).toBe(true);
+  });
+
+  it('refuses a plugin id that is not name@marketplace, in the file and in a patch', () => {
+    for (const id of ['__proto__', 'constructor', 'a b@c', 'x', '@builtin', 'ptc@', 'a@b@c', ' ptc@ptc-tool', `${'x'.repeat(256)}@m`, '']) {
+      expect(LaunchProfileSchema.safeParse(profile([id])).success, JSON.stringify(id)).toBe(false);
+      expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, launchProfile: profile([id]) } }).success, JSON.stringify(id)).toBe(false);
+      expect(SettingsPatchSchema.safeParse({ engine: { launchProfile: profile([id]) } }).success, JSON.stringify(id)).toBe(false);
+    }
+  });
+
+  it('refuses an unknown key at either level, a value outside the two switches, and a partial profile', () => {
+    expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), effort: 'high' }).success).toBe(false); // P4 Decision Log 8: no effort
+    expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), plugins: { off: [], on: ['ptc@ptc-tool'] } }).success).toBe(false);
+    expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), outputStyle: 'default' }).success).toBe(false);
+    expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), hooks: 'project' }).success).toBe(false);
+    expect(LaunchProfileSchema.safeParse({ plugins: { off: [] }, outputStyle: 'user' }).success).toBe(false);
+    expect(SettingsPatchSchema.safeParse({ engine: { launchProfile: { hooks: 'none' } } }).success).toBe(false); // replaced whole, never by field
+  });
+
+  it('holds the plugin list to 256 ids', () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}@m`);
+    expect(LaunchProfileSchema.safeParse(profile(ids(256))).success).toBe(true);
+    expect(LaunchProfileSchema.safeParse(profile(ids(257))).success).toBe(false);
+  });
+});
+// P4-A2 end
 
 // C12 start (C12 execution document, Interfaces "X2 additions"); W13: settings.engineCustody retired with custody
 describe('settings.engineApplied', () => {

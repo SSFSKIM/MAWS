@@ -19,7 +19,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { TRUST_FIRST } from '../../sessions/acquire';
 import { OwnerReport } from './OwnerReport';
 import { ReportBar } from './ReportBar';
-import { reportOf, resetUnreportedAnswers } from './answering';
+import { reportOf, resetQuestionAnswering } from './answering';
 
 const hold = vi.hoisted(() => ({
   client: null as ReturnType<typeof import('../../../../../test/support/fake-client').fakeClient>['client'] | null,
@@ -55,7 +55,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetOwnerChannelStore();
-  resetUnreportedAnswers();
+  resetQuestionAnswering();
   useSessions.setState({ records: new Map(), engine: new Map() });
   useComposerStore.setState({ focusTargets: new Map() });
   useNotices.setState({ notices: [] });
@@ -151,6 +151,43 @@ describe('a choice is sent through the seam and its result reported to main, wha
     await settle();
     expect(screen.queryByText('Sending…')).toBeNull();
     expect(reports()).toHaveLength(1);
+  });
+
+  // tech debt (L118): the send in flight is the question's, not the card's: the transcript mounts only the rows in
+  // view, so a card scrolled away and back while its answer is out still offers nothing, and says what it answered
+  it('a card remounted while its answer is out still reads Sending…, offers nothing, and says the outcome', async () => {
+    withMarks([question({ state: 'unanswered' })]);
+    let release!: (result: HumanPromptResult) => void;
+    seam(() => new Promise((resolve) => (release = resolve)));
+    const first = draw();
+    fireEvent.click(choice(/^Postgres/));
+    await settle();
+    first.unmount(); // virtualized out of the transcript
+    draw();
+    expect(screen.getByRole('status').textContent).toBe('Sending…');
+    expect(choice(/^Postgres/)).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Reply' })).toHaveProperty('disabled', true);
+    fireEvent.click(choice(/^Postgres/));
+    expect(sends).toHaveLength(1);
+    await act(async () => release({ disposition: 'refused', started: false, reason: 'The session has ended' }));
+    await settle();
+    expect(sends).toHaveLength(1);
+    expect(reports()).toHaveLength(1);
+    expect(screen.queryByText('Sending…')).toBeNull();
+    expect(screen.getByText('The session has ended')).toBeTruthy(); // the outcome, said on the card now drawn
+    expect(choice(/^Postgres/)).toHaveProperty('disabled', false);
+  });
+
+  it('reads Starting… through a remount when the send starts the session first', async () => {
+    useSessions.setState({ engine: new Map() });
+    withMarks([question({ state: 'unanswered' })]);
+    seam(() => new Promise(() => {}));
+    const first = draw();
+    fireEvent.click(choice(/^Postgres/));
+    await settle();
+    first.unmount();
+    draw();
+    expect(screen.getByRole('status').textContent).toBe('Starting…');
   });
 
   it('reads Starting… when the session has no ready process, since the send starts it first', async () => {

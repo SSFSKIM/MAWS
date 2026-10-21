@@ -5,7 +5,7 @@ import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useNotices } from '../stores/notices';
 import { BUDGET, clockTime, gb, reasonWords } from './copy';
-import { formatClock } from '../app/date-format';
+import { formatClock } from '@shared/app/date-format';
 import { BUDGET_BANNER_ID, connectBudget, resetBudgetStore, useBudget } from './store';
 
 const A = 'app-a' as AppSessionId;
@@ -29,7 +29,7 @@ describe('the budget’s words', () => {
 
   it('names the release’s time and budget on the mark and in Session info', () => {
     const at = new Date(2026, 8, 29, 14, 2).toISOString();
-    const clock = formatClock(Date.parse(at)); // L129: the system locale's clock, as every date in the app
+    const clock = formatClock(Date.parse(at)); // L129: the display locale's clock, as every date in the app
     expect(clockTime(at)).toBe(clock);
     expect(BUDGET.markTitle({ at, reason: 'budget', limitKiB: 8 * GiB })).toBe(`Released at ${clock} to stay under the 8 GB memory budget · Send resumes it`);
     expect(BUDGET.releasedLine({ at, reason: 'budget', limitKiB: 8 * GiB })).toBe(`Released at ${clock} to stay under 8 GB`);

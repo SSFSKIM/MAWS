@@ -6,9 +6,12 @@
 import { Window } from 'happy-dom';
 import { describe, expect, it } from 'vitest';
 import { canonElements, canonUnits, CHECK_RULES, checkHardDonts, parseLaw, parseTokens, validateCanon, type CanonElement, type HtmlParser } from '../../design-system';
+import { parse5Parser } from '../../design-system/parse5-parser';
 import { DEFAULT_SYSTEMS } from './defaults';
 
 const parser = new new Window().DOMParser() as unknown as HtmlParser;
+// The host checks an agent's publish with parse5 (P4, the tracker row of 2026-10-14): the defaults pass under both.
+const PARSERS = [['happy-dom', parser], ['parse5', parse5Parser]] as const;
 
 // The dialect's text elements, its inline set (the only content of an `li`), and the elements that hold no text of
 // their own (text goes in a text element inside them).
@@ -83,11 +86,11 @@ describe.each(DEFAULT_SYSTEMS.map((system) => [system.key, system] as const))('t
     for (const path of canonPaths) expect(section5, path).toContain(path);
   });
 
-  it('has a structurally valid canon', () => {
+  it.each(PARSERS)('has a structurally valid canon (%s)', (_name, parser) => {
     expect(validateCanon(system.files, parser, tokens)).toEqual([]);
   });
 
-  it('passes its own law’s mechanical checks on its own canon', () => {
+  it.each(PARSERS)('passes its own law’s mechanical checks on its own canon (%s)', (_name, parser) => {
     const report = checkHardDonts(law, tokens, canonUnits(system.files, parser));
     expect(report.unknown).toEqual([]);
     expect(report.violations).toEqual([]);

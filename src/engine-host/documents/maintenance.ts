@@ -3,6 +3,7 @@
 // In order: each Y doc's head rewritten at its committed revision (a load is the head plus the log after it), the log
 // rows a head covers and older than 7 days deleted, `auto` versions thinned (versions.ts), provenance merged into hour
 // and day rows (losslessly), then `PRAGMA incremental_vacuum`. The last run's time is kept in `meta`.
+import { recordHostWork } from './host-work'; // P4-R6
 import type { ArtifactStore } from './store';
 
 export const MAINTENANCE_EVERY_MS = 24 * 3_600_000;
@@ -69,7 +70,9 @@ export class Maintenance {
     const { service, storage } = store;
     const now = this.now();
     if (storage.readOnly) return { heads: 0, logRowsPruned: 0, versionsThinned: 0, attributionsMerged: 0 };
-    // Synchronous from here to the thinning: no batch can open between the commit and these outside-batch steps.
+    // Synchronous from here to the thinning: no batch can open between the commit and these outside-batch steps. P4-R6:
+    // each synchronous stretch is recorded as the host's work.
+    const first = performance.now();
     service.commitNow();
     const behind = storage.db
       .prepare('SELECT DISTINCT u.artifactId AS id FROM artifact_updates u LEFT JOIN artifact_head h ON h.artifactId = u.artifactId WHERE u.bytes IS NOT NULL AND u.seq > COALESCE(h.seq, 0)')
@@ -83,13 +86,16 @@ export class Maintenance {
     const pinned = store.versions.pinned();
     const artifacts = (storage.db.prepare('SELECT DISTINCT artifactId AS id FROM artifact_versions').all() as { id: string }[]).map((row) => row.id);
     const plan = artifacts.map((id) => ({ id, drop: store.versions.thinnable(id, now, pinned) })).filter((p) => p.drop.length > 0);
+    recordHostWork('maintenance', first, performance.now() - first, `${behind.length} heads, the log, provenance`);
     const files = plan.length === 0 ? [] : await service.inBatch(() => plan.flatMap(({ id, drop }) => store.versions.drop(id, drop).map((ref) => ({ artifactId: id, ref }))));
+    const second = performance.now();
     store.removeUnreferenced(files);
     store.collectStaged(now); // P3-F (store-versions scalpel-1#2): what a killed write staged
     service.commitNow();
     store.collectRetiredAssets(); // E3: the query snapshots only the thinned versions pinned (retention.ts)
     storage.incrementalVacuum();
     storage.setMeta(LAST_RUN_KEY, String(now));
+    recordHostWork('maintenance', second, performance.now() - second, 'files, the vacuum');
     const report = { heads: behind.length, logRowsPruned, versionsThinned: plan.reduce((n, p) => n + p.drop.length, 0), attributionsMerged };
     this.log(`maintenance: ${JSON.stringify(report)}`);
     return report;

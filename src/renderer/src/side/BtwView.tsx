@@ -15,7 +15,7 @@ import { STARTS } from '../composer/submit/submit-state';
 import { useAvailability } from '../sessions/availability';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { useSessions } from '../stores/sessions';
-import { Markdown } from '../transcript/view/markdown/Markdown';
+import { Markdown } from '../transcript'; // lazy.tsx's: the side pane registers from the entry, and a static import would pull Markdown into it
 import { promoteSide } from './actions';
 import { sideBlock, startForSide } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A

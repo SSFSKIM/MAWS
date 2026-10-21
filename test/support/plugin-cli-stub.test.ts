@@ -1,7 +1,7 @@
 // The plugin CLI stub (E8 execution document, M3): the shapes it prints are the ones the engine host's parser reads
 // (`cli-result.ts`, written from G0's probe), so the `widgets` e2e drives the product's own parsing; its mutations move
 // its state as the engine's registry would; its errors are the engine's words; it never takes `-y`.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -302,5 +302,43 @@ describe('the plugin CLI stub', () => {
     expect(() => execFileSync(stub.bin, ['mcp', 'list'], { stdio: 'pipe' })).toThrow(/refusing/);
     writeFileSync(stub.stateFile, JSON.stringify({ ...base(), installed: [] }));
     expect(JSON.parse(readFileSync(stub.stateFile, 'utf8')).installed).toEqual([]);
+  });
+
+  // P4 W2-D (tracker 2026-10-06): what the widgets e2e's Stop case relies on, spawned as the runner spawns the CLI.
+  it('a stubborn held mutation leads its own group with a member, both outliving SIGTERM until SIGKILL', async () => {
+    const userData = scratch();
+    const stub = writePluginCliStub(userData, base());
+    stub.hold(true);
+    stub.stubborn(true);
+    const cli = spawn(stub.bin, ['plugin', 'install', 'e8-probe@e8-scratch', '--json'], { cwd: userData, stdio: 'ignore', detached: true });
+    const gone = new Promise((resolve) => cli.once('exit', (_, signal) => resolve(signal)));
+    const alive = (pgid: number) => {
+      try {
+        process.kill(-pgid, 0);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+        throw error;
+      }
+    };
+    try {
+      await expect.poll(() => stub.group(), { timeout: 5_000 }).not.toBeNull();
+      const group = stub.group()!;
+      expect(group).toEqual({ pgid: cli.pid, leader: cli.pid, member: expect.any(Number), memberPgid: cli.pid });
+      process.kill(-group.pgid, 'SIGTERM');
+      await expect.poll(() => stub.signals().sort(), { timeout: 5_000 }).toEqual([`${group.leader} SIGTERM`, `${group.member} SIGTERM`].sort());
+      expect(alive(group.pgid)).toBe(true);
+      process.kill(-group.pgid, 'SIGKILL');
+      expect(await gone).toBe('SIGKILL');
+      await expect.poll(() => alive(group.pgid), { timeout: 5_000 }).toBe(false);
+      expect(stub.state().installed).toEqual([]); // the mutation never completed
+    } finally {
+      stub.hold(false);
+      try {
+        process.kill(-cli.pid!, 'SIGKILL');
+      } catch {
+        // gone already
+      }
+    }
   });
 });

@@ -379,3 +379,378 @@ test('pass3 p2-c3-subagent-ask: each subagent ask is framed with its parent befo
   assert.ok(use);assert.equal(use.name,'mcp__maws__ask');assert.match(use.parent,/^toolu_/);assert.ok(use.seq<call.seq);}
  assert.ok(!rows.some(r=>r.frame.type==='control_request'&&r.frame.request.subtype==='can_use_tool'));
 });
+// P4-B4 (docs/doperpowers/plans/2026-10-20-p4-b4-tool-surface.md, M0 and M3; the P4 spec §4.6, R-2): what the pinned
+// engine sends the model for MAWS's `maws` server, recorded against the scripted Messages API stand-in (stub-api.mjs,
+// nothing spent). The served list and paragraph are scenarios/pass3/p4-maws-tools.json, which a unit test pins to
+// src/shared/maws/tools.ts and instructions.ts, so these checks hold the wire to MAWS's own X33 texts.
+const dir4=new URL('./fixtures/p4/',import.meta.url);
+const load4=n=>readFileSync(new URL(n+'.jsonl',dir4),'utf8').trim().split('\n').map(JSON.parse);
+const served4=JSON.parse(readFileSync(new URL('./scenarios/pass3/p4-maws-tools.json',import.meta.url),'utf8'));
+const B4=['p4-b4-instructions','p4-b4-owner-style','p4-b4-append','p4-b4-no-tool-search','p4-b4-resume-first','p4-b4-resume'];
+const meta4=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+const mainRequests4=rows=>meta4(rows,'stub_requests')[0].requests.filter(q=>q.main);
+// The engine's context message (role system inside `messages`) of a request, as the stub recorded it.
+const contextText4=q=>q.messages.filter(m=>m.role==='system').flatMap(m=>m.blocks).map(b=>b.text??'').join('\n');
+for(const name of B4)test('p4/'+name+' is ordered NDJSON with correlated replies, P4-B4 provenance, the owner file unchanged, no secret and nothing spent',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0); // pass 3's integrity rule, the engine's byte-for-byte echo of every host answer included
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-B4');assert.equal(prov.served,'p4-maws-tools.json');assert.match(prov.pin,/^[0-9a-f]{40}$/);
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ assert.ok(meta4(rows,'spend')[0].result.total_cost_usd<0.0001);
+});
+test('p4 the maws server lists artifact_search exactly as MAWS describes it, read-only, and the engine connects it',()=>{
+ const rows=load4('p4-b4-instructions');
+ const listed=rows.find(r=>r.direction==='out'&&r.frame.type==='control_response'&&r.frame.response.response?.mcp_response?.result?.tools)?.frame.response.response.mcp_response.result.tools;
+ const search=listed.find(t=>t.name==='artifact_search');const expected=served4.tools.find(t=>t.name==='artifact_search');
+ assert.deepEqual(search,expected);assert.equal(search.annotations.readOnlyHint,true);assert.ok(search.description.length<4096);
+ const init=meta4(rows,'init_tools')[0];assert.ok(init.maws.includes('mcp__maws__artifact_search'));assert.deepEqual(init.mcp_servers,[{name:'maws',status:'connected',source:'sdk'}]);
+ // without tool search the model is given it loaded, with the description and schema as listed
+ const loaded=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools.find(t=>t.name==='mcp__maws__artifact_search');
+ assert.equal(loaded.defer_loading,null);assert.equal(loaded.description,expected.description);assert.deepEqual(loaded.input_schema.properties,expected.inputSchema.properties);
+});
+test('p4 the model is given the other two wire changes as listed: show_pane\'s `at` and artifact_list\'s pointer to artifact_search',()=>{
+ const tools=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools;
+ const pane=tools.find(t=>t.name==='mcp__maws__show_pane');const servedPane=served4.tools.find(t=>t.name==='show_pane');
+ assert.ok(pane.input_schema.properties.at);assert.deepEqual(pane.input_schema.properties.at,servedPane.inputSchema.properties.at);
+ const list=tools.find(t=>t.name==='mcp__maws__artifact_list');const servedList=served4.tools.find(t=>t.name==='artifact_list');
+ assert.equal(list.description,servedList.description);assert.ok(list.description.includes('To find artifacts by what they contain, use artifact_search.'));
+});
+test('p4 R-2: the server\'s instructions reach the model under ## maws in the engine\'s context message, the owner\'s style case and tool search off included',()=>{
+ for(const name of ['p4-b4-instructions','p4-b4-owner-style','p4-b4-no-tool-search','p4-b4-append']){
+  const q=mainRequests4(load4(name))[0];const context=contextText4(q);
+  assert.ok(context.includes('# MCP Server Instructions'),name);assert.ok(context.includes('## maws\n'+served4.instructions),name);
+  assert.equal(q.system.mcpInstructions,false,name); // not in the top-level system prompt
+ }
+ const style=contextText4(mainRequests4(load4('p4-b4-owner-style'))[0]);assert.ok(style.includes('# Output Style: probe-to-human'));
+ const append=mainRequests4(load4('p4-b4-append'))[0];assert.equal(append.system.linkMarker,true);assert.equal(append.system.contractMarker,true); // route (a)'s text would land in the top-level system
+});
+test('p4 deferral (for P4-A3): under tool search the maws tools are deferred and named for ToolSearch, alwaysLoad loads one, a direct call still runs and the model reads its JSON text',()=>{
+ const rows=load4('p4-b4-instructions');const [first,second]=mainRequests4(rows);
+ const names=first.tools.map(t=>t.name);assert.ok(names.includes('ToolSearch'));
+ assert.ok(names.includes('mcp__maws__show_pane')); // listed with _meta["anthropic/alwaysLoad"]: true
+ // P4-R7: MAWS's own message tool carries the key as MAWS lists it, so it is loaded beside show_pane
+ const alwaysLoaded=t=>t.name==='show_pane'||t._meta?.['anthropic/alwaysLoad']===true;
+ assert.deepEqual(served4.tools.filter(alwaysLoaded).map(t=>t.name),['show_pane','message']);
+ assert.ok(names.includes('mcp__maws__message'));
+ for(const tool of served4.tools.filter(t=>!alwaysLoaded(t)))assert.ok(!names.includes('mcp__maws__'+tool.name),tool.name);
+ const context=contextText4(first);const from=context.indexOf('The following deferred tools are now available via ToolSearch');
+ const listing=context.slice(from,context.indexOf('\n\n',from)).split('\n').slice(1); // the list alone, one name per line
+ assert.ok(listing.includes('mcp__maws__artifact_search'));
+ const calls=meta4(rows,'server_calls')[0].calls;assert.deepEqual(calls,[{name:'artifact_search',arguments:{query:'로드맵'}}]);
+ const result=second.messages.flatMap(m=>m.blocks).find(b=>b.type==='tool_result'&&b.tool_use_id==='toolu_stub_search');
+ assert.equal(result.is_error,false);assert.equal(JSON.parse(result.content[0].text).status,'found');
+ const all=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools.map(t=>t.name);
+ for(const tool of served4.tools)assert.ok(all.includes('mcp__maws__'+tool.name),tool.name);
+});
+test('p4 resume: a resumed session keeps the paragraph it was first given; the server\'s changed text is not announced',()=>{
+ const q=mainRequests4(load4('p4-b4-resume'))[0];const context=contextText4(q);
+ assert.ok(context.includes('## maws\n'+served4.instructions));
+ assert.ok(!JSON.stringify(q).includes('RESUMED-PARAGRAPH-CHANGED'));
+});
+// P4-R7 (docs/doperpowers/plans/2026-10-19-p4-smoothing.md, Decision Log 46; scenarios/pass3/p4-r7-message-tool.mjs): what a
+// message the model writes before a tool call becomes on MAWS's own wire, recorded on engine 2.1.304 and claude-opus-5-5
+// through the relay with a recorder between them, and what MAWS's message tool is there. Read from the recorder's
+// `api_exchanges` (each main request's fields and the blocks the API streamed back, in order), the engine's frames and
+// the transcript's records (`disk`).
+const R7=['p4-r7-loss-short','p4-r7-loss','p4-r7-tool','p4-r7-loss-mid','p4-r7-loss-notice','p4-r7-loss-dialog','p4-r7-loss-stages','p4-r7-tool-stages'];
+const exchanges7=name=>meta4(load4(name),'api_exchanges')[0].exchanges;
+const blocks7=name=>exchanges7(name).map(e=>e.response.blocks);
+const isMessageCall=b=>b.type==='tool_use'&&b.name==='mcp__maws__message';
+for(const name of R7)test('p4/'+name+' is ordered NDJSON with correlated replies, P4-R7 provenance on the pinned engine, the owner file unchanged and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R7');assert.equal(prov.engineVersion,'2.1.304');assert.equal(prov.model,'claude-opus-5-5');assert.equal(prov.pin,'08a31f8df08ed97911398057380acd9d3cd7e687');
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ assert.equal(meta4(rows,'turn')[0].result.subtype,'success');
+});
+test('p4 R7: MAWS\'s launch asks the API for adaptive thinking with display "updates" under its beta, so a progress note arrives with the API\'s paraphrase',()=>{
+ for(const name of R7)for(const {request} of exchanges7(name)){
+  assert.deepEqual(request.thinking,{type:'adaptive',display:'updates'},name);
+  assert.ok(request.beta.split(',').includes('thinking-display-updates-2026-08-18'),name);
+  assert.deepEqual(request.output_config,{effort:'high'},name);
+ }
+});
+test('p4 R7 the loss: under contract 5 a status written between stages, before the next call, comes back as a thinking block holding a paraphrase without its tags; the next call follows it in the same response',()=>{
+ const responses=blocks7('p4-r7-loss-stages');
+ const lost=responses.filter(bs=>bs.some(b=>b.type==='thinking'&&b.text.trim()!=='')&&bs.at(-1).type==='tool_use');
+ assert.equal(lost.length,1);
+ const [note,call]=lost[0];
+ assert.equal(note.type,'thinking');assert.ok(note.signatureChars>0);
+ assert.ok(!note.text.includes('<message>'));assert.match(note.text,/0412, 0977, and 1203/);assert.match(note.text,/manual labeling/); // a request to the human, lost
+ assert.equal(call.type,'tool_use');assert.equal(call.name,'Bash');assert.equal(call.input.command,'sh stage.sh 3');
+ // the other two statuses survived as spans, so the loss is per note, not per session
+ assert.equal(responses.flat().filter(b=>b.type==='text'&&b.text.includes('<message>')).length,3);
+ // what every reader sees: the transcript keeps the paraphrase in a thinking block and no text before the call
+ const disk=meta4(load4('p4-r7-loss-stages'),'disk')[0].records.filter(r=>r.type==='assistant').flatMap(r=>r.blocks);
+ assert.ok(disk.some(b=>b.type==='thinking'&&b.text===note.text));
+});
+test('p4 R7: a note asked for in the prompt stays a span, short or long, first or mid-turn; the model wrote no thinking-block note there',()=>{
+ for(const name of ['p4-r7-loss-short','p4-r7-loss','p4-r7-loss-mid']){
+  const responses=blocks7(name);
+  const before=responses.find(bs=>bs.some(b=>b.type==='text'&&b.text.includes('<message>'))&&bs.at(-1).type==='tool_use');
+  assert.ok(before,name);
+  assert.ok(!responses.flat().some(b=>b.type==='thinking'&&b.text.trim()!==''),name);
+ }
+});
+test('p4 R7 the tool: mcp__maws__message is loaded under tool search through its _meta, the only maws tool in the request\'s tools, and in default mode the engine asks a permission for it unless the launch allows it',()=>{
+ for(const name of ['p4-r7-tool','p4-r7-tool-stages'])for(const {request} of exchanges7(name))assert.deepEqual(request.maws,[{name:'mcp__maws__message',defer_loading:null}],name);
+ const asked=n=>meta4(load4(n),'permission_asked').map(p=>p.tool);
+ assert.ok(asked('p4-r7-tool').includes('mcp__maws__message')); // no allow: asked
+ assert.ok(!asked('p4-r7-tool-stages').includes('mcp__maws__message')); // --allowedTools mcp__maws__message, as MAWS launches
+ assert.deepEqual(meta4(load4('p4-r7-tool-stages'),'provenance')[0].allowed,['mcp__maws__message']);
+});
+test('p4 R7 the tool: each status is a call in the same response as the next stage\'s call, its text whole in the frames, the tools/call (with its tool-use id) and on disk, answered `sent`; the final message stays a span',()=>{
+ const responses=blocks7('p4-r7-tool-stages');
+ const calls=responses.flatMap(bs=>bs.filter(isMessageCall).map(call=>({call,next:bs[bs.indexOf(call)+1]})));
+ assert.equal(calls.length,3);
+ for(const {next} of calls){assert.equal(next.type,'tool_use');assert.equal(next.name,'Bash');assert.match(next.input.command,/^sh stage\.sh [234]$/);}
+ assert.match(calls[1].call.input.text,/0412, 0977 and 1203 could not be restored and need a person to label them/);
+ assert.ok(!responses.flat().some(b=>b.type==='thinking'&&b.text.trim()!==''));
+ const last=responses.at(-1);assert.equal(last.at(-1).type,'text');assert.match(last.at(-1).text,/^<message>/);
+ const frames=meta4(load4('p4-r7-tool-stages'),'frames')[0];
+ const framed=frames.assistant.flatMap(f=>f.blocks).filter(isMessageCall);
+ assert.deepEqual(framed.map(b=>b.input),calls.map(c=>c.call.input));
+ assert.deepEqual(frames.calls.map(c=>({name:c.name,arguments:c.arguments,toolUseId:c.toolUseId})),framed.map(b=>({name:'message',arguments:b.input,toolUseId:b.id})));
+ for(const b of framed){
+  const result=frames.toolResults.find(r=>r.tool_use_id===b.id);
+  assert.deepEqual({is_error:result.is_error,content:result.content},{is_error:false,content:[{type:'text',text:'sent'}]});
+ }
+ const disk=meta4(load4('p4-r7-tool-stages'),'disk')[0].records;
+ for(const b of framed){
+  assert.ok(disk.some(r=>r.type==='assistant'&&r.blocks.some(x=>isMessageCall(x)&&x.id===b.id&&x.input.text===b.input.text)));
+  assert.ok(disk.some(r=>r.type==='user'&&r.blocks.some(x=>x.type==='tool_result'&&x.tool_use_id===b.id&&x.is_error===false)));
+ }
+});
+test('p4 R7 the eval: before, 4 of 11 mid-turn messages lost to progress notes, each asking the human to act; after, 11 of 11 through the tool and none lost; every final message a span; under US$1',()=>{
+ const {summary,runs}=JSON.parse(readFileSync(new URL('p4-r7-eval.json',dir4),'utf8'));
+ assert.deepEqual([summary.before.midSpan,summary.before.lost,summary.before.lostNeedingAction,summary.before.midTurnMessages],[7,4,4,11]);
+ assert.deepEqual([summary.after.midTool,summary.after.midSpan,summary.after.lost,summary.after.midTurnMessages],[11,0,0,11]);
+ assert.deepEqual([summary.before.finalSpan,summary.after.finalSpan,summary.before.notesUnjudged,summary.after.notesUnjudged],[5,5,0,0]);
+ assert.equal(runs.length,10);assert.ok(summary.before.cost+summary.after.cost<1);
+ for(const r of runs.filter(r=>r.arm==='before'))for(const n of r.notes)assert.equal(n.addressed_to_human,true);
+});
+
+// P4-R7y (docs/doperpowers/plans/2026-10-19-p4-smoothing.md, after Decision Logs 48 and 49; scenarios/pass3/
+// p4-r7y-session-start.mjs): which mechanism gives the model a SessionStart context at every start of a session, on the
+// pinned engine 2.1.304: a host callback registered through `initialize.hooks`, or the command hook MAWS puts in its
+// `--settings` (src/shared/owner/contract.ts messageToolHookGroup). Read from each launch's `step` notes (every request
+// the engine sent, with each place the context appears), its `starts` note (the `hook_callback` requests, the hook
+// lifecycle frames) and, on the relay, what the model answered.
+const ownerContract=await import('../../src/shared/owner/contract.ts');
+const R7Y_STUB=['','-plain','-resume','-resume-again','-fork'].flatMap(s=>['callback','command'].map(m=>`p4-r7y-stub-${m}${s}`));
+const R7Y_RELAY=['p4-r7y-relay-control','p4-r7y-relay-resume','p4-r7y-relay-startup'];
+const steps7y=name=>meta4(load4(name),'step');
+// per step, the context's copies in each main-loop request (a side request, the title's, is left out)
+const copies7y=name=>steps7y(name).map(s=>s.requests.filter(q=>q.main!==false&&!q.prompts[0]?.head.startsWith('<session>')).map(q=>q.copies));
+const starts7y=name=>meta4(load4(name),'starts')[0];
+const ran7y=name=>starts7y(name).hookFrames.filter(h=>h.subtype==='hook_response').map(h=>`${h.hook_name}:${h.outcome}`);
+for(const name of [...R7Y_STUB,...R7Y_RELAY])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-R7y provenance on the pinned engine, the owner file unchanged and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R7y');assert.equal(prov.engineVersion,'2.1.304');assert.equal(prov.pin,'bd54d325b4c967eeafb98fb6426049bff1c55669');assert.equal(prov.text,ownerContract.MESSAGE_TOOL_ALIAS);
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ for(const s of meta4(rows,'step'))assert.equal(s.result.subtype,'success',s.prompt);
+});
+test('p4 R7y the host callback: called at a compaction and a clear, never at startup, a resume or a fork, the engine running those starts before it reads initialize',()=>{
+ assert.deepEqual(starts7y('p4-r7y-stub-callback').callbacks.map(c=>[c.callback_id,c.source]),[['maws_SessionStart_1','compact'],['maws_SessionStart_1','clear']]);
+ for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(starts7y('p4-r7y-stub-callback'+s).callbacks,[],s);
+ assert.equal(meta4(load4('p4-r7y-stub-callback'),'initialize_answer')[0].hooks_applied,true); // registered, only too late for the first start
+ // the first turn, the compaction, the turn after it, the clear (no request), the turn after it
+ assert.deepEqual(copies7y('p4-r7y-stub-callback'),[[0],[0],[1],[],[1]]);
+ for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(copies7y('p4-r7y-stub-callback'+s),[[0]],s);
+});
+test('p4 R7y the command hook MAWS puts in --settings: it runs at every start (startup, compact, clear, resume, fork) and the next request carries the context once, as a SessionStart system message',()=>{
+ const group=ownerContract.messageToolHookGroup();
+ for(const name of R7Y_STUB.filter(n=>n.includes('-command')&&!n.endsWith('-plain')))assert.deepEqual(meta4(load4(name),'provenance')[0].flagSettings.hooks,{SessionStart:[group]},name);
+ assert.deepEqual(ran7y('p4-r7y-stub-command'),['SessionStart:startup:success','SessionStart:compact:success','SessionStart:clear:success']);
+ assert.deepEqual(copies7y('p4-r7y-stub-command'),[[1],[1],[1],[],[1]]);
+ assert.deepEqual([ran7y('p4-r7y-stub-command-resume'),ran7y('p4-r7y-stub-command-fork')],[['SessionStart:resume:success'],['SessionStart:fork:success']]);
+ assert.deepEqual(copies7y('p4-r7y-stub-command-plain'),[[0]]); // the session the resumes and the fork read had none
+ for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(copies7y('p4-r7y-stub-command'+s),[[1]],s); // a later start's copy is not added again
+ const hit=steps7y('p4-r7y-stub-command-resume')[0].requests.find(q=>q.copies===1).hits[0];
+ assert.equal(hit.role,'system');assert.ok(hit.text.startsWith(`SessionStart hook additional context: ${ownerContract.MESSAGE_TOOL_ALIAS}`));
+ assert.ok(meta4(load4('p4-r7y-stub-command'),'disk')[0].context.every(c=>c.hookEvent==='SessionStart'&&c.content.includes(ownerContract.MESSAGE_TOOL_ALIAS)));
+});
+test('p4 R7y on a real model: without the hook it names no tool for mcp__to-human__message; with it, at a resume of that session and at a new session\'s startup, it names mcp__maws__message; under US$0.25',()=>{
+ const answers=name=>steps7y(name)[0].requests.filter(q=>q.prompts.some(p=>p.head.startsWith('Without calling any tool'))).map(q=>[q.copies,q.answer.trim()]);
+ assert.deepEqual(answers('p4-r7y-relay-control'),[[0,'none']]);
+ assert.deepEqual(answers('p4-r7y-relay-resume'),[[1,'mcp__maws__message']]);
+ assert.deepEqual(answers('p4-r7y-relay-startup'),[[1,'mcp__maws__message']]);
+ assert.deepEqual([ran7y('p4-r7y-relay-control'),ran7y('p4-r7y-relay-resume'),ran7y('p4-r7y-relay-startup')],[[],['SessionStart:resume:success'],['SessionStart:startup:success']]);
+ const spent=R7Y_RELAY.reduce((n,name)=>n+meta4(load4(name),'spend')[0].result.total_cost_usd,0);assert.ok(spent<0.25,String(spent));
+});
+// P4-R8 (docs/doperpowers/plans/2026-10-19-p4-smoothing.md, routed as P4-R8; scenarios/pass3/p4-r8-mcp-servers.mjs;
+// findings-p4-r8-mcp-servers.txt): the app's MCP servers through --mcp-config on MAWS's own wire, engine 2.1.306, no
+// prompt. owner: the owner's config home, curated from a raw recording that was not kept; scratch: a scratch home.
+const NOTION8={type:'http',url:'https://mcp.notion.com/mcp'};
+const answers8=(rows,subtype)=>{const ids=new Set(rows.filter(r=>r.direction==='out'&&r.frame.request?.subtype===subtype).map(r=>r.frame.request_id));return rows.filter(r=>r.direction==='in'&&r.frame.type==='control_response'&&ids.has(r.frame.response.request_id)).map(r=>r.frame.response);};
+for(const name of ['p4-r8-owner','p4-r8-scratch'])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-R8 provenance, no prompt and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));assert.ok(!/"(access|refresh)_?[Tt]oken"\s*:\s*"[^"]/.test(text));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R8');assert.equal(prov.pin,'bd54d325b4c967eeafb98fb6426049bff1c55669');assert.equal(prov.mcpConfig.mcpServers.notion.url,NOTION8.url);
+ const spawn=meta4(rows,'spawn')[0];assert.equal(spawn.args[spawn.args.indexOf('--mcp-config')+1],JSON.stringify(prov.mcpConfig));
+ assert.ok(!rows.some(r=>r.direction==='out'&&r.frame.type==='user'));
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+});
+test('p4 R8 owner: notion from --mcp-config reads dynamic and connects in the owner\'s config home on the binary MAWS runs, the login its user-scope entry made reused; the owner\'s files kept',()=>{
+ const rows=load4('p4-r8-owner');
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.arm,'owner');assert.deepEqual(prov.mcpConfig,{mcpServers:{notion:NOTION8}});assert.equal(prov.engineVersion,'2.1.306');
+ assert.ok(!meta4(rows,'spawn')[0].args.includes('--strict-mcp-config'));
+ const [last]=answers8(rows,'mcp_status').slice(-1);const notion=last.response.mcpServers.find(s=>s.name==='notion');
+ assert.deepEqual([notion.status,notion.scope,notion.config.url,notion.config.headerKeys],['connected','dynamic',NOTION8.url,[]]);assert.ok(notion.tools.length>0);
+ const lines=meta4(rows,'debug_lines')[0].lines;assert.ok(lines.some(l=>l.includes('MCP server "notion": Returning tokens')));assert.ok(lines.some(l=>l.includes('MCP server "notion": Successfully connected')));
+ const [before,after]=meta4(rows,'owner_snapshot');assert.ok(!before.userServers.includes('notion'));
+ assert.deepEqual([after.userServersSame,after.projectKeysSame,after.projectCountSame,after.transcript],[true,true,true,false]);
+ assert.ok(!meta4(rows,'dialog_seen').length);
+});
+test('p4 R8 scratch: the --mcp-config entry wins over user, local and project scope of the same name, and only it is connected',()=>{
+ const rows=load4('p4-r8-scratch');
+ const [last]=answers8(rows,'mcp_status').slice(-1);const named=last.response.mcpServers.filter(s=>s.name==='notion');
+ assert.equal(named.length,1);assert.deepEqual([named[0].scope,named[0].config.url],['dynamic',NOTION8.url]);
+ const paths=meta4(rows,'local_hits')[0].hits.map(h=>h.path);for(const shadowed of ['/user/mcp','/local/mcp','/project/mcp'])assert.ok(!paths.includes(shadowed),shadowed);
+});
+test('p4 R8 scratch: a server that needs auth reads needs-auth with no tools, an mcp_call to it is not connected, and mcp_authenticate answers the URL to open and the engine\'s own localhost callback',()=>{
+ const rows=load4('p4-r8-scratch');
+ const [last]=answers8(rows,'mcp_status').slice(-1);const oauth=last.response.mcpServers.find(s=>s.name==='probe-oauth');
+ assert.deepEqual(Object.keys(oauth).sort(),['config','name','scope','source','status']); // no tools and no error field
+ assert.deepEqual([oauth.status,oauth.scope,oauth.source],['needs-auth','dynamic','dynamic']);
+ assert.equal(answers8(rows,'mcp_call')[0].error,'MCP server not connected: probe-oauth');
+ const [auth,unknown]=answers8(rows,'mcp_authenticate');
+ assert.equal(auth.subtype,'success');assert.deepEqual(Object.keys(auth.response).sort(),['authUrl','callbackExpected','callbackPort','redirectScheme','requiresUserAction','state']);
+ assert.deepEqual([auth.response.requiresUserAction,auth.response.callbackExpected,auth.response.redirectScheme],[true,true,'localhost']);
+ const url=new URL(auth.response.authUrl);assert.equal(url.searchParams.get('redirect_uri'),`http://localhost:${auth.response.callbackPort}/callback`);assert.equal(url.searchParams.get('state'),auth.response.state);
+ assert.ok(meta4(rows,'local_hits')[0].hits.some(h=>h.method==='POST'&&h.path==='/register')); // registered before it answered
+ assert.equal(unknown.error,'Server not found: no-such-server');
+});
+// P4-A2P (docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.2 "The per-session launch profile", acceptance R-7;
+// scenarios/pass3/p4-a2p-profile.mjs; findings-p4-a2p-profile.txt): the launch profile through the launch's own flags
+// (src/shared/engine/launch-profile.ts profileSettings in `--settings`; under hooks none the alias appended), on the
+// installed engine 2.1.306, in a scratch home seeded from read-only copies of the owner's model, effort and style, three
+// of the owner's user-scope plugins and probe-owned user hooks. Stub arms against the scripted API (each launch's `step`
+// notes: every request with the alias and the user hooks' markers placed), two relay arms, and the home's manifest.
+const launchProfile=await import('../../src/shared/engine/launch-profile.ts');
+const A2P_STUB=['plain','plugins','style','hooks-group','hooks','hooks-resume','hooks-fork','hooks-user-kept','hooks-user','full'].map(s=>'p4-a2p-stub-'+s);
+const A2P_RELAY=['p4-a2p-relay-plain','p4-a2p-relay-full'];
+const A2P_PLUGINS=['designer@designer','doperpowers@doperpowers','eli5@claude-community'];
+const one2p=(name,event)=>meta4(load4(name),event)[0];
+const main2p=name=>meta4(load4(name),'step').map(s=>s.requests.filter(q=>q.main)); // per step, the main loop's requests
+const flat2p=name=>main2p(name).flat();
+const responses2p=name=>one2p(name,'hooks').frames.filter(h=>h.subtype==='hook_response').map(h=>h.hook_name);
+const noneOf2p=name=>one2p(name,'provenance').profile.hooks==='none';
+// MAWS's `--settings` and `--append-system-prompt` for a lane-on launch under a profile, from MAWS's own modules
+const flagFor2p=prov=>({dialogExpiry:'never',...launchProfile.profileSettings(prov.profile),env:{[ownerContract.NATIVE_TO_HUMAN_ENV]:String(ownerContract.TO_HUMAN_CONTRACT_VERSION)},...(prov.group?{hooks:{SessionStart:[ownerContract.messageToolHookGroup()]}}:{})});
+const appendFor2p=prov=>(prov.profile.outputStyle==='maws'?ownerContract.TO_HUMAN_CONTRACT:ownerContract.TO_HUMAN_SUPPLEMENT)+(prov.profile.hooks==='none'&&prov.group===false?`\n\n${ownerContract.MESSAGE_TOOL_ALIAS}`:'');
+const argAfter2p=(args,flag)=>{const i=args.indexOf(flag);return i<0?null:args[i+1];};
+for(const name of [...A2P_STUB,...A2P_RELAY])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-A2P provenance on the installed engine, MAWS\'s launch under its profile, the owner file unchanged and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-A2P');assert.equal(prov.pin,'246354256c404b41189c6cbeb67a7c1157a9f0e6');assert.equal(prov.engineVersion,'2.1.306');
+ assert.deepEqual(launchProfile.LaunchProfileSchema.parse(prov.profile),prov.profile);assert.deepEqual(prov.profileSettings,launchProfile.profileSettings(prov.profile));
+ assert.deepEqual(prov.flagSettings,flagFor2p(prov));assert.equal(prov.append,appendFor2p(prov));
+ const args=meta4(rows,'spawn')[0].args;
+ assert.ok(!args.includes('--model')); // the model and the effort come from the user scope
+ assert.equal(argAfter2p(args,'--setting-sources'),'user,project,local');
+ assert.equal(argAfter2p(args,'--settings'),JSON.stringify(prov.flagSettings));assert.equal(argAfter2p(args,'--append-system-prompt'),prov.append);
+ assert.equal(argAfter2p(args,'--system-prompt-snapshot'),prov.snapshotOff?'off':null);
+ assert.equal(argAfter2p(args,'--resume'),prov.resume);assert.equal(args.includes('--fork-session'),prov.fork);
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ for(const s of meta4(rows,'step'))assert.equal(s.result.subtype,'success',s.prompt);
+});
+test('p4 A2P R-7 (1): under every profile the model and the effort are the user scope\'s; init lists the user\'s plugins less the off ids and the chosen style',()=>{
+ const plain=one2p('p4-a2p-stub-plain','settings');
+ assert.deepEqual([plain.effective.model,plain.applied.model],['opus','claude-opus-5-5']);
+ // the user's effort for the model, per model (a top-level effortLevel applies to legacy models only)
+ assert.deepEqual([plain.effective.effortLevel,plain.effective.modelSettings[plain.applied.model].effortLevel,plain.applied.effort],['high','xhigh','xhigh']);
+ const builtins=one2p('p4-a2p-stub-plain','inits').inits[0].plugins.filter(p=>p.source.endsWith('@builtin')).map(p=>p.source);
+ const init=load4('p4-a2p-stub-plain').find(r=>r.direction==='in'&&r.frame.type==='system'&&r.frame.subtype==='init').frame;assert.ok(!('effort' in init));
+ for(const name of [...A2P_STUB,...A2P_RELAY]){
+  const {profile}=one2p(name,'provenance');const s=one2p(name,'settings');const inits=one2p(name,'inits').inits;const off=profile.plugins.off;
+  const style=profile.outputStyle==='maws'?'default':'doperpowers:to-human';
+  assert.deepEqual([s.applied.model,s.applied.effort,s.effective.outputStyle,s.effective.disableAllHooks],[plain.applied.model,plain.applied.effort,style,profile.hooks==='none'?true:null],name);
+  for(const id of A2P_PLUGINS)assert.equal(s.effective.enabledPlugins[id],!off.includes(id),name);
+  for(const i of inits){
+   assert.deepEqual([i.model,i.output_style],[plain.applied.model,style],name);
+   assert.deepEqual(i.plugins.map(p=>p.source).filter(x=>!x.endsWith('@builtin')).sort(),A2P_PLUGINS.filter(id=>!off.includes(id)),name);
+   assert.deepEqual(i.plugins.filter(p=>p.source.endsWith('@builtin')).map(p=>p.source),builtins,name);
+  }
+  // what the model was sent: the user's effort; the owner's style (the engine's output-style message) only under it; an off plugin's skills never
+  for(const q of flat2p(name)){
+   assert.equal(q.effort,plain.applied.effort,name);assert.equal(q.style.body>0,style!=='default',name);
+   assert.deepEqual([q.skills.doperpowers>0,q.skills.eli5>0,q.skills.designer>0],[true,!off.includes('eli5@claude-community'),!off.includes('designer@designer')],name);
+  }
+ }
+});
+test('p4 A2P R-7 (2): the user\'s hooks and the plugins\' run under the user scope; under hooks none none runs, MAWS\'s group left in the flag JSON included, and no new hook context reaches the model',()=>{
+ for(const name of ['p4-a2p-stub-plain','p4-a2p-stub-plugins','p4-a2p-stub-style','p4-a2p-relay-plain']){
+  // the user's printf, MAWS's group and doperpowers' kairos.sh at startup; the user's UserPromptSubmit; doperpowers' MessageDisplay
+  const ran=responses2p(name);assert.equal(ran.filter(h=>h==='SessionStart:startup').length,3,name);assert.ok(ran.includes('UserPromptSubmit')&&ran.includes('MessageDisplay'),name);
+  const [q]=main2p(name)[0];assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length,q.hits.alias.messages.length,q.hits.alias.system],[1,1,1,0],name);
+ }
+ assert.ok(one2p('p4-a2p-stub-plain','debug_lines').lines.some(l=>l.includes('hooks module doperpowers@doperpowers loaded')));
+ for(const name of [...A2P_STUB,...A2P_RELAY].filter(noneOf2p)){
+  assert.deepEqual(one2p(name,'hooks').frames,[],name);
+  assert.ok(one2p(name,'debug_lines').lines.some(l=>l.includes('hooks module doperpowers@doperpowers not loaded')),name);
+  for(const q of flat2p(name))assert.equal(q.hits.userSessionStart.system+q.hits.userPromptSubmit.system,0,name);
+ }
+ // a session begun under hooks none: no marker anywhere; a resume of the user-scope session: its own history's copies, none added
+ for(const name of ['p4-a2p-stub-hooks-group','p4-a2p-stub-hooks','p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-full','p4-a2p-relay-full'])for(const q of flat2p(name))assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length],[0,0],name);
+ for(const name of ['p4-a2p-stub-hooks-user-kept','p4-a2p-stub-hooks-user'])for(const q of flat2p(name))assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length,q.hits.alias.messages.length],[1,1,1],name);
+ // MAWS's group still in the flag JSON beside disableAllHooks: it does not run, and the alias reaches the model nowhere
+ const g=one2p('p4-a2p-stub-hooks-group','provenance');assert.deepEqual([g.flagSettings.disableAllHooks,g.flagSettings.hooks],[true,{SessionStart:[ownerContract.messageToolHookGroup()]}]);
+ for(const q of flat2p('p4-a2p-stub-hooks-group'))assert.deepEqual([q.hits.alias.system,q.hits.alias.messages.length,q.appendWhole],[0,0,true]);
+});
+test('p4 A2P R-7 (2) the route: under hooks none the alias appended after the supplement or the contract is in the system prompt at startup, after /compact and /clear, at a --resume and a --fork-session with snapshot off, and at a snapshot-off resume of a user-scope session',()=>{
+ const sys=name=>main2p(name).map(qs=>qs.map(q=>q.hits.alias.system));
+ assert.deepEqual(sys('p4-a2p-stub-hooks'),[[1],[1],[1],[],[1]]); // the first turn, the compaction's own request, the turn after it, the clear (no request), the turn after it
+ for(const name of ['p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-hooks-user','p4-a2p-stub-full','p4-a2p-relay-full'])assert.deepEqual(sys(name),[[1]],name);
+ for(const name of ['p4-a2p-stub-hooks','p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-hooks-user','p4-a2p-stub-full','p4-a2p-relay-full'])for(const q of flat2p(name))assert.deepEqual([q.appendWhole,q.appended],[true,one2p(name,'provenance').profile.outputStyle==='maws'?'contract:7':'supplement:2'],name);
+ // in a session begun under hooks none the system prompt is the one place it is
+ for(const name of ['p4-a2p-stub-hooks','p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-full','p4-a2p-relay-full'])for(const q of flat2p(name))assert.equal(q.hits.alias.messages.length,0,name);
+ // the compaction left a boundary; the clear began the session the resume and the fork read
+ const ids=[...new Set(meta4(load4('p4-a2p-stub-hooks'),'step').map(s=>s.session_id))];assert.equal(ids.length,2);
+ for(const name of ['p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork'])assert.equal(one2p(name,'provenance').resume,ids[1],name);
+ const disk=one2p('p4-a2p-stub-hooks','disk').sessions;assert.equal(disk.find(s=>s.sessionId===ids[0]).boundaries,1);assert.ok(disk.every(s=>s.snapshots.length>0&&s.snapshots.every(x=>x.alias===1)));
+});
+test('p4 A2P R-7 (2): without snapshot off a resume reuses the recorded system prompt, dropping the new append; a launch with snapshot off records no snapshot of its own',()=>{
+ const [plain]=main2p('p4-a2p-stub-plain')[0];const [kept]=main2p('p4-a2p-stub-hooks-user-kept')[0];const [live]=main2p('p4-a2p-stub-hooks-user')[0];
+ assert.deepEqual([kept.hits.alias.system,kept.appendWhole,kept.appended,kept.systemChars],[0,false,'supplement:2',plain.systemChars]);
+ assert.deepEqual([live.hits.alias.system,live.appendWhole,live.systemChars-plain.systemChars],[1,true,`\n\n${ownerContract.MESSAGE_TOOL_ALIAS}`.length]);
+ const id=one2p('p4-a2p-stub-plain','inits').inits[0].session_id;
+ for(const name of ['p4-a2p-stub-hooks-user-kept','p4-a2p-stub-hooks-user'])assert.equal(one2p(name,'provenance').resume,id,name);
+ // after both resumes the user-scope session's transcript holds its first launch's snapshots only, neither with the alias
+ const t=one2p('p4-a2p-home','transcripts').sessions.find(s=>s.sessionId===id);
+ assert.deepEqual(t.snapshots,one2p('p4-a2p-stub-plain','disk').sessions[0].snapshots.map(({alias,appended})=>({alias,appended})));assert.ok(t.snapshots.every(s=>s.alias===0));
+});
+test('p4 A2P on a real model: asked which tool stands for mcp__to-human__message, the user scope (the alias from MAWS\'s group) and the full profile (the alias only in the appended prompt) both name mcp__maws__message; under US$1',()=>{
+ const answers=name=>main2p(name)[0].map(q=>[q.status,q.answer.replace(/<\/?message>/g,'').trim()]);
+ assert.deepEqual(answers('p4-a2p-relay-plain'),[[200,'mcp__maws__message']]);assert.deepEqual(answers('p4-a2p-relay-full'),[[200,'mcp__maws__message']]);
+ const [p]=main2p('p4-a2p-relay-plain')[0];const [f]=main2p('p4-a2p-relay-full')[0];
+ assert.deepEqual([p.hits.alias.system,p.hits.alias.messages.length,f.hits.alias.system,f.hits.alias.messages.length],[0,1,1,0]);
+ const spent=A2P_RELAY.reduce((n,name)=>n+one2p(name,'spend').result.total_cost_usd,0);assert.ok(spent<1,String(spent));
+});
+test('p4 A2P R-7 (3): the scratch home\'s seeded files are read-only and byte-identical after the last launch, and every other change is a write the engine makes for a session',()=>{
+ const rows=load4('p4-a2p-home');
+ const prov=meta4(rows,'provenance')[0];assert.deepEqual([prov.child,prov.pin,prov.engineVersion,prov.arms],['P4-A2P','246354256c404b41189c6cbeb67a7c1157a9f0e6','2.1.306',['stub','relay']]);
+ const seeded=meta4(rows,'seeded')[0];
+ // the owner's model, effort and style; the copied plugins; the probe's own hooks (nothing of the owner's hooks, env or permissions)
+ assert.deepEqual(Object.keys(seeded.settings).sort(),['effortLevel','enabledPlugins','hooks','model','modelSettings','outputStyle']);
+ assert.deepEqual(Object.keys(seeded.settings.hooks).sort(),['SessionStart','UserPromptSubmit']);
+ for(const [event,groups] of Object.entries(seeded.settings.hooks))assert.deepEqual(groups,[{hooks:[{type:'command',command:'/usr/bin/printf',args:['%s',JSON.stringify({hookSpecificOutput:{hookEventName:event,additionalContext:`PROBE_USER_HOOK_${event}`}})]}]}],event);
+ assert.deepEqual([Object.keys(seeded.settings.enabledPlugins).sort(),Object.keys(seeded.registry.plugins).sort()],[A2P_PLUGINS,A2P_PLUGINS]);
+ assert.ok(Object.values(seeded.markets).every(m=>!('autoUpdate' in m))); // nothing to fetch
+ assert.ok(seeded.readOnly);assert.ok(seeded.files>1000);
+ const [before,after]=meta4(rows,'manifest');assert.deepEqual([after.seededDigest,after.seededSame,after.seededChanged],[before.seededDigest,true,[]]);
+ const {changes,other}=meta4(rows,'changes')[0];assert.deepEqual(other,[]);
+ assert.deepEqual([...new Set(changes.map(c=>c.class))].sort(),['auto memory directory','file checkpoints','global config','global config backup','plugin data','plugin in-use marker','plugin in-use sweep stamp','session environment','session registry','transcript']);
+ assert.deepEqual(changes.filter(c=>c.kind!=='added').map(c=>c.path),['.claude.json']); // nothing removed; the one changed file the engine's own state
+ assert.deepEqual(changes.filter(c=>c.path.startsWith('plugins/cache/')).map(c=>c.path.split('/').at(-1)),['.in_use','.in_use','.in_use']);
+});

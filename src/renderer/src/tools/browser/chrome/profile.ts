@@ -3,7 +3,7 @@
 // profiles Switch profile offers.
 import type { BrowserProfileListItem, ImportedBookmarks } from '@shared/browser/profiles';
 import { DEFAULT_PARTITION, profilePartition } from '@shared/browser/tab';
-import { relativeAge } from '../../../app/relative-age';
+import { formatAgo } from '@shared/app/date-format';
 import { BROWSER_COPY } from '../copy';
 
 // The theme's accent palette, as tokens: an initial's disc takes one by its profile directory, so a profile keeps its
@@ -25,7 +25,7 @@ export function accountLine({ gaiaName, userName }: Pick<BrowserProfileListItem,
 // Under Sync bookmarks now: when the mirror last read Chrome's file, or why the last read failed (the rows kept from
 // the last good one); null before any read succeeded or failed.
 export function syncLine(bookmarks: ImportedBookmarks, now: number): string | null {
-  const age = bookmarks.syncedAt === null ? null : relativeAge(Math.max(0, now - Date.parse(bookmarks.syncedAt)));
+  const age = bookmarks.syncedAt === null ? null : formatAgo(Math.max(0, now - Date.parse(bookmarks.syncedAt)));
   if (bookmarks.error === 'indexUnavailable') return BROWSER_COPY.profile.indexUnavailable;
   if (bookmarks.error !== null) return BROWSER_COPY.profile.unreadable(age);
   return age === null ? null : BROWSER_COPY.profile.lastSynced(age);

@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { base64urlEncode } from '../../src/protocol/base64url';
-import { decodeEnrollmentCode, encodeEnrollmentCode, isMachineName, machineNameKey, machineProjectId, serviceTokenName, type EnrollmentCode } from '../../src/protocol/identity';
+import {
+  decodeCode,
+  decodeEnrollmentCode,
+  decodeProvisioningCode,
+  encodeEnrollmentCode,
+  encodeProvisioningCode,
+  isMachineName,
+  machineNameKey,
+  machineProjectId,
+  serviceTokenName,
+  type EnrollmentCode,
+  type ProvisioningCode,
+} from '../../src/protocol/identity';
 import machineProjects from '../../src/protocol/vectors/machine-project.json';
 
 const code = (): EnrollmentCode => ({
@@ -48,6 +60,70 @@ describe('the enrollment code (built in the browser, pasted at the prompt of `sm
     ['an empty token', { token: '' }],
   ])('refuses %s', (_label, change) => {
     expect(() => encodeEnrollmentCode({ ...code(), ...change })).toThrow(TypeError);
+  });
+});
+
+const provision = (): ProvisioningCode => ({
+  hub: 'https://desk-hub.example.workers.dev',
+  org: 'o-1',
+  token: 'secret_abc',
+  prefix: 'dc-',
+  key: base64urlEncode(new Uint8Array(32).fill(7)),
+});
+/** A provisioning code's text over any JSON body, as a hand-built one would be. */
+const provisionText = (body: unknown) => `smns-provision-v1.${base64urlEncode(new TextEncoder().encode(JSON.stringify(body)))}`;
+
+describe("the provisioning code (a reusable key's code, built in the browser, piped into `sminos hub enroll`)", () => {
+  it('round-trips under its own prefix', () => {
+    const text = encodeProvisioningCode(provision());
+    expect(text.startsWith('smns-provision-v1.')).toBe(true);
+    expect(text).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(decodeProvisioningCode(text)).toEqual(provision());
+  });
+
+  it('is read by decodeCode, as is a one-time code, each tagged with its kind', () => {
+    expect(decodeCode(encodeProvisioningCode(provision()))).toEqual({ kind: 'provision', ...provision() });
+    expect(decodeCode(encodeEnrollmentCode(code()))).toEqual({ kind: 'enroll', ...code() });
+  });
+
+  it('is refused by the one-time decoder, which an older sminos ports, at its prefix', () => {
+    expect(() => decodeEnrollmentCode(encodeProvisioningCode(provision()))).toThrow(new TypeError('enrollment code: not smns-enroll-v1'));
+  });
+
+  it.each([
+    ['another prefix', 'smns-provision-v2.' + encodeProvisioningCode(provision()).slice('smns-provision-v1.'.length), 'provisioning code: not smns-provision-v1'],
+    ['a damaged body', encodeProvisioningCode(provision()).slice(0, -4), 'provisioning code: damaged'],
+    ['a body that is not an object', provisionText('dc-'), 'provisioning code: damaged'],
+    ['no hub', provisionText({ ...provision(), hub: undefined }), 'provisioning code: no hub'],
+    ['no org', provisionText({ ...provision(), org: '' }), 'provisioning code: no org'],
+    ['no token', provisionText({ ...provision(), token: 7 }), 'provisioning code: no token'],
+    ['no prefix', provisionText({ ...provision(), prefix: undefined }), 'provisioning code: no prefix'],
+    ['an empty prefix', provisionText({ ...provision(), prefix: '' }), 'provisioning code: no prefix'],
+    ['a prefix that is not a string', provisionText({ ...provision(), prefix: ['dc-'] }), 'provisioning code: no prefix'],
+    ['no key', provisionText({ ...provision(), key: undefined }), 'provisioning code: no key'],
+    ['a hub that is not a URL', provisionText({ ...provision(), hub: 'desk hub' }), 'provisioning code: the hub is not a URL'],
+    ['a hub that is not https', provisionText({ ...provision(), hub: 'http://hub.example.com' }), 'provisioning code: the hub is not https'],
+    ['the prefix hub', provisionText({ ...provision(), prefix: 'hub' }), 'provisioning code: the prefix is not admitted'],
+    ['a prefix starting with a dash', provisionText({ ...provision(), prefix: '-x' }), 'provisioning code: the prefix is not admitted'],
+    ['a prefix of 64 characters', provisionText({ ...provision(), prefix: 'd'.repeat(64) }), 'provisioning code: the prefix is not admitted'],
+    ['a key that is not base64url', provisionText({ ...provision(), key: 'not base64!' }), 'provisioning code: the key is not base64url'],
+    ['a key that is not 256 bits', provisionText({ ...provision(), key: base64urlEncode(new Uint8Array(16)) }), 'provisioning code: the key is not 256 bits'],
+  ])('refuses %s, in the words the kind names', (_label, text, message) => {
+    expect(() => decodeProvisioningCode(text)).toThrow(new TypeError(message));
+    // decodeCode words a refusal by the kind its prefix named; another prefix is neither kind.
+    expect(() => decodeCode(text)).toThrow(new TypeError(text.startsWith('smns-provision-v1.') ? message : 'enrollment code: not smns-enroll-v1 or smns-provision-v1'));
+  });
+
+  it("words a one-time code's refusal as the one-time decoder does, and an unknown prefix as neither kind", () => {
+    const noMachine = `smns-enroll-v1.${base64urlEncode(new TextEncoder().encode(JSON.stringify({ ...code(), machine: '' })))}`;
+    expect(() => decodeCode(noMachine)).toThrow(new TypeError('enrollment code: no machine'));
+    expect(() => decodeCode('smns-other-v1.e30')).toThrow(new TypeError('enrollment code: not smns-enroll-v1 or smns-provision-v1'));
+    expect(() => decodeCode('')).toThrow(new TypeError('enrollment code: not smns-enroll-v1 or smns-provision-v1'));
+  });
+
+  it('refuses to encode what it would refuse to decode', () => {
+    expect(() => encodeProvisioningCode({ ...provision(), prefix: 'legacy' })).toThrow(new TypeError('provisioning code: the prefix is not admitted'));
+    expect(() => encodeProvisioningCode({ ...provision(), token: '' })).toThrow(new TypeError('provisioning code: no token'));
   });
 });
 

@@ -1,7 +1,7 @@
 // Elapsed time and token counts for the agent tools (C8b execution document, Interfaces *Elapsed*): a running node ticks
 // from its start event; one with no start reads the engine's own count at its last report; an ended one reads its
 // usage or its end minus its start; with neither, the view says `elapsed unavailable` rather than guessing.
-import { formatAgo as formatAgoIn, formatUntil } from '../../../app/date-format';
+import { formatAgo as formatAgoIn, formatUntil } from '@shared/app/date-format';
 import type { TaskNode } from './task-graph';
 
 export function elapsedOf(node: TaskNode, now: number): { ms: number; live: boolean } | null {
@@ -25,8 +25,8 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
 }
 
-// How long ago an agent ended, in the app's compact relative form (the status line's), in the system locale
-// (`app/date-format.ts`): `now`, `3m ago`, `2h ago`, `1d ago` (3분 전).
+// How long ago an agent ended, in the app's compact relative form (the status line's), in the display locale
+// (`@shared/app/date-format`): `now`, `3m ago`, `2h ago`, `1d ago`.
 export const formatAgo = (ms: number): string => formatAgoIn(ms, { narrow: true });
 
 // E7: how long until a time to come, in the same form (a scheduled job's next run): `in <1m` under a minute (an overdue

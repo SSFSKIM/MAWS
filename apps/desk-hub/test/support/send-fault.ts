@@ -2,7 +2,7 @@
 /** Where the suites' `Machine` takes an armed send fault. */
 export const SEND_FAULT_PATH = '/__test/send-fault';
 /** Where the suites' `Machine` takes a shortened heartbeat and lease (`?heartbeatMs=&leaseMs=`, and optionally
- * `&graceMs=&probeMs=`), before its stream opens. */
+ * `&graceMs=&probeMs=&writeTimeoutMs=`), before its stream opens. */
 export const TIMING_PATH = '/__test/timing';
 /** Where the suites' `Machine` is armed to find itself replaced at its next probe, as an instance Cloudflare replaced
  * under its stream would. */
@@ -34,11 +34,16 @@ export const PROJECT_CALLS_PATH = '/__test/calls';
 export const ORG_ROW_PATH = '/__test/org-row';
 /** Where the suites' `Machine` holds its next send of one frame kind (`?kind=`) until it is released. */
 export const SEND_HOLD_PATH = '/__test/send-hold';
+/** Where the suites' `Machine` stalls its next write of one frame kind (`?kind=`): the stream never takes it, as one whose
+ * client stopped reading would not, so the write bound ends the stream. */
+export const WRITE_STALL_PATH = '/__test/write-stall';
+/** Where the suites' `Project` lists its `machines` rows (`[{name, generation}]`): the streams it fans out to. */
+export const PROJECT_MACHINES_PATH = '/__test/machines';
 /** Where the suites' `Machine` releases a held send: answers `released`, or `none` while no send is held. */
 export const SEND_RELEASE_PATH = '/__test/send-release';
 /** Where the suites' `Project` holds, or releases, its lookups of the archive machine (`{hold: boolean}`). */
 export const PROJECT_ARCHIVE_HOLD_PATH = '/__test/archive-hold';
-/** Where the suites' `Project` lists its send queues (`<machine>#<generation>`). */
+/** Where the suites' `Project` lists its send queues (`<machine>#<generation>#<lane>`). */
 export const PROJECT_QUEUES_PATH = '/__test/queues';
 /** Where the suites' `Project` queues a frame for a machine's stream of any generation (`{machine, generation, frame}`),
  * as a reply on a retired stream would be queued. */
@@ -59,3 +64,26 @@ export const UNREGISTER_PATH = '/__test/unregister';
 /** Where the suites' `Registry` takes a project's summary report (`{project, report}`), as one delivered late would
  * arrive, and answers the org's directory after it. */
 export const REPORT_PATH = '/__test/report';
+/** Where the suites' `Registry` drops `live` from its `summaries`, as a registry stored before that column had it; its
+ * next construction adds the column again. */
+export const SUMMARIES_BEFORE_LIVE_PATH = '/__test/summaries-before-live';
+/** Where the suites' `Registry` is armed to take its next summary report as the version before `live` took it: the
+ * counts stored without `live`, nothing answered. */
+export const SUMMARY_AS_PREVIOUS_PATH = '/__test/summary-as-previous';
+/** Where the suites' `Registry` moves times back (`{machines?: [{name, seen?, confirmed?}], key?: {id, expires},
+ * enrollment?: {machine, expires}}`, all in one step), as an hour or a pending window having passed would leave them, schedules its alarm as its own
+ * changes do, and answers the alarm (`{alarm}`, ms or null). The Registry reads `Date.now()`, and a key's offline time is
+ * an hour at least. */
+export const BACKDATE_PATH = '/__test/backdate';
+/** Where the suites' `Registry` answers its alarm (`{alarm}`, ms or null); a POST of `{clear: true}` deletes it first. */
+export const ALARM_PATH = '/__test/alarm';
+/** Where the suites' `Registry` is armed to hold its next `leave` until it is released, as the Worker would be held
+ * between resolving a machine's credential and asking for its revocation. */
+export const LEAVE_HOLD_PATH = '/__test/leave-hold';
+/** Where the suites' `Registry` takes how long an unfinished offline revocation waits before it is tried again
+ * (`{ms}`, or `{ms: null}` for the deployed minute), and wakes its alarm. */
+export const OFFLINE_RETRY_PATH = '/__test/offline-retry';
+/** Where the suites' `Registry` says whether a `leave` is held: `held` or `none`. */
+export const LEAVE_HELD_PATH = '/__test/leave-held';
+/** Where the suites' `Registry` releases a held `leave`: answers `released`, or `none` while none is held. */
+export const LEAVE_RELEASE_PATH = '/__test/leave-release';

@@ -10,7 +10,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Overview } from './Overview';
-import { formatClock } from '../app/date-format'; // L129
+import { formatClock } from '@shared/app/date-format'; // L129
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;

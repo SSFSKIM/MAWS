@@ -10,6 +10,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact, type DocKind } from '@shared/artifacts/entity';
 import type { LibraryEntry, LibraryEntryAnswer, LibrarySnapshot } from '@shared/ipc/schema/library';
 import { ArtifactStoreError } from '../documents/errors';
+import { timed } from '../documents/host-work'; // P4-R6
 import type { DocumentService } from '../documents/service';
 import type { ArtifactStore } from '../documents/store';
 
@@ -72,7 +73,8 @@ type TextRead = { kind: DocKind; state: Uint8Array } | { kind: 'html'; bytes: Ui
 // An artifact's searchable text at its revision (the revision the row carries, so main can tell when it is current).
 // A deleted or unknown artifact is the store's `notFound`.
 export async function readText({ store, service }: LibraryDocuments, artifactId: string): Promise<{ revision: number; text: string }> {
-  const { revision, read } = await store.readCommitted((): { revision: number; read: TextRead } => {
+  // P4-R6: both synchronous parts (the state read, the extraction) recorded as the host's work
+  const { revision, read } = await store.readCommitted((): { revision: number; read: TextRead } => timed('library text', () => {
     const artifact = store.get(artifactId);
     if (!artifact) throw new ArtifactStoreError('notFound', `no artifact ${artifactId}`, { artifactId });
     if (isDocKind(artifact.kind)) {
@@ -81,8 +83,8 @@ export async function readText({ store, service }: LibraryDocuments, artifactId:
     }
     const content = byteContentOf(store, artifactId);
     return { revision: store.revision(artifactId), read: 'bytes' in content ? { kind: 'html', bytes: content.bytes } : { kind: 'file', ...content } };
-  });
-  return { revision, text: textOf(read) };
+  }, () => `the state of ${artifactId}`));
+  return { revision, text: timed('library text', () => textOf(read), () => `the text of ${artifactId}`) };
 }
 
 function textOf(read: TextRead): string {

@@ -17,7 +17,7 @@ const live = (ref: string, title = 'Live'): DatasetDescriptor => ({ title, sourc
 function world() {
   const doc = newDoc();
   setDataset(doc, 'live', live('assets/q1.json'));
-  let state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  let state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const listeners = new Set<(state: DocumentState) => void>();
   const handle = { doc, awareness: null, state: () => state, subscribe: (listener: (s: DocumentState) => void) => (listeners.add(listener), () => listeners.delete(listener)), onRestored: () => () => {}, holdRemote: () => {}, close: () => {} } as unknown as DocumentHandle;
   const setState = (next: Partial<DocumentState>) => {

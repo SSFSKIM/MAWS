@@ -1,10 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import { applyStatusToDigest, costLedger, emptyDigest, foldDigest, foldEvents } from './digest';
+import { parseJournalRow } from '@shared/wire/journal'; // P4-R7
+import { activityForTool, applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
-import { framesOf, loadJournal } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, framesOf, loadJournal } from '../../../test/support/fixtures';
 import { Normalizer } from '../../engine-host/normalizer'; // C12
 
 const APP = 'app-1' as AppSessionId;
@@ -133,7 +136,8 @@ describe('digest fold', () => {
       totals.push(digest.cost?.totalUsd ?? 0);
     }
     expect(totals).toEqual([0.3, 0.3, 0.35, 0.37]);
-    expect(ledger).toEqual({ finishedUsd: 0.3, restoredUsd: 0, runningUsd: 0.07, awaitingFirst: false });
+    // a first total below the restored figure: what the process restored is the transcript's to say (restoreCost)
+    expect(ledger).toEqual({ finishedUsd: 0.3, restoredUsd: 0, runningUsd: 0.07, awaitingFirst: false, signalled: false, restoring: { firstUsd: 0.05, previousUsd: 0.3 } });
   });
 
   // Each journal's result totals as the engine reported them, one process per journal, an exit between processes.
@@ -160,6 +164,61 @@ describe('digest fold', () => {
   it('a resumed process that restored nothing (pass2/resume-live-second, resumed while its holder still ran) counts from zero', () => {
     // the holder ends at 0.061483; the resume's first total, 0.0060484, is its own turn alone (modelUsage 2 input tokens)
     expect(costAfterEach(processes('pass2/resume-live-holder', 'pass2/resume-live-second'))).toEqual([0.061483, 0.061483 + 0.0060484].map((usd) => expect.closeTo(usd, 9)));
+  });
+
+  // Tracker 2026-09-29: a resume the ledger cannot place alone takes its restored part from the transcript's last
+  // `cost-state` (restored-cost.ts). The figures are pass 3's: a session's first process ended at 0.0031984
+  // (p1-side-thread-live-fork) and its resume at 0.00593705 (p1-side-thread-live-resume: 0.0031984 restored plus a turn
+  // of 0.00273865). Here the resume is killed (SIGKILL) before it records its total, so the next resume restores the
+  // older 0.0031984.
+  describe('a resume’s restored part, settled from the transcript', () => {
+    const FIRST = 0.0031983999999999997;
+    const SECOND = 0.005937049999999999;
+    const TURN = SECOND - FIRST;
+    const ledgerAfter = (third: number, exit: Record<string, unknown> = { signal: 'SIGKILL', code: null, reason: 'crash' }) => {
+      const ledger = costLedger(emptyDigest(APP));
+      foldEvents(emptyDigest(APP), new Set(), [
+        ev('turn.ended', { costUsd: FIRST }), ev('process.exited', {}),
+        ev('turn.ended', { costUsd: SECOND }), ev('process.exited', exit),
+        ev('turn.ended', { costUsd: third }),
+      ], ledger);
+      return ledger;
+    };
+
+    it('a first total below the restored figure: the older figure it restored, not zero (the restored part counted twice)', () => {
+      const ledger = ledgerAfter(FIRST + 0.001); // a cheaper turn than the killed process's
+      expect(costOf(ledger)).toBeCloseTo(SECOND + FIRST + 0.001, 12); // the ledger's own rule
+      expect(ledger.restoring).toEqual({ firstUsd: FIRST + 0.001, previousUsd: SECOND });
+      expect(costOf(restoreCost(ledger, FIRST))).toBeCloseTo(SECOND + 0.001, 12);
+      expect(restoreCost(ledger, FIRST).restoring).toBeNull();
+    });
+
+    it('a first total at or above it, after a signal ended the process before: the killed process’s spend is kept', () => {
+      const ledger = ledgerAfter(SECOND); // the same turn again: 0.0031984 restored plus 0.00273865
+      expect(costOf(ledger)).toBeCloseTo(SECOND, 12); // the ledger's own rule loses the killed process's turn
+      expect(costOf(restoreCost(ledger, FIRST))).toBeCloseTo(FIRST + 2 * TURN, 12);
+    });
+
+    it('a process a signal ended after it recorded a total above its last sample (stopped mid-turn, its shutdown past the stop ladder): that spend is kept', () => {
+      const recorded = SECOND + 0.0005; // spent after its last sample, then recorded at its shutdown before the SIGKILL
+      const ledger = ledgerAfter(recorded + TURN); // the next resume restored the recorded figure
+      expect(costOf(ledger)).toBeCloseTo(recorded + TURN, 12); // the ledger's own rule: the unsampled 0.0005 is counted
+      expect(costOf(restoreCost(ledger, recorded))).toBeCloseTo(recorded + TURN, 12); // the last sample stays the restored part
+    });
+
+    it('after an exit that recorded its total and a first total above it, nothing is read', () => {
+      expect(ledgerAfter(SECOND + TURN, { signal: null, code: 0, reason: 'quit' }).restoring).toBeNull();
+    });
+
+    it('a figure above the first total was recorded after the process started, and one it cannot read changes nothing', () => {
+      // pass2/resume-live-second: resumed while its holder still ran, which recorded 0.061483 at its exit afterwards
+      const live = costLedger(emptyDigest(APP));
+      foldEvents(emptyDigest(APP), new Set(), processes('pass2/resume-live-holder', 'pass2/resume-live-second').flat().slice(0, -1), live);
+      expect(live.restoring).toEqual({ firstUsd: expect.closeTo(0.0060484, 12), previousUsd: expect.closeTo(0.061483, 12) });
+      expect(costOf(restoreCost(live, 0.061483))).toBeCloseTo(0.061483 + 0.0060484, 12);
+      expect(costOf(restoreCost(live, null))).toBeCloseTo(0.061483 + 0.0060484, 12);
+      expect(restoreCost(live, null).restoring).toBeNull();
+    });
   });
 
   it('a synthesised turn end (C4’s backfill, no accounting on disk) leaves the cost alone', () => {
@@ -225,6 +284,85 @@ describe('digest fold', () => {
     expect(seen.size).toBe(2000);
     expect(seen.has('e2099')).toBe(true);
     expect(seen.has('e0')).toBe(false);
+  });
+});
+
+// P4-R7: a message the model sent through a message tool is the session's last line once the tool accepted it. Its call
+// and its result arrive in different batches, so the read model keeps the calls awaiting results beside the ledger.
+describe('a message tool’s message as the last line', () => {
+  const call = (id: string, text: unknown, over: Record<string, unknown> = {}) => ev('tool.use', { toolUseId: id, toolName: 'mcp__maws__message', input: { text }, ...over });
+  const result = (id: string, over: Record<string, unknown> = {}) => ev('tool.result', { toolUseId: id, content: [{ type: 'text', text: 'sent' }], ...over });
+  const text = (words: string) => ev('assistant.block.complete', { block: { type: 'text', text: words } });
+  // The batches folded in turn as the read model folds them, with one session's state carried across them.
+  function lines(...batches: SessionEvent[][]): (string | null)[] {
+    const seen = new Set<string>();
+    const ledger = costLedger(emptyDigest(APP));
+    const messages: MessageCalls = new Map();
+    let digest = emptyDigest(APP);
+    return batches.map((batch) => (digest = foldEvents(digest, seen, batch, ledger, true, messages)).lastAssistantLine);
+  }
+
+  it('the call in one batch and its accepted result in the next: the message’s first line, once the result is in', () => {
+    expect(lines([ev('turn.started', {}), text('Looking first.'), call('c1', '\nStage 1 is done.\nMoving on.')], [result('c1')])).toEqual(['Looking first.', 'Stage 1 is done.']);
+    expect(lines([call('c1', 'x'.repeat(300))], [result('c1')])).toEqual([null, 'x'.repeat(160)]);
+  });
+
+  // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
+  it('an accepted call of the to-human plugin’s message tool is work like any MCP call, and leaves the line it had', () => {
+    const seen = new Set<string>();
+    const messages: MessageCalls = new Map();
+    let digest = emptyDigest(APP);
+    const fold = (batch: SessionEvent[]) => (digest = foldEvents(digest, seen, batch, costLedger(digest), true, messages));
+    fold([ev('turn.started', {}), text('Looking first.'), call('c1', 'Stage 1 is done.', { toolName: 'mcp__to-human__message' })]);
+    expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: activityForTool('mcp__to-human__message', { text: 'Stage 1 is done.' }) });
+    expect(messages.size).toBe(0);
+    fold([result('c1')]);
+    expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: 'Working' });
+  });
+
+  it('a refused result, or a call with no words, leaves the line it had', () => {
+    expect(lines([text('Looking first.'), call('c1', 'Stage 1 is done.')], [result('c1', { isError: true, content: 'MCP error: the server went away' })])).toEqual(['Looking first.', 'Looking first.']);
+    expect(lines([text('Looking first.'), call('c1', '  ')], [result('c1')])).toEqual(['Looking first.', 'Looking first.']);
+  });
+
+  it('a later text is the newer line', () => {
+    expect(lines([call('c1', 'Stage 1 is done.'), result('c1')], [text('All stages ran.')])).toEqual(['Stage 1 is done.', 'All stages ran.']);
+  });
+
+  it('a message call is no work: the activity stays the last tool’s through the call and its result', () => {
+    const seen = new Set<string>();
+    const ledger = costLedger(emptyDigest(APP));
+    const messages: MessageCalls = new Map();
+    const bash = ev('tool.use', { toolUseId: 'b1', toolName: 'Bash', input: { command: 'sh stage.sh 2' } });
+    const digest = foldEvents(emptyDigest(APP), seen, [ev('turn.started', {}), bash, call('c1', 'Stage 1 is done.')], ledger, true, messages);
+    expect(digest.activity).toBe('Running sh stage.sh 2');
+    expect(foldEvents(digest, seen, [result('c1')], ledger, true, messages)).toMatchObject({ activity: 'Running sh stage.sh 2', lastAssistantLine: 'Stage 1 is done.' });
+  });
+
+  it('a subagent’s call and result leave the parent’s line alone', () => {
+    expect(lines([text('Looking first.'), call('c1', 'Child found it.', CHILD)], [result('c1', CHILD)])).toEqual(['Looking first.', 'Looking first.']);
+  });
+
+  it('a call its turn ended without answering sent nothing, whatever arrives after the end', () => {
+    expect(lines([ev('turn.started', {}), text('Looking first.'), call('c1', 'Stage 1 is done.')], [ev('turn.ended', {})], [result('c1')])).toEqual(['Looking first.', 'Looking first.', 'Looking first.']);
+  });
+
+  it('one event on its own keeps no call waiting: a result folded alone is no message', () => {
+    expect(run([text('Looking first.'), call('c1', 'Stage 1 is done.'), result('c1')]).lastAssistantLine).toBe('Looking first.');
+  });
+
+  // The recorded session (spikes/protocol-probe/fixtures/p4/p4-r7-tool-stages.jsonl): three statuses through the tool,
+  // each in the same response as the next command, then the final message as a span; one batch per frame.
+  it('over the recorded wire, each status is the last line in turn once its result is in, then the final message', () => {
+    const rows = readFileSync(join(FIXTURE_DIR, 'p4', 'p4-r7-tool-stages.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => parseJournalRow(JSON.parse(line)));
+    const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+    const shown = lines(...rows.map((row) => normalizer.push(row))).filter((line, i, all) => line !== null && line !== all[i - 1]);
+    expect(shown).toEqual([
+      'Stage 1 of 4 is done. It indexed 1,240 call transcripts, and 37 of them are missing their speaker labels.',
+      'Stage 2 of 4 is done. It restored 34 of the 37 missing labels from the audio. Calls 0412, 0977 and 1203 could not be restored and need a person to label them. Moving on to stage 3.'.slice(0, 160),
+      'Stage 3 of 4 is done. The classifier is trained. Accuracy on the held-out 10% is 91.4%, down from 93.0% last week, a drop of 1.6 points.',
+      'Stage 4 of 4 is done, so the whole pipeline has run. It wrote `out/labels.csv` with 1,240 rows.', // the span's first line
+    ]);
   });
 });
 

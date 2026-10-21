@@ -16,13 +16,21 @@
 // beside them: `1 p95` ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16), `7 enter` ≤ 1,200 ms per preview (mini 890.8 to
 // 1,126.8; MacBook target 1,000), `8 renderer collected` ≤ 600 MB (mini 480.5 and 519.7, about 8% run variance; MacBook 412
 // to 469, target 500). The MacBook targets in B's section and S7b's table are unchanged; a rise over these bounds is the
-// regression signal.
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+// regression signal. P4 Decision Log 33 rescales rows 1 and 2 by the mini's own drift: from 10-20 the same tree reads
+// slower there (de71da97a 17.0 on 10-19, 22.4 after a reboot on 10-20; the cause survived restarts, Chrome, System
+// Settings and Docker quit, and renderer accessibility is off), so `1 p95` ≤ 28 ms (clean runs on 10-20 read 20.3 to
+// 26.6) and `2 p95` ≤ 58 ms (Event Timing's 8 ms grain puts it at 48 or 56).
+// Each test's first measured trial waits, after its launch and setup, for the measured specs' shared quiet admission
+// (support/quiet.ts: the 1-minute load under 5 on two reads 30 s apart, at most three minutes; on its expiry the trials
+// run and are judged as above), recorded in its results as `quiet` (`quietHidden` for the margin's control, `quietSigkill`
+// for row 11).
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { prng, seedDocument, type SeedStats } from './support/document-seed';
 import { keystrokes } from './support/hangul';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { quietWait } from './support/quiet';
 import {
   Agent,
   armHistory,
@@ -51,6 +59,7 @@ import {
   typingReport,
   watchRemote,
   type CallAnswer,
+  type CallBackground, // P4-R6
   type ReadResult,
   type TypingReport,
 } from './support/document-scale';
@@ -224,9 +233,231 @@ async function drain(page: Page, pageB: Page): Promise<{ end: number; waitedMs: 
 }
 const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} ${what} when the drain stopped, each a miss at the time it had waited` : '');
 
+// P4-B1 (the P4 spec §5 B1's "the keystroke p95 on the 200-page two-agent workload with the margin open within the
+// re-based bound (P3 Decision Log 108, 109) measured on the mini"; docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md
+// D13): step 1 again with the margin open. The window at 1920 × 1080 so the main tab reaches the cards tier: the app's
+// default layout keeps the sidebar (300) and the panel (380) open, the page is 816 and LC-1's least card with its gutters
+// needs 333 beside it, 1,829 in all; 1920 leaves 424 beside the page, a 357 px card (1600 and 1800 drew icons on the mini:
+// runs 39382175044 and 39383570754); the seed's
+// threads (one in every third section, about 53 open) are cards in the margin, one near the typing section activated;
+// then the owner's 300 keystrokes with the two agents batching, and, through the seam's `stream` (P4-A2's provisional
+// emitter, X35), a layer growing in a block of a section two away from the typing one for the typing's whole span, so
+// the margin's re-layout on the layer's growth is in the measurement (`streamWhile`: started with the typing, stopped
+// when it ends, its answer recorded in the row's note). Without `stream` (A2 not on this tree) the row is recorded
+// without the layer and says so; the acceptance's tree carries A2 (the child's Decision Log 6). Rows:
+// `1m p95` ≤ the control's `1h p95` in the same job + 6 ms (P4-B1's follow-up, below; it was ≤ 20 ms, the mini's
+// calibration of row 1 before the margin existed), `1m max` ≤ 50 ms, `1m relayouts` (the margin's layout passes per frame
+// callback the page ran, `data-relayouts` over the page's `data-frames`: the agents' edits and the layer's growth run
+// frames of their own, so a ratio per keystroke would count them against the owner; the scripted scroll afterwards adds
+// none, R4). P4-B1's follow-up wave (docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md, "Follow-up"): an edit
+// owes the margin a pass, run once the edits pause or at the 1 s ceiling (margin-settle.ts), so under the step's
+// constant writes the row reads about one pass a second against every frame the edits ran, where B1 read one pass a
+// frame; and `1m stale`, the longest any change waited for the pass that read it (the margin's `data-stale-max`, cleared
+// before the step), the ceiling and the main thread's queue. The follow-up wave also adds the control, run first: the
+// same workload (1920 × 1080, the two agents, the streaming layer) with the margin hidden (View › Hide, no thread
+// activated), rows `1h p95`, `1h max` and `1h ack p95`, recorded, so the margin's own cost is `1m` minus `1h` in one job
+// and `1m p95` is bounded by it (MARGIN_OVER_CONTROL_MS); `1m` against the base
+// gate's row 1 also carries the window (row 1 runs at the default 1280 × 820) and the layer (row 1 has none), which the
+// wave's diagnostic placed at about 2 and 2.5 to 3 ms of p95 on the mini (the execution document's follow-up section).
+// Results in test-results/document-scale-margin.json.
+const MARGIN_RESULTS = join(REPO_ROOT, 'test-results', 'document-scale-margin.json');
+// P4-B1's follow-up: the pass falls due at MARGIN_SETTLE_MAX_MS (src/artifacts/document/editor/comments/margin-settle.ts,
+// 1,000 ms) and starts once the main thread reaches its task; the limit is the ceiling and that queue under the step's
+// load, set from the mini's reading (1,063 ms at 2a6170eb8, run 39393866900)
+const STALE_LIMIT_MS = 1_200;
+// P4-B1's follow-up: about one pass a second over the step's frame callbacks; set from the mini's reading (0.074: 40
+// passes over 540 frame callbacks in 41.6 s, run 39393866900), with room for fewer frames under load
+const RELAYOUTS_PER_FRAME = 0.1;
+// P4-B1's follow-up (P4 Decision Logs 36 and 38: `1m p95`'s bound is the follow-up wave's): the margin open may cost at
+// most this much p95 over the control (the same workload, the margin hidden) run just before it in the same job, in
+// place of the absolute 20 ms calibrated before the margin existed. The over-control readings so far are +0.6 and +2.9
+// (run 39398316541) and identical back-to-back runs of this workload spread 2.3 ms (25.5 and 27.8), so the margin is
+// 6 ms: the higher reading clears it by 3.1, more than that spread, and a margin as it stands (about +1.75 on average)
+// goes red by chance about one job in thirty. It still catches the margin's own cost rising by about 4 ms at p95 (one
+// job in two) and by about 6.5 ms (five jobs in six); a smaller regression is for an A/B to read, B minus A
+const MARGIN_OVER_CONTROL_MS = 6;
+const STREAM_SECTION = TYPING_SECTION + 2; // kept clear of the agents, two sections under the caret: on screen with it
+const STREAM_TICK_MS = 120; // P4-B1: the layer's pace, a piece every 120 ms and the seam's round trip (the typing is about 36 s)
+const STREAM_ID = 'toolu_perf_stream_margin';
+
+// P4-B1: the streaming layer, a long replace_block into `block` fed piece by piece while `running()` holds, then left for
+// the caller to drop (never committed: the document is unchanged). The seam runs its commands one at a time in name
+// order (A2's `serveCommandFiles`), so a single `stream` of every piece would hold the agents' calls behind it for its
+// whole span: each piece is a `stream` command of its own, paced from here, and the agents' calls run between them.
+// Answers the pieces fed and the streaming frames the call sent, or why the seam refused (A2 not on the tree).
+type Streamed = { on: true; pieces: number; frames: number; spanned: boolean; why?: string } | { on: false; why: string };
+async function streamWhile(seam: PerfSeam, id: string, block: string, running: () => boolean): Promise<Streamed> {
+  const words = 'the agent keeps writing a long replacement for this block while the owner types elsewhere, and every piece grows the layer on the page '.repeat(20).trim();
+  const prefix = JSON.stringify({ artifact: id, baseRevision: 1, ops: [{ op: 'replace_block', id: block, markdown: '' }] }).replace('"markdown":""}]}', '"markdown":"');
+  const deltas = [prefix, ...words.split(' ').map((word) => `${word} `)];
+  let pieces = 0;
+  let frames = 0;
+  for (const piece of deltas) {
+    if (pieces > 0 && !running()) break;
+    try {
+      const answer = await seam.send<{ ok: boolean; frames?: number }>({ cmd: 'stream', session: 'perf-stream', toolUseId: STREAM_ID, name: 'artifact_edit', deltas: [piece], tickMs: 0 });
+      frames = answer.frames ?? frames; // the call's frames so far
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      return pieces === 0 ? { on: false, why } : { on: true, pieces, frames, spanned: !running(), why };
+    }
+    pieces += 1;
+    await sleep(STREAM_TICK_MS);
+  }
+  return { on: true, pieces, frames, spanned: !running() };
+}
+
+// P4-B1's follow-up: the control first, the same workload with the margin hidden (rows `1h`, recorded), then the margin
+// open, whose `1m p95` is bounded by the control's p95 in this job plus MARGIN_OVER_CONTROL_MS
+test('the typing workload with the margin hidden (the control for 1m): keystroke → frame p95, the same window, agents and layer', () => marginWorkload(true));
+test('the typing workload with the margin open: keystroke → frame p95 with about 53 cards beside the page and a streaming layer', () => marginWorkload(false));
+
+/** P4-B1's follow-up: the control's `1h p95` as this job's results file holds it, or null when the control has not run. */
+function controlP95(): number | null {
+  if (!existsSync(MARGIN_RESULTS)) return null;
+  const results = JSON.parse(readFileSync(MARGIN_RESULTS, 'utf8')) as { rows?: Array<{ row: string; value: number }> };
+  const row = results.rows?.find((r) => r.row === '1h p95');
+  return row && Number.isFinite(row.value) ? row.value : null;
+}
+
+async function marginWorkload(hidden: boolean): Promise<void> {
+  if (hidden) rmSync(MARGIN_RESULTS, { force: true });
+  const R = hidden ? '1h' : '1m'; // P4-B1's follow-up: the rows' prefix
+  const { large } = seedsOnce();
+  const { page, app, seam } = await start();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1920, 1080));
+  await page.waitForFunction(() => window.innerWidth === 1920);
+  const rows = new Rows(MARGIN_RESULTS, hidden ? { hiddenRun: new Date().toISOString() } : { run: new Date().toISOString(), seed: { large: large.stats }, margin: true });
+  const loads: Record<string, number> = { launched: load1() };
+  const id = await seeded(page, seam, 'Scale 200 margin', large.state);
+  await openTimed(page, id, 'Scale 200 margin', large.stats.topBlocks - 20);
+  const main = page.locator(`[data-artifact-tab="${id}"]`);
+  const margin = main.getByRole('region', { name: 'Comments' });
+  await expect(margin).toHaveAttribute('data-margin-tier', 'cards', { timeout: 15_000 });
+  const cards = await margin.locator('[data-margin-entry]').count();
+  expect(cards, 'the seed’s threads as cards').toBeGreaterThan(40);
+  const near = [...Array(SECTIONS).keys()].filter((section) => section % 3 === 0).sort((a, b) => Math.abs(a - TYPING_SECTION) - Math.abs(b - TYPING_SECTION))[0]!;
+  await main.locator(`.ProseMirror[data-editor="live"] [data-thread="th${near}"]`).first().scrollIntoViewIfNeeded();
+  if (hidden) {
+    // the control: View › Hide (no thread activated: a click on a passage with the margin hidden opens the panel)
+    const toolbar = main.getByRole('toolbar', { name: 'Formatting' });
+    await toolbar.getByRole('button', { name: 'Comment view' }).click();
+    await toolbar.getByRole('menuitemradio', { name: 'Hide' }).click();
+    await expect(margin).toHaveCount(0);
+  } else {
+    // a thread near the caret activated by its passage: the margin's stack pinned around it, as a reader has it
+    await main.locator(`.ProseMirror[data-editor="live"] [data-thread="th${near}"]`).first().click();
+    await expect(margin.locator(`[data-margin-entry="th${near}"]`)).toHaveAttribute('data-active', '');
+  }
+  const marginAttr = async (name: string) => (hidden ? null : await margin.getAttribute(name)); // P4-B1's follow-up
+
+  // window B, the agents' reads and first batches, as the gate's step 0 to 5 have them
+  const [pageB] = await Promise.all([app.waitForEvent('window'), app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
+  await pageB.waitForLoadState('domcontentloaded');
+  await openTimed(pageB, id, 'Scale 200 margin', large.stats.topBlocks - 20);
+  const agents = agentsFor();
+  for (const agent of agents) {
+    const read = await readFirst(seam, agent, id);
+    const { ops, run } = agent.firstBatch();
+    const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
+    agent.record(run, answer);
+    expect(answer.isError, answer.text).toBe(false);
+    await readRest(seam, agent, id, read.result!);
+  }
+
+  // the streaming layer in a block two sections under the caret (P4-B1: fed alongside the typing below, `streamWhile`)
+  const streamBlock = `s${STREAM_SECTION}p3`;
+  const layer: { streamed: Streamed | null } = { streamed: null }; // set by the typing step
+  await admitted(rows, hidden ? 'quietHidden' : 'quiet');
+
+  await test.step(`${R}: typing in A with the margin ${hidden ? 'hidden' : 'open'}, two agents writing, the layer growing`, async () => {
+    const { clientID } = await instrumentTyping(page, id);
+    await watchRemote(pageB, id, clientID);
+    await caretAtEnd(page, id, `s${TYPING_SECTION}p2`);
+    await ok(page, 'artifacts.testLoopDelay', { reset: true });
+    await seam.send({ cmd: 'loop', reset: true });
+    const relayoutsBefore = Number(await marginAttr('data-relayouts'));
+    const framesBefore = Number(await main.locator('.ds-doc').getAttribute('data-frames')); // P4-B1: the page frame's callbacks
+    if (!hidden) await margin.evaluate((el) => el.removeAttribute('data-stale-max')); // P4-B1's follow-up: the step's waits alone
+    await startMeasuring(page);
+    loads.steadyStart = load1();
+    const reads: Array<{ session: string; answer: CallAnswer<ReadResult> }> = [];
+    const typingStarted = Date.now();
+    const typing = type(page, TYPED, 300);
+    // P4-B1: the layer grows from the first keystroke to the last: its feed starts with the typing, not awaited, and
+    // stops when the typing ends; its answer is awaited after the typing
+    let typingEnded = false;
+    void typing.then(
+      () => (typingEnded = true),
+      () => (typingEnded = true),
+    );
+    const streaming = streamWhile(seam, id, streamBlock, () => !typingEnded);
+    const [typed] = await Promise.all([typing, agentsRun(seam, agents, id, typing, null, reads)]);
+    const typingSeconds = (Date.now() - typingStarted) / 1000; // P4-B1's follow-up: the passes' rate over the typing
+    const streamed = await streaming;
+    layer.streamed = streamed;
+    const drained = await drain(page, pageB);
+    const loop = await ok<{ p50: number; p99: number; max: number }>(page, 'artifacts.testLoopDelay', {});
+    loads.steadyEnd = load1();
+    const report = await typingReport(page);
+    const keys = keystrokeMeasures(report);
+    const counted = everyKeystroke(report, await remoteSeen(pageB), drained.end);
+    const relayoutsAfter = Number(await marginAttr('data-relayouts'));
+    const passes = relayoutsAfter - relayoutsBefore;
+    const frames = Number(await main.locator('.ds-doc').getAttribute('data-frames')) - framesBefore;
+    const staleMax = await marginAttr('data-stale-max'); // P4-B1's follow-up: null when no pass settled an edit
+    // R4: a scripted scroll of the page runs no layout pass
+    await main.locator('.ds-doc').evaluate((el) => {
+      el.scrollTop += 400;
+      el.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForTimeout(100);
+    const afterScroll = Number(await marginAttr('data-relayouts'));
+    const layerNote = streamed.on
+      ? `a streaming layer (${streamed.pieces} pieces, ${streamed.frames} frames, ${streamed.spanned ? 'over the whole typing' : 'its pieces ran out before the typing did'}${streamed.why ? `; stopped: ${streamed.why}` : ''})`
+      : `NO streaming layer (${streamed.why}): not the acceptance's tree`;
+    const note = `${keys.keystrokes} keystrokes; ${hidden ? `the margin hidden (${cards} threads)` : `${cards} cards, th${near} active`}; agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}; ${layerNote}`;
+    if (hidden) {
+      // P4-B1's follow-up: the control's rows, against which `1m p95` reads the margin's own cost
+      // (recorded, no bound of their own: the control is the margin workload's level on this Mac in this job)
+      rows.add('1h p95', 'keystroke → frame in A, p95, the margin hidden (the 1m workload: 1920 × 1080, 2 windows, 2 agents, a streaming layer)', keys.frame.p95, 'ms', null, 'recorded: the control for 1m p95', note);
+      rows.add('1h max', 'keystroke → frame in A, max, the margin hidden', keys.frame.max, 'ms', null, 'recorded', `p50 ${keys.frame.p50}`);
+      rows.add('1h ack p95', 'keystroke → durable ack, p95, the margin hidden', counted.ack.p95, 'ms', null, 'recorded', `${counted.acked} of ${counted.keystrokes} acked`);
+      rows.write({ hidden: { loads, threads: cards, layer: streamed, typing: { ...keys, ack: counted.ack }, frames, loop } });
+      expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
+      return;
+    }
+    // P4-B1's follow-up (P4 Decision Logs 36 and 38): the margin's own cost over the control run just before it
+    const control = controlP95();
+    const over = control === null ? null : +(keys.frame.p95 - control).toFixed(1);
+    rows.add('1m p95', 'keystroke → frame in A, p95, the margin open (200 pages, 2 windows, 2 agents, a streaming layer), against the control 1h p95 of this job', keys.frame.p95, 'ms', control === null ? null : control + MARGIN_OVER_CONTROL_MS, control === null ? 'the control did not run: recorded' : `p95 ≤ 1h p95 (${control}) + ${MARGIN_OVER_CONTROL_MS} ms`, `${note}; 1m − 1h ${over === null ? 'not read' : `${over >= 0 ? '+' : ''}${over} ms`}`);
+    rows.add('1m max', 'keystroke → frame in A, max, the margin open', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
+    // P4-B1's follow-up: the passes the edits owed, settled once they paused or at the ceiling, none in an edit's frame
+    rows.add('1m relayouts', 'the margin’s layout passes per frame callback (edits owe a pass, settled when they pause or at the 1 s ceiling)', +(passes / Math.max(1, frames)).toFixed(3), 'passes', RELAYOUTS_PER_FRAME, `≤ ${RELAYOUTS_PER_FRAME} per frame (about one a second under constant writes)`, `${passes} passes over ${frames} frame callbacks (${keys.keystrokes} keys) in ${typingSeconds.toFixed(1)} s of typing, ${(passes / typingSeconds).toFixed(2)} a second; after a scripted scroll ${afterScroll - relayoutsAfter} more (R4: none)`);
+    rows.add('1m stale', 'the longest a change waited for the margin’s pass that read it, the margin open', staleMax === null ? NaN : Number(staleMax), 'ms', STALE_LIMIT_MS, `≤ ${STALE_LIMIT_MS} ms (the settle’s 1 s ceiling and the main thread’s queue)`, staleMax === null ? 'no pass settled an edit in the step' : undefined);
+    rows.add('1m ack p95', 'keystroke → durable ack, p95, the margin open', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked`);
+    rows.add('5m p99', 'host event-loop delay over the run, p99, the margin open', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
+    rows.write({ margin: { loads, cards, active: `th${near}`, layer: streamed, typing: { ...keys, ack: counted.ack }, relayouts: { passes, frames, keystrokes: keys.keystrokes, typingSeconds, staleMax: staleMax === null ? null : Number(staleMax), afterScroll: afterScroll - relayoutsAfter }, loop } });
+    expect(control, 'the control (1h) ran before 1m in this job').not.toBeNull(); // P4-B1's follow-up
+    expect(afterScroll - relayoutsAfter, 'a scroll runs no layout pass (R4)').toBe(0);
+    expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
+    const landed = (await blockText(page, id, `s${TYPING_SECTION}p2`)) ?? '';
+    expect(landed.endsWith(typed), `the typed text landed whole: …${landed.slice(-80)}`).toBe(true);
+  });
+  if (layer.streamed?.on) await seam.send({ cmd: 'drop', session: 'perf-stream', toolUseId: STREAM_ID }).catch(() => {});
+  judged(rows, hidden ? 'marginalHidden' : 'marginal');
+}
+
+/** A test's first measured trial's admission (support/quiet.ts), after its launch and setup: logged, and kept under `key`. */
+async function admitted(rows: Rows, key: 'quiet' | 'quietHidden' | 'quietSigkill'): Promise<void> {
+  const admission = await quietWait();
+  console.log(`[document scale] the first trial's admission (${key}): ${admission.summary}`);
+  rows.write({ [key]: admission });
+}
+
 // The run passes when no row failed (Decision Log 44's reading of the parent's Decision Log 54): a marginal row is listed
 // for P3-F's re-measure, in the output and in the results' `marginal`, and does not fail the run.
-function judged(rows: Rows, key: 'marginal' | 'marginalSigkill'): void {
+function judged(rows: Rows, key: 'marginal' | 'marginalSigkill' | 'marginalHidden' /* P4-B1's follow-up */): void {
   const marginal = rows.rows.filter((r) => r.verdict === 'marginal');
   rows.write({ [key]: marginal.map((r) => ({ row: r.row, value: r.value, limit: r.limit, unit: r.unit, load: r.load })) });
   if (marginal.length > 0) console.log(`marginal rows (P3-F re-measures):\n${marginal.map((r) => `  ${r.row}: ${r.value} ${r.unit} against ${r.limit} at load ${r.load}`).join('\n')}`);
@@ -253,6 +484,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   await sleep(UNLOAD_WAIT_MS);
   const idle1 = await seam.heap();
   rows.write({ heap: { idle0: MB(idle0.heapUsed), idleWarmAfterUnload: MB(idle1.heapUsed) } });
+  await admitted(rows, 'quiet');
 
   await test.step('6: first sync to interactive, cold and warm, at 20 and at 200 pages', async () => {
     const small20 = small.stats.topBlocks - 5;
@@ -289,14 +521,14 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   const agents = agentsFor();
   for (const [k, agent] of agents.entries()) {
     const read = await readFirst(seam, agent, id);
-    rows.add(`read idle ${k + 1}`, `the 200-block read, ${agent.session}'s first (its replica made), host loop max over the call`, read.loop.max, 'ms', null, 'recorded (36–44 ms headless, Decision Log 34)', `wall ${read.wallMs.toFixed(1)} ms`);
+    rows.add(`read idle ${k + 1}`, `the 200-block read, ${agent.session}'s first (its replica made), host loop max over the call`, read.loop.max, 'ms', null, 'recorded (36–44 ms headless, Decision Log 34)', `wall ${read.wallMs.toFixed(1)} ms`, read.background);
     const shown = Math.max(...[...agent.blocks.keys()].map((blockId) => /^s(\d+)p5$/.exec(blockId)).filter((m) => m !== null).map((m) => Number(m![1]))) + 1;
     const { ops, run } = agent.firstBatch();
     const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
     agent.record(run, answer);
     expect(answer.isError, answer.text).toBe(false);
     expect(ops, 'a five-op batch').toHaveLength(5);
-    rows.add(`5 first after read ${k + 1}`, `the first batch after a read: ${agent.session}'s five ops right after its 200-block read, on the replica that read made (sections 0 to ${shown - 1}), host loop max over the call`, answer.loop.max, 'ms', 50, '≤ 50 ms (Decision Log 20, 37)', `wall ${answer.wallMs.toFixed(1)} ms; ops ${ops.map((op) => op.op).join(', ')}`);
+    rows.add(`5 first after read ${k + 1}`, `the first batch after a read: ${agent.session}'s five ops right after its 200-block read, on the replica that read made (sections 0 to ${shown - 1}), host loop max over the call`, answer.loop.max, 'ms', 50, '≤ 50 ms (Decision Log 20, 37)', `wall ${answer.wallMs.toFixed(1)} ms; ops ${ops.map((op) => op.op).join(', ')}`, answer.background);
     await readRest(seam, agent, id, read.result!);
   }
   const steadyFrom = agents.map((agent) => agent.applied.length); // the steady state's batches follow
@@ -320,18 +552,19 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const counted = everyKeystroke(report, await remoteSeen(pageB), drained.end);
     const painted = counted.inB;
     const note = `${keys.keystrokes} keystrokes (${keys.noTransaction} without a transaction); agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}`;
-    rows.add('1 p95', 'keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16)', note);
+    rows.add('1 p95', 'keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)', keys.frame.p95, 'ms', 28, 'p95 ≤ 28 ms (mini 20.3 to 26.6, P4 Decision Log 33; MacBook target 16)', note);
     rows.add('1 max', 'keystroke → frame in A, max', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
-    rows.add('2 p95', 'keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)', keys.presented.p95, 'ms', 50, 'p95 ≤ 50 ms', `${keys.presentedReported} keydowns reported at ≥ 16 ms; max ${keys.presented.max}`);
+    rows.add('2 p95', 'keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)', keys.presented.p95, 'ms', 58, 'p95 ≤ 58 ms (mini 56 and 56, P4 Decision Log 33)', `${keys.presentedReported} keydowns reported at ≥ 16 ms; max ${keys.presented.max}`);
     rows.add('3 p95', 'keystroke → durable ack, p95 (every keystroke counted)', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked${missed(counted.acked, counted.keystrokes, 'unacknowledged')}; drained ${drained.waitedMs} ms; p50 ${counted.ack.p50}, max ${counted.ack.max}`);
     rows.add('4 p95', 'keystroke painted in window B, p95 (every keystroke counted)', painted.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.painted} of ${counted.keystrokes} painted${missed(counted.painted, counted.keystrokes, 'not painted in B')}; p50 ${painted.p50}, max ${painted.max}`);
     rows.add('5 p99', 'host event-loop delay over the run (A’s testLoopDelay: the whole gaps of its own 10 ms timer), p99, documents live with the writer’s batches', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.add('5 max', 'host event-loop delay over the run, max', loop.max, 'ms', 100, 'max ≤ 100 ms');
     const all = agents.flatMap((a, k) => a.applied.slice(steadyFrom[k]));
-    rows.add('5 batch max', 'an agent batch of five ops in the steady state (replicas fully read, typing and the other agent running): the host loop’s max over each batch', Math.max(...all.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 37)', `${all.length} batches; loop max p95 ${stats(all.map((b) => b.loop.max)).p95}; call wall p95 ${stats(all.map((b) => b.wallMs)).p95} ms`);
+    const slowest = all.reduce<(typeof all)[number] | undefined>((a, b) => (a === undefined || b.loop.max > a.loop.max ? b : a), undefined); // P4-R6: its record names what shared its loop
+    rows.add('5 batch max', 'an agent batch of five ops in the steady state (replicas fully read, typing and the other agent running): the host loop’s max over each batch', Math.max(...all.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 37)', `${all.length} batches; loop max p95 ${stats(all.map((b) => b.loop.max)).p95}; call wall p95 ${stats(all.map((b) => b.wallMs)).p95} ms`, slowest?.background);
     const seamLoop = await seam.send<{ loop: { max: number; p99: number } }>({ cmd: 'loop' });
     rows.add('5 max (gaps)', 'host loop over the run measured by the seam’s 1 ms tick gaps (beside A’s 10 ms testLoopDelay), max', seamLoop.loop.max, 'ms', 100, 'max ≤ 100 ms', `p99 ${seamLoop.loop.p99.toFixed(1)} ms`);
-    for (const [k, r] of reads.entries()) rows.add(`read load ${k + 1}`, `the 200-block read under load (${r.session}, typing and the other agent running), host loop max over the call`, r.answer.loop.max, 'ms', 100, 'held to row 5’s max ≤ 100 ms', `wall ${r.answer.wallMs.toFixed(1)} ms`);
+    for (const [k, r] of reads.entries()) rows.add(`read load ${k + 1}`, `the 200-block read under load (${r.session}, typing and the other agent running), host loop max over the call`, r.answer.loop.max, 'ms', 100, 'held to row 5’s max ≤ 100 ms', `wall ${r.answer.wallMs.toFixed(1)} ms`, r.answer.background);
     rows.write({ steady: { loads, typing: { ...keys, ack: counted.ack, acked: counted.acked }, painted, paintedKeys: counted.painted, drain: drained, loop, agents: agents.map((a) => ({ session: a.session, applied: a.applied.length, refused: a.refused })) } });
     expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
     const landed = (await blockText(page, id, `s${TYPING_SECTION}p2`)) ?? '';
@@ -453,6 +686,7 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
   await openTimed(pageB, id, 'Scale 200', large.stats.topBlocks - 20);
   const agents = agentsFor();
   for (const agent of agents) await readAll(seam, agent, id);
+  await admitted(rows, 'quietSigkill');
   await instrumentTyping(page, id);
   await caretAtEnd(page, id, `s${TYPING_SECTION}p2`);
   const before = (await blockText(page, id, `s${TYPING_SECTION}p2`))!;
@@ -561,4 +795,56 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
   rows.add('11 fork → live', 'host SIGKILL: re-fork → every replica live: both windows’ (live and synced) and both agents’ (their first read after the re-fork answered)', allLive - forkedAt, 'ms', 1000, '≤ 1,000 ms', `kill → re-fork ${forkedAt - killedAt} ms (the supervisor’s restart delay); kill → all live ${allLive - killedAt} ms; from the re-fork: windows ${liveAgain.map((t) => t - forkedAt).join(', ')} ms, agents ${agentLive.map((t) => t - forkedAt).join(', ')} ms`);
   rows.write({ sigkill: { load: load1() } });
   judged(rows, 'marginalSigkill');
+});
+
+// P4-R6 (the P4 composite spec's Decision Log 44): row 5's first batch after a read, repeated in one launch, so a stray
+// that one run meets about one time in six is met often enough to count and to name. Run only on purpose:
+//   pnpm e2e:document-scale-repeat     (the script sets MAWS_DOCUMENT_REPEAT; the scale gate's own run skips this test)
+// Each round is a fresh session's 200-block read (its replica made, as perf-agent-1's first read makes it) and at once
+// its five-op first batch, on the 200-page document open in two windows, then the session's end and a pause of 1.5 to
+// 3 s. Every round's loop max, wall and background (what shared the call's loop: CallBackground in
+// support/document-scale.ts) is kept in test-results/document-scale-repeat.json, written after each round so a run
+// that stops keeps what it measured; the rows are recorded, with no bound. A round whose batch is refused (a long run's
+// edits can leave the fifth op's unscoped quote matching several blocks) is kept with its refusal and left out of the
+// rows; more than a tenth of the rounds refused means the fixture is broken, and fails the test.
+const REPEAT = Number(process.env.MAWS_DOCUMENT_REPEAT ?? 0);
+const REPEAT_RESULTS = join(REPO_ROOT, 'test-results', 'document-scale-repeat.json');
+
+test('5r: the first batch after a read, repeated in one launch (MAWS_DOCUMENT_REPEAT rounds)', async () => {
+  test.skip(!(REPEAT > 0), 'runs only under MAWS_DOCUMENT_REPEAT (pnpm e2e:document-scale-repeat)');
+  rmSync(REPEAT_RESULTS, { force: true });
+  const { large } = seedsOnce();
+  const { page, app, seam } = await start();
+  const rows = new Rows(REPEAT_RESULTS, { run: new Date().toISOString(), rounds: REPEAT });
+  const id = await seeded(page, seam, 'Scale 200', large.state);
+  await openTimed(page, id, 'Scale 200', large.stats.topBlocks - 20);
+  const [pageB] = await Promise.all([app.waitForEvent('window'), app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
+  await pageB.waitForLoadState('domcontentloaded');
+  await openTimed(pageB, id, 'Scale 200', large.stats.topBlocks - 20);
+  const sections = [...Array(SECTIONS).keys()].filter((s) => !KEPT_CLEAR(s) && s % 2 === 0); // perf-agent-1's (agentsFor)
+  type Round = { round: number; max: number; wallMs: number; readMax: number; load: number; background?: CallBackground; refused?: string };
+  const rounds: Round[] = [];
+  await admitted(rows, 'quiet');
+  for (let round = 1; round <= REPEAT; round++) {
+    await sleep(1_500 + Math.random() * 1_500);
+    const agent = new Agent(`perf-repeat-${round}`, sections, prng(100 + round));
+    const read = await readFirst(seam, agent, id);
+    const { ops } = agent.firstBatch();
+    const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
+    rounds.push({ round, max: +answer.loop.max.toFixed(2), wallMs: +answer.wallMs.toFixed(1), readMax: +read.loop.max.toFixed(2), load: load1(), background: answer.background, ...(answer.isError ? { refused: answer.text } : {}) });
+    rows.write({ repeat: rounds });
+    await seam.release(agent.session);
+  }
+  const applied = rounds.filter((r) => r.refused === undefined);
+  const refused = rounds.filter((r) => r.refused !== undefined);
+  const maxes = stats(applied.map((r) => r.max));
+  const slowest = applied.reduce<Round | null>((a, b) => (a === null || b.max > a.max ? b : a), null);
+  const over = applied.filter((r) => r.max > 50);
+  rows.add('5r p50', `the first batch after a read, ${applied.length} applied of ${REPEAT} rounds in one launch: host loop max over the call, p50`, maxes.p50, 'ms', null, 'recorded');
+  rows.add('5r p95', 'the first batch after a read, repeated: p95', maxes.p95, 'ms', null, 'recorded');
+  rows.add('5r max', 'the first batch after a read, repeated: max (its record beside it)', maxes.max, 'ms', null, 'recorded', slowest ? `round ${slowest.round}, wall ${slowest.wallMs} ms` : undefined, slowest?.background);
+  rows.add('5r over 50', 'the first batch after a read, repeated: rounds over row 5’s 50 ms', over.length, 'rounds', null, 'recorded', over.map((r) => `round ${r.round} ${r.max} ms`).join('; ') || undefined);
+  rows.add('5r refused', 'the first batch after a read, repeated: rounds whose batch was refused, left out of the rows above (the test fails past a tenth)', refused.length, 'rounds', null, 'recorded', refused.length > 0 ? `rounds ${refused.map((r) => r.round).join(', ')} (each refusal in repeat)` : undefined);
+  rows.write({ repeat: rounds });
+  expect(refused.length, `${refused.length} of ${REPEAT} rounds refused, the first: ${refused[0]?.refused}`).toBeLessThanOrEqual(REPEAT / 10);
 });

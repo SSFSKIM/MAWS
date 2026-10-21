@@ -12,6 +12,7 @@ import { DocIndex } from '@artifacts/document/block-index';
 import { stateV2 } from '@artifacts/yjs';
 import { HUMAN, openDocumentWorld, type DocumentWorld } from './document-world.fixture';
 import { DocumentPerfSeam, documentPerfSeamRequested, startDocumentPerfSeam, type CallAnswer } from './document-perf';
+import { hostWorkBetween, timed } from '../host-work'; // P4-R6
 
 let world: DocumentWorld;
 beforeEach(() => {
@@ -80,6 +81,77 @@ describe('the seam’s commands', () => {
     seam.close();
   });
 
+  // P4-R6: a slow row names what shared its loop. The work inside the call's longest gap is listed (when it began, how
+  // long, what it did); the call's work is summed by kind; work before the call is not counted.
+  it('names the host’s work that shared a call’s longest gap, and sums the call’s work by kind', async () => {
+    const spin = (ms: number) => {
+      const until = performance.now() + ms;
+      while (performance.now() < until);
+    };
+    const tool = {
+      call: async () => {
+        timed('warm', () => spin(4));
+        await new Promise((resolve) => setTimeout(resolve, 10)); // the loop turns: a gap of its own
+        timed('mirror', () => spin(60), () => 'a document’s text');
+        timed('commit', () => spin(5));
+        return { content: [{ type: 'text' as const, text: '{"revision":1}' }] };
+      },
+    };
+    const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: tool, artifact_edit: tool }) as never });
+    timed('head', () => spin(20)); // before the call: not its
+    const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: {} })) as CallAnswer;
+    const { longest, call } = answer.background;
+    expect(longest?.ms).toBeCloseTo(answer.loop.max, 0);
+    expect(longest?.ms).toBeGreaterThanOrEqual(60);
+    const named = longest!.work.filter((entry) => entry.what !== 'gc'); // V8's collections land where they land
+    expect(named.map((entry) => entry.what)).toEqual(['mirror', 'commit']);
+    expect(named[0]).toMatchObject({ what: 'mirror', detail: 'a document’s text' });
+    expect(named[0]!.ms).toBeGreaterThanOrEqual(59);
+    expect(named[0]!.at).toBeGreaterThanOrEqual(10); // after the call's turn
+    expect(Object.keys(call).filter((what) => what !== 'gc').sort()).toEqual(['commit', 'mirror', 'warm']);
+    expect(call.warm).toMatchObject({ count: 1 });
+    // the main thread ran through the gap, where the platform tells it (Node 23.9 and later)
+    if (longest?.cpuMs !== null) expect(longest!.cpuMs!).toBeGreaterThan(0.8 * longest!.ms - 5);
+    seam.close();
+  });
+
+  // P4-R6 (the review's P2): a call longer than the record's two-second horizon keeps its whole window
+  it('keeps a long call’s work in its record past the record’s horizon', { timeout: 10_000 }, async () => {
+    const spin = (ms: number) => {
+      const until = performance.now() + ms;
+      while (performance.now() < until);
+    };
+    const tool = {
+      call: async () => {
+        timed('mirror', () => spin(60));
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        timed('commit', () => spin(5));
+        return { content: [{ type: 'text' as const, text: '{"revision":1}' }] };
+      },
+    };
+    const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: tool, artifact_edit: tool }) as never });
+    const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: {} })) as CallAnswer;
+    expect(answer.background.longest?.work.filter((entry) => entry.what !== 'gc').map((entry) => entry.what)).toEqual(['mirror']);
+    expect(Object.keys(answer.background.call).filter((what) => what !== 'gc').sort()).toEqual(['commit', 'mirror']);
+    expect(answer.background.partial).toBeUndefined();
+    seam.close();
+  });
+
+  // P4-R6: a first read's replica applies the whole document from the host after the read, a stretch the record names
+  it('records a first read’s replica sync, the whole document applied on the agent’s replica, as the host’s work', async () => {
+    const id = await emptyDocument();
+    const seam = new DocumentPerfSeam(world.store);
+    await seam.run({ cmd: 'seed', artifactId: id, state: Buffer.from(stateV2(seedDoc())).toString('base64') });
+    const from = performance.now();
+    await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: { artifact: id } });
+    await settle();
+    const { work } = hostWorkBetween(from, performance.now());
+    expect(work.some((entry) => entry.what === 'replica' && /^step2, \d+ bytes$/.test(entry.detail ?? ''))).toBe(true);
+    expect(work.some((entry) => entry.what === 'frame' && /^step1, \d+ bytes from session:perf-agent-1$/.test(entry.detail ?? ''))).toBe(true);
+    expect(work.some((entry) => entry.what === 'commit')).toBe(true);
+    seam.close();
+  });
+
   it('answers the loop’s longest gap over a run since its reset', async () => {
     const seam = new DocumentPerfSeam(world.store);
     await seam.run({ cmd: 'loop', reset: true });
@@ -98,6 +170,28 @@ describe('the seam’s commands', () => {
     const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: { artifact: id, baseRevision: 0, ops: [{ op: 'delete', id: 'nope' }] } })) as CallAnswer;
     expect(answer).toMatchObject({ ok: true, isError: true });
     expect(answer.text).toContain('nope');
+  });
+
+  // P4-A2 (X35; R12): a call's input streamed to the session's provisional emitter as the engine's deltas would arrive,
+  // then committed by a call under the same tool-use id; another streamed and dropped
+  it('streams a call’s input to the document’s ports, then commits it under the same id, or drops it', async () => {
+    const id = await emptyDocument();
+    const seam = new DocumentPerfSeam(world.store);
+    await seam.run({ cmd: 'seed', artifactId: id, state: Buffer.from(stateV2(seedDoc())).toString('base64') });
+    const read = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: { artifact: id } })) as CallAnswer & { result: { revision: number } };
+    const end = world.connect(id, HUMAN);
+    const states = () => end.received.flatMap((frame) => (frame.type === 'provisional' ? [(JSON.parse(frame.json) as { toolUseId: string; state: string }).state] : []));
+    const args = { artifact: id, baseRevision: read.result.revision, ops: [{ op: 'insert', after: 'p1', markdown: 'Streamed in by the seam.' }] };
+    const text = JSON.stringify(args);
+    expect(await seam.run({ cmd: 'stream', session: 'perf-agent-1', toolUseId: 'toolu_seam_1', name: 'artifact_edit', deltas: [text.slice(0, -12), text.slice(-12)] })).toEqual({ ok: true, frames: 2 });
+    expect(states()).toEqual(['streaming', 'streaming']);
+    const edit = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: { ...args, toolUseId: 'toolu_seam_1' } })) as CallAnswer & { result: { revision: number } };
+    expect(edit).toMatchObject({ ok: true, isError: false });
+    expect(states()).toEqual(['streaming', 'streaming', 'committed']);
+    await seam.run({ cmd: 'stream', session: 'perf-agent-1', toolUseId: 'toolu_seam_2', name: 'artifact_edit', deltas: [text] });
+    expect(await seam.run({ cmd: 'drop', session: 'perf-agent-1', toolUseId: 'toolu_seam_2' })).toEqual({ ok: true });
+    expect(states()).toEqual(['streaming', 'streaming', 'committed', 'streaming', 'dropped']);
+    seam.close();
   });
 
   it('answers the heap after a collection', async () => {

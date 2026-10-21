@@ -3,12 +3,14 @@
 //   - signs the assertion Access adds (`Cf-Access-Jwt-Assertion`, RS256) for a test identity or a service token it
 //     minted, and serves the certificate endpoint the Worker verifies it against;
 //   - answers Cloudflare's service-token API (create, list, delete) for the Worker's enrollment;
-//   - lets the enrollment-redeem path through with no assertion, as Access's Bypass policy will.
+//   - lets the enrollment-redeem path through with no assertion, as Access's Bypass policy will;
+//   - refuses a service token it does not hold as production Access does (401 and a page naming Cloudflare Access, the
+//     deploy probe's A4), so a machine reads a dead credential here as it will deployed.
 // It runs in Node (the local command's proxy, the suites), on WebCrypto and the Fetch API. Written so Node can run it
 // with its own type stripping: no TypeScript-only runtime syntax, and no import of the Worker's modules.
 import { createHash, randomBytes, randomUUID, webcrypto } from 'node:crypto';
 
-/** The path Access does not guard: the one-time token guards it (DX7). */
+/** The path Access does not guard: the one-time token, or a provisioning key's secret, guards it (DX7). */
 export const REDEEM_PATH = '/machine/enroll';
 /** The stand-in's own paths; everything else is the hub's. */
 export const STANDIN_PREFIX = '/standin/';
@@ -42,10 +44,17 @@ export type StandinOptions = {
   persist?: (state: StandinState) => void;
 };
 
-export type Admission =
-  | { kind: 'bypass' }
-  | { kind: 'assert'; assertion: string }
-  | { kind: 'refuse'; status: number; body: { error: string; message: string } };
+/** A refusal is answered with `body` as `contentType`. */
+export type Admission = { kind: 'bypass' } | { kind: 'assert'; assertion: string } | { kind: 'refuse'; status: number; contentType: string; body: string };
+
+/** Access's answer to a service token it does not hold (`service_auth_401_redirect`): 401 with its own HTML page, which
+ * names Cloudflare Access. A machine tells it from the Worker's JSON refusals by that mark. */
+const SERVICE_TOKEN_REFUSED: Admission = {
+  kind: 'refuse',
+  status: 401,
+  contentType: 'text/html; charset=utf-8',
+  body: '<!DOCTYPE html><html><head><title>Unauthorized · Cloudflare Access</title></head><body><h1>Unauthorized</h1><p>Cloudflare Access did not admit this request: the service token is not one it holds. (The local stand-in for Access, answering as Access does.)</p></body></html>',
+};
 
 type Headers = Record<string, string | string[] | undefined>;
 
@@ -77,6 +86,12 @@ function withoutSecret(token: ServiceToken): Omit<ServiceToken, 'client_secret'>
 export function enrollmentCode(code: { hub: string; org: string; token: string; machine: string; key: string }): string {
   const { hub, org, token, machine, key } = code;
   return `smns-enroll-v1.${Buffer.from(JSON.stringify({ hub, org, token, machine, key })).toString('base64url')}`;
+}
+
+/** A provisioning key's code as the browser builds it (`smns-provision-v1.` + base64url of the JSON), likewise. */
+export function provisioningCode(code: { hub: string; org: string; token: string; prefix: string; key: string }): string {
+  const { hub, org, token, prefix, key } = code;
+  return `smns-provision-v1.${Buffer.from(JSON.stringify({ hub, org, token, prefix, key })).toString('base64url')}`;
 }
 
 /** Cloudflare's v4 envelope; on an error, `result` is the message (the stand-in's error codes are its own). */
@@ -156,15 +171,14 @@ export class AccessStandin {
     const secret = header(headers, 'cf-access-client-secret');
     if (clientId !== undefined || secret !== undefined) {
       const token = this.state.tokens.find((t) => t.client_id === clientId);
-      if (!token || token.client_secret !== secret) {
-        return { kind: 'refuse', status: 403, body: { error: 'access-denied', message: 'the service token is not one Access holds' } };
-      }
+      if (!token || token.client_secret !== secret) return SERVICE_TOKEN_REFUSED;
       // Access puts a service token's client id in `common_name`; its `sub` is empty.
       return { kind: 'assert', assertion: await this.sign({ common_name: token.client_id, sub: '' }) };
     }
     const user = header(headers, IDENTITY_HEADER) ?? cookie(headers, IDENTITY_COOKIE) ?? this.defaultUser;
     if (user) return { kind: 'assert', assertion: await this.person(user) };
-    return { kind: 'refuse', status: 403, body: { error: 'access-denied', message: `sign in first: GET ${STANDIN_PREFIX}login?email=<address>` } };
+    // Production sends a person to the team's login (302); the local runtime has no login page, so it says how to sign in.
+    return { kind: 'refuse', status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'access-denied', message: `sign in first: GET ${STANDIN_PREFIX}login?email=<address>` }) };
   }
 
   /** Answers the stand-in's own paths (under /standin/); null for any other path. */

@@ -6,6 +6,43 @@
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/artifacts/**/*", "src/main/artifacts/bridge-script.ts", "src/main/artifacts/*.dom.test.tsx"],
-  "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts", "src/artifacts/**/*.test.ts"]
+  "include": [
+    "src/renderer/src/**/*",
+    "src/shared/**/*",
+    "src/artifacts/**/*",
+    "src/main/artifacts/bridge-script.ts",
+    "src/main/artifacts/*.dom.test.tsx",
+    // What the renderer's suites (and the harness's fixtures) import outside the renderer, directly or through what they
+    // import: the project is composite, built so through tsconfig.json's references and by `pnpm typecheck`, and composite
+    // mode refuses a file the include does not list (TS6307). The engine host whole, since the suites drive real sessions
+    // through its conformance harness and that graph grows with the host; main and test support by file, so a suite that
+    // imports a new one fails `pnpm typecheck` until it is added here.
+    "src/engine-host/**/*",
+    "src/main/artifacts/page-connectors.ts",
+    "src/main/files/read-tail.ts",
+    "src/main/usage/claude-usage-reader.ts",
+    "src/main/usage/request-ledger.ts",
+    "test/support/agents-events.ts",
+    "test/support/builders.ts",
+    "test/support/engine-pin/index.ts",
+    "test/support/events.ts",
+    "test/support/fake-client.ts",
+    "test/support/fixtures.ts",
+    "test/support/git-env.ts",
+    "test/support/import-reports.ts",
+    "test/support/memory-reader.ts",
+    "test/support/panel-child-fixture.ts",
+    "test/support/panel-child-tail.ts",
+    "test/support/r3-surface.ts",
+    "test/support/scenario.ts",
+    "test/support/synth-transcript.ts",
+    "test/support/widget-backend.ts"
+  ],
+  "exclude": [
+    "src/shared/**/*.test.ts",
+    "src/shared/**/*.test-d.ts",
+    "src/artifacts/**/*.test.ts",
+    "src/engine-host/**/*.test.ts", // the host's own suites are the node project's
+    "src/engine-host/index.ts" // the host's entry, which reads main's build defines (src/main/env.d.ts) and no suite here reaches
+  ]
 }

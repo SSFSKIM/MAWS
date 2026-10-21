@@ -14,6 +14,7 @@ import { connectKeys } from '../keymap/dispatcher';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
+import { installResizeObserver } from '../test-support/resize';
 import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { PINNED_HINT } from './Tab';
 import { TAB_DRAG_TYPE } from './TabStrip';
@@ -450,7 +451,8 @@ describe('split', () => {
     expect(currentSet(useLayout.getState().main).focusedPane).toBe(1);
   });
 
-  it('the split divider resizes the panes within 25–75 %', async () => {
+  // P4-B3 M1: pixel floors replace 25–75 % (before the region is measured, a nominal 1000 px stands in).
+  it('the split divider’s Home and End stop at the panes’ 320 px floors', async () => {
     const user = userEvent.setup();
     render(<Shell />);
     openThree();
@@ -458,9 +460,248 @@ describe('split', () => {
     const sep = within(main()).getByRole('separator', { name: 'Resize panes' });
     sep.focus();
     await user.keyboard('{End}');
-    expect(currentSet(useLayout.getState().main).splitRatio).toBe(0.75);
+    expect(currentSet(useLayout.getState().main).splitRatio).toBe(0.68);
     await user.keyboard('{Home}');
-    expect(currentSet(useLayout.getState().main).splitRatio).toBe(0.25);
+    expect(currentSet(useLayout.getState().main).splitRatio).toBe(0.32);
+  });
+});
+
+// P4-B3 M1 (parent §4.5 and §2 item 5's drag half; the prior art's §3.3 rows and worked numbers; Decision Log 2 to 5): a
+// session beside another tab, in a 1500 px main region.
+describe('the split’s float: the divider', () => {
+  const SESSION = 'Charter + research · MAWS';
+  const W = 1500;
+  let resize: ReturnType<typeof installResizeObserver>['resize'];
+  const region = () => main().querySelector<HTMLElement>('[data-main-area]')!;
+  const columns = () => region().style.gridTemplateColumns;
+  const set = () => currentSet(useLayout.getState().main);
+  const divider = () => within(main()).getByRole('separator', { name: 'Resize panes' });
+  const down = (x: number) => act(() => void fireEvent.pointerDown(divider(), { pointerId: 1, button: 0, clientX: x }));
+  const move = (x: number) => act(() => void fireEvent.pointerMove(divider(), { pointerId: 1, clientX: x }));
+  const up = (x: number) => act(() => void fireEvent.pointerUp(divider(), { pointerId: 1, clientX: x }));
+  // The session's tab and its content, hidden or not.
+  const sessionTab = () => main().querySelector(`[data-tab-id="session:${idOf('Charter + research')}"]`);
+  const sessionBody = () => main().querySelector('[data-pane="0"] [role="tabpanel"]')?.firstElementChild;
+
+  // S on the left (the session), A on the right (Diagnostics), at the ratio 0.5: the divider at 750 px.
+  function sessionBesideDiagnostics() {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+      useLayout.getState().openTab({ kind: 'diagnostics' }, { pane: 1 });
+    });
+    resize(region(), { width: W, height: 800 });
+    expect(columns()).toBe('750px 1px minmax(0, 1fr)');
+  }
+
+  beforeEach(() => {
+    ({ resize } = installResizeObserver());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('follows the pointer, holds S at 320, collapses it live below 160 and restores it, writing nothing until release', () => {
+    sessionBesideDiagnostics();
+    const before = useLayout.getState().main;
+    const panelA = within(main()).getByRole('region', { name: 'Diagnostics' });
+    const tabS = sessionTab()!;
+    const bodyS = sessionBody()!;
+    down(750);
+    move(400);
+    expect(columns()).toBe('400px 1px minmax(0, 1fr)');
+    move(200);
+    expect(columns()).toBe('320px 1px minmax(0, 1fr)'); // the dead zone holds S at S_min
+    move(159);
+    expect(columns()).toBe('0px 1px minmax(0, 1fr)'); // armed: A spans the region
+    expect(within(main()).queryByRole('tab', { name: SESSION })).toBeNull(); // S's column hidden...
+    expect(sessionTab()).toBe(tabS); // ...and still mounted, so a disarm is lossless
+    expect(sessionBody()).toBe(bodyS);
+    move(161);
+    expect(columns()).toBe('320px 1px minmax(0, 1fr)'); // disarmed, held at 320
+    expect(within(main()).getByRole('tab', { name: SESSION })).toBe(tabS);
+    expect(sessionBody()).toBe(bodyS);
+    expect(useLayout.getState().main).toBe(before); // nothing reached main.tabs, so nothing is persisted
+    move(150);
+    up(150);
+    expect(set().floating).toEqual({ sessionTabId: `session:${idOf('Charter + research')}` });
+    expect(set().splitRatio).toBe(0.5); // r0: a float never writes the ratio
+    expect(columns()).toBe('minmax(0, 1fr)');
+    expect(sessionTab()).toBeNull(); // S is not rendered in the main area (M2's card draws it)
+    expect(within(main()).queryByRole('separator', { name: 'Resize panes' })).toBeNull();
+    expect(within(main()).getByRole('region', { name: 'Diagnostics' })).toBe(panelA); // A never remounted
+  });
+
+  it('mirrored: a session on the right arms past W − 160, collapses to 0 px on the right, and floats leaving A in place', () => {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openTab({ kind: 'diagnostics' });
+      useLayout.getState().openSession(idOf('Charter + research'), { split: true });
+    });
+    resize(region(), { width: W, height: 800 });
+    const body = (pane: 0 | 1) => main().querySelector(`[data-pane="${pane}"] [role="tabpanel"]`)?.firstElementChild;
+    const bodyA = body(0)!;
+    const tabS = sessionTab()!;
+    down(750);
+    move(1300);
+    expect(columns()).toBe('1180px 1px minmax(0, 1fr)'); // S held at 320 on the right
+    move(1341);
+    expect(columns()).toBe('minmax(0, 1fr) 1px 0px'); // armed: A spans, S's column at 0 on the right
+    expect(within(main()).queryByRole('tab', { name: SESSION })).toBeNull();
+    expect(sessionTab()).toBe(tabS);
+    move(1339);
+    expect(columns()).toBe('1180px 1px minmax(0, 1fr)'); // disarmed
+    move(1400);
+    up(1400);
+    expect(set().floating).toEqual({ sessionTabId: `session:${idOf('Charter + research')}` });
+    expect(set().splitRatio).toBe(0.5);
+    expect(columns()).toBe('minmax(0, 1fr)');
+    expect(sessionTab()).toBeNull();
+    expect(body(0)).toBe(bodyA); // A never remounted
+  });
+
+  // M6 (the e2e's round trip, Chromium layout): collapsed into a 0 px column, S's content reflowed at no width, so its
+  // transcript's rows were re-measured and the carry its float records named another row; it now keeps the width it was
+  // last laid out at, hidden and overflowing its column over A (left: from its start; right: from its end).
+  it('armed, S keeps the width it was last laid out at, hidden, so its content never reflows at 0 px', () => {
+    sessionBesideDiagnostics();
+    const bodyOf = (pane: 0 | 1) => main().querySelector<HTMLElement>(`[data-pane="${pane}"] > [role="tabpanel"]`)!;
+    down(750);
+    move(400);
+    resize(bodyOf(0), { width: 400, height: 700 });
+    move(159);
+    expect(columns()).toBe('0px 1px minmax(0, 1fr)');
+    expect(bodyOf(0).style).toMatchObject({ visibility: 'hidden', width: '400px', justifySelf: 'start' });
+    move(161);
+    expect(bodyOf(0).style.visibility).toBe('');
+    expect(bodyOf(0).style.width).toBe('');
+  });
+
+  it('armed on the right, S keeps its last width from its column’s end', () => {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openTab({ kind: 'diagnostics' });
+      useLayout.getState().openSession(idOf('Charter + research'), { split: true });
+    });
+    resize(region(), { width: W, height: 800 });
+    const bodyS = main().querySelector<HTMLElement>('[data-pane="1"] > [role="tabpanel"]')!;
+    resize(bodyS, { width: 749, height: 700 });
+    down(750);
+    move(1400);
+    expect(columns()).toBe('minmax(0, 1fr) 1px 0px');
+    expect(bodyS.style).toMatchObject({ visibility: 'hidden', width: '749px', justifySelf: 'end' });
+  });
+
+  it('with two sessions the squeezed one floats and the other keeps its slot without remounting', () => {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+      useLayout.getState().openSession(idOf('Fix sidebar drag'), { split: true });
+    });
+    resize(region(), { width: W, height: 800 });
+    const body = (pane: 0 | 1) => main().querySelector(`[data-pane="${pane}"] [role="tabpanel"]`)?.firstElementChild;
+    const bodyRight = body(1)!;
+    const tabRight = within(main()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' });
+    down(750);
+    move(100);
+    expect(columns()).toBe('0px 1px minmax(0, 1fr)'); // the left session is squeezed: it arms
+    expect(body(1)).toBe(bodyRight);
+    up(100);
+    expect(set().floating).toEqual({ sessionTabId: `session:${idOf('Charter + research')}` });
+    expect(sessionTab()).toBeNull();
+    expect(body(1)).toBe(bodyRight); // the right session's pane kept its slot
+    expect(within(main()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' })).toBe(tabRight);
+  });
+
+  it('a release that is not armed persists the ratio; A clamps at its floor and never collapses', () => {
+    sessionBesideDiagnostics();
+    down(750);
+    move(400);
+    up(400);
+    expect(set().splitRatio).toBe(400 / W);
+    expect(set().floating).toBeUndefined();
+    down(400);
+    move(1450);
+    expect(columns()).toBe('1180px 1px minmax(0, 1fr)');
+    up(1450);
+    expect(set().splitRatio).toBe(1180 / W);
+  });
+
+  it('a pointer-cancel or a lost capture leaves the split docked at r0', () => {
+    sessionBesideDiagnostics();
+    const before = useLayout.getState().main;
+    down(750);
+    move(100);
+    act(() => void fireEvent.pointerCancel(divider(), { pointerId: 1 }));
+    expect(useLayout.getState().main).toBe(before);
+    expect(columns()).toBe('750px 1px minmax(0, 1fr)');
+    down(750);
+    move(500);
+    act(() => void fireEvent.lostPointerCapture(divider(), { pointerId: 1 }));
+    up(500); // the drag is over: the release writes nothing
+    expect(useLayout.getState().main).toBe(before);
+    expect(columns()).toBe('750px 1px minmax(0, 1fr)');
+  });
+
+  it('a drag whose split goes from under it is dropped with it', () => {
+    sessionBesideDiagnostics();
+    down(750);
+    move(400);
+    act(() => useLayout.getState().closeTab('diagnostics'));
+    expect(columns()).toBe('minmax(0, 1fr)');
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }, { pane: 1 }));
+    expect(columns()).toBe('750px 1px minmax(0, 1fr)'); // the stored ratio, not the abandoned drag's 400
+    expect(set().splitRatio).toBe(0.5);
+  });
+
+  it('the keyboard moves within the floors and never floats; Enter and a double-click restore 0.5', async () => {
+    const user = userEvent.setup();
+    sessionBesideDiagnostics();
+    act(() => divider().focus());
+    await user.keyboard('{Home}');
+    expect(set().splitRatio).toBe(320 / W);
+    await user.keyboard('{ArrowLeft}{Shift>}{ArrowLeft}{/Shift}');
+    expect(set().splitRatio).toBe(320 / W);
+    expect(set().floating).toBeUndefined();
+    await user.keyboard('{End}{ArrowLeft}');
+    expect(set().splitRatio).toBe((1180 - 8) / W);
+    await user.keyboard('{Shift>}{ArrowLeft}{/Shift}');
+    expect(set().splitRatio).toBe((1180 - 40) / W);
+    await user.keyboard('{Enter}');
+    expect(set().splitRatio).toBe(0.5);
+    act(() => useLayout.getState().setSplitRatio(0.3));
+    act(() => void fireEvent.doubleClick(divider()));
+    expect(set().splitRatio).toBe(0.5);
+    expect(set().floating).toBeUndefined();
+  });
+
+  it('a window resize only clamps: docked it never floats, floating it never docks', () => {
+    sessionBesideDiagnostics();
+    act(() => useLayout.getState().setSplitRatio(0.25));
+    expect(columns()).toBe('375px 1px minmax(0, 1fr)');
+    resize(region(), { width: 1000, height: 800 });
+    expect(columns()).toBe('320px 1px minmax(0, 1fr)'); // held at S_min, not floated
+    resize(region(), { width: 600, height: 800 });
+    expect(columns()).toBe('300px 1px minmax(0, 1fr)'); // narrower than both floors: even
+    expect(set()).toMatchObject({ splitRatio: 0.25 });
+    expect(set().floating).toBeUndefined();
+    act(() => useLayout.getState().floatSplit(`session:${idOf('Charter + research')}`));
+    resize(region(), { width: W, height: 800 });
+    expect(set().floating).toBeDefined();
+    expect(columns()).toBe('minmax(0, 1fr)');
+  });
+
+  it('with no session in the split, both sides clamp at their floors', () => {
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openTab({ kind: 'diagnostics' });
+      useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 1 });
+    });
+    resize(region(), { width: W, height: 800 });
+    down(750);
+    move(40);
+    expect(columns()).toBe('320px 1px minmax(0, 1fr)');
+    up(40);
+    expect(set().floating).toBeUndefined();
+    expect(set().splitRatio).toBe(320 / W);
   });
 });
 
@@ -580,6 +821,25 @@ describe('unstarted sessions', () => {
 });
 
 describe('before the layout has hydrated', () => {
+  // A relaunch drew "No open tabs" for a moment before the saved tabs arrived: the pane draws no empty state until the
+  // snapshot has applied, and then only when no tab came back.
+  it('draws no empty state until hydration, then the empty state when no tab came back', async () => {
+    const layoutMain = fakeClient({ 'layout.list': { keys: [] } });
+    useLayout.setState({ hydrated: false });
+    render(<Shell />);
+    const hydrating = useLayout.getState().hydrate(layoutMain.client, (id) => useSessions.getState().records.has(id));
+    await act(async () => {});
+    expect(layoutMain.pending('layout.get')).toBe(3); // the snapshot is still outstanding
+    expect(within(main()).queryByText('No open tabs')).toBeNull();
+    expect(within(main()).queryByRole('tabpanel', { name: 'No open tabs' })).toBeNull();
+    await act(async () => {
+      for (let i = 0; i < 3; i++) await layoutMain.reply('layout.get', { value: null });
+      await hydrating;
+    });
+    expect(within(main()).getByText('No open tabs')).toBeTruthy();
+    expect(within(main()).getByRole('tabpanel', { name: 'No open tabs' })).toBeTruthy();
+  });
+
   it('a session opened from the sidebar while layout.get is outstanding survives hydration', async () => {
     const user = userEvent.setup();
     // Saved before W5, so it still holds the Overview's tab, which hydration drops.

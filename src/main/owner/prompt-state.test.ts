@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MessageUuid } from '@shared/graph/ids';
-import { CONTRACT_HEADER, LEGACY_CONTRACT_1, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, MESSAGE_TOOL_ALIAS, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 
 // P2-C2: the full contract is now contract 5; sessions recorded under contract 1 keep reading as contract:1.
 const CONTRACT_1 = LEGACY_CONTRACT_1.text;
@@ -32,7 +32,8 @@ const write = (name: string, lines: string[]) => {
 describe('classifySnapshot', () => {
   it('reads contract n from a segment opening with its header, and none otherwise', () => {
     expect(classifySnapshot([...ENGINE_SEGMENTS, CONTRACT_1])).toBe('contract:1'); // the text sessions recorded before contract 5
-    expect(classifySnapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])).toBe('contract:5'); // P2-C2: the full contract now
+    expect(classifySnapshot([...ENGINE_SEGMENTS, LEGACY_CONTRACT_5.text])).toBe('contract:5'); // P2-C2's, recorded before contract 7
+    expect(classifySnapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])).toBe('contract:7'); // P4-R7: the full contract now
     expect(classifySnapshot([...ENGINE_SEGMENTS, `${CONTRACT_HEADER(2)}\n\nlater semantics`])).toBe('contract:2');
     expect(classifySnapshot([...ENGINE_SEGMENTS, `${CONTRACT_HEADER(12)}\n`])).toBe('contract:12');
     expect(classifySnapshot(ENGINE_SEGMENTS)).toBe('none');
@@ -43,10 +44,22 @@ describe('classifySnapshot', () => {
 
   // P2-C2: the supplement beside a message-tool style carries its own header
   it('reads supplement n from a segment opening with the supplement’s header', () => {
-    expect(classifySnapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])).toBe('supplement:1');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, LEGACY_SUPPLEMENT_1.text])).toBe('supplement:1'); // recorded before P4-R7
+    expect(classifySnapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])).toBe('supplement:2'); // P4-R7: the supplement now
     expect(classifySnapshot([...ENGINE_SEGMENTS, `${SUPPLEMENT_HEADER(3)}\n\nlater words`])).toBe('supplement:3');
     expect(classifySnapshot([...ENGINE_SEGMENTS, `Appended. ${SUPPLEMENT_HEADER(1)}`])).toBe('none');
     expect(classifySnapshot([...ENGINE_SEGMENTS, '# Messages to the human (MAWS to-human supplement)'])).toBe('none');
+  });
+
+  // P4-A2 (Decision Log 16): under hooks none a compatible style gets the alias appended alone, its own segment; after the
+  // contract or the supplement it shares their segment, which keeps their reading
+  it('reads alias from a segment that is exactly the alias, the contract and the supplement first', () => {
+    expect(classifySnapshot([...ENGINE_SEGMENTS, MESSAGE_TOOL_ALIAS])).toBe('alias');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `${TO_HUMAN_CONTRACT}\n\n${MESSAGE_TOOL_ALIAS}`])).toBe('contract:7');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `${TO_HUMAN_SUPPLEMENT}\n\n${MESSAGE_TOOL_ALIAS}`])).toBe('supplement:2');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, MESSAGE_TOOL_ALIAS, TO_HUMAN_CONTRACT])).toBe('contract:7'); // a header in any segment
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `Some appended prompt.\n\n${MESSAGE_TOOL_ALIAS}`])).toBe('none'); // inside other text
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `${MESSAGE_TOOL_ALIAS}\n\nmore`])).toBe('none');
   });
 });
 
@@ -61,7 +74,8 @@ describe('recordedState reads a transcript', () => {
     expect(await recordedState(write('b.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), user('x'), snapshot(ENGINE_SEGMENTS)]))).toBe('none');
     expect(await recordedState(write('c.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), BOUNDARY, user('after')]))).toBe('unrecorded'); // the boundary hides it
     expect(await recordedState(write('d.jsonl', [snapshot(ENGINE_SEGMENTS), BOUNDARY, snapshot([...ENGINE_SEGMENTS, CONTRACT_1])]))).toBe('contract:1');
-    expect(await recordedState(write('s.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), user('x'), snapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])]))).toBe('supplement:1'); // P2-C2: switched to a message-tool style
+    expect(await recordedState(write('s.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), user('x'), snapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])]))).toBe('supplement:2'); // P2-C2: switched to a message-tool style
+    expect(await recordedState(write('t.jsonl', [snapshot([...ENGINE_SEGMENTS, LEGACY_CONTRACT_5.text]), user('x'), snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])]))).toBe('contract:7'); // P4-R7: re-rendered after "off"
   });
 
   it('is not misled by a prompt or a record that only mentions the two record types', async () => {

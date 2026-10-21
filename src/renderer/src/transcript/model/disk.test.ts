@@ -193,9 +193,9 @@ describe('a /compact turn from disk', () => {
 
 // E1 (M3, residue 13; §12 "Terminal interop of new rows"): the async ask's session read from its transcript on disk,
 // where there are no `maws.*` events and no meta rows, only the call, its `asked` result and the steer the answers
-// travelled in. The capsule reads answered all the same, in the first of the two turns, and the steer stays a bubble.
+// travelled in. The capsule reads answered all the same, in the first of the two turns, and the steer is no bubble.
 describe('a maws ask read from disk', () => {
-  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' })); // the snapshot suite's pin
   afterAll(() => configureTime(null));
   const sortKeys = (value: unknown): unknown =>
     Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
@@ -208,9 +208,11 @@ describe('a maws ask read from disk', () => {
     const [ask] = ofKind(rows, 'ask');
     expect(ask).toMatchObject({ state: 'answered', blocking: false, askId: 'toolu_016zBCDTWVXbAqbGdLyd1Zzj', turnId: state.order[0], answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }] });
     expect(ask.questions).toEqual([{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }]);
+    // the steer, the second turn's prompt and the disk's only record of the answers, answers the capsule and is no bubble
     const users = ofKind(rows, 'user');
-    expect(users.map((row) => row.turnId)).toEqual(state.order.slice(0, 2));
-    expect(users[1].text.startsWith('[MAWS ask toolu_016zBCDTWVXbAqbGdLyd1Zzj] ')).toBe(true);
+    expect(users.map((row) => row.turnId)).toEqual(state.order.slice(0, 1));
+    expect(state.order).toHaveLength(2);
+    expect(rows.some((row) => row.kind === 'user' && row.text.includes('[MAWS ask'))).toBe(false);
     await expect(`${JSON.stringify(rows.map(sortKeys), null, 2)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'disk/p1-maws-ask-async.rows.json'));
   });
 });
@@ -219,7 +221,7 @@ describe('a maws ask read from disk', () => {
 // where there are no `maws.delivery.artifact` events, only the calls and their results, the screenshot's carrying the
 // engine's pointer text between the image and the server's JSON. The rows and cells read as the journal's do.
 describe('maws artifacts read from disk', () => {
-  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' })); // the snapshot suite's pin
   afterAll(() => configureTime(null));
   const sortKeys = (value: unknown): unknown =>
     Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
@@ -247,7 +249,7 @@ describe('maws artifacts read from disk', () => {
 // disk, where there are no `maws.browser.action` events, only the calls and their results (each result carrying main's
 // own `ms`). The seven rows read as the journal's do, `ms` included.
 describe('maws browser actions read from disk', () => {
-  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', timeZone: 'UTC' })); // the snapshot suite's pin
   afterAll(() => configureTime(null));
   const sortKeys = (value: unknown): unknown =>
     Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;

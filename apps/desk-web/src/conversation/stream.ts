@@ -14,7 +14,7 @@
 // the rest. A session is taken as running from its `joined` (and before any event says otherwise).
 //
 // A live session's channel ends with a fold after its last item: its working record goes on.
-import { writerMachine, type LogEvent, type Raised, type Recipient } from 'desk-hub/protocol';
+import { writerMachine, type JsonObject, type LogEvent, type Raised, type Recipient } from 'desk-hub/protocol';
 import { requestKey } from '../project/conversation';
 import type { Channel } from '../shell/layout';
 import { isQuestion } from './card-state';
@@ -71,18 +71,49 @@ const questionRef = (event: LogEvent): string =>
 
 /**
  * A cross-project message's other end (the org directory's §6): the sender's copy, told by its `copy` key, names its
- * destination — the project of the delivering event its `copy` points at (`"<project id>:<writer>:<seq>"`), else its
- * recipients' — and the delivering event names its origin by `from_project` when that is another project. An event of
- * this project alone is neither.
+ * destinations — the project of each delivering event its `copy` points at (`"<project id>:<writer>:<seq>"`, or a list
+ * of those when a broadcast's events in several projects deliver it), else its recipients' projects — and the
+ * delivering event names its origin by `from_project` when that is another project. An event of this project alone is
+ * neither.
  */
-export function crossProject(event: LogEvent, here: string): { to: string } | { from: string } | null {
-  if (typeof event.copy === 'string') {
-    const at = event.copy.indexOf(':');
-    const to = at > 0 ? event.copy.slice(0, at) : recipients(event.to).map((r) => str((r as { project?: unknown }).project)).find(Boolean);
-    return to ? { to } : null;
+export function crossProject(event: LogEvent, here: string): { to: string[] } | { from: string } | null {
+  const copy = typeof event.copy === 'string' ? [event.copy] : Array.isArray(event.copy) ? event.copy.filter((c): c is string => typeof c === 'string') : null;
+  if (copy !== null) {
+    const named = copy.flatMap((c) => (c.indexOf(':') > 0 ? [c.slice(0, c.indexOf(':'))] : []));
+    const to = named.length > 0 ? named : [...new Set(recipients(event.to).map((r) => str((r as { project?: unknown }).project)).filter(Boolean))];
+    return to.length > 0 ? { to } : null;
   }
   const from = event.from_project;
   return typeof from === 'string' && from !== '' && from !== here ? { from } : null;
+}
+
+const isObject = (v: unknown): v is JsonObject => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * How sminos names a broadcast's scope (the org directory's §5a; `scope_label` in doperpowers' `sminos.py`, pinned by
+ * `test/fixtures/sminos-scope/`): `@org` for the whole org, else `@all` narrowed by ` in <projects>` and
+ * ` on <machines>` (`--here`'s machine last), then ` (<states>)` when it reached only those; each list comma-joined, a
+ * project by `projectName`.
+ */
+export function scopeLabel(scope: JsonObject, projectName: (id: string) => string): string {
+  const words = (key: string): string[] => {
+    const v = scope[key];
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  };
+  const projects = words('projects').map(projectName);
+  const here = scope.here;
+  const machines = [...words('machines'), ...(typeof here === 'string' && here !== '' ? [here] : [])];
+  const states = words('states');
+  let label = projects.length > 0 || machines.length > 0 ? '@all' : '@org';
+  if (projects.length > 0) label += ` in ${projects.join(',')}`;
+  if (machines.length > 0) label += ` on ${machines.join(',')}`;
+  if (states.length > 0) label += ` (${states.join(',')})`;
+  return label;
+}
+
+/** Whom a broadcast (an event with `wake`) names, by its `scope`: the scope's label (`scopeLabel`), or `@all` for a bare one. */
+export function broadcastLabel(scope: unknown, projectName: (id: string) => string): string {
+  return isObject(scope) ? scopeLabel(scope, projectName) : '@all';
 }
 
 /** A web member's id (DX7: 128 bits as 32 lowercase hex), which `retired` and spawn's `joined` record as `by`. */
