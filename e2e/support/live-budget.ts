@@ -33,17 +33,21 @@ export function spentUnder(userData: string): number {
 const rowsOf = (file: string): JournalRow[] => readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow);
 const metaRow = (rows: readonly JournalRow[], event: string) => rows.findLast((r) => r.direction === 'meta' && (r.frame as { event?: unknown }).event === event);
 
-// Whether a launch carries on the cumulative figure of the launch before it: it resumes, and that launch had journaled
-// a clean exit (code 0, no signal) before this one spawned, so its `cost-state` was on disk to restore. Two host
-// lifetimes can overlap over one profile (the engine allows a concurrent resume, pass2/resume-live-second.jsonl); a
-// resume spawned before the exit restored nothing of what came after.
-function continues(rows: readonly JournalRow[], before: readonly JournalRow[]): boolean {
+const exitAt = (rows: readonly JournalRow[]): number => Date.parse(metaRow(rows, 'exit')?.at ?? ''); // NaN: none journaled
+
+// Whether a launch carries on the cumulative figure of the launch before it: it resumes, and the `cost-state` on disk
+// when it spawned was that launch's, since that launch journaled a clean exit (code 0, no signal) before this one
+// spawned and after every earlier launch's exit (`earlier`, the latest of those; NaN once one was never journaled, its
+// end unknown). Host lifetimes can overlap over one profile (the engine allows a concurrent resume,
+// pass2/resume-live-second.jsonl), and a resume restores whichever exit wrote last, not the launch just before it.
+function continues(rows: readonly JournalRow[], before: readonly JournalRow[], earlier: number): boolean {
   const spawn = metaRow(rows, 'spawn');
   const exit = metaRow(before, 'exit');
   if (spawn === undefined || exit === undefined) return false;
   const { args } = spawn.frame as { args?: unknown };
   const { code, signal } = exit.frame as { code?: unknown; signal?: unknown };
-  return Array.isArray(args) && args.includes('--resume') && code === 0 && signal === null && Date.parse(exit.at) < Date.parse(spawn.at);
+  const ended = Date.parse(exit.at);
+  return Array.isArray(args) && args.includes('--resume') && code === 0 && signal === null && earlier < ended && ended < Date.parse(spawn.at);
 }
 
 // What one session spent, from its journal directory: its launches in launch order (JournalReader: by their first row,
@@ -51,17 +55,22 @@ function continues(rows: readonly JournalRow[], before: readonly JournalRow[]): 
 // figure is cumulative, a drop opening a segment), since a resumed process restores the `cost-state` its session's last
 // exit recorded (src/main/sessions/restored-cost.ts) and so carries the earlier launch's spend in its own figure. A
 // launch continues that stream only when `continues` holds; otherwise (a fresh launch, one after a kill or an exit
-// never journaled, or one spawned while the launch before still ran, whose restored figure is unknown) the stream so far
-// is counted whole and the launch starts its own, which can only over-count, the safe side of a cap.
+// never journaled, or one spawned while an earlier launch still ran or after another exited last, whose restored figure
+// is unknown) the stream so far is counted whole and the launch starts its own, which can only over-count, the safe
+// side of a cap.
 export function sessionSpent(dir: string): number {
   let usd = 0;
   let stream: JournalRow[] = [];
   let before: JournalRow[] | null = null; // the launch before
+  let earlier = -Infinity; // the latest exit of the launches before `before`
   for (const launch of JournalReader.launches(dir)) {
     const rows = launch.files.flatMap(rowsOf);
-    if (before && !continues(rows, before)) {
-      usd += journalCost(stream).costUsd;
-      stream = [];
+    if (before) {
+      if (!continues(rows, before, earlier)) {
+        usd += journalCost(stream).costUsd;
+        stream = [];
+      }
+      earlier = Math.max(earlier, exitAt(before));
     }
     stream.push(...rows);
     before = rows;

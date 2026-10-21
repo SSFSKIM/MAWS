@@ -179,6 +179,15 @@ describe('spentUnder', () => {
     // concurrent resume, pass2/resume-live-second.jsonl), so it restored nothing of that launch's later spend
     expect(pair({ costs: [0.02], exitMinute: 9 }, { costs: [0.03] })).toBeCloseTo(0.05, 10);
     expect(pair({ costs: [0.02], exitMinute: 4 }, { costs: [0.03] })).toBeCloseTo(0.03, 10); // exited before it: continued
+    // the overlap beyond the adjacent pair: B ran inside A's lifetime and exited first, so the cost-state on disk when C
+    // resumed was A's (US$0.02, C reaching US$0.04): US$0.07 spent, and C must not continue B, the launch before it
+    const overlapped = scratch();
+    writeSession(overlapped, 'app-1', [
+      { id: 'A', minute: 0, costs: [0.02], exitMinute: 9 },
+      { id: 'B', minute: 5, resume: 'engine-1', costs: [0.03], exitMinute: 6 },
+      { id: 'C', minute: 10, resume: 'engine-1', costs: [0.04] },
+    ]);
+    expect(spentUnder(overlapped)).toBeCloseTo(0.02 + 0.03 + 0.04, 10);
     // the launch just before decides: an earlier launch's clean exit does not vouch for a later one's
     const userData = scratch();
     writeSession(userData, 'app-1', [
