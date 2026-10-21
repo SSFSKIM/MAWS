@@ -48,6 +48,7 @@ const CASES = (process.env.MAWS_IME_LIVE_CASES ?? (PROBE ? 'L0,L1,L2,L3,L4,L5,L6
 const WAIT_MS = 15 * 60_000; // per case, for the driver
 const DRY = process.env.MAWS_IME_LIVE_DRY === '1';
 const MIN_FRAME_PX = 800; // the slide's drawn width the cases' targets need (a scale of about 0.42)
+const L4_ATTEMPTS = 3; // L4 under the probe: the tries in all for keys landing within 100 ms of the press
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -133,6 +134,11 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
   const plain = (e: ElementIR | undefined) => (e?.text ?? []).map((b) => b.inline.map((r) => ('text' in r ? r.text : '\n')).join('')).join('\n');
   const slide = () => page.evaluate((a) => (window as unknown as Seam).__maws_presentations.slide(a, 'ime'), id);
   const element = async (eid: string) => (await slide()).children.find((c) => c.id === eid);
+  /** The deck as seeded, through the seam, its text drawn again (each case's start, and L4's reset between attempts). */
+  const reseed = async () => {
+    await page.evaluate(([a, f]) => (window as unknown as Seam).__maws_presentations.seed(a, f), [id, DECK] as const);
+    await expect(page.locator(`[data-region="main"] [data-artifact-tab="${id}"] [data-stage-slide="ime"] [data-eid="a"]`)).toHaveText('Hello');
+  };
 
   test.beforeAll(async () => {
     test.setTimeout(120_000);
@@ -199,8 +205,7 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
         test.skip(needs === 'source' && prelude.perContextInput !== '0', `${name} needs per-context input off (read: ${prelude.perContextInput ?? 'nothing'})`);
       }
       // the deck as seeded, nothing selected, the stage focused
-      await page.evaluate(([a, f]) => (window as unknown as Seam).__maws_presentations.seed(a, f), [id, DECK] as const);
-      await expect(tab.locator('[data-stage-slide="ime"] [data-eid="a"]')).toHaveText('Hello');
+      await reseed();
       await page.keyboard.press('Escape');
       await tab.locator('[data-stage-surface]').focus();
       const where = await targets(page, tab.locator('[data-stage-slide]'));
@@ -224,8 +229,9 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       // Blink's own undo stack is empty, findings.txt finding 1, so the effect alone cannot tell).
       let menu: string[] = [];
       if (name === 'L8') await probeMenu();
-      // a probe call that posted nothing or not all (the front window not MAWS's, a key refused, a source not selected)
-      // halts the case: recorded as halted, with the report, and skipped with its reason rather than judged on its text
+      // a probe call that posted nothing or not all (the front window not MAWS's, a key refused, a source not selected),
+      // or L4 with none of its attempts' keys within 100 ms of the press, halts the case: recorded as halted, with the
+      // reports, and skipped with its reason rather than judged on its text
       let halted: string | null = null;
       const events =
         name === 'L8'
@@ -243,6 +249,8 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       const out = await outcome(name, events, menu, probes);
       writeFileSync(join(DIR, `${name}.result.json`), JSON.stringify({ case: name, policy: POLICY, ...out, probes, events }, null, 1));
       if (DRY) return;
+      // a case its text cannot judge (L7 with no Hanja and no window seen): recorded, then skipped with the reason
+      if (out.inconclusive !== undefined) test.skip(true, `${name} inconclusive: ${out.inconclusive}`);
       if (name === 'L1') await writeFixture(events, out);
       // L0 is the slot's gate: unless the probe's r then k composed 가, nothing after it can be read
       if (PROBE && name === 'L0' && JSON.stringify(out.checks['the keys reach the input method']) !== JSON.stringify([true, true])) stopped = `L0 did not compose 가 (notes: ${JSON.stringify(out.facts.notes)}; probe: ${JSON.stringify(probes.at(-1)?.report ?? null)})`;
@@ -288,7 +296,8 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
     });
   }
 
-  async function outcome(name: string, events: TraceEvent[], menu: string[] = [], probes: ProbeCall[] = []): Promise<{ checks: Record<string, [unknown, unknown]>; facts: Record<string, unknown> }> {
+  // A case its text cannot judge answers why (`inconclusive`), and the test skips it once its result is written.
+  async function outcome(name: string, events: TraceEvent[], menu: string[] = [], probes: ProbeCall[] = []): Promise<{ checks: Record<string, [unknown, unknown]>; facts: Record<string, unknown>; inconclusive?: string }> {
     const a = plain(await element('a'));
     const b = plain(await element('b'));
     const keys = events.filter((e) => e.type === 'keydown');
@@ -307,6 +316,7 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       focusChanges: events.filter((e) => e.type === 'focusin' || e.type === 'focusout').map((e) => `${e.type} ${e.target} @${e.t}`),
     };
     const checks: Record<string, [unknown, unknown]> = {};
+    let inconclusive: string | undefined;
     if (name === 'L0') {
       const notes = await page.locator('.deck-notes-field').first().inputValue();
       facts.notes = notes;
@@ -332,12 +342,16 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       checks['a begins 하하'] = [a.normalize('NFC').startsWith('하하'), true];
       checks['the element kept and not moved'] = [[facts.elements, facts.left], [3, '200px']];
     } else if (name === 'L7' && PROBE) {
-      // judged by the text: a Hanja in place of 한. No composition after alt+Return means the window never opened, which
-      // is the probe's flag to suspect (its option flag lacks a physical keyboard's device bit), not MAWS's failure
+      // judged by the text first (Decision Log 16): one Han character in place of 한 passes. Any other text fails when a
+      // composition followed alt+Return (the window opened); with none, the window never opened, which is the probe's
+      // flag to suspect (its option flag lacks a physical keyboard's device bit), not MAWS's: the case is inconclusive
+      const han = /^\p{Script=Han}$/u.test(a.normalize('NFC'));
       const hanjaKey = probes.findIndex((c) => c.args.includes('alt+Return'));
       const after = hanjaKey < 0 ? [] : events.slice(probes[hanjaKey]!.traceFrom);
-      facts.hanjaWindow = after.some((e) => e.type === 'compositionstart' || e.type === 'compositionupdate') ? 'opened' : 'window not opened';
-      if (facts.hanjaWindow === 'opened') checks['a reads a Hanja in place of 한'] = [/^\p{Script=Han}$/u.test(a.normalize('NFC')), true];
+      const opened = han || after.some((e) => e.type === 'compositionstart' || e.type === 'compositionupdate');
+      facts.hanjaWindow = opened ? 'opened' : 'window not opened';
+      if (opened) checks['a reads a Hanja in place of 한'] = [han, true];
+      else inconclusive = `window not opened (a reads ${JSON.stringify(a)}, and no composition followed alt+Return)`;
     } else if (name === 'L7') {
       checks['a reads 한 or its Hanja'] = [a.length, 1];
     } else if (name === 'L8') {
@@ -356,7 +370,7 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       checks['the Edit menu’s Undo left both pastes (today’s gap)'] = [[facts.elements, facts.historyUndo], [5, 0]];
     }
     if (name === 'L4') facts.postedAt = probes.map((c) => (c.report as { postedAt?: unknown } | null)?.postedAt ?? null);
-    return { checks, facts };
+    return { checks, facts, inconclusive };
   }
 
   // ---- the probe's driver: its presses through Playwright, its keys and input sources through cua's engine probe
@@ -413,7 +427,31 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
     if (!point) throw new Error(`no ${at} to press`);
     await page.mouse.click(point.x, point.y);
   }
+  /** L4's measure, from the trace: the last press before the keys posted from `from` on, to their first keydown (ms). */
+  async function pressToKey(from: number): Promise<number | null> {
+    const read = () =>
+      page.evaluate((i) => {
+        const events = (window as unknown as { __ime_trace?: { events: TraceEvent[] } }).__ime_trace?.events ?? [];
+        const key = events.findIndex((e, at) => at >= i && e.type === 'keydown');
+        if (key < 0) return undefined;
+        const down = events.slice(0, key).findLast((e) => e.type === 'pointerdown');
+        return down ? Math.round((events[key]!.t - down.t) * 10) / 10 : null;
+      }, from);
+    // the probe's exit can come before the page has seen its keys
+    const until = Date.now() + 2_000;
+    let ms = await read();
+    while (ms === undefined && Date.now() < until) {
+      await page.waitForTimeout(50);
+      ms = await read();
+    }
+    return ms ?? null;
+  }
   async function drive(name: string, where: Where, calls_: ProbeCall[]): Promise<void> {
+    const check = (call: ProbeCall) => {
+      if (call.failure) throw new Error(`the probe failed at ${name}: ${call.failure} ${JSON.stringify(call.report)}`);
+      const outcome = outcomeOf(call);
+      if (outcome !== 'posted' && outcome !== 'selected') throw new ProbeHalt(`${outcome} at ${call.args.join(' ')}; report ${JSON.stringify(call.report)}`);
+    };
     for (const step of PROBE_CASES[name]!.steps) {
       if ('click' in step) await press(where, step.click);
       else if ('wait' in step) await page.waitForTimeout(step.wait);
@@ -421,20 +459,31 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       else if ('source' in step) calls_.push(await inputSource(step.source));
       else {
         // L4: the probe launched first and told to post at a time just after the press, so the keys land within 100 ms of
-        // it whatever LaunchServices' launch takes; the trace's press-to-key time is the case's measure
+        // it whatever LaunchServices' launch takes. The trace's press-to-key time says whether they did: an attempt
+        // outside 0 to 100 ms is no sample of L4, so the deck is reset (`empty` pressed, re-seeded, a new trace) and the
+        // case tried again, up to L4_ATTEMPTS; with none inside, the case halts as inconclusive. Each attempt's interval
+        // is kept on its call, beside its report.
         const { click, ansi, afterMs } = step.pressThenKeys;
-        const at = Date.now() + 2_500;
-        const keys = keystroke({ ansi }, at);
-        await page.waitForTimeout(Math.max(0, at - afterMs - Date.now()));
-        await press(where, click);
-        calls_.push(await keys);
+        const intervals: (number | null)[] = [];
+        for (let attempt = 1; ; attempt++) {
+          const at = Date.now() + 2_500;
+          const keys = keystroke({ ansi }, at);
+          await page.waitForTimeout(Math.max(0, at - afterMs - Date.now()));
+          await press(where, click);
+          const call = await keys;
+          call.pressToKeyMs = await pressToKey(call.traceFrom);
+          calls_.push(call);
+          check(call);
+          intervals.push(call.pressToKeyMs);
+          if (call.pressToKeyMs !== null && call.pressToKeyMs >= 0 && call.pressToKeyMs <= 100) break;
+          if (attempt === L4_ATTEMPTS) throw new ProbeHalt(`inconclusive: no attempt's keys landed within 100 ms of the press (press to first keydown, ms, per attempt: ${JSON.stringify(intervals)})`);
+          await press(where, 'empty');
+          await reseed();
+          await startTrace(page);
+        }
       }
       const last = calls_.at(-1);
-      if (last && last.failure) throw new Error(`the probe failed at ${name}: ${last.failure} ${JSON.stringify(last.report)}`);
-      if (last && !('click' in step) && !('wait' in step)) {
-        const outcome = outcomeOf(last);
-        if (outcome !== 'posted' && outcome !== 'selected') throw new ProbeHalt(`${outcome} at ${last.args.join(' ')}; report ${JSON.stringify(last.report)}`);
-      }
+      if (last && !('click' in step) && !('wait' in step)) check(last);
     }
   }
 
@@ -500,6 +549,8 @@ interface ProbeCall {
   failure: string | null;
   /** the trace's length when the call began: the events after it are its keys' */
   traceFrom: number;
+  /** L4: the trace's last press before the call's keys to their first keydown, in ms (null: no press before them, or no keys seen) */
+  pressToKeyMs?: number | null;
 }
 
 /** Where the driver presses: page px, window points and screen points (the window's frame and content from main). */

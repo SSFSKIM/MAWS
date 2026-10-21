@@ -606,7 +606,12 @@ test('a double-click on an inactive board’s heading activates the board and ed
   }).toEqual(['desktop', ['head']]);
   const box = tab.locator('[data-board-id="desktop"] [data-eid="head"] .deck-textbox');
   await expect(box).toBeFocused();
-  // the word selected, not a caret: the first key replaces it ("Overview", one word)
+  // the edit began with the word selected ("Overview", one word), not the ARMED box the first press already mounted
+  // (whose first key would replace the text too): the world no longer armed, the editor's selection the word (Tiptap's
+  // root carries its editor)
+  await expect(tab.locator('[data-design-world][data-armed]')).toHaveCount(0);
+  type WithEditor = { editor: { state: { selection: { from: number; to: number }; doc: { textBetween(from: number, to: number): string } } } };
+  await expect.poll(() => box.evaluate((n) => ((s) => s.doc.textBetween(s.selection.from, s.selection.to))((n as unknown as WithEditor).editor.state))).toBe('Overview');
   await page.keyboard.type('Summary');
   await expect.poll(async () => plain(await elementOf(page, id, 'desktop', 'head'))).toBe('Summary');
   await page.keyboard.press('Escape');
