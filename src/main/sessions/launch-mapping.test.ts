@@ -7,6 +7,8 @@ import { record } from '../../../test/support/builders';
 import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
 import { withOwnerChannel } from './launch-mapping'; // P2-C
 import { CONTRACT_HEADER, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement; P4-R7y: the hook
+import { buildLaunch } from '../../engine-host/launch'; // P4-R8: the launch line a spec becomes
+import type { AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
 
 const APP = 'a0000000-0000-4000-8000-000000000001' as AppSessionId;
 const BOOT = 'b0000000-0000-4000-8000-000000000002' as AppSessionId;
@@ -42,8 +44,8 @@ describe('launch mapping', () => {
 
   it('fills subagentModel from the settings seam (null until C11 lands settings v3)', () => {
     expect(readSettings()).toEqual(C10_SETTING_DEFAULTS);
-    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null }, permissions: { autoFallback: 'acceptEdits' } });
-    const settings: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { subagentModel: 'sonnet' } };
+    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null, mcpServers: [] }, permissions: { autoFallback: 'acceptEdits' } });
+    const settings: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, subagentModel: 'sonnet' } };
     expect(toLaunchSpec(base, settings).subagentModel).toBe('sonnet');
   });
 
@@ -95,7 +97,7 @@ describe('launch mapping', () => {
     expect(resumeLaunchSpec(r, { gateway: 'direct', model: 'sonnet', effort: null }, { trust: null, replay: null })).toMatchObject({ gateway: 'direct', model: 'sonnet', effort: null });
     // an effort the record holds that is not an X6 effort launches with none; a record without an engine id is a fresh pinned session
     expect(resumeLaunchSpec(record(APP, { effort: 'ultra', engineSessionId: null }), {}, { trust: null, replay: null })).toMatchObject({ effort: null, resume: null, sessionId: null });
-    expect(resumeLaunchSpec(r, {}, { trust: null, replay: null }, { ...C10_SETTING_DEFAULTS, engine: { subagentModel: 'haiku' } }).subagentModel).toBe('haiku');
+    expect(resumeLaunchSpec(r, {}, { trust: null, replay: null }, { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, subagentModel: 'haiku' } }).subagentModel).toBe('haiku');
   });
 
   it('runs the trust bootstrap under its own id: attested, resuming nothing, pinned by C3', () => {
@@ -114,6 +116,66 @@ describe('launch mapping', () => {
     expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null, browserBackend: socket }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket } });
     expect(intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: null }).extraSettings).toBeNull();
     expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null }).extraSettings).toBeNull();
+  });
+});
+
+// P4-R8: the app's MCP servers (settings v16, `engine.mcpServers`) reach the engine as one `--mcp-config` on every launch
+// MAWS owns; the engine resolves a server of the same name in the user's or a project's own config (the entry wins).
+describe('the app\'s MCP servers', () => {
+  const SOURCE_APP = 'e0000000-0000-4000-8000-000000000005' as AppSessionId;
+  const SERVERS: AppMcpServer[] = [
+    { name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' },
+    { name: 'local-docs', type: 'http', url: 'http://127.0.0.1:7777/mcp' },
+  ];
+  const CONFIG = { mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' }, 'local-docs': { type: 'http', url: 'http://127.0.0.1:7777/mcp' } } };
+  const withServers: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, mcpServers: SERVERS } };
+  const source = { appSessionId: SOURCE_APP, engineSessionId: SOURCE_ENGINE, rewindTo: null };
+  const ctx = { cwd: REPO, trust: null, replay: null };
+  // the four launches a session can take: new, fork, side thread (a fork in place with its lineage) and resume
+  const launches = (settings: C10Settings) => ({
+    new: intentLaunchSpec(intent(), ctx, settings),
+    fork: intentLaunchSpec(intent({ kind: 'fork', source }), ctx, settings),
+    sideThread: intentLaunchSpec(intent({ kind: 'fork', source, lineage: { kind: 'side-thread', parentAppSessionId: SOURCE_APP, parentEngineSessionId: SOURCE_ENGINE, openedBy: 'btw' } }), ctx, settings),
+    resume: resumeLaunchSpec(record(APP, { engineSessionId: SOURCE_ENGINE }), {}, { trust: null, replay: null }, settings),
+  });
+  const argsOf = (spec: ReturnType<typeof toLaunchSpec>) => buildLaunch(spec, {}, { relayUrl: 'http://127.0.0.1:8641', bin: '/bin/claude', engineVersion: '2.1.306', spawnerPid: 1 }).args;
+
+  it('passes them to a new session, a fork, a side thread and a resume as one --mcp-config, never with --strict-mcp-config', () => {
+    for (const [kind, spec] of Object.entries(launches(withServers))) {
+      expect(LaunchSpecSchema.parse(spec), kind).toEqual(spec);
+      expect(spec.mcpConfig, kind).toEqual(CONFIG);
+      const args = argsOf(spec);
+      expect(args.filter((arg) => arg === '--mcp-config'), kind).toHaveLength(1);
+      expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual(CONFIG);
+      expect(args, kind).not.toContain('--strict-mcp-config'); // the user's and the projects' servers load beside them
+    }
+    expect(argsOf(launches(withServers).sideThread)).toEqual(expect.arrayContaining(['--resume', SOURCE_ENGINE, '--fork-session']));
+  });
+
+  it('passes no --mcp-config when the list is empty, the default', () => {
+    for (const [kind, spec] of Object.entries(launches(C10_SETTING_DEFAULTS))) {
+      expect(spec.mcpConfig, kind).toBeNull();
+      expect(argsOf(spec), kind).not.toContain('--mcp-config');
+    }
+  });
+
+  it('leaves them out of the trust bootstrap, which serves no turn, and keeps them through the owner channel\'s decision', () => {
+    const boot = bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers);
+    expect(boot.mcpConfig).toBeNull();
+    expect(withOwnerChannel(launches(withServers).new, { laneOn: true, append: 'contract', snapshotOff: true }).mcpConfig).toEqual(CONFIG);
+  });
+
+  // beside P4-R7y: a lane-on launch carries both the app's servers and MAWS's SessionStart hook; the bootstrap neither
+  it('gives a lane-on launch with app servers both --mcp-config and the SessionStart hook in --settings, and the bootstrap neither', () => {
+    const settingsOf = (args: string[]) => JSON.parse(args[args.indexOf('--settings') + 1]!) as { hooks?: unknown };
+    for (const [kind, spec] of Object.entries(launches(withServers))) {
+      const args = argsOf(withOwnerChannel(spec, { laneOn: true, append: 'contract', snapshotOff: false }));
+      expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual(CONFIG);
+      expect(settingsOf(args).hooks, kind).toEqual({ SessionStart: [messageToolHookGroup()] });
+    }
+    const boot = argsOf(bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers));
+    expect(boot).not.toContain('--mcp-config');
+    expect(settingsOf(boot).hooks).toBeUndefined();
   });
 });
 

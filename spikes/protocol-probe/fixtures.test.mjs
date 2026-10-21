@@ -585,3 +585,47 @@ test('p4 R7y on a real model: without the hook it names no tool for mcp__to-huma
  assert.deepEqual([ran7y('p4-r7y-relay-control'),ran7y('p4-r7y-relay-resume'),ran7y('p4-r7y-relay-startup')],[[],['SessionStart:resume:success'],['SessionStart:startup:success']]);
  const spent=R7Y_RELAY.reduce((n,name)=>n+meta4(load4(name),'spend')[0].result.total_cost_usd,0);assert.ok(spent<0.25,String(spent));
 });
+// P4-R8 (docs/doperpowers/plans/2026-10-19-p4-smoothing.md, routed as P4-R8; scenarios/pass3/p4-r8-mcp-servers.mjs;
+// findings-p4-r8-mcp-servers.txt): the app's MCP servers through --mcp-config on MAWS's own wire, engine 2.1.306, no
+// prompt. owner: the owner's config home, curated from a raw recording that was not kept; scratch: a scratch home.
+const NOTION8={type:'http',url:'https://mcp.notion.com/mcp'};
+const answers8=(rows,subtype)=>{const ids=new Set(rows.filter(r=>r.direction==='out'&&r.frame.request?.subtype===subtype).map(r=>r.frame.request_id));return rows.filter(r=>r.direction==='in'&&r.frame.type==='control_response'&&ids.has(r.frame.response.request_id)).map(r=>r.frame.response);};
+for(const name of ['p4-r8-owner','p4-r8-scratch'])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-R8 provenance, no prompt and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));assert.ok(!/"(access|refresh)_?[Tt]oken"\s*:\s*"[^"]/.test(text));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R8');assert.equal(prov.pin,'bd54d325b4c967eeafb98fb6426049bff1c55669');assert.equal(prov.mcpConfig.mcpServers.notion.url,NOTION8.url);
+ const spawn=meta4(rows,'spawn')[0];assert.equal(spawn.args[spawn.args.indexOf('--mcp-config')+1],JSON.stringify(prov.mcpConfig));
+ assert.ok(!rows.some(r=>r.direction==='out'&&r.frame.type==='user'));
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+});
+test('p4 R8 owner: notion from --mcp-config reads dynamic and connects in the owner\'s config home on the binary MAWS runs, the login its user-scope entry made reused; the owner\'s files kept',()=>{
+ const rows=load4('p4-r8-owner');
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.arm,'owner');assert.deepEqual(prov.mcpConfig,{mcpServers:{notion:NOTION8}});assert.equal(prov.engineVersion,'2.1.306');
+ assert.ok(!meta4(rows,'spawn')[0].args.includes('--strict-mcp-config'));
+ const [last]=answers8(rows,'mcp_status').slice(-1);const notion=last.response.mcpServers.find(s=>s.name==='notion');
+ assert.deepEqual([notion.status,notion.scope,notion.config.url,notion.config.headerKeys],['connected','dynamic',NOTION8.url,[]]);assert.ok(notion.tools.length>0);
+ const lines=meta4(rows,'debug_lines')[0].lines;assert.ok(lines.some(l=>l.includes('MCP server "notion": Returning tokens')));assert.ok(lines.some(l=>l.includes('MCP server "notion": Successfully connected')));
+ const [before,after]=meta4(rows,'owner_snapshot');assert.ok(!before.userServers.includes('notion'));
+ assert.deepEqual([after.userServersSame,after.projectKeysSame,after.projectCountSame,after.transcript],[true,true,true,false]);
+ assert.ok(!meta4(rows,'dialog_seen').length);
+});
+test('p4 R8 scratch: the --mcp-config entry wins over user, local and project scope of the same name, and only it is connected',()=>{
+ const rows=load4('p4-r8-scratch');
+ const [last]=answers8(rows,'mcp_status').slice(-1);const named=last.response.mcpServers.filter(s=>s.name==='notion');
+ assert.equal(named.length,1);assert.deepEqual([named[0].scope,named[0].config.url],['dynamic',NOTION8.url]);
+ const paths=meta4(rows,'local_hits')[0].hits.map(h=>h.path);for(const shadowed of ['/user/mcp','/local/mcp','/project/mcp'])assert.ok(!paths.includes(shadowed),shadowed);
+});
+test('p4 R8 scratch: a server that needs auth reads needs-auth with no tools, an mcp_call to it is not connected, and mcp_authenticate answers the URL to open and the engine\'s own localhost callback',()=>{
+ const rows=load4('p4-r8-scratch');
+ const [last]=answers8(rows,'mcp_status').slice(-1);const oauth=last.response.mcpServers.find(s=>s.name==='probe-oauth');
+ assert.deepEqual(Object.keys(oauth).sort(),['config','name','scope','source','status']); // no tools and no error field
+ assert.deepEqual([oauth.status,oauth.scope,oauth.source],['needs-auth','dynamic','dynamic']);
+ assert.equal(answers8(rows,'mcp_call')[0].error,'MCP server not connected: probe-oauth');
+ const [auth,unknown]=answers8(rows,'mcp_authenticate');
+ assert.equal(auth.subtype,'success');assert.deepEqual(Object.keys(auth.response).sort(),['authUrl','callbackExpected','callbackPort','redirectScheme','requiresUserAction','state']);
+ assert.deepEqual([auth.response.requiresUserAction,auth.response.callbackExpected,auth.response.redirectScheme],[true,true,'localhost']);
+ const url=new URL(auth.response.authUrl);assert.equal(url.searchParams.get('redirect_uri'),`http://localhost:${auth.response.callbackPort}/callback`);assert.equal(url.searchParams.get('state'),auth.response.state);
+ assert.ok(meta4(rows,'local_hits')[0].hits.some(h=>h.method==='POST'&&h.path==='/register')); // registered before it answered
+ assert.equal(unknown.error,'Server not found: no-such-server');
+});

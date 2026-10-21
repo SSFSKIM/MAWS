@@ -253,7 +253,7 @@ describe('session service', () => {
 
     it("falls back to direct for a Claude model when settings say so, with the session's notice", async () => {
       h.dispose();
-      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
+      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null, mcpServers: [] }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
       h.trustDirectory(h.work);
       h.host.relay = DOWN_RELAY;
       const id = await create();
