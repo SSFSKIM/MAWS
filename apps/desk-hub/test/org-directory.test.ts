@@ -485,24 +485,24 @@ describe("a project's summary report, failed", () => {
 
   it('is superseded by a later report, and never brings the Registry an older state', async () => {
     const project = newProject();
-    // A retry waits a second at least: the return is reported first.
-    await hub.retryBase({ project }, 2000);
+    // A retry that waits half a minute at least: whether it was superseded is read, not waited for.
+    await hub.retryBase({ project }, 60_000);
     const watcher = await connected();
     const m = await connected(newName(), { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
     await m.sync(project);
     await nextOrg(watcher, 0, (f) => machineIn(f, m.name)?.online === true, 'the machine online');
 
-    // The lapse's report fails, and its retry waits; the machine is back before it goes.
+    // The lapse's report fails, and its retry waits; the machine is back meanwhile.
     await hub.summaryFault(project, 1);
     const from = watcher.frames.length;
     await m.close();
-    await waitFor(async () => ((await hub.summaryFault(project)).calls === 1 ? true : undefined));
+    await waitFor(async () => ((await hub.reportRetryWaits(project)) ? true : undefined));
+    expect((await hub.summaryFault(project)).calls).toBe(1);
     await m.connect();
     await m.sync(project);
+    // The return's report lands, and the retry no longer waits: the Registry was told the return, and nothing older.
     await waitFor(async () => ((await hub.summaryFault(project)).calls === 2 ? true : undefined));
-    // Past the retry's time: the Registry was told only the return, and nothing after it.
-    await pause(2500);
-    expect((await hub.summaryFault(project)).calls).toBe(2);
+    expect(await hub.reportRetryWaits(project)).toBe(false);
     expect(orgFramesOf(watcher, from).every((f) => machineIn(f, m.name)?.online === true)).toBe(true);
     await m.close();
     await watcher.close();

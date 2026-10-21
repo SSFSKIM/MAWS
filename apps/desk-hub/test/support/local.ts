@@ -47,6 +47,7 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   REPORT_PATH,
+  REPORT_RETRY_PATH,
   RETRY_BASE_PATH,
   SUMMARIES_BEFORE_LIVE_PATH,
   SUMMARY_AS_PREVIOUS_PATH,
@@ -371,6 +372,10 @@ export async function startLocalHub() {
     async retryBase(of: 'registry' | { project: string }, ms: number) {
       if (of === 'registry') await seam('REGISTRY', ORG, RETRY_BASE_PATH, { ms });
       else await seam('PROJECT', of.project, RETRY_BASE_PATH, { ms });
+    },
+    /** Whether a retry of the project's failed summary report waits for its time (the suites' Worker only). */
+    async reportRetryWaits(project: string): Promise<boolean> {
+      return (JSON.parse(await seam('PROJECT', project, REPORT_RETRY_PATH)) as { waiting: boolean }).waiting;
     },
     /** Makes a project's next `forget` throw, as a failed RPC from the Registry would (the suites' Worker only). */
     async failNextForget(project: string) {

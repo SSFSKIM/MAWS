@@ -33,8 +33,9 @@
 //     machine's credential and asking for its revocation would be;
 //   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
 //   - a `Machine` armed to throw from its next calls of `directory`, and a `Registry` armed to throw from its next summary
-//     reports of a project, as a call to an object a code update reset fails, each counting the calls it took; and a
-//     `Registry` and a `Project` whose first retry of such a call waits less than the deployed second.
+//     reports of a project, as a call to an object a code update reset fails, each counting the calls it took; a
+//     `Registry` and a `Project` whose first retry of such a call waits another time than the deployed second; and a
+//     `Project` that says whether a retry of its report waits.
 import { Machine as DeployedMachine, type Stream, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
@@ -75,6 +76,7 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   REPORT_PATH,
+  REPORT_RETRY_PATH,
   RETRY_BASE_PATH,
   SUMMARIES_BEFORE_LIVE_PATH,
   SUMMARY_AS_PREVIOUS_PATH,
@@ -404,6 +406,7 @@ export class Project extends DeployedProject {
       this.ctx.storage.kv.put('retry-base-ms', ((await request.json()) as { ms: number }).ms);
       return new Response('set');
     }
+    if (url.pathname === REPORT_RETRY_PATH) return Response.json({ waiting: (this as unknown as { reportRetry: unknown }).reportRetry !== undefined });
     if (url.pathname === PROJECT_HOLD_PATH) {
       const { hold } = (await request.json()) as { hold: boolean };
       if (hold && !this.held) {
