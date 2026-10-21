@@ -91,7 +91,8 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
     expect(await within(row('Binary')).findByText('/opt/claude/2.1.290/claude')).toBeTruthy();
     expect(within(row('Binary')).queryByText(/re-pin|refuse/)).toBeNull(); // W13: a version never refuses
-    const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name); // C12
+    // C12; P4-A2: the launch profile's rows read the plugin list on their own schedule, which is no part of this write
+    const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name).filter((name) => name !== 'plugins.list' && name !== 'fs.state');
     await vi.waitFor(() => expect(afterWrite().slice(0, 2)).toEqual(['settings.engineApplied', 'engine.binaryInfo'])); // C12
     expect(b.calls.map((c) => c.name)).not.toContain('engine.configure'); // C12: main is its only sender
 

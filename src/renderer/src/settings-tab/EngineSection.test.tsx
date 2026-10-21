@@ -55,7 +55,8 @@ describe('Settings › Engine writes settings; main configures the host', () => 
     fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Change…' }));
     expect(await within(row('Binary')).findByText('/opt/claude/2.1.283/claude')).toBeTruthy();
     expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.283/claude' } }]);
-    const after = names().slice(names().indexOf('settings.set'));
+    // P4-A2: the launch profile's rows read the plugin list on their own schedule, which is no part of this write
+    const after = names().slice(names().indexOf('settings.set')).filter((name) => name !== 'plugins.list' && name !== 'fs.state');
     expect(after.slice(0, 3)).toEqual(['settings.set', 'settings.engineApplied', 'engine.binaryInfo']);
     expect(names()).not.toContain('engine.configure');
   });
