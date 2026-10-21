@@ -6,8 +6,8 @@
 // write through the host's artifact store; each turn's end writes the session's `turn` versions there, and the process's
 // end closes the session's agent replicas (their bases and presence with them). P4-A2 (X35): the session's events feed
 // its `ProvisionalEmitter`, which shows an artifact call on the documents' ports while its input streams. P4-A3: a human
-// message written to the engine carries the reads of the artifacts it links (`withLinkedReads`), read through the
-// session's own `artifact_read`.
+// message the queue submits carries the reads of the artifacts it links (`withLinkedReads`), read through the session's
+// own `artifact_read`.
 import { randomUUID } from 'node:crypto';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -17,7 +17,7 @@ import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerRe
 import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS, type AskAnswer, type AskResult } from '@shared/maws/tools';
-import type { ControlRequestFrame, UserInputFrame } from '@shared/wire/frames';
+import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { LinkedArtifact } from '@shared/maws/linked-read'; // P4-A3
 import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
 import type { WriteOptions } from './outbound-writer';
@@ -34,7 +34,8 @@ import type { ArtifactExportAnswer, ArtifactExportRequest, ExportBridge } from '
 import type { ArtifactStore } from './documents/store'; // P3-A
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 import { ProvisionalEmitter } from './tool-server/provisional'; // P4-A2 (X35)
-import { withLinkedReads, type LinkedReadOutcome } from './linked-reads'; // P4-A3
+import { withLinkedReads, type Admission } from './linked-reads'; // P4-A3
+import type { SendContent } from '@shared/engine/session-state-store'; // P4-A3
 import type { McpToolDefinition } from './tool-server/server';
 
 type AppSessionIdOf = LaunchSpec['appSessionId'];
@@ -76,6 +77,7 @@ export class SessionMaws {
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private readonly provisional: ProvisionalEmitter; // P4-A2 (X35): the session's artifact calls shown as they stream
   private readonly read: McpToolDefinition; // P4-A3: the session's `artifact_read`, as the server serves it, for the linked reads
+  private readonly artifactSession = new ArtifactSession(); // P3-A: what the artifact tools remember between calls (P4-A3: read here too)
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the asks' attention items (P2-C2: async ones too), published with the broker's
 
   constructor(private readonly host: SessionMawsHost) {
@@ -94,7 +96,7 @@ export class SessionMaws {
       bridge: this.panes, capture: this.captures /* E2 */,
       asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
       artifactScope: host.artifactScope, // P2-E1
-      artifacts: host.artifacts, session: new ArtifactSession(), log: host.log, // P3-A (M6)
+      artifacts: host.artifacts, session: this.artifactSession, log: host.log, // P3-A (M6)
       exporter: this.exports, // P3-A M7
       datasetRefresh: host.datasetRefresh, // E3
       provisional: this.provisional, // P4-A2
@@ -113,34 +115,47 @@ export class SessionMaws {
     // E1 end
   }
 
-  // P4-A3: a human message as it is written, with the reads of the artifacts its words link (link order, within the cap;
-  // `../linked-reads`); any other frame, or one linking nothing readable, unchanged. A read is the session's own
-  // `artifact_read` answer at this moment (no tool-use id: it joins no call's operation), so it resolves, migrates and
-  // answers exactly as the agent's read would.
-  async withLinkedReads(frame: UserInputFrame): Promise<{ frame: UserInputFrame; outcome: LinkedReadOutcome | null }> {
-    if (frame.parent_tool_use_id !== null || (frame.origin as { kind?: unknown } | undefined)?.kind !== 'human') return { frame, outcome: null };
+  // P4-A3: a human message the queue submits, with the reads of the artifacts its words link (link order, within the
+  // cap; `../linked-reads`); content linking nothing readable comes back as it was, and so does any content when the
+  // reads fail. A read is the session's own `artifact_read` answer at this moment (no tool-use id: it joins no call's
+  // operation), so it resolves, migrates and answers exactly as the agent's read would.
+  async withLinkedReads(content: SendContent): Promise<SendContent> {
     try {
-      const outcome = await withLinkedReads(frame.message.content, (link) => this.readLinked(link));
-      return { frame: outcome.content === frame.message.content ? frame : { ...frame, message: { ...frame.message, content: outcome.content } }, outcome };
+      return (await withLinkedReads(content, (link, admit) => this.readLinked(link, admit))).content;
     } catch (error) {
       this.host.log(`linked reads not attached: ${error instanceof Error ? error.message : String(error)}`); // the message goes as written
-      return { frame, outcome: null };
+      return content;
     }
   }
 
-  // A read that throws is one not attached: the message goes as written either way.
-  private async readLinked(link: LinkedArtifact): Promise<string | null> {
+  // A read changes the session's memory of the artifact: an html page's byte base, a file kind's replica base (what its
+  // publish merges from). A read not attached must not, since the agent never saw it: both are put back as they were.
+  // A document's read records its view too, which only validates an edit from that revision; the agent learns the
+  // revision only from a read it does see, so that record is left. A read that throws is one not attached.
+  private async readLinked(link: LinkedArtifact, admit: (text: string | null) => Admission): Promise<Admission> {
+    const { artifactId } = link;
+    const service = this.host.artifacts?.()?.service ?? null;
+    const byteBase = this.artifactSession.byteBases.get(artifactId);
+    const base = service?.existingReplica(this.host.appSessionId, artifactId)?.base ?? null;
+    let text: string | null = null;
     try {
       const result = await this.read.call(
-        { artifact: link.artifactId, ...(link.tab !== undefined && { tab: link.tab }) },
+        { artifact: artifactId, ...(link.tab !== undefined && { tab: link.tab }) },
         { appSessionId: this.host.appSessionId, cwd: this.host.cwd(), toolUseId: null, requestId: `linked-read-${randomUUID()}` as RequestId, signal: new AbortController().signal, fromSubagent: false },
       );
-      const text = result.content.find((block) => block.type === 'text');
-      return result.isError || !text || text.type !== 'text' ? null : text.text;
+      const block = result.content.find((b) => b.type === 'text');
+      text = result.isError || !block || block.type !== 'text' ? null : block.text;
     } catch (error) {
-      this.host.log(`linked read of ${link.artifactId} not attached: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
+      this.host.log(`linked read of ${artifactId} not attached: ${error instanceof Error ? error.message : String(error)}`);
     }
+    const admitted = admit(text);
+    if (!admitted.ok) {
+      if (byteBase === undefined) this.artifactSession.byteBases.delete(artifactId);
+      else this.artifactSession.byteBases.set(artifactId, byteBase);
+      const replica = service?.existingReplica(this.host.appSessionId, artifactId);
+      if (replica) replica.base = base;
+    }
+    return admitted;
   }
 
   // The `maws` server's JSON-RPC traffic (the server answers another server's name itself).

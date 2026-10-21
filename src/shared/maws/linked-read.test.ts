@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { estimateTokens, linkedArtifacts, linkedReadBlock, linkedReadOf, withoutLinkedReads } from './linked-read';
+import { linkedArtifacts, linkedReadBlock, linkedReadOf, utf8Bytes, withoutLinkedReads } from './linked-read';
 
 const DOC = '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806';
 const DECK = '0b1a2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -49,9 +49,9 @@ describe('the attached read', () => {
     expect(withoutLinkedReads('plain')).toBe('plain');
   });
 
-  it('is counted conservatively: three bytes a token, so a Korean text is not undercounted', () => {
-    expect(estimateTokens('abcdef')).toBe(2);
-    expect(estimateTokens('가나다')).toBe(3); // nine bytes
+  it('is counted in UTF-8 bytes, a bound on its tokens however token-dense (a token is at least one byte)', () => {
+    expect(utf8Bytes('abcdef')).toBe(6);
+    expect(utf8Bytes('가나다')).toBe(9);
   });
 });
 

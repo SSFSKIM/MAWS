@@ -7,15 +7,14 @@
 // read gone stale is refused by that revision as any read's is. Pure.
 import { parseArtifactLink } from '../artifacts/link';
 
-// The attached reads' total, in tokens as `estimateTokens` counts them. A read above what is left is not attached and
-// the agent reads it as it would have. 10,000 holds the bench's document (about 2,600) and deck (about 1,200) and a
-// working document of several thousand words, and bounds what a passing mention costs the session's context to about
-// 1 % of a 1M window (5 % of 200K); a whole read can reach the engine's 25,000-token cap on a tool's result.
-export const LINKED_READ_CAP_TOKENS = 10_000;
+// The attached reads' total, in UTF-8 bytes of the blocks as sent. A token is at least one byte, so the reads cost the
+// session's context at most this many tokens however token-dense the artifact (hex, Hangul, minified html), and about a
+// quarter of it for English prose. 24,000 holds the bench's document (about 8,000 bytes) and deck (about 4,000) and a
+// working document of some 3,500 words, and stays under the 25,000 tokens the engine allows one tool result, the most a
+// read the agent made itself could cost. A read above what is left is not attached and the agent reads it as it would have.
+export const LINKED_READ_CAP_BYTES = 24_000;
 
-// A conservative count, never under the API's for the text it is used on: three UTF-8 bytes a token (English runs
-// about four characters a token, Korean about one and a half; each Hangul syllable is three bytes).
-export const estimateTokens = (text: string): number => Math.ceil(new TextEncoder().encode(text).length / 3);
+export const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
 
 export interface LinkedArtifact {
   artifactId: string;

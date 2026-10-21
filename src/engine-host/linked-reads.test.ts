@@ -5,23 +5,32 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { RequestId } from '@shared/graph/ids';
-import { linkedReadBlock, linkedReadOf, LINKED_READ_CAP_TOKENS, estimateTokens } from '@shared/maws/linked-read';
+import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
+import { linkedReadBlock, linkedReadOf, LINKED_READ_CAP_BYTES, utf8Bytes } from '@shared/maws/linked-read';
 import type { StdinFrame } from '@shared/wire/frames';
 import { scriptedSession } from './conformance/session-harness';
 import { openDocumentWorld, type DocumentWorld } from './documents/kinds/document-world.fixture';
-import { withLinkedReads } from './linked-reads';
+import { withLinkedReads, type LinkedReader } from './linked-reads';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
+import { AskTable } from './tool-server/asks';
+import { HostBridge } from './tool-server/bridge';
+import { PaneBridge } from './tool-server/panes';
+import { mawsTools } from './tool-server/tools';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const C = '33333333-3333-4333-8333-333333333333';
+// A reader over fixed answers: each link's text, admitted or not as `withLinkedReads` decides.
+const reader = (answer: (artifactId: string) => string | null, asked: string[] = []): LinkedReader => async (link, admit) => {
+  asked.push(link.artifactId);
+  return admit(answer(link.artifactId));
+};
 const readOf = (artifactId: string, revision: number, body = 'x') => JSON.stringify({ status: 'read', artifactId, kind: 'document', title: `T ${artifactId.slice(0, 1)}`, revision, markdown: body }, null, 2);
 
 describe('withLinkedReads', () => {
   it('leaves a message that links nothing as it is, the same content', async () => {
     const content = 'no link';
-    const out = await withLinkedReads(content, async () => readOf(A, 1));
+    const out = await withLinkedReads(content, reader(() => readOf(A, 1)));
     expect(out.content).toBe(content);
     expect(out.attached).toEqual([]);
   });
@@ -29,10 +38,7 @@ describe('withLinkedReads', () => {
   it('attaches each linked artifact once, in link order, after the human’s words; a refused read is skipped', async () => {
     const asked: string[] = [];
     const reads: Record<string, string | null> = { [A]: readOf(A, 4), [B]: null, [C]: readOf(C, 9) };
-    const out = await withLinkedReads(`See [c](maws-artifact:${C}#block=p1), [b](maws-artifact:${B}) and [a](maws-artifact:${A}), and [c](maws-artifact:${C}) again.`, async (link) => {
-      asked.push(link.artifactId);
-      return reads[link.artifactId]!;
-    });
+    const out = await withLinkedReads(`See [c](maws-artifact:${C}#block=p1), [b](maws-artifact:${B}) and [a](maws-artifact:${A}), and [c](maws-artifact:${C}) again.`, reader((id) => reads[id]!, asked));
     expect(asked).toEqual([C, B, A]);
     expect(out.attached.map(({ artifactId, revision }) => [artifactId, revision])).toEqual([[C, 9], [A, 4]]);
     expect(out.skipped).toEqual([{ artifactId: B, why: 'refused' }]);
@@ -43,17 +49,17 @@ describe('withLinkedReads', () => {
   });
 
   it('holds the reads’ total within the cap: one too large is skipped and a smaller later one still goes', async () => {
-    const big = readOf(B, 2, 'w'.repeat(LINKED_READ_CAP_TOKENS * 3));
-    const out = await withLinkedReads([{ type: 'image', source: {} }, { type: 'text', text: `[a](maws-artifact:${A}) [b](maws-artifact:${B}) [c](maws-artifact:${C})` }], async (link) => (link.artifactId === B ? big : readOf(link.artifactId, 1)));
+    const big = readOf(B, 2, '가'.repeat(LINKED_READ_CAP_BYTES / 3)); // token-dense: a byte bound, never a guess per character
+    const out = await withLinkedReads([{ type: 'image', source: {} }, { type: 'text', text: `[a](maws-artifact:${A}) [b](maws-artifact:${B}) [c](maws-artifact:${C})` }], reader((id) => (id === B ? big : readOf(id, 1))));
     expect(out.attached.map((a) => a.artifactId)).toEqual([A, C]);
     expect(out.skipped).toEqual([{ artifactId: B, why: 'over the cap' }]);
-    expect(out.attached.reduce((sum, a) => sum + a.tokens, 0)).toBeLessThanOrEqual(LINKED_READ_CAP_TOKENS);
-    expect(out.attached[0]!.tokens).toBe(estimateTokens(linkedReadBlock(readOf(A, 1))));
+    expect(out.attached.reduce((sum, a) => sum + a.bytes, 0)).toBeLessThanOrEqual(LINKED_READ_CAP_BYTES);
+    expect(out.attached[0]!.bytes).toBe(utf8Bytes(linkedReadBlock(readOf(A, 1))));
     expect((out.content as { type: string }[]).map((b) => b.type)).toEqual(['image', 'text', 'text', 'text']);
   });
 
   it('attaches nothing a cap cannot hold, and leaves the message as it is', async () => {
-    const out = await withLinkedReads(`[a](maws-artifact:${A})`, async () => readOf(A, 1), 10);
+    const out = await withLinkedReads(`[a](maws-artifact:${A})`, reader(() => readOf(A, 1)), 10);
     expect(out.content).toBe(`[a](maws-artifact:${A})`);
     expect(out.skipped).toEqual([{ artifactId: A, why: 'over the cap' }]);
   });
@@ -110,6 +116,39 @@ describe('a human message on an EngineSession (scripted, the real store)', () =>
     const stale = await answer(call('artifact_edit', { artifact: created.artifactId, baseRevision: attachedRevision, ops: [{ op: 'replace_block', id: 'p1', markdown: 'We meet on Monday.' }] }));
     expect(stale.isError).toBe(true);
     expect(stale.content[0]!.text).toContain('p1');
+    run.transport.exit(0);
+    await run.session.exited;
+  });
+
+  it('leaves the session’s memory of an artifact as it was when its read is not attached: a page it never saw stays unread', async () => {
+    // two html pages another session made: one small, one over the cap
+    const other = mawsTools({ bridge: new PaneBridge({ show: () => {} }), capture: new HostBridge({ send: () => {}, answerMs: 1_000 }), asks: new AskTable(), askCancelled: () => {}, artifacts: () => documents.store });
+    const make = async (content: string) => {
+      const result = await other.find((t) => t.name === 'artifact_create')!.call({ title: 'Page', content }, { appSessionId: 'app-other' as AppSessionId, cwd, toolUseId: `toolu_o${content.length}` as ToolUseId, requestId: `ro${content.length}` as RequestId, signal: new AbortController().signal, fromSubagent: false });
+      return JSON.parse((result.content[0] as { text: string }).text) as { artifactId: string; revision: number };
+    };
+    const small = await make('<p>small</p>');
+    const big = await make(`<p>${'x'.repeat(LINKED_READ_CAP_BYTES)}</p>`);
+    const run = scriptedSession({ spec: { cwd }, session: { appVersion: '0.9.0', artifacts: () => documents.store } });
+    await run.session.start();
+    await run.session.send(`Look at [one](maws-artifact:${small.artifactId}) and [two](maws-artifact:${big.artifactId}).`);
+    const users = () => run.transport.writes.filter((f): f is Extract<StdinFrame, { type: 'user' }> => f.type === 'user');
+    for (let i = 0; i < 2000 && users().length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    expect((users()[0]!.message.content as unknown as { text: string }[]).slice(1).map((b) => linkedReadOf(b.text)?.artifactId)).toEqual([small.artifactId]);
+    let n = 0;
+    const publish = async (artifactId: string, revision: number) => {
+      const id = `mcp-p${++n}` as RequestId;
+      run.transport.push({ type: 'control_request', request_id: id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: n, method: 'tools/call', params: { name: 'artifact_publish', arguments: { artifact: artifactId, baseRevision: revision, files: { 'index.html': '<p>mine</p>' } }, _meta: { 'claudecode/toolUseId': `toolu_p${n}` } } } } });
+      for (let i = 0; i < 2000; i++) {
+        const w = run.transport.writes.find((f) => f.type === 'control_response' && (f as { response: { request_id: string } }).response.request_id === id) as { response: { response: { mcp_response: { result: { content: { text: string }[]; isError?: boolean } } } } } | undefined;
+        if (w) return w.response.response.mcp_response.result;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      throw new Error('no answer');
+    };
+    expect((await publish(small.artifactId, small.revision)).isError).toBeUndefined(); // the attached read is the session's read
+    const unread = await publish(big.artifactId, big.revision);
+    expect(unread.isError).toBe(true); // the read not attached left no base: refused as never read, as without the link
     run.transport.exit(0);
     await run.session.exited;
   });
