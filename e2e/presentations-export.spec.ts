@@ -20,7 +20,7 @@
 // P4-B2 D19 (Acceptance 7): a deck naming Google Fonts faces, with no network (MAWS_GOOGLE_FONTS_FIXTURES answers the
 // host's egress from the grounding's recorded answers, any other URL failing as offline): Lora is fetched into the deck
 // and draws from its assets in the editor and the presenter (`document.fonts` holds it loaded; its text sets apart from
-// the fallback) and in the HTML export's `data:font/woff2` face, the PDF's `/BaseFont` and the PPTX's `typeface`;
+// the fallback) and in the HTML export's `data:font/woff2` face, the PDF's font descriptor and the PPTX's `typeface`;
 // Roboto Slab (Apache-2.0) is refused by name in Theme ▸ Faces and in the agent's read (the deck scale seam's
 // `artifact_read`, MAWS_PRESENTATIONS_SCALE=1).
 import { execFileSync } from 'node:child_process';
@@ -656,7 +656,9 @@ test('a named Google Fonts face with no network: Lora fetched once and drawn off
   expect(html).toContain(`data:font/woff2;base64,${woff2}`);
   expect(html).toMatch(/@font-face\s*\{[^}]*font-family:\s*"Lora"[^}]*data:font\/woff2/);
   const pdf = readFileSync((await exportAs(page, id, 'pdf')).path).toString('latin1');
-  expect(pdf).toMatch(/\/BaseFont\s*\/(?:[A-Z]{6}\+)?Lora/);
+  // Skia/PDF writes a web face as a Type 3 font (its glyphs' outlines, with a ToUnicode map), whose dictionary has no
+  // /BaseFont; its name is in its descriptor, where an embedded TrueType face carries it too
+  expect(pdf).toMatch(/\/FontName\s*\/(?:[A-Z]{6}\+)?Lora/);
   const pptx = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
   expect(typefaces(await slideXml(pptx, 1))).toContain('Lora');
 });
