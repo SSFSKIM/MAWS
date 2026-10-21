@@ -9,7 +9,7 @@
 //
 // P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; the prior art's V2, V4, V12): the frame also
 // holds the pin popover (PinPopover.tsx), outside the stage's surface. The card stands at its thread's pin (`locate`
-// answers the pin's rect once it is drawn, else where it will be, the element's top-right), so ⌥⌘M opens at the pin;
+// answers the pin's rect, read from the element as drawn: `pinRectOf`), so ⌥⌘M opens at the pin;
 // while a popover is open the card's host is hidden, never unmounted, so its draft and its send live on. The card's
 // host tells the editor which thread it is on (`hosting`). ⌥⌘M closes the popover first; ⌥⌘⇧J hides and shows the pins
 // (Slides' key; Figma's Shift+C would collide with typing on a selected text element).
@@ -20,7 +20,6 @@ import { discardThread, getThread, newThreadId, reopen, reply, resolve } from '.
 import { useDocVersion } from '../transform/use-doc-version';
 import { COMMENTS_ORIGIN, type DeckCommentsApi } from './controller';
 import { PinPopover, useShownSlide } from './PinPopover';
-import { pinNode } from './Pins';
 import './comments.css';
 
 interface Props {
@@ -33,7 +32,7 @@ interface Props {
 }
 
 export function CommentFrame({ api, surface, canvas, scale, children }: Props) {
-  const { session, author, readOnly, setActive, setComposing, pinMoves } = api;
+  const { session, author, readOnly, setActive, setComposing } = api;
   const frame = useRef<HTMLDivElement | null>(null);
   // P4-B2: the frame as mounted, for the popover, which places itself in it
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -65,7 +64,6 @@ export function CommentFrame({ api, surface, canvas, scale, children }: Props) {
   }, [moved]);
   // fix wave 1: the stage's layout passes move elements with no deck write (a token, a face): the card locates again
   useEffect(() => canvas?.onLayout(moved), [canvas, moved]);
-  useEffect(() => pinMoves.subscribe(moved), [pinMoves, moved]); // P4-B2: the card stands at its pin
 
   const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey'>>(() => {
     const doc = session.doc;
@@ -126,20 +124,16 @@ function elementRect(canvas: SlideCanvas | null, frame: HTMLElement | null, thre
   return { x: r.left - f.left, y: r.top - f.top, width: r.width, height: r.height };
 }
 
-/** P4-B2: a pin's size and its point on the element's top-right corner (comments.css's `.deck-comment-pin`). */
-export const PIN_PX = 20;
+/**
+ * P4-B2: where a thread's card stands, relative to the frame: its pin, which stands on the top-right corner of what it
+ * marks (`rect`, as drawn now) above it (comments.css's `.deck-comment-pin`: 20 px, its point 2 px right of the corner).
+ * Read from the drawn element, not the pin's node, so the card is located in the same pass as the element moves and
+ * where the pin is not drawn (hidden, merged on a zoomed-out world) it still points there. The deck's and the design's.
+ */
+export function pinRectOf(rect: PassageRect | null): PassageRect | null {
+  return rect && { x: rect.x + rect.width + PIN_GAP_PX, y: rect.y - PIN_PX, width: PIN_PX, height: PIN_PX };
+}
+const PIN_PX = 20;
 const PIN_GAP_PX = 2;
 
-/**
- * P4-B2: where a thread's card stands, relative to the frame: its pin as drawn, else where its pin will be (the element's
- * top-right corner, the pin standing above it); null when its element is not on the slide shown.
- */
-function pinRect(canvas: SlideCanvas | null, frame: HTMLElement | null, thread: { slideId: string; elementId: string } | null): PassageRect | null {
-  const element = elementRect(canvas, frame, thread);
-  if (!element || !frame || !thread) return null;
-  const pin = pinNode(frame, thread);
-  if (!pin) return { x: element.x + element.width + PIN_GAP_PX, y: element.y - PIN_PX, width: PIN_PX, height: PIN_PX };
-  const r = pin.getBoundingClientRect();
-  const f = frame.getBoundingClientRect();
-  return { x: r.left - f.left, y: r.top - f.top, width: r.width, height: r.height };
-}
+const pinRect = (canvas: SlideCanvas | null, frame: HTMLElement | null, thread: { slideId: string; elementId: string } | null): PassageRect | null => pinRectOf(elementRect(canvas, frame, thread));

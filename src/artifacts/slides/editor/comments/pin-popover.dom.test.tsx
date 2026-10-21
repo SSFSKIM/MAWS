@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import type { Actor } from '@shared/artifacts/actor';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '../../../document/editor/comments/surface';
 import { newDoc, transact, type Doc } from '../../../yjs';
-import { deleteElementTree, importSlide, writeDeckKeys } from '../../model';
+import { deleteElementTree, importSlide, setStyle, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { addThread, getThread, listThreads, reply, resolve } from '../../threads';
 import { DeckEditor } from '../DeckEditor';
@@ -73,6 +73,7 @@ function fakeLayout(container: HTMLElement): void {
 // The frame and the stage at the window's top-left, 1000 × 800; a pin where its style puts it on the stage, less the
 // stage's scroll, its 20 px box above its element's corner (comments.css's margin).
 const scroll = { left: 0, top: 0 };
+const drawnAt = { zoom: 0.5 }; // the stage's zoom, as the stubbed rects draw the elements
 let rects: MockInstance | null = null;
 const box = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 function fakeRects(container: HTMLElement): void {
@@ -85,6 +86,11 @@ function fakeRects(container: HTMLElement): void {
     if (this instanceof HTMLElement && this.classList.contains('deck-comment-pin')) {
       return box(Number.parseFloat(this.style.left) + 2 - scroll.left, Number.parseFloat(this.style.top) - 20 - scroll.top, 20, 20);
     }
+    // a stage element as drawn at the zoom (its layout box, the fake layout's), less the stage's scroll
+    if (this instanceof HTMLElement && this.dataset.eid !== undefined) {
+      const z = drawnAt.zoom;
+      return box(this.offsetLeft * z - scroll.left, this.offsetTop * z - scroll.top, this.offsetWidth * z, this.offsetHeight * z);
+    }
     return box(0, 0, 0, 0);
   });
 }
@@ -92,6 +98,7 @@ function fakeRects(container: HTMLElement): void {
 beforeEach(() => {
   scroll.left = 0;
   scroll.top = 0;
+  drawnAt.zoom = 0.5;
 });
 afterEach(() => {
   cleanup();
@@ -409,15 +416,23 @@ describe('the compose card and the keys (V12)', () => {
     expect(s.focusDraft).toHaveBeenCalledTimes(1);
   });
 
-  it('the card stands at its thread’s pin (where it will be until it is drawn)', async () => {
-    const { session, toolbar, surface: s, pin } = await mount();
+  it('the card stands at its thread’s pin, read from the element as drawn, so it is there with the element’s move and with the pins hidden', async () => {
+    const { session, toolbar, surface: s, pin, doc, stage } = await mount();
     act(() => session.select(['body']));
     fireEvent.click(within(toolbar).getByRole('button', { name: 'Comment' }));
     const id = s.opened.at(-1)!.threadId;
     await settle();
-    // the body's pin is drawn (352, 180, 20 × 20): the card's locate answers it
-    expect(pin('body')).not.toBeNull();
+    // the body's pin is drawn at (352, 180, 20 × 20): the card's locate answers the same rect
+    const drawn = pin('body')!.getBoundingClientRect();
+    expect(s.reach.current!.locate(id)).toEqual({ x: drawn.left, y: drawn.top, width: 20, height: 20 });
     expect(s.reach.current!.locate(id)).toEqual({ x: 352, y: 180, width: 20, height: 20 });
+    // moved: where its pin goes, in the same pass
+    act(() => setStyle(doc, 's1', 'body', { left: '900px', top: '200px' }));
+    expect(s.reach.current!.locate(id)).toEqual({ x: (900 + 400) * 0.5 + 2, y: 200 * 0.5 - 20, width: 20, height: 20 });
+    // the pins hidden: the card still stands where the pin would be
+    fireEvent.keyDown(stage, { key: 'Ô', code: 'KeyJ', altKey: true, metaKey: true, shiftKey: true });
+    expect(pin('body')).toBeNull();
+    expect(s.reach.current!.locate(id)).toEqual({ x: 652, y: 80, width: 20, height: 20 });
   });
 
   it('⌥⌘⇧J hides every pin and the popover, resolving nothing; again shows them', async () => {

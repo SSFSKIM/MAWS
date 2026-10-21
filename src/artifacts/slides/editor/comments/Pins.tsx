@@ -8,7 +8,7 @@
 // its popover (the controller's `pressPin`), not the rail. The threads are read at once from the threads map
 // (`useOpenDeckThreads`), whether an element is drawn from the canvas (`canvas.node`); the pins stand in slide order, so
 // Tab walks them as the slide reads, each saying whether its popover is open; none is drawn while ⌥⌘⇧J hides them.
-// After each placement they commit, the pins tell the controller (`pinMoves`), so the popover re-places in that frame.
+// After each placement that moved a pin, the pins tell the controller (`pinMoves`), so the popover re-places in that pass.
 import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { SlideCanvas } from '../../canvas';
 import type { Box } from '../../geometry';
@@ -57,12 +57,11 @@ function Pins({ api, canvas, slideId, scale, version }: Props & { api: DeckComme
   const [laidOut, setLaidOut] = useState(0);
   useEffect(() => canvas.onLayout(() => setLaidOut((n) => n + 1)), [canvas]);
   useLayoutEffect(() => {
-    setBoxes(
-      inSlideOrder(canvas, byElement.keys()).flatMap((id): [string, Box][] => {
-        const m = measure(canvas, id, scale);
-        return m ? [[id, m.bounds]] : [];
-      }),
-    );
+    const next = inSlideOrder(canvas, byElement.keys()).flatMap((id): [string, Box][] => {
+      const m = measure(canvas, id, scale);
+      return m ? [[id, m.bounds]] : [];
+    });
+    setBoxes((was) => (samePinBoxes(was, next) ? was : next)); // unchanged geometry renders nothing and tells nobody
   }, [canvas, byElement, scale, version, laidOut]);
   const { pinMoves } = api;
   useLayoutEffect(() => pinMoves.placed(), [boxes, pinMoves]);
@@ -118,4 +117,12 @@ export const pinKey = ({ slideId, elementId }: { slideId: string; elementId: str
 export function pinNode(root: ParentNode, target: { slideId: string; elementId: string }): HTMLElement | null {
   const key = pinKey(target);
   return [...root.querySelectorAll<HTMLElement>('[data-pin-key]')].find((node) => node.dataset.pinKey === key) ?? null;
+}
+
+/** Two placements of a slide's pins are the same: the same elements in the same order at the same boxes. */
+export function samePinBoxes(a: readonly (readonly [string, Box])[], b: readonly (readonly [string, Box])[]): boolean {
+  return a.length === b.length && a.every(([id, box], i) => {
+    const [other, at] = b[i]!;
+    return id === other && box.x === at.x && box.y === at.y && box.w === at.w && box.h === at.h;
+  });
 }

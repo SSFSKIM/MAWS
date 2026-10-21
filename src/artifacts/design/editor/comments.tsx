@@ -22,12 +22,12 @@ import type { SlideCanvas } from '../../slides/canvas';
 import type { Box } from '../../slides/geometry';
 import { resolveAnchor, ROOT } from '../../slides/model';
 import { addThread, discardThread, elementQuote, getThread, newThreadId, reopen, reply, resolve, threadStatus, type DeckThread } from '../../slides/threads';
-import { commentKeys, PIN_PX } from '../../slides/editor/comments/CommentFrame';
+import { commentKeys, pinRectOf } from '../../slides/editor/comments/CommentFrame';
 import { COMMENTS_ORIGIN, HUMAN_AUTHOR, useDeckComments, type DeckCommentsApi } from '../../slides/editor/comments/controller';
 import { COMMENTS_COPY } from '../../slides/editor/comments/copy';
 import type { CommentsRailLabels } from '../../slides/editor/comments/CommentsRail';
 import { PinPopover } from '../../slides/editor/comments/PinPopover';
-import { inSlideOrder, PinButton, pinNode, threadsByElement } from '../../slides/editor/comments/Pins';
+import { inSlideOrder, PinButton, samePinBoxes, threadsByElement } from '../../slides/editor/comments/Pins';
 import { useOpenDeckThreads, useOpenThreadCount } from '../../slides/editor/comments/use-threads';
 import type { DeckSession } from '../../slides/editor/session';
 import { measure } from '../../slides/editor/transform/measure';
@@ -175,7 +175,7 @@ interface FrameProps {
  */
 export function DesignCommentFrame({ api, activeId, surface, view, boards, canvases, children }: FrameProps) {
   void activeId; // P4-B2: the active board's pins are this frame's too
-  const { session, author, readOnly, setActive, setComposing, pinMoves } = api;
+  const { session, author, readOnly, setActive, setComposing } = api;
   const frame = useRef<HTMLDivElement | null>(null);
   // P4-B2: the frame as mounted, for the popover, which places itself in it
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -218,7 +218,6 @@ export function DesignCommentFrame({ api, activeId, surface, view, boards, canva
     const offs = [...canvases.values()].map((canvas) => canvas.onLayout(moved));
     return () => offs.forEach((off) => off());
   }, [canvases, moved]);
-  useEffect(() => pinMoves.subscribe(moved), [pinMoves, moved]); // P4-B2: the card stands at its pin
 
   const latest = useRef(canvases);
   useLayoutEffect(() => {
@@ -229,7 +228,7 @@ export function DesignCommentFrame({ api, activeId, surface, view, boards, canva
     const writable = (threadId: string) => !readOnly && getThread(doc, threadId) !== null;
     return {
       doc,
-      locate: (threadId) => pinRect(latest.current, frame.current, getThread(doc, threadId)), // P4-B2: at the pin
+      locate: (threadId) => pinRectOf(threadRect(latest.current, frame.current, getThread(doc, threadId))), // P4-B2: at the pin
       setActive,
       resolve: (threadId) => void (writable(threadId) && resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN)),
       reopen: (threadId) => void (writable(threadId) && reopen(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN)),
@@ -265,16 +264,6 @@ function threadRect(canvases: ReadonlyMap<string, SlideCanvas>, frame: HTMLEleme
   return { x: r.left - f.left, y: r.top - f.top, width: r.width, height: r.height };
 }
 
-/** P4-B2: where a thread's card stands: its pin as drawn, else where its pin will be (the top-right corner of its element or board). */
-function pinRect(canvases: ReadonlyMap<string, SlideCanvas>, frame: HTMLElement | null, thread: { slideId: string; elementId: string } | null): PassageRect | null {
-  const at = threadRect(canvases, frame, thread);
-  if (!at || !frame || !thread) return null;
-  const pin = pinNode(frame, thread);
-  if (!pin) return { x: at.x + at.width + 2, y: at.y - PIN_PX, width: PIN_PX, height: PIN_PX };
-  const r = pin.getBoundingClientRect();
-  const f = frame.getBoundingClientRect();
-  return { x: r.left - f.left, y: r.top - f.top, width: r.width, height: r.height };
-}
 
 interface WorldPin {
   slideId: string;
@@ -320,10 +309,11 @@ function WorldPins(props: { api: DeckCommentsApi; threads: readonly DeckThread[]
         }),
       );
     }
-    setBoxes(next);
+    setBoxes((was) => (sameBoxes(was, next) ? was : next)); // unchanged geometry renders nothing and tells nobody
   }, [byBoard, canvases, zoom, version, laidOut]);
+  // a re-measure that moved a pin tells the popover in this pass (a pan or a zoom renders it with this layer)
   const { pinMoves } = api;
-  useLayoutEffect(() => pinMoves.placed(), [boxes, zoom, x, y, pinMoves]);
+  useLayoutEffect(() => pinMoves.placed(), [boxes, pinMoves]);
 
   const pins: WorldPin[] = drawn.flatMap((b) => {
     const elements = byBoard.get(b.id);
@@ -370,4 +360,14 @@ function WorldPins(props: { api: DeckCommentsApi; threads: readonly DeckThread[]
       })}
     </div>
   );
+}
+
+/** The boards' measured pins are the same (ids and boxes). */
+function sameBoxes(a: ReadonlyMap<string, readonly [string, Box][]>, b: ReadonlyMap<string, readonly [string, Box][]>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [board, list] of b) {
+    const was = a.get(board);
+    if (!was || !samePinBoxes(was, list)) return false;
+  }
+  return true;
 }
