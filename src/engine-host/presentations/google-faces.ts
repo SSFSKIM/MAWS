@@ -190,7 +190,13 @@ export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>
       noting = null;
       const ids = [...noted];
       noted.clear();
-      for (const id of ids) consider(id);
+      for (const id of ids) {
+        try {
+          consider(id);
+        } catch (error) {
+          log(`${id}'s faces could not be read: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
     });
   };
 
@@ -245,7 +251,15 @@ export function startGoogleFaces(documents: Pick<Documents, 'store' | 'service'>
       const url = queue.shift()!;
       const job = jobs.get(url)!;
       // the targets that still ask for it (an earlier job's write, an edit or a deletion since may have answered them)
-      for (const [k, target] of job.targets) if (!asks(liveFace(target), job.request)) job.targets.delete(k);
+      for (const [k, target] of job.targets) {
+        let still = false;
+        try {
+          still = asks(liveFace(target), job.request);
+        } catch (error) {
+          log(`${target.artifactId} could not be read for ${job.request.family}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        if (!still) job.targets.delete(k);
+      }
       if (job.targets.size === 0) {
         jobs.delete(url);
         settle(url, null);
