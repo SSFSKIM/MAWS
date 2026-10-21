@@ -29,9 +29,14 @@
 // against the seed. Both live in the bench profile (MAWS_BENCH_PROFILE), kept between invocations, so the record run's
 // driver seeds once and runs one repetition per invocation.
 //
+// P4-A3 (docs/doperpowers/plans/2026-10-21-p4-a3-edit-protocol.md): MAWS_BENCH_VARIANT labels the build's lever, so a
+// lever's arm is its own cell beside the base build's (parse.py's maws/<variant>, judged with --maws); the manifest
+// records it with the checkout's commit, and the repetition's directory carries it, so two arms share one run directory.
+//
 // Run on purpose only (it spends; no cap but the receipts are reported):
 //   MAWS_LIVE=1 [MAWS_BENCH_TASKS=B1,B3,B5,B7] [MAWS_BENCH_REPS=1] [MAWS_BENCH_REP_FROM=1] [MAWS_BENCH_SCOPE=mirror|owner]
-//   [MAWS_BENCH_PIN=<model>:<effort>] [MAWS_BENCH_OUT=<dir>] [MAWS_BENCH_PROFILE=<dir>] pnpm e2e:bench-edit-live
+//   [MAWS_BENCH_PIN=<model>:<effort>] [MAWS_BENCH_OUT=<dir>] [MAWS_BENCH_PROFILE=<dir>] [MAWS_BENCH_VARIANT=<label>]
+//   pnpm e2e:bench-edit-live
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, loadavg } from 'node:os';
@@ -60,6 +65,15 @@ const REPS = Number(process.env.MAWS_BENCH_REPS ?? '1');
 const REP_FROM = Number(process.env.MAWS_BENCH_REP_FROM ?? '1');
 const SCOPE = process.env.MAWS_BENCH_SCOPE ?? 'mirror';
 if (SCOPE !== 'owner' && SCOPE !== 'mirror') throw new Error(`MAWS_BENCH_SCOPE is owner or mirror, not ${SCOPE}`);
+const VARIANT = process.env.MAWS_BENCH_VARIANT || null;
+if (VARIANT !== null && !/^[A-Za-z][\w.+-]*$/.test(VARIANT)) throw new Error(`MAWS_BENCH_VARIANT is a label (a letter, then letters, digits or . + - _), not ${VARIANT}`);
+const BUILD = (() => {
+  try {
+    return execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+})();
 const PIN = process.env.MAWS_BENCH_PIN ? (([model, effort]) => ({ model: model!, effort: effort! }))(process.env.MAWS_BENCH_PIN.split(':')) : null;
 const OUT = resolve(process.env.MAWS_BENCH_OUT ?? `/tmp/maws-parity-bench/${new Date().toISOString().replace(/[:.]/g, '-')}`);
 const PROFILE = resolve(process.env.MAWS_BENCH_PROFILE ?? join(OUT, 'maws-profile'));
@@ -201,7 +215,8 @@ async function startSession(page: Page, id: string, message: string): Promise<vo
 // A repetition's records are never overwritten: a later attempt at it goes to …-a2, …-a3, created fresh.
 function attemptDir(task: Task, rep: number): { dir: string; attempt: number } {
   for (let attempt = 1; ; attempt++) {
-    const dir = join(OUT, attempt === 1 ? `maws-${task}-r${rep}` : `maws-${task}-r${rep}-a${attempt}`);
+    const arm = VARIANT === null ? 'maws' : `maws-${VARIANT}`;
+    const dir = join(OUT, attempt === 1 ? `${arm}-${task}-r${rep}` : `${arm}-${task}-r${rep}-a${attempt}`);
     if (existsSync(join(dir, 'manifest.json'))) continue;
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
@@ -264,7 +279,7 @@ test.beforeAll(async () => {
   mkdirSync(CWD, { recursive: true });
   mkdirSync(PROFILE, { recursive: true });
   const configHome = SCOPE === 'owner' ? join(homedir(), '.claude') : mirrorConfigHome();
-  note(`==== P4-A1 MAWS arm, ${new Date().toISOString()} on ${hostname()}: scope ${SCOPE} (${SCOPE === 'owner' ? "the owner's ~/.claude, no CLAUDE_CONFIG_DIR" : configHome}), engine ${engine.bin.replace(homedir(), '~')} ${engine.version}, relay ${RELAY_URL}, cwd ${CWD}, profile ${PROFILE}, pin ${PIN ? `${PIN.model}:${PIN.effort} (measurement-only)` : "none (the owner's settings)"}, tasks ${TASKS.join(',')} x ${REPS} from repetition ${REP_FROM}`);
+  note(`==== P4-A1 MAWS arm, ${new Date().toISOString()} on ${hostname()}: scope ${SCOPE} (${SCOPE === 'owner' ? "the owner's ~/.claude, no CLAUDE_CONFIG_DIR" : configHome}), engine ${engine.bin.replace(homedir(), '~')} ${engine.version}, relay ${RELAY_URL}, cwd ${CWD}, profile ${PROFILE}, pin ${PIN ? `${PIN.model}:${PIN.effort} (measurement-only)` : "none (the owner's settings)"}, variant ${VARIANT ?? 'none'} at ${BUILD ?? 'an unknown commit'}, tasks ${TASKS.join(',')} x ${REPS} from repetition ${REP_FROM}`);
   const maws = await launchMaws({
     userData: PROFILE,
     ownerConfigHome: SCOPE === 'owner',
@@ -330,7 +345,7 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
       const manifest = {
         arm: 'maws', task, rep, attempt, surface: 'maws', kind, host: hostname(), scope: SCOPE, startedAt, prompt, promptMatch: text.slice(text.indexOf('{ref}') + '{ref}'.length), artifactId: work.id,
         transcript, journal: journalPath, relay: relayLogs(startedMs), landing: LANDING, sessionId, appSessionId: id,
-        load: { before: loadBefore, after: loadAfter }, check, pin: PIN, measurementOnly: PIN !== null,
+        load: { before: loadBefore, after: loadAfter }, check, pin: PIN, measurementOnly: PIN !== null, variant: VARIANT, build: BUILD,
         engine: { bin: bench!.engine.bin, version: bench!.engine.version }, costUsd: cost,
         mawsToolSpans: spans.map(({ name, ms, toolUseId }) => ({ name, ms, toolUseId })),
       };
@@ -345,7 +360,7 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
       }
       const artifactSpans = spans.filter((s) => s.name.startsWith('artifact_'));
       note(
-        `${task} r${rep}${attempt > 1 ? ` attempt ${attempt}` : ''}: ${check.pass ? 'PASS' : 'FAIL'} (${check.detail}); landed ${m?.sendToEditLanded ?? '-'} s, first token ${m?.sendToFirstToken ?? '-'} s, turn end ${m?.sendToTurnEnd ?? '-'} s, ` +
+        `${VARIANT ? `${VARIANT} ` : ''}${task} r${rep}${attempt > 1 ? ` attempt ${attempt}` : ''}: ${check.pass ? 'PASS' : 'FAIL'} (${check.detail}); landed ${m?.sendToEditLanded ?? '-'} s, first token ${m?.sendToFirstToken ?? '-'} s, turn end ${m?.sendToTurnEnd ?? '-'} s, ` +
           `${m?.requests ?? '-'} requests, ${m?.outputTokens ?? '-'} output tokens, ${JSON.stringify(m?.models ?? [])} ${JSON.stringify(m?.efforts ?? [])}, cache ${m?.cache?.state ?? '-'}; ` +
           `MAWS tool time ${artifactSpans.map((s) => `${s.name} ${s.ms ?? 'unanswered'} ms`).join(', ') || 'none'}; load ${loadBefore[0]} -> ${loadAfter[0]}; US$${cost.toFixed(4)}; ${manifestPath}`,
       );

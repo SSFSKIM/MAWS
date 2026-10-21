@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const written = [];
 globalThis.nodeRepl = { write(s) { written.push(s); } };
 let screen = null; // the fake Desktop the flows below drive
@@ -31,6 +33,8 @@ const cases = {
   sendCode: '121 버튼 보내기',
   sendCloud: '67 버튼 메시지 보내기',
   stop: '150 버튼 중지',
+  // §7c: the Claude tab's recent list, a row's button and its menu button beside it (read live in Part B)
+  recentItem: '58 팝업 버튼 Autumn Workshops 2026 slide deck에 대한 더 많은 옵션',
 };
 const PROBE_PAGE = '3 HTML 콘텐츠 Available tools and system info - Claude, URL: claude.ai/chat/55cfb041-2381-476f-939b-a5078f7f0e4d';
 const negatives = {
@@ -43,7 +47,7 @@ const negatives = {
   // an existing session on screen: another session's item selected, or the new one not selected; a chat's page
   codeNewItem: ['141 항목 Available tools inventory, Value: 1', '141 항목 새 세션, Value: 0'],
   cloudNewPage: [PROBE_PAGE, '3 HTML 콘텐츠 Claude, URL: claude.ai/newsletter'],
-  recentItem: ['141 항목 새 세션, Value: 1'],
+  recentItem: ['141 항목 새 세션, Value: 1', '57 버튼 Autumn Workshops 2026 slide deck', '122 버튼 새로 생성'],
 };
 let bad = 0;
 const fail = (...why) => { bad++; console.log(...why); };
@@ -55,6 +59,12 @@ const eq = (what, got, want) => { if (JSON.stringify(got) !== JSON.stringify(wan
 eq('pageUrl', bench.pageUrl(`1 창 Claude\n${PROBE_PAGE}\n40 HTML 콘텐츠 Slides, URL: claude.ai/artifact/CVsiKk2utAxFxm8aNrwmaA`), 'claude.ai/chat/55cfb041-2381-476f-939b-a5078f7f0e4d');
 eq('isNewSession cowork', [bench.isNewSession(cases.cloudNewPage, 'cowork'), bench.isNewSession(PROBE_PAGE, 'cowork')], [true, false]);
 eq('isNewSession code', [bench.isNewSession(`${cases.codeNewItem}\n142 항목 Available tools inventory, Value: 0`, 'code'), bench.isNewSession(negatives.codeNewItem[0], 'code')], [true, false]);
+
+// The recent list's rows: a button with the menu button for the same title beside it, never another button.
+const RECENTS = ['2 버튼 새로 생성', '57 버튼 Autumn Workshops 2026 slide deck', '58 팝업 버튼 Autumn Workshops 2026 slide deck에 대한 더 많은 옵션',
+  '59 버튼 Available tools and system info', '60 팝업 버튼 Available tools and system info에 대한 더 많은 옵션', '61 버튼 보내기',
+  '70 버튼 Orphan title', '72 팝업 버튼 Another title에 대한 더 많은 옵션'].join('\n');
+eq('recentItems', bench.recentItems(RECENTS).map((r) => r.index), [57, 59]);
 
 // The hand-over's Download: the last after the line naming the .jsonl file, else the last; never an earlier card's.
 const FILE = '40 텍스트 3f9a2c1e-7b4d-4e8a-9c61-0f4d2b7a8e13.jsonl';
@@ -76,7 +86,7 @@ function claudeTab({ page, newWorks = true, chats = [], cards = [], savePanel = 
       if (running) st.stopRenders--;
       return ['1 라디오 버튼 Description: Claude, Value: 1', '2 버튼 새로 생성', `3 HTML 콘텐츠 Claude, URL: ${st.page}`, '4 팝업 버튼 권한: 자동',
         '5 팝업 버튼 모델: Opus 5.5 엑스트라', `6 텍스트 엔트리 영역 (settable) Description: Claude에게 프롬프트를 입력하세요., Value: ${st.field}`,
-        running ? '7 버튼 중지' : '7 버튼 메시지 보내기', ...chats.map((c, i) => `${20 + i} 항목 ${c.title}, Value: ${st.page === c.url ? 1 : 0}`),
+        running ? '7 버튼 중지' : '7 버튼 메시지 보내기', ...chats.flatMap((c, i) => [`${20 + 2 * i} 버튼 ${c.title}`, `${21 + 2 * i} 팝업 버튼 ${c.title}에 대한 더 많은 옵션`]),
         ...cards, ...(st.saveShown ? ['90 버튼 저장, ID: OKButton'] : [])].join('\n');
     },
     async click(i) {
@@ -88,7 +98,7 @@ function claudeTab({ page, newWorks = true, chats = [], cards = [], savePanel = 
         st.stopRenders = 2;
         if (st.page === 'claude.ai/new') st.page = `claude.ai/chat/sent-${st.sent.length}`;
       }
-      if (i >= 20 && i < 20 + chats.length) st.page = chats[i - 20].url;
+      if (i >= 20 && i < 20 + 2 * chats.length) st.page = i % 2 === 0 ? chats[(i - 20) / 2].url : st.page; // a menu button opens no chat
       if (cards.some((c) => c.startsWith(`${i} `)) && savePanel) st.saveShown = true;
       if (i === 90) st.saveShown = false;
     },
@@ -119,7 +129,7 @@ eq('send', [sent.url, screen.st.sent], ['claude.ai/chat/sent-1', [PROMPT]]);
 const chats = Array.from({ length: 10 }, (_, i) => ({ title: 'Autumn Workshops 2026', url: `claude.ai/chat/c${i}` }));
 screen = claudeTab({ page: 'claude.ai/new', chats });
 eq('reopen', await bench.reopen('https://claude.ai/chat/c3/'), 'claude.ai/chat/c3');
-eq('reopen clicked', screen.st.clicks.filter((i) => i >= 20), [20, 21, 22, 23]);
+eq('reopen clicked', screen.st.clicks.filter((i) => i >= 20), [20, 22, 24, 26]);
 screen = claudeTab({ page: 'claude.ai/new', chats });
 await throws('reopen of a session not among the first eight', () => bench.reopen('claude.ai/chat/c9'), 'no recent item of the first eight');
 eq('reopen gave up after eight', screen.st.clicks.filter((i) => i >= 20).length, 8);
@@ -130,6 +140,20 @@ for (const savePanel of [false, true]) {
   screen = claudeTab({ page: 'claude.ai/chat/c0', cards: CARDS, savePanel });
   const h = await bench.handOver();
   eq(`handOver (save panel ${savePanel})`, [h.downloaded, h.button, screen.st.clicks.filter((i) => i >= 30)], ['unconfirmed', '41 버튼 다운로드', savePanel ? [41, 90] : [41]]);
+}
+
+// probe({save}): the report and the whole tree written under the run's ax/ by the driver itself (§7a's rule).
+const ax = mkdtempSync(join(tmpdir(), 'bench-ax-'));
+try {
+  screen = claudeTab({ page: 'claude.ai/new', chats: chats.slice(0, 2) });
+  const probed = await bench.probe({ save: join(ax, 'ax'), note: 'hold start' });
+  const files = readdirSync(join(ax, 'ax'));
+  eq('probe saved one file', [files.length, probed.saved === join(ax, 'ax', files[0])], [1, true]);
+  const kept = JSON.parse(readFileSync(join(ax, 'ax', files[0]), 'utf8'));
+  eq('probe file', [kept.note, kept.report.recentItem, kept.recentItems.length, kept.tree.includes('20 버튼 Autumn Workshops 2026')], ['hold start', '21 팝업 버튼 Autumn Workshops 2026에 대한 더 많은 옵션', 2, true]);
+  eq('probe without save writes nothing', [(await bench.probe()).saved, readdirSync(join(ax, 'ax')).length], [undefined, 1]);
+} finally {
+  rmSync(ax, { recursive: true, force: true });
 }
 
 console.log(bad ? `${bad} wrong` : `all ${Object.keys(cases).length} labels match, ${Object.values(negatives).flat().length} near misses refused, the flows hold`);

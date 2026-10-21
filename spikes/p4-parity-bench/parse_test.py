@@ -103,6 +103,65 @@ class Verdict(Bench):
         _, _, v = self.run_cells(n=4)
         self.assertTrue(v['verdict'].startswith('no verdict yet'), v['verdict'])
 
+    def test_maws_variants_need_a_judged_one(self):
+        """P4-A3: MAWS arms that differ by a lever are cells of their own; with more than one, the judged one is named,
+        and the others are reported beside it against the same Desktop cell."""
+        for i in range(1, 6):
+            self.manifest('maws-B1-r%d' % i, 'maws', MAWS_T, variant='base')
+            self.manifest('maws-alwaysLoad-B1-r%d' % i, 'maws', MAWS_T, variant='alwaysLoad')
+            self.manifest('desktop-B1-r%d' % i, 'desktop', DESKTOP_T)
+        rows = [parse.edit_row(p) for p in parse.collect([self.dir])]
+        cs = parse.cells(rows)
+        self.assertIn(('B1', 'maws', 'maws/alwaysLoad'), cs)
+        self.assertIn(('B1', 'maws', 'maws/base'), cs)
+        v = {x['task']: x for x in parse.verdicts(cs)}['B1']
+        self.assertTrue(v['verdict'].startswith('no verdict: MAWS ran more than one variant (alwaysLoad, base)'), v['verdict'])
+        v = {x['task']: x for x in parse.verdicts(cs, maws={'B1': 'alwaysLoad'})}['B1']
+        self.assertEqual((v['verdict'], v['ratio'], v['maws']), ('parity', 1.0, 'alwaysLoad'))
+        self.assertIn('MAWS base, not judged: median 5.2 over 5 valid (that/Desktop 1.0)', v['beside'])
+
+    def test_the_requested_model_is_beside(self):
+        """A1's residue: the requested variant (MAWS the 1M one, Desktop the plain one) is named beside the verdict, never
+        voiding it, since the served model is compared and is the same."""
+        plain = self.variant(DESKTOP_T, 'plain.jsonl', lambda r: r.update(requestedModel='claude-opus-5-5') if r.get('type') == 'assistant' else None)
+        wide = self.variant(MAWS_T, 'wide.jsonl', lambda r: r.update(requestedModel='claude-opus-5-5[1m]') if r.get('type') == 'assistant' else None)
+        for i in range(1, 6):
+            self.manifest('maws-B1-r%d' % i, 'maws', wide)
+            self.manifest('desktop-B1-r%d' % i, 'desktop', plain)
+        cs = parse.cells([parse.edit_row(p) for p in parse.collect([self.dir])])
+        v = {x['task']: x for x in parse.verdicts(cs)}['B1']
+        self.assertEqual(v['verdict'], 'parity')
+        self.assertIn("requested model: MAWS ['claude-opus-5-5[1m]'], Desktop ['claude-opus-5-5'] (not voiding)", v['beside'])
+
+    def test_the_breakdown_to_the_landing(self):
+        """The cause is read over the requests up to the one that made the landing call (findings §7c): their count and
+        sums, and the turn's last landing beside the first."""
+        x = parse.edit_row(self.manifest('maws-B1-r1', 'maws', MAWS_T))['measured']
+        upto = x['perRequest'][:x['toLanding']['requests']]
+        self.assertEqual(x['toLanding']['requests'], 2)
+        self.assertEqual(x['toLanding']['thinkingTokens'], sum(r['think'] for r in upto))
+        self.assertAlmostEqual(x['toLanding']['generation'], sum(r['gen'] for r in upto), places=2)
+        self.assertEqual(x['sendToLastLanding'], x['sendToEditLanded'])  # one landing call
+        cs = parse.cells([parse.edit_row(self.manifest('maws-B1-r%d' % i, 'maws', MAWS_T)) for i in range(2, 4)])
+        self.assertEqual(cs[('B1', 'maws', 'maws')]['measures']['landingRequests']['median'], 2)
+
+
+class Bootstrap(unittest.TestCase):
+    RECORD = os.path.join(HERE, 'record-2026-10-21', 'run', 'report.json')
+
+    def test_reproduces_the_records_b3_interval(self):
+        """The interval A1 computed by hand for B3 (findings §7c: 0.79 to 1.93 at 95 %, 66 % of resamples above 1.2)
+        from the same five and five landings, 20,000 resamples within each arm."""
+        with open(self.RECORD, encoding='utf-8') as f:
+            rows = json.load(f)['rows']
+        arm = lambda a: [r['measured']['sendToEditLanded'] for r in rows if r['task'] == 'B3' and r['arm'] == a]
+        b = parse.bootstrap(arm('maws'), arm('desktop'))
+        self.assertEqual((b['resamples'], b['level']), (20000, 0.95))
+        self.assertAlmostEqual(b['low'], 0.79, delta=0.02)
+        self.assertAlmostEqual(b['high'], 1.93, delta=0.02)
+        self.assertAlmostEqual(b['aboveThreshold'], 0.66, delta=0.02)
+        self.assertEqual(parse.bootstrap(arm('maws'), arm('desktop')), b)  # seeded: the same record gives the same interval
+
 
 class Validity(Bench):
     def test_missing_records_exclude_without_stopping_the_report(self):
