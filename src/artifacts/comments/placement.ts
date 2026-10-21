@@ -93,6 +93,33 @@ export function caretOf(pin: CardPin | null, column: Box): number | null {
   return clamp(pin.x, min, Math.max(min, column.width - INSET - CARET_HALF));
 }
 
+/** Where a placement puts the card in its host's box, as the card's style (CSS px). */
+export interface CardPosition {
+  left?: number;
+  top?: number;
+  bottom?: number;
+  margin?: number;
+  width: number;
+  maxHeight: number;
+}
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): moved here from the renderer's CommentCard
+// (`positionOf`), so the pin popover places itself as the card does; the renderer reaches it through its re-export.
+export function cardPosition(style: CardStyle): CardPosition {
+  switch (style.mode) {
+    case 'below':
+      return { left: style.left, top: style.top, width: style.width, maxHeight: style.maxHeight };
+    case 'above':
+      return { left: style.left, bottom: style.bottom, width: style.width, maxHeight: style.maxHeight };
+    case 'docked':
+      return { left: INSET, bottom: INSET, width: style.width, maxHeight: style.maxHeight };
+    case 'strip': // P2-E2: in flow in its host's strip, the margin its inset
+      return { margin: INSET, width: style.width, maxHeight: style.maxHeight };
+    case 'margin': // P4-B1: in flow in the document margin's stack, at the column's width
+      return { width: style.width, maxHeight: style.maxHeight };
+  }
+}
+
 // D4's table, row by row.
 export function placeCard(box: Box, pin: CardPin | null): CardStyle {
   const { width: W, height: H } = box;

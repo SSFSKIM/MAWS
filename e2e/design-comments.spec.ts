@@ -236,7 +236,7 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await ws.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
     const pin = ws.locator(`[data-comment-pin="${moved}"]`);
     await expect(pin).toHaveCount(1);
-    await expect(ws.locator(`[data-board-pins-of="desktop"] [data-comment-pin="${moved}"]`)).toHaveCount(1);
+    await expect(ws.locator(`[data-comment-pin="${moved}"][data-pin-board="desktop"]`)).toHaveCount(1); // P4-B2: one layer for every board's pins
     await expect.poll(() => pinOffset(pin, ws.locator(`[data-board-id="desktop"] [data-eid="${moved}"]`))).toBeLessThan(4);
     await expect(ws.locator(`[data-comment-pin="${onPhone}"]`)).toHaveCount(0);
   });
@@ -255,6 +255,64 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await expect.poll(() => pinOffset(ws.locator('[data-board-pin="phone"]'), ws.locator('[data-board-id="phone"]'))).toBeLessThan(4);
   });
 
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; the prior art's V6 and V15): every board's pins in
+// one layer, merged on a zoomed-out world and parted by the merged pin's fit, and the pin popover following its pin
+// through a pan, hidden while the pin is outside the world. The design opened from the library in a main tab (wide);
+// its threads written through the seam, so no session is needed.
+test('a design’s pins: merged at a zoom-out, a press fits them apart; the popover follows its pin through a pan and hides with it', async () => {
+  test.setTimeout(180_000);
+  const page = await ready({});
+  const id = await createDesign(page, 'Cluster lab', DESIGN_FILES);
+  const tab = await openFromLibrary(page, 'Cluster lab', id);
+  await editDesign(page, id, { op: 'addThread', threadId: 'on-a', boardId: 'desktop', elementId: 'a', body: 'Redder?' });
+  await editDesign(page, id, { op: 'addThread', threadId: 'on-b', boardId: 'desktop', elementId: 'b', body: 'Greener?' });
+  const pinA = tab.locator('[data-comment-pin="a"][data-pin-board="desktop"]');
+  const pinB = tab.locator('[data-comment-pin="b"][data-pin-board="desktop"]');
+
+  // at 5 % the two corners (400 board px apart) are 20 screen px apart: one count at their centroid (V15)
+  await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.05');
+  const cluster = tab.locator('[data-pin-cluster="desktop/a desktop/b"]');
+  await expect(cluster).toHaveText('2');
+  await expect(cluster).toHaveAttribute('aria-label', '2 comments here; zoom to them');
+  await expect(pinA).toHaveCount(0);
+  // its press fits the two elements: the pins part
+  await cluster.click();
+  await expect.poll(async () => (await viewOf(page, id, 'main')).viewport?.zoom ?? 0).toBeGreaterThan(0.2);
+  await expect(pinA).toBeVisible();
+  await expect(pinB).toBeVisible();
+  await expect(cluster).toHaveCount(0);
+
+  // a pin's popover, its reply field focused; a pan moves it with its pin, in step (V6)
+  await pinA.click();
+  const popover = page.locator('[data-pin-popover]');
+  await expect(popover).toBeVisible();
+  await expect(popover.getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  const offset = async () => {
+    const [p, q] = [(await pinA.boundingBox())!, (await popover.boundingBox())!];
+    return { x: Math.round(q.x - p.x), y: Math.round(q.y - p.y) };
+  };
+  const before = await offset();
+  const world = (await tab.locator('[data-design-world]').boundingBox())!;
+  await page.mouse.move(world.x + 24, world.y + world.height - 24); // away from the popover
+  const startY = (await pinA.boundingBox())!.y;
+  await page.mouse.wheel(0, 60);
+  await expect.poll(async () => Math.round(startY - (await pinA.boundingBox())!.y)).toBe(60);
+  await expect.poll(offset).toEqual(before);
+  // panned until its pin is above the world's top: hidden, kept; panned back: shown where it was
+  const up = Math.ceil((await pinA.boundingBox())!.y - world.y) + 60;
+  await page.mouse.wheel(0, up);
+  await expect(popover).toBeHidden();
+  await expect(popover).toHaveCount(1);
+  await page.mouse.wheel(0, -up);
+  await expect(popover).toBeVisible();
+  await expect.poll(offset).toEqual(before);
+  // Escape in its reply field closes it, the keyboard on the pin
+  await popover.getByRole('textbox', { name: 'Reply' }).press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(pinA).toBeFocused();
   expect(launch!.consoleErrors()).toEqual([]);
 });
 

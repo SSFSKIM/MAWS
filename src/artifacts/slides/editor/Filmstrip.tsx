@@ -4,6 +4,8 @@
 // lift, arrows to move, Space to drop), and the slide gestures: new (blank, after the current slide), duplicate, hide,
 // delete. Hidden slides are dimmed; held slides badged with their reasons. Every gesture is one transaction and one
 // undo step (the session's `edit`).
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; V10): a slide with open comments carries their
+// count, orphans counted, said in its thumbnail's name.
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -20,6 +22,8 @@ import type { DeckView, SectionHeader, SlideEntry } from './deck-view';
 import type { DeckSession } from './session';
 import { SLIDE_W, SlideView } from './SlideView';
 import { DECK_COPY as C } from './copy';
+import { COMMENTS_COPY } from './comments/copy';
+import { useOpenThreadCounts } from './comments/use-threads';
 
 export interface FilmstripProps {
   session: DeckSession;
@@ -43,6 +47,7 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
   const scale = width / SLIDE_W;
   // a reorder as assistive technology hears it: the slides by position and title, over the order last drawn
   const accessibility = useReorderAccessibility(ids, (id, n) => C.reorderItem(n, slideTitle(session.doc, id)));
+  const comments = useOpenThreadCounts(session.doc); // P4-B2
 
   // every thumbnail of the first showing laid out: reported once
   const canvases = useRef(new Map<string, SlideCanvas>());
@@ -93,6 +98,7 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
                   readOnly={readOnly}
                   startsSection={view.sections.some((s) => s.before === slide.id && !s.empty)}
                   full={full}
+                  comments={comments.get(slide.id) ?? 0}
                   onCanvas={(canvas) => (canvas ? canvases.current.set(slide.id, canvas) : canvases.current.delete(slide.id))}
                 />
               </li>
@@ -125,12 +131,14 @@ function Thumbnail(props: {
   startsSection: boolean;
   /** The deck holds as many slides as a deck may: no duplicate. */
   full: boolean;
+  /** P4-B2: its open comments, orphans counted. */
+  comments: number;
   onCanvas: (canvas: SlideCanvas | null) => void;
 }) {
-  const { session, slide, index, current, scale, assetUrl, faces, readOnly, startsSection, full, onCanvas } = props;
+  const { session, slide, index, current, scale, assetUrl, faces, readOnly, startsSection, full, comments, onCanvas } = props;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slide.id, disabled: readOnly });
   const doc = session.doc;
-  const label = C.slideLabel(index + 1, slide.hidden, slide.held !== null);
+  const label = C.slideLabel(index + 1, slide.hidden, slide.held !== null) + (comments > 0 ? `, ${COMMENTS_COPY.openOnSlide(comments)}` : ''); // P4-B2
 
   const duplicate = () => {
     if (slide.held || full) return;
@@ -185,6 +193,11 @@ function Thumbnail(props: {
         <SlideView doc={doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} thumbnail />
         {slide.held && <span className="deck-thumb-badge">{C.held}</span>}
         {slide.hidden && <span className="deck-thumb-badge deck-thumb-badge-quiet">{C.hiddenBadge}</span>}
+        {comments > 0 && (
+          <span className="deck-thumb-comments" data-comments-badge aria-hidden>
+            {comments}
+          </span>
+        )}
       </button>
       {!readOnly && (
         <DropdownMenu.Root modal={false}>

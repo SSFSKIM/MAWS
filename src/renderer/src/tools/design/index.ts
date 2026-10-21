@@ -11,6 +11,7 @@ import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
 import { registerArtifactEditor } from '../../artifacts/registry';
 import { confirm } from '../../sessions/dialogs';
+import { handCommentCardOver } from '../document/comments'; // P4-B2
 import { DesignMain, DesignPanel } from './DesignBody';
 import { installDesignSeam } from './e2e-seam';
 import { DesignTabState, type DesignTabDeps } from './tab-state';
@@ -23,10 +24,11 @@ const windowDeps = (): DesignTabDeps => ({
     const record = useSessions.getState().records.get(appSessionId as AppSessionId);
     return record ? displayTitle(record) : undefined;
   },
-  confirmDiscard: (title) =>
+  confirmDiscard: (title, about) =>
     confirm({
       title: `Close “${title || 'this design'}”?`,
-      body: 'Some of its changes are not saved yet. Closing now loses them.',
+      // P4-B2 (X36's draft rule): the unsent comment in its compose card, asked about as the document's tab asks
+      body: about === 'comment' ? 'Your comment is not sent yet. Closing now discards it.' : 'Some of its changes are not saved yet. Closing now loses them.',
       confirmLabel: 'Close and discard',
       destructive: true,
     }),
@@ -41,5 +43,7 @@ export function registerDesignEditor(deps: () => DesignTabDeps = windowDeps): ()
     createState: (target) => new DesignTabState(target, deps()),
     dispose: (state) => state.dispose(),
     moved: (state, target) => state.moveTo(target.surface), // P4-B3: the e2e seam reports the surface it is on
+    // P4-B2 (D16; the review's P1): the compose card and its unsent comment go to the view an activate-existing move keeps
+    handOver: (from, to) => handCommentCardOver(from.artifactId, from.commentHostId, to.commentHostId),
   });
 }

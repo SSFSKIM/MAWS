@@ -103,7 +103,8 @@ describe('comments on a deck’s elements (D9)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
     const reach = s.reach.current!;
     const id = listThreads(doc)[0]!.id;
-    expect(reach.locate(id)).toEqual({ x: 0, y: 0, width: 0, height: 0 }); // drawn (happy-dom's box)
+    // P4-B2: the card stands at the element's pin: where it will be (the element's top-right, the 20 px pin above it) until drawn
+    expect(reach.locate(id)).toEqual({ x: 2, y: -20, width: 20, height: 20 }); // the element drawn at happy-dom's empty box
     act(() => reach.record(id, 'Shorter?'));
     act(() => reach.resolve(id));
     expect(getThread(doc, id)).toMatchObject({ status: 'resolved', messages: [{ body: 'Shorter?', by: { kind: 'human' }, at: 1_001 }] });
@@ -182,7 +183,8 @@ describe('comments on a deck’s elements (D9)', () => {
     expect(session.snapshot().canUndo).toBe(false);
   });
 
-  it('a pin sits at its element’s top-right, follows a move, and opens the rail on its thread', async () => {
+  // P4-B2: a pin opens its popover now (pin-popover.dom.test.tsx), not the rail
+  it('a pin sits at its element’s top-right, follows a move, and is drawn active with its thread', async () => {
     const { doc, session, container } = mount();
     fakeLayout(container);
     act(() => session.select(['body']));
@@ -195,12 +197,7 @@ describe('comments on a deck’s elements (D9)', () => {
     act(() => setStyle(doc, 's1', 'body', { left: '900px', top: '200px' }));
     await settle();
     expect([Number.parseFloat(pin().style.left), Number.parseFloat(pin().style.top)]).toEqual([(900 + 400) * scale, 200 * scale]);
-    fireEvent.click(pin());
-    expect(session.snapshot().rail).toBe('comments');
-    await settle();
-    const id = listThreads(doc)[0]!.id;
-    expect(container.querySelector(`article[data-thread="${id}"]`)!.getAttribute('aria-current')).toBe('true');
-    expect(pin().hasAttribute('data-active')).toBe(true);
+    expect(pin().hasAttribute('data-active')).toBe(true); // Comment drew its thread active
     // deleted: no pin
     act(() => deleteElementTree(doc, 's1', 'body'));
     await settle();

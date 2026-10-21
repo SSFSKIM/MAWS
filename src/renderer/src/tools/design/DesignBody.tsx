@@ -67,7 +67,8 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
   // M4: comments go to the session the main area shows (its Side thread, or its conversation). P3-F (L230): with none
   // shown, to the design's own context, as the document's and the deck's (P3-F1); not offered only while that is unread
   const target = useArtifactCommentTarget(artifactId);
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design' });
+  // P4-B2 (D16): X36's draft rule and the tab state's card host id, as the deck's
+  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design', draftRule: true, hostId: state.commentHostId });
   // M4: the history over the tab's api and replica, the pill counting the design's projection
   const handle = snapshot.handle;
   const history = useMemo(() => (state.designHistory && handle ? { api: state.designHistory, handle, countChanges: countDesignChanges } : undefined), [state.designHistory, handle]);

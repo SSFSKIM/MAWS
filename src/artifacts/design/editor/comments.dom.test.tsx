@@ -71,7 +71,8 @@ describe('comments on a design', () => {
     const pin = container.querySelector<HTMLElement>('[data-board-pin="b1"]')!;
     expect([pin.style.left, pin.style.top]).toEqual(['205px', '20px']);
     fireEvent.click(pin);
-    expect(screen.getByRole('complementary', { name: 'Comments' })).toBeTruthy(); // the pin opens the rail on its thread
+    expect(screen.getByRole('dialog', { name: 'Comments on “Phone”' })).toBeTruthy(); // P4-B2: the pin opens its popover
+    expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
   });
 
   it('with nothing selected the active board is the target; ⌥⌘M comments it too', () => {
@@ -132,7 +133,8 @@ function fakeLayout(container: HTMLElement, boardId: string): void {
 }
 
 describe('element pins on every board', () => {
-  it('pins an element on an inactive board (a move another replica made lands there unseen by this one), once, at its corner; the active board’s stay its overlay’s', async () => {
+  // P4-B2 (D16): every pin of the world is the comment frame's one layer, the active board's too
+  it('pins an element on an inactive board (a move another replica made lands there unseen by this one), once, at its corner; the active board’s too, in the one layer', async () => {
     const { doc, session, container } = mount();
     act(() => session.show('b2')); // the desktop active: its overlay alone takes gestures
     addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: '', by: { kind: 'human' }, at: 1 }, 'deck-comments');
@@ -142,19 +144,20 @@ describe('element pins on every board', () => {
     expect(pins()).toHaveLength(1);
     const pin = pins()[0]!;
     expect(pin.closest('[data-active-board]')).toBeNull(); // not the overlay's
+    expect(pin.dataset.pinBoard).toBe('b1');
     // at the element's top-right on screen: the board at (0, 0) of the world, the view at (10, 20) × 0.5
-    const host = pin.closest<HTMLElement>('[data-board-pins-of="b1"]')!;
-    expect([host.style.left, host.style.top]).toEqual(['10px', '20px']);
-    expect([Number.parseFloat(pin.style.left), Number.parseFloat(pin.style.top)]).toEqual([(24 + 342) * 0.5, 740 * 0.5]);
+    expect([Number.parseFloat(pin.style.left), Number.parseFloat(pin.style.top)]).toEqual([10 + (24 + 342) * 0.5, 20 + 740 * 0.5]);
     fireEvent.click(pin);
-    expect(session.snapshot().rail).toBe('comments');
+    expect(screen.getByRole('dialog', { name: /^Comments on/ })).toBeTruthy(); // its popover, not the rail
+    expect(session.snapshot().rail).toBeNull();
 
-    // the board activated: its pin is its overlay's, and only one
+    // the board activated: its pin is still the one layer's, and only one
     act(() => session.show('b1'));
     fakeLayout(container, 'b1');
     await act(async () => new Promise((r) => setTimeout(r, 80)));
     expect(pins()).toHaveLength(1);
-    expect(pins()[0]!.closest('[data-active-board="b1"]')).not.toBeNull();
+    expect(pins()[0]!.closest('[data-active-board]')).toBeNull();
+    expect(container.querySelector('[data-active-board="b1"] .deck-comment-pin')).toBeNull();
   });
 
   it('another replica’s cross-board move: the source stays active here, the pin and the card follow to the destination, once', async () => {
@@ -171,8 +174,8 @@ describe('element pins on every board', () => {
     expect(container.querySelectorAll('[data-comment-pin="cta"]')).toHaveLength(0);
     const pins = container.querySelectorAll<HTMLElement>(`[data-comment-pin="${moved}"]`);
     expect(pins).toHaveLength(1);
-    expect(pins[0]!.closest('[data-board-pins-of="b2"]')).not.toBeNull();
-    expect([Number.parseFloat(pins[0]!.style.left), Number.parseFloat(pins[0]!.style.top)]).toEqual([(24 + 342) * 0.5, 740 * 0.5]);
+    expect(pins[0]!.dataset.pinBoard).toBe('b2');
+    expect([Number.parseFloat(pins[0]!.style.left), Number.parseFloat(pins[0]!.style.top)]).toEqual([10 + (500 + 24 + 342) * 0.5, 20 + 740 * 0.5]);
     expect(overlay().locate('t1')).not.toBeNull(); // the card finds it on the destination's canvas
     expect(Y.threadScalars(doc, 't1')).toMatchObject({ slideId: 'b2', elementId: moved });
   });
@@ -298,5 +301,237 @@ describe('the comment frame’s cost while the world pans (DL39’s bounded wave
     const key = overlay().layoutKey;
     act(() => view.setViewport({ zoom: 0.5, x: 90, y: 25 }));
     expect(overlay().layoutKey).not.toBe(key);
+  });
+});
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; the prior art's V6, V11, V15): the pin popover on
+// a world of boards. The frame and the world at the window's top-left, 1000 × 800; a pin where its style puts it, its
+// 20 px box above its corner (comments.css's margin).
+describe('the pin popover over the world', () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => {
+    restore?.();
+    restore = null;
+  });
+  const box = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  function fakeRects(container: HTMLElement): void {
+    const frame = container.querySelector<HTMLElement>('[data-design-comment-frame]')!;
+    const world = container.querySelector<HTMLElement>('[data-stage-surface]')!;
+    Object.defineProperty(frame, 'clientWidth', { configurable: true, get: () => 1000 });
+    Object.defineProperty(frame, 'clientHeight', { configurable: true, get: () => 800 });
+    const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this === frame || this === world) return box(0, 0, 1000, 800);
+      if (this instanceof HTMLElement && this.classList.contains('deck-comment-pin')) return box(Number.parseFloat(this.style.left) + 2, Number.parseFloat(this.style.top) - 20, 20, 20);
+      return box(0, 0, 0, 0);
+    });
+    restore = () => spy.mockRestore();
+  }
+  const settle = () => act(async () => new Promise((r) => setTimeout(r, 80)));
+  const popover = () => document.querySelector<HTMLElement>('[data-pin-popover]');
+
+  it('follows its pin through a pan and a zoom in the same render, and hides while the pin is outside the world (V6)', async () => {
+    const { doc, view, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    const pin = () => container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!;
+    fireEvent.click(pin());
+    const placed = () => [Number.parseFloat(popover()!.style.left), Number.parseFloat(popover()!.style.top)];
+    // the pin's point at (10 + 366 × 0.5, 20 + 740 × 0.5) = (193, 390); its box (195, 370, 20 × 20); the card at its left, 4 px under
+    expect(placed()).toEqual([195, 394]);
+    expect(document.activeElement).toBe(popover()!.querySelector('textarea'));
+    act(() => view.setViewport({ zoom: 0.5, x: 60, y: -100 })); // no wait: the same render
+    expect(placed()).toEqual([245, 274]);
+    act(() => view.setViewport({ zoom: 0.25, x: 60, y: -100 }));
+    expect(placed()).toEqual([60 + 366 * 0.25 + 2, -100 + 740 * 0.25 + 4]);
+    // panned until the pin is above the world's top: hidden, kept; back with it
+    act(() => view.setViewport({ zoom: 0.5, x: 10, y: -500 }));
+    expect(popover()!.style.visibility).toBe('hidden');
+    act(() => view.setViewport({ zoom: 0.5, x: 10, y: 20 }));
+    expect(popover()!.style.visibility).toBe('');
+    expect(placed()).toEqual([195, 394]);
+  });
+
+  it('a press on the empty world closes it, consumed: no pan, nothing selected (V4 on a board)', async () => {
+    const { doc, view, session, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    act(() => {
+      session.show('b1');
+      session.select(['lede']);
+    });
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!);
+    const world = container.querySelector<HTMLElement>('[data-stage-surface]')!;
+    const before = view.snapshot().viewport;
+    fireEvent.pointerDown(world, { button: 0, pointerId: 1, clientX: 990, clientY: 790 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 900, clientY: 700 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 900, clientY: 700 });
+    expect(popover()).toBeNull();
+    expect(view.snapshot().viewport).toEqual(before);
+    expect(session.snapshot().selection).toEqual(['lede']);
+    expect(document.activeElement).toBe(container.querySelector('[data-comment-pin="cta"]'));
+  });
+
+  // the review's P2: cancelling the closing press's pointerdown does not cancel the click its gesture ends in
+  it('the closing press on another board’s title selects nothing, its click included; the next click is the title’s again', async () => {
+    const { doc, view, session, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    act(() => session.show('b1'));
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!);
+    const title = container.querySelector<HTMLElement>('[data-board-title="b2"]')!;
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(title, { button: 0, pointerId: 1 });
+    fireEvent.click(title, { detail: 1 });
+    expect(popover()).toBeNull();
+    expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual([null, 'b1']);
+    await settle(); // the gesture over: its click is no longer swallowed
+    fireEvent.click(title, { detail: 1 });
+    expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual(['b2', 'b2']);
+  });
+
+  // the review's P2: the swallower takes the click a pointer made, no other, and does not outlive a gesture whose end never comes
+  it('the swallower takes a click a pointer made only: a keyboard click on the focused pin, before the pointer’s end, still acts', async () => {
+    const { doc, session, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    act(() => session.show('b1'));
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    const pin = () => container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!;
+    const title = container.querySelector<HTMLElement>('[data-board-title="b2"]')!;
+    fireEvent.click(pin(), { detail: 1 });
+    // (a) the consumed press closes the popover and puts the keyboard on the pin; Enter on it, before the pointer's end, still acts
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
+    expect(popover()).toBeNull();
+    expect(document.activeElement).toBe(pin());
+    fireEvent.click(pin(), { detail: 0 });
+    expect(popover()).not.toBeNull();
+  });
+
+  it('a pointer whose end never arrives: the next press anywhere removes the swallower, so a later real click is the title’s', async () => {
+    const { doc, view, session, container } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'Bigger?' }, 'deck-comments');
+    act(() => session.show('b1'));
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    const title = container.querySelector<HTMLElement>('[data-board-title="b2"]')!;
+    fireEvent.click(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!, { detail: 1 });
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 }); // consumed; no pointerup, no pointercancel, no click
+    expect(popover()).toBeNull();
+    fireEvent.pointerDown(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!, { button: 0, pointerId: 2 }); // the next press, anywhere (the title's own selects on a press): the swallower goes with it
+    fireEvent.click(title, { detail: 1 });
+    expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual(['b2', 'b2']);
+  });
+
+  it('a board’s own pin opens its popover; the rail’s Show of a board’s thread does too (V11)', async () => {
+    const { doc, container } = mount();
+    addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1, body: 'Wider?' }, 'deck-comments');
+    fakeRects(container);
+    await settle();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-board-pin="b2"]')!);
+    expect(screen.getByRole('dialog', { name: 'Comments on “Desktop”' })).toBeTruthy();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-board-pin="b2"]')!);
+    expect(popover()).toBeNull();
+    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    await settle();
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Comments' })).getByRole('button', { name: 'Show board: Desktop' }));
+    expect(popover()!.querySelector('[data-thread="tb"]')!.getAttribute('aria-current')).toBe('true');
+  });
+
+  // the review's P2: a popover's pin merged into a count would leave the popover nowhere to stand
+  it('the open popover’s pin is never merged: a zoom-out while open, and the rail’s Show of a merged pin’s thread', async () => {
+    const { doc, view, container } = mount();
+    addThread(doc, { threadId: 'a', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'One' }, 'deck-comments');
+    addThread(doc, { threadId: 'b', slideId: 'b1', elementId: 'cta2', quote: 'Also', by: { kind: 'human' }, at: 2, body: 'Two' }, 'deck-comments');
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!);
+    act(() => view.setViewport({ zoom: 0.25, x: 10, y: 20 })); // 25 px apart: they would merge
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')).toBeNull();
+    expect(container.querySelectorAll('[data-comment-pin="cta"], [data-comment-pin="cta2"]')).toHaveLength(2); // the other a pin of its own
+    expect(popover()!.style.visibility).toBe('');
+    // closed, the keyboard off its pin: they merge; the rail's Show of one's thread opens its popover on its own pin
+    fireEvent.keyDown(popover()!.querySelector('textarea')!, { key: 'Escape' });
+    await settle();
+    act(() => (container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!.blur()));
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')).not.toBeNull();
+    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    await settle();
+    fireEvent.click(screen.getByRole('complementary', { name: 'Comments' }).querySelector<HTMLElement>('article[data-thread="b"] .deck-thread-quote')!);
+    await settle();
+    expect(container.querySelector('[data-comment-pin="cta2"]')).not.toBeNull();
+    expect(popover()!.querySelector('[data-thread="b"]')!.getAttribute('aria-current')).toBe('true');
+    expect(popover()!.style.visibility).toBe('');
+  });
+
+  // the review's P2: closing focuses the pin, and merging it into a count the next render would drop the keyboard on the body
+  it('a closed popover’s pin stays alone while it holds the keyboard, and merges once the keyboard leaves it or never reached it', async () => {
+    const { doc, view, container } = mount();
+    addThread(doc, { threadId: 'a', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'One' }, 'deck-comments');
+    addThread(doc, { threadId: 'b', slideId: 'b1', elementId: 'cta2', quote: 'Also', by: { kind: 'human' }, at: 2, body: 'Two' }, 'deck-comments');
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    const pin = () => container.querySelector<HTMLElement>('[data-comment-pin="cta"]');
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    fireEvent.click(pin()!, { detail: 1 });
+    act(() => view.setViewport({ zoom: 0.25, x: 10, y: 20 })); // 25 px apart: they would merge
+    await settle();
+    fireEvent.keyDown(popover()!.querySelector('textarea')!, { key: 'Escape' });
+    await settle();
+    expect(popover()).toBeNull();
+    expect(container.querySelector('[data-pin-cluster]')).toBeNull(); // the pin stays, alone, with the keyboard on it
+    expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(2);
+    expect(document.activeElement).toBe(pin());
+    act(() => elsewhere.focus());
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')!.textContent).toBe('2');
+    expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(0);
+    // the keyboard never reached the pin (a press outside the frame closes): nothing to hold, so they merge at once
+    act(() => view.setViewport({ zoom: 0.5, x: 10, y: 20 }));
+    await settle();
+    fireEvent.click(pin()!, { detail: 1 });
+    act(() => view.setViewport({ zoom: 0.25, x: 10, y: 20 }));
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')).toBeNull();
+    fireEvent.pointerDown(elsewhere, { button: 0, pointerId: 1 });
+    await settle();
+    expect(popover()).toBeNull();
+    expect(container.querySelector('[data-pin-cluster]')).not.toBeNull();
+    elsewhere.remove();
+  });
+
+  it('pins under 32 screen px apart merge into one count at their centroid; its press fits them, and they part (V15)', async () => {
+    const { doc, view, container } = mount();
+    addThread(doc, { threadId: 'a', slideId: 'b1', elementId: 'cta', quote: '', by: { kind: 'human' }, at: 1, body: 'One' }, 'deck-comments');
+    addThread(doc, { threadId: 'b', slideId: 'b1', elementId: 'cta2', quote: '', by: { kind: 'human' }, at: 2, body: 'Two' }, 'deck-comments');
+    addThread(doc, { threadId: 'c', slideId: 'b1', elementId: 'cta2', quote: '', by: { kind: 'human' }, at: 3, body: 'Three' }, 'deck-comments');
+    fakeLayout(container, 'b1');
+    await settle();
+    // at 0.5 the two corners are (24 + 342) × 0.5 apart in x by 0 and 100 × 0.5 = 50 px in y: two pins
+    expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(2);
+    expect(container.querySelector('[data-pin-cluster]')).toBeNull();
+    act(() => view.setViewport({ zoom: 0.25, x: 10, y: 20 })); // 25 px apart: one
+    await settle();
+    expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(0);
+    const cluster = container.querySelector<HTMLElement>('[data-pin-cluster]')!;
+    expect(cluster.textContent).toBe('3'); // the threads they hold
+    expect(cluster.getAttribute('aria-label')).toBe('3 comments here; zoom to them');
+    expect([Number.parseFloat(cluster.style.left), Number.parseFloat(cluster.style.top)]).toEqual([10 + 366 * 0.25, 20 + ((740 + 640) / 2) * 0.25]);
+    fireEvent.click(cluster);
+    const v = view.snapshot().viewport!;
+    expect(v.zoom).toBeGreaterThan(0.5); // fitted to the two elements
+    await settle();
+    expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(2);
   });
 });
