@@ -204,16 +204,18 @@ function diskRecords(run,sessionId){
 // The owner's sessions run at xhigh (their user settings); a probe passes `--effort high`, the doperpowers evals' level,
 // since MAWS passes none and the scratch config home has no owner settings.
 export const EFFORT='high';
+// Read at load: the first launch clears this process's environment to the engine's base keys (p1-common), so a read in
+// `arm` would honour the override for the first arm only.
+const MODEL=process.env.R7_MODEL||'claude-opus-5-5';
 
 // One launch and turn; answers the main loop's exchanges as recorded (the eval reads them, p4-r7-eval.mjs).
 export async function arm(name,{run,appended,tools,prompt,question,allowed=[],dir='fixtures/p4/'}){
  const maws=new MawsServer(tools);
  const exchanges=[];
  const {server,port}=await startRecorder(x=>exchanges.push(x));
- const model=process.env.R7_MODEL||'claude-opus-5-5';
  let recorded=null;
  try{
-  await launch(name,run,{model,dir,spendCap:'1.00',vars:{ANTHROPIC_BASE_URL:`http://127.0.0.1:${port}`},flags:['--effort',EFFORT,'--disallowedTools','AskUserQuestion',...(allowed.length?['--allowedTools',...allowed]:[]),'--append-system-prompt',appended.text],provenance:{...PROVENANCE,question,prompt,effort:EFFORT,allowed,appended:{version:appended.version,header:appended.text.split('\n')[0]},recorder:'between the engine and the relay (127.0.0.1:8641)'}},async(p,{sessionId})=>{
+  await launch(name,run,{model:MODEL,dir,spendCap:'1.00',vars:{ANTHROPIC_BASE_URL:`http://127.0.0.1:${port}`},flags:['--effort',EFFORT,'--disallowedTools','AskUserQuestion',...(allowed.length?['--allowedTools',...allowed]:[]),'--append-system-prompt',appended.text],provenance:{...PROVENANCE,question,prompt,effort:EFFORT,allowed,appended:{version:appended.version,header:appended.text.split('\n')[0]},recorder:'between the engine and the relay (127.0.0.1:8641)'}},async(p,{sessionId})=>{
    p.serve('maws',maws);
    p.on('can_use_tool',r=>{p.note({event:'permission_asked',tool:r.tool_name,tool_use_id:r.tool_use_id??null});return {behavior:'allow',updatedInput:r.input};});
    success(await p.init({...initPayload(run.cwd),sdkMcpServers:['maws']}),'initialize');
