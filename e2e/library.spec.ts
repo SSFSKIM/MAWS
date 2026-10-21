@@ -236,6 +236,23 @@ function rewindIndexTo9(path: string): void {
   }
 }
 
+// P4-W2L (the owner's sitting candidates 4 and 7; P4 Decision Log 4, English throughout): on the owner's Korean app
+// locale the library still reads English, "Edited now by You" under Today, never "Edited 지금 by You".
+test('on a Korean app locale the library’s ages and date group read English', async () => {
+  test.setTimeout(60_000);
+  launch = await launchMaws({ lang: 'ko-KR' });
+  const { page } = launch;
+  expect(await page.evaluate(() => new Intl.DateTimeFormat().resolvedOptions().locale)).toMatch(/^ko/);
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  await ok(page, 'artifacts.create', { kind: 'document', title: 'Launch plan' });
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  const library = page.locator('[data-library]');
+  const row = library.getByRole('article', { name: 'Launch plan', exact: true });
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await expect(row).toContainText(/Edited (now|\d+ minutes? ago) by You/);
+  expect(await library.getByRole('heading', { level: 2 }).allTextContents()).toEqual(['Make something new', 'Today']);
+});
+
 test('an index at version 9 beside a populated host store migrates to 10 at launch, and the first connection’s snapshot fills the library', async () => {
   test.setTimeout(120_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-upgrade-'));

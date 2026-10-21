@@ -123,7 +123,7 @@ test('usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing
     await expect(popover).toBeVisible();
     await expect(page.locator('[data-region="main"]').getByRole('tab', { name: /Accounts/ })).toHaveCount(0);
     await expect(popover.getByRole('heading', { name: 'Claude Usage' })).toBeVisible();
-    await expect(popover.getByText(/^updated (\dm ago|\d분 전)$/)).toBeVisible(); // the system locale's compact age (D2 widened)
+    await expect(popover.getByText(/^updated \dm ago$/)).toBeVisible(); // the compact age, in English (P4 Decision Log 4)
     await expect(popover.getByText('Usage includes all machines. Activity below is from this Mac.')).toBeVisible();
     const cards = popover.locator('[data-account]:not([data-codex] [data-account])');
     await expect(cards).toHaveCount(5);

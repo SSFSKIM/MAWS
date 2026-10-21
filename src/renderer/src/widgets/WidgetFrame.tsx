@@ -11,7 +11,7 @@
 // the button). Load now and Refresh are the owner's gesture that starts the engine; opening the frame starts nothing.
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { useNow } from '../app/use-now';
 import type { WidgetSize } from '../composer/WidgetDialog'; // P2-B (2026-10-09)
 import { useComposerStore } from '../stores/composer';

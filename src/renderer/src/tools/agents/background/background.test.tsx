@@ -765,7 +765,7 @@ describe('scheduled jobs', () => {
   const callOf = (prompt: string) => CRON.find((e) => e.kind === 'tool.use' && e.toolName === 'CronCreate' && (e.input as { prompt?: string }).prompt === prompt) as Extract<SessionEvent, { kind: 'tool.use' }>;
   const ONE_SHOT = callOf('E7 one-shot');
   const next = (cron: string, from: number) => nextCronMatch(parseCron(cron)!, from)!;
-  const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+  const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
 
   const scheduled = () =>
     Array.from(section('scheduled')?.querySelectorAll<HTMLElement>('[data-scheduled]') ?? []).map((row) => ({
@@ -804,7 +804,7 @@ describe('scheduled jobs', () => {
       { id: '8d1a2582', schedule: '15 4 6 10 *', kind: 'one-shot · session-only', prompt: 'E7 one-shot', link: 'Open creating turn' },
     ]);
     const tick = next('*/2 * * * *', now);
-    expect(rows[1]!.when).toBe(`Next ≈ ${TIME.format(tick)} (${formatIn(tick - now)}) · Expires ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(Date.parse(callOf('E7 cron tick').at) + RECURRING_MAX_AGE_MS)}`);
+    expect(rows[1]!.when).toBe(`Next ≈ ${TIME.format(tick)} (${formatIn(tick - now)}) · Expires ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(Date.parse(callOf('E7 cron tick').at) + RECURRING_MAX_AGE_MS)}`);
     const fire = next('15 4 6 10 *', Date.parse(ONE_SHOT.at));
     expect(rows[2]!.when).toContain(`(${formatIn(fire - now)})`); // a one-shot: its one fire, no expiry
     expect(rows[2]!.when).not.toContain('Expires');

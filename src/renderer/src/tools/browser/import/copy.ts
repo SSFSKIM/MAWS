@@ -5,7 +5,7 @@
 import type { CookieSkipReason, ExtensionCandidate, HistorySkipReason, ImportedExtension, ImportPhase, ImportReport, KeychainOutcome } from '@shared/browser/import';
 import { extensionBackgroundFailure } from '@shared/browser/extensions';
 import { summaryWords } from '@shared/browser/import-summary';
-import { formatDate } from '../../../app/date-format';
+import { formatDate } from '@shared/app/date-format';
 
 const count = (n: number): string => n.toLocaleString('en-US');
 const plural = (n: number, one: string, many = `${one}s`): string => `${count(n)} ${n === 1 ? one : many}`;

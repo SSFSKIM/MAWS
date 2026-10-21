@@ -8,7 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { Fact, ObservedFactsAnswer, ObservedPlugin, ObservedPluginError, ObservedPluginWarning } from '@shared/engine/observed-facts';
 import type { AppSessionId } from '@shared/graph/ids';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { ipc } from '../ipc/client';
 import { IpcCommandError } from '../ipc/query';
 import type { AcquireOutcome } from '@shared/sessions/setup';

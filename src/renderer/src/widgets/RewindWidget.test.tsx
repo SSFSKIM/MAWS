@@ -48,6 +48,8 @@ describe('the rewind picker', () => {
   it('lists the session’s messages newest first, the newest chosen, and rewinds the conversation with the newest seen: the composer holds the engine’s prefillText', async () => {
     const close = mount();
     expect(messages().map((m) => m.querySelector('.truncate')?.textContent)).toEqual(['second prompt', 'first prompt']); // the first line
+    // each message's time in English under the Korean system locale the suite runs in (P4 Decision Log 4)
+    expect(messages()[0].querySelector('.shrink-0')?.textContent).toMatch(/^\d{1,2}:\d{2}\s[AP]M$/);
     expect(messages()[0].getAttribute('aria-checked')).toBe('true');
     fireEvent.click(messages()[1]);
     expect(option('Conversation').getAttribute('aria-checked')).toBe('true');

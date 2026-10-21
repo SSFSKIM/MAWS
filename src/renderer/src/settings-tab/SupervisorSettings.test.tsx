@@ -13,12 +13,12 @@ import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { EngineSection } from './EngineSection';
 import { SupervisorSettings } from './SupervisorSettings';
-import { formatClock } from '../app/date-format';
+import { formatClock } from '@shared/app/date-format';
 
 vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn() }));
 
 const STARTED = new Date(2026, 9, 6, 14, 2).toISOString();
-const CLOCK = formatClock(Date.parse(STARTED)); // L129: the system locale's clock
+const CLOCK = formatClock(Date.parse(STARTED)); // L129: the display locale's clock
 const supervisor = (over: Partial<SupervisorStatus> = {}): SupervisorStatus => ({
   mode: 'detached',
   pid: 48213,

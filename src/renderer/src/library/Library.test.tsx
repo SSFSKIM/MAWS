@@ -9,7 +9,6 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
-import { formatAgo } from '../app/date-format';
 import { registerArtifactEditor, resetArtifactEditors } from '../artifacts/registry';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
@@ -274,13 +273,13 @@ describe('a row', () => {
     expect(within(launch).getByText('Document')).toBeTruthy();
     expect(within(launch).getByRole('button', { name: 'Work' })).toBeTruthy();
     expect(within(launch).getByText('maws')).toBeTruthy();
-    expect(within(launch).getByText(`Edited ${formatAgo(3 * 60_000)} by Session 1`)).toBeTruthy();
+    expect(within(launch).getByText('Edited 3 minutes ago by Session 1')).toBeTruthy(); // English under the Korean system locale (P4 DL 4)
     const chips = within(launch).getAllByRole('button', { name: /^Session \d/ });
     expect(chips.map((c) => c.textContent)).toEqual(['Session 1', 'Session 2', 'Session 3']);
     expect(chips[0].getAttribute('title')).toMatch(/^Session 1: created, edited, /);
     expect(within(launch).getByText('+1').getAttribute('title')).toContain('Session 4');
     expect(within(article('Mine')).getByText('HTML page')).toBeTruthy();
-    expect(within(article('Mine')).getByText(/Edited .* by You/)).toBeTruthy();
+    expect(within(article('Mine')).getByText('Edited 2 hours ago by You')).toBeTruthy();
     expect(within(article('Unknown session')).getByText(/by Claude$/)).toBeTruthy();
     expect(within(article('Unlinked editor')).getByText(/by Side quest$/)).toBeTruthy();
     expect(within(article('Unknown session')).getByRole('button', { name: 'Untitled session' })).toBeTruthy();
