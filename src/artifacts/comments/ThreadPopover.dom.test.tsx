@@ -103,6 +103,17 @@ describe('the popover’s threads', () => {
     expect(card('t3').getAttribute('aria-current')).toBe('true');
   });
 
+  it('the thread that took a resolved one’s place stays active when an agent then adds a thread, its reply draft kept', () => {
+    const view = render(<Host threads={[thread('t1', 1), thread('t2', 10)]} initial="t2" />);
+    view.rerender(<Host threads={[thread('t1', 1)]} initial="t2" />);
+    expect(card('t1').getAttribute('aria-current')).toBe('true');
+    fireEvent.change(field('t1'), { target: { value: 'Half a reply' } });
+    view.rerender(<Host threads={[thread('t1', 1), thread('t3', 30)]} initial="t2" />);
+    expect(card('t1').getAttribute('aria-current')).toBe('true');
+    expect(card('t3').hasAttribute('aria-current')).toBe(false);
+    expect((field('t1') as HTMLTextAreaElement).value).toBe('Half a reply');
+  });
+
   it('E on the active card resolves it; the keyboard goes to the thread that takes its place', () => {
     function Resolving() {
       const [threads, setThreads] = useState([thread('t1', 1), thread('t2', 10)]);

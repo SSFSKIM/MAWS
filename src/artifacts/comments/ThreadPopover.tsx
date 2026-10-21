@@ -41,8 +41,10 @@ export function ThreadPopover({ threads, initial = null, placement, hidden = fal
   const root = useRef<HTMLDivElement | null>(null);
   const newest = threads.at(-1)?.id ?? null;
   const [chosen, setChosen] = useState<string | null>(() => (initial !== null && threads.some((t) => t.id === initial) ? initial : newest));
-  // the human's choice while it is listed; a thread resolved away gives way to the newest
+  // the human's choice while it is listed; a thread resolved away gives way to the newest, which becomes the choice, so
+  // a thread an agent adds next leaves it active
   const active = chosen !== null && threads.some((t) => t.id === chosen) ? chosen : newest;
+  if (active !== chosen) setChosen(active);
   const shown = placement !== null && !hidden;
 
   // the keyboard: to the active card's reply field the first time the popover shows (else to the card); to a card J or K
