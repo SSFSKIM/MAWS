@@ -15,9 +15,11 @@ import { loadSlide } from '@artifacts/slides/parse';
 import type { SlideIR } from '@artifacts/slides/ir';
 import { setDeckOverride } from '@artifacts/slides/writers';
 import { deckScalars } from '@artifacts/yjs/slides';
-import { onUpdate } from '@artifacts/yjs';
 import type { DeckTimings } from '@artifacts/slides/editor/session';
+import { summarizeDrag, type DragRecord, type DragStats, type RemoteApply } from './drag-stats';
 import { openDeckTabs } from './tab-state';
+
+export type { DragStats } from './drag-stats';
 
 export type DeckSeamEdit =
   | { op: 'setStyle'; slideId: string; elementId: string; props: Record<string, string | null> }
@@ -29,15 +31,6 @@ export type DeckSeamEdit =
   // fix wave 1: attributes as another replica sets them (a picture's crop)
   | { op: 'setAttrs'; slideId: string; elementId: string; attrs: Record<string, string | null> };
 
-/** Per-move times of a drag (ms): pointer move → the editor's transaction → the next frame (S7b's measure). */
-export interface DragStats {
-  moves: number;
-  withTransaction: number;
-  inputToTxMs: { p50: number; p95: number; max: number };
-  inputToFrameMs: { p50: number; p95: number; max: number };
-  longTasks: number;
-}
-
 export interface PresentationsSeam {
   /** Publishes `files` onto the deck (forced), removing its other slides; answers once the host has them. */
   seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>;
@@ -48,8 +41,12 @@ export interface PresentationsSeam {
   order(artifactId: string): Promise<string[]>;
   /** The open tabs showing the deck, with their timings (ms on the page's clock). */
   timings(artifactId: string): { surface: string; timings: DeckTimings }[];
-  /** M5: measures the drags on the deck's open tab from now until `stop`. */
-  dragProbe: { start(artifactId: string): void; stop(): DragStats };
+  /**
+   * M5: measures one drag on the deck's open tab from now until `stop`; P4-B2 M0: each move's queue, handler and paint,
+   * and the remote applies beside them (`drag-stats.ts`). `remotes` answers how many updates of other origins the tab's
+   * replica has applied since `start`.
+   */
+  dragProbe: { start(artifactId: string): void; remotes(): number; stop(): DragStats };
   /** Fix wave 1: another replica selecting elements (its awareness), until cleared. */
   presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
   /** M5: an agent republishing one slide every `intervalMs` (the second slide on), until stopped; answers how many. */
@@ -128,53 +125,76 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
   };
 }
 
-const stats = (xs: number[]) => {
-  const s = [...xs].sort((a, b) => a - b);
-  const at = (q: number) => (s.length ? Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))]! * 10) / 10 : 0);
-  return { p50: at(0.5), p95: at(0.95), max: s.length ? Math.round(s[s.length - 1]! * 10) / 10 : 0 };
-};
-
-// S7b's drag measure (spikes/p3-store/s7/electron/deck-page.ts): each pointer move while a button is down, the editor's
-// transaction it caused (the replica's update with the session's origin), and the animation frame after it.
+// S7b's drag measure (spikes/p3-store/s7/electron/deck-page.ts), split by P4-B2 M0 (`drag-stats.ts`): each pointer move
+// while a button is down, when its first listener ran (the probe's, capturing on the window, so before the editor's on
+// its overlay), the editor's transaction it caused (the replica's update with the session's origin) and the animation
+// frame after it; beside them each update of another origin (an agent's publish reaching the tab through the host) with
+// its transaction's start, its next frame and the frame after that, and the drop. One drag per probe: a move after the
+// drop, or a write of the session's after it (the gesture's end), is no move's.
 function dragProbe(win: Window): PresentationsSeam['dragProbe'] {
-  let stop: (() => DragStats) | null = null;
+  let running: { record: DragRecord; end(): void } | null = null;
   return {
     start(artifactId) {
-      stop?.();
+      running?.end();
+      running = null;
       const session = openDeckTabs().find((tab) => tab.artifactId === artifactId && tab.snapshot().session)?.snapshot().session;
       if (!session) throw new Error(`no open tab shows ${artifactId}`);
-      const moves: { tIn: number; tTx?: number; tFrame?: number }[] = [];
-      let longTasks = 0;
-      const observer = new PerformanceObserver((list) => (longTasks += list.getEntries().length));
+      const record: DragRecord = { moves: [], remotes: [], longTasks: 0 };
+      const now = () => win.performance.now();
+      const nextFrame = (then: (at: number) => void) => win.requestAnimationFrame(() => then(now()));
+      const observer = new PerformanceObserver((list) => (record.longTasks += list.getEntries().length));
       observer.observe({ type: 'longtask' });
       const onMove = (e: PointerEvent) => {
-        if (e.buttons) moves.push({ tIn: e.timeStamp });
+        if (e.buttons && record.drop === undefined) record.moves.push({ tIn: e.timeStamp, tDispatch: now() });
       };
-      win.document.addEventListener('pointermove', onMove, true);
-      const off = onUpdate(session.doc, (_update, origin) => {
-        const m = moves[moves.length - 1];
-        if (origin !== session.origin || !m || m.tTx !== undefined) return;
-        m.tTx = win.performance.now();
-        win.requestAnimationFrame(() => (m.tFrame = win.performance.now()));
-      });
-      stop = () => {
-        win.document.removeEventListener('pointermove', onMove, true);
-        off();
-        observer.disconnect();
-        stop = null;
-        const tx = moves.filter((m) => m.tTx !== undefined);
-        return {
-          moves: moves.length,
-          withTransaction: tx.length,
-          inputToTxMs: stats(tx.map((m) => m.tTx! - m.tIn)),
-          inputToFrameMs: stats(tx.filter((m) => m.tFrame !== undefined).map((m) => m.tFrame! - m.tIn)),
-          longTasks,
-        };
+      const onUp = (e: PointerEvent) => {
+        if (record.moves.length > 0 && record.drop === undefined) record.drop = { tIn: e.timeStamp, tDispatch: now() };
+      };
+      const begun = new WeakMap<object, number>();
+      const onBefore = (tr: { origin: unknown }) => {
+        if (tr.origin !== session.origin) begun.set(tr, now());
+      };
+      const onApplied = (_update: Uint8Array, origin: unknown, _doc: unknown, tr: object) => {
+        const at = now();
+        if (origin !== session.origin) {
+          const remote: RemoteApply = { tStart: begun.get(tr) ?? at, tEnd: at };
+          record.remotes.push(remote);
+          nextFrame((frame) => {
+            remote.tFrame = frame;
+            nextFrame((after) => (remote.tFrameEnd = after));
+          });
+          return;
+        }
+        const m = record.moves[record.moves.length - 1];
+        if (record.drop !== undefined || !m || m.tTx !== undefined) return;
+        m.tTx = at;
+        nextFrame((frame) => (m.tFrame = frame));
+      };
+      win.addEventListener('pointermove', onMove, true);
+      win.addEventListener('pointerup', onUp, true);
+      session.doc.on('beforeTransaction', onBefore);
+      session.doc.on('update', onApplied);
+      running = {
+        record,
+        end() {
+          win.removeEventListener('pointermove', onMove, true);
+          win.removeEventListener('pointerup', onUp, true);
+          session.doc.off('beforeTransaction', onBefore);
+          session.doc.off('update', onApplied);
+          observer.disconnect();
+        },
       };
     },
+    remotes: () => {
+      if (!running) throw new Error('the drag probe is not running');
+      return running.record.remotes.length;
+    },
     stop: () => {
-      if (!stop) throw new Error('the drag probe is not running');
-      return stop();
+      if (!running) throw new Error('the drag probe is not running');
+      const { record, end } = running;
+      running = null;
+      end();
+      return summarizeDrag(record);
     },
   };
 }
