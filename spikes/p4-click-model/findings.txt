@@ -1,4 +1,4 @@
-P4-B2's spike S-IME: findings. Phase 1 (everything that needs no GUI), 2026-10-19; the first GUI hold, 2026-10-20
+P4-B2's spike S-IME: findings. Phase 1 (everything that needs no GUI), 2026-10-19; the first GUI hold, 2026-10-20; closed 2026-10-21
 (§4: L8 passed, Q3 on the real Mac; the L0 gate failed, the relay route's keys never reaching the input method).
 
 Spec: docs/doperpowers/plans/2026-10-19-p4-smoothing.md, child P4-B2 (the spike half), parent pin blob
@@ -269,3 +269,50 @@ What a second hold needs: keys that reach the input method.
       posts at the HID level, so this needs the same r, k gate first.
   Whatever the route, L8 need not run again; run L0 (the gate), then L1 to L7, then the mode `select` comparison for
       L1, L2 and L4.
+
+
+5. THE SPIKE'S CLOSE (2026-10-21)
+
+The owner's ruling (2026-10-21, about 17:35Z, relayed by the architect): "skip L0–L7, LC-2 and LC-3 now". No real-Mac
+Hangul run by the owner's hands, and no Slides or Canva live check. The spike closes on what exists.
+
+The IME verdict: intact under simulation, the real input method unverified.
+  - Intact under simulation: I1 to I5 over CDP (e2e/presentations-ime.spec.ts) pass in both modes on Electron 44.4.5 and
+    Chromium 152; the L1 replay runs on the synthetic trace e2e/fixtures/ime/l1-hangul.json (source cdp-synthetic). The
+    armed box is focused with its caret hidden before the first key on the real Mac (L8's first press, §4).
+  - Unverified: the first syllable through the real 2-Set input method (L1 to L7 not run, by the owner's ruling; the
+    relay route's keys never reach the input method, §4). It is a residue row: the decks round of P4-L, or cua's
+    HID-level composition probe in its own mini hold, covers real typing.
+  - Q2's clear stands as the platform orders it (§1, Q2); the input method's view of a cleared document is unverified
+    with Q1.
+  - Q3: answered on the real Mac (L8, §4).
+
+What stands for the plan
+  - The armed arrangement and T11 (the clear on the first keyCode-229 keydown) as §4.4 binds them. The plan arms in mode
+    `clear` (§4.4's words: the key clears the content), the marks of a text that is one marked run carried as stored
+    marks; Decision Log 24's ruling (2) had a marked run fall back to mode `select` if L2 failed live, and with L2 not run
+    the plan keeps one mode and names the switch (a uniformly marked run arms in `select`) as the residue row's remedy.
+    Both modes reach ProseMirror's own `compositionstart` path that re-renders the selection (endComposition with
+    `restarting`: over a selection in `select`, with stored marks in `clear`), the path every ProseMirror editor takes
+    for a composition over a selection or after ⌘B.
+  - T10 as §4.4 writes it (the architect's ruling at LC-2, below): a printable key on ARMED clears and inserts, one
+    transition the plan keeps swappable.
+  - The fixture stays cdp-synthetic; the acceptance's replay reads I2 replaying it (Decision Log 24's ruling 4).
+
+LC-2 (the owner's correction, relayed 2026-10-21: L0 to L7 stay skipped and LC-2 runs; run 17:35Z to 17:41Z, its record in
+lc2-steps.txt's Results): Google Slides appends a printable key typed on an object-selected text box at the end of its
+text and enters editing, it does not replace; the first syllable there could not be measured through cua, whose keys
+skip the input method's composition on the MacBook too (the control in Chrome's address bar gave ㅎㅏㄴ); Canva was not run,
+the profile being signed out of Canva. The architect's ruling (2026-10-21, at LC-2's acceptance): T10 stays as §4.4
+writes it, a printable key on ARMED clears and inserts. "Typing replaces" is a design item the owner approved and the
+rule of PowerPoint and Keynote; Slides' append at the end is one host's divergence, recorded here with research check
+1's evidence (Slides' first click on a box's text gives a caret, so Slides has no object-selected state reached by one
+click on text, and a key from the object selection Escape reaches goes to the text's end). The owner is asked, without
+blocking the plan, whether Canva is to be read or Slides followed; so T10 is one transition, swappable without touching
+the others. H (the first syllable on an object-selected box) is not measurable through cua on either Mac: on the
+MacBook its posted keys carry 2-Set's jamo uncomposed, on the mini they carry ASCII. It joins the residue row of the
+real input method unverified. The two Drive items stay until the owner answers.
+
+What is throwaway now: the live harness's role as the proof
+route; e2e/presentations-ime-live.spec.ts and cua-live.js stay for whoever runs real typing later (the decks round, or
+cua's probe once it composes).

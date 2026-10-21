@@ -66,5 +66,24 @@ D2. Drive: right-click "MAWS UX check" › Move to trash; then Trash › the fol
 D3. Check nothing was shared: Drive's "Shared" column and Canva's sharing state of the design both untouched (no share
     dialog was opened in this run). Close the tabs the run opened.
 
-Results
-(not run yet)
+Results (2026-10-21, 17:35Z to 17:41Z, on the owner's go relayed by the architect; screenshots in lc2/, cropped below the
+browser's chrome)
+- Route as written: navigation and the setup through the Playwright extension on the profile `main` (Default,
+  supremekim17@gmail.com); every press on the box and every key through cua's local cua_repl (Google Chrome).
+- Google Slides (the Korean UI), the text box "Hello" in the presentation "LC-2 typing":
+  - Check 1: a first click on an unselected box's text gives a caret at the click (the DOM's `docs-text-ui-cursor-blink`
+    rect at the click's x; s3-first-click-on-text.jpg). Escape then leaves the object selected, the text ruler gone
+    (s3-object-selected.jpg).
+  - P: a printable key on the object-selected box enters editing and appends at the end of the text; it does not
+    replace (s4: the key landed after "Hello", though the first click's caret had been between "He" and "llo"). The key
+    arrived as the 2-Set layout's ㅌ (see the next point), a plain text insertion, so it reads as any printable key.
+  - H: not measurable through cua. g k s r m f on the object-selected box gave "Helloㅎㅏㄴㄱㅡㄹ" (s5), and the control,
+    the same keys in Chrome's address bar, gave "ㅎㅏㄴ": cua's local keys carry the current layout's characters and skip
+    the input method's composition (on the mini they carried ASCII, findings §4). The breakage is cua's, not Slides'.
+- Canva: not run. canva.com in the profile `main` was signed out (a cookie dialog and the signed-out page) and opened a
+  Google account-chooser tab for Canva's OAuth (`prompt=consent`); a sign-in is the owner's, so nothing was made there
+  and both tabs were closed.
+- Made, nothing deleted: the Drive folder "MAWS UX check" in My Drive (id 1gcMqtz7EQVFBoG6Mq03MUquGwhHr-gph) and in it the
+  Google Slides presentation "LC-2 typing" (id 1bVhs9SKEaa18EpEc8KipwMdXjgzSW2EtCXT7gSay-0k: the blank title layout and
+  one text box reading "Hello", the typed tests undone). Nothing shared. The input source read ABC at 17:35:14Z and 2-Set
+  at 17:38:46Z, a change this run did not make; left as found.
