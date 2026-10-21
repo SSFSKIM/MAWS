@@ -176,6 +176,14 @@ test('--affected names the change in the subject and lists its paths, a rename w
   assert.match(kept.summary, /\nSelection: affected — 3 paths, unit runs vitest related\n$/);
 });
 
+test('--affected on master\'s own tree pushes an affected subject and a zero count, with no path trailers', () => {
+  const result = gate(['--gates', 'unit', '--affected'], { base: files, change: () => {} });
+  assert.equal(result.status, 1, result.stdout + result.stderr); // the fake gh finds no run
+  assert.match(result.stdout, /^ci-gate: --affected: 0 paths from the merge base [0-9a-f]{8} with origin\/master$/m);
+  assert.match(result.message, /^ci-gate: [0-9a-f]{8} affected\n\n/);
+  assert.deepEqual(trailers(result.message), ['Gates: unit', 'Selection: affected', 'Affected-Count: 0']);
+});
+
 test('--affected above its bound counts the paths and lists none; without the flag nothing about them is pushed', () => {
   const many = gate(['--gates', 'unit', '--affected'], {
     base: files,

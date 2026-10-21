@@ -199,7 +199,7 @@ trailers="Nonce: $(date +%s)-$$"
 [[ -n $live ]] && trailers+=$'\n'"Live: $live"
 if [[ -n $affected ]]; then
   trailers+=$'\n'"Selection: affected"$'\n'"Affected-Count: ${#affected_lines[@]}"
-  if ((${#affected_lines[@]} <= AFFECTED_BOUND)); then for line in "${affected_lines[@]}"; do trailers+=$'\n'"Affected: $line"; done; fi
+  if ((${#affected_lines[@]} > 0 && ${#affected_lines[@]} <= AFFECTED_BOUND)); then for line in "${affected_lines[@]}"; do trailers+=$'\n'"Affected: $line"; done; fi
 fi
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short${affected:+ affected}" -m "$trailers") || exit 1
 
