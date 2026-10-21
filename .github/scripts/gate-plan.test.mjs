@@ -421,13 +421,13 @@ test('on the pool the whole unit suite runs in shards; related mode and the othe
   assert.deepEqual(shards({ HEAD_MESSAGE: selected(['M\tpnpm-lock.yaml']) }), sharded);
 });
 
-test("gate.yml runs the unit job over the plan's shards: its name, its --shard and its artifact's name", () => {
+test("gate.yml runs the unit job over the plan's shards: its name, its --shard (beside the module cache) and its artifact's name", () => {
   const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
   assert.match(workflow, /\n {6}unit_shards: \$\{\{ steps\.plan\.outputs\.unit_shards \}\}\n/);
   const body = /\n {2}unit:\n((?: {4}.*\n|\n)*?)(?= {2}\S|$)/.exec(workflow)[1];
   assert.match(body, /^ {4}name: \$\{\{ matrix\.shard && format\('unit \{0\}', matrix\.shard\) \|\| 'unit' \}\}\n/);
   assert.match(body, /\n {8}include: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_shards\) \}\}\n/);
   assert.match(body, /\n {10}SHARD: \$\{\{ matrix\.shard \}\}\n/);
-  assert.match(body, /pnpm test --maxWorkers="\$cores" \$\{SHARD:\+--shard="\$SHARD"\}\n/);
+  assert.match(body, /pnpm test --maxWorkers="\$cores" --fsModuleCache \$\{SHARD:\+--shard="\$SHARD"\}\n/);
   assert.match(body, /\n {10}name: test-results-unit\$\{\{ matrix\.slug \}\}-\$\{\{ github\.run_attempt \}\}\n/);
 });
