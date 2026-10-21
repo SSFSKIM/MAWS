@@ -1,0 +1,71 @@
+{
+  "arm": "desktop",
+  "task": "B1",
+  "rep": 1,
+  "attempt": 1,
+  "kind": "document",
+  "surface": "code",
+  "host": "Mac-mini.local",
+  "startedAt": "2026-10-21T11:57:36.042291+00:00",
+  "prompt": "In the document doc.md, change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "promptMatch": ", change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-MAWS-parity-bench/b6665db9-8552-4166-a326-0baf9b96ffd8.jsonl",
+  "audit": null,
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "Edit",
+    "Write",
+    "MultiEdit"
+  ],
+  "landingFiles": [
+    "doc.md"
+  ],
+  "landingActions": null,
+  "load": {
+    "before": [
+      3.49,
+      3.36,
+      2.93
+    ],
+    "after": [
+      3.78,
+      3.41,
+      2.97
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "block 3: Thursday -> Friday, nothing else changed"
+  },
+  "before": "/tmp/maws-parity-bench/run-20261021/desktop-B1-r1/before-doc.md",
+  "after": "/tmp/maws-parity-bench/run-20261021/desktop-B1-r1/after-doc.md",
+  "afterSource": "the file in the folder",
+  "rebuildError": null,
+  "deckUrl": null,
+  "deckUrlFrom": null,
+  "seedId": null,
+  "seedTranscript": null,
+  "seedCheck": null,
+  "freshSession": null,
+  "permissionsAnswered": 0,
+  "humanStop": null,
+  "pin": null,
+  "measurementOnly": false,
+  "desktop": {
+    "local": "/Users/new/Library/Application Support/Claude/claude-code-sessions/fa95bd34-0db9-44ae-be00-4f2b7387054b/2b86a6ed-5c24-49b5-8fa3-77671976f84e/local_1f08bd2d-2572-4814-b006-708948468960.json",
+    "meta": {
+      "cliSessionId": "b6665db9-8552-4166-a326-0baf9b96ffd8",
+      "cwd": "/private/tmp/maws-parity-bench/MAWS parity bench",
+      "model": "claude-opus-5-5",
+      "effort": "xhigh",
+      "effortInherited": true,
+      "permissionMode": "auto",
+      "createdAt": 1792583866950,
+      "latestUserFrameAt": 1792583868058,
+      "completedTurns": 1
+    },
+    "cliVersion": "2.1.304"
+  }
+}

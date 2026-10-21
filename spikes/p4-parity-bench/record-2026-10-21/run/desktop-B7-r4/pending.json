@@ -1,0 +1,21 @@
+{
+  "arm": "desktop",
+  "task": "B7",
+  "rep": 4,
+  "attempt": 1,
+  "kind": "presentation",
+  "surface": "code",
+  "host": "Mac-mini.local",
+  "armDir": "/tmp/maws-parity-bench/MAWS parity bench",
+  "prompt": "In the slide deck deck.html, add a slide after slide 2 titled \"Getting there\" with three bullets: \"Bus 14 stops at the gate\", \"Bike racks stand by the tool shed\" and \"Parking is on Mill Lane\". Change nothing else.",
+  "promptMatch": ", add a slide after slide 2 titled \"Getting there\" with three bullets: \"Bus 14 stops at the gate\", \"Bike racks stand by the tool shed\" and \"Parking is on Mill Lane\". Change nothing else.",
+  "startedAt": "2026-10-21T12:14:46.495073+00:00",
+  "loadBefore": [
+    4.45,
+    3.52,
+    3.23
+  ],
+  "seedId": null,
+  "seedTranscript": null,
+  "seedUrl": null
+}

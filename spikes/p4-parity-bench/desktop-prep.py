@@ -5,12 +5,31 @@ writes the manifest the parser reads (parse.py report). The GUI half (open a ses
 send, wait) is desktop-driver.js through cua. Nothing here writes outside the run directory and the arm's folder;
 Desktop's records are only read.
 
-  python3 -I desktop-prep.py before <task> <rep> --out RUN [--surface code|cowork]
-  python3 -I desktop-prep.py after  <task> <rep> --out RUN --permissions-answered N [--seed-transcript T] ...
+  python3 -I desktop-prep.py before <task> <rep> --out RUN [--surface code|cowork] [--seed next|<id>] [--ref TEXT]
+  python3 -I desktop-prep.py after  <task> <rep> --out RUN --permissions-answered N [--transcript FILE|newest] ...
   python3 -I desktop-prep.py deck   <transcript> <out dir>     a Cowork deck rebuilt from a session's records, its url,
                                                                `same` against the bench's, and the turns' permission modes
   python3 -I desktop-prep.py kinds  <transcript.jsonl | audit.jsonl> ...   the artifact kinds a session was offered and
                                                                the permission mode its records carry
+  python3 -I desktop-prep.py seed-prompt                       the untimed prompt that makes a Cowork seed deck
+  python3 -I desktop-prep.py seed-add <transcript|newest> --out RUN   a seed session's deck checked and entered in RUN/seeds.json
+
+Cloud Cowork (Desktop 3.1623.0, findings §7b): the Claude tab's Cowork runs in Anthropic's cloud (entrypoint
+remote_cowork, a Linux VM, engine 2.1.305) and keeps its transcript in the VM. After the turn, an untimed follow-up in
+the same session has it send that file (desktop-driver.js `bench.handOver()`), and Desktop saves it under ~/Downloads.
+`after --transcript newest` (or a path) and `seed-add newest` take the newest .jsonl there, copy it into the run and
+read it like any transcript; the follow-up's own records come after the timed turn's and the turn window leaves them
+out. A fresh session is told by the records' session id, not the file: two hand-overs of one session are one session.
+
+Seeds (§7a): a Cowork deck's timed turn runs in a fresh session of its own, on a deck an untimed Cowork session made
+beforehand from seed/maws-deck (`seed-prompt`). `seed-add` rebuilds that deck from the seed session's records, checks it
+`same` against the bench's, reads its url and the seed turn's permission mode, and enters it in the run's seeds ledger
+(good only when the session created the deck itself and no other entry names the same Artifact); `before --seed next`
+takes the next good seed not yet used (a seed is used once, even by an attempt that is then redone), names its deck in
+the prompt by its url, and keeps its transcript for `after`. `after` stops, before any rebuild, when the timed turn's
+successful calls create an Artifact or publish or read_file another than the seed's, and records the seed and whether
+the timed turn ran in another session than the seed's (`seedId`, `freshSession`; the parser excludes a Cowork deck
+repetition without either).
 
 Attempts: a repetition's records live in RUN/desktop-<task>-r<rep>, a later attempt at the same repetition in
 …-a2, …-a3: nothing is overwritten. `before` opens the first attempt without a manifest; an attempt it finds laid but
@@ -38,6 +57,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import unicodedata
 from datetime import datetime, timezone
 
@@ -48,6 +68,8 @@ ARM_DIR = os.environ.get('MAWS_BENCH_DESKTOP_DIR', '/tmp/maws-parity-bench/MAWS 
 CLAUDE_APP = os.environ.get('MAWS_BENCH_CLAUDE_APP') or os.path.expanduser('~/Library/Application Support/Claude')  # overridable for a dry run
 CONFIG_HOME = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.expanduser('~/.claude')
 CLAUDE_USAGE = os.path.expanduser('~/Library/Application Support/ClaudeUsage')
+# Where Desktop saves a file a cloud Cowork session hands over (bench.handOver() in desktop-driver.js).
+DOWNLOADS = os.environ.get('MAWS_BENCH_DOWNLOADS') or os.path.expanduser('~/Downloads')
 SEED_DECK = os.path.join(HERE, 'seed', 'maws-deck')
 FILES = {'document': 'doc.md', 'presentation': 'deck.html'}
 # The landing calls: a plain file's edit tools (counted only on the artifact's file, `landingFiles`), or the publish of
@@ -144,9 +166,73 @@ def pending_attempt(out, task, rep):
 
 # ---- before ---------------------------------------------------------------------------------------------------------
 
+# ---- a cloud session's handed-over transcript ------------------------------------------------------------------------
+
+def handed_over(arg, since, dest):
+    """The handed-over transcript `arg` (a path, or 'newest': the newest .jsonl in DOWNLOADS saved since `since`), copied
+    to `dest`, so the run keeps its own copy."""
+    if arg == 'newest':
+        found = sorted((os.path.getmtime(p), p) for p in glob.glob(os.path.join(DOWNLOADS, '*.jsonl'))
+                       if since is None or os.path.getmtime(p) + 5 >= since)
+        if not found:
+            sys.exit('no .jsonl in %s saved since %s: hand the transcript over first (bench.handOver())' % (DOWNLOADS, since))
+        arg = found[-1][1]
+    if not os.path.isfile(arg):
+        sys.exit('no transcript at %s' % arg)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    shutil.copyfile(arg, dest)
+    return dest
+
+
+def session_id(transcript):
+    return bench_parse().parse_transcript(transcript)[0]['sessionId']
+
+
+def transcript_session(path):
+    """A session known only by its transcript (a cloud Cowork hand-over): what Desktop's local records would have said."""
+    meta, _, turns = bench_parse().parse_transcript(path)
+    return dict(transcript=path, audit=None, local=None, cliVersion=meta['version'],
+                meta=dict(sessionId=meta['sessionId'], entrypoint=meta['entrypoint'], version=meta['version'],
+                          permissionMode=turns[0]['permissionMode'] if turns else None))
+
+
+# ---- the seeds ledger ------------------------------------------------------------------------------------------------
+
+def ledger_path(out):
+    return os.path.join(out, 'seeds.json')
+
+
+def ledger(out):
+    p = ledger_path(out)
+    return json.loads(read(p)) if os.path.isfile(p) else {'seeds': []}
+
+
+def save_ledger(out, led):
+    os.makedirs(out, exist_ok=True)
+    tmp = ledger_path(out) + '.tmp'
+    write(tmp, json.dumps(led, indent=2) + '\n')
+    os.replace(tmp, ledger_path(out))
+
+
+def take_seed(out, which, used_by):
+    led = ledger(out)
+    good = [s for s in led['seeds'] if s['ok'] and s['usedBy'] is None]
+    pick = good[0] if which == 'next' and good else next((s for s in led['seeds'] if s['id'] == which), None)
+    if pick is None:
+        sys.exit('no good unused seed in %s (%d seeds, %d good and unused)' % (ledger_path(out), len(led['seeds']), len(good)) if which == 'next'
+                 else 'no seed %s in %s' % (which, ledger_path(out)))
+    if not pick['ok'] or pick['usedBy'] is not None:
+        sys.exit('seed %s is %s' % (pick['id'], 'used by %s' % pick['usedBy'] if pick['usedBy'] else 'not good: %s' % pick['why']))
+    pick['usedBy'] = used_by
+    save_ledger(out, led)
+    return pick
+
+
 def before(args):
     t = tasks()['tasks'][args.task]
     kind = t['kind']
+    if args.seed and not (kind == 'presentation' and args.surface == 'cowork'):
+        sys.exit('--seed is for a Cowork deck; %s on %s takes none' % (args.task, args.surface))
     attempt, d = open_attempt(args.out, args.task, args.rep)
     os.makedirs(ARM_DIR, exist_ok=True)
     name = FILES[kind]
@@ -155,12 +241,16 @@ def before(args):
     shutil.rmtree(os.path.join(ARM_DIR, 'bench-after'), ignore_errors=True)
     shutil.rmtree(os.path.join(ARM_DIR, '.claude'), ignore_errors=True)  # a permission answered "always" lands here
     shutil.copyfile(os.path.join(ARM_DIR, name), os.path.join(d, 'before-' + name))
-    ref = name if args.surface == 'code' else '"%s"' % tasks()['titles'][kind]
+    seed = take_seed(args.out, args.seed, dict(task=args.task, rep=args.rep, attempt=attempt, at=datetime.now(timezone.utc).isoformat())) if args.seed else None
+    ref = args.ref or (seed['url'] if seed else name if args.surface == 'code' else '"%s"' % tasks()['titles'][kind])
     prompt = t['text'].replace('{ref}', ref)
     pending = dict(arm='desktop', task=args.task, rep=args.rep, attempt=attempt, kind=kind, surface=args.surface, host=socket.gethostname(), armDir=ARM_DIR,
-                   prompt=prompt, promptMatch=t['text'][t['text'].index('{ref}') + len('{ref}'):], startedAt=datetime.now(timezone.utc).isoformat(), loadBefore=load())
+                   prompt=prompt, promptMatch=t['text'][t['text'].index('{ref}') + len('{ref}'):], startedAt=datetime.now(timezone.utc).isoformat(), loadBefore=load(),
+                   seedId=seed and seed['id'], seedTranscript=seed and seed['transcript'], seedUrl=seed and seed['url'])
     write(os.path.join(d, 'pending.json'), json.dumps(pending, indent=2) + '\n')
-    print(json.dumps({'prompt': prompt, 'folder': ARM_DIR, 'file': name, 'attempt': attempt, 'pending': os.path.join(d, 'pending.json')}, indent=2))
+    note = 'no seed: a Cowork deck repetition of the record takes --seed (§7a)' if kind == 'presentation' and args.surface == 'cowork' and not seed else None
+    print(json.dumps({'prompt': prompt, 'folder': ARM_DIR, 'file': name, 'attempt': attempt, 'seed': seed and seed['id'], 'seedUrl': seed and seed['url'],
+                      'note': note, 'pending': os.path.join(d, 'pending.json')}, indent=2))
 
 
 # ---- Desktop's records ----------------------------------------------------------------------------------------------
@@ -562,6 +652,28 @@ def turn_window(transcript, match):
     raise RebuildError('no turn in %s matched the task' % transcript)
 
 
+def creates(call):
+    """A successful create: a publish (the action omitted or 'publish', not an asset's) with `type_url`, which makes a new
+    Artifact from a type. A read or list naming a type_url only reads the type."""
+    return call['name'] == 'Artifact' and call['ok'] and artifact_action(call['input']) == 'publish' and isinstance(call['input'].get('type_url'), str)
+
+
+def off_seed(timed, seed_url):
+    """How the timed turn's successful calls leave the seed's deck, or None: a create, or a publish or read_file naming
+    another Artifact than the seed's (compared the engine's way). Checked before anything is rebuilt, since the replay's
+    refusals of the same calls fall back to bench-after/ and the parser would time a publish to another deck."""
+    for c in timed:
+        if c['name'] != 'Artifact' or not c['ok']:
+            continue
+        if creates(c):
+            return 'created a new Artifact (a publish with type_url %s)' % c['input']['type_url']
+        url = c['input'].get('url')
+        publish = (c['input'].get('action') or 'publish') == 'publish'  # every spelling the parser counts as a landing, an asset's too
+        if (publish or artifact_action(c['input']) == 'read_file') and isinstance(url, str) and artifact_id(url) != artifact_id(seed_url):
+            return '%s %s' % ('published to' if publish else 'read a file of', url)
+    return None
+
+
 def check(*args):
     res = subprocess.run(['/usr/bin/python3', '-I', os.path.join(HERE, 'check.py'), *args], capture_output=True, text=True)
     try:
@@ -601,14 +713,21 @@ def after(args):
     p = json.loads(read(os.path.join(d, 'pending.json')))
     started = ts(p['startedAt'])
     load_after = load()
-    s = code_session(started) if p['surface'] == 'code' else cowork_session(started)
+    if args.transcript:  # a cloud Cowork session: its records are the handed-over transcript
+        s = transcript_session(handed_over(args.transcript, started, os.path.join(d, 'transcript.jsonl')))
+    else:
+        s = code_session(started) if p['surface'] == 'code' else cowork_session(started)
     if s is None:
         stop(d, p, 'no Desktop %s session found since %s in %s' % (p['surface'], p['startedAt'], ARM_DIR))
     name = FILES[p['kind']]
     deck = p['kind'] == 'presentation' and p['surface'] == 'cowork'
+    if p.get('seedTranscript'):  # the seed `before --seed` took; an explicit --seed-transcript must name the same one
+        if args.seed_transcript and os.path.realpath(args.seed_transcript) != os.path.realpath(p['seedTranscript']):
+            sys.exit('--seed-transcript %s is not the seed %s took (%s)' % (args.seed_transcript, p['seedId'], p['seedTranscript']))
+        args.seed_transcript = p['seedTranscript']
     if args.seed_transcript and not deck:
         sys.exit('--seed-transcript is for a Cowork deck; this attempt is a %s on %s' % (p['kind'], p['surface']))
-    seed_check, after_source, rebuild_error, deck_url, deck_url_from = None, None, None, None, None
+    seed_check, after_source, rebuild_error, deck_url, deck_url_from, fresh = None, None, None, None, None, None
     if not deck:  # a plain file in the folder, both surfaces
         before_path, after_path = os.path.join(d, 'before-' + name), os.path.join(d, 'after-' + name)
         try:
@@ -619,23 +738,34 @@ def after(args):
     else:
         if not s['transcript']:
             stop(d, p, 'no transcript for the Cowork session %s' % s['local'])
-        # Before: the seed's calls up to the timed turn's send (the seed transcript may be the timed one), else the
-        # bench's seed deck. After: the same replay carried on through the timed turn's calls, on the same deck (no
-        # create, no other url). Any error on the way is the rebuild's (`rebuilding`): the deck after falls back to
-        # bench-after/, else the attempt stays open.
+        # First, for a seed `before --seed` took, the timed turn's calls must stay on its deck (`off_seed`): a turn that
+        # left it stops here, before any rebuild and never falling back to bench-after/. Before: the seed's calls up to
+        # the timed turn's send (the seed transcript may be the timed one), else the bench's seed deck. After: the same
+        # replay carried on through the timed turn's calls, on the same deck (no create, no other url). Any error on the
+        # way is the rebuild's (`rebuilding`): the deck after falls back to bench-after/, else the attempt stays open.
         try:
             with rebuilding():
                 send, until = turn_window(s['transcript'], p['promptMatch'])
-                r = Replay(None if args.seed_transcript else seed_files())
-                for c in calls(args.seed_transcript, until=send) if args.seed_transcript else []:
-                    r.apply(c)
-                before_path = write_deck(r.published, os.path.join(d, 'before-deck')) if args.seed_transcript else SEED_DECK
+                timed = calls(s['transcript'], since=send, until=until)
+                off = off_seed(timed, p['seedUrl']) if p.get('seedUrl') else None
+                # the timed turn in its seed's session: the same transcript, or the same session id (two hand-overs of a
+                # session); decided once, for the replay and for freshSession
+                seed_sid = session_id(args.seed_transcript) if args.seed_transcript else None
+                same = bool(args.seed_transcript) and (os.path.realpath(args.seed_transcript) == os.path.realpath(s['transcript'])
+                                                       or bool(seed_sid and seed_sid == session_id(s['transcript'])))
+                if off is None:
+                    r = Replay(None if args.seed_transcript else seed_files())
+                    for c in calls(args.seed_transcript, until=send) if args.seed_transcript else []:
+                        r.apply(c)
+                    before_path = write_deck(r.published, os.path.join(d, 'before-deck')) if args.seed_transcript else SEED_DECK
         except RebuildError as e:
             stop(d, p, 'the deck before the turn could not be rebuilt from the records: %s' % e)
+        if off:
+            stop(d, p, "the timed turn left the seed's deck: it %s, and the seed %s took is %s (redo the repetition on another seed)" % (off, p['seedId'], p['seedUrl']))
         try:
             with rebuilding():
-                r.timed(bool(args.seed_transcript) and os.path.realpath(args.seed_transcript) == os.path.realpath(s['transcript']))
-                for c in calls(s['transcript'], since=send, until=until):
+                r.timed(same)
+                for c in timed:
                     r.apply(c)
                 after_path = write_deck(r.published, os.path.join(d, 'after-deck'))
             after_source = "rebuilt from the records' calls"
@@ -650,6 +780,9 @@ def after(args):
             after_source = 'bench-after/ (the model transcribed the deck; the last resort)'
         if args.seed_transcript:
             seed_check = check('same', SEED_DECK, before_path)
+            fresh = not same
+        if p.get('seedUrl') and r.url and artifact_id(r.url) != artifact_id(p['seedUrl']):
+            stop(d, p, 'the turn edited %s, not the seed %s took (%s)' % (r.url, p['seedId'], p['seedUrl']))
         deck_url = r.url
         if r.url_from == 'seed':
             deck_url_from = "the seed's records"
@@ -664,7 +797,8 @@ def after(args):
                     landing=LANDING_FILE if plain else LANDING_DECK, landingFiles=[name] if plain else None,
                     landingActions=landing_actions(args, None if plain else {'Artifact': ['publish']}),
                     load={'before': p['loadBefore'], 'after': load_after}, check=result, before=before_path, after=after_path, afterSource=after_source,
-                    rebuildError=rebuild_error, deckUrl=deck_url, deckUrlFrom=deck_url_from, seedTranscript=args.seed_transcript, seedCheck=seed_check, permissionsAnswered=answered,
+                    rebuildError=rebuild_error, deckUrl=deck_url, deckUrlFrom=deck_url_from, seedId=p.get('seedId'), seedTranscript=args.seed_transcript, seedCheck=seed_check,
+                    freshSession=fresh, permissionsAnswered=answered,
                     humanStop='%d permission card%s answered in the turn' % (answered, '' if answered == 1 else 's') if answered else None,
                     pin=None, measurementOnly=bool(args.measurement_only), desktop=dict(local=s['local'], meta=s['meta'], cliVersion=s['cliVersion']))
     mpath = os.path.join(d, 'manifest.json')
@@ -673,7 +807,7 @@ def after(args):
     row = parse.edit_row(mpath)
     print(json.dumps({'manifest': mpath, 'attempt': attempt, 'valid': parse.valid(row) or 'yes', 'check': result, 'afterSource': after_source,
                       'permissionMode': (row['measured'] or {}).get('permissionMode'), 'pickerPermissionMode': s['meta'].get('permissionMode'),
-                      'seedCheck': seed_check, 'deckUrl': deck_url, 'deckUrlFrom': deck_url_from, 'transcript': s['transcript'], 'meta': s['meta']}, indent=2))
+                      'seedCheck': seed_check, 'freshSession': fresh, 'priorTurns': row['priorTurns'], 'deckUrl': deck_url, 'deckUrlFrom': deck_url_from, 'transcript': s['transcript'], 'meta': s['meta']}, indent=2))
 
 
 def deck(args):
@@ -686,11 +820,89 @@ def deck(args):
             r = Replay()
             for c in calls(args.transcript):
                 r.apply(c)
-            out = write_deck(r.published, os.path.abspath(args.out))
+            out = write_deck(r.published, args.out)
     except RebuildError as e:
         print(json.dumps({'deck': None, 'rebuildError': str(e), 'permissionModes': modes}, indent=2))
         sys.exit(1)
     print(json.dumps({'deck': out, 'url': r.url, 'same': check('same', SEED_DECK, out), 'permissionModes': modes}, indent=2))
+
+
+def seed_prompt(args):
+    """The untimed prompt that has a Cowork session make one seed deck: the bench's deck, file for file, as Desktop's own
+    Slides deck, and its url as the reply (`seed-add` reads the url from the records, the reply its last resort)."""
+    index = read(os.path.join(SEED_DECK, 'project', 'deck.json')).strip()
+    order = json.loads(index)['order']
+    parts = ['----- %s -----\n%s' % (rel, read(os.path.join(SEED_DECK, rel)).strip())
+             for rel in ['project/deck.json'] + ['project/slides/%s.html' % sid for sid in order]]
+    print('Make a new slide deck with the Artifact tool, as a Slides deck titled "%s", from exactly the files below: write each '
+          'file under its path, character for character, publish the deck with every file, and change, add or drop nothing. '
+          'When it is published, reply with the deck\'s URL and nothing else.\n\n%s\n----- end -----'
+          % (tasks()['titles']['presentation'], '\n\n'.join(parts)))
+
+
+def urls_in(transcript):
+    """The Artifact urls a session's records show outside its calls: a successful create's tool result, then its replies."""
+    made, results, replies = set(), [], []
+    for r in jsonl(transcript):
+        for b in (r.get('message') or {}).get('content') or [] if isinstance((r.get('message') or {}).get('content'), list) else []:
+            if not isinstance(b, dict):
+                continue
+            if r.get('type') == 'assistant' and b.get('type') == 'tool_use' and creates(dict(name=b.get('name'), input=b.get('input') or {}, ok=True)):
+                made.add(b.get('id'))
+            elif r.get('type') == 'user' and b.get('type') == 'tool_result' and b.get('tool_use_id') in made and not b.get('is_error'):
+                results += [m.group(0) for m in ARTIFACT_URL_ANY.finditer(json.dumps(b.get('content')))]
+            elif r.get('type') == 'assistant' and b.get('type') == 'text':
+                replies += [m.group(0) for m in ARTIFACT_URL_ANY.finditer(b.get('text', ''))]
+    return results, replies
+
+
+ARTIFACT_URL_ANY = re.compile(r'https://(?:[a-z0-9-]+\.)?claude\.ai/(?:artifact|code/(?:artifact|frame))/[A-Za-z0-9_-]+')
+
+
+def seed_add(args):
+    """A seed session's deck rebuilt from its records and entered in the run's ledger: good when it is the bench's
+    (`same`), every human turn of the seed session ran in auto, the session made the deck itself (a successful create),
+    its url is known, and no other entry's url names the same Artifact (a deck is one seed's)."""
+    led = ledger(args.out)
+    sid = 'seed-%02d' % (len(led['seeds']) + 1)
+    source = args.transcript if args.transcript == 'newest' else os.path.abspath(args.transcript)
+    if source != 'newest' and any(os.path.realpath(s.get('source') or s['transcript']) == os.path.realpath(source) for s in led['seeds']):
+        sys.exit('%s is already in %s' % (source, ledger_path(args.out)))
+    # the run's own copy (a hand-over lands in ~/Downloads among other files)
+    transcript = handed_over(source, time.time() - 900 if source == 'newest' else None, os.path.join(args.out, 'seeds', sid + '.jsonl'))
+    this_session = session_id(transcript)
+    if this_session and any(s.get('sessionId') == this_session for s in led['seeds']):
+        os.remove(transcript)
+        sys.exit('session %s is already in %s' % (this_session, ledger_path(args.out)))
+    modes = [t['permissionMode'] for t in bench_parse().parse_transcript(transcript)[2]]
+    entry = dict(id=sid, transcript=transcript, source=source, sessionId=this_session, url=None, urlFrom=None, same=None, permissionModes=modes, ok=False, why=None, usedBy=None,
+                 addedAt=datetime.now(timezone.utc).isoformat())
+    try:
+        with rebuilding():
+            seed_calls = calls(transcript)
+            made = any(creates(c) for c in seed_calls)
+            r = Replay()
+            for c in seed_calls:
+                r.apply(c)
+            out = write_deck(r.published, os.path.join(args.out, 'seeds', sid))
+        entry['same'] = check('same', SEED_DECK, out)
+        results, replies = urls_in(transcript)
+        entry['url'], entry['urlFrom'] = ((r.url, "the seed's calls") if r.url else (results[0], "the create's result") if results
+                                          else (replies[-1], "the session's reply") if replies else (None, None))
+    except RebuildError as e:
+        entry['why'] = 'the deck could not be rebuilt from the records: %s' % e
+    if entry['why'] is None:
+        twin = next((s['id'] for s in led['seeds'] if entry['url'] and s.get('url') and artifact_id(s['url']) == artifact_id(entry['url'])), None)
+        reasons = [w for w, bad in (("not the bench's deck: %s" % (entry['same'] or {}).get('detail'), not (entry['same'] or {}).get('pass')),
+                                    ('a turn not in auto: %s' % modes, not modes or any(m != 'auto' for m in modes)),
+                                    ('the session made no new deck (no successful create)', not made),
+                                    ('no url in the records', entry['url'] is None),
+                                    ('the deck of %s' % twin, twin is not None)) if bad]
+        entry['why'] = '; '.join(reasons) or None
+    entry['ok'] = entry['why'] is None
+    led['seeds'].append(entry)
+    save_ledger(args.out, led)
+    print(json.dumps(entry, indent=2))
 
 
 KIND_TOOLS = {
@@ -740,9 +952,12 @@ def main(argv):
         a.add_argument('--out', required=True)
         if name == 'before':
             a.add_argument('--surface', choices=('code', 'cowork'), default='code')
+            a.add_argument('--seed', metavar='next|ID', help="a Cowork deck's seed from RUN/seeds.json: its deck named in the prompt by its url, its transcript kept for after")
+            a.add_argument('--ref', metavar='TEXT', help="the artifact's handle in the prompt, in place of the surface's own")
         else:
             a.add_argument('--permissions-answered', type=int, required=True, metavar='N',
                            help="the permission cards the driver answered in the turn (bench.rep()'s permissionsAnswered); more than 0 is a human stop")
+            a.add_argument('--transcript', metavar='FILE|newest', help="a cloud Cowork session's handed-over transcript (newest: the newest .jsonl saved in ~/Downloads since before)")
             a.add_argument('--seed-transcript', metavar='T', help="a Cowork deck's seed session's transcript (it may be the timed one): the deck before the turn is rebuilt from it")
             a.add_argument('--measurement-only', action='store_true', help='the cell ran at Desktop\'s own setting, MAWS pinned to it')
             a.add_argument('--landing-actions', action='append', help='TOOL=op,op: the operations of TOOL that land an edit')
@@ -751,8 +966,14 @@ def main(argv):
     dk.add_argument('out')
     k = sub.add_parser('kinds')
     k.add_argument('paths', nargs='+')
+    sub.add_parser('seed-prompt')
+    sa = sub.add_parser('seed-add')
+    sa.add_argument('transcript')
+    sa.add_argument('--out', required=True)
     args = ap.parse_args(argv)
-    {'before': before, 'after': after, 'deck': deck, 'kinds': kinds}[args.cmd](args)
+    if getattr(args, 'out', None):  # every path the run's files record, a manifest's included, is absolute from here
+        args.out = os.path.abspath(args.out)
+    {'before': before, 'after': after, 'deck': deck, 'kinds': kinds, 'seed-prompt': seed_prompt, 'seed-add': seed_add}[args.cmd](args)
 
 
 if __name__ == '__main__':

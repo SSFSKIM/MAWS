@@ -1,0 +1,71 @@
+{
+  "arm": "desktop",
+  "task": "B7",
+  "rep": 2,
+  "attempt": 1,
+  "kind": "presentation",
+  "surface": "code",
+  "host": "Mac-mini.local",
+  "startedAt": "2026-10-21T12:03:30.234401+00:00",
+  "prompt": "In the slide deck deck.html, add a slide after slide 2 titled \"Getting there\" with three bullets: \"Bus 14 stops at the gate\", \"Bike racks stand by the tool shed\" and \"Parking is on Mill Lane\". Change nothing else.",
+  "promptMatch": ", add a slide after slide 2 titled \"Getting there\" with three bullets: \"Bus 14 stops at the gate\", \"Bike racks stand by the tool shed\" and \"Parking is on Mill Lane\". Change nothing else.",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-MAWS-parity-bench/0884d89a-fe91-4758-b99a-c9a3d9c8b5b7.jsonl",
+  "audit": null,
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "Edit",
+    "Write",
+    "MultiEdit"
+  ],
+  "landingFiles": [
+    "deck.html"
+  ],
+  "landingActions": null,
+  "load": {
+    "before": [
+      3.75,
+      3.65,
+      3.2
+    ],
+    "after": [
+      3.11,
+      3.47,
+      3.16
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "a slide \"Getting there\" with the three bullets after slide 2, nothing else changed"
+  },
+  "before": "/tmp/maws-parity-bench/run-20261021/desktop-B7-r2/before-deck.html",
+  "after": "/tmp/maws-parity-bench/run-20261021/desktop-B7-r2/after-deck.html",
+  "afterSource": "the file in the folder",
+  "rebuildError": null,
+  "deckUrl": null,
+  "deckUrlFrom": null,
+  "seedId": null,
+  "seedTranscript": null,
+  "seedCheck": null,
+  "freshSession": null,
+  "permissionsAnswered": 0,
+  "humanStop": null,
+  "pin": null,
+  "measurementOnly": false,
+  "desktop": {
+    "local": "/Users/new/Library/Application Support/Claude/claude-code-sessions/fa95bd34-0db9-44ae-be00-4f2b7387054b/2b86a6ed-5c24-49b5-8fa3-77671976f84e/local_43175147-adc6-4dcc-8bd8-dc7678747290.json",
+    "meta": {
+      "cliSessionId": "0884d89a-fe91-4758-b99a-c9a3d9c8b5b7",
+      "cwd": "/private/tmp/maws-parity-bench/MAWS parity bench",
+      "model": "claude-opus-5-5",
+      "effort": "xhigh",
+      "effortInherited": true,
+      "permissionMode": "auto",
+      "createdAt": 1792584222029,
+      "latestUserFrameAt": 1792584223118,
+      "completedTurns": 1
+    },
+    "cliVersion": "2.1.304"
+  }
+}

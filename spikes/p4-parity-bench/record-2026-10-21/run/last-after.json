@@ -1,0 +1,29 @@
+{
+  "manifest": "/tmp/maws-parity-bench/run-20261021/desktop-B7-r6/manifest.json",
+  "attempt": 1,
+  "valid": "yes",
+  "check": {
+    "pass": true,
+    "detail": "a slide \"Getting there\" with the three bullets after slide 2, nothing else changed"
+  },
+  "afterSource": "the file in the folder",
+  "permissionMode": "auto",
+  "pickerPermissionMode": "auto",
+  "seedCheck": null,
+  "freshSession": null,
+  "priorTurns": 0,
+  "deckUrl": null,
+  "deckUrlFrom": null,
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-MAWS-parity-bench/93deb1c8-942a-4c7d-92d0-d2dd319ca1d8.jsonl",
+  "meta": {
+    "cliSessionId": "93deb1c8-942a-4c7d-92d0-d2dd319ca1d8",
+    "cwd": "/private/tmp/maws-parity-bench/MAWS parity bench",
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "effortInherited": true,
+    "permissionMode": "auto",
+    "createdAt": 1792585432978,
+    "latestUserFrameAt": 1792585434242,
+    "completedTurns": 1
+  }
+}
