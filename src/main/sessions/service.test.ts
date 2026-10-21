@@ -14,6 +14,7 @@ import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
 import { OwnerChannelLaunches } from '../owner/launch'; // P2-C
 import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT } from '@shared/owner/contract'; // P2-C
+import { userScopeProfile } from '@shared/engine/launch-profile'; // P4-A2
 
 // The service is Electron-free (its handlers are service-register.ts's).
 vi.mock('electron', () => {
@@ -253,7 +254,7 @@ describe('session service', () => {
 
     it("falls back to direct for a Claude model when settings say so, with the session's notice", async () => {
       h.dispose();
-      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null, mcpServers: [] }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
+      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
       h.trustDirectory(h.work);
       h.host.relay = DOWN_RELAY;
       const id = await create();

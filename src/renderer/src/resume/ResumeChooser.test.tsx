@@ -8,7 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { project, record } from '../../../../test/support/builders';
-import { formatDateTime } from '../app/date-format';
+import { formatDateTime } from '@shared/app/date-format';
 import { useSessions } from '../stores/sessions';
 import { RESUME_COPY } from './copy';
 import { clearPreviewCache, SETTLE_MS } from './preview';
@@ -133,7 +133,7 @@ describe('the resume chooser', () => {
     expect(turns.textContent).not.toContain(RESUME_COPY.empty);
   });
 
-  it('a row’s time and the preview’s last activity carry the date and time in the system locale, as the rest of MAWS', () => {
+  it('a row’s time and the preview’s last activity carry the date and time in the display locale, as the rest of MAWS', () => {
     fill(base);
     mount();
     const full = formatDateTime(Date.parse(at(9)));

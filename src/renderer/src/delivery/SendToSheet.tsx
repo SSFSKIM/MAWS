@@ -12,7 +12,7 @@ import { destinationIdOf, type DeliveryDestination, type DeliveryTarget } from '
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DeliveryStatus } from '@shared/ipc/schema/delivery';
 import type { ArtifactExportFormat } from '@shared/maws/tools';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { useNow } from '../app/use-now';
 import { ipc } from '../ipc/client';
 import { useExportFormats } from '../library/export';

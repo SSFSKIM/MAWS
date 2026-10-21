@@ -6,7 +6,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V16 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 import type { AccountUsage, UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../test/support/scenario';
 import { paceLine, paceRunsOutAt, routingFacts, unstartedRoute } from './routing-facts';
@@ -28,7 +28,7 @@ const snapshot = (pinsFor: Record<string, string> = {}): UsageSnapshot => ({
   available: true, dataDir: '/x', readAt: '2026-09-29T07:36:17Z', error: null, drainTarget: 'u3', drainTargetIsManual: false,
   accounts: [account('u1', '1@example.test'), account('u3', '3@example.test')], pinsFor, gateway: null, codex: null, activity: null,
 });
-const settings = (patch: Partial<Settings['gateway']> = {}): Settings => ({ ...SETTINGS_DEFAULTS_V16, gateway: { ...SETTINGS_DEFAULTS_V16.gateway, ...patch } });
+const settings = (patch: Partial<Settings['gateway']> = {}): Settings => ({ ...SETTINGS_DEFAULTS_V17, gateway: { ...SETTINGS_DEFAULTS_V17.gateway, ...patch } });
 
 describe('routingFacts names the account and the switch', () => {
   it('a routed session: the relay sentence, the pinned account when pinsFor names it, Switch to Direct…', () => {
@@ -121,14 +121,14 @@ describe('paceLine warns when the window runs out before it resets', () => {
     const at = paceRunsOutAt(copy, 'weekly', NOW)!;
     // 96 h elapsed at 90 %: 10 % more takes 96 / 9 h
     expect(at).toBeCloseTo(NOW + (96 / 9) * 3_600_000, -3);
-    // the weekday and the hour in the system locale (Thu 2 PM; (목) 오후 2시)
-    const when = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric' }).format(at).replace(/\s/g, ' ');
+    // the weekday and the hour in English (Thu 2 PM), under the Korean system locale the suite runs in (P4 DL 4)
+    const when = new Intl.DateTimeFormat('en-US', { weekday: 'short', hour: 'numeric' }).format(at).replace(/\s/g, ' ');
     expect(paceLine(copy, 'weekly', NOW)).toBe(`At this rate weekly runs out ${when}, before it resets`);
   });
 
   it('the 5-hour form names the time; nothing without a reading, at 0 % or at 100 %', () => {
     const five = { percent: 80, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString(), recordedAt: weekly.recordedAt };
-    const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(paceRunsOutAt(five, 'fiveHour', NOW)!).replace(/\s/g, ' ');
+    const clock = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(paceRunsOutAt(five, 'fiveHour', NOW)!).replace(/\s/g, ' ');
     expect(paceLine(five, 'fiveHour', NOW)).toBe(`At this rate the 5-hour window runs out at ${clock}`);
     expect(paceLine(null, 'fiveHour', NOW)).toBeNull();
     expect(paceLine({ ...five, percent: 0 }, 'fiveHour', NOW)).toBeNull();

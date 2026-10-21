@@ -33,6 +33,7 @@ describe('syncLine', () => {
 
   it('says when the last sync was', () => {
     expect(syncLine(state({}), NOW)).toBe('마지막 동기화 5 minutes ago');
+    expect(syncLine(state({ syncedAt: at(0.5) }), NOW)).toBe('마지막 동기화 now'); // the age is the date module's, in English (P4 DL 4)
     expect(syncLine(state({ syncedAt: null }), NOW)).toBeNull();
   });
 

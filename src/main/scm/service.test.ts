@@ -1,5 +1,5 @@
 // The local service over a fake read runner, a fake status and a fake mutating runner: the argv of every mutation, the
-// trust gate's environment, the per-checkout chain, the fresh-status rule and the watcher refresh. The real-repository
+// trust gate's environment, the per-repository chain, the fresh-status rule and the watcher refresh. The real-repository
 // behaviour (hooks, the index on disk) is service.git.test.ts's.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,19 +11,15 @@ import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { GitCommandError, GitTimeoutError, NotARepositoryError } from '../git/runner';
 import { ScmService, type ScmServiceDeps } from './service';
 
-// `realpath` as node answers it, except that a test may hold the first call for one path until it releases it.
-// E11: every file `readFile` was asked for, so a test can say what trust read
+// `realpath` as node answers it, except that a test may hold every call for one path until it releases it (a mount
+// that hangs). E11: every file `readFile` was asked for, so a test can say what trust read
 const fsGate = vi.hoisted(() => ({ path: null as string | null, held: null as Promise<void> | null, reads: [] as string[] }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
     realpath: async (path: string) => {
-      if (path === fsGate.path && fsGate.held !== null) {
-        const held = fsGate.held;
-        fsGate.path = null;
-        await held;
-      }
+      if (path === fsGate.path && fsGate.held !== null) await fsGate.held;
       return actual.realpath(path);
     },
     readFile: (async (path: string, options?: unknown) => {
@@ -77,7 +73,11 @@ describe('scm service', () => {
     head = 'abc123';
     records = new Map([[ID, { directory: root, worktree: null }]]);
     read = vi.fn<ScmServiceDeps['read']>(async (directory, args) => {
-      if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`; // the trust key's read
+      // the trust key's read and the chain's key: canonical paths, as `--path-format=absolute` answers them
+      if (args[0] === 'rev-parse') {
+        const top = realpathSync(directory);
+        return `${top}\n${top}/.git\n${top}/.git\n`;
+      }
       if (args[0] === 'log') return `${'f'.repeat(40)}\0From the panel\n`;
       if (args.join(' ') === 'remote -v') return ''; // scm.status: no remote (E11: one `remote -v`)
       throw new Error(`unexpected read: git ${args.join(' ')}`);
@@ -257,7 +257,7 @@ describe('scm service', () => {
     });
   });
 
-  describe('serialises mutations per checkout', () => {
+  describe('serialises mutations per repository', () => {
     it('runs a second click only after the first answered, never interleaving their status reads', async () => {
       const order: string[] = [];
       let release!: () => void;
@@ -284,29 +284,60 @@ describe('scm service', () => {
       expect(order).toEqual(['status 1', 'mutate :(top,literal)a.txt', 'status 2', 'status 3', 'mutate :(top,literal)u.txt', 'status 4']);
     });
 
-    it('applies two clicks in the order they were made even when the second checkout path resolves first', async () => {
-      const link = join(tmpdir(), `maws-scm-order-${process.pid}-${Date.now()}`);
-      symlinkSync(root, link);
+    it("applies two clicks in one checkout in the order they were made even when the first one's key answers last", async () => {
       let release!: () => void;
-      fsGate.path = root;
-      fsGate.held = new Promise<void>((resolve) => { release = resolve; });
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const answer = read.getMockImplementation()!;
+      let first = true;
+      read.mockImplementation(async (directory, args) => {
+        if (args[0] === 'rev-parse' && first) {
+          first = false;
+          await held;
+        }
+        return answer(directory, args);
+      });
+      const scm = service();
+      const one = scm.stage({ appSessionId: ID, paths: ['a.txt'] }); // its key's read is held
+      const two = scm.stage({ appSessionId: ID, paths: ['u.txt'] });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      release();
+      await Promise.all([one, two]);
+      expect(mutate.mock.calls.map(([, args]) => args.at(-1))).toEqual([':(top,literal)a.txt', ':(top,literal)u.txt']);
+    });
+
+    // P4 W2-B (tracker 2026-10-06 "The mutation chain and admission queue are keyed by the checkout's realpath…"): a
+    // checkout's key is resolved in a queue of its own, so one on a mount that hangs holds up nobody else's
+    it('lets a checkout whose mount hangs hold up only its own mutations', async () => {
+      const other = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scm-other-')));
+      trust.write({ [root]: { hasTrustDialogAccepted: true }, [other]: { hasTrustDialogAccepted: true } });
+      records.set(OTHER, { directory: other, worktree: null });
+      let release!: () => void;
+      const hung = new Promise<void>((resolve) => { release = resolve; });
+      fsGate.path = root; // the root's realpath and every git call in it wait for the release
+      fsGate.held = hung;
+      const answer = read.getMockImplementation()!;
+      read.mockImplementation(async (directory, args) => {
+        if (directory === root) await hung;
+        return answer(directory, args);
+      });
       try {
-        records.set(OTHER, { directory: link, worktree: null });
         const scm = service();
-        const first = scm.stage({ appSessionId: ID, paths: ['a.txt'] }); // its realpath is held
-        const second = scm.stage({ appSessionId: OTHER, paths: ['u.txt'] }); // another spelling, answered at once
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        const stalled = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
+        const elsewhere = scm.stage({ appSessionId: OTHER, paths: ['u.txt'] });
+        await vi.waitFor(() => expect(mutate).toHaveBeenCalledExactlyOnceWith(other, ['add', '--', ':(top,literal)u.txt'], { timeoutMs: 10_000 }), { timeout: 2_000 });
+        expect(await elsewhere).toMatchObject({ ok: true });
         release();
-        await Promise.all([first, second]);
-        expect(mutate.mock.calls.map(([, args]) => args.at(-1))).toEqual([':(top,literal)a.txt', ':(top,literal)u.txt']);
+        expect(await stalled).toMatchObject({ ok: true });
+        expect(mutate).toHaveBeenLastCalledWith(root, ['add', '--', ':(top,literal)a.txt'], { timeoutMs: 10_000 });
       } finally {
+        release();
         fsGate.path = null;
         fsGate.held = null;
-        rmSync(link, { force: true });
+        rmSync(other, { recursive: true, force: true });
       }
     });
 
-    it('keys the chain by realpath, so two spellings of one checkout share it, and a refusal does not break it', async () => {
+    it('keys the chain by the repository, so two spellings of one checkout share it, and a refusal does not break it', async () => {
       const link = join(tmpdir(), `maws-scm-link-${process.pid}-${Date.now()}`);
       symlinkSync(root, link);
       try {

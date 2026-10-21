@@ -5,6 +5,9 @@
 # trailer keeps a green run's e2e reports (Decision Log 48); a `Live: yes` trailer runs the LIVE_E2E groups, and only
 # them, with their run flags on, a paid run each spec caps itself (Decision Log 75). On a Mac a MEASURED_E2E group first
 # waits for ci-kit's measured-job guard to find the desktop settled, and is refused, to be relaunched, when it has not.
+# A `Selection: affected` trailer (ci-gate.sh --affected) makes an iteration run: unit and unit:darwin test only what the
+# change its `Affected:` trailers list can reach, or the whole suite where vitest's module graph cannot see (the plan
+# says which, and why, in its summary). Such a run is never landing evidence (ci-kit's test-history spec, M4).
 name: gate
 
 on:
@@ -115,6 +118,8 @@ jobs:
       evidence: ${{ steps.plan.outputs.evidence }}
       live: ${{ steps.plan.outputs.live }}
       default_beside: ${{ steps.plan.outputs.default_beside }}
+      selection: ${{ steps.plan.outputs.selection }}
+      related: ${{ steps.plan.outputs.related }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -181,13 +186,21 @@ jobs:
       # test history (ci-kit docs/doperpowers/specs/2026-10-21-test-history-design.md). It never decides the job: the
       # upload runs only after this step ran (so never another job's report from a persistent checkout), and its
       # failure is not the job's.
+      # UNIT_RELATED: a selected run's paths (`Selection: affected`, the same spec's M4), when the plan found nothing there
+      # vitest's module graph cannot see; the suites they reach then run in vitest's related mode, with the test script's
+      # own NODE_OPTIONS (unit-related.mjs). Empty, the whole suite runs, as in every run that is not selected.
       - id: test
         env:
           MAWS_TEST_JUNIT: ci-results/unit.xml
+          UNIT_RELATED: ${{ needs.plan.outputs.related }}
         run: |
           cores=$(if [[ $RUNNER_OS == Linux ]]; then nproc; else getconf _NPROCESSORS_ONLN; fi)
           rm -rf ci-results
-          .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$cores"
+          if [[ -n $UNIT_RELATED ]]; then
+            NODE_OPTIONS="$NODE_OPTIONS --disable-warning=ExperimentalWarning" .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL |^unit-related: ' node .github/scripts/unit-related.mjs "$cores"
+          else
+            .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$cores"
+          fi
       - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
@@ -208,13 +221,19 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shared setup skips apt on macOS
-      # The unit job's JUnit report, as there.
+      # The unit job's JUnit report and its selection, as there; a selected run takes only the related suites among its
+      # own files.
       - id: test
         env:
           MAWS_TEST_JUNIT: ci-results/unit-darwin.xml
+          UNIT_RELATED: ${{ needs.plan.outputs.related }}
         run: |
           rm -rf ci-results
-          .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+          if [[ -n $UNIT_RELATED ]]; then
+            .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL |^unit-related: ' node .github/scripts/unit-related.mjs "$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+          else
+            .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+          fi
       - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
         continue-on-error: true
         uses: actions/upload-artifact@v7

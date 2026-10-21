@@ -226,15 +226,14 @@ describe('sidebar row text', () => {
     expect(waitingItem([held])?.oldest).toBe(held);
   });
 
-  it('ages read now, minutes, hours, days, weeks, compact in the locale (2h; 2시간)', () => {
+  it('ages read now, minutes, hours, days, weeks, compact and in English under the Korean system locale (2h)', () => {
     const ages = [0, 59_000, 60_000, 3_599_000, 3_600_000, 86_399_000, 86_400_000, 7 * 86_400_000, -5000];
-    expect(ages.map((ms) => formatAge(ms, 'en-US'))).toEqual(['now', 'now', '1m', '59m', '1h', '23h', '1d', '1w', 'now']);
-    expect(ages.map((ms) => formatAge(ms, 'ko-KR'))).toEqual(['지금', '지금', '1분', '59분', '1시간', '23시간', '1일', '1주', '지금']);
+    expect(ages.map((ms) => formatAge(ms))).toEqual(['now', 'now', '1m', '59m', '1h', '23h', '1d', '1w', 'now']);
   });
 
   // E11 F2b (plan 2.4): an outcome (an error, an interruption) says when it happened; a request says how long it has waited
   it('an outcome reads "2 weeks ago", a request "waiting 5m"', () => {
-    // the age's words follow the system locale (2주 전); `app/date-format.test.ts` pins them
+    // the age's words are English (2 weeks ago; `@shared/app/date-format`)
     const now = at('2026-10-08T10:00:00Z');
     expect(itemAge(item('r', 'error', '2026-09-24T10:00:00Z'), now)).toBe(REL.ago(2, 'week'));
     expect(itemAge(item('r', 'interrupted', '2026-10-03T10:00:00Z'), now)).toBe(REL.ago(5, 'day'));
@@ -244,7 +243,7 @@ describe('sidebar row text', () => {
   it('a working session is "now"; otherwise the age of its latest movement; a Needs-you row shows its wait', () => {
     const now = at('2026-09-28T10:30:00Z');
     const r = record('r', { updatedAt: '2026-09-28T09:00:00Z' });
-    // the system locale's compact amounts (8m; 8분), pinned by `formatAge` above
+    // the display locale's compact amounts (8m), pinned by `formatAge` above
     expect(sessionAge(r, digest('r', { phase: 'working', turnStartedAt: '2026-09-28T08:00:00Z' }), now)).toBe(REL.now);
     expect(sessionAge(r, digest('r', { phase: 'idle', lastTurnEndedAt: '2026-09-28T10:22:00Z' }), now)).toBe(REL.amount(8, 'minute'));
     expect(sessionAge(r, null, now)).toBe(REL.amount(1, 'hour'));

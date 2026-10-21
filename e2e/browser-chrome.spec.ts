@@ -514,7 +514,7 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       expect(await popover.locator('[data-profile-switch]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-profile-switch')))).toEqual(['Profile 1', 'default']);
       await expect(popover.locator('[data-profile-switch="Profile 1"] [data-profile-avatar="initials"]')).toHaveText('W');
       await expect(popover.locator('[data-profile-sync]')).toContainText('Sync bookmarks now');
-      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^마지막 동기화 (just now|\d+ minutes? ago)$/);
+      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^마지막 동기화 (now|\d+ minutes? ago)$/);
       await expect(popover.locator('[data-profile-reimport]')).toHaveText('Re-import this profile…');
       await expect(popover.locator('[data-profile-settings]')).toHaveText('Browser settings');
       // the main area keeps the Browser tab: no Settings tab opened
@@ -534,7 +534,7 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       // the file deleted: the bar kept, the 읽지 못함 line with the last good sync, a toast
       rmSync(bookmarks.file);
       await popover.locator('[data-profile-sync]').click();
-      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Chrome의 북마크 파일을 읽지 못함 · 마지막 동기화 (just now|\d+ minutes? ago)$/);
+      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Chrome의 북마크 파일을 읽지 못함 · 마지막 동기화 (now|\d+ minutes? ago)$/);
       await expect(s.page.getByText('Bookmarks could not be synced: Chrome의 북마크 파일을 읽지 못함', { exact: true })).toBeVisible();
       await expect(chipNamed(main, 'A2')).toBeVisible();
       await s.page.keyboard.press('Escape'); // the toast is the top layer: Esc dismisses it first, then the popover

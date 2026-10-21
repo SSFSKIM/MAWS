@@ -9,7 +9,8 @@
 // borders and cell text; an inline svg and an x-icon an SVG picture with a PNG fallback the window drew. What no native
 // object carries (an x-embed, a gradient fill, a gradient slide background, a turned table) is a picture of its region
 // the window took. A turn (the element's own and its ancestors') turns a connector's points and a box's border bars with
-// it (the final review's A5, A11, A12); every line break is a native one (A9).
+// it (the final review's A5, A11, A12); every line break is a native one (A9). A skew (P4), which no PowerPoint object
+// takes, makes the element, and every member of a skewed group, a picture of it as drawn.
 // Every object is named by its element's id (`shapeName`); notes, hidden slides, fade and push transitions (magic as
 // fade), and the theme part of the design system (D's `officeThemeXml`) are written by post-processing the package.
 //
@@ -69,9 +70,13 @@ export interface PictureJob {
   key: string;
   slideId: string;
   elementId: string | null;
-  /** `slide`: everything; `background`: the section alone; `self`: the element without its content; `tree`: the element and its content. */
-  mode: 'slide' | 'background' | 'self' | 'tree';
-  /** In slide px (the element's box before rotation; the window draws it unrotated). */
+  /**
+   * `slide`: everything; `background`: the section alone; `self`: the element without its content; `tree`: the element
+   * and its content; `drawn` (P4): the element in place as the slide draws it, its own and its ancestors' transforms and
+   * clips kept (a skew), with its content but the elements measured on their own.
+   */
+  mode: 'slide' | 'background' | 'self' | 'tree' | 'drawn';
+  /** In slide px (the element's box before rotation; the window draws it unrotated); for `drawn`, the region it paints. */
   box: MeasuredBox;
 }
 
@@ -88,9 +93,14 @@ export function pictureJobs(measured: MeasuredDeck, variant: PptxFontVariant): P
     }
     if (slide.background.image) jobs.push({ key: pictureKey(slide.id, ''), slideId: slide.id, elementId: '', mode: 'background', box: FULL });
     for (const el of slide.elements) {
-      const job = (mode: PictureJob['mode']) => jobs.push({ key: pictureKey(slide.id, el.id), slideId: slide.id, elementId: el.id, mode, box: el.box });
+      const job = (mode: PictureJob['mode'], box = el.box) => jobs.push({ key: pictureKey(slide.id, el.id), slideId: slide.id, elementId: el.id, mode, box });
+      // a skew has no native form (P4): the window's picture of the element as drawn (a group's own, when it paints; none
+      // where the slide shows none of it, which then draws nothing)
+      if (el.drawn) {
+        if (el.drawn.w > 0 && el.drawn.h > 0 && (el.tag !== 'div' || painted(el.paint) || el.paint.image)) job('drawn', el.drawn);
+      }
       // a turned table has no native form (a PowerPoint table does not turn): the window's picture of it (A11)
-      if (el.tag === 'x-embed' || el.tag === 'svg' || el.tag === 'x-icon' || (el.tag === 'table' && el.rotate !== 0)) job('tree');
+      else if (el.tag === 'x-embed' || el.tag === 'svg' || el.tag === 'x-icon' || (el.tag === 'table' && el.rotate !== 0)) job('tree');
       else if (el.tag === 'img' ? decoratedImage(el) : el.paint.image && el.tag !== 'x-shape' && el.tag !== 'x-connector' && el.tag !== 'hr') job('self');
     }
   }
@@ -451,7 +461,9 @@ const NO_BORDERS: MeasuredPaint['borders'] = [null, null, null, null];
 /**
  * A native table's own paint (P3-F, exports-capture scalpel-5#2), which the cells' fills and borders do not carry: its
  * fill and shadow under the table (or, for a gradient, the window's picture of the table without its cells), its outline
- * over it, where the canvas draws a collapsed border over the cells' fills.
+ * over it, where the canvas draws a collapsed border over the cells' fills. P4 (the collapsed-table row; the probe in
+ * e2e/presentations-export.spec.ts): Chromium draws that border whole inside the measured box (so the outline keeps the
+ * half-width inset every box's has) and square, the table's radius rounding only its background and its shadow.
  */
 function tablePaint(el: MeasuredElement, picture: string | undefined): { under: PptxObject[]; over: PptxObject[] } {
   const fill = `${el.id}:fill`;
@@ -461,7 +473,7 @@ function tablePaint(el: MeasuredElement, picture: string | undefined): { under: 
     const { options, shape } = paintObjects({ ...el, paint: { ...el.paint, borders: NO_BORDERS } }, true);
     under.push({ kind: 'shape', name: fill, shape, options: { ...options, objectName: fill } });
   }
-  const { options, shape, sides } = paintObjects({ ...el, paint: { ...el.paint, shadow: null } }, false);
+  const { options, shape, sides } = paintObjects({ ...el, paint: { ...el.paint, shadow: null, radius: 0 } }, false);
   const outline: PptxObject[] = options.line ? [{ kind: 'shape', name: `${el.id}:border`, shape, options: { ...options, objectName: `${el.id}:border` } }] : [];
   return { under, over: [...outline, ...sides] };
 }
@@ -495,6 +507,10 @@ export function atDrawnSize(el: MeasuredElement): MeasuredElement {
 }
 
 function elementObjects(drawn: MeasuredElement, ir: ElementIR | undefined, picture: string | undefined, options: PptxMapOptions): PptxObject[] {
+  // a skewed element: the window's picture of it as drawn, its turn and lean in it, so placed unturned where it is drawn;
+  // or nothing (no native stand-in, whose box need not stay within the skewed paint: one the slide shows none of, an
+  // unpainted group, a picture not taken)
+  if (drawn.drawn) return pictureObject({ ...drawn, box: drawn.drawn, rotate: 0 }, picture);
   const el = atDrawnSize(drawn);
   switch (el.tag) {
     case 'img':

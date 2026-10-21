@@ -70,6 +70,16 @@ describe('browserElementAnchor', () => {
     expect([plain.role, plain.name, plain.a11y, plain.label]).toEqual([undefined, undefined, undefined, 'div']);
   });
 
+  // P4 W2-C (tracker 2026-10-07): a web-component icon's display label reaches the label alone; the exact name the
+  // locator narrows by stays absent, so E4c's lookup is what it was
+  it('labels a pick whose exact name is empty by its display label, one line, and never sends it as the name', () => {
+    const icon = build(report({ name: '', displayName: 'gear', a11y: 'main > button' }))!;
+    expect([icon.label, icon.name, icon.role, icon.css]).toEqual(['button “gear”', undefined, 'button', '#increment']);
+    expect(BrowserLocatorSchema.parse({ css: icon.css, role: icon.role, name: icon.name })).toEqual({ css: '#increment', role: 'button' });
+    expect(build(report({ name: '', displayName: 'Open\u0007\nmenu' }))!.label).toBe('button “Open menu”');
+    expect(build(report({ name: 'Increment', displayName: 'gear' }))!.label).toBe('button “Increment”');
+  });
+
   it('builds nothing from a css outside the grammar, a URL that is not http or https, or a field X10 refuses', () => {
     for (const css of ['div, body', 'a[href]', ':has(a)', 'body >> a', 'text=x', ''])
       expect(build(report({ css })), css).toBeNull();
@@ -108,6 +118,7 @@ describe('PickReportSchema', () => {
   it('admits a report within the caps', () => {
     expect(PickReportSchema.parse(report())).toEqual(report());
     expect(PickReportSchema.safeParse(report({ role: null, name: 'n'.repeat(200), a11y: 'a'.repeat(300) }, { requestId: 'r1', mode: 'area' })).success).toBe(true);
+    expect(PickReportSchema.parse(report({ name: '', displayName: 'd'.repeat(200) }))).toEqual(report({ name: '', displayName: 'd'.repeat(200) }));
   });
 
   it('refuses an unknown field, an over-long string and a number that is not finite', () => {
@@ -115,6 +126,8 @@ describe('PickReportSchema', () => {
       { ...report(), url: 'https://x.test/' },
       { ...report(), description: { ...report().description, html: '<b>' } },
       report({ name: 'n'.repeat(201) }),
+      report({ name: '', displayName: 'd'.repeat(201) }),
+      report({ name: '', displayName: '' }),
       report({ a11y: 'a'.repeat(301) }),
       report({ role: 'r'.repeat(65) }),
       report({ role: '' }),

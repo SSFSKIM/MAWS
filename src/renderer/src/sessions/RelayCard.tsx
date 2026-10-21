@@ -4,7 +4,7 @@
 // starts routed by itself once it answers), "Run direct" (`onAccept`), Retry and Cancel (`onDecline`). Under C11's
 // `relayUnreachable: 'wait'` the primary is the ClaudeUsage path; under `ask` both are offered.
 import type { RelayHealth } from '@shared/engine/relay-health';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
 
 export const RELAY_CARD_TITLE = 'Relay not answering';

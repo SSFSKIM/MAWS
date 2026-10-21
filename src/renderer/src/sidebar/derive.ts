@@ -6,7 +6,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
-import { dateFormats, formatAgo } from '../app/date-format';
+import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title'; // E3
@@ -191,8 +191,8 @@ export function rowBranch(record: SessionRecord): string | null {
   return branchLabel(recordBranch(record));
 }
 
-// A row's age, compact in the system locale (`app/date-format.ts`): now, 2m, 2h, 3d, 1w (지금, 2시간); `locale` pins one.
-export const formatAge = (ms: number, locale?: string): string => dateFormats(locale).age(ms);
+// A row's age, compact in the display locale (`@shared/app/date-format`): now, 2m, 2h, 3d, 1w.
+export const formatAge = (ms: number): string => dateFormats().age(ms);
 
 // A working session is "now"; otherwise the age of its last activity.
 export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number): string {

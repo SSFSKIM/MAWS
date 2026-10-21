@@ -277,6 +277,21 @@ describe('hover', () => {
     expect(badge()!.textContent).toBe(quoted('button', 'One'));
   });
 
+  // P4 W2-C (tracker 2026-10-07): a button holding a web-component icon has no exact name (its shadow root is doubt);
+  // the badge reads its display label, and the report carries it beside the empty name
+  it('names a button holding a web-component icon by its display label, and reports the label beside the empty name', () => {
+    doc().querySelector('main')!.insertAdjacentHTML('beforeend', '<button id="gear"><sl-icon name="gear"></sl-icon></button>');
+    byId('gear').querySelector('sl-icon')!.attachShadow({ mode: 'open' }).innerHTML = '<svg viewBox="0 0 16 16"></svg>';
+    place(byId('gear'), { left: 700, top: 600, width: 30, height: 30 });
+    pointer('pointermove', { x: 710, y: 610 });
+    expect(badge()!.textContent).toBe(`${quoted('button', 'gear')}\n${COMMENT_WORDS.hint}`);
+    click({ x: 710, y: 610 });
+    frame();
+    frame();
+    const [report] = ipc.sent();
+    expect(PickReportSchema.parse(report).description).toMatchObject({ css: '#gear', role: 'button', name: '', displayName: 'gear', tag: 'button' });
+  });
+
   it('names an element without a role by its tag, and a frame by its element', () => {
     pointer('pointermove', { x: 600, y: 50 });
     pointer('pointermove', { x: 600, y: 400 });

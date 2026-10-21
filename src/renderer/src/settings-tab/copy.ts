@@ -48,6 +48,24 @@ export const ENGINE = {
   autoFallbackNote: "Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS then sets this mode for the session and says so; the next resume asks for auto again.",
 };
 
+// P4-A2 start: Settings › Engine, the launch profile every session MAWS launches runs under (settings version 17)
+export const LAUNCH_PROFILE = {
+  plugins: 'Plugins in sessions',
+  pluginsNote: 'The plugins your Claude Code settings turn on, as a terminal session loads them. Switch one off to keep it out of the sessions MAWS starts, forks and resumes; your own settings files are never changed.',
+  pluginsReading: 'Reading your plugins…',
+  pluginsNone: 'Your settings turn on no plugins.',
+  pluginOn: (id: string) => `Load ${id} in MAWS sessions`,
+  style: 'Output style in sessions',
+  styleNote: "Yours: the style your settings select. MAWS's: Claude Code's default style, with MAWS's own instructions for messaging you.",
+  styleYours: 'Yours',
+  styleMaws: "MAWS's",
+  hooks: 'Hooks in sessions',
+  hooksNote: "None turns off every hook from your settings and your plugins in MAWS's sessions; MAWS still tells each session how to message you. Each change on this page applies at a session's next launch, never to a terminal session.",
+  hooksYours: 'Yours',
+  hooksNone: 'None',
+};
+// P4-A2 end
+
 // P4-R8 start: Settings › Engine › MCP servers (settings version 16)
 export const MCP_SERVERS = {
   label: 'MCP servers',

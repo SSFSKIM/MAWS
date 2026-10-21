@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { formatClock, formatShortDate, formatWeekdayClock } from '../../../app/date-format';
+import { formatClock, formatDayTime, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { useTranscriptStore } from '../../../transcript';
 import { cellId } from '../../../transcript/model/keys';
 import { SCHEDULED_COPY } from '../copy';
@@ -20,14 +20,13 @@ import { useScheduledFile } from './scheduled-file';
 import { ACTION } from './TaskRows';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const DATE_TIME = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
 
 // A next run in local time: the time alone today, with the weekday within a week, else with the date.
 function localTime(at: number, now: number): string {
   if (sameDay(at, now)) return formatClock(at);
-  return at - now < 6 * DAY_MS ? formatWeekdayClock(at) : DATE_TIME.format(at);
+  return at - now < 6 * DAY_MS ? formatWeekdayClock(at) : formatDayTime(at);
 }
 
 interface Props {

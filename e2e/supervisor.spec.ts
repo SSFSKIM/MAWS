@@ -649,7 +649,7 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     const strip = await openDiagnostics(run.maws);
     const supervisorRow = strip.getByRole('status', { name: 'supervisor' });
     await expect(supervisorRow).toContainText(`pid ${fresh}`);
-    await expect(supervisorRow).toContainText(new RegExp(`last unexpected exit ${CLOCK} \\(SIGKILL\\) · 1 interrupted`, 'u'));
+    await expect(supervisorRow).toContainText(new RegExp(`last unexpected exit ${CLOCK} \\(SIGKILL\\) · 1 interrupted`));
     const rowText = (await supervisorRow.textContent())!;
     await shots(run.maws, 'diagnostics-supervisor', () => strip);
     expect(run.maws.consoleErrors()).toEqual([]);
@@ -678,7 +678,7 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
 
     await menu(run.maws, 'settings.open');
     const group = run.page.getByRole('group', { name: 'Background supervisor' });
-    await expect(group.getByRole('status')).toHaveText(new RegExp(`^Running since ${CLOCK} · pid ${old} · 1 session · exits 10 min after the last session ends$`, 'u'));
+    await expect(group.getByRole('status')).toHaveText(new RegExp(`^Running since ${CLOCK} · pid ${old} · 1 session · exits 10 min after the last session ends$`));
     await shots(run.maws, 'settings-supervisor', () => group);
 
     await group.getByRole('button', { name: 'Stop all sessions and the supervisor…' }).click();

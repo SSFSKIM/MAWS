@@ -43,6 +43,19 @@ const ONE_SCHEMA = [
 ];
 const mawsSchemaPlugin = { rules: { 'one-schema': builtinRules.get('no-restricted-syntax') } };
 // P3-B end
+// P4-W2L start: English throughout (P4 Decision Log 4). Every age, date and time MAWS shows is written by one module in
+// one display locale, src/shared/app/date-format.ts; a date formatter built elsewhere, or a date's toLocaleDateString or
+// toLocaleTimeString, writes the system's locale into English copy. The same core rule under its own name, as the
+// one-schema check. A Date's toLocaleString is not told from a number's here; the module's header names it too.
+const ONE_LOCALE_MESSAGE =
+  'Ages, dates and times are written by @shared/app/date-format in its one display locale (P4 Decision Log 4): use its named shapes, or dateTimeFormat for a shape of your own.';
+const ONE_LOCALE = [
+  { selector: "NewExpression[callee.object.name='Intl'][callee.property.name=/^(?:DateTimeFormat|RelativeTimeFormat|DurationFormat)$/]", message: ONE_LOCALE_MESSAGE },
+  { selector: "CallExpression[callee.object.name='Intl'][callee.property.name=/^(?:DateTimeFormat|RelativeTimeFormat|DurationFormat)$/]", message: ONE_LOCALE_MESSAGE },
+  { selector: "CallExpression[callee.property.name=/^toLocale(?:Date|Time)String$/]", message: ONE_LOCALE_MESSAGE },
+];
+const mawsDatesPlugin = { rules: { 'one-locale': builtinRules.get('no-restricted-syntax') } };
+// P4-W2L end
 const DESK_WEB = 'apps/desk-web/src/ runs in a browser (the DC5 plan): no Node or Electron module.'; // DC5
 const DESK_WEB_NO_PRELOAD = 'apps/desk-web/src/ runs in a browser with no MAWS preload: `window.maws` does not exist there (the desk composite, DC6).'; // DC6
 const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
@@ -145,6 +158,14 @@ module.exports = defineConfig(
     rules: { 'maws-schema/one-schema': ['error', ...ONE_SCHEMA] },
   },
   // P3-B end
+  // P4-W2L start: the one-locale rule (above); tests build their own English oracles.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/shared/app/date-format.ts', 'src/**/*.test.{ts,tsx}', 'src/renderer/src/test-support/**'],
+    plugins: { 'maws-dates': mawsDatesPlugin },
+    rules: { 'maws-dates/one-locale': ['error', ...ONE_LOCALE] },
+  },
+  // P4-W2L end
   // DC3 start: the desk hub's protocol module (apps/desk-hub/src/protocol/) is imported by the Worker, the web app, and
   // the fake machine as it stands, so it imports no runtime's module; apps/desk-hub/tsconfig.protocol.json holds its
   // globals to WebCrypto, text encoding, and URL.

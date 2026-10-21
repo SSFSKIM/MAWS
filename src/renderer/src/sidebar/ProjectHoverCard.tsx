@@ -7,7 +7,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
-import { formatAgo } from '../app/date-format';
+import { formatAgo } from '@shared/app/date-format';
 import { useNow } from '../app/use-now';
 import { formatCwd } from '../composer/frame/LocationChip';
 import { ipc } from '../ipc/client';

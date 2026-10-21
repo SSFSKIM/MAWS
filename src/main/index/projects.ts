@@ -179,6 +179,20 @@ export function locate(directory: string | null, mainWorktreeOf: (root: string) 
   return { realpath, projectDirectory: realpath, worktreePath: null };
 }
 
+// P4 W2-B (tracker 2026-10-07 "The index sync's warm-up queue…"): whether `locate(directory)` answers without git: no
+// directory, one that is gone, or one whose answer the cache holds. A directory never asked about reads no, though its
+// answer may need no git either (no `.git` file above it): the reading that costs one realpath.
+export function locatesWithoutGit(directory: string | null): boolean {
+  if (directory === null || directory === '') return true;
+  let realpath: string;
+  try {
+    realpath = canonical(directory);
+  } catch {
+    return true;
+  }
+  return linkedWorktrees.has(WORKTREE.exec(realpath)?.[1] ?? realpath);
+}
+
 function linkedWorktree(directory: string, mainWorktreeOf: (root: string) => string | null): LinkedWorktree | null {
   let answer = linkedWorktrees.get(directory);
   if (answer === undefined) linkedWorktrees.set(directory, (answer = findLinkedWorktree(directory, mainWorktreeOf)));

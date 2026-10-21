@@ -24,10 +24,16 @@
 // It refuses a LIVE_E2E group in a run that is not live too: design-live and dashboard-live set MAWS_LIVE in their own
 // scripts and would spend, the others would build and skip (Decision Log 75). Every live run also takes the
 // LIVE_GUARD_E2E groups (P4-A2, X34: the tool-time guard's heavy-case fixture), whichever live groups it names.
+// `Selection: affected` (a push only; ci-gate.sh --affected): an iteration run whose unit and unit:darwin test only what
+// its change, listed in the commit's `Affected:` trailers, can reach (gate-affected.mjs; ci-kit's test-history spec, M4).
+// It adds `selection` and `related` (the paths for vitest related as JSON, or empty for the full suite) to the outputs
+// and one line saying which to the summary; a run without the trailer writes neither. Such a run is never landing
+// evidence.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
 import process from 'node:process';
+import { affected } from './gate-affected.mjs';
 
 const env = process.env;
 const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -112,6 +118,10 @@ const e2e = [...gates]
 // Group names; an `e2e:` prefix, as --gates writes them, is read as the group.
 const defaultBeside = dispatched ? [] : [...new Set(words(trailer('DefaultBeside')).map((name) => name.replace(/^e2e:/, '')))].filter((group) => group !== 'default');
 
+const selectionAsked = dispatched ? undefined : trailer('Selection')?.toLowerCase();
+if (selectionAsked !== undefined && selectionAsked !== 'affected') refuse(`no such selection: ${selectionAsked} (affected, through ci-gate.sh --affected)`);
+const selection = selectionAsked && affected(env.HEAD_MESSAGE ?? '');
+
 const has = (gate) => String(gates.has(gate));
 const runners = CLASS1A_RUNNERS[class1a];
 const pool = class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)));
@@ -128,3 +138,11 @@ const moved = e2e.filter((entry) => offMac.has(entry.group) && entry.runner !== 
 const pooledNote = moved.length > 0 ? ` (${class1a === 'pool' ? 'on the pool' : 'on the hosted Linux runner'}: ${moved.join(', ')})` : '';
 appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}\n`);
 process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}`);
+if (selection) {
+  const line = selection.related
+    ? `Selection: affected — ${selection.paths} paths, unit runs vitest related`
+    : `Selection: affected — full suite: ${selection.reason}`;
+  appendFileSync(env.GITHUB_OUTPUT, `selection=affected\nrelated=${selection.related ? JSON.stringify(selection.related) : ''}\n`);
+  appendFileSync(env.GITHUB_STEP_SUMMARY, `\n${line}\n`);
+  process.stdout.write(`${line}\n${(selection.related ?? []).map((path) => `  ${path}\n`).join('')}`);
+}
