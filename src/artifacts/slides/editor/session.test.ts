@@ -139,4 +139,14 @@ describe('the gesture hold (D17)', () => {
     session.holdRemote(false); // the text box unmounting after: nothing left to release
     expect(log).toEqual(['release']);
   });
+
+  it('dispose finishes its cleanup when the release’s flush throws, then lets the error through', () => {
+    const { session } = logged((on) => {
+      if (!on) throw new Error('a listener of the flush');
+    });
+    const destroy = vi.spyOn(session.undo, 'destroy');
+    session.beginDrag();
+    expect(() => session.dispose()).toThrow('a listener of the flush');
+    expect(destroy).toHaveBeenCalled();
+  });
 });

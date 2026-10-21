@@ -1004,10 +1004,10 @@ describe('P4-B2: the gesture hold and the drop’s re-assert (D17)', () => {
     expect(ctx.session.snapshot().dragging).toBe(false);
   });
 
-  it('a gesture the overlay unmounts in ends as a cancel does: the hold released, the drag over', () => {
+  /** The overlay alone over the deck's slide, its session holding through `holdRemote`, `a` selected. */
+  function overlaid(holdRemote: (on: boolean) => void) {
     const doc = deck();
-    const channel = heldPeer(doc, HIGHER);
-    const session = new DeckSession(doc, 0, { holdRemote: channel.holdRemote });
+    const session = new DeckSession(doc, 0, { holdRemote });
     const canvas = new SlideCanvas(doc, 's', document.createElement('div'));
     canvases.push(canvas);
     fakeLayout(canvas);
@@ -1024,12 +1024,36 @@ describe('P4-B2: the gesture hold and the drop’s re-assert (D17)', () => {
     }
     const utils = render(<Stage />);
     act(() => session.select(['a']));
-    const handle = utils.container.querySelector('[data-handle="se"]')!;
+    return { doc, session, utils, stage: utils.container.querySelector<HTMLElement>('[data-stage-surface]')!, handle: utils.container.querySelector('[data-handle="se"]')! };
+  }
+
+  it('a gesture the overlay unmounts in ends as a cancel does: the hold released, the drag over', () => {
+    const holds: boolean[] = [];
+    const { session, utils, handle } = overlaid((on) => holds.push(on));
     fireEvent.pointerDown(handle, { button: 0, buttons: 1, clientX: 10, clientY: 10, pointerId: 1 });
-    expect(channel.holds).toEqual([true]);
+    expect(holds).toEqual([true]);
     expect(session.snapshot().dragging).toBe(true);
     utils.unmount();
-    expect(channel.holds).toEqual([true, false]);
+    expect(holds).toEqual([true, false]);
     expect(session.snapshot().dragging).toBe(false);
+  });
+
+  it('a cancel whose drop throws (a listener of the flush) leaves no gesture behind: a later move writes nothing', () => {
+    const { doc, session, stage, handle } = overlaid((on) => {
+      if (!on) throw new Error('a listener of the flush');
+    });
+    // the move and the cancel on the stage itself: the handle is drawn again as the frame re-measures
+    fireEvent.pointerDown(handle, { button: 0, buttons: 1, clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(stage, { buttons: 1, clientX: 60, clientY: 10, pointerId: 1 });
+    const width = styleOf(doc, 'a').width;
+    expect(width).not.toBe('200px');
+    try {
+      fireEvent.pointerCancel(stage, { pointerId: 1 });
+    } catch {
+      // the flush's error, as the listener's caller sees it
+    }
+    expect(session.snapshot().dragging).toBe(false);
+    fireEvent.pointerMove(stage, { buttons: 0, clientX: 110, clientY: 10, pointerId: 1 });
+    expect(styleOf(doc, 'a').width).toBe(width);
   });
 });

@@ -414,16 +414,19 @@ export class DeckSession {
 
   dispose(): void {
     this.disposed = true; // B4: an awaited edit still running writes nothing
-    // D17: a drag or a composition the tab closed on holds nothing after it, and re-asserts nothing
+    // D17: a drag or a composition the tab closed on holds nothing after it, and re-asserts nothing; the hold is
+    // released last, so a listener of its flush that throws leaves nothing here undone
     this.reasserts = [];
-    if (this.holding.size > 0) {
-      this.holding.clear();
-      this.options.holdRemote?.(false);
+    const holding = this.holding.size > 0;
+    this.holding.clear();
+    try {
+      const presence = this.options.presence;
+      if (presence && presence.awareness.getLocalState()) presence.awareness.setLocalStateField('deck', null);
+      this.stopUndo();
+      this.undo.destroy();
+      this.listeners.clear();
+    } finally {
+      if (holding) this.options.holdRemote?.(false);
     }
-    const presence = this.options.presence;
-    if (presence && presence.awareness.getLocalState()) presence.awareness.setLocalStateField('deck', null);
-    this.stopUndo();
-    this.undo.destroy();
-    this.listeners.clear();
   }
 }

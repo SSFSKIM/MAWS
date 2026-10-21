@@ -266,11 +266,15 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     };
 
     // the gesture ends written, its step closed, and the layout passes it saw caught up
+    // (P4-B2 D17: the end flushes the replica's hold, whose listeners may throw; the gesture is already let go)
     const finish = (g: Gesture) => {
-      g.end(true);
-      setShown(null);
-      catchUpLayout();
-      rearm();
+      try {
+        g.end(true);
+      } finally {
+        setShown(null);
+        catchUpLayout();
+        rearm();
+      }
     };
 
     const onUp = (e: PointerEvent) => {
@@ -347,13 +351,18 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       e.preventDefault();
     };
 
+    // the gesture let go before its end runs (D17: the end flushes the hold, which may throw), as a release does
     const onCancel = () => {
-      gesture.current?.end(false);
+      const g = gesture.current;
       gesture.current = null;
       pending.current = null;
-      setShown(null);
-      catchUpLayout();
-      rearm();
+      try {
+        g?.end(false);
+      } finally {
+        setShown(null);
+        catchUpLayout();
+        rearm();
+      }
     };
 
     el.addEventListener('pointerdown', onDown);
