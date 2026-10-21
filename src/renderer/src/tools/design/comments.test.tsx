@@ -15,7 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
+import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { NO_SESSION_CONTEXT } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -26,6 +26,7 @@ import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
+import { commentDraftOf } from '../document/comment-drafts';
 import { artifactCommentAnchor, useDocumentComments } from '../document/comments';
 import { registerDesignEditor } from './index';
 import type { DesignTabState } from './tab-state';
@@ -211,6 +212,20 @@ describe('a design’s compose card keeps its draft', () => {
     await comment();
     expect(threadStates(doc)).toHaveLength(1);
     expect(document.activeElement).toBe(field());
+  });
+
+  // the review's P1: an activate-existing move hands the card and its comment to the view it keeps
+  it('a move onto a view already showing the design hands the card and its typed comment to that view', async () => {
+    const { state, comment } = await mount();
+    await comment();
+    await userEvent.type(field(), 'Taller?');
+    const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
+    const kept = holdArtifactEditorState<DesignTabState>(panelScope, DESIGN, 'design', artifactEditorFor('design')! as never);
+    expect(await state.closeGuard({ moving: true })).toBe(true);
+    expect(handArtifactViewOver(scope, panelScope)).toBe(true);
+    expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);
+    expect(commentDraftOf(DESIGN)?.text).toBe('Taller?');
+    releaseArtifactEditorState(panelScope);
   });
 
   it('the tab’s close guard asks before an unsent comment is lost, and lets a move go', async () => {

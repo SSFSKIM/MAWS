@@ -14,7 +14,7 @@ import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
+import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -24,6 +24,7 @@ import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
+import { commentDraftOf } from '../document/comment-drafts';
 import { artifactCommentAnchor, useDocumentComments } from '../document/comments';
 import { registerPresentationEditor } from './index';
 import type { DeckTabState } from './tab-state';
@@ -109,7 +110,7 @@ describe('a deck’s compose card keeps its draft', () => {
     const editor = artifactEditorFor('presentation')!;
     const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, 'presentation', editor as never);
     const Main = editor.Main;
-    render(
+    const view = render(
       <EditorHostScopeContext.Provider value={scope}>
         <Main artifactId={DECK} state={hold.state} scope={scope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
@@ -122,7 +123,7 @@ describe('a deck’s compose card keeps its draft', () => {
       act(() => button.click());
       await act(async () => {});
     };
-    return { doc, state: hold.state, confirmDiscard, comment };
+    return { doc, state: hold.state, confirmDiscard, comment, unmount: view.unmount };
   }
   const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
 
@@ -147,6 +148,38 @@ describe('a deck’s compose card keeps its draft', () => {
     await act(async () => {});
     expect(useCommentCard.getState().open).toBeNull();
     expect(listThreads(doc)).toHaveLength(0);
+  });
+
+  // the review's P1: a move onto a view already showing the deck activates that view and closes the source (P4-B3's
+  // activate-existing move, its Decision Log 39); the guard does not ask a move, so the card must go to the kept view
+  it('a move onto a view already showing the deck hands the card and its typed comment to that view, the source closing', async () => {
+    const { doc, state, comment, unmount } = await mount();
+    await comment();
+    await userEvent.type(field(), 'Shorter?');
+    // the panel shows the deck too: the move's destination
+    const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
+    const editor = artifactEditorFor('presentation')!;
+    const kept = holdArtifactEditorState<DeckTabState>(panelScope, DECK, 'presentation', editor as never);
+    const Panel = editor.Panel;
+    const panel = render(
+      <EditorHostScopeContext.Provider value={panelScope}>
+        <Panel artifactId={DECK} state={kept.state} scope={panelScope} visible onShown={() => {}} />
+      </EditorHostScopeContext.Provider>,
+    );
+    await waitFor(() => expect(kept.state.snapshot().session).not.toBeNull());
+    expect(await state.closeGuard({ moving: true })).toBe(true);
+    expect(handArtifactViewOver(scope, panelScope)).toBe(true);
+    expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);
+    expect(commentDraftOf(DECK)).toEqual({ threadId: listThreads(doc)[0]!.id, text: 'Shorter?' });
+    // the source closes, its body and its state with it
+    unmount();
+    act(() => releaseArtifactEditorState(scope));
+    await act(async () => {});
+    expect(useCommentCard.getState().open).toMatchObject({ hostId: kept.state.commentHostId });
+    expect(commentDraftOf(DECK)?.text).toBe('Shorter?');
+    expect(listThreads(doc)).toHaveLength(1); // not withdrawn
+    panel.unmount();
+    releaseArtifactEditorState(panelScope);
   });
 
   it('the tab’s close guard asks before an unsent comment is lost, keeps the tab when refused, and lets a move go', async () => {

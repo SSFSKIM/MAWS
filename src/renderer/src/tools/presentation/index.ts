@@ -9,6 +9,7 @@ import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
 import { registerArtifactEditor } from '../../artifacts/registry';
 import { confirm } from '../../sessions/dialogs';
+import { handCommentCardOver } from '../document/comments'; // P4-B2
 import { DeckMain, DeckPanel } from './DeckBody';
 import { DeckTabState, type DeckTabDeps } from './tab-state';
 
@@ -38,5 +39,8 @@ export function registerPresentationEditor(deps: () => DeckTabDeps = windowDeps)
     createState: (target) => new DeckTabState(target, deps()),
     dispose: (state) => state.dispose(),
     moved: (state, target) => state.moveTo(target.surface), // P4-B3: the e2e seam reports the surface it is on
+    // P4-B2 (D16; the review's P1): a move onto a view already showing the deck hands that view the compose card and its
+    // unsent comment, as the document's does (P4-B3 Decision Log 39), so the close guard's `moving` skip loses nothing
+    handOver: (from, to) => handCommentCardOver(from.artifactId, from.commentHostId, to.commentHostId),
   });
 }
