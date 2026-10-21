@@ -66,6 +66,22 @@ describe('the parse5 parser: the spec’s tree, as the page’s DOMParser builds
   });
 });
 
+// The one place parse5 7 and the page part: inside a <select>, which parse5 parses as the spec once did and Chromium
+// (Electron 44's 152, and 156) as it does now. The page's DOMParser builds this as one <select>.
+describe('the parse5 parser’s known gap: a <select>', () => {
+  const MENU = '<select><textarea>A</textarea><option>B</option></select>';
+
+  it('builds another tree there than the page, says so, and validateCanon leaves the file’s structure to the page', () => {
+    expect(canonElements(MENU, parse5Parser).map((e) => e.tag)).toEqual(['select', 'textarea', 'option']);
+    expect([MENU, '<div><SELECT name="x"></SELECT></div>'].map((html) => parse5Parser.buildsPageTree?.(html))).toEqual([false, false]);
+    expect(messages('components/menu.html', MENU)).toEqual([]);
+    // its limits still hold; a file with no <select> keeps the whole check
+    expect(messages('components/menu.html', `${MENU}${'x'.repeat(64 * 1024)}`)).toEqual([`${MENU.length + 64 * 1024} bytes; a canon file holds at most ${64 * 1024}`]);
+    expect(parse5Parser.buildsPageTree?.('<div data-select="1"><selection-chip></selection-chip></div>')).toBe(true);
+    expect(messages('components/chip.html', '<div data-select="1"></div><selection-chip></selection-chip>')).toEqual(['a canon file is one root element; this one has 2']);
+  });
+});
+
 // Canon whose tree happy-dom builds as the spec does: the two parsers must find the same problems and the same elements.
 const AGREED: Record<string, string> = {
   'layouts/title.html': `<section id="title" style="background:var(--ds-color-bg);padding:128px">

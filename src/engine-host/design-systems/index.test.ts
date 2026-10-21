@@ -24,7 +24,7 @@ import { ArtifactStoreError } from '../documents/errors';
 import { LibraryMirror } from '../library/mirror';
 import { artifactPublishTool } from '../tool-server/artifact-publish';
 import { artifactCreateTool, artifactDescribeTypeTool } from '../tool-server/artifact-tools';
-import { jsonOf, openWorld, textOf } from '../tool-server/artifact-world.fixture';
+import { jsonOf, openWorld, textOf, type World } from '../tool-server/artifact-world.fixture';
 import type { McpToolResult } from '../tool-server/server';
 import { DESIGN_SYSTEMS_DEADLINE_SHAPES, registerDesignSystems, type DesignSystems } from '.';
 
@@ -389,43 +389,60 @@ describe('the agent’s publish through the store (Acceptance 7)', () => {
 // P4 (the tracker row of 2026-10-14): the host checks canon structure as the page's Check does, so an agent's publish
 // or create of a malformed canon file is refused, and the refusal the agent reads names the file and what is wrong.
 describe('the canon’s structure, checked on the host', () => {
-  it('refuses an agent’s create and publish of a malformed component, naming the file and its problem, and takes a well-formed one', async () => {
+  const house = DEFAULT_SYSTEMS.find((d) => d.key === HOUSE_KEY)!.files;
+  const FAULTY = '<span onclick="go()" style="color:var(--ds-color-accent)">New</span>';
+  const PROBLEM = 'span: the event handler onclick runs script; canon holds no script';
+  const expectRefused = (result: McpToolResult, tool: string) => {
+    expect(result.isError).toBe(true);
+    // the sentence the agent reads names the file and the problem; the machine-readable part lists them too
+    expect(textOf(result)).toContain(`${tool}: the design system's files were refused: components/badge.html: ${PROBLEM}`);
+    expect(artifactRefusalOf(textOf(result))).toEqual({ reason: 'invalid', problems: [{ path: 'components/badge.html', message: PROBLEM }] });
+  };
+  const onHost = async (run: (world: World) => Promise<void>) => {
     const world = openWorld();
     const mounted = registerDesignSystems({ on, documents: { storage: world.storage, service: world.service, store: world.store, close: () => {} }, log: () => {}, loadAssets: async () => [] });
     try {
       await mounted.seeded;
-      const deps = world.deps();
-      const house = DEFAULT_SYSTEMS.find((d) => d.key === HOUSE_KEY)!.files;
-      const FAULTY = '<span onclick="go()" style="color:var(--ds-color-accent)">New</span>';
-      const PROBLEM = 'span: the event handler onclick runs script; canon holds no script';
-      const expectRefused = (result: McpToolResult, tool: string) => {
-        expect(result.isError).toBe(true);
-        // the sentence the agent reads names the file and the problem; the machine-readable part lists them too
-        expect(textOf(result)).toContain(`${tool}: the design system's files were refused: components/badge.html: ${PROBLEM}`);
-        expect(artifactRefusalOf(textOf(result))).toEqual({ reason: 'invalid', problems: [{ path: 'components/badge.html', message: PROBLEM }] });
-      };
+      await run(world);
+    } finally {
+      mounted.close();
+      world.close();
+    }
+  };
+  const create = async (world: World, title: string) =>
+    jsonOf<{ artifactId: string; revision: number }>(await artifactCreateTool(world.deps()).call({ kind: 'design_system', title, files: house }, world.ctx()));
+  const publish = (world: World, created: { artifactId: string; revision: number }, files: Record<string, string>) =>
+    artifactPublishTool(world.deps()).call({ artifact: created.artifactId, baseRevision: created.revision, files }, world.ctx());
 
+  it('refuses an agent’s create and publish of a malformed component, naming the file and its problem, and takes a well-formed one', () =>
+    onHost(async (world) => {
       // a create whose canon holds the fault is refused before the artifact exists
       const before = world.store.list({ kind: 'design_system' }).length;
-      expectRefused(await artifactCreateTool(deps).call({ kind: 'design_system', title: 'Badges', files: { ...house, 'components/badge.html': FAULTY } }, world.ctx()), 'artifact_create');
+      expectRefused(await artifactCreateTool(world.deps()).call({ kind: 'design_system', title: 'Badges', files: { ...house, 'components/badge.html': FAULTY } }, world.ctx()), 'artifact_create');
       expect(world.store.list({ kind: 'design_system' })).toHaveLength(before);
 
       // a well-formed create lands; a publish of the faulty component over it is refused and writes nothing
-      const created = jsonOf<{ artifactId: string; revision: number }>(await artifactCreateTool(deps).call({ kind: 'design_system', title: 'Badges', files: house }, world.ctx()));
-      expectRefused(await artifactPublishTool(deps).call({ artifact: created.artifactId, baseRevision: created.revision, files: { 'components/badge.html': FAULTY } }, world.ctx()), 'artifact_publish');
+      const created = await create(world, 'Badges');
+      expectRefused(await publish(world, created, { 'components/badge.html': FAULTY }), 'artifact_publish');
       const liveFiles = () => readFiles(world.service.live(created.artifactId));
       expect(liveFiles()['components/badge.html']).toBeUndefined();
 
       // the agent fixes it and publishes again from the same read
       const fixed = '<span style="color:var(--ds-color-accent)">New</span>';
-      const published = jsonOf<{ status: string; changed: string[] }>(await artifactPublishTool(deps).call({ artifact: created.artifactId, baseRevision: created.revision, files: { 'components/badge.html': fixed } }, world.ctx()));
-      expect(published).toMatchObject({ status: 'published', changed: ['components/badge.html'] });
+      expect(jsonOf(await publish(world, created, { 'components/badge.html': fixed }))).toMatchObject({ status: 'published', changed: ['components/badge.html'] });
       expect(liveFiles()['components/badge.html']).toBe(fixed);
-    } finally {
-      mounted.close();
-      world.close();
-    }
-  });
+    }));
+
+  // parse5 7 parses inside a <select> as the spec once did, Chromium as it does now; a file holding one is left to the
+  // page's Check, so the host never refuses what the page accepts (here parse5 alone would see three roots)
+  it('leaves a component holding a <select> to the page’s Check, and still refuses a malformed one beside it', () =>
+    onHost(async (world) => {
+      const MENU = '<select><textarea>A</textarea><option>B</option></select>';
+      const created = await create(world, 'Menus');
+      expectRefused(await publish(world, created, { 'components/menu.html': MENU, 'components/badge.html': FAULTY }), 'artifact_publish');
+      expect(jsonOf(await publish(world, created, { 'components/menu.html': MENU }))).toMatchObject({ status: 'published', changed: ['components/menu.html'] });
+      expect(readFiles(world.service.live(created.artifactId))['components/menu.html']).toBe(MENU);
+    }));
 });
 
 describe('deletion and the pin (Acceptance 13; D10)', () => {

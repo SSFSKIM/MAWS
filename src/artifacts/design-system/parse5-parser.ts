@@ -1,8 +1,9 @@
 // The canon check's HTML parser where no DOM is (the engine host): parse5, which builds the HTML spec's tree as the
 // renderer's `DOMParser` does, read as the DOM nodes `canon.ts` reads (`DomNodeLike`). So the host refuses what the
 // page's Check flags, by the same tree: the head and body split, implied elements, a template's contents outside its
-// children, attributes by their qualified names. P4, the tracker row of 2026-10-14. One known gap: parse5 7 drops the
-// tags inside a `<select>` as the spec once did, where Chromium now keeps them, so the two may differ inside one.
+// children, attributes by their qualified names. P4, the tracker row of 2026-10-14. One known gap: parse5 7 parses inside
+// a `<select>` as the spec once did (dropping tags, closing it at a `<textarea>`), Chromium as the spec does now, so the
+// trees part both ways there; a file holding a `<select>` tag is left to the page (`buildsPageTree`).
 import { html as spec, parse, type DefaultTreeAdapterMap } from 'parse5';
 import type { DomNodeLike, HtmlParser } from './canon';
 
@@ -10,6 +11,9 @@ type Node = DefaultTreeAdapterMap['node'];
 type Element = DefaultTreeAdapterMap['element'];
 
 const EMPTY: readonly DomNodeLike[] = [];
+// A `<select` start tag anywhere in the source, as the tokenizer would end its name; a comment or an attribute naming
+// one counts too, which only leaves more to the page.
+const SELECT_TAG = /<select[\s/>]/i;
 
 function domNode(node: Node): DomNodeLike | null {
   if (node.nodeName === '#text') return { nodeType: 3, nodeName: '#text', nodeValue: (node as DefaultTreeAdapterMap['textNode']).value, childNodes: EMPTY };
@@ -42,4 +46,5 @@ export const parse5Parser: HtmlParser = {
     };
     return { head: first(['head']), body: first(['body', 'frameset']) };
   },
+  buildsPageTree: (source) => !SELECT_TAG.test(source),
 };
