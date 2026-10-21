@@ -8,7 +8,7 @@ toolchain. This page says where everything is and how to cite it.
 
 | | location | current build | older builds kept |
 |---|---|---|---|
-| ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5) | `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
+| ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.1016.51333` (published 2026-10-21 02:19Z, runtime 0.0.33; acquired from the appcast, not installed) | `chatgpt-26.1013.40934` (published 2026-10-16; installed build at acquisition), `chatgpt-26.1013.31256` (published 2026-10-15; incomplete conversion, see below), `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5), `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
 | Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-2.42304.0` (2026-10-18, Electron 44.7.2) | `app-2.16120.0`, `app-2.9939.2` |
 | claude.ai web app | inside `app-2.42304.0/web/` (shipped with the app from 2.16120 on) | | `app-2.16120.0/web/`, `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
 | T3 Code (open source, MIT) | `~/t3code-src` (git clone of `pingdotgg/t3code`) | `148e6dee` (2026-10-01) | `git -C ~/t3code-src log` holds the history; cite `<path>:<line>` at a named commit |
@@ -31,6 +31,12 @@ Start at `MAP.md`. Then:
   then grep the id in the prettified renderer to reach the component.
 - `CHANGES-<old>..<new>.md`: what changed since the previous build, from the catalogs.
 - `extracted/<build>/BUILD.json`: version, bundle id, Electron, asar sha256, Sentry release, acquisition time.
+
+**Check conversion completeness before interpreting a digest.** `convert-log.json` records each conversion's
+`ok` flag. In `chatgpt-26.1013.31256`, `renderer/app/app-initial-3ccf4886957f.js` failed with `deadline`;
+the 928→31256 digest's apparent route and feature-gate removals are therefore not evidence of product removal.
+The 31256→40934 digest restores many of those names. Compare complete endpoint trees and inspect the component
+and gate call sites; a UI string's presence does not establish account eligibility or a default-on rollout.
 
 ## Citing
 
