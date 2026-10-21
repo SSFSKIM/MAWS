@@ -642,7 +642,12 @@ test('a named Google Fonts face with no network: Lora fetched once and drawn off
   expect(presented.first).toBe('Lora');
   expect(presented.loaded).toBe(true);
   expect(Math.abs(presented.drawn - presented.fallback)).toBeGreaterThan(2);
-  await audience.keyboard.press('Escape');
+  // Escape ends the show: the window closes on the key's down, before its up, so a press that finds its page closed has
+  // done its work (presentations-present.spec.ts's way); the window is open until the press
+  expect(audience.isClosed(), 'the audience window still open before Escape').toBe(false);
+  await audience.keyboard.press('Escape').catch((error: unknown) => {
+    if (!/has been closed/.test(String(error))) throw error;
+  });
   await expect.poll(() => app.windows().filter((w) => w.url().includes('present=1')).length, { timeout: 10_000 }).toBe(0);
 
   // the exports: the HTML inlines the fetched file as its face, the PDF embeds Lora, the PPTX names it

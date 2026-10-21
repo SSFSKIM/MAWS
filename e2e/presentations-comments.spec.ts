@@ -156,7 +156,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(thread).toHaveAttribute('data-status', 'resolved');
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-status', 'open');
-  await expect(panel.getByRole('button', { name: '1 open comment' })).toBeVisible(); // the header's count
+  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible(); // the header's count
 
   // the pin at the element's top-right
   await expect.poll(() => pinOffset(deck, 'body'), { message: 'the pin on the element’s corner' }).toBeLessThan(4);
@@ -192,7 +192,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(thread).toContainText('The commented element was deleted.');
   await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths');
   await expect(deck.locator('[data-comment-pin]')).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: '1 open comment' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible();
 
   // Resolve and Reopen in the rail; the count follows
   await thread.getByRole('button', { name: 'Resolve' }).click();
@@ -200,7 +200,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(panel.getByRole('button', { name: /open comment/ })).toHaveCount(0);
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-orphan', '');
-  await expect(panel.getByRole('button', { name: '1 open comment' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible();
   // an undo brings the element back: the thread is no orphan any more, its pin is back
   await deck.getByRole('button', { name: 'Undo' }).click();
   await expect(thread).not.toHaveAttribute('data-orphan', '');
@@ -274,8 +274,15 @@ test('the pin popover: at the pin with its reply field focused, Escape keeps the
   await expect(reply).toBeFocused();
   await expect(pin).toHaveAttribute('aria-expanded', 'true');
   await expect(rail).toHaveCount(0);
-  const [p, q] = [(await pin.boundingBox())!, (await popover.boundingBox())!];
-  expect(Math.abs(q.x - p.x), 'its left at the pin’s').toBeLessThan(2);
+  // at the pin, clamped inside the frame (D16: the card's placement): its left at the pin's unless the card would then
+  // cross the frame's right edge less its 8 px inset, where it stops, still under the pin (at the panel's widest the
+  // stage's frame beside the filmstrip is narrow enough that this pin's 300 px card stops there)
+  const [p, q, f] = [(await pin.boundingBox())!, (await popover.boundingBox())!, (await deck.locator('.deck-comment-frame').boundingBox())!];
+  const right = f.x + f.width - 8;
+  expect(Math.abs(q.x - Math.min(p.x, right - q.width)), 'its left at the pin’s, clamped inside the frame').toBeLessThan(2);
+  expect(q.x + q.width, 'its right inside the frame').toBeLessThan(right + 2);
+  expect(q.x, 'under the pin').toBeLessThanOrEqual(p.x + 1);
+  expect(q.x + q.width, 'under the pin').toBeGreaterThanOrEqual(p.x + p.width - 1);
   expect(q.y - (p.y + p.height), 'its top just under the pin').toBeGreaterThanOrEqual(0);
   expect(q.y - (p.y + p.height)).toBeLessThan(8);
 

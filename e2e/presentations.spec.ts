@@ -624,7 +624,7 @@ test('Edit ▸ Undo and Redo: the deck’s step on the stage, the field’s own 
   await expect.poll(async () => (await element('b'))?.style.left).toBe('701px');
 
   // typed into the inspector's Width field, the menu's Undo takes back the typing, not the deck's nudge
-  const width = tab.getByRole('complementary', { name: 'Inspector' }).getByRole('textbox', { name: 'Width' });
+  const width = tab.getByRole('complementary', { name: 'Inspector' }).getByRole('textbox', { name: 'Width', exact: true });
   await expect(width).toHaveValue('200');
   await width.click();
   await width.selectText();
