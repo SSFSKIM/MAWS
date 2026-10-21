@@ -1,0 +1,282 @@
+# P4-B2 — Slides and design boards (2026-10-21)
+
+> **Parent:** `docs/doperpowers/plans/2026-10-19-p4-smoothing.md` (the P4 composite spec), child **P4-B2** (§5 "P4-B2 — Slides and design boards — spike (S-IME), then plan"; §2 items 2, 3 and 4; §4.4, binding on the state machine's states and on the armed editor as the IME arrangement, advisory on thresholds and selection details; §4.3's canvas half; §4.10's S-IME and R-8; Decision Logs 4, 6, 15, 16, 17, 20, 24, 25, 39 and 40). **Parent pin:** blob `e8dcab899cfb0c7d0db61e41644d4e2014b71a01` at master `a98e0a75e`. **Consumes:** the spike's findings (`spikes/p4-click-model/findings.txt`, closed 2026-10-21), the P4 interface ledger (`docs/doperpowers/plans/2026-10-19-p4-interface-ledger.md`: X36's `ThreadCard` and draft rule as built at P4-B1's landing, `placeCard` and `pinOf` in `src/artifacts/comments/placement.ts`, X27's and X23's proposed rows, the shared-files rule that adds `src/main/menu.ts`), the prior art (`research/p4-ux-prior-art.md` §1.4 V1 to V15, §2.3 T1 to T22, §2.4 P1 to P12, K1 to K6, I1 to I5, A1 to A5), P3's Decision Log 108 (the 24 ms drag acceptance), and the tracker rows 293, 280, 253, 256, 231, 212, 182 and 176 (line numbers of the tracker at c395ff0d9). **Status:** the plan, written before implementation; implementation starts from master after the P4 integration (W2-B/C/D/L, W3-A, A2's launch profile, R9) lands, with the spike's branch merged into that base.
+
+## Purpose
+
+Text on a slide or a design board is edited on the first gesture, as in Canva (the owner's select-first choice, Decision Log 6) and faster than Canva where the owner asked for it. A first click selects a text element and its editor is already focused underneath with the caret hidden (ARMED), so a printable key replaces the text and a Korean composition starts in place with its first syllable intact. A second click places the caret, a 3 px drag moves, and a double-click reaches the deepest text under the pointer in one gesture, grouped headings and table cells included. Comments on a slide or a board become a pin and a popover drawing the document's card (X36). A named Google Fonts face is fetched once into the deck and then renders offline everywhere. The drag stays inside its bound while an agent republishes. This plan covers §2 items 2, 3 and 4 and the tracker rows above, and it closes the IME spike's open questions as far as they can be closed without the owner's hands.
+
+## Progress
+
+- 2026-10-19 to 2026-10-21: the spike S-IME (`spikes/p4-click-model/findings.txt`; branch `worktree-agent-a0ef27fba0a0f4b08`). The first phase built the ARMED prototype, the CDP harness and eight simulated cases. The mini's GUI hold passed L8, so Q3 holds on the real Mac. L0 stopped the run: cua's keys bypass the input method. The owner then skipped L0 to L7, so the IME verdict is "intact under simulation, the real input method unverified". LC-2 read Google Slides: a printable key on an object-selected box appends at the end of its text, and a first click on a box's text gives a caret. Canva's half waits on the owner's sign-in. Until then T10 stays as §4.4 writes it, one swappable transition.
+- 2026-10-21: the grounding read on master a98e0a75e. Four read-only opus agents covered the pin popover, Google Fonts with R-8, the drag remainder with rows 212 and 182, and accessibility with rows 280 and 253. The executor read the state machine's files. The design below rests on their reports.
+
+## Scope and what the code says (grounding)
+
+- **The click model today** (`src/artifacts/slides/editor/transform/selection.ts`, `Overlay.tsx`, `../TextBox.tsx`, `../session.ts`; `src/artifacts/design/editor/World.tsx`):
+  - `pick` selects at the selection's level, and ⌘ deep-selects.
+  - A double-click calls `drill`: one level into a selected container, or an edit of a selected text element.
+  - Escape is `escapeUp`: up to the container, then nothing. Enter edits a text element or selects a container's first child.
+  - The session holds `selection` and `editingText`, and the text box mounts only for `editingText`.
+  - P3-F F9 types a printable key pressed on a selected text element into its edit once the box binds, excluding Hangul (`Overlay.tsx:55-58, 330`).
+  - The World arbitrates presses before the overlay (a press on an inactive board activates it and selects the hit; `World.tsx:233-243, 603-614`), and passes every key it does not own to the overlay.
+  - None of these files changed on master since the spike's base 48fec4bd1. The integration's R9 changes the Inspector (`pickedAt(…, version)` with `useDocVersion`) and the MarkBar (`useEditorState`).
+- **The spike's prototype** (`armed.ts`, and the armed branches in `TextBox.tsx`, `Overlay.tsx`, `Stage.tsx`, `textbox.css`) is the mechanism this plan keeps:
+  - The box mounts ARMED: focused, caret transparent, no mark bar.
+  - Capture-phase key routing sends the element keys to `stageKey`; ⌘Z stays the box's; the clipboard events are the stage's.
+  - `replace()` clears and carries the marks; a press the stage keeps gives the focus back.
+  - The prototype's switch and the seam's `armed()` go. ARMED becomes unconditional.
+- **Tables.** `th` and `td` are text tags and `table` and `tr` are containers (`ir.ts:79-83`). `tableRow` adds and removes rows (`writers-elements.ts:629`).
+- **The Edit menu** holds Undo and Redo as role items (`src/main/menu.ts:117`). Its Select All is already an app item that runs the focused contents' command and emits `layout.selectAll` (`:30-44`), which is this plan's pattern for K6.
+- **The e2e stage** draws the slide 256 px wide (scale 0.133) in the presentations specs' 1600 × 1000 window (findings, finding 4). Pointer cases need the sidebar and the panel collapsed, as the live harness does.
+
+## Design (decided here)
+
+The states are §4.4's, binding. Everything below them (thresholds, selection details, the files) is advisory and decided here. Each departure from the prior art is named, and the dated ones are listed in the Decision Log.
+
+**D1. The states, as code.**
+- **IDLE and SEL:** the session's `selection`.
+- **EDIT(id):** `editingText`.
+- **ARMED(id):** derived, never stored: one selected element on a writable slide, outside EDIT, which is itself a text target. The TextBox for it mounts armed, and the flip to EDIT is `session.editText(id, placement)` on the mounted box: no remount and no focus change.
+- **CELLS(table, a, b):** a selection of two or more `th`/`td` of one table, with the gesture's anchor cell kept by the overlay.
+- **PRESS and DRAG:** the overlay's pending press and gesture. The session gains a `dragging` flag, which the gesture hold (D17) and the inspector's settled version (D13) read.
+- **`composing`:** the box's `view.composing`, mirrored on the session so the overlay's keys and T20 can read it.
+
+**D2. A text target is the selected element itself** (h1 to h3, p, ul, ol, th, td), never a container's single text descendant. This departs from tldraw's one-label guard, which the prior art's §2.3 names: under that guard a group holding one heading would arm on the first click, and P7 then fails (click 1 must select and move the group). A group arms only once its heading is selected (P7's click 2).
+
+**D3. A press on the armed element is the stage's, and it moves no focus.**
+- While armed, the editor root takes no pointer events (`.deck-stage[data-armed] .deck-textbox { pointer-events: none }`), so presses reach the element's node and the overlay's PRESS.
+- `mousedown` on the armed element is cancelled, so the focus stays in the editor (I2: no focusin or focusout).
+- A 3 px move is DRAG(move) (T2). A release without one is T3: EDIT with the caret at `posAtCoords` of the release.
+- A gesture the stage kept (a handle, a drag, a cancel) gives the focus back to the box at its end (the spike's `rearm`).
+
+**D4. T1 and T3.**
+- **T1:** the first press selects the outermost element at the current scope; a text target is then armed.
+- **T3 on an already selected X:**
+  - a text target gives EDIT with the caret at the point;
+  - a group gives SEL of its child under the pointer, ARMED if that child is text;
+  - a table gives EDIT of the cell under the pointer, caret at the point;
+  - a press inside a multi-selection narrows it, as today.
+- A press with `detail ≥ 2` defers to the dblclick (T4).
+
+**D5. T5: a double-click from any state edits the deepest text under the pointer** (the owner's departure from Canva's level entry, Decision Log 6).
+- D is the deepest text target or cell among the hits, ignoring scope. If D exists: select it, then EDIT with the word at the point selected. A placeholder gets select-all, an empty element a caret, and the scope becomes D's parent. If no text target is hit, the gesture drills one level, as today.
+- The word is found with `Intl.Segmenter(…, {granularity: 'word'})` over the block's text around `posAtCoords`, so a Hangul word is one word.
+- P12 (no flash): the first click of the double-click already armed the element, so the second only sets the word's selection and then flips. The caret is transparent until the flip, so no caret is ever drawn before the word.
+- On a design board, the first press of a double-click on an inactive board activates it and selects the hit (the World's existing rule). The dblclick then reaches the newly active board's overlay and applies T5: T22 in one gesture.
+
+**D6. The keys on ARMED**, from the spike's capture-phase routing; every element key is gated on `!isComposing && keyCode !== 229`.
+- **T10 (a printable key, no modifier):** clear the content and let the key insert natively. The text's marks are carried when it is one marked run (stored marks), as the spike built it.
+  - It is one function, `armedPrintable`, with its policy in one constant (`ARMED_TYPING: 'replace' | 'append'`). Canva's reading, or the owner, may change it without touching another transition.
+  - Under `append`, the box flips to EDIT with the caret at the end, and T11 follows the same policy.
+- **T11 (a keyCode-229 keydown):** the same policy, applied in that keydown before the composition starts (findings, Q2). Then the flag flips with no remount, no focus change and no MAWS write near the composition.
+- **T12 Enter:** EDIT with all selected, no newline. **T14 Backspace or Delete:** remove. **T15 Tab:** the next sibling, and past the end the focus leaves the stage. **T18 Escape:** the parent below the root, else IDLE.
+- **Arrows** nudge by 1 px, 10 with Shift. **⌘D, ⌘G, ⌘A and the z-order keys** are the stage's. **⌘C, ⌘X and ⌘V** stay the Edit menu's, and their clipboard events are the stage's (L8). **⌘Z and ⇧⌘Z** are the box's, which is the deck's stack.
+- **⌘B, ⌘I and ⌘U on ARMED** toggle the mark over the whole text and stay ARMED. This is Slides' behaviour for an object-selected box, and with no selection drawn there is nothing else for them to act on.
+
+**D7. EDIT.**
+- **T6 to T9 are native or today's:** a triple press selects the paragraph; a drag in the text selects text; a press on another element commits and runs T1; a press on the empty stage commits to IDLE.
+- **T16, Tab in a cell:** the next or previous cell with its content selected. Tab in the last cell adds a row through `tableRow`, then enters its first cell.
+- **T17, Escape:** commit, and go back to ARMED on the same mounted box, with the caret hidden and its armed selection. From a cell it goes to SEL of the table.
+- **T19:** while composing, Esc, Enter, Backspace, the arrows and Tab are the input method's.
+- **T20:** an element deleted by a remote replica drops the selection and unmounts the box. While composing, the replica's composition hold already buffers the deletion until `compositionend`.
+- **T21 (⌘-click deep select)** is today's.
+
+**D8. CELLS.**
+- A press in a cell of the selected table, followed by a 3 px move, is DRAG(cells). The selection becomes the rectangle of cells between the anchor and the cell under the pointer, outlined as one range.
+- On CELLS, the inspector's text styling applies to every cell, through its existing multi-selection.
+- Backspace or Delete clears the cells' text in one step (Keynote's rule for a cell range). Escape goes to SEL of the table.
+
+**D9. The stray key.** F9's typed-key path and its Hangul exclusion retire (§4.4).
+- A key can still reach the stage with one text target selected, for example when something took the focus. In that case the stage gives the focus back to the armed box, and a non-composing printable key goes through T10.
+- A keyCode-229 key arriving at the stage is lost, because no input method composed it there. That is the platform's limit, and the box's focus makes it rare.
+
+**D10. K6: the Edit menu's Undo and Redo reach the focused editor** (Decision Log 24's ruling 3; finding 1).
+- In `src/main/menu.ts`, Undo and Redo become app items with ids `edit.undo` and `edit.redo`, keeping ⌘Z and ⇧⌘Z as accelerators, following Select All's pattern.
+  - If the focused contents is not an app page (a webview, DevTools), the item runs that contents' `undo()` or `redo()`, as the role did.
+  - Otherwise it emits `layout.edit {op}`.
+- The renderer keeps a registry of edit claimants (`registerEditClaimant({claims(el), undo(), redo()})`). The deck editor and the design workbench claim any focus inside their root. An unclaimed op calls back `layout.nativeEdit {op}`, and main runs the focused contents' command, so inputs, the composer and the document editor behave as under the role.
+- A ⌘Z the page cancels never reaches the item (Q3 on the real Mac, L8), so the editors' own keys are unchanged; the item serves the mouse and unhandled keys.
+- Tests: a menu unit test for the two items, a renderer claimant test, and an e2e case that nudges an element, clicks `edit.undo` by id (`getMenuItemById(...).click()`) and reads the element back in place, then does the same inside a plain input.
+
+**D11. The IME cases** (I1 to I5; Decision Log 24's ruling 4: I2 replays the trace, I1, I3, I4 and I5 are simulated).
+- `e2e/presentations-ime.spec.ts` is rewritten against the unconditional ARMED state, with no `armed(mode)` calls. It keeps the spike's Q2 and Q3 assertions; the Q3 Edit › Undo assertion flips to "undoes the deck step" once D10 lands.
+- `e2e/fixtures/ime/l1-hangul.json` stays the cdp-synthetic stand-in. The live harness (`e2e/presentations-ime-live.spec.ts`, `spikes/p4-click-model/cua-live.js`) stays, skipped, for whoever types for real later.
+- **Row 256:** the deck tab's provider counts the frames it holds and receives (`PortProvider.counts()`), the seam answers them for an open tab (`__maws_presentations.frames(artifactId)`), and the composition-hold steps in `e2e/presentations.spec.ts` and the IME spec poll the held count above zero before their negative check, in place of the fixed 300 ms wait.
+
+**D12. The e2e cases** (§5's acceptance).
+- `e2e/presentations.spec.ts` gains three cases: a grouped heading reached in one double-click and typed over; a table cell double-clicked and edited, then Tab to the next cell; and a single-click path through P7. Its composition-hold step is reworked as in D11.
+- `e2e/design.spec.ts` gains a board-activation case: a double-click on an inactive board's heading edits it in one gesture (T22).
+- These cases collapse the sidebar and the panel through the View menu's items, so the slide draws at least 800 px wide (a support helper shared with the live harness).
+
+**D13. The inspector follows every gesture's end (row 280).**
+- R9 already makes the read take the document's version. B2 adds `useSettledVersion(session, canvas)` beside `useDocVersion`. It advances on a document update or a canvas layout pass outside DRAG, and once at every gesture's end, commit or cancel. Keyboard nudges refresh on each key.
+- The Inspector passes it to `pickedAt` and rebuilds `measure` per version, so the React Compiler keys on it.
+- The fields show whole pixels for X, Y, W and H, and the model keeps its fractions:
+  - an untouched field's Enter writes nothing;
+  - the arrows step from the model's value;
+  - "Mixed" compares rounded values.
+- Tests: in both the compiled and the uncompiled DOM projects, a real move and resize with the inspector mounted. X holds during the frames and shows the new whole number after the end; a cancel shows the old value; 1334.73 reads 1335 and an untouched Enter writes nothing; a layout pass alone updates W.
+
+**D14. The stage's keyboard exit (row 253): F6 and ⇧F6 cycle the editor's regions**, keeping the selection.
+- The deck's ring is the toolbar, the filmstrip, the stage, the inspector (its last field), the notes and the open rail. The board's ring is the toolbar, the board list, the world and the inspector. An absent region is skipped.
+- The editors' root `onKeyDown` handles it, gated on not composing. It steps aside when the user's keymap binds F6, and the stage carries `aria-keyshortcuts="F6"`.
+- Leaving the stage from ARMED drops to SEL and coming back re-arms (T23, new: a transition §4.4's list did not need until the stage had an exit that keeps the selection).
+- Regression test: a middle element's selection reaches the inspector by F6, ⇧F6 returns, F6 does nothing while composing, and the board does the same.
+
+**D15. Accessibility A1 to A5, bounded here, on the drawn nodes with no mirror.**
+- The canvas already draws real, positioned DOM in the model's own tags, so Figma's mirror (which exists because its canvas is WebGL) would add a second tree and nothing else.
+- **A1:** a `describe` option passed only for the stage's and the boards' canvases (never the thumbnails, the presenter or the previews) names the nodes. A group is `role="group"` with "Group, N items"; shapes, icons, connectors, svgs and embeds are `role="img"` named by kind; an image without alt is "Image". Text and tables keep their native semantics, and the model's own `alt`, `aria-label` and `role` win. Every element is `tabindex=-1`, and the model is never written.
+- **A3, focus follows the selection:** the armed editor for one text target, the element's node for one other element, the stage for several or none. A `focusin` on a node selects it, so VoiceOver's focus and Delete agree.
+- **A2:** a polite status speaks only what focus does not, "N elements selected". A single element's "n of total" goes into the focused node's `aria-description`. Nothing is announced during EDIT.
+- **A4:** the editor carries `role="textbox"`, `aria-multiline` and the element's name.
+- **A5:** whenever the focused node or editor goes, the focus goes to the stage, never to `body`.
+- The names live in one module shared with the inspector's title (W1-C's L281 `nameOf`).
+- The live VoiceOver run, coalesced move announcements and focusin activating an inactive board are routed to the decks round's known items, by a dated line.
+
+**D16. The pin popover (§2 item 2, V1 to V15).**
+- **The component:** a portable `src/artifacts/comments/ThreadPopover.tsx`. It draws the pin's open threads as compact X36 `ThreadCard`s, oldest first, focuses the newest one's reply field on opening, and closes on `onExit`.
+- **The binding:** `src/artifacts/slides/editor/comments/PinPopover.tsx`, mounted in the comment frame (outside the stage surface) by both the deck's and the design's frames.
+- **Placement:** `placeCard(box, pinOf(pinRect))` against the frame, re-placed in a layout effect and inside the stage's scroll handler so it never lags a frame. It is hidden while its pin is off the stage.
+- **State:** one slot `popover: {slideId, elementId} | null` in `useDeckComments`, which makes V3 hold, and one reply-draft map per editor, shared with the rail, which makes V5 hold.
+- **While open:**
+  - A capture-phase pointerdown on the frame closes it on any stage press that is not on the popover or a pin. That press is consumed (it selects nothing, no marquee, no pan), and the focus goes to the pin.
+  - Escape on the stage closes it before `escapeUp`.
+  - A press outside the frame closes it without being consumed.
+- **Closing on its own:** when its pin goes (the last thread resolved, the element deleted, the slide changed), the popover closes and the drafts stay. The deleted element's threads stay orphans in the rail (V9, today's).
+- **The compose card:** P2's card adopts the draft rule on decks and boards (`draftRule: true`). Its `locate` answers the pin's rect, so ⌥⌘M opens at the pin (V12), and opening a popover hides the compose card without unmounting it. ⌥⌘⇧J hides and shows the pins.
+- **Pins:** they read open threads at once (a `useSyncExternalStore`, as B1's Decision Log 11 did), in slide order for Tab (V13), with `aria-expanded`.
+- **Boards:** one pin layer for all of a board's pins, clustered under 32 screen px by a pure `pin-clusters.ts`. A cluster click fits its members (V15).
+- **The filmstrip:** badges a slide with open threads, orphans counted, as the header's count and B1's tab dot do (V10). Presenting mounts no pins (V14, a test).
+- `{kind: 'pin'}` placement is retired by a dated ledger line: the anchored card placement with `locate` answering the pin's rect does the work with no X21 amendment.
+
+**D17. The drag while an agent republishes (rows 231 and 212).** The grounding changed the premise.
+- The host-faithful trials' move-to-frame p95 is 18.6 to 20.9 ms, but their move-to-transaction p95 is already 16.4 to 19.7 ms. Most of the p95 is input queueing before the handler runs, not the arriving publish: about 8 publishes fall across 167 written moves. The "about 4 ms" of row 231 was never isolated against a no-agent control.
+- So the work is measure first, then the deferral, and 16 ms is not promised.
+- **M0's measurement:**
+  - The seam's `dragProbe` splits each move into queue, handler and paint, and counts remote applies during the moves and after the drop.
+  - A new fast group `e2e:presentations-drag` alternates no-agent control trials with agent trials.
+  - Two runs on the mini decide whether 16 ms is reachable at all.
+- **The gesture hold:**
+  - `DeckSession.beginDrag` and `endDrag` add a gesture reason to the replica's hold (one hold, two reasons, the provider unchanged). Awareness, acks, a host step 1 and X35 frames keep flowing.
+  - At the drop, `endDrag(reassert)` releases the buffer before the step's closing cut, then rewrites the gesture's last values for any key a held remote write moved, so the owner's drop wins whatever the clientIDs.
+  - The board drag in `World.tsx` uses the same calls.
+  - The 5 s cap stays, and the probe records when it fires.
+- **Row 212:** the renderer seam's stand-in agent (`agentRepublishing`) goes. The class-1 case drives the host's real `artifact_publish` through the presentations perf seam, as `e2e/presentations-scale.spec.ts` row 2 does, with a fidelity regression: rising revisions, the agent's frames integrated as remote, and its last font size in the read-back.
+- **Acceptance:** p95 ≤ 24 ms under the hold, with the 16 ms target recorded as met, or its remainder attributed by the split and re-filed under the architect's ruling.
+- If the no-agent control already sits at 16 ms or more, B2's own per-frame levers come next, because they live in files B2 touches: skipping `readDeckView` on a transaction with no deck-level key, and the thumbnail redraw at the drop.
+
+**D18. Row 182 (the export page's copies of the canvas's drawing code) is re-deferred** with a dated line. B2 rewrites the gesture state machine, not the drawing. The two sides draw to different media (DOM nodes and markup strings), and the export's measure page must stay self-contained.
+
+**D19. Google Fonts fetched once (§2 item 4, row 176, R-8).**
+- **Where:** the engine host fetches. The portable logic lives in `src/artifacts/slides/google-faces.ts` (the request's canonical form, the repository directory rule, the `METADATA.pb` reader, the CSS2 parser) and the host module in `src/engine-host/presentations/google-faces.ts`. It covers decks and designs, which share `faces`.
+- **When:** on any commit (`service.onCommitted`) and on a document's load (a new `service.onLoad`), for an `href` face with no host record answering it, one family at a time. The publish never waits on the network.
+- **The licence:**
+  - The index file is `https://raw.githubusercontent.com/google/fonts/main/ofl/<dir>/METADATA.pb`, where `<dir>` is the family lowercased with everything outside `[a-z0-9]` removed.
+  - It needs a top-level `name:` equal to the family and `license: "OFL"`.
+  - Its `OFL.txt` is stored beside the faces.
+  - A miss probes `apache/` and `ufl/` only to name the refusal. CSS2 also serves Apache families, so the licence never comes from it.
+- **The files:**
+  - The CSS2 answer is requested with a Firefox 40 user agent. That form is unsliced, one woff2 per style and weight, where a modern user agent gets 248 `unicode-range` blocks for Noto Sans KR.
+  - The answer is validated (text/css, ≤ 64 KB, one gstatic source per block, no `unicode-range`). If it ever comes back sliced, the request falls back to the user-agent-less TTF form.
+  - Each file is checked for its magic bytes and against the 16 MB asset limit; a family over about 32 MB is refused by name.
+  - Everything is written with the face entry in one `writeWithAssets`. Its `prepare` discards a result whose `href` changed meanwhile.
+- **The model (an X27 amendment, departing from the ledger's proposed shape):**
+  - The face keeps its `href` and gains a host-owned record: `google: {href, licence: 'OFL', licenceSrc, files: [{src, weight, style}]}`, or `google: {href, refused}`.
+  - Refs replace the ledger's `assetId` (refs are the model's currency, and versions pin ids already), and a family needs several files.
+  - The loader strips `google` from what an agent sends, and the publish's faces merge carries the live record forward, so the host's write never turns the agent's next face edit into a conflict.
+- **Rendering offline:** `faceFiles(face)` returns `[{src, weight?, style?}]` for uploaded and fetched faces alike. It replaces the single-`src` reads in the editor's and the presenter's face rules, the history preview, `deckAssetRefs` and `deckFacesCss` for the three exports, the folder mirror and the answer. No CSP changes. PPTX's `named` variant writes the family's name; `embedded` stays refused.
+- **A refusal by name:** "Roboto Slab is Apache-2.0 on Google Fonts; MAWS fetches only OFL faces, so it draws as its fallback; upload a font file to use it". The agent's answer warns with it, and Theme ▸ Faces lists each face as saved, pending (offline) or refused.
+- **R-8's answer: no egress rule exists today.** A new `src/engine-host/egress.ts` declares host rules as data, behind a guarded GET-only fetch (https, no redirects, timeouts, bounded bodies, injectable for tests). Its `google-fonts` rule admits `fonts.googleapis.com/css2`, `fonts.gstatic.com/s/` and `raw.githubusercontent.com/google/fonts/main/{ofl,apache,ufl}/<dir>/{METADATA.pb,OFL.txt}`. A source-guard test fails on any other `fetch(` in `src/engine-host` besides this module and route D's transport. This opens a second host egress door after route D, so it takes a charter Decision Log line (the architect's, listed under the approval ask).
+- **The owner sees the fetch** in Theme ▸ Faces and in the agent's answer; no prompt (Decision Log 4 rules it automatic).
+
+## Plan of Work
+
+Milestones run in order where they share files, and in parallel where they do not. The executor owns the state machine and the merges. Sub-workers (opus, isolated worktrees off this branch, one commit per change, test-first where the logic is testable) take the independent milestones. One reviewer-medium per milestone at its pin, sol unless the quota refuses; reviewer-high over the whole branch before the hand-back.
+
+### M0 — The base and the drag's first measurement
+- **The base:** once the architect reports the integration landed, merge master into this branch. Strip the prototype's switch (`setArmedPrototype`, `useArmedMode`, the seam's `armed()`) so ARMED is unconditional, and keep the registry. The F9 cases are rewritten under M1, not deleted.
+- **In parallel, a sub-worker on the drag's measurement (D17's M0):** the probe's split and counters, `e2e/support/deck-agent.ts`, and the class-1 drag case through the host seam with its no-agent control trials (`e2e:presentations-drag`). Two Mac runs, requested from the architect with the quiet flag (a measured group, P4 Decision Log 53). It reports the no-agent floor before M6 starts.
+
+### M1 — The state machine (the executor)
+D1 to D9 in `selection.ts` (the pure helpers: `isTextTarget`, `deepestText`, `cellRange`, `nextCell`, the layered Escape), `session.ts` (`editText(id, placement)`, `dragging`, `composing`), `TextBox.tsx` (armed mounting from the spike, the placements: caret at a point, the word at a point, all, the end) and `Overlay.tsx` (PRESS, DRAG and CELLS; T1 to T21; the armed key routing; the stray key), and `World.tsx`'s T22.
+- Tests: `selection.dom.test.tsx` for the pure helpers; `transform.dom.test.tsx` and `TextBox.dom.test.tsx` extended to P1 to P12 and K1 to K5 (K6 in M2), the table rules, T20 and T22. F9's cases are rewritten as T10's.
+- Gates: the artifacts DOM projects, compiled and uncompiled; typecheck; lint; the React Compiler test with `TextBox.tsx` and `Overlay.tsx` added to its list.
+
+### M2 — K6: the Edit menu (a sub-worker, parallel to M1)
+D10 in `src/main/menu.ts`, `src/shared/ipc/schema` (the two events), and the renderer's claimant registry. The deck's and the board's claims land with M1's merge. Menu unit tests, the claimant test, and the e2e case.
+
+### M3 — The IME cases, row 256 and the e2e cases (the executor, after M1)
+- D11: the IME spec against the state machine, the provider's counts, the seam's `frames()`, and the composition-hold steps polling.
+- D12: the presentations and design e2e cases, with the stage-widening helper.
+- Gate: `e2e:presentations` and `e2e:design` on the mini, with explicit `--gates` after the architect's go.
+
+### M4 — The inspector, the stage's exit and accessibility (a sub-worker, after M1)
+D13, D14 and D15 in `Inspector.tsx` and its fields, `use-doc-version.ts`, `DeckEditor.tsx`, `DesignWorkbench.tsx`, the canvas's `describe` option (`slide-canvas.ts`, `elements.ts`), a new `editor/a11y.ts`, the shared names module, `Stage.tsx`'s status, and `TextBox.tsx`'s editor attributes, the one line it shares with M1. A1 to A5's DOM tests in both projects.
+
+### M5 — The pin popover (a sub-worker, parallel to M1 from the start)
+D16 under `src/artifacts/comments/` and `src/artifacts/slides/editor/comments/`, plus the design's comment frame, the filmstrip's badge and the renderer's `draftRule` and close guards. The overlay gets only a `pins` prop, so M1 and M5 meet on one line.
+- DOM tests V1 to V15 (`pin-popover.dom.test.tsx`, `ThreadPopover.dom.test.tsx`, `pin-clusters.test.ts`, the filmstrip and presenter cases).
+- A popover case in `e2e/presentations-comments.spec.ts` and a pan-and-cluster case in `e2e/design-comments.spec.ts`.
+
+### M6 — The gesture hold (a sub-worker, after M1 and M0's floor)
+D17's hold and re-assert in `session.ts`, `gestures.ts` and `World.tsx`. The tests: the hold set during a drag and released before the cut, the composition reason surviving the gesture's release, and the owner winning against a higher clientID, red without the re-assert.
+- The measured A/B/A/B on the mini, on the architect's posture go: `e2e:presentations-drag`, `e2e:presentations-scale` (row 2 with its control trials and the 16 ms line) and `e2e:design-scale`. Evidence under `docs/doperpowers/evidence/p4-b2/`.
+
+### M7 — Google Fonts (a sub-worker, parallel from the start)
+D19: `egress.ts` with its source-guard test, `google-faces.ts` (portable and host), the model's `google` record (deck.ts, publish.ts's merge, answer.ts, adapter.ts's restore carry, design/publish.ts), `faceFiles` in every renderer and exporter, and Theme ▸ Faces.
+- Unit tests over recorded answers (unsliced Lora, the Source Serif 4 range, a sliced answer refused, the 400 page, `METADATA.pb` for ofl/lora and apache/robotoslab).
+- An e2e with no network (`MAWS_GOOGLE_FONTS_FIXTURES`: any URL missing from the map fails as offline). Lora must load in the editor and the presenter and appear in the HTML export's `data:` face, the PDF's `/BaseFont` and the PPTX's `typeface`; Roboto Slab must be refused by name.
+
+### M8 — Reviews, gates and the hand-back
+- reviewer-high over the branch, its findings verified and given to a fix wave.
+- A full class 1a on the pool.
+- The mini's set named by the files touched: `e2e:presentations`, `e2e:design`, the settings and smoke groups that read the Edit menu, and the measured groups of M6.
+- The hand-back: the branch's head, the evidence per acceptance clause, the ledger names, the dated lines, and the residue rows.
+
+## Acceptance (this child's share of §2 items 2, 3 and 4 and §5 B2)
+
+1. The spike's findings carry the IME verdict: "intact under simulation, the real input method unverified" (the owner's ruling, 2026-10-21), its residue row written. T10 follows Canva's reading once it runs; until then it is as §4.4 writes it.
+2. `selection.dom.test.tsx`, `transform.dom.test.tsx` and `TextBox.dom.test.tsx` pass P1 to P12 and K1 to K5, and K6's menu, claimant and e2e tests pass.
+3. I2 replays the synthetic trace. I1, I3, I4 and I5 pass as simulations. The composition-hold steps poll the held count (row 256).
+4. `e2e/presentations.spec.ts` passes the grouped-heading, table-cell and single-click cases, and `e2e/design.spec.ts` the board activation, on the mini.
+5. The pin popover's DOM tests V1 to V15 pass, and the comments e2e cases pass on the mini (§2 item 2).
+6. The host-faithful drag p95 is ≤ 24 ms with the gesture hold, the 16 ms target is recorded met or its remainder attributed, and row 212's seam drives the host's `artifact_publish` with its fidelity regression.
+7. A deck naming Lora renders it offline in the editor, the presenter and the three exports, and Roboto Slab is refused by name, with no network in the e2e (§2 item 4).
+8. A1 to A5's DOM tests pass under D15's bound, and the dated line routes the live VoiceOver run to the decks round.
+9. The inspector refreshes at every gesture's end and shows whole pixels (row 280). F6 carries a middle element's selection to the inspector (row 253).
+
+## Interface proposals (for the architect's ledger)
+
+- **X27:** the face's host-owned `google` record (D19), replacing the proposed `{family, source, assetId, licence}`.
+- **X23:** no schema change; the fetched faces and `OFL.txt` are ordinary asset rows.
+- **X36 consumer:** `ThreadPopover` over `ThreadCard`. `{kind: 'pin'}` placement retired: the anchored card with `locate` answering the pin's rect.
+- **New, under the host's egress:** `src/engine-host/egress.ts` and its `google-fonts` rule.
+- **Shared files:**
+  - `src/main/menu.ts` (D10: `edit.undo`, `edit.redo`, `layout.edit`, `layout.nativeEdit`);
+  - `src/artifacts/provider/port.ts` (the hold reasons stay outside it; `counts()` is new);
+  - `e2e/support/deck-agent.ts` (new; row 2 and the class-1 drag share it);
+  - `.github/workflows/gate.yml`'s `MEASURED_E2E` gains `presentations-drag`. This is a lane file, so it is the architect's or CI-opt's edit, or theirs to approve.
+
+## Decision Log
+
+1. 2026-10-21 (the executor, at the plan): a text target is the selected element itself, never a single text descendant (D2), because P7 needs a group's first click to select and move the group.
+2. 2026-10-21: ARMED is derived from the selection, not a stored state. The flip to EDIT is a placement on the mounted box (D1), so no state can disagree with what is mounted.
+3. 2026-10-21: T10 and T11 share one policy constant, `ARMED_TYPING` (D6), so Canva's reading or the owner's choice swaps one transition.
+4. 2026-10-21: A1's "mirror nodes" become the drawn nodes (D15). It is the same purpose with no second tree, because MAWS's canvas is DOM where Figma's is WebGL. A2 is reworded: focus speaks a single selection, and the status speaks only a multi-selection.
+5. 2026-10-21: row 231's attribution is re-opened by measurement (D17), and 16 ms is a target, not a promise. Row 182 is re-deferred (D18).
+6. 2026-10-21: the Google Fonts design departs from the ledger's proposed X27 shape (refs, files per style and weight, `href` kept beside the record) and from the repository's TTFs, which are rejected on size (NotoSerifKR's variable TTF is 23.8 MB, over the 16 MB asset limit).
+7. 2026-10-21: the cluster click on a board fits its members. Figma's live check (prior art §1.5 item 10) never ran, and the fit's code exists.
+
+## Residue rows (proposed; Logged, Owner, Item, Evidence, Closes when)
+
+- 2026-10-21 | P4-L decks round (or cua's HID probe) | The first Hangul syllable on ARMED through the real 2-Set input method is unverified: L0 to L7 skipped by the owner's ruling, and cua's keys skip the input method's composition on both Macs (ASCII on the mini, uncomposed jamo on the MacBook) | spikes/p4-click-model/findings.txt §4, §5; lc2-steps.txt Results | A real-typing run (the owner's hands, a HID-level poster, or cua once it composes) passes L1 to L7 on ARMED
+- 2026-10-21 | P4-B2 (deferred) | The deck's threads rail keeps its own card, not X36's ThreadCard (it shares only the drafts map) | this plan D16; ThreadCard.tsx's fixed orphan note | The rail draws ThreadCard with an orphan note and a Show action
+- 2026-10-21 | P4-B3's carry (or the next view-carry change) | Moving a deck between the panel and a main tab drops its reply drafts, as it does for documents (view-carry.ts carries none) | tools/document/view-carry.ts | A move carries the editor's reply drafts
+- 2026-10-21 | The host's egress | No Settings view lists the declared egress rules | this plan D19 | Settings shows the host's egress rules
+
+## Approval ask (what the architect should see before implementation)
+
+- The milestone outline above (M0 to M8) and the staffing: the executor on M1 and M3; sub-workers on M0's measurement, M2, M4, M5, M6 and M7.
+- The departures in the Decision Log, items 1, 4, 5 and 6, and the egress line for the charter.
+- The Mac runs: M0's two measured runs early; M3's functional groups; M6's measured A/B/A/B with the posture go.
