@@ -315,6 +315,167 @@ test('transforms: scaled text at its drawn size; pictures of translated, scaled 
   expect(back.held).toEqual([]);
 });
 
+/** Each point's [r, g, b, a] in a PNG, read by main's nativeImage. */
+const pixelsOf = (png: Buffer, points: [number, number][]) =>
+  launch!.app.evaluate(({ nativeImage }, [b64, at]) => {
+    const image = nativeImage.createFromBuffer(Buffer.from(b64, 'base64'));
+    const { width } = image.getSize();
+    const bitmap = image.toBitmap(); // BGRA
+    return at.map(([x, y]) => {
+      const i = (Math.round(y) * width + Math.round(x)) * 4;
+      return [bitmap[i + 2]!, bitmap[i + 1]!, bitmap[i]!, bitmap[i + 3]!];
+    });
+  }, [png.toString('base64'), points] as const);
+const colourOf = ([r, g, b]: number[]) => (r! > 200 && g! < 60 && b! < 60 ? 'red' : r! < 60 && g! > 200 && b! < 60 ? 'green' : r! < 60 && g! < 60 && b! > 200 ? 'blue' : r! > 230 && g! > 230 && b! > 230 ? 'white' : `rgb(${r}, ${g}, ${b})`);
+
+// P4 (the collapsed-table row): the probe of what Chromium draws for a collapsed table (the canvas's `border-collapse:
+// collapse`) with a 16 px border, a radius and a shadow, on the export window's own page (the slide's PNG), recorded as
+// evidence, and the PPTX that matches it: the whole outer border lies inside the measured box (none of it outside, so
+// the outline keeps its half-width inset) and its corners are square, while the background and the shadow are rounded.
+const TABLES = (): Record<string, string> => ({
+  'project/deck.json': JSON.stringify({ v: 4, title: 'Tables', cover: 's1', order: ['s1'] }),
+  'project/slides/s1.html': `<section id="s1" style="background:#ffffff">
+<table id="thick" style="position:absolute; left:200px; top:200px; border:16px solid #ff0000; border-radius:40px; background:#0000ff; box-shadow:12px 12px 0 #00ff00; font-size:28px"><tr id="a1"><td>North</td><td>12</td></tr><tr id="a2"><td>South</td><td>34</td></tr></table>
+<table id="thin" style="position:absolute; left:900px; top:200px; border:4px solid #ff0000; border-radius:40px; background:#0000ff; font-size:28px"><tr id="b1"><td>North</td><td>12</td></tr><tr id="b2"><td>South</td><td>34</td></tr></table>
+</section>`,
+});
+
+test('a collapsed table: its border inside its box and square, its background and shadow rounded, in the canvas and the PPTX', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const { id, held } = await seedDeck(page, 'Tables', TABLES());
+  expect(held).toEqual([]);
+  const xml = await slideXml(await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path)), 1);
+  const part = (name: string) => xml.split(/<p:sp>/).find((p) => p.includes(`name="${name}"`))!;
+  // the measured box: the fill's place (the whole box)
+  const boxOf = (name: string) => {
+    const [x, y, w, h] = offsetOf(xml, `${name}:fill`)!.map((n) => n / EMU) as [number, number, number, number];
+    return { x, y, w, h };
+  };
+  const thick = boxOf('thick');
+  const thin = boxOf('thin');
+  const midThick = thick.y + thick.h / 2;
+  const points: Record<string, [number, number]> = {
+    'thick: 2 px outside its left edge': [thick.x - 2, midThick],
+    'thick: 1 px inside its left edge': [thick.x + 1, midThick],
+    'thick: 14 px inside its left edge': [thick.x + 14, midThick],
+    'thick: 18 px inside its left edge': [thick.x + 18, midThick],
+    'thick: its corner, 2 px in': [thick.x + 2, thick.y + 2],
+    'thick: 6 px right of its right edge': [thick.x + thick.w + 6, midThick],
+    'thick: 9 px past its bottom-right corner': [thick.x + thick.w + 9, thick.y + thick.h + 9],
+    'thin: its corner, 1 px in': [thin.x + 1, thin.y + 1],
+    'thin: 7 px in from its corner': [thin.x + 7, thin.y + 7],
+    'thin: 6 px inside its left edge': [thin.x + 6, thin.y + thin.h / 2],
+  };
+  const png = readFileSync((await exportAs(page, id, 'png')).path);
+  const seen = Object.fromEntries((await pixelsOf(png, Object.values(points))).map((rgba, i) => [Object.keys(points)[i]!, colourOf(rgba)]));
+  const versions = await launch!.app.evaluate(() => ({ electron: process.versions.electron, chrome: process.versions.chrome }));
+  const probe = { ...versions, boxes: { thick, thin }, seen };
+  console.log(`[collapsed-table probe] ${JSON.stringify(probe)}`);
+  await test.info().attach('collapsed-table-probe.json', { body: JSON.stringify(probe, null, 2), contentType: 'application/json' });
+  expect(seen).toEqual({
+    // nothing of the border outside the box; all 16 px of it inside; the background after it
+    'thick: 2 px outside its left edge': 'white',
+    'thick: 1 px inside its left edge': 'red',
+    'thick: 14 px inside its left edge': 'red',
+    'thick: 18 px inside its left edge': 'blue',
+    // the border's corner square, under a 40 px radius
+    'thick: its corner, 2 px in': 'red',
+    // the shadow at 12 px, its corner rounded by the radius (12 + 40 px about the corner's centre)
+    'thick: 6 px right of its right edge': 'green',
+    'thick: 9 px past its bottom-right corner': 'white',
+    // a 4 px border: square at the corner, the background inside it rounded
+    'thin: its corner, 1 px in': 'red',
+    'thin: 7 px in from its corner': 'white',
+    'thin: 6 px inside its left edge': 'blue',
+  });
+  // the PPTX: the outline a square rectangle whose 16 px stroke runs from the box's edge inward (its path 8 px in), the
+  // fill and the shadow under the table a rounded rectangle at the box
+  expect(part('thick:border')).toContain('prst="rect"');
+  expect(offsetOf(xml, 'thick:border')).toEqual([(thick.x + 8) * EMU, (thick.y + 8) * EMU, (thick.w - 16) * EMU, (thick.h - 16) * EMU].map(Math.round));
+  expect(part('thick:fill')).toContain('prst="roundRect"');
+  expect(part('thin:border')).toContain('prst="rect"');
+});
+
+// P4 (the skewed-element row): a skew, its own or a group's, has no native PowerPoint form: the element, and a skewed
+// group's members with their connector, are the window's pictures of them as drawn, placed unturned at the box each is
+// drawn in; a turn alone keeps its native object.
+const SKEWED = (): Record<string, string> => ({
+  'project/deck.json': JSON.stringify({ v: 4, title: 'Skews', cover: 's1', order: ['s1', 's2'] }),
+  'project/slides/s1.html': `<section id="s1" style="background:#ffffff">
+<div id="lean" style="position:absolute; left:200px; top:200px; width:200px; height:100px; background:#00ff00; transform:skewX(30deg)"></div>
+<div id="tilt" data-group="" style="position:absolute; left:800px; top:200px; width:300px; height:200px; transform:skewY(20deg)"><x-connector id="wire" x1="0" y1="100" x2="300" y2="100"></x-connector><p id="word" style="position:absolute; left:20px; top:20px; font-size:28px">Lean</p></div>
+<div id="plain" style="position:absolute; left:200px; top:600px; width:200px; height:100px; background:#00ff00; transform:rotate(30deg)"></div>
+<div id="cast" style="position:absolute; left:1300px; top:150px; width:200px; height:100px; background:#00ff00; box-shadow:0 40px 0 #0000ff; transform:skewX(30deg)"></div>
+<div id="wrap" style="width:500px"><div id="pin" style="position:absolute; left:50%; top:800px; width:200px; height:100px; background:#ff8800; transform:skewX(30deg)"></div></div>
+</section>`,
+  'project/slides/s2.html': `<section id="s2" style="background:#ffffff; transform:translate(300px, 0px)">
+<div id="moved" style="position:absolute; left:200px; top:200px; width:200px; height:100px; background:#ff00ff; transform:skewX(30deg)"></div>
+</section>`,
+});
+
+test('a skewed element and a skewed group’s members export as pictures of them as drawn', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const { id, held } = await seedDeck(page, 'Skews', SKEWED());
+  expect(held).toEqual([]);
+  const zip = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
+  const xml = await slideXml(zip, 1);
+  const part = (name: string) => xml.split(/(?=<p:(?:sp|pic)>)/).find((p) => p.includes(`name="${name}"`));
+  // the skewed box, the group's connector and its text: pictures; the turned box its native shape; the unpainted group nothing
+  expect(['lean', 'wire', 'word', 'plain', 'tilt', 'cast', 'pin', 'wrap'].map((name) => /^<p:(sp|pic)>/.exec(part(name) ?? '')?.[1] ?? null)).toEqual(['pic', 'pic', 'pic', 'sp', null, 'pic', 'pic', null]);
+  expect(part('plain')).toContain('rot="1800000"');
+  expect(part('lean')).not.toMatch(/ rot="/);
+  // at the box skewX(30deg) draws the 200 × 100 box in: 200 + 100·tan 30° ≈ 257.7 px across, from 300 − 128.9 ≈ 171.1
+  const [x, y, w, h] = offsetOf(xml, 'lean')!.map((n) => n / EMU) as [number, number, number, number];
+  expect([Math.abs(x - 171.13) < 1, y, Math.abs(w - 257.74) < 1, h]).toEqual([true, 200, true, 100]);
+  // its picture leans: its top-left and bottom-right corners green, the other two see-through (an unskewed box's picture
+  // would be green to all four)
+  const rels = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('string');
+  const pictureOf = async (name: string) => {
+    const rId = /<a:blip r:embed="(rId\d+)"/.exec(part(name)!)![1];
+    const target = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels)![1]!;
+    const png = Buffer.from(await zip.file(`ppt/media/${target}`)!.async('uint8array'));
+    return { png, size: pngSize(png) as [number, number] };
+  };
+  const lean = await pictureOf('lean');
+  const [pw, ph] = lean.size;
+  expect(pw).toBeGreaterThanOrEqual(255);
+  // 8 px in across, 4 px down: each sample at least 5 px from a slanted edge (at 4 px down the edges run 2.3 px in)
+  const [topLeft, topRight, bottomLeft, bottomRight, centre] = await pixelsOf(lean.png, [[8, 4], [pw - 8, 4], [8, ph - 4], [pw - 8, ph - 4], [pw / 2, ph / 2]]);
+  const green = ([r, g, b, a]: number[]) => r! < 60 && g! > 200 && b! < 60 && a! > 200;
+  const clear = (rgba: number[]) => rgba[3]! < 30;
+  expect([green(topLeft!), clear(topRight!), clear(bottomLeft!), green(bottomRight!), green(centre!)]).toEqual([true, true, true, true, true]);
+
+  // the review's findings. A shadow past the border box is in the picture: the region widened by the shadow's 40 px as
+  // the lean carries it (63 px across, 40 down, each side), so 180 px tall, the shadow below the box and leaning with it
+  const cast = await pictureOf('cast');
+  const [cw, ch] = cast.size;
+  expect(ch).toBeGreaterThanOrEqual(170);
+  const [shadow] = await pixelsOf(cast.png, [[cw / 2 + 40, ch / 2 + 70]]);
+  expect([shadow![0]! < 60, shadow![1]! < 60, shadow![2]! > 200, shadow![3]! > 200], 'blue: the shadow below the box').toEqual([true, true, true, true]);
+  // a pinned skewed box in a static flow wrapper is taken where the slide draws it, whole (moving the wrapper would have
+  // made it the box's containing block, laying it out elsewhere)
+  const pin = await pictureOf('pin');
+  expect(offsetOf(xml, 'pin')!.map((n) => Math.round(n / EMU))).toEqual([931, 800, 258, 100]);
+  expect(pin.size[0]).toBeGreaterThanOrEqual(255);
+  const [orange] = await pixelsOf(pin.png, [[pin.size[0] / 2, pin.size[1] / 2]]);
+  expect([orange![0]! > 200, orange![1]! > 100 && orange![1]! < 170, orange![2]! < 60, orange![3]! > 200], 'orange at its centre').toEqual([true, true, true, true]);
+
+  // the re-review's: a slide whose section carries a translate of its own draws the element 300 px off the region the
+  // measure gives in slide px; the window takes it where it is drawn, so its picture is the box, not empty
+  const xml2 = await slideXml(zip, 2);
+  const moved = xml2.split(/(?=<p:(?:sp|pic)>)/).find((p) => p.includes('name="moved"'))!;
+  expect(moved.startsWith('<p:pic>')).toBe(true);
+  const rels2 = await zip.file('ppt/slides/_rels/slide2.xml.rels')!.async('string');
+  const rId2 = /<a:blip r:embed="(rId\d+)"/.exec(moved)![1];
+  const target2 = new RegExp(`Id="${rId2}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels2)![1]!;
+  const movedPng = Buffer.from(await zip.file(`ppt/media/${target2}`)!.async('uint8array'));
+  const [mw, mh] = pngSize(movedPng) as [number, number];
+  const [magenta] = await pixelsOf(movedPng, [[mw / 2, mh / 2]]);
+  expect([magenta![0]! > 200, magenta![1]! < 60, magenta![2]! > 200, magenta![3]! > 200], 'magenta at its centre').toEqual([true, true, true, true]);
+});
+
 // S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load
 // average beside each time, as the scale gate records its bounds)
 test('the 100-slide deck exports to PPTX, named and as pictures, and to PDF within the budget', async () => {

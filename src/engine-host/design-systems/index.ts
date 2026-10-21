@@ -7,6 +7,7 @@
 // Decision Log 61). Wired by one line beside P3-A's and P3-L's in `src/engine-host/index.ts`.
 import { designSystemMirrorWriter } from '@artifacts/design-system/mirror';
 import { createDesignSystemAdapter } from '@artifacts/design-system/model';
+import { parse5Parser } from '@artifacts/design-system/parse5-parser';
 import { registerMirrorWriter } from '@artifacts/library/mirror';
 import type { HostOn } from '@shared/host/runtime';
 import { loadBundledAssets } from './assets';
@@ -41,9 +42,10 @@ export function registerDesignSystems({ on, documents, log = (line) => console.e
     return { chain: null, seeded: Promise.resolve(), close: unregisterMirror };
   }
   const { store, service } = documents;
-  // The host has no DOM parser, so a publish checks canon by its paths and limits, not its structure (the page checks
-  // structure with the renderer's DOMParser).
-  store.registerAdapter(createDesignSystemAdapter());
+  // An agent's publish checks canon structure by parse5's tree, the spec's as the page's DOMParser builds it, so the host
+  // refuses what the page's Check flags (P4, the tracker row of 2026-10-14). Seeding writes the bundled defaults, whose
+  // canon `defaults.canon.test.ts` checks under both parsers.
+  store.registerAdapter(createDesignSystemAdapter({ parser: parse5Parser }));
   store.registerDesignSystemContext(async (system) => designSystemContext(service, system));
   const chain = new DesignSystemChain(store, service);
   store.registerDesignSystemChain(chain);
