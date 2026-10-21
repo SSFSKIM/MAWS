@@ -343,8 +343,8 @@ def measure(turn, api, journal=None, relay=None, audit=None, landing=DEFAULT_LAN
         if res and not res['err'] and landed is None:
             landed = dict(name=short(x['name']), at=res['t'], inChars=x['inChars'], span=res['t'] - x['t'], mawsExec=(journal or {}).get('spans', {}).get(x['id']))
             landed_key = x['key']
-        if res and not res['err']:
-            last_landed = res['t']
+        if res and not res['err']:  # calls sorted by when they were made; a later one may land first
+            last_landed = res['t'] if last_landed is None else max(last_landed, res['t'])
     # first token
     ft, ft_src = None, None
     if journal and journal['deltas']:
@@ -596,7 +596,8 @@ def verdicts(cs, judge=None, maws=None):
         ds = {c['surface']: c for c in cs.values() if c['task'] == task and c['arm'] == 'desktop'}
         v = dict(task=task, verdict=None, ratio=None, surface=None, maws=None, why=[], beside=[])
         surface = next(iter(ds)) if len(ds) == 1 else judge.get(task)
-        mkey = next(iter(ms)) if len(ms) == 1 else ('maws/%s' % maws[task] if task in maws else None)
+        # a variant named is the one judged, whatever ran; with none named, the one cell MAWS ran is
+        mkey = 'maws/%s' % maws[task] if task in maws else (next(iter(ms)) if len(ms) == 1 else None)
         m = ms.get(mkey) if mkey else None
         if m is not None:
             v['maws'] = m['surface'].partition('/')[2] or None

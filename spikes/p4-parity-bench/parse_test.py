@@ -119,6 +119,10 @@ class Verdict(Bench):
         v = {x['task']: x for x in parse.verdicts(cs, maws={'B1': 'alwaysLoad'})}['B1']
         self.assertEqual((v['verdict'], v['ratio'], v['maws']), ('parity', 1.0, 'alwaysLoad'))
         self.assertIn('MAWS base, not judged: median 5.2 over 5 valid (that/Desktop 1.0)', v['beside'])
+        # a variant named that did not run is no verdict, even beside one cell that did: never the other arm's
+        only_base = {k: c for k, c in cs.items() if k[2] != 'maws/alwaysLoad'}
+        v = {x['task']: x for x in parse.verdicts(only_base, maws={'B1': 'alwaysLoad'})}['B1']
+        self.assertEqual((v['verdict'], v['ratio']), ('no verdict: the judged MAWS variant alwaysLoad has no repetitions (MAWS ran base)', None))
 
     def test_the_requested_model_is_beside(self):
         """A1's residue: the requested variant (MAWS the 1M one, Desktop the plain one) is named beside the verdict, never

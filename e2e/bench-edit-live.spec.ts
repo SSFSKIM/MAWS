@@ -31,7 +31,8 @@
 //
 // P4-A3 (docs/doperpowers/plans/2026-10-21-p4-a3-edit-protocol.md): MAWS_BENCH_VARIANT labels the build's lever, so a
 // lever's arm is its own cell beside the base build's (parse.py's maws/<variant>, judged with --maws); the manifest
-// records it with the checkout's commit, and the repetition's directory carries it, so two arms share one run directory.
+// records it with the running app's build stamp (main's own, `host.status`), a variant refused before it spends when that
+// stamp is not its checkout's commit, and the repetition's directory carries it, so two arms share one run directory.
 //
 // Run on purpose only (it spends; no cap but the receipts are reported):
 //   MAWS_LIVE=1 [MAWS_BENCH_TASKS=B1,B3,B5,B7] [MAWS_BENCH_REPS=1] [MAWS_BENCH_REP_FROM=1] [MAWS_BENCH_SCOPE=mirror|owner]
@@ -67,13 +68,14 @@ const SCOPE = process.env.MAWS_BENCH_SCOPE ?? 'mirror';
 if (SCOPE !== 'owner' && SCOPE !== 'mirror') throw new Error(`MAWS_BENCH_SCOPE is owner or mirror, not ${SCOPE}`);
 const VARIANT = process.env.MAWS_BENCH_VARIANT || null;
 if (VARIANT !== null && !/^[A-Za-z][\w.+-]*$/.test(VARIANT)) throw new Error(`MAWS_BENCH_VARIANT is a label (a letter, then letters, digits or . + - _), not ${VARIANT}`);
-const BUILD = (() => {
+const CHECKOUT = (() => {
   try {
     return execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   } catch {
     return null;
   }
 })();
+let APP_BUILD: { commit: string; builtAt: string; checkout: string | null } | null = null; // the running app's own stamp
 const PIN = process.env.MAWS_BENCH_PIN ? (([model, effort]) => ({ model: model!, effort: effort! }))(process.env.MAWS_BENCH_PIN.split(':')) : null;
 const OUT = resolve(process.env.MAWS_BENCH_OUT ?? `/tmp/maws-parity-bench/${new Date().toISOString().replace(/[:.]/g, '-')}`);
 const PROFILE = resolve(process.env.MAWS_BENCH_PROFILE ?? join(OUT, 'maws-profile'));
@@ -279,13 +281,18 @@ test.beforeAll(async () => {
   mkdirSync(CWD, { recursive: true });
   mkdirSync(PROFILE, { recursive: true });
   const configHome = SCOPE === 'owner' ? join(homedir(), '.claude') : mirrorConfigHome();
-  note(`==== P4-A1 MAWS arm, ${new Date().toISOString()} on ${hostname()}: scope ${SCOPE} (${SCOPE === 'owner' ? "the owner's ~/.claude, no CLAUDE_CONFIG_DIR" : configHome}), engine ${engine.bin.replace(homedir(), '~')} ${engine.version}, relay ${RELAY_URL}, cwd ${CWD}, profile ${PROFILE}, pin ${PIN ? `${PIN.model}:${PIN.effort} (measurement-only)` : "none (the owner's settings)"}, variant ${VARIANT ?? 'none'} at ${BUILD ?? 'an unknown commit'}, tasks ${TASKS.join(',')} x ${REPS} from repetition ${REP_FROM}`);
+  note(`==== P4-A1 MAWS arm, ${new Date().toISOString()} on ${hostname()}: scope ${SCOPE} (${SCOPE === 'owner' ? "the owner's ~/.claude, no CLAUDE_CONFIG_DIR" : configHome}), engine ${engine.bin.replace(homedir(), '~')} ${engine.version}, relay ${RELAY_URL}, cwd ${CWD}, profile ${PROFILE}, pin ${PIN ? `${PIN.model}:${PIN.effort} (measurement-only)` : "none (the owner's settings)"}, variant ${VARIANT ?? 'none'} in a checkout at ${CHECKOUT ?? 'an unknown commit'}, tasks ${TASKS.join(',')} x ${REPS} from repetition ${REP_FROM}`);
   const maws = await launchMaws({
     userData: PROFILE,
     ownerConfigHome: SCOPE === 'owner',
     env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', ...(SCOPE === 'mirror' ? { CLAUDE_CONFIG_DIR: configHome } : {}) },
   });
   const { page } = maws;
+  // P4-A3: the app measured is this checkout's build, or nothing runs: a variant's cell holds only its own build
+  const { mainBuild } = await ok(page, 'host.status', undefined);
+  APP_BUILD = { commit: mainBuild.commit, builtAt: mainBuild.builtAt, checkout: CHECKOUT };
+  note(`the app: built at ${mainBuild.commit} (${mainBuild.builtAt}), the checkout at ${CHECKOUT ?? 'an unknown commit'}`);
+  if (VARIANT !== null && (CHECKOUT === null || !CHECKOUT.startsWith(mainBuild.commit))) throw new Error(`blocked: the app was built at ${mainBuild.commit} and the checkout is at ${CHECKOUT ?? 'an unknown commit'}; build it again (scripts/e2e-build.sh plain) before a variant's repetitions`);
   await expect.poll(async () => (await ok(page, 'engine.hostState', undefined)).state, { timeout: 120_000, message: 'the engine host is ready' }).toBe('ready');
   await expect.poll(() => page.evaluate(() => typeof (window as unknown as { __maws_presentations?: unknown }).__maws_presentations), { message: 'the deck seam is installed' }).toBe('object');
   const real = realpathSync(CWD);
@@ -345,7 +352,7 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
       const manifest = {
         arm: 'maws', task, rep, attempt, surface: 'maws', kind, host: hostname(), scope: SCOPE, startedAt, prompt, promptMatch: text.slice(text.indexOf('{ref}') + '{ref}'.length), artifactId: work.id,
         transcript, journal: journalPath, relay: relayLogs(startedMs), landing: LANDING, sessionId, appSessionId: id,
-        load: { before: loadBefore, after: loadAfter }, check, pin: PIN, measurementOnly: PIN !== null, variant: VARIANT, build: BUILD,
+        load: { before: loadBefore, after: loadAfter }, check, pin: PIN, measurementOnly: PIN !== null, variant: VARIANT, build: APP_BUILD,
         engine: { bin: bench!.engine.bin, version: bench!.engine.version }, costUsd: cost,
         mawsToolSpans: spans.map(({ name, ms, toolUseId }) => ({ name, ms, toolUseId })),
       };
