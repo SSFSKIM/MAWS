@@ -155,7 +155,7 @@ describe('openAllConfirmation: the question', () => {
     const confirm = openAllConfirmation({}, showMessageBox);
     const window = { id: 1, isDestroyed: () => false } as never;
     expect(await confirm(window, 25)).toBe(true);
-    expect(showMessageBox).toHaveBeenCalledWith(window, expect.objectContaining({ message: '25개의 탭을 열까요?', defaultId: 0, cancelId: 1 }));
+    expect(showMessageBox).toHaveBeenCalledWith(window, expect.objectContaining({ message: 'Open all 25 tabs?', buttons: ['Open', 'Cancel'], defaultId: 0, cancelId: 1 }));
     showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false });
     expect(await confirm(window, 25)).toBe(false);
     expect(await confirm({ isDestroyed: () => true } as never, 25)).toBe(false); // no window to ask on: nothing opens
