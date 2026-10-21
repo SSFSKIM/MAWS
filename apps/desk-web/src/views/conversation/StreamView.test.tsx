@@ -36,6 +36,27 @@ it('opens a link in a message in a new tab, without opener', async () => {
   connection.stop();
 });
 
+it("opens a link in a human's bubble, and in a send on its way, in a new tab, without opener", async () => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+  const me = '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c';
+  const text = 'see [the PR](https://github.com/SSFSKIM/MAWS/pull/1)';
+  const event = { ts: '2026-10-15T08:00:00.000Z', writer: `hub/${me}`, seq: 1, kind: 'human', from: 'human', to: '*', text, member: me, mac: { nonce: 'n', value: 'v' } } as LogEvent;
+  render(
+    <DeskContext.Provider value={{ connection, member: me, sessions: new Map() }}>
+      <StreamView
+        items={[{ kind: 'human', key: 'h1', offset: 1, event, text, to: '*', wake: false }]}
+        outbox={[{ nonce: 'o1', to: '*', text: 'and [the plan](https://example.com/plan)', wake: false, state: 'sending' }]}
+      />
+    </DeskContext.Provider>,
+  );
+  fireEvent.click(await waitFor(() => screen.getByRole('link', { name: 'the PR' })));
+  expect(open).toHaveBeenCalledWith('https://github.com/SSFSKIM/MAWS/pull/1', '_blank', 'noopener,noreferrer');
+  fireEvent.click(screen.getByRole('link', { name: 'the plan' }));
+  expect(open).toHaveBeenLastCalledWith('https://example.com/plan', '_blank', 'noopener,noreferrer');
+  connection.stop();
+});
+
 it("names a session's message by its title, the alias it went out under muted beside it; by that alias alone without one", () => {
   const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
   const [titled, plain] = ['1ea561bc-a60d-4437-a6ac-fa7cd5eda54f', '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b'];
