@@ -22,7 +22,7 @@
 // own save, a spurious event), while dirty it becomes `theirs` and the document stands. A save writes the document
 // captured at invocation through `files.write` with the baseline's hash (the merge view's `theirs.hash` once the owner
 // has seen theirs). A save's answer, and the conflict read it may start, land only on the entry incarnation that issued
-// them.
+// them; the conflict read, like a load, only while no newer load was issued.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
@@ -290,7 +290,8 @@ export function createViewerStore(client: MawsBridge) {
     // E5: a `change` load is judged by the entry as it is when the load completes (the editing state machine's
     // commit-time rule). Clean: the text is replaced as before, unless the read is the baseline itself (an own save, a
     // spurious event), which lands nothing. Unsaved edits: the document stands, and a read that is neither the baseline
-    // nor the theirs already shown becomes theirs, when it is a text the editor could take.
+    // nor the theirs already shown becomes theirs, when it is a text the editor could take; the baseline itself
+    // withdraws a theirs shown earlier.
     const commitChange = (tabId: string, read: LoadedFile) => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
@@ -302,6 +303,9 @@ export function createViewerStore(client: MawsBridge) {
         if (!isEditable(read)) return patch(tabId, { ...ready, theirs: null, diskUnusable: unusableReason(read) });
         const differs = read.hash !== null && read.hash !== entry.hash && read.hash !== entry.theirs?.hash;
         if (differs) return patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice' } });
+        // P4 W2-C (tracker 2026-10-06): the disk back at the baseline withdraws a theirs shown earlier, so a save from the
+        // merge view sends the baseline's hash and lands; safe because a save's conflict read supersedes older loads
+        if (read.hash !== null && read.hash === entry.hash && entry.theirs !== null) return patch(tabId, { ...ready, theirs: null });
         if (!settledAlready) patch(tabId, ready);
         return;
       }
@@ -426,14 +430,22 @@ export function createViewerStore(client: MawsBridge) {
 
     // E5: a save's conflict answered with a hash the tab has not seen: the file is read whole (one hashed read within the
     // editor's caps) and shown as theirs in the merge view; a read answering yet another hash is newer and wins. The
-    // read lands only on the incarnation that saved (`current`); answers whether it landed.
+    // read lands only on the incarnation that saved (`current`); answers whether it landed. P4 W2-C (tracker
+    // 2026-10-06): it carries the tab's generation as a load does, superseding the loads in flight (read before it, they
+    // may answer a disk it has seen move on) and superseded by a newer one, whose read then says what the disk holds.
     const conflicted = async (tabId: string, entry: ViewerEntry, hash: string, current: () => boolean): Promise<boolean> => {
       if (entry.theirs?.hash === hash) {
         patch(tabId, { saving: false, theirs: { ...entry.theirs, view: 'merge' } });
         return true;
       }
+      const generation = ++lastGeneration;
+      generations.set(tabId, generation);
       const answer = await readChunk(entry, 0, FILES_READ_MAX_LENGTH, true);
       if (!current()) return false;
+      if (generations.get(tabId) !== generation) {
+        patch(tabId, { saving: false });
+        return true;
+      }
       if (!answer.ok) {
         patch(tabId, { saving: false, saveError: answer.error.message });
         return true;
