@@ -1,7 +1,8 @@
 // A notification's landing on a `<message>` in the session view (DC9 M6): the log's `message` event names its
 // transcript row and span (`src`, `<row uuid>#<span>`), and the view jumps to that row's text as MAWS's own mark anchors
 // do (its store's `jumpToMessage`, by message uuid and block index). An async question's `question` event names its call
-// (`src`, the tool-use id), and the view jumps to the row MAWS keys by that id.
+// (`src`, the tool-use id), and the view jumps to the row MAWS keys by that id; so does a `message` sent through a
+// message tool, whose `src` is its call's id.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { callRow, landingStep, messageAnchor } from './landed-message';
@@ -48,6 +49,16 @@ describe("a landing's call row", () => {
     ]);
     expect(callRow('toolu_mod', [asks])).toBe('question:toolu_mod');
     expect(callRow('toolu_maws', [asks])).toBe('ask:toolu_maws');
+  });
+
+  it("is the message's row for a message tool's call, MAWS's and the to-human plugin's alike (a `message` landing by tool-use id)", () => {
+    const messages = assistant([
+      { type: 'tool_use', id: 'toolu_mawsmsg', name: 'mcp__maws__message', input: { text: 'Stage 1 is done.' } },
+      { type: 'tool_use', id: 'toolu_pluginmsg', name: 'mcp__to-human__message', input: { text: 'Stage 2 is done.' } },
+    ]);
+    expect(callRow('toolu_mawsmsg', [messages])).toBe('to-human:toolu_mawsmsg');
+    expect(callRow('toolu_pluginmsg', [messages])).toBe('to-human:toolu_pluginmsg');
+    expect(messageAnchor('toolu_pluginmsg', [messages])).toBeNull(); // its src names no span: the landing reads the call
   });
 
   it('is none while no held row holds the call', () => {

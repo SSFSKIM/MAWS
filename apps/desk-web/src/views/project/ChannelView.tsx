@@ -9,7 +9,7 @@
 //
 // A channel a tapped notification opened lands on its card (`useLanding`): the card is marked once it is drawn, and
 // until then, or when it will not be, the channel says why. In the session view a request's card is at the tail, a
-// `<message>`'s is its transcript row (`landed-message.ts`), and an async question's is its request's card while a
+// message's is its transcript row (`landed-message.ts`; a `<message>`'s, or a message tool's call), and an async question's is its request's card while a
 // bridge's request for it waits, else its call's row. On a phone (mockups/desk/05-phone.html, 5A) Retire sits
 // behind ⋯ with the note that depth opens on a computer, and an ended session shows Resume in place of the composer.
 //
@@ -208,7 +208,7 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>, sess
 
 /**
  * Where the session view (`sessionView`, null when the channel draws none) lands the log event a tapped notification
- * named, when this channel is the one it opened (`eventLanding`): a `<message>`'s transcript row; an async question's
+ * named, when this channel is the one it opened (`eventLanding`): a message's transcript row; an async question's
  * request card while a bridge's request for it waits, else its call's row. A landing that reached the card stays on
  * it: the question answered there settles the request, which must not then send the reader up to the call.
  */

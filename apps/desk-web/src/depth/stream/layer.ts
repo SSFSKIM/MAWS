@@ -27,6 +27,8 @@ export type StreamBlock = {
   text: string;
   /** A tool call's name, from its `tool` chunk. */
   toolName: string | null;
+  /** A tool call's id (its `tool_use_id`), from its `tool` chunk. */
+  toolUseId: string | null;
   /** The row the engine wrote for this block (its `block-row`), once named; the block is drawn until that row lands. */
   settledBy: string | null;
 };
@@ -62,7 +64,7 @@ function kindOf(name: unknown): BlockKind {
  * string is none); `namedAt` and `truncated` (the text cut to its tail) are passed over. An entry with no blocks gives
  * nothing to draw.
  */
-function snapshotEntry(entry: Streaming): { upTo: number; blocks: Array<Pick<StreamBlock, 'index' | 'kind' | 'text' | 'toolName' | 'settledBy'>> } {
+function snapshotEntry(entry: Streaming): { upTo: number; blocks: Array<Pick<StreamBlock, 'index' | 'kind' | 'text' | 'toolName' | 'toolUseId' | 'settledBy'>> } {
   const raw: JsonObject[] = Array.isArray(entry.blocks) ? (entry.blocks as JsonObject[]) : [];
   const blocks = raw
     .filter((block) => typeof block.index === 'number')
@@ -71,6 +73,7 @@ function snapshotEntry(entry: Streaming): { upTo: number; blocks: Array<Pick<Str
       kind: kindOf(block.kind),
       text: typeof block.text === 'string' ? block.text : '',
       toolName: typeof block.name === 'string' ? block.name : null,
+      toolUseId: typeof block.id === 'string' ? block.id : null,
       settledBy: typeof block.uuid === 'string' ? block.uuid : null,
     }));
   return { upTo: typeof entry.upTo === 'number' ? entry.upTo : -1, blocks };
@@ -151,7 +154,7 @@ export class StreamingLayer {
         const fresh = request?.blocks.get(index);
         if (fresh) {
           const text = old.named.has(index) ? block.text : fresh.text;
-          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text, toolName: fresh.toolName, settledBy: fresh.settledBy ?? block.settledBy }));
+          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text, toolName: fresh.toolName, toolUseId: fresh.toolUseId, settledBy: fresh.settledBy ?? block.settledBy }));
           continue;
         }
         const settledBy = block.settledBy !== null && lands(block.settledBy) ? block.settledBy : landing;
@@ -176,7 +179,7 @@ export class StreamingLayer {
     const existing = request.blocks.get(index);
     const block = (kind: BlockKind): StreamBlock => {
       if (existing) return existing;
-      const fresh: StreamBlock = { turnId: body.turnId, agentId: body.agentId, step: body.step, index, kind, text: '', toolName: null, settledBy: null };
+      const fresh: StreamBlock = { turnId: body.turnId, agentId: body.agentId, step: body.step, index, kind, text: '', toolName: null, toolUseId: null, settledBy: null };
       request.blocks.set(index, fresh);
       return fresh;
     };
@@ -188,6 +191,7 @@ export class StreamingLayer {
       case 'tool': {
         const tool = block('tool');
         tool.toolName = typeof chunk.name === 'string' ? chunk.name : tool.toolName;
+        tool.toolUseId = typeof chunk.id === 'string' ? chunk.id : tool.toolUseId;
         return true;
       }
       case 'input':
