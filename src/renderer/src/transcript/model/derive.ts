@@ -36,6 +36,7 @@ import { BROWSER_TOOL_NAMES, browserCallOf, browserToolResultSchemaOf, type Brow
 import type { ContentBlock } from '@shared/graph/events';
 import { denialDisposition } from './classify';
 import { marksOfText } from './owner-marks'; // P2-C (2026-10-09)
+import { messageCallState, messageCallText } from '@shared/owner/message-call'; // P4-R7
 // E4c end
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -126,7 +127,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  (row.kind === 'to_human' && row.forHuman === true) /* P4-R7: as a marked text */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentMessage(row) // E7
   || row.kind === 'owner_record'; // P2-C (2026-10-09): placed by the report projection, never a work row
 
@@ -228,7 +229,8 @@ type Item =
   | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId } // E1: a `maws` call's row, filled once its result and events are seen
   | { kind: 'later'; row: () => Row } // E7: a message or listing row, filled once the turn's results and agents are known
   | { kind: 'artifact'; toolUseId: ToolUseId } // E2: as E1's, for an artifact call
-  | { kind: 'browser_action'; toolUseId: ToolUseId }; // E4c: as E2's, for a browser tool call
+  | { kind: 'browser_action'; toolUseId: ToolUseId } // E4c: as E2's, for a browser tool call
+  | { kind: 'message'; toolUseId: ToolUseId }; // P4-R7: a message tool's call, a message or (refused) a cell
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
@@ -318,6 +320,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const results = new Map<ToolUseId, Event<'tool.result'>>(); // E7: a SendMessage's or ListAgents' result, for its row
   const artifacts = new Map<ToolUseId, ArtifactRecord>(); // E2
   const browserActions = new Map<ToolUseId, BrowserActionRecord>(); // E4c
+  // P4-R7: a message tool's calls, apart from the turn's tool records: an accepted one is a message, not work the turn
+  // did; one that is refused becomes the cell its record makes
+  const messageCalls = new Map<ToolUseId, ToolRecord>();
+  const toolRecord = (toolUseId: ToolUseId): ToolRecord | undefined => tools.get(toolUseId) ?? messageCalls.get(toolUseId);
   const retracted = new Set<string>();
   const superseded = new Set<string>();
   const byMarker = new Map<string, LiveBlock>();
@@ -491,6 +497,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (presentation === 'browser_action') { // E4c
           browserActions.set(event.toolUseId, browserActionOfCall(event));
           items.push({ kind: 'browser_action', toolUseId: event.toolUseId });
+        } else if (presentation === 'message') { // P4-R7: a cell's record too, for the call that turns out refused
+          messageCalls.set(event.toolUseId, { use: event, result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false });
+          items.push({ kind: 'message', toolUseId: event.toolUseId });
         } else {
           pendingRows.set(event.toolUseId, { kind: presentation, use: event, answers: null, outcome: null, feedback: null, requestId: null, error: null });
           items.push({ kind: 'request', toolUseId: event.toolUseId });
@@ -498,7 +507,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       case 'tool.result': {
-        const rec = tools.get(event.toolUseId);
+        const rec = toolRecord(event.toolUseId);
         if (rec) rec.result = event;
         const group = byToolUse.get(event.toolUseId);
         const ref = group?.refs.find((ref) => ref.toolUseId === event.toolUseId);
@@ -535,12 +544,12 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       case 'tool.safeguard': {
-        const rec = tools.get(event.toolUseId);
+        const rec = toolRecord(event.toolUseId);
         if (rec) rec.safeguard = event.verdict;
         break;
       }
       case 'tool.progress': {
-        const rec = tools.get(event.toolUseId);
+        const rec = toolRecord(event.toolUseId);
         if (rec) rec.elapsedSeconds = Math.max(rec.elapsedSeconds, event.elapsedSeconds);
         break;
       }
@@ -617,7 +626,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       case 'permission.resolved': {
-        const rec = tools.get(event.toolUseId);
+        const rec = toolRecord(event.toolUseId);
         if (rec && event.resolvedBy === 'user') rec.humanDecision = true;
         break;
       }
@@ -766,6 +775,12 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'browser_action': // E4c
         resolved.push({ kind: 'row', row: browserActionRow(browserActions.get(item.toolUseId)!, turn.id, context) });
         break;
+      case 'message': { // P4-R7
+        const rec = messageCalls.get(item.toolUseId)!;
+        const row = toHumanRow(rec, turn.id, context);
+        resolved.push(row !== null ? { kind: 'row', row } : { kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false) });
+        break;
+      }
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
@@ -782,7 +797,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook,
   // a notice and what a plugin said (R1) are not the model's work: under MessageDisplay and Stop hooks every final text
   // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
-  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */]);
+  // P4-R7: a message tool's call is a call too, so a text before it is the turn's commentary, as before any call
+  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */, 'to_human' /* P4-R7 */]);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
@@ -801,7 +817,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // P2-C (2026-10-09): while the owner channel's lane is on, a text with a mark is addressed to the human as an inked
   // drawing is, so it stays in view when the work folds (the report module draws it; Rows.tsx)
   const forHuman = (row: Extract<Row, { kind: 'assistant_text' }>) => ui?.assistantInk.has(row.id) || (ui?.ownerLane === true && marksOfText(row.markdown, row.live).marked);
-  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row);
+  // P4-R7: a message tool's message is addressed to the human as a marked text is
+  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => (row.kind === 'assistant_text' && forHuman(row)) || (row.kind === 'to_human' && ui?.ownerLane === true) ? { ...row, forHuman: true } : row);
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
   const files = changedFiles(cells, turn);
@@ -1100,6 +1117,16 @@ function deliveryRow(delivery: DeliveryRecord, turnId: TurnId, context: TurnCont
   };
 }
 // E1 end
+
+// P4-R7: a message tool's call as the message it sends (`@shared/owner/message-call`): drawn while its result is still
+// due in an open turn, and once its result says it was sent; null for a call that sent nothing (no text in its input,
+// a refused or failed result, a turn that closed before the result), which the engine's cell shows instead.
+function toHumanRow(rec: ToolRecord, turnId: TurnId, context: TurnContext): RowOf<'to_human'> | null {
+  const text = messageCallText(rec.use.input);
+  const state = messageCallState(rec.result);
+  if (text === null || state === 'refused' || (state === 'pending' && context.closed)) return null;
+  return { id: rowId.toHuman(rec.use.toolUseId), turnId, at: rec.use.at, kind: 'to_human', toolUseId: rec.use.toolUseId, text, pending: state === 'pending' };
+}
 
 // E7 start: a Workflow call's launch result names its task and run (`{ status: 'async_launched', taskId, runId, … }`,
 // pass2/workflow seq 80; X1's `tool.result.structured`, live and from disk). The ref takes the task's id, as a

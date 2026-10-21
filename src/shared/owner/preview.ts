@@ -5,7 +5,8 @@
 // need-input's words, else its choices), then the essential text, then the to-human text, then the plain text, an
 // insight last. ANSI is stripped. The owner's own marks never show in a preview, even one a cap cut from its pair (a
 // summary stored before this read 200 raw characters); any other markup stays as written, and so do tags quoted in
-// inline code (grammar 2, P2-C). Null when nothing is left.
+// inline code (grammar 2, P2-C). Null when nothing is left. P4-R7: a message tool's message previews through
+// `messageLine`, at the call's place among the texts it reads.
 import { stripAnsi } from '../wire/ansi';
 import { codeRegions, insideCode, parse, type Kind, type Part } from './to-human-parser';
 
@@ -36,6 +37,13 @@ export function previewLine(text: string, max: number): string | null {
     ...of('insight').map((part) => firstLine(part.text)),
   ];
   const line = candidates.find((candidate) => candidate !== null) ?? null;
+  return line === null ? null : line.slice(0, max);
+}
+
+// P4-R7: the line a message tool's message shows (`message-call.ts`): its text read as the to-human part it is, so it
+// previews as the same words in a `<message>` span would. Null when nothing is left.
+export function messageLine(text: string, max: number): string | null {
+  const line = firstLine(stripAnsi(text).trim());
   return line === null ? null : line.slice(0, max);
 }
 

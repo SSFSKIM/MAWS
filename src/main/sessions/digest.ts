@@ -11,7 +11,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionDigest } from '@shared/ipc/schema';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import { previewLine } from '@shared/owner/preview';
+import { messageLine, previewLine } from '@shared/owner/preview';
+import { isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
 
 export const SEEN_WINDOW = 2_000;
 const LAST_LINE_MAX = 160;
@@ -132,13 +133,19 @@ export function foldCost(ledger: CostLedger, event: SessionEvent): CostLedger {
 
 const withCost = (d: SessionDigest, totalUsd: number): SessionDigest => ({ ...d, cost: { totalUsd, sinceSeenUsd: d.cost?.sinceSeenUsd ?? 0 } });
 
-// One event on its own: the digest's cost is taken as its process's running total (`foldEvents` carries the ledger).
+// P4-R7: a message tool's calls waiting for their results, by tool use, each with the line its message shows: the
+// session's state beside the ledger, since a call and its result arrive in different batches. An accepted call's line
+// becomes the last line, as a text block's does (`@shared/owner/message-call`).
+export type MessageCalls = Map<string, string | null>;
+
+// One event on its own: the digest's cost is taken as its process's running total (`foldEvents` carries the ledger,
+// and a message call's wait for its result).
 export function foldDigest(prev: SessionDigest, event: SessionEvent): SessionDigest {
-  return foldWithLedger(prev, event, foldCost(costLedger(prev), event));
+  return foldWithLedger(prev, event, foldCost(costLedger(prev), event), new Map());
 }
 
 // `ledger` is the session's cost ledger after this event (`foldCost`).
-function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLedger): SessionDigest {
+function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLedger, messages: MessageCalls): SessionDigest {
   const pending = REQUESTED.has(event.kind) ? 1 : RESOLVED.has(event.kind) ? -1 : 0;
   const d = pending === 0 ? prev : { ...prev, pendingRequests: Math.max(0, prev.pendingRequests + pending) };
 
@@ -150,9 +157,16 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
     case 'assistant.block.delta':
       return event.thinkingDelta !== null ? { ...d, activity: 'Thinking' } : d;
     case 'tool.use':
+      if (isMessageTool(event.toolName)) {
+        const text = messageCallText(event.input);
+        messages.set(event.toolUseId, text === null ? null : messageLine(text, LAST_LINE_MAX));
+      }
       return { ...d, activity: activityForTool(event.toolName, event.input) };
-    case 'tool.result':
-      return { ...d, activity: 'Working' };
+    case 'tool.result': {
+      const line = messages.get(event.toolUseId);
+      messages.delete(event.toolUseId);
+      return { ...d, activity: 'Working', ...(line != null && !event.isError && { lastAssistantLine: line }) };
+    }
     case 'assistant.block.complete': {
       const line = firstLine(event.block);
       return line === null ? d : { ...d, lastAssistantLine: line };
@@ -163,6 +177,7 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
       return { ...d, phase: event.state === 'requires_action' ? 'waiting' : event.state === 'running' ? 'working' : 'idle' };
     case 'turn.ended': {
       if (event.isEchoReceipt) return d;
+      messages.clear(); // P4-R7: a call its turn ended without answering sent nothing
       // An interrupt is the human's stop, not a failure: `aborted_streaming` mid-reply, `aborted_tools` mid-tool (debt
       // wave 5), as C3's attention service and C6's divider (`isAbortedReason`) read every `aborted_*` reason.
       const failed = event.isError && !event.terminalReason?.startsWith('aborted_');
@@ -210,13 +225,14 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
 // initializing, ready or exiting, or a replay run the host plays). Without one the events are history — C4 following or
 // backfilling a transcript nobody here runs — and move only the last line, context and pending count, never the
 // phase, activity, turn times or child agents, so replayed history never turns a done or foreign session idle or
-// gives it an active child.
+// gives it an active child. P4-R7: `messages`, the session's message calls awaiting results, is the caller's too.
 export function foldEvents(
   prev: SessionDigest,
   seen: Set<string>,
   events: SessionEvent[],
   ledger: CostLedger = costLedger(prev),
   live = true,
+  messages: MessageCalls = new Map(),
 ): SessionDigest {
   let digest = prev;
   for (const event of events) {
@@ -224,7 +240,7 @@ export function foldEvents(
     seen.add(event.id);
     if (seen.size > SEEN_WINDOW) seen.delete(seen.values().next().value as string);
     Object.assign(ledger, foldCost(ledger, event));
-    const next = foldWithLedger(digest, event, ledger);
+    const next = foldWithLedger(digest, event, ledger, messages);
     digest = live
       ? next
       : { ...next, phase: digest.phase, activity: digest.activity, turnStartedAt: digest.turnStartedAt, lastTurnEndedAt: digest.lastTurnEndedAt, childAgents: digest.childAgents };

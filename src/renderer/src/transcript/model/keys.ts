@@ -44,6 +44,7 @@ export const rowId = {
   // E1 start: an `ask` call's capsule and a `send_file` call's delivery row, keyed by the tool use (the ask's askId)
   ask: (toolUse: ToolUseId) => row(`ask:${toolUse}`),
   delivery: (toolUse: ToolUseId) => row(`delivery:${toolUse}`),
+  toHuman: (toolUse: ToolUseId) => row(`to-human:${toolUse}`), // P4-R7: a message tool's call, keyed by its tool use as an ask is
   // E1 end
   sideThread: (child: string) => row(`side:${child}`), // E3: one row per side thread, keyed by the child's app session id
   // E7 start: a `ListAgents` call's listing row, keyed by the tool use

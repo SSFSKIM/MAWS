@@ -5,9 +5,10 @@ import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
 import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/maws/tools'; // E1
 import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
+import { MESSAGE_TOOLS } from '@shared/owner/message-call'; // P4-R7
 import type { ToolCategory, ToolClassification } from './rows';
 
-export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action';
+export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action' | /* P4-R7 */ 'message';
 
 // E1 start: the names the engine gives the `maws` server's tools (X9), as tool uses carry them
 export const MAWS_TOOL_USE = Object.fromEntries(MAWS_TOOL_NAMES.map((name) => [name, `mcp__${MAWS_SERVER_NAME}__${name}`])) as Readonly<Record<MawsToolName, string>>;
@@ -63,6 +64,8 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   // E4c start: every historical browser tool call is a browser action row (E4c execution document, Design §10)
   ...Object.fromEntries(Object.values(HISTORICAL_BROWSER_TOOL_USE).map((name) => [name, 'browser_action' as const])),
   // E4c end
+  // P4-R7: a message tool's call, MAWS's or the to-human plugin's, is the message it sends (derive.ts's `to_human` row)
+  ...Object.fromEntries(MESSAGE_TOOLS.map((name) => [name, 'message' as const])),
 };
 
 export function presentationOf(toolName: string): Presentation {

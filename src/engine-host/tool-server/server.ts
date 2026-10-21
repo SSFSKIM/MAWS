@@ -46,6 +46,7 @@ export interface McpToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: Record<string, unknown>;
+  _meta?: Record<string, unknown>; // P4-R7: listed as the tool's `_meta` (`message`'s alwaysLoad)
   call(args: unknown, ctx: McpToolContext): Promise<McpToolResult>;
 }
 
@@ -119,7 +120,7 @@ export class MawsToolServer {
         this.result(requestId, id, {});
         return;
       case 'tools/list':
-        this.result(requestId, id, { tools: [...this.tools.values()].map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })) });
+        this.result(requestId, id, { tools: [...this.tools.values()].map(({ name, title, description, inputSchema, annotations, _meta }) => ({ name, title, description, inputSchema, annotations, ...(_meta !== undefined && { _meta }) })) });
         return;
       case 'tools/call':
         void this.call(requestId, id, params);

@@ -23,7 +23,8 @@ import {randomUUID,createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 export {delay,randomUUID,join,existsSync,writeFileSync,mkdirSync,records,slug,success,check,endAsStop,initFrame,answer,stat};
 
-export const BIN=realpathSync(join(homedir(),'.local/bin/claude'));
+// P4-R7: PROBE_ENGINE names a binary by path instead (the pinned version beside a newer installed one)
+export const BIN=realpathSync(process.env.PROBE_ENGINE||join(homedir(),'.local/bin/claude'));
 export const ENGINE_VERSION=execFileSync(BIN,['--version'],{encoding:'utf8',timeout:15000}).trim().split(/\s+/)[0];
 export const PROVENANCE={charter:'docs/charter.md',child:'E0a',pin:'f11ae359af82c86831f052140683ed620dd25500',document:'docs/doperpowers/plans/2026-10-05-p1-extension.md',spike:'E0a',engine:BIN,engineVersion:ENGINE_VERSION};
 // MAWS's flags beyond the harness's own (launch.ts ENGINE_FLAGS less what harness.mjs already passes), and its --settings.
