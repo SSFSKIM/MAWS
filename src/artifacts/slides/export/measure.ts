@@ -9,11 +9,11 @@
 //    canvas's fit pass does, its search the shared `shrinkScale` (render-rules.ts), whose source main sends beside this
 //    function's and which arrives as the second argument,
 // 3. reads every slide: its background, then each element in paint order (document order, the page writing a section's
-//    children under, flow, over), each with its box before rotation in slide px, its rotation, its paint, and for text
-//    its paragraphs of runs with their computed face, size, weight, style, colour and decoration, the text as shown
-//    (its `text-transform` applied) and every line break the app shows (the final review's A9, A10); tables by rows of
-//    cells; pictures with their natural size; inline svg and icons as their markup in their colour. What a hidden
-//    ancestor hides is left out.
+//    children under, flow, over), each with its box before rotation in slide px, its rotation (under a skew, its drawn
+//    box too), its paint, and for text its paragraphs of runs with their computed face, size, weight, style, colour and
+//    decoration, the text as shown (its `text-transform` applied) and every line break the app shows (the final
+//    review's A9, A10); tables by rows of cells; pictures with their natural size; inline svg and icons as their markup
+//    in their colour. What a hidden ancestor hides is left out.
 // Portable: types and one function over the DOM, no imports.
 
 export interface MeasuredBox {
@@ -114,6 +114,11 @@ export interface MeasuredElement {
   linear?: [number, number, number, number];
   /** The mapping's own: a connector's scale, kept for its coordinates once its metrics are at drawn size. */
   connectorScale?: [number, number];
+  /**
+   * P4 (the skewed-element row): the box it is drawn in on the slide (its bounding box), present when its composed
+   * transform skews it (a `skewX`/`skewY`, its own or an ancestor's), so that no box, turn and scale describe its pose.
+   */
+  drawn?: MeasuredBox;
   paint: MeasuredPaint;
   /** The computed text colour (an x-icon's and an x-connector's stroke). */
   color: string;
@@ -267,7 +272,9 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
   // The box before rotation: the drawn box's centre with the layout size scaled (a rotation about the centre, CSS's
   // default origin, keeps the centre where it was). The element's and its ancestors' transforms compose (outermost
   // first): their rotation is the box's, their scale on each axis (fix wave 1) the factor its contents are drawn at.
-  const boxOf = (el: DomElement, slide: DomElement): { box: MeasuredBox; rotate: number; scale: [number, number]; linear: [number, number, number, number] } => {
+  // P4: a skew leaves the composed matrix's columns out of square (a box drawn as a parallelogram), and the drawn box,
+  // its bounding box, is answered with it.
+  const boxOf = (el: DomElement, slide: DomElement): { box: MeasuredBox; rotate: number; scale: [number, number]; linear: [number, number, number, number]; skewed: MeasuredBox | null } => {
     const drawn = rectIn(el.getBoundingClientRect(), slide);
     let [a, b, c, d] = [1, 0, 0, 1];
     for (let at: DomElement | null = el; at && at !== slide; at = at.parentElement) {
@@ -280,11 +287,12 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
     const rotate = (((Math.round(angle * 100) / 100) % 360) + 360) % 360;
     const scale: [number, number] = [Math.round(sx * 1e6) / 1e6, Math.round(sy * 1e6) / 1e6];
     const linear: [number, number, number, number] = [a, b, c, d];
-    if (rotate === 0 && scale[0] === 1 && scale[1] === 1 && Math.abs(b) < 1e-9 && Math.abs(c) < 1e-9) return { box: drawn, rotate: 0, scale, linear };
+    const skewed = Math.abs(a * c + b * d) > 1e-6 * sx * Math.hypot(c, d) ? drawn : null;
+    if (rotate === 0 && scale[0] === 1 && scale[1] === 1 && Math.abs(b) < 1e-9 && Math.abs(c) < 1e-9) return { box: drawn, rotate: 0, scale, linear, skewed };
     const w = (el.offsetWidth ?? el.clientWidth) * sx;
     const h = (el.offsetHeight ?? el.clientHeight) * sy;
     const [cx, cy] = [drawn.x + drawn.w / 2, drawn.y + drawn.h / 2];
-    return { box: { x: cx - w / 2, y: cy - h / 2, w, h }, rotate, scale, linear };
+    return { box: { x: cx - w / 2, y: cy - h / 2, w, h }, rotate, scale, linear, skewed };
   };
   const bordersOf = (el: DomElement): MeasuredPaint['borders'] =>
     (['top', 'right', 'bottom', 'left'] as const).map((side) => {
@@ -506,11 +514,11 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
       const tag = el.tagName.toLowerCase();
       if (tag === 'tr' || tag === 'th' || tag === 'td') continue; // read with their table
       if (hiddenIn(el, slide)) continue;
-      const { box, rotate, scale, linear } = boxOf(el, slide);
+      const { box, rotate, scale, linear, skewed } = boxOf(el, slide);
       const attrs: Record<string, string> = {};
       for (const a of Array.from(el.attributes)) if (!['style', 'src', 'data-eid', 'data-layer', 'data-fit-box'].includes(a.name)) attrs[a.name] = a.value;
       const color = css(el, 'color');
-      const measured: MeasuredElement = { id: el.getAttribute('data-eid') ?? '', tag, box, rotate, ...(scale[0] !== 1 || scale[1] !== 1 ? { scale } : {}), ...(linear[0] !== 1 || linear[1] !== 0 || linear[2] !== 0 || linear[3] !== 1 ? { linear } : {}), paint: paintOf(el, slide), color, attrs };
+      const measured: MeasuredElement = { id: el.getAttribute('data-eid') ?? '', tag, box, rotate, ...(scale[0] !== 1 || scale[1] !== 1 ? { scale } : {}), ...(linear[0] !== 1 || linear[1] !== 0 || linear[2] !== 0 || linear[3] !== 1 ? { linear } : {}), ...(skewed && { drawn: skewed }), paint: paintOf(el, slide), color, attrs };
       if (textTags.has(tag)) measured.text = textOf(el);
       const fit = fits.get(el);
       if (fit) measured.fit = fit;

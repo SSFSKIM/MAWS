@@ -96,7 +96,7 @@ describe('the presentation’s exporters', () => {
 // fix wave 1: the window's staging script is sent as text; each of its forms parses
 describe('the staging script for a picture', () => {
   it('parses for every mode, with any id', () => {
-    for (const mode of ['slide', 'background', 'self', 'tree'] as const) expect(() => new Function(`return ${STAGE('c"1', mode === 'slide' ? null : `e'2`, mode)}`), mode).not.toThrow();
+    for (const mode of ['slide', 'background', 'self', 'tree', 'drawn'] as const) expect(() => new Function(`return ${STAGE('c"1', mode === 'slide' ? null : `e'2`, mode)}`), mode).not.toThrow();
   });
 });
 

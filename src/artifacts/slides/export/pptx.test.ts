@@ -386,3 +386,36 @@ describe('the PPTX mapping: the exports-capture panel', () => {
   });
   // (the exports-capture regressions end)
 });
+
+// P4 (the skewed-element row): a skew, an element's own or an ancestor's, has no native form (a PowerPoint box turns but
+// does not lean): the element, and every member of a skewed group with its connectors among them, is the window's picture
+// of it as drawn, placed unturned at the box it is drawn in; a turned or scaled element keeps its native object.
+describe('the PPTX mapping: skewed elements', () => {
+  const body = MEASURED.slides[1]!;
+  const lean: [number, number, number, number] = [1, 0, Math.tan(Math.PI / 9), 1]; // skewX(20deg)
+  const fill: MeasuredElement['paint'] = { fill: 'rgb(0, 255, 0)', image: false, borders: [null, null, null, null], radius: 0, shadow: null, opacity: 1 };
+
+  it('takes a skewed box, a skewed group’s text and its connector as drawn, and places each unturned at its drawn box', () => {
+    const card: MeasuredElement = { ...body.elements[0]!, id: 'card', tag: 'div', box: { x: 118, y: 200, w: 200, h: 100 }, rotate: 0, linear: lean, drawn: { x: 100, y: 200, w: 236.4, h: 100 }, paint: fill };
+    const wire: MeasuredElement = { ...body.elements[1]!, id: 'wire', box: { x: 400, y: 100, w: 300, h: 200 }, rotate: 10, linear: lean, drawn: { x: 380, y: 90, w: 380, h: 230 }, attrs: { x1: '0', y1: '0', x2: '300', y2: '200' } };
+    const points = body.elements.find((e) => e.id === 'points')!;
+    const text: MeasuredElement = { ...points, id: 'member', rotate: 10, linear: lean, drawn: { x: 410, y: 110, w: 120, h: 60 } };
+    const turned: MeasuredElement = { ...card, id: 'turned', rotate: 30, linear: [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6), -Math.sin(Math.PI / 6), Math.cos(Math.PI / 6)], drawn: undefined };
+    // the skewed group itself paints nothing: no picture of it
+    const group: MeasuredElement = { ...card, id: 'group', box: wire.box, drawn: wire.drawn, paint: { ...fill, fill: null } };
+    const measured = { slides: [{ ...body, elements: [card, group, wire, text, turned] }] };
+    expect(pictureJobs(measured, 'named').map((j) => [j.key, j.mode, j.box])).toEqual([
+      ['body/card', 'drawn', card.drawn],
+      ['body/wire', 'drawn', wire.drawn],
+      ['body/member', 'drawn', text.drawn],
+    ]);
+    const pictures = new Map(['card', 'wire', 'member'].map((id) => [pictureKey('body', id), PNG]));
+    const out = pptxSlides(deck(), measured, { variant: 'named', pictures, asset })[0]!.objects;
+    expect(out.map((o) => [o.kind, o.name])).toEqual([['image', 'card'], ['image', 'wire'], ['image', 'member'], ['shape', 'turned']]);
+    expect(named(out, 'card').options).toEqual({ data: PNG, objectName: 'card', x: inches(100), y: inches(200), w: inches(236.4), h: inches(100) });
+    expect(named(out, 'wire').options).toEqual({ data: PNG, objectName: 'wire', x: inches(380), y: inches(90), w: inches(380), h: inches(230) });
+    expect(named(out, 'member').options).not.toHaveProperty('rotate');
+    // a turn alone: its native box, turned
+    expect(named(out, 'turned')).toMatchObject({ kind: 'shape', shape: 'rect', options: { rotate: 30 } });
+  });
+});

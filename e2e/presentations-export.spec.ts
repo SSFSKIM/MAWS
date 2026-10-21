@@ -397,6 +397,48 @@ test('a collapsed table: its border inside its box and square, its background an
   expect(part('thin:border')).toContain('prst="rect"');
 });
 
+// P4 (the skewed-element row): a skew, its own or a group's, has no native PowerPoint form: the element, and a skewed
+// group's members with their connector, are the window's pictures of them as drawn, placed unturned at the box each is
+// drawn in; a turn alone keeps its native object.
+const SKEWED = (): Record<string, string> => ({
+  'project/deck.json': JSON.stringify({ v: 4, title: 'Skews', cover: 's1', order: ['s1'] }),
+  'project/slides/s1.html': `<section id="s1" style="background:#ffffff">
+<div id="lean" style="position:absolute; left:200px; top:200px; width:200px; height:100px; background:#00ff00; transform:skewX(30deg)"></div>
+<div id="tilt" data-group="" style="position:absolute; left:800px; top:200px; width:300px; height:200px; transform:skewY(20deg)"><x-connector id="wire" x1="0" y1="100" x2="300" y2="100"></x-connector><p id="word" style="position:absolute; left:20px; top:20px; font-size:28px">Lean</p></div>
+<div id="plain" style="position:absolute; left:200px; top:600px; width:200px; height:100px; background:#00ff00; transform:rotate(30deg)"></div>
+</section>`,
+});
+
+test('a skewed element and a skewed group’s members export as pictures of them as drawn', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const { id, held } = await seedDeck(page, 'Skews', SKEWED());
+  expect(held).toEqual([]);
+  const zip = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
+  const xml = await slideXml(zip, 1);
+  const part = (name: string) => xml.split(/(?=<p:(?:sp|pic)>)/).find((p) => p.includes(`name="${name}"`));
+  // the skewed box, the group's connector and its text: pictures; the turned box its native shape; the unpainted group nothing
+  expect(['lean', 'wire', 'word', 'plain', 'tilt'].map((name) => /^<p:(sp|pic)>/.exec(part(name) ?? '')?.[1] ?? null)).toEqual(['pic', 'pic', 'pic', 'sp', null]);
+  expect(part('plain')).toContain('rot="1800000"');
+  expect(part('lean')).not.toMatch(/ rot="/);
+  // at the box skewX(30deg) draws the 200 × 100 box in: 200 + 100·tan 30° ≈ 257.7 px across, from 300 − 128.9 ≈ 171.1
+  const [x, y, w, h] = offsetOf(xml, 'lean')!.map((n) => n / EMU) as [number, number, number, number];
+  expect([Math.abs(x - 171.13) < 1, y, Math.abs(w - 257.74) < 1, h]).toEqual([true, 200, true, 100]);
+  // its picture leans: its top-left and bottom-right corners green, the other two see-through (an unskewed box's picture
+  // would be green to all four)
+  const rels = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('string');
+  const rId = /<a:blip r:embed="(rId\d+)"/.exec(part('lean')!)![1];
+  const target = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels)![1]!;
+  const picture = Buffer.from(await zip.file(`ppt/media/${target}`)!.async('uint8array'));
+  const [pw, ph] = pngSize(picture) as [number, number];
+  expect(pw).toBeGreaterThanOrEqual(255);
+  // 8 px in across, 4 px down: each sample at least 5 px from a slanted edge (at 4 px down the edges run 2.3 px in)
+  const [topLeft, topRight, bottomLeft, bottomRight, centre] = await pixelsOf(picture, [[8, 4], [pw - 8, 4], [8, ph - 4], [pw - 8, ph - 4], [pw / 2, ph / 2]]);
+  const green = ([r, g, b, a]: number[]) => r! < 60 && g! > 200 && b! < 60 && a! > 200;
+  const clear = (rgba: number[]) => rgba[3]! < 30;
+  expect([green(topLeft!), clear(topRight!), clear(bottomLeft!), green(bottomRight!), green(centre!)]).toEqual([true, true, true, true, true]);
+});
+
 // S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load
 // average beside each time, as the scale gate records its bounds)
 test('the 100-slide deck exports to PPTX, named and as pictures, and to PDF within the budget', async () => {
