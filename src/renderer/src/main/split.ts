@@ -2,10 +2,11 @@
 // pane whose active tab is a session ("S") holds at S_MIN_PX, and a drag that would leave it under FLOAT_THRESHOLD_PX
 // arms its float, live and with the same limit both ways (no hysteresis); the other pane ("A") only ever clamps at
 // A_MIN_PX. Every floor is capped at half the region, so a region narrower than both floors splits evenly rather than
-// overlapping. The divider's 1 px column is ignored in the arithmetic. The constants are provisional: LC-3 re-bases them.
-export const S_MIN_PX = 320; // provisional; re-based by LC-3
-export const A_MIN_PX = 320; // provisional; re-based by LC-3
-export const FLOAT_THRESHOLD_PX = S_MIN_PX / 2; // 160; provisional; re-based by LC-3
+// overlapping. The divider's 1 px column is ignored in the arithmetic. LC-3 (2026-10-21) confirmed the constants against
+// Codex 26.1013: its chat holds at 320 and snaps past half of it.
+export const S_MIN_PX = 320; // confirmed by LC-3
+export const A_MIN_PX = 320; // confirmed by LC-3 (source)
+export const FLOAT_THRESHOLD_PX = S_MIN_PX / 2; // 160; confirmed by LC-3
 
 export type SplitSide = 'left' | 'right';
 // Which panes may float: those whose active tab is a session.

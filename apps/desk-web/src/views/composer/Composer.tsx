@@ -8,6 +8,7 @@
 // group post lists the project's live members to pick from (4c).
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { useStore } from 'zustand';
+import { formatCount } from '@shared/app/date-format';
 import { address } from '../../conversation/address';
 import { complete, completionAt, insertTag, type Completion } from '../../conversation/completion';
 import { turnRunning, type Capability } from '../../conversation/capabilities';
@@ -259,7 +260,7 @@ function Compaction({ session }: { session: string }) {
   if (compaction.phase === 'start') text = 'Compacting…';
   else if (compaction.error) text = `Compaction failed: ${compaction.error}`;
   else if (compaction.skip) text = `Compaction skipped by a hook: ${compaction.skip}`;
-  else if (typeof compaction.tokensBefore === 'number' && typeof compaction.tokensAfter === 'number') text = `Compacted: ${compaction.tokensBefore.toLocaleString()} → ${compaction.tokensAfter.toLocaleString()} tokens`;
+  else if (typeof compaction.tokensBefore === 'number' && typeof compaction.tokensAfter === 'number') text = `Compacted: ${formatCount(compaction.tokensBefore)} → ${formatCount(compaction.tokensAfter)} tokens`;
   else text = 'Compacted';
   return (
     <span className={`text-ui-sm ${compaction.error ? 'text-danger' : 'text-fg-muted'}`} data-testid="compaction">

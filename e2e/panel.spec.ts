@@ -1277,6 +1277,7 @@ test.describe('the main split’s float (P4-B3)', () => {
       const area = page.locator('[data-main-area]');
       const divider = main.getByRole('separator', { name: 'Resize panes' });
       const card = main.getByRole('region', { name: 'Session card' });
+      const outline = main.locator('[data-split-card-outline]'); // LC-3: the card's place while the drag is armed
       const pill = main.getByRole('button', { name: 'Show session card' });
       const composers = page.locator(`section[data-composer="${id}"]`);
       const left = page.locator('[data-pane="0"]');
@@ -1337,13 +1338,19 @@ test.describe('the main split’s float (P4-B3)', () => {
         expect(Math.round((await right.locator(':scope > [role="tabpanel"]').boundingBox())!.width), 'the other pane spans the area').toBeGreaterThanOrEqual(Math.round(region.width) - 1);
         await expect(composers, 'S stays mounted while armed').toHaveCount(1);
         await expect(card, 'no card before release').toHaveCount(0);
+        await expect(outline, 'LC-3: the card’s outline while armed').toBeVisible();
         await to(161);
         await expect.poll(leftWidth, 'disarmed: back at the floor').toBe(320);
+        await expect(outline, 'a disarm takes the outline away').toHaveCount(0);
         expect(await firstRowInView(paneScroller), 'a disarm is lossless: the same row at the top').toBe(heldRow);
         await to(150);
         await expect.poll(leftWidth).toBe(0);
+        const outlined = (await outline.boundingBox())!;
         await page.mouse.up();
         await expect(card).toBeVisible();
+        await expect(outline).toHaveCount(0);
+        const opened = (await card.boundingBox())!;
+        for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(opened[key] - outlined[key]), `the card opens on its outline (${key})`).toBeLessThanOrEqual(1);
         await expect(divider, 'no divider while floating').toHaveCount(0);
       });
 

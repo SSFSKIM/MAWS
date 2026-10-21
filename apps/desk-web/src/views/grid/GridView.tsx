@@ -8,6 +8,7 @@
 // or waiting on you; below them, "Show all (N)" reveals every project and becomes "Show active", a choice this browser
 // keeps (smns remote identity §5). The sort, "All sessions", and the waiting counts read every project either way.
 import { useMemo, useState } from 'react';
+import { formatClock } from '@shared/app/date-format';
 import { useAccess } from '../../hub/access';
 import { orgWaiting } from '../../pwa/badge';
 import { useDeskLayout } from '../../shell/layout';
@@ -15,8 +16,6 @@ import { gridShowsAll, isActive, keepGridShowsAll, sortForGrid, useGrid } from '
 import { LapsedBanner } from '../access/SignInAgain';
 import { GridPushBanner } from '../notifications/PushBanner';
 import { ProjectCard } from './ProjectCard';
-
-const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export function GridView({ onEnroll }: { onEnroll: () => void }) {
   const { projects, loaded, status, asOf } = useGrid();
@@ -32,7 +31,7 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
   const waiting = orgWaiting(projects);
   const lapsed = useAccess((s) => s.lapsed);
   const stale = loaded && (status === 'connecting' || lapsed !== null);
-  const asOfText = `Counts as of ${asOf === null ? 'the last connection' : time(asOf)}.`;
+  const asOfText = `Counts as of ${asOf === null ? 'the last connection' : formatClock(asOf)}.`;
   return (
     <main className="h-full overflow-y-auto bg-bg" aria-label="Projects">
       <GridPushBanner />

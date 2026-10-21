@@ -1,0 +1,258 @@
+{
+ "run": {
+  "date": "2026-10-21",
+  "by": "the owner, by hand (cua refuses com.openai.codex)",
+  "script": "spikes/p4-b3-lc3/steps-owner.md at 11ae099f2",
+  "captures": "~/Pictures/Screenshots, 37 PNG (8 byte-identical at 11.24.14) and one recording '화면 기록 2026-10-21 오전 11.15.00.mov' (71.4 s, 2850x1602, 120 fps), 11:13:11-11:40:20 local (-0700)",
+  "scale": "all captures are Retina 2x region shots: px / 2 = pt",
+  "ui_language": "English",
+  "theme": "dark"
+ },
+ "build": {
+  "40934": "captures 11:13:11-11:37:28 and the recording (the rail's update-ready mark present, e17 left)",
+  "51333": "captures 11:38:08-11:40:20, after step 21's quit installed the update (mark gone, e17 right); Info.plist read 26.1016.51333 after the run",
+  "about_capture": "none (step 0 skipped)"
+ },
+ "recording_timeline_s": {
+  "docked_divider_px": 1646,
+  "sidebar_edge_px": 634,
+  "chat_docked_pt": 506,
+  "drag_start": 1.43,
+  "hold_reached": 2.4,
+  "hold_chat_px": 641,
+  "hold_chat_pt": 320,
+  "hold_until": 6.87,
+  "pointer_at_hold_px": 1067,
+  "pointer_implied_chat_at_hold_pt": 217.5,
+  "pointer_crosses_160pt": [
+   6.63,
+   6.67
+  ],
+  "threshold_pointer_px": 954,
+  "full_width_drawn": 6.9,
+  "pointer_when_drawn_px": 785,
+  "floating_composer_visible": 7.0,
+  "resize_cursor_until": 8.1,
+  "release_about": 8.15,
+  "disarm_attempt": "none (no rightward pointer move between 6.9 and 8.15)",
+  "compact_composer_after_release": {
+   "x_px": [
+    1685,
+    2803
+   ],
+   "y_px": [
+    1474,
+    1561
+   ],
+   "w_pt": 559,
+   "h_pt": 44
+  },
+  "compact_with_header": {
+   "y_px": [
+    1381,
+    1561
+   ],
+   "h_pt": 90
+  },
+  "sidebar_resized_by_accident": {
+   "t": [
+    14.8,
+    17.3
+   ],
+   "edge_px_before": 633,
+   "edge_px_after": 611,
+   "width_pt_before": 267.5,
+   "width_pt_after": 256.5
+  },
+  "expanded_float": {
+   "t": 35.0,
+   "transcript_rows_visible": "130-150 (the end)"
+  },
+  "draft_sent_by_accident": 38.5,
+  "click_in_document_collapses": 44.0,
+  "chat_tab_in_front": {
+   "t": 46.5,
+   "rows_visible": "44-71"
+  },
+  "resplit_by_tab_drag": {
+   "t": 51.0,
+   "chat_px": 642,
+   "chat_pt": 321
+  }
+ },
+ "screenshots": [
+  {
+   "time": "11:14:19",
+   "step": 6,
+   "what": "docked, draft '초안 가나다', rows 31-58",
+   "chat_pt": 506,
+   "evidence": "e01"
+  },
+  {
+   "time": "11:16:33",
+   "step": "8 (repeat)",
+   "what": "re-float: compact composer, bottom right",
+   "bottom_gap_pt": 15.5
+  },
+  {
+   "time": "11:16:42",
+   "step": "10 (repeat)",
+   "what": "docked",
+   "chat_pt": 320.5
+  },
+  {
+   "time": "11:17:30",
+   "step": 9,
+   "what": "float, compact, draft '초안 가나다 추가'",
+   "bottom_gap_pt": 15.5
+  },
+  {
+   "time": "11:19:10",
+   "step": 10,
+   "what": "grip menu: Open in full view / Move to left pane / Move to right pane / Minimize composer",
+   "evidence": "e10"
+  },
+  {
+   "time": "11:19:30",
+   "step": "?",
+   "what": "minimised 36 pt button at the bottom right (Minimize composer?)"
+  },
+  {
+   "time": "11:20:03",
+   "step": 10,
+   "what": "after Move to left pane: docked, draft kept, transcript at the end",
+   "chat_pt": 320.5,
+   "evidence": "e11"
+  },
+  {
+   "time": "11:21:08",
+   "step": "11 or 12 (owner question 2)",
+   "what": "docked, sidebar hidden, draft kept",
+   "chat_pt": 320.5
+  },
+  {
+   "time": "11:22:04",
+   "step": 13,
+   "what": "float, expanded (owner question 3)",
+   "card_pt": [
+    561,
+    615
+   ],
+   "right_gap_pt": 15.5,
+   "evidence": "e12"
+  },
+  {
+   "time": "11:22:17",
+   "step": 14,
+   "what": "click in document -> compact",
+   "bottom_gap_pt": 15.5,
+   "evidence": "e13"
+  },
+  {
+   "time": "11:24:14",
+   "step": 15,
+   "what": "compact with header, approval prompt typed (8 identical files)"
+  },
+  {
+   "time": "11:33:50",
+   "step": 15,
+   "what": "compact, 'Working for 4s'"
+  },
+  {
+   "time": "11:34:01",
+   "step": "15?",
+   "what": "compact with header + completion notice (owner question 4)"
+  },
+  {
+   "time": "11:34:51",
+   "step": 15,
+   "what": "pending approval, card expanded",
+   "card_pt": [
+    561,
+    616
+   ],
+   "evidence": "e14"
+  },
+  {
+   "time": "11:35:25",
+   "step": 16,
+   "what": "minimised during the pending request: 36 pt button, blue dot",
+   "button_pt": [
+    37,
+    37
+   ],
+   "right_gap_pt": 15.5,
+   "bottom_gap_pt": 15.5,
+   "evidence": "e15"
+  },
+  {
+   "time": "11:35:35",
+   "step": 17,
+   "what": "allowed once; expanded with the result"
+  },
+  {
+   "time": "11:36:15",
+   "step": "18/19?",
+   "what": "no card visible (owner question 7)"
+  },
+  {
+   "time": "11:37:28",
+   "step": 20,
+   "what": "expanded at the right, before the quit (anchor not moved, owner question 6)",
+   "card_pt": [
+    561,
+    615
+   ]
+  },
+  {
+   "time": "11:38:08",
+   "step": 21,
+   "build": "51333",
+   "what": "after quit and reopen: still floating, compact, bottom right ('그대로 떠있음. 안펼쳐짐.')",
+   "evidence": "e16"
+  },
+  {
+   "time": "11:39:01",
+   "step": "22?",
+   "build": "51333",
+   "what": "expanded at the right",
+   "card_pt": [
+    561,
+    601
+   ]
+  },
+  {
+   "time": "11:39:12",
+   "step": "?",
+   "build": "51333",
+   "what": "no card visible (minimised under the thumbnail?)"
+  },
+  {
+   "time": "11:39:33",
+   "step": "?",
+   "build": "51333",
+   "what": "expanded at the right again"
+  },
+  {
+   "time": "11:40:12",
+   "step": "dock",
+   "build": "51333",
+   "what": "Move to left pane: docked, sidebar hidden",
+   "chat_pt": 320.5
+  },
+  {
+   "time": "11:40:20",
+   "step": "full view",
+   "build": "51333",
+   "what": "Open in full view: the chat alone, chip 'Ask for approval'"
+  }
+ ],
+ "not_observed": [
+  "item 2's disarm",
+  "item 6's card edge-drag and quadrant drops (step 20, section D)",
+  "item 7's new request while minimised (step 18)",
+  "item 8's Escape",
+  "item 9's chord",
+  "items 10, 12, 13, 14"
+ ]
+}

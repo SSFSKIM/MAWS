@@ -56,6 +56,17 @@ const ONE_LOCALE = [
 ];
 const mawsDatesPlugin = { rules: { 'one-locale': builtinRules.get('no-restricted-syntax') } };
 // P4-W2L end
+// The desk's web app writes its times through the same module, and its counts too (formatCount, formatCompactCount), so
+// there the rule also refuses every toLocaleString, a Date's or a number's, and every Intl.NumberFormat: in a browser
+// each would write the browser's locale beside the desk's English (the tracker's desk-lane row, 2026-10-21).
+const DESK_ONE_LOCALE_MESSAGE =
+  "The desk's dates, times and counts are written by @shared/app/date-format in its one display locale (P4 Decision Log 4): formatCount or formatCompactCount for a count, a named shape or dateTimeFormat for a date.";
+const DESK_ONE_LOCALE = [
+  ...ONE_LOCALE,
+  { selector: "CallExpression[callee.property.name='toLocaleString']", message: DESK_ONE_LOCALE_MESSAGE },
+  { selector: "NewExpression[callee.object.name='Intl'][callee.property.name='NumberFormat']", message: DESK_ONE_LOCALE_MESSAGE },
+  { selector: "CallExpression[callee.object.name='Intl'][callee.property.name='NumberFormat']", message: DESK_ONE_LOCALE_MESSAGE },
+];
 const DESK_WEB = 'apps/desk-web/src/ runs in a browser (the DC5 plan): no Node or Electron module.'; // DC5
 const DESK_WEB_NO_PRELOAD = 'apps/desk-web/src/ runs in a browser with no MAWS preload: `window.maws` does not exist there (the desk composite, DC6).'; // DC6
 const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
@@ -210,6 +221,13 @@ module.exports = defineConfig(
   },
   { files: ['apps/desk-web/{test,e2e}/**/*.ts', 'apps/desk-web/*.config.ts', 'apps/desk-web/scripts/**/*.mjs'], languageOptions: { globals: globals.node } },
   // DC5 end
+  // The one-locale rule over the desk's web app (DESK_ONE_LOCALE, above); its suites build their own English oracles.
+  {
+    files: ['apps/desk-web/src/**/*.{ts,tsx}'],
+    ignores: ['apps/desk-web/src/**/*.test.{ts,tsx}'],
+    plugins: { 'maws-dates': mawsDatesPlugin },
+    rules: { 'maws-dates/one-locale': ['error', ...DESK_ONE_LOCALE] },
+  },
   // DC6 start: the browser has no MAWS preload, so nothing under apps/desk-web/src/ reaches for its bridge; MAWS's own
   // sources (src/) are outside this glob and keep theirs.
   {

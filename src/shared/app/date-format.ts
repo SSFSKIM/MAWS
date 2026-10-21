@@ -7,7 +7,9 @@
 // the copy around it. Times are in the system's zone. Dates written for machines (ISO stamps in files, logs, protocol
 // fields) are not this module's. One set of formatters per locale, built once; `dateFormats(locale)` builds another
 // locale's set (this module's test pins the Korean forms). Compact ages and countdowns keep Intl's narrow unit style
-// ("2h"). The budget's `clockTime` (budget/copy.ts) writes through `formatClock` (L129).
+// ("2h"). The budget's `clockTime` (budget/copy.ts) writes through `formatClock` (L129). The desk's web app
+// (apps/desk-web) writes its times here too, and its counts (`formatCount`, `formatCompactCount`), so a page of it reads
+// in one locale whatever the browser's; there the lint refuses every `toLocaleString` and `Intl.NumberFormat` as well.
 export const DISPLAY_LOCALE = 'en-US';
 
 const MINUTE = 60_000;
@@ -54,6 +56,10 @@ export interface DateFormats {
   amount(count: number, unit: AmountUnit): string;
   // The compact age of an elapsed `ms`: "now" under a minute (지금), then the largest whole unit (2m, 2h; 2시간).
   age(ms: number): string;
+  // A count, grouped: 12,345 (a compaction's tokens).
+  count(n: number): string;
+  // A count in compact notation, to a tenth: 36.8K, 200K, 1M (3.7만, 20만): a context window and its fill.
+  compactCount(n: number): string;
 }
 
 function build(locale: string): DateFormats {
@@ -69,6 +75,8 @@ function build(locale: string): DateFormats {
   const auto = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const now = auto.format(0, 'second');
   const label = (s: string) => s.charAt(0).toLocaleUpperCase(locale) + s.slice(1);
+  const count = new Intl.NumberFormat(locale);
+  const compactCount = new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 });
   const units = new Map<AmountUnit, Intl.NumberFormat>();
   const amount = (count: number, unit: AmountUnit) => {
     let format = units.get(unit);
@@ -101,6 +109,8 @@ function build(locale: string): DateFormats {
       if (ms < MINUTE) return now;
       return amount(...unitOf(ms));
     },
+    count: (n) => count.format(n),
+    compactCount: (n) => compactCount.format(n),
   };
 }
 
@@ -121,6 +131,8 @@ export const formatDateTime = shown.dateTime;
 export const formatDayTime = shown.dayTime;
 export const formatAgo = shown.ago;
 export const formatUntil = shown.until;
+export const formatCount = shown.count;
+export const formatCompactCount = shown.compactCount;
 
 // A shape of a surface's own (the history's long day, the library's month headings, the transcript's separators in a
 // pinned zone), in the display locale; built once per shape, building costing far more than formatting (M6).
