@@ -161,3 +161,20 @@ export const LEGACY_SUPPLEMENT_1: ContractText = SUPPLEMENT_1;
 export const SUPPLEMENT: ContractText = SUPPLEMENT_2;
 export const TO_HUMAN_SUPPLEMENT_VERSION = SUPPLEMENT.version;
 export const TO_HUMAN_SUPPLEMENT = SUPPLEMENT.text;
+
+// P4-R7y (2026-10-21, the owner's ask): the context a SessionStart hook gives the model at every start of a lane-on
+// session (a new session, a fork, a resume, a compaction, a clear), so a style or a skill naming the plugin's message
+// tool reaches MAWS's even where the appended prompt is missing or stale (a snapshot kept from an earlier launch, an
+// append deferred to the next compaction). Supplement 2, where it is in force, says the plugin's tool is not available
+// here and to message through MAWS's; this says which tool stands for the plugin's, at every start.
+export const PLUGIN_MESSAGE_TOOL = 'mcp__to-human__message';
+export const MESSAGE_TOOL_ALIAS = `In this session \`${PLUGIN_MESSAGE_TOOL}\` is the \`mcp__maws__message\` tool: wherever your instructions name \`${PLUGIN_MESSAGE_TOOL}\`, call \`mcp__maws__message\`, which takes the same input.`;
+
+// The hook that gives it, one SessionStart matcher group for a lane-on launch's `--settings` (launch-mapping.ts
+// `withOwnerChannel`). A command hook, since a host callback registered through `initialize.hooks` misses the startup
+// and resume starts: the engine runs SessionStart hooks before it reads `initialize` (pass p4-r7y on 2.1.304 and
+// 2.1.306, findings-p4-r7y-session-start.txt). Exec form (`args`), so no shell and none of the owner's shell
+// configuration runs, and nothing in the text needs quoting. No matcher: every source.
+export const messageToolHookGroup = (): { hooks: { type: 'command'; command: string; args: string[] }[] } => ({
+  hooks: [{ type: 'command', command: '/usr/bin/printf', args: ['%s', JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: MESSAGE_TOOL_ALIAS } })] }],
+});

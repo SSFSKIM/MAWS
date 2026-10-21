@@ -1,16 +1,15 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  carriesFullContract, CONTRACT_HEADER, FULL_CONTRACT, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT,
+  carriesFullContract, CONTRACT_HEADER, FULL_CONTRACT, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, MESSAGE_TOOL_ALIAS, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, PLUGIN_MESSAGE_TOOL, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT,
   TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from './contract';
 import { MAWS_MESSAGE_TOOL } from './message-call';
 import type { MessageUuid } from '../graph/ids';
 import { marksOf } from './marks';
 
-// The to-human plugin's message tool, which MAWS names to the model only to say it is not available here.
-const PLUGIN_MESSAGE_TOOL = 'mcp__to-human__message';
 
 // The engine's record of the system prompt U2 run 6 rendered with the contract appended (S14, a new session): the
 // segment is the text the live runs tested (spikes/protocol-probe/findings-pass3-p2-to-human.txt).
@@ -132,6 +131,26 @@ describe('the supplement: supplement 2 (P4-R7)', () => {
 
   it('quotes its mark in code, so it reads as no mark itself', () => {
     expect(marksOf(TO_HUMAN_SUPPLEMENT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
+  });
+});
+
+// P4-R7y (the owner's ask of 2026-10-21): the context a lane-on session's SessionStart hook gives at every start.
+describe('the SessionStart context and its hook (P4-R7y)', () => {
+  it('says the plugin’s message tool is MAWS’s here, to call MAWS’s wherever instructions name the plugin’s, and that the input is the same', () => {
+    expect(MESSAGE_TOOL_ALIAS).toContain(`\`${PLUGIN_MESSAGE_TOOL}\` is the \`${MAWS_MESSAGE_TOOL}\` tool`);
+    expect(MESSAGE_TOOL_ALIAS).toContain(`wherever your instructions name \`${PLUGIN_MESSAGE_TOOL}\`, call \`${MAWS_MESSAGE_TOOL}\``);
+    expect(MESSAGE_TOOL_ALIAS).toContain('same input');
+    // supplement 2 names the same two tools: the plugin's not available here, MAWS's the one to message through
+    for (const tool of [PLUGIN_MESSAGE_TOOL, MAWS_MESSAGE_TOOL]) expect(TO_HUMAN_SUPPLEMENT).toContain(`\`${tool}\``);
+  });
+
+  it('is what the hook prints, run as the engine runs an exec-form hook (no shell): the SessionStart answer, for every source', () => {
+    const group = messageToolHookGroup();
+    expect(group).not.toHaveProperty('matcher');
+    expect(group.hooks).toHaveLength(1);
+    const [hook] = group.hooks;
+    expect(hook!.type).toBe('command');
+    expect(JSON.parse(execFileSync(hook!.command, hook!.args, { encoding: 'utf8', env: {} }))).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: MESSAGE_TOOL_ALIAS } });
   });
 });
 

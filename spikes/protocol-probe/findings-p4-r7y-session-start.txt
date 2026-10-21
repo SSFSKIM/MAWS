@@ -1,0 +1,53 @@
+P4-R7y: the SessionStart context on MAWS's own wire
+(docs/doperpowers/plans/2026-10-19-p4-smoothing.md, the follow-up to Decision Logs 48 and 49; parent pin
+bd54d325b4c967eeafb98fb6426049bff1c55669 at master 4326f0a97; 2026-10-21)
+
+Question (D-1). The owner's ask: every lane-on MAWS session tells the model, at every start, that
+`mcp__to-human__message` is `mcp__maws__message` here (src/shared/owner/contract.ts MESSAGE_TOOL_ALIAS). On the pinned
+engine over MAWS's wire, which mechanism delivers a SessionStart context at each start (a new session, a compaction, a
+clear, a resume, a fork): a host hook callback registered through `initialize.hooks` and answered on `hook_callback`,
+or a command hook in the `--settings` JSON?
+
+Method. scenarios/pass3/p4-r7y-session-start.mjs: MAWS's launch line and initialize (p1-common), the `--settings` JSON
+of a lane-on launch (dialogExpiry, env MAWS_NATIVE_TO_HUMAN=7), engine 2.1.304 (PROBE_ENGINE). The callback answers
+`{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: <the text>}}`; the command hook is the group
+MAWS now puts in `--settings` (contract.ts messageToolHookGroup: `/usr/bin/printf %s <that answer>`, exec form, no
+matcher). Stub arms run against the scripted Messages API (stub-api.mjs, nothing spent) and record every request the
+engine sent with each place the text appears; relay arms run Haiku 5.5 through the relay with a recorder between.
+Fixtures fixtures/p4/p4-r7y-*.jsonl; tests in fixtures.test.mjs ("p4 R7y").
+
+1. The callback misses the first start of every launch. Registered at initialize (`hooks_applied: true`), the engine
+   called it at a compaction (source compact) and at a clear (source clear), and the next request carried the text;
+   it never called it at startup, at a resume or at a fork, and those requests carried no copy. The engine runs a
+   launch's SessionStart hooks before it reads `initialize` (src/engine-host/session-start-hooks.ts), so a callback
+   registered there exists only for the starts after the first.
+                         startup   /compact   /clear   --resume   2nd --resume   --fork-session
+     callback               -         yes       yes        -           -               -
+     command hook          yes        yes       yes       yes      yes (1 copy)    yes (source fork)
+2. The command hook runs at every start: hook_started and hook_response (outcome success) for SessionStart:startup,
+   :compact, :clear, :resume and :fork, and each next main request carries the text once, as a system message
+   "SessionStart hook additional context: <the text>" in the request's messages. A second resume
+   of a session that already carries it adds no second copy; the transcript keeps it as a `hook_additional_context`
+   attachment.
+3. On a real model (relay-control, relay-resume, relay-startup; asked which tool it calls where its instructions name
+   mcp__to-human__message): without the hook it answered "none"; at a `--resume` of that same session with the hook,
+   and at a new session's startup with the hook, it answered "mcp__maws__message", the request carrying the text.
+4. Repeated on 2.1.306, the owner's installed engine, which MAWS launches by default (W13): the stub arms gave the
+   same table (fixtures not kept).
+
+Verdict: the command hook in the `--settings` JSON. MAWS adds messageToolHookGroup to a launch's settings hooks
+exactly where it advertises MAWS_NATIVE_TO_HUMAN (src/main/sessions/launch-mapping.ts withOwnerChannel), so a new
+session, a fork, a side thread and a resume all carry it while the lane is on, and none does while it is off.
+
+Notes.
+- Exec form (`args`, in the engine since before 2.1.220) spawns /usr/bin/printf directly: no shell, so neither the
+  owner's shell configuration nor CLAUDE_CODE_SHELL_PREFIX touches it, and the text needs no quoting.
+- A successful SessionStart hook draws nothing in MAWS's transcript (renderer transcript/model/hooks.ts); the hook
+  frames hold initialize's deadline as any SessionStart hook does, and with no `timeout` the hold stays at 600 s. The
+  Hooks widget lists it under the startup settings, as get_hooks_listing reports it.
+- apply_flag_settings merges into the flag settings key by key (2.1.304 cli.pretty.js:83273, read, not probed), so
+  Settings' effort change and the other flag writes keep the hook for the process's later compactions and clears.
+- Spend through the relay: US$0.0060 in the kept relay fixtures (the sum of each launch's reported cost), and
+  US$0.0066 in a first relay run with a shell-form hook, replaced; the stub arms spent nothing.
+- Not covered: an automatic compaction (the probe sends /compact), a compaction or a clear on a real model (stub only),
+  and the owner's own plugins' SessionStart hooks beside it (they run together; the engine concatenates the sources).
