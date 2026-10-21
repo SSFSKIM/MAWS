@@ -109,6 +109,10 @@ Round 2, the same reviewer over the fixes (b96347122..da5859ac6): the six fixes 
 - A preparation ending after an exit saved the queue again, recreating a deleted state or overwriting a relaunch's. Fixed: nothing is saved there.
 - A read attached and then discarded (the entry edited meanwhile, or paused) kept its effect on the session's memory. Fixed: a preparation is settled by whether its content reached the pipe, and an attached read is undone when it did not.
 
+Round 3, the same reviewer over da5859ac6..a88b5ea82: the removal and the post-exit save are closed. Two P2 interleavings were left in the undo, both real, both fixed:
+- The settle re-read the entry after the write, which an edit's failed save had changed meanwhile. Fixed: it is decided before the write.
+- An agent call beside the linked read (a background agent's, the main turn idle) could set the same memory, which the undo then cleared. Fixed: nothing is undone when a call ran beside the read. The cost of that choice is that, in that overlap, an unseen read may stay the session's base: the agent's next publish is refused as from an old read and it reads again (a residue row).
+
 ## Surprises & Discoveries
 
 - The transcripts carry the whole request. Since engine 2.1.300 the `api-request-shape` (system and tools) and `api-request-blob` records (messages) let a request be rebuilt to the token. Assistant messages and tool results are not blobbed and come from the transcript's own records. This is what made the replay diagnosis possible without a run.
