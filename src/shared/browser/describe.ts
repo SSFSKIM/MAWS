@@ -533,14 +533,33 @@ function computeName(el: DomElement): string {
 // found of: the content's rendered text, an open shadow tree read in place of its host's children and a slot as what it
 // places; the element's own `title`; within the content in tree order, an `aria-label`, `label`, `title` or `alt`, or an
 // SVG `<title>`; then a custom element's `icon` or `name`. A control, editable content (what a person typed, as in a
-// name), a hidden subtree and a script are never read. `''` when the content holds no open shadow root or gives nothing.
+// name: an editable element, one inside an editable region, an editable part of the content), a hidden subtree and a
+// script are never read. `''` when the content holds no open shadow root or gives nothing.
 const DISPLAY_NODES_MAX = 2000; // a bound on the walk: the content is the page's
 const LABEL_ATTRIBUTES = ['aria-label', 'label', 'title', 'alt'];
 const ICON_ATTRIBUTES = ['icon', 'name'];
 type Display = { budget: number; shadowed: boolean; label: string; icon: string };
 
+// What an element's own `contenteditable` says: editable (`''`, `true`, `plaintext-only`), not (`false`), or nothing,
+// absent or an invalid value, which inherits (HTML's rule).
+function ownEditability(el: DomElement): boolean | null {
+  const value = el.getAttribute('contenteditable')?.toLowerCase() ?? null;
+  if (value === '' || value === 'true' || value === 'plaintext-only') return true;
+  return value === 'false' ? false : null;
+}
+
+// Whether an element is editable: the nearest `contenteditable` at or above it decides.
+function editable(el: DomElement): boolean {
+  for (let node: DomElement | null = el; node !== null; node = node.parentElement) {
+    const own = ownEditability(node);
+    if (own !== null) return own;
+  }
+  return false;
+}
+
 export function displayNameOf(el: DomElement): string {
   if (!NAME_FROM_CONTENT_ROLES.has(ariaRole(el) ?? '') && el.localName !== 'summary') return '';
+  if (editable(el)) return '';
   const found: Display = { budget: DISPLAY_NODES_MAX, shadowed: false, label: '', icon: '' };
   const text = flat(contentDisplay(el, found));
   if (!found.shadowed) return '';
@@ -551,8 +570,7 @@ const firstAttribute = (el: DomElement, names: string[]): string => names.map((n
 
 function unread(el: DomElement): boolean {
   if (IGNORED.has(el.localName) || ['input', 'textarea', 'select', 'desc'].includes(el.localName) || VALUE_ROLES.has(ariaRole(el) ?? '')) return true;
-  const editable = el.getAttribute('contenteditable');
-  if (editable !== null && editable.toLowerCase() !== 'false') return true;
+  if (ownEditability(el) === true) return true; // the walk starts outside every editable region, so its own decides
   if (el.hasAttribute('hidden')) return true;
   const style = styleOf(el);
   return style !== null && (style.display === 'none' || (style.visibility !== '' && style.visibility !== 'visible'));

@@ -458,6 +458,24 @@ describe('the display label beside the exact name', () => {
     expect(describeElement(shadowed('<button data-t><x-blank data-host></x-blank></button>', SVG))).not.toHaveProperty('displayName');
   });
 
+  // the review (P4 W2-C): editability is inherited, so an editable element or one inside an editable region is what a
+  // person typed, whatever its role; the nearest `contenteditable` decides, `false` making an island that is not
+  it('reads nothing of an editable element or one inside an editable region, and reads a non-editable island in one', () => {
+    const root = shadowed('<div data-t role="cell" contenteditable>private draft<x-icon data-host name="gear"></x-icon></div>', SVG);
+    expect(describeElement(root)).toMatchObject({ role: 'cell', name: '' });
+    expect(describeElement(root)).not.toHaveProperty('displayName');
+    expect(JSON.stringify(describeElement(root))).not.toMatch(/private|draft|gear/);
+    const inside = shadowed('<div contenteditable="true"><p><span data-t role="heading" aria-level="2">edited title<x-icon data-host name="gear"></x-icon></span></p></div>', SVG);
+    expect(describeElement(inside)).not.toHaveProperty('displayName');
+    expect(JSON.stringify(describeElement(inside))).not.toMatch(/edited|gear/);
+    const plain = shadowed('<div contenteditable="plaintext-only"><span><button data-t>typed<x-icon data-host name="gear"></x-icon></button></span></div>', SVG);
+    expect(describeElement(plain)).not.toHaveProperty('displayName');
+    const island = shadowed('<div contenteditable><div contenteditable="false"><button data-t>Insert<x-icon data-host name="gear"></x-icon></button></div></div>', SVG);
+    expect(describeElement(island)).toMatchObject({ name: '', displayName: 'Insert' });
+    const nested = shadowed('<div contenteditable="false"><div contenteditable><button data-t>typed<x-icon data-host name="gear"></x-icon></button></div></div>', SVG);
+    expect(describeElement(nested)).not.toHaveProperty('displayName'); // the nearest decides
+  });
+
   it('carries none beside a name the page’s own tree gives', () => {
     expect(describeElement(fragment('<button data-t>Save</button>'))).not.toHaveProperty('displayName');
     expect(describeElement(shadowed('<button data-t aria-label="Open menu"><sl-icon data-host name="menu"></sl-icon></button>', SVG))).toMatchObject({ name: 'Open menu' });
