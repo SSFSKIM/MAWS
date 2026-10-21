@@ -3,7 +3,7 @@
 import { request as httpRequest } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { serviceTokenName } from '../src/protocol/identity';
-import { enroll, enrollmentToken, MachineClient } from './support/clients';
+import { enroll, enrollmentToken, MachineClient, refusal } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
@@ -133,7 +133,8 @@ describe('enrollment refuses', () => {
     expect(revoked.status).toBe(200);
     await waitFor(() => machine.isEnded);
     expect(tokensNamed('revoked-1')).toHaveLength(0);
-    expect((await hub.fetchAs(machine.creds, '/machine/stream')).status).toBe(403);
+    // Its token deleted, Access refuses it before the Worker sees it, with its own page.
+    expect(await refusal(await hub.fetchAs(machine.creds, '/machine/stream'))).toBe('401 access');
     expect((await machines()).map((m) => m.name)).not.toContain('revoked-1');
   });
 
@@ -196,9 +197,10 @@ describe('enrollment refuses', () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'not-enrolled' });
     hub.faults.length = 0;
-    // The orphan is deleted by name once the API answers again (the next enrollment sweeps orphans).
+    // The orphan is deleted by name once the API answers again (the next enrollment sweeps orphans); Access refuses it then.
     await enroll(hub, ADMIN, 'sweeper');
     await waitFor(() => tokensNamed('revoked-2').length === 0);
+    expect(await refusal(await hub.fetchAs(creds1, '/machine/stream'))).toBe('401 access');
   });
 });
 
@@ -262,7 +264,7 @@ describe('enrollment recovers', () => {
     const fresh = (await again.json()) as { client_id: string; client_secret: string };
     expect(fresh.client_id).not.toBe(lost.client_id);
     expect(tokensNamed('rotated').map((t) => t.client_id)).toEqual([fresh.client_id]);
-    expect((await hub.fetchAs(creds(lost), '/machine/stream')).status).toBe(403);
+    expect(await refusal(await hub.fetchAs(creds(lost), '/machine/stream'))).toBe('401 access');
     const machine = new MachineClient(hub, 'rotated', creds(fresh));
     await machine.connect();
     await machine.close();
@@ -304,7 +306,7 @@ describe('enrollment recovers', () => {
     expect(tokensNamed('lapsed')).toHaveLength(1);
     await waitFor(() => tokensNamed('lapsed').length === 0);
     expect((await machines()).map((m) => m.name)).not.toContain('lapsed');
-    expect((await hub.fetchAs(creds(body), '/machine/stream')).status).toBe(403);
+    expect(await refusal(await hub.fetchAs(creds(body), '/machine/stream'))).toBe('401 access');
     const late = await redeem(token, 'lapsed');
     expect(late.status).toBe(410);
     expect(await late.json()).toMatchObject({ error: 'expired' });

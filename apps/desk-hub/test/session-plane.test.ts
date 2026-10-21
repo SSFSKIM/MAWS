@@ -742,6 +742,7 @@ describe("a POST's answer names the frames it refused (MAWS #88)", () => {
     });
 
     await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+    await waitFor(() => (sessionKinds(b).some((x) => x.kind === 'presence') ? true : undefined));
     expect(lastPending(b)).toEqual([{ machine: m.name, raised: request, terminal_only: false }]);
     expect(sessionKinds(b).filter((x) => x.kind === 'presence').map((x) => x.body)).toEqual([presence('busy')]);
     b.close();

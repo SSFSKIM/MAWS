@@ -2,6 +2,7 @@
 // machine (DX2: its SSE stream down, NDJSON POSTs up, a mirror of each project's log) and a browser (DX3: a project's
 // WebSocket). Each keeps every frame it received, in order, and waits for the one a test names.
 import type { GridDown, ProjectDown, ProjectUp } from '../../src/protocol/browser';
+import type { ProvisioningKeyIssued, ProvisioningKeyRecord, ProvisioningKeyRequest } from '../../src/protocol/identity';
 import type { LogEvent, Vector } from '../../src/protocol/log';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 import { GENERATION_HEADER } from '../../src/protocol/machine';
@@ -34,6 +35,26 @@ export async function enrollmentToken(hub: LocalHub, admin: string, ttl_s?: numb
   const response = await hub.fetchAs(admin, '/api/enrollments', { body: ttl_s === undefined ? {} : { ttl_s } });
   if (response.status !== 201) throw new Error(`enrollment: ${response.status} ${await response.text()}`);
   return ((await response.json()) as { token: string }).token;
+}
+
+/** A provisioning key made by `admin`: its record and its secret, shown this once. */
+export async function provisioningKey(
+  hub: LocalHub,
+  admin: string,
+  request: ProvisioningKeyRequest,
+): Promise<{ id: string; token: string; key: ProvisioningKeyRecord }> {
+  const response = await hub.fetchAs(admin, '/api/provisioning-keys', { body: request });
+  if (response.status !== 201) throw new Error(`provisioning key: ${response.status} ${await response.text()}`);
+  const issued = (await response.json()) as ProvisioningKeyIssued;
+  return { id: issued.key.id, token: issued.token, key: issued.key };
+}
+
+/** Redeems a provisioning key's secret for `machine`; the machine's service token. */
+export async function enrollThrough(hub: LocalHub, token: string, machine: string): Promise<Credentials> {
+  const response = await hub.fetchAs(null, '/machine/enroll', { body: { token, machine } });
+  if (response.status !== 200) throw new Error(`redeem ${machine} through a key: ${response.status} ${await response.text()}`);
+  const body = (await response.json()) as { client_id: string; client_secret: string };
+  return { clientId: body.client_id, clientSecret: body.client_secret };
 }
 
 /** A machine's connection, with a mirror of each project's log as the daemon keeps one (one feed per writer). */
@@ -259,5 +280,17 @@ export class GridClient {
   }
   close() {
     this.socket.close(1000, 'done');
+  }
+}
+
+/** A refusal as a machine reads it (§6 of the provisioning-keys spec): `<status> access` for Access's denial (401 with
+ * its HTML page naming `Cloudflare Access`), else `<status> <the JSON error>` (the Worker's), else the status and text. */
+export async function refusal(response: Response): Promise<string> {
+  const text = await response.text();
+  if ((response.headers.get('content-type') ?? '').startsWith('text/html') && text.includes('Cloudflare Access')) return `${response.status} access`;
+  try {
+    return `${response.status} ${(JSON.parse(text) as { error: string }).error}`;
+  } catch {
+    return `${response.status} ${text.slice(0, 80)}`;
   }
 }

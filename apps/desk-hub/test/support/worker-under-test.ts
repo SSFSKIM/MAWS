@@ -26,16 +26,27 @@
 //   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's, and takes a
 //     project's summary report straight, as a late one would arrive;
 //   - a `Registry` whose `summaries` lose their `live` column, as a registry stored before it had them, and one armed to
-//     take its next summary report as the version before `live` took it.
+//     take its next summary report as the version before `live` took it;
+//   - a `Registry` whose machines' `seen` and `confirmed`, keys' expiry and enrollments' expiry are moved back, as the
+//     time having passed would leave them, and whose alarm is read or cleared;
+//   - a `Registry` armed to hold its next `leave` until the suite releases it, as the Worker held between resolving a
+//     machine's credential and asking for its revocation would be;
+//   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again.
 import { Machine as DeployedMachine, type Stream, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 import type { MachineContext } from '../../src/objects/project';
 import type { Env } from '../../src/env';
-import type { ProjectRecord } from '../../src/protocol/identity';
+import type { MachineRecord, ProjectRecord } from '../../src/protocol/identity';
 import {
   ABORT_REASON,
+  ALARM_PATH,
+  BACKDATE_PATH,
+  LEAVE_HELD_PATH,
+  LEAVE_HOLD_PATH,
+  LEAVE_RELEASE_PATH,
+  OFFLINE_RETRY_PATH,
   MACHINE_ABORT_PATH,
   MACHINE_FETCH_FAULT_PATH,
   MACHINE_PROBE_PATH,
@@ -73,6 +84,21 @@ export { default } from '../../src/worker';
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
   private asPrevious = false;
+  private leaveRelease: (() => void) | undefined;
+
+  /** A suite's wait before an unfinished offline revocation is tried again, over the deployed minute. */
+  protected offlineRetryMs(): number {
+    return this.ctx.storage.kv.get<number>('offline-retry-ms') ?? super.offlineRetryMs();
+  }
+
+  /** Armed, the next leave waits for the suite's release before the Registry's own. */
+  async leave(machine: MachineRecord): ReturnType<DeployedRegistry['leave']> {
+    if (this.ctx.storage.kv.get<boolean>('leave-hold')) {
+      this.ctx.storage.kv.delete('leave-hold');
+      await new Promise<void>((resolve) => (this.leaveRelease = resolve));
+    }
+    return super.leave(machine);
+  }
 
   /** Armed, the next report is taken as the version before `live` took it, once: its counts stored without `live`, and
    * nothing answered. */
@@ -85,6 +111,44 @@ export class Registry extends DeployedRegistry {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === OFFLINE_RETRY_PATH) {
+      const { ms } = (await request.json()) as { ms: number | null };
+      if (ms === null) this.ctx.storage.kv.delete('offline-retry-ms');
+      else this.ctx.storage.kv.put('offline-retry-ms', ms);
+      await this.ctx.storage.setAlarm(Date.now() + 100);
+      return new Response('set');
+    }
+    if (url.pathname === LEAVE_HOLD_PATH) {
+      this.ctx.storage.kv.put('leave-hold', true);
+      return new Response('armed');
+    }
+    if (url.pathname === LEAVE_HELD_PATH) return new Response(this.leaveRelease ? 'held' : 'none');
+    if (url.pathname === LEAVE_RELEASE_PATH) {
+      const release = this.leaveRelease;
+      this.leaveRelease = undefined;
+      release?.();
+      return new Response(release ? 'released' : 'none');
+    }
+    if (url.pathname === BACKDATE_PATH) {
+      const { machines, key, enrollment } = (await request.json()) as {
+        machines?: Array<{ name: string; seen?: string; confirmed?: string }>;
+        key?: { id: string; expires: string };
+        enrollment?: { machine: string; expires: string };
+      };
+      const sql = this.ctx.storage.sql;
+      for (const machine of machines ?? []) {
+        if (machine.seen !== undefined) sql.exec('UPDATE machines SET seen = ? WHERE name = ?', machine.seen, machine.name);
+        if (machine.confirmed !== undefined) sql.exec('UPDATE machines SET confirmed = ? WHERE name = ?', machine.confirmed, machine.name);
+      }
+      if (key) sql.exec('UPDATE provisioning_keys SET expires = ? WHERE id = ?', key.expires, key.id);
+      if (enrollment) sql.exec('UPDATE enrollments SET expires = ? WHERE id = (SELECT enrollment FROM machines WHERE name = ?)', enrollment.expires, enrollment.machine);
+      await this.scheduleAlarm();
+      return Response.json({ alarm: await this.ctx.storage.getAlarm() });
+    }
+    if (url.pathname === ALARM_PATH) {
+      if (request.method === 'POST' && ((await request.json()) as { clear?: boolean }).clear) await this.ctx.storage.deleteAlarm();
+      return Response.json({ alarm: await this.ctx.storage.getAlarm() });
+    }
     if (url.pathname === SUMMARY_AS_PREVIOUS_PATH) {
       this.asPrevious = true;
       return new Response('armed');

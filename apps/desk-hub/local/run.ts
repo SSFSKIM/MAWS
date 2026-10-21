@@ -15,14 +15,15 @@
 // service tokens it minted in <state>/standin.json, the hub's VAPID key in <state>/vapid.json. Delete the directory to
 // start from nothing.
 import { spawn } from 'node:child_process';
-import { randomBytes, webcrypto } from 'node:crypto';
+import { webcrypto } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { connect } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { codeHelpers } from './helpers.ts';
 import { startProxy } from './proxy.ts';
-import { AccessStandin, enrollmentCode, IDENTITY_HEADER, type StandinState } from './standin.ts';
+import { AccessStandin, IDENTITY_HEADER, type StandinState } from './standin.ts';
 
 const app = resolve(import.meta.dirname, '..');
 const { values } = parseArgs({
@@ -106,23 +107,9 @@ const proxy = await startProxy({
   standin,
   upstream: () => `http://127.0.0.1:${hubPort}`,
   port,
-  // A convenience for a machine-side developer with no web app: an enrollment code as the browser would build it.
-  extra: async (request) => {
-    const url = new URL(request.url);
-    if (url.pathname !== '/standin/enrollment-code' || request.method !== 'POST') return null;
-    const body = (await request.json().catch(() => ({}))) as { machine?: string; key?: string; ttl_s?: number };
-    if (typeof body.machine !== 'string') return Response.json({ error: 'bad-shape', message: 'the body is {machine, key?, ttl_s?}' }, { status: 400 });
-    const user = request.headers.get(IDENTITY_HEADER) ?? standin.defaultUser ?? ADMIN;
-    const issued = await fetch(`${origin}/api/enrollments`, {
-      method: 'POST',
-      headers: { [IDENTITY_HEADER]: user, 'content-type': 'application/json' },
-      body: JSON.stringify(body.ttl_s === undefined ? {} : { ttl_s: body.ttl_s }),
-    });
-    if (issued.status !== 201) return new Response(await issued.text(), { status: issued.status, headers: { 'content-type': 'application/json' } });
-    const { token } = (await issued.json()) as { token: string };
-    const key = body.key ?? randomBytes(32).toString('base64url');
-    return Response.json({ code: enrollmentCode({ hub: origin, org: ORG, token, machine: body.machine, key }), key, token });
-  },
+  // Conveniences for a machine-side developer with no web app: an enrollment code and a provisioning code as the browser
+  // would build them.
+  extra: codeHelpers({ origin: () => origin, org: ORG, standin, admin: ADMIN }),
 });
 
 const stop = async () => {
@@ -150,4 +137,8 @@ The local hub, behind its stand-in for Access: ${proxy.url}
     curl -s -X POST ${proxy.url}/standin/enrollment-code -d '{"machine": "<name>"}'
   then on the machine: sminos hub enroll, and paste the code at its hidden prompt (never an argument: it carries
     the org key); it redeems at ${proxy.url}/machine/enroll
+
+  a provisioning code for machines named <prefix>… (a reusable key; also label, ttl_s, max_uses, offline_revoke_s, key):
+    curl -s -X POST ${proxy.url}/standin/provisioning-code -d '{"prefix": "dc-", "offline_revoke_s": 3600}'
+  then on each machine: printf %s "$CODE" | sminos hub enroll --name dc-<machine>
 `);

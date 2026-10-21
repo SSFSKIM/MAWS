@@ -532,6 +532,8 @@ test('an admin removes a connected machine from the Machines dialog: it leaves t
   test.info().annotations.push({ type: 'stream end after the confirming click (ms)', description: String(endedAfter) });
   expect(fm.isConnected).toBe(false);
   expect(endedAfter, `the stream ended ${endedAfter} ms after the click; bound ${endBound} ms`).toBeLessThanOrEqual(endBound);
-  // Reconnecting with the credential it holds, as its daemon would, is refused.
-  await expect(fm.connect()).rejects.toMatchObject({ status: 403 });
+  // Reconnecting with the credential it holds, as its daemon would, is refused: by Access, 401, since the local
+  // stand-in deletes the revoked token in the same call and then refuses it as production Access does (the
+  // provisioning-keys spec, §4).
+  await expect(fm.connect()).rejects.toMatchObject({ status: 401 });
 });
