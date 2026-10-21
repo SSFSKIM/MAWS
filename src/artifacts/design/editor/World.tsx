@@ -76,10 +76,11 @@ export interface WorldProps {
 // A frame gesture owns the keys it moves (a move the position, a handle the edges it drags) and writes those alone, each
 // frame against the board's current frame: another writer's change of the others (a replica's resize during a move,
 // its move during an east resize) stands, and snapping and the cap are read against where the board is now.
+// P4-B2 (D17): from its first move to its drop it holds the replica's remote frames (the session's gesture hold, as C's
+// overlay gestures do), and the drop writes again the keys it last wrote that a held write moved (`owned`).
 type FrameKey = keyof BoardFrame;
-type Drag =
-  | { kind: 'pan'; pointerId: number; from: Pt; start: Viewport }
-  | { kind: 'move' | 'resize'; pointerId: number; id: string; handle: Handle | null; keys: readonly FrameKey[]; from: Pt; start: BoardFrame; moving: boolean; last: string };
+type FrameDrag = { kind: 'move' | 'resize'; pointerId: number; id: string; handle: Handle | null; keys: readonly FrameKey[]; from: Pt; start: BoardFrame; moving: boolean; last: string; owned: Partial<BoardFrame> | null };
+type Drag = { kind: 'pan'; pointerId: number; from: Pt; start: Viewport } | FrameDrag;
 
 /** The frame keys a resize by `handle` drags. */
 function keysOf(handle: Handle): FrameKey[] {
@@ -190,13 +191,29 @@ export function World(props: WorldProps) {
     /** The board's frame now, when a write to it may land now (the replica, the session, the board), else null. */
     const writableFrame = (id: string): BoardFrame | null =>
       latest.current.readOnly || !session.writable() || !Y.hasSlide(session.doc, id) || heldOf(session.doc, id) !== null || isMissingSource(session.doc, id) ? null : boardFrame(session.doc, id);
+    /**
+     * P4-B2 (D17): the drop's re-assert, which the session runs after the hold's flush while it takes writes: the keys
+     * the drag last wrote whose value a held write moved, written again while the board still takes writes, so the
+     * owner's frame wins whatever the clientIDs.
+     */
+    const reassertOf = (d: FrameDrag) => () => {
+      const now = d.owned && writableFrame(d.id);
+      if (!d.owned || !now) return;
+      const moved = Object.fromEntries(Object.entries(d.owned).filter(([k, v]) => now[k as FrameKey] !== v)) as Partial<BoardFrame>;
+      if (Object.keys(moved).length === 0) return;
+      try {
+        setBoardFrame(session.doc, d.id, moved, session.origin);
+      } catch (error) {
+        latest.current.onNotice(error instanceof BoardError ? error.problems.join('; ') : String(error));
+      }
+    };
     /** A gesture that may no longer write ends here: nothing more written, the undo step closed, the pointer let go. */
     const end = (d: Drag, pointerId: number) => {
       drag.current = null;
       if (el.hasPointerCapture?.(pointerId)) el.releasePointerCapture(pointerId);
-      if (d.kind === 'pan') setPanning(false);
-      else if (d.moving) session.endDrag();
       setGuides([]);
+      if (d.kind === 'pan') setPanning(false);
+      else if (d.moving) session.endDrag(reassertOf(d)); // D17: the hold's flush, the re-assert, the step's cut
     };
     const startPan = (e: PointerEvent) => {
       drag.current = { kind: 'pan', pointerId: e.pointerId, from: local(e), start: vp() };
@@ -220,7 +237,7 @@ export function World(props: WorldProps) {
         const b = all.find((x) => x.id === id);
         capture(e);
         const h = handle.dataset.boardHandle as Handle;
-        if (writable(b, ro)) drag.current = { kind: 'resize', pointerId: e.pointerId, id: b.id, handle: h, keys: keysOf(h), from: local(e), start: b.frame, moving: false, last: '' };
+        if (writable(b, ro)) drag.current = { kind: 'resize', pointerId: e.pointerId, id: b.id, handle: h, keys: keysOf(h), from: local(e), start: b.frame, moving: false, last: '', owned: null };
         return;
       }
       if (titled) {
@@ -228,7 +245,7 @@ export function World(props: WorldProps) {
         capture(e);
         selectFrame(session, view, id);
         const b = all.find((x) => x.id === id);
-        if (writable(b, ro)) drag.current = { kind: 'move', pointerId: e.pointerId, id, handle: null, keys: ['x', 'y'], from: local(e), start: b.frame, moving: false, last: '' };
+        if (writable(b, ro)) drag.current = { kind: 'move', pointerId: e.pointerId, id, handle: null, keys: ['x', 'y'], from: local(e), start: b.frame, moving: false, last: '', owned: null };
         return;
       }
       if (content) {
@@ -277,6 +294,7 @@ export function World(props: WorldProps) {
       d.last = key;
       try {
         setBoardFrame(session.doc, d.id, owned, session.origin);
+        d.owned = owned;
       } catch (error) {
         latest.current.onNotice(error instanceof BoardError ? error.problems.join('; ') : String(error));
       }
@@ -319,6 +337,10 @@ export function World(props: WorldProps) {
       win.removeEventListener('pointerup', onUp, { capture: true });
       win.removeEventListener('pointercancel', onUp, { capture: true });
       el.removeEventListener('wheel', onWheel);
+      // P4-B2 (D17): a frame drag the world unmounts in ends here, its hold, its step and `dragging` with it
+      const d = drag.current;
+      drag.current = null;
+      if (d && d.kind !== 'pan' && d.moving) session.endDrag(reassertOf(d));
     };
   }, [surface, session, view]);
 

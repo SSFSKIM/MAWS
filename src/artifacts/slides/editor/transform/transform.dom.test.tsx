@@ -7,11 +7,11 @@ import userEvent from '@testing-library/user-event';
 import { EditorView } from '@tiptap/pm/view';
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { adoptClientId, applyV1, diffV1, mergeUpdates, newDoc, onUpdate, stateVector, transact, type Doc } from '../../../yjs';
+import { adoptClientId, applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
 import { DesignWorkbench } from '../../../design/editor/DesignWorkbench';
 import { DesignView } from '../../../design/editor/viewport';
-import { design } from '../../../design/fixtures/support';
+import { design, heldPeer } from '../../../design/fixtures/support';
 import { MISSING_SOURCE_KEY } from '../../../design/model';
 import { SlideCanvas } from '../../canvas';
 import { childLists, deleteElementTree, importSlide, readFlat, ROOT, setStyle, slideFile, writeDeckKeys } from '../../model';
@@ -909,44 +909,17 @@ describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () 
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a drag holds the replica's remote frames (the
 // session's gesture reason; session.test.ts), and its drop writes the gesture's last values again wherever a write it
 // held moved them, so the owner's drop wins whatever the clientIDs; it writes nothing into a slide the flush held,
-// emptied of its file or removed, nor onto an element the flush deleted. The agent's replica writes beside the owner's,
-// each write having seen what the owner sent before it (the host relays the owner's frames), and reaches the owner as the
-// provider delivers it: on arrival, or buffered while held and applied merged at the release.
+// emptied of its file or removed, nor onto an element the flush deleted. The agent is the fixtures' `heldPeer`: its writes
+// reach the owner as the provider delivers them, buffered while held and applied merged at the release.
 describe('P4-B2: the gesture hold and the drop’s re-assert (D17)', () => {
   const OWNER = 0x100;
   const HIGHER = 0x7fff0000;
   const LOWER = 0x10;
 
-  function agentOf(owner: Doc, clientId: number) {
-    const agent = newDoc();
-    applyV1(agent, diffV1(owner));
-    adoptClientId(agent, clientId);
-    let held = false;
-    const buffer: Uint8Array[] = [];
-    const holds: boolean[] = [];
-    return {
-      agent,
-      holds,
-      buffered: () => buffer.length,
-      holdRemote(on: boolean) {
-        holds.push(on);
-        held = on;
-        if (!on && buffer.length > 0) applyV1(owner, mergeUpdates(buffer.splice(0)), 'agent');
-      },
-      write(edit: (doc: Doc) => void) {
-        applyV1(agent, diffV1(owner, stateVector(agent)), 'host');
-        const before = stateVector(agent);
-        transact(agent, () => edit(agent), 'agent');
-        const update = diffV1(agent, before);
-        if (held) buffer.push(update);
-        else applyV1(owner, update, 'agent');
-      },
-    };
-  }
   function heldDeck(clientId = HIGHER) {
     const doc = deck();
     adoptClientId(doc, OWNER);
-    const channel = agentOf(doc, clientId);
+    const channel = heldPeer(doc, clientId);
     return { doc, ctx: gestureContext(doc, undefined, { holdRemote: channel.holdRemote }), ...channel };
   }
   /** How many updates of the owner's own `run` made. */
@@ -1033,7 +1006,7 @@ describe('P4-B2: the gesture hold and the drop’s re-assert (D17)', () => {
 
   it('a gesture the overlay unmounts in ends as a cancel does: the hold released, the drag over', () => {
     const doc = deck();
-    const channel = agentOf(doc, HIGHER);
+    const channel = heldPeer(doc, HIGHER);
     const session = new DeckSession(doc, 0, { holdRemote: channel.holdRemote });
     const canvas = new SlideCanvas(doc, 's', document.createElement('div'));
     canvases.push(canvas);
