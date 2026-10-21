@@ -1,0 +1,229 @@
+{
+ "arm": "maws",
+ "task": "B3",
+ "rep": 8,
+ "attempt": 1,
+ "surface": "maws/alwaysLoad",
+ "variant": "alwaysLoad",
+ "build": {
+  "commit": "646970a5",
+  "builtAt": "2026-10-21T20:43:13.358Z",
+  "checkout": "646970a54a2861582fafd12a34e5ffff94604568"
+ },
+ "kind": "document",
+ "host": "Mac-mini.local",
+ "startedAt": "2026-10-21T20:59:49.229Z",
+ "manifest": "../../../../../tmp/maws-parity-bench/a3/run-a/maws-alwaysLoad-B3-r8/manifest.json",
+ "sessionId": "d787c5a6-cb9b-482f-95af-d10e6cbbb828",
+ "entrypoint": "sdk-ts",
+ "engine": "2.1.306",
+ "route": "gateway",
+ "load": {
+  "before": [
+   1.7,
+   2.6,
+   3.03
+  ],
+  "after": [
+   2.15,
+   2.58,
+   2.99
+  ]
+ },
+ "check": {
+  "pass": true,
+  "detail": "the introduction rewritten (128 -> 135 words), nothing else changed"
+ },
+ "pin": null,
+ "measurementOnly": false,
+ "humanStop": null,
+ "seedId": null,
+ "seedCheck": null,
+ "freshSession": null,
+ "priorTurns": 0,
+ "measured": {
+  "turn": 1,
+  "sendAt": "2026-10-21T20:59:50.453Z",
+  "permissionMode": "auto",
+  "sendToFirstToken": 1.231,
+  "firstTokenSrc": "journal first delta",
+  "sendToFirstBlock": 2.053,
+  "sendToEditLanded": 39.03,
+  "landing": {
+   "name": "artifact_edit",
+   "inChars": 894,
+   "span": 0.298,
+   "mawsExec": 0.023
+  },
+  "landingCalls": 1,
+  "sendToLastLanding": 39.03,
+  "toLanding": {
+   "requests": 2,
+   "firstByteWait": 1.469,
+   "generation": 36.683,
+   "serverHold": 0.494,
+   "thinkingTokens": 4280,
+   "outputTokens": 4740
+  },
+  "sendToTurnEnd": 42.894,
+  "stopHookMs": 175,
+  "apiErrors": 0,
+  "requests": 3,
+  "contextFirst": 29293,
+  "contextMax": 36982,
+  "firstByteWait": 5.256,
+  "generation": 36.745,
+  "serverHold": 0.494,
+  "toolExec": 0.049,
+  "mawsExec": 0.044,
+  "toolSpanUnion": 0.58,
+  "outputTokens": 5159,
+  "thinkingTokens": 4280,
+  "cache": {
+   "state": "cold",
+   "firstRead": 12942,
+   "firstWrite": 16349,
+   "read": 74370,
+   "write": 24038
+  },
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "requestedModels": [
+   "claude-opus-5-5[1m]"
+  ],
+  "efforts": [
+   "xhigh"
+  ],
+  "thinking": [
+   "adaptive"
+  ],
+  "thinkingSeen": "thinking blocks present",
+  "advisorModels": [],
+  "iterationTypes": [],
+  "serviceTiers": [
+   "standard"
+  ],
+  "speeds": [
+   "standard"
+  ],
+  "relayJoined": 3,
+  "accounts": [
+   "fa95bd34-0db9-44ae-be00-4f2b7387054b"
+  ],
+  "sources": [
+   "journal",
+   "journal stream end",
+   "journal ttft_ms"
+  ],
+  "perRequest": [
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 1.752,
+    "firstByte": 0.924,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.243,
+    "holdSrc": "journal",
+    "gen": 0.843,
+    "toolExec": 0.024,
+    "mawsExec": 0.021,
+    "ctx": 29293,
+    "cacheRead": 12942,
+    "cacheWrite": 16349,
+    "out": 82,
+    "think": 0,
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "thinking": "adaptive",
+    "requestedModel": "claude-opus-5-5[1m]",
+    "thinkingBlocks": false,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [
+     "artifact_read"
+    ],
+    "relayJoined": true
+   },
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 34.178,
+    "firstByte": 0.545,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.251,
+    "holdSrc": "journal",
+    "gen": 35.84,
+    "toolExec": 0.025,
+    "mawsExec": 0.023,
+    "ctx": 32139,
+    "cacheRead": 29291,
+    "cacheWrite": 2846,
+    "out": 4658,
+    "think": 4280,
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "thinking": "adaptive",
+    "requestedModel": "claude-opus-5-5[1m]",
+    "thinkingBlocks": true,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [
+     "artifact_edit"
+    ],
+    "relayJoined": true
+   },
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 3.826,
+    "firstByte": 3.787,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.0,
+    "holdSrc": "journal",
+    "gen": 0.062,
+    "toolExec": null,
+    "mawsExec": null,
+    "ctx": 36982,
+    "cacheRead": 32137,
+    "cacheWrite": 4843,
+    "out": 419,
+    "think": 0,
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "thinking": "adaptive",
+    "requestedModel": "claude-opus-5-5[1m]",
+    "thinkingBlocks": false,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [],
+    "relayJoined": true
+   }
+  ],
+  "tools": [
+   {
+    "name": "artifact_read",
+    "span": 0.282,
+    "err": false,
+    "mawsExec": 0.021,
+    "inChars": 52,
+    "resultChars": 7780
+   },
+   {
+    "name": "artifact_edit",
+    "span": 0.298,
+    "err": false,
+    "mawsExec": 0.023,
+    "inChars": 894,
+    "resultChars": 297
+   }
+  ]
+ },
+ "error": null
+}

@@ -29,18 +29,20 @@
 // tab's selected sidebar item 새 세션, the Claude tab's page claude.ai/new): a New click that failed silently would
 // put the prompt into an existing session, with its context and cache. The labels are 3.1623.0's Korean UI (the
 // owner's Desktop runs ko-KR, input source ABC), with English beside some; `bench.probe()` reports which of them the
-// live tree shows. `recentItem` alone was not read live (the Claude tab's sidebar list); the probe reads it first.
+// live tree shows, and `bench.probe({ save: '<run>/ax' })` keeps the report with the whole tree there (§7a's rule).
+// The Claude tab's recent list (read live in Part B, §7c; P4-A3): a row is "버튼 <title>" with "팝업 버튼 <title>에 대한
+// 더 많은 옵션" beside it, so a row is a button whose title a menu button beside it names (`recentItems`).
 
 const L = {
   modeCode: [/라디오 버튼 Description: Code/],
   modeClaude: [/라디오 버튼 Description: Claude/],
-  newSession: [/버튼 새로 생성/, /button New/],
+  newSession: [/^\s*\d+\s+버튼 새로 만들기$/, /버튼 새로 생성/, /button New/], // P4-A3: 새로 만들기 since the web UI of 2026-10-21 evening
   // the session on screen is a new one: the Code tab's sidebar item for it, selected; the Claude tab's page
   codeNewItem: [/^\s*\d+\s+항목 새 세션, Value: 1(,|$)/],
   pageUrl: [/HTML 콘텐츠 .*, URL: [^\s,]+/],
   cloudNewPage: [/HTML 콘텐츠 .*, URL: (https:\/\/)?claude\.ai\/new\/?([?#][^\s,]*)?(,|$)/],
-  recentItem: [/^\s*\d+\s+항목 (?!새 세션, ).+, Value: [01](,|$)/],
-  folderPopup: [/팝업 버튼 Description: 폴더:/],
+  recentItem: [/^\s*\d+\s+팝업 버튼 .+에 대한 더 많은 옵션$/], // a recent row's menu button; the row is the button before it
+  folderPopup: [/팝업 버튼 (Description: )?폴더:/], // P4-A3: without Description while no folder is chosen
   openFolder: [/^\s*\d+\s+폴더 열기…/, /Open folder…/],
   panelPath: [/텍스트 필드 \(settable\).*ID: PathTextField/],
   panelOpen: [/버튼 열기, ID: OKButton/, /button Open, ID: OKButton/],
@@ -115,6 +117,18 @@ function pickDownload(state) {
   }
   const after = buttons.filter((b) => b.index > file);
   return (file >= 0 && after.length ? after : buttons).at(-1) ?? null;
+}
+
+// The recent list's rows: each button whose title the menu button right after it names, in tree order.
+function recentItems(state) {
+  const all = lines(state);
+  const out = [];
+  for (let i = 0; i + 1 < all.length; i++) {
+    const row = /^\s*(\d+)\s+버튼 (.+)$/.exec(all[i]);
+    const menu = /^\s*\d+\s+팝업 버튼 (.+)에 대한 더 많은 옵션$/.exec(all[i + 1]);
+    if (row && menu && row[2] === menu[1]) out.push({ index: Number(row[1]), line: all[i].trim() });
+  }
+  return out;
 }
 
 async function app() {
@@ -275,7 +289,7 @@ async function reopen(url) {
   if (sameUrl(pageUrl(s), url)) return pageUrl(s);
   const tried = [];
   for (let i = 0; i < 8; i++) {
-    const item = findAll(s, L.recentItem)[i];
+    const item = recentItems(s)[i];
     if (!item) break;
     const before = pageUrl(s);
     await a.click(item.index);
@@ -297,13 +311,24 @@ globalThis.bench = {
   pageUrl,
   isNewSession,
   pickDownload,
-  // What the live tree shows of each label (the hold's first step, and whenever a step throws).
-  async probe() {
+  recentItems,
+  // What the live tree shows of each label (the hold's first step, and whenever a step throws); with `save`, a
+  // directory (the run's ax/), the report, the recent rows and the whole tree are written there as probe-<time>.json,
+  // so a label is fixed from saved lines (§7a). `note` says what was on screen.
+  async probe({ save, note } = {}) {
     const s = await tree(await app());
     const report = {};
     for (const [key, patterns] of Object.entries(L)) report[key] = find(s, patterns)?.line ?? null;
-    nodeRepl.write(JSON.stringify(report, null, 2));
-    return report;
+    const result = { report };
+    if (save) {
+      const fs = await import('node:fs');
+      fs.mkdirSync(save, { recursive: true });
+      const file = `${save.replace(/\/+$/, '')}/probe-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      fs.writeFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), note: note ?? null, report, recentItems: recentItems(s), tree: s }, null, 2)}\n`);
+      result.saved = file;
+    }
+    nodeRepl.write(JSON.stringify({ ...result, ...(result.saved && { tree: undefined }) }, null, 2));
+    return { ...report, ...(result.saved && { saved: result.saved }) };
   },
   // One timed repetition: a fresh session on the surface, the prompt sent, the turn waited out.
   async rep({ surface, folder, prompt }) {

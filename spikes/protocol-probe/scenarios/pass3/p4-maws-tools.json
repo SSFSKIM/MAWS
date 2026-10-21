@@ -411,6 +411,9 @@
         "readOnlyHint": true,
         "openWorldHint": false,
         "title": "Describe artifact kind"
+      },
+      "_meta": {
+        "anthropic/alwaysLoad": true
       }
     },
     {
@@ -475,6 +478,9 @@
         "readOnlyHint": true,
         "openWorldHint": false,
         "title": "Read artifact"
+      },
+      "_meta": {
+        "anthropic/alwaysLoad": true
       }
     },
     {
@@ -539,6 +545,9 @@
         "readOnlyHint": false,
         "openWorldHint": false,
         "title": "Publish artifact"
+      },
+      "_meta": {
+        "anthropic/alwaysLoad": true
       }
     },
     {
@@ -1014,6 +1023,9 @@
         "readOnlyHint": false,
         "openWorldHint": false,
         "title": "Edit document"
+      },
+      "_meta": {
+        "anthropic/alwaysLoad": true
       }
     },
     {

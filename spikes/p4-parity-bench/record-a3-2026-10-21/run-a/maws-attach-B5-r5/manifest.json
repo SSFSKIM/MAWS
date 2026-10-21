@@ -1,0 +1,61 @@
+{
+  "arm": "maws",
+  "task": "B5",
+  "rep": 5,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "presentation",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T21:05:53.128Z",
+  "prompt": "In the slide deck [Autumn Workshops 2026](maws-artifact:2b411d27-fdee-428e-9e41-1ae81d53a27a), on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "promptMatch": ", on slide 2, change the session lead's date to 21 October. Change nothing else.",
+  "artifactId": "2b411d27-fdee-428e-9e41-1ae81d53a27a",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/d801975e-c621-4592-96cf-e2dd929e5ae2.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/8b237924-26af-4408-a268-85ffb22c805f/lugvlfmm.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "d801975e-c621-4592-96cf-e2dd929e5ae2",
+  "appSessionId": "8b237924-26af-4408-a268-85ffb22c805f",
+  "load": {
+    "before": [
+      2.89,
+      2.59,
+      2.86
+    ],
+    "after": [
+      4.76,
+      3.02,
+      3.01
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "slide 2: the session lead date -> 21 October, nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "variant": "attach",
+  "build": {
+    "commit": "80e89dd2",
+    "builtAt": "2026-10-21T20:43:57.352Z",
+    "checkout": "80e89dd2365d3016cde0b502dadfe53cf8da4f9b"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.171683,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_publish",
+      "ms": 34,
+      "toolUseId": "toolu_01Q7q7ftwXYPFAkXjam833Z1"
+    }
+  ]
+}

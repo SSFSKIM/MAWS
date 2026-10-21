@@ -10,6 +10,7 @@ import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/com
 import type { Anchor } from '@shared/anchor/anchor';
 import { anchoredMessage, anchorLead, anchorTag, parseAnchoredText } from '@shared/anchor/message';
 import type { ContentBlock } from '@shared/graph/events';
+import { linkedReadOf } from '@shared/maws/linked-read'; // P4-A3
 import type { AnchorFrame, Attachment } from './rows';
 
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
@@ -101,7 +102,10 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
   if (typeof content === 'string') texts.push(content);
   else {
     content.forEach((block, index) => {
-      if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text);
+      // P4-A3: the read of an artifact the message linked, sent with it, is shown as what went, never as the human's words
+      const linked = block.type === 'text' && typeof block.text === 'string' ? linkedReadOf(block.text) : null;
+      if (linked) attachments.push({ kind: 'file', name: `${linked.title}, read at revision ${linked.revision}`, bytes: null, dataUrl: null, mediaType: `sent with the message: the ${linked.kind} as artifact_read returned it`, text: null });
+      else if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text);
       else {
         const attachment = attachmentOf(block, index);
         if (attachment) attachments.push(attachment);

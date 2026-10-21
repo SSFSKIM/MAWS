@@ -1,0 +1,29 @@
+{
+  "manifest": "/tmp/maws-parity-bench/a3/run-b/desktop-B3-r11/manifest.json",
+  "attempt": 1,
+  "valid": "yes",
+  "check": {
+    "pass": true,
+    "detail": "the introduction rewritten (128 -> 138 words), nothing else changed"
+  },
+  "afterSource": "the file in the folder",
+  "permissionMode": "auto",
+  "pickerPermissionMode": "auto",
+  "seedCheck": null,
+  "freshSession": null,
+  "priorTurns": 0,
+  "deckUrl": null,
+  "deckUrlFrom": null,
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-MAWS-parity-bench/e6106620-20a2-4362-aab6-2c794187c1d3.jsonl",
+  "meta": {
+    "cliSessionId": "e6106620-20a2-4362-aab6-2c794187c1d3",
+    "cwd": "/private/tmp/maws-parity-bench/MAWS parity bench",
+    "model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "effortInherited": true,
+    "permissionMode": "auto",
+    "createdAt": 1792618139090,
+    "latestUserFrameAt": 1792618140183,
+    "completedTurns": 1
+  }
+}

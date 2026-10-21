@@ -1,0 +1,194 @@
+{
+ "arm": "maws",
+ "task": "B1",
+ "rep": 1,
+ "attempt": 1,
+ "surface": "maws/attach",
+ "variant": "attach",
+ "build": {
+  "commit": "80e89dd2",
+  "builtAt": "2026-10-21T20:43:57.352Z",
+  "checkout": "80e89dd2365d3016cde0b502dadfe53cf8da4f9b"
+ },
+ "kind": "document",
+ "host": "Mac-mini.local",
+ "startedAt": "2026-10-21T20:45:33.480Z",
+ "manifest": "../../../../../tmp/maws-parity-bench/a3/shakedown/maws-attach-B1-r1/manifest.json",
+ "sessionId": "091dc12e-fc9b-4481-83cf-e7395c69812e",
+ "entrypoint": "sdk-ts",
+ "engine": "2.1.306",
+ "route": "gateway",
+ "load": {
+  "before": [
+   4.5,
+   2.91,
+   2.48
+  ],
+  "after": [
+   4.54,
+   2.94,
+   2.49
+  ]
+ },
+ "check": {
+  "pass": true,
+  "detail": "block 3: Thursday -> Friday, nothing else changed"
+ },
+ "pin": {
+  "model": "sonnet",
+  "effort": "low"
+ },
+ "measurementOnly": true,
+ "humanStop": null,
+ "seedId": null,
+ "seedCheck": null,
+ "freshSession": null,
+ "priorTurns": 0,
+ "measured": {
+  "turn": 1,
+  "sendAt": "2026-10-21T20:45:34.798Z",
+  "permissionMode": "auto",
+  "sendToFirstToken": 1.635,
+  "firstTokenSrc": "journal first delta",
+  "sendToFirstBlock": 2.753,
+  "sendToEditLanded": 3.002,
+  "landing": {
+   "name": "artifact_edit",
+   "inChars": 162,
+   "span": 0.249,
+   "mawsExec": 0.025
+  },
+  "landingCalls": 1,
+  "sendToLastLanding": 3.002,
+  "toLanding": {
+   "requests": 1,
+   "firstByteWait": 1.323,
+   "generation": 1.138,
+   "serverHold": 0.208,
+   "thinkingTokens": 0,
+   "outputTokens": 171
+  },
+  "sendToTurnEnd": 4.604,
+  "stopHookMs": 189,
+  "apiErrors": 0,
+  "requests": 2,
+  "contextFirst": 32450,
+  "contextMax": 32821,
+  "firstByteWait": 2.88,
+  "generation": 1.173,
+  "serverHold": 0.208,
+  "toolExec": 0.028,
+  "mawsExec": 0.025,
+  "toolSpanUnion": 0.249,
+  "outputTokens": 289,
+  "thinkingTokens": 0,
+  "cache": {
+   "state": "cold",
+   "firstRead": 13451,
+   "firstWrite": 18997,
+   "read": 45899,
+   "write": 19368
+  },
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "requestedModels": [
+   "claude-sonnet-5-5[1m]"
+  ],
+  "efforts": [
+   "low"
+  ],
+  "thinking": [
+   "adaptive"
+  ],
+  "thinkingSeen": null,
+  "advisorModels": [],
+  "iterationTypes": [],
+  "serviceTiers": [
+   "standard"
+  ],
+  "speeds": [
+   "standard"
+  ],
+  "relayJoined": 2,
+  "accounts": [
+   "fa95bd34-0db9-44ae-be00-4f2b7387054b"
+  ],
+  "sources": [
+   "journal",
+   "journal stream end",
+   "journal ttft_ms"
+  ],
+  "perRequest": [
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 2.448,
+    "firstByte": 1.323,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.208,
+    "holdSrc": "journal",
+    "gen": 1.138,
+    "toolExec": 0.028,
+    "mawsExec": 0.025,
+    "ctx": 32450,
+    "cacheRead": 13451,
+    "cacheWrite": 18997,
+    "out": 171,
+    "think": 0,
+    "model": "claude-sonnet-5-5",
+    "effort": "low",
+    "thinking": "adaptive",
+    "requestedModel": "claude-sonnet-5-5[1m]",
+    "thinkingBlocks": false,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [
+     "artifact_edit"
+    ],
+    "relayJoined": true
+   },
+   {
+    "sentSrc": "api-request",
+    "firstBlock": 1.571,
+    "firstByte": 1.557,
+    "firstByteSrc": "journal ttft_ms",
+    "endSrc": "journal stream end",
+    "hold": 0.0,
+    "holdSrc": "journal",
+    "gen": 0.035,
+    "toolExec": null,
+    "mawsExec": null,
+    "ctx": 32821,
+    "cacheRead": 32448,
+    "cacheWrite": 371,
+    "out": 118,
+    "think": 0,
+    "model": "claude-sonnet-5-5",
+    "effort": "low",
+    "thinking": "adaptive",
+    "requestedModel": "claude-sonnet-5-5[1m]",
+    "thinkingBlocks": false,
+    "advisors": [],
+    "iterationTypes": [],
+    "serviceTier": "standard",
+    "speed": "standard",
+    "tools": [],
+    "relayJoined": true
+   }
+  ],
+  "tools": [
+   {
+    "name": "artifact_edit",
+    "span": 0.249,
+    "err": false,
+    "mawsExec": 0.025,
+    "inChars": 162,
+    "resultChars": 316
+   }
+  ]
+ },
+ "error": null
+}

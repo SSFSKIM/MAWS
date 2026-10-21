@@ -1,0 +1,36 @@
+per edit: arm task rep surface | landed first-token turn-end | req ctx0 | first-byte gen hold exec maws | out think | cache | route load1 | check
+desktop B3 r1    code   |   25.2    2.8   45.5 |  9   63413 |  25.6  14.8     -     -     - |  3568  1078 | cold | direct (no relay rows for the session) 2.4 | pass
+maws    B3 r1    maws/attach |   20.3    1.5   23.3 |  2   32112 |   3.6  19.0   0.3   0.0   0.0 |  2706  2109 | cold | gateway 2.9 | pass
+desktop B3 r2    code   |   29.5    1.3   45.0 |  7   63402 |  11.3  29.4     -     -     - |  4540  2573 | warm | None 2.3 | pass
+maws    B3 r2    maws/attach |   14.1    1.7   17.9 |  2   32103 |   4.6  12.8   0.2   0.0   0.0 |  1856  1170 | cold | gateway 2.6 | pass
+desktop B3 r3    code   |   34.9    1.1   40.7 |  4   63402 |   6.1  33.4     -     -     - |  4624  3341 | warm | direct (no relay rows for the session) 2.8 | pass
+maws    B3 r3    maws/attach |   20.7    2.5   24.8 |  2   32122 |   5.8  18.4   0.3   0.0   0.0 |  2782  1984 | cold | gateway 2.4 | pass
+desktop B3 r4    code   |   25.0    6.4   48.8 |  8   63405 |  24.1  20.0     -     -     - |  3408  1077 | warm | None 2.9 | pass
+maws    B3 r4    maws/attach |   16.3    1.6   20.4 |  2   32112 |   4.8  14.9   0.3   0.0   0.0 |  2175  1447 | cold | gateway 2.6 | pass
+desktop B3 r5    code   |   31.4    4.9   45.0 |  6   63410 |  21.4  19.5     -     -     - |  3281  1503 | warm | direct (no relay rows for the session) 2.5 | pass
+maws    B3 r5    maws/attach |   16.1    1.7   20.6 |  2   32107 |   5.4  14.7   0.2   0.0   0.0 |  2335  1496 | cold | gateway 2.1 | pass
+desktop B3 r6    code   |   23.0    2.8   54.2 |  8   63411 |  21.4  28.1     -     -     - |  4720  1558 | warm | None 2.5 | pass
+maws    B3 r6    maws/attach |   17.6    1.6   23.6 |  3   32110 |   5.6  17.1   0.6   0.0   0.0 |  2734  1789 | cold | gateway 2.4 | pass
+desktop B3 r7    code   |   22.6    2.7   33.4 |  6   63404 |  17.2  12.1     -     -     - |  2554   804 | warm | direct (no relay rows for the session) 2.4 | pass
+maws    B3 r7    maws/attach |   23.2    1.3   28.2 |  2   32102 |   5.4  22.0   0.5   0.0   0.0 |  3423  2494 | cold | gateway 2.5 | pass
+desktop B3 r8    code   |   37.2    1.3   47.3 |  6   63402 |  11.2  32.2     -     -     - |  4992  2670 | warm | direct (no relay rows for the session) 3.3 | pass
+maws    B3 r8    maws/attach |   19.2    2.2   22.7 |  2   32107 |   4.9  17.3   0.2   0.0   0.0 |  2443  1830 | cold | gateway 2.9 | pass
+desktop B3 r9    code   |   30.8    2.6   47.2 |  6   63405 |  18.3  23.2     -     -     - |  3786  1918 | warm | direct (no relay rows for the session) 2.9 | pass
+maws    B3 r9    maws/attach |   19.0    2.6   24.1 |  2   32116 |   6.7  16.9   0.2   0.0   0.0 |  2546  1752 | cold | gateway 3.6 | pass
+desktop B3 r10   code   |   12.9    1.1   23.4 |  5   63411 |   7.1  12.8     -     -     - |  2128   732 | warm | None 2.6 | pass
+maws    B3 r10   maws/attach |   28.7    2.4   32.0 |  2   32104 |   4.9  26.3   0.5   0.0   0.0 |  3830  3209 | cold | gateway 2.2 | pass
+desktop B3 r11   code   |   24.7    1.1   44.8 |  9   63405 |  18.1  21.7     -     -     - |  4437  1648 | warm | direct (no relay rows for the session) 2.2 | pass
+maws    B3 r11   maws/attach |   14.3    1.2   18.3 |  2   32104 |   4.5  13.3   0.2   0.0   0.0 |  2036  1193 | cold | gateway 2.3 | pass
+
+cells (median [min..max], n): send to edit landed | first token | turn end | requests | output tokens
+B3 desktop code   | 25.185 [12.945..37.209] n=11 | 2.626 [1.087..6.383] n=11 | 45.009 [23.413..54.201] n=11 | 6 [4..9] n=11 | 3786 [2128..4992] n=11 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": ["claude-opus-5-5"], "routes": ["None", "direct (no relay rows for the session)"], "cache": {"cold": 1, "warm": 10}}
+B3 maws    maws/attach | 19.048 [14.129..28.664] n=11 | 1.676 [1.25..2.584] n=11 | 23.257 [17.927..32.032] n=11 | 2 [2..3] n=11 | 2546 [1856..3830] n=11 | controls {"models": ["claude-opus-5-5"], "efforts": ["xhigh"], "thinking": ["adaptive"], "advisorModels": [], "routes": ["gateway"], "cache": {"cold": 11, "warm": 0}}
+
+verdict (threshold 1.2 x, at least 5 repetitions per cell):
+B1: no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)
+B3: parity (Desktop on code) (MAWS/Desktop median 0.756)
+    beside: advisor model: MAWS [], Desktop ['claude-opus-5-5'] (not voiding)
+    beside: requested model: MAWS ['claude-opus-5-5[1m]'], Desktop ['claude-opus-5-5'] (not voiding)
+    beside: the ratio's 95% bootstrap interval 0.53 to 0.835 (20,000 resamples within each arm, 0% of them above 1.2; not part of the rule)
+B5: no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)
+B7: no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)

@@ -126,6 +126,24 @@ class Queue(unittest.TestCase):
             log = f.read()
         self.assertLess(log.index('MAWS_BENCH_TASKS=B3'), log.index('MAWS_BENCH_TASKS=B1'))
 
+    def test_a_request_names_its_checkout_and_variant(self):
+        """P4-A3: two builds' arms interleave through one runner, each request naming the checkout it runs in and the
+        lever its manifest records; a checkout that is not the bench's is refused, and the default stays the runner's."""
+        other = os.path.join(self.dir, 'lever')
+        os.makedirs(os.path.join(other, 'e2e'))
+        open(os.path.join(other, 'e2e', 'bench-edit-live.spec.ts'), 'w').close()
+        self.start_runner('pwd -P; ' + FAKE)
+        res = self.wrapper('run', self.run_dir, 'MAWS_BENCH_TASKS=B3', 'MAWS_BENCH_REPO=' + other, 'MAWS_BENCH_VARIANT=alwaysLoad', *REQUIRED)
+        self.assertEqual(res.returncode, 0, res.stdout)
+        self.assertIn('MAWS_BENCH_VARIANT=alwaysLoad\n', res.stdout)
+        self.assertEqual(res.stdout.strip().splitlines()[0], os.path.realpath(other))
+        self.assertNotIn('MAWS_BENCH_REPO=', res.stdout)  # the checkout is where it runs, not a key the bench reads
+        plain = self.wrapper('run', self.run_dir, 'MAWS_BENCH_TASKS=B3', *REQUIRED)
+        self.assertEqual(plain.stdout.strip().splitlines()[0], os.path.realpath(self.dir))
+        bad = self.wrapper('run', self.run_dir, 'MAWS_BENCH_TASKS=B3', 'MAWS_BENCH_REPO=' + self.run_dir, *REQUIRED)
+        self.assertEqual(bad.returncode, 2, bad.stdout)
+        self.assertIn('refused: MAWS_BENCH_REPO', bad.stdout)
+
     def test_a_key_that_is_not_the_benchs_is_refused(self):
         self.start_runner()
         res = self.wrapper('run', self.run_dir, 'MAWS_BENCH_TASKS=B1', *REQUIRED, 'CLAUDE_CONFIG_DIR=/tmp/x')

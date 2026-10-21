@@ -426,18 +426,43 @@ test('p4 R-2: the server\'s instructions reach the model under ## maws in the en
  const style=contextText4(mainRequests4(load4('p4-b4-owner-style'))[0]);assert.ok(style.includes('# Output Style: probe-to-human'));
  const append=mainRequests4(load4('p4-b4-append'))[0];assert.equal(append.system.linkMarker,true);assert.equal(append.system.contractMarker,true); // route (a)'s text would land in the top-level system
 });
+// P4-A3 lever 2 (docs/doperpowers/plans/2026-10-21-p4-a3-edit-protocol.md): a human user frame carrying a linked read
+// after the words, on 2.1.304 against the stub (nothing spent). The block's form is linked-read.ts's, which
+// src/shared/maws/linked-read.test.ts checks against this fixture's recorded text.
+test('p4 A3 the linked read: the model gets the words then the read, unchanged, in the one user message; the echo and the transcript keep both; the edit runs with no ToolSearch',()=>{
+ const rows=load4('p4-a3-linked-read');
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-A3');assert.equal(prov.engineVersion,'2.1.304');assert.equal(prov.served,'p4-maws-tools.json');
+ assert.ok(meta4(rows,'spend')[0].result.total_cost_usd<0.0001);
+ const {words:WORDS,block:BLOCK,artifact:ARTIFACT}=meta4(rows,'sent')[0]; // what the scenario wrote, kept in its fixture
+ const [first,second]=mainRequests4(rows);
+ const user=first.messages.find(m=>m.role==='user');
+ const texts=user.blocks.filter(b=>b.type==='text'&&b.text!==undefined).map(b=>b.text);
+ assert.deepEqual(texts.slice(-2),[WORDS,BLOCK]); // after the engine's own context blocks, in the order MAWS wrote them, whole
+ for(const name of ['mcp__maws__artifact_read','mcp__maws__artifact_edit'])assert.equal(first.tools.find(t=>t.name===name).defer_loading,null,name);
+ assert.deepEqual(meta4(rows,'transcript_tools')[0].toolUses.map(u=>u.name),['mcp__maws__artifact_edit']); // no ToolSearch, no read first
+ assert.deepEqual(meta4(rows,'server_calls')[0].calls.map(c=>[c.name,c.arguments.baseRevision]),[['artifact_edit',25]]);
+ assert.ok(second.messages.some(m=>m.blocks.some(b=>b.type==='tool_result'&&b.tool_use_id==='toolu_stub_edit'&&!b.is_error)));
+ const replay=rows.find(r=>r.direction==='in'&&r.frame.type==='user'&&r.frame.isReplay&&Array.isArray(r.frame.message.content)&&r.frame.message.content.some(b=>b.text===WORDS));
+ assert.deepEqual(replay.frame.message.content.map(b=>b.text),[WORDS,BLOCK]);
+ assert.deepEqual(meta4(rows,'transcript_user')[0].records,[{isMeta:null,content:[{type:'text',same:'words',chars:WORDS.length},{type:'text',same:'block',chars:BLOCK.length}]}]);
+ assert.ok(BLOCK.includes(`(maws-artifact:${ARTIFACT})`));
+});
 test('p4 deferral (for P4-A3): under tool search the maws tools are deferred and named for ToolSearch, alwaysLoad loads one, a direct call still runs and the model reads its JSON text',()=>{
  const rows=load4('p4-b4-instructions');const [first,second]=mainRequests4(rows);
  const names=first.tools.map(t=>t.name);assert.ok(names.includes('ToolSearch'));
  assert.ok(names.includes('mcp__maws__show_pane')); // listed with _meta["anthropic/alwaysLoad"]: true
- // P4-R7: MAWS's own message tool carries the key as MAWS lists it, so it is loaded beside show_pane
+ // P4-R7: MAWS's own message tool carries the key as MAWS lists it; P4-A3: so do the tools an edit needs (re-recorded
+ // with them): every one is loaded beside show_pane, in the request's tools with no defer_loading, and none is named
+ // for ToolSearch; every other maws tool stays deferred
  const alwaysLoaded=t=>t.name==='show_pane'||t._meta?.['anthropic/alwaysLoad']===true;
- assert.deepEqual(served4.tools.filter(alwaysLoaded).map(t=>t.name),['show_pane','message']);
- assert.ok(names.includes('mcp__maws__message'));
+ assert.deepEqual(served4.tools.filter(alwaysLoaded).map(t=>t.name),['show_pane','artifact_describe_type','artifact_read','artifact_publish','artifact_edit','message']);
+ for(const tool of served4.tools.filter(alwaysLoaded)){const listed=first.tools.find(t=>t.name==='mcp__maws__'+tool.name);assert.ok(listed,tool.name);assert.equal(listed.defer_loading,null,tool.name);}
  for(const tool of served4.tools.filter(t=>!alwaysLoaded(t)))assert.ok(!names.includes('mcp__maws__'+tool.name),tool.name);
  const context=contextText4(first);const from=context.indexOf('The following deferred tools are now available via ToolSearch');
  const listing=context.slice(from,context.indexOf('\n\n',from)).split('\n').slice(1); // the list alone, one name per line
  assert.ok(listing.includes('mcp__maws__artifact_search'));
+ for(const tool of served4.tools.filter(alwaysLoaded))assert.ok(!listing.includes('mcp__maws__'+tool.name),tool.name);
  const calls=meta4(rows,'server_calls')[0].calls;assert.deepEqual(calls,[{name:'artifact_search',arguments:{query:'로드맵'}}]);
  const result=second.messages.flatMap(m=>m.blocks).find(b=>b.type==='tool_result'&&b.tool_use_id==='toolu_stub_search');
  assert.equal(result.is_error,false);assert.equal(JSON.parse(result.content[0].text).status,'found');
