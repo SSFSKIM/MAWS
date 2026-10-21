@@ -31,11 +31,14 @@
 //     time having passed would leave them, and whose alarm is read or cleared;
 //   - a `Registry` armed to hold its next `leave` until the suite releases it, as the Worker held between resolving a
 //     machine's credential and asking for its revocation would be;
-//   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again.
+//   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
+//   - a `Machine` armed to throw from its next calls of `directory`, and a `Registry` armed to throw from its next summary
+//     reports of a project, as a call to an object a code update reset fails, each counting the calls it took; and a
+//     `Registry` and a `Project` whose first retry of such a call waits less than the deployed second.
 import { Machine as DeployedMachine, type Stream, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
-import type { DownFrame, UpFrame } from '../../src/protocol/machine';
+import type { DownFrame, OrgFrame, UpFrame } from '../../src/protocol/machine';
 import type { MachineContext } from '../../src/objects/project';
 import type { Env } from '../../src/env';
 import type { MachineRecord, ProjectRecord } from '../../src/protocol/identity';
@@ -43,6 +46,7 @@ import {
   ABORT_REASON,
   ALARM_PATH,
   BACKDATE_PATH,
+  DIRECTORY_FAULT_PATH,
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
@@ -71,8 +75,10 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   REPORT_PATH,
+  RETRY_BASE_PATH,
   SUMMARIES_BEFORE_LIVE_PATH,
   SUMMARY_AS_PREVIOUS_PATH,
+  SUMMARY_FAULT_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
   WRITE_STALL_PATH,
@@ -80,6 +86,9 @@ import {
 } from './send-fault';
 
 export { default } from '../../src/worker';
+
+/** An armed fault: the throws still armed, and the calls taken since it was armed. */
+type Fault = { remaining: number; calls: number };
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
@@ -89,6 +98,11 @@ export class Registry extends DeployedRegistry {
   /** A suite's wait before an unfinished offline revocation is tried again, over the deployed minute. */
   protected offlineRetryMs(): number {
     return this.ctx.storage.kv.get<number>('offline-retry-ms') ?? super.offlineRetryMs();
+  }
+
+  /** A suite's first wait before a failed push of the directory is sent again, over the deployed second. */
+  protected retryBaseMs(): number {
+    return this.ctx.storage.kv.get<number>('retry-base-ms') ?? super.retryBaseMs();
   }
 
   /** Armed, the next leave waits for the suite's release before the Registry's own. */
@@ -103,6 +117,11 @@ export class Registry extends DeployedRegistry {
   /** Armed, the next report is taken as the version before `live` took it, once: its counts stored without `live`, and
    * nothing answered. */
   summary(project: string, report: SummaryReport): true {
+    const fault = this.ctx.storage.kv.get<Fault>(`summary-fault:${project}`);
+    if (fault) {
+      this.ctx.storage.kv.put(`summary-fault:${project}`, { remaining: Math.max(0, fault.remaining - 1), calls: fault.calls + 1 });
+      if (fault.remaining > 0) throw new Error(`a failure the suite injected into a summary report of ${project}`);
+    }
     if (!this.asPrevious) return super.summary(project, report);
     this.asPrevious = false;
     super.summary(project, { ...report, live: undefined });
@@ -121,6 +140,15 @@ export class Registry extends DeployedRegistry {
     if (url.pathname === LEAVE_HOLD_PATH) {
       this.ctx.storage.kv.put('leave-hold', true);
       return new Response('armed');
+    }
+    if (url.pathname === SUMMARY_FAULT_PATH) {
+      const { project, times } = (await request.json()) as { project: string; times?: number };
+      if (times !== undefined) this.ctx.storage.kv.put(`summary-fault:${project}`, { remaining: times, calls: 0 });
+      return Response.json(this.ctx.storage.kv.get<Fault>(`summary-fault:${project}`) ?? { remaining: 0, calls: 0 });
+    }
+    if (url.pathname === RETRY_BASE_PATH) {
+      this.ctx.storage.kv.put('retry-base-ms', ((await request.json()) as { ms: number }).ms);
+      return new Response('set');
     }
     if (url.pathname === LEAVE_HELD_PATH) return new Response(this.leaveRelease ? 'held' : 'none');
     if (url.pathname === LEAVE_RELEASE_PATH) {
@@ -241,6 +269,11 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.put('fetch-fault', url.searchParams.get('path') ?? '');
       return new Response('armed');
     }
+    if (url.pathname === DIRECTORY_FAULT_PATH) {
+      const { times } = (await request.json()) as { times?: number };
+      if (times !== undefined) this.ctx.storage.kv.put('directory-fault', { remaining: times, calls: 0 });
+      return Response.json(this.ctx.storage.kv.get<Fault>('directory-fault') ?? { remaining: 0, calls: 0 });
+    }
     if (this.ctx.storage.kv.get<string>('fetch-fault') === url.pathname) {
       this.ctx.storage.kv.delete('fetch-fault');
       throw new Error(`a failure the suite injected into the object's ${url.pathname}`);
@@ -281,6 +314,16 @@ export class Machine extends DeployedMachine {
       return new Promise<void>(() => {});
     }
     return super.put(stream, frame);
+  }
+
+  /** Armed, the next calls throw before the directory reaches the stream; every call is counted. */
+  async directory(frame: OrgFrame, version: number): Promise<'written' | 'offline'> {
+    const fault = this.ctx.storage.kv.get<Fault>('directory-fault');
+    if (fault) {
+      this.ctx.storage.kv.put('directory-fault', { remaining: Math.max(0, fault.remaining - 1), calls: fault.calls + 1 });
+      if (fault.remaining > 0) throw new Error(`a failure the suite injected into the directory push of version ${version}`);
+    }
+    return super.directory(frame, version);
   }
 
   async send(frame: DownFrame, generation?: number): Promise<'written' | 'offline'> {
@@ -333,6 +376,11 @@ export class Project extends DeployedProject {
     return this.ctx.storage.kv.get<number>('visible-window') ?? super.visibleMs();
   }
 
+  /** A suite's first wait before a failed summary report is sent again, over the deployed second. */
+  protected retryBaseMs(): number {
+    return this.ctx.storage.kv.get<number>('retry-base-ms') ?? super.retryBaseMs();
+  }
+
   forget(org: string, project: string, machine: string, generation: number): void {
     if (this.ctx.storage.kv.get<boolean>('forget-fault')) {
       this.ctx.storage.kv.delete('forget-fault');
@@ -351,6 +399,10 @@ export class Project extends DeployedProject {
     if (url.pathname === PROJECT_VISIBLE_PATH) {
       this.ctx.storage.kv.put('visible-window', ((await request.json()) as { ms: number }).ms);
       return new Response('windowed');
+    }
+    if (url.pathname === RETRY_BASE_PATH) {
+      this.ctx.storage.kv.put('retry-base-ms', ((await request.json()) as { ms: number }).ms);
+      return new Response('set');
     }
     if (url.pathname === PROJECT_HOLD_PATH) {
       const { hold } = (await request.json()) as { hold: boolean };

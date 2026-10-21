@@ -20,7 +20,8 @@
 // The org's directory (`org`) is second on every stream: the object asks the org's `Registry` for it as the stream
 // opens and writes nothing else after `welcome` until it is written (a stream it cannot be had for ends, and the daemon
 // reconnects for it). The `Registry` sends it again on every change
-// (`directory`), each carrying its version, so one that arrives behind a later one, or behind the snapshot, is passed by.
+// (`directory`), and again after a call that failed, each carrying its version, so one that arrives behind a later one,
+// or behind the snapshot, is passed by.
 //
 // A revocation is a fence: the revoked credential's client id is kept, and a request carrying it is refused here, so
 // one the Worker admitted before the revocation and delivered after it opens nothing, and the name enrolled again (a
