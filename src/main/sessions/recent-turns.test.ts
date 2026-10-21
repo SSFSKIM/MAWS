@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RECENT_TURN_PROMPT_MAX, RecentTurnsSchema } from '@shared/ipc/schema/session';
+import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, RecentTurnsSchema } from '@shared/ipc/schema/session';
 import { NO_TURNS, readRecentTurns, recentTurnsOf } from './recent-turns';
 
 const ROOT = join(__dirname, '../../..');
@@ -174,6 +174,57 @@ describe('recentTurnsOf', () => {
       const text = [...parallelLines.slice(0, 5), foreign, ...parallelLines.slice(5)].join('\n');
       expect(recentTurnsOf(text, 5, false).turns.map((t) => [t.prompt?.text, t.answer?.text, t.toolCalls]), shape.type).toEqual([['Run independent checks.', 'All checks completed.', 5]]);
     }
+  });
+
+  // P4-R7: a message the model sent through a message tool is the turn's message, read where its call sits, once the
+  // tool accepted it; a refused call is a tool call the turn made, as the transcript draws it.
+  describe('a message tool’s call', () => {
+    const SENT = [{ type: 'text', text: 'sent' }];
+    const call = (id: string, text: string, name = 'mcp__maws__message') => [{ type: 'tool_use', id, name, input: { text } }];
+    const resultOf = (id: string, content: unknown = SENT, isError = false) => [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }];
+    const turnOf = (...rows: Record<string, unknown>[]) => recentTurnsOf(records(...rows), 5, false).turns.map((t) => [t.answer?.text ?? null, t.toolCalls]);
+    // a status before the next command, sent in the same response as that command
+    const stages = (outcome: unknown[], name?: string) => [
+      user('p1', null, 'Run the stages'),
+      assistant('a1', 'p1', [{ type: 'text', text: 'Looking first.' }]),
+      assistant('a2', 'a1', call('toolu_m', 'Stage 1 is done.\nMoving on.', name)),
+      user('r2', 'a2', outcome),
+      assistant('a3', 'r2', [{ type: 'tool_use', id: 'toolu_b', name: 'Bash', input: { command: 'sh stage.sh 2' } }]),
+      user('r3', 'a3', resultOf('toolu_b', 'ok')),
+    ];
+
+    it('accepted, it is the turn’s answer, at the call’s time, and no tool call', () => {
+      const answer = recentTurnsOf(records(...stages(resultOf('toolu_m'))), 5, false);
+      expect(answer.turns[0]).toMatchObject({ answer: { text: 'Stage 1 is done.', at: '2026-10-09T11:00:02.000Z' }, toolCalls: 1 });
+      expect(turnOf(...stages(resultOf('toolu_m'), 'mcp__to-human__message'))).toEqual([['Stage 1 is done.', 1]]);
+    });
+
+    it('a span written after it is the newer answer', () => {
+      expect(turnOf(...stages(resultOf('toolu_m')), assistant('a4', 'r3', [{ type: 'text', text: '<message>All stages ran.</message>' }]))).toEqual([['All stages ran.', 1]]);
+    });
+
+    it('refused, it is one of the turn’s tool calls and the answer stays the text before it', () => {
+      expect(turnOf(...stages(resultOf('toolu_m', 'MCP error: the server went away', true)))).toEqual([['Looking first.', 2]]);
+    });
+
+    // spikes/protocol-probe/fixtures/p4/p4-r7-tool-stages.jsonl: the transcript as the engine wrote it (its meta row
+    // `disk`, user and assistant records with their blocks; a record whose parent the probe left out is chained to the
+    // one before it), each status's result written before the next command of the same response
+    it('over the recorded transcript: four commands, the final span the answer', () => {
+      const journal = readFileSync(join(ROOT, 'spikes/protocol-probe/fixtures/p4/p4-r7-tool-stages.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: { event?: string; records?: { type: string; uuid: string; parentUuid: string | null; messageId: string | null; blocks: unknown[] }[] } });
+      const disk = journal.find((row) => row.direction === 'meta' && row.frame.event === 'disk')!.frame.records!;
+      const kept = new Set(disk.map((record) => record.uuid));
+      const text = records(...disk.map((record, i) => ({
+        type: record.type, uuid: record.uuid, parentUuid: record.parentUuid === null || kept.has(record.parentUuid) ? record.parentUuid : disk[i - 1].uuid,
+        message: { role: record.type, ...(record.messageId !== null && { id: record.messageId }), content: record.blocks },
+      })));
+      const [turn] = recentTurnsOf(text, 5, false).turns;
+      expect(turn.prompt?.text).toMatch(/^Run the four stages of the pipeline one at a time/);
+      expect(turn.answer?.text).toBe('Stage 4 of 4 is done, so the whole pipeline has run. It wrote `out/labels.csv` with 1,240 rows.'.slice(0, RECENT_TURN_ANSWER_MAX));
+      expect(turn.toolCalls).toBe(4);
+      // the same window cut before the final span: the last status sent is the answer
+      expect(recentTurnsOf(text.split('\n').slice(0, -1).join('\n'), 5, false).turns[0]).toMatchObject({ answer: { text: expect.stringMatching(/^Stage 3 of 4 is done\. The classifier is trained\./) }, toolCalls: 4 });
+    });
   });
 
   it('an empty or unparsable text has no turns', () => {
