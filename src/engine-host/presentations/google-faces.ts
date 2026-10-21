@@ -95,7 +95,7 @@ export async function fetchFamily(request: GoogleRequest, get: EgressGet, signal
       const css = await ask(request.url, userAgent);
       if (css.status === 400) return refused(REFUSED_REASONS.unserved, `CSS2 answered 400 for ${request.url}`);
       if (css.status !== 200) return pending(`CSS2 answered ${css.status}`);
-      parsed = parseCss2(text(css.bytes), family);
+      parsed = parseCss2(text(css.bytes!), family);
       if (parsed.ok || !parsed.sliced) break;
     }
     if (!parsed!.ok) return refused(REFUSED_REASONS.unreadable, parsed!.problem);

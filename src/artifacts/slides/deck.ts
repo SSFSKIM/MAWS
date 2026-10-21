@@ -187,7 +187,7 @@ function faces(value: Record<string, unknown>, warn: (p: string, m: string) => v
       warn(where, 'a face is {family, href | src} with a family of a letter, then letters, digits, spaces, _ and - (40 at most); dropped');
       continue;
     }
-    const { href, src, google: _hostRecord, ...kept } = entry; // the host's record is never the sender's (D19)
+    const { href, src } = entry;
     const linked = typeof href === 'string' && GOOGLE_FONTS_RE.test(href);
     const uploaded = typeof src === 'string' && isAssetRef(src);
     if ((href === undefined) === (src === undefined) || (href !== undefined && !linked) || (src !== undefined && !uploaded)) {
@@ -199,7 +199,7 @@ function faces(value: Record<string, unknown>, warn: (p: string, m: string) => v
       continue;
     }
     if (key !== faceKey(entry.family)) note(where, `a face is keyed by its family lowercased with spaces as -: "${faceKey(entry.family)}"`);
-    out[key] = { ...kept, ...(href !== undefined && { href }), ...(src !== undefined && { src }) } as DeckFace;
+    out[key] = withoutRecord(entry) as DeckFace; // the host's record is never the sender's (D19)
   }
   return out;
 }
@@ -260,7 +260,8 @@ export function googleFaceState(face: DeckFace): GoogleFaceState | null {
 /** A face as an agent compares it: the host's record left out (D19). */
 export function withoutRecord<T>(face: T): T {
   if (!isRecord(face) || !('google' in face)) return face;
-  const { google: _record, ...rest } = face;
+  const rest = { ...face };
+  delete rest.google;
   return rest as T;
 }
 

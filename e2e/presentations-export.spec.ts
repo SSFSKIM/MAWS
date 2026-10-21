@@ -418,7 +418,9 @@ const setting = (node: Locator) =>
       probe.remove();
       return w;
     };
-    return { first, loaded: [...document.fonts].some((face) => face.family.replace(/["']/g, '') === first && face.status === 'loaded'), drawn: width(stack), fallback: width('serif') };
+    let loaded = false;
+    document.fonts.forEach((face) => void (loaded ||= face.family.replace(/["']/g, '') === first && face.status === 'loaded'));
+    return { first, loaded, drawn: width(stack), fallback: width('serif') };
   });
 
 test('a named Google Fonts face with no network: Lora fetched once and drawn offline in the editor, the presenter and the three exports; Roboto Slab refused by name', async () => {
