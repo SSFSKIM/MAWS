@@ -330,6 +330,62 @@ test("gate.yml times every job that can take the exclusive Mac instance by the p
   assert.match(body('e2e'), /export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME /);
 });
 
+// ci-kit's job-started hook refuses a job by failing its start, which does not abort it: a later step whose condition
+// holds after a failure (failure(), always(), cancelled(), !cancelled()) still runs, beside whatever the hook would not
+// admit it beside. ci-kit's contract (its mac-lane concurrency spec): such a step of a Mac job leaves the desktop alone.
+// Here that means an artifact upload, or a step that waits on the outcome of a step only an admitted job runs.
+test('a step of a Mac job that can run after its start was refused is an upload, or waits on a step only an admitted job runs', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  // Every label set a job's runs-on can resolve to: a literal list, a fromJSON('…') literal, a plan output or the e2e
+  // matrix's runner, read from plans that put every gate on a Mac, exclusive and shared.
+  const everyMacGate = 'ci-gate: test\n\nGates: static,unit,unit:darwin,probes,e2e:library\nRunner: macos\nClass1a: macos';
+  const plans = [{}, { MAC_SHARED_E2E: 'library unit:darwin' }].map((shared) => plan({ CLASS1_E2E: 'library', ...shared, HEAD_MESSAGE: everyMacGate }).outputs);
+  const runsOn = (spec) => {
+    const sets = [...spec.matchAll(/fromJSON\('([^']*)'\)/g)].map((match) => JSON.parse(match[1]));
+    for (const [, output] of spec.matchAll(/needs\.plan\.outputs\.(\w+)/g)) sets.push(...plans.map((outputs) => JSON.parse(outputs[output])));
+    if (/\bmatrix\.runner\b/.test(spec)) sets.push(...plans.flatMap((outputs) => JSON.parse(outputs.e2e).map((entry) => JSON.parse(entry.runner))));
+    if (/^\[.*\]$/.test(spec)) sets.push(spec.slice(1, -1).split(',').map((label) => label.trim()));
+    if (sets.length === 0) sets.push(spec.replace(/^\$\{\{ (.*) \}\}$/, '$1').match(/'[^']*'/g)?.map((quoted) => quoted.slice(1, -1)) ?? [spec]);
+    return sets.map((set) => [set].flat());
+  };
+  const onMac = (labels) => labels.includes('macOS') || labels.includes('ci-kit-mac-shared');
+  const condition = (step) => /^ {6}- if: (.*)$|^ {8}if: (.*)$/m.exec(step)?.slice(1).find(Boolean)?.replace(/^\$\{\{ (.*) \}\}$/, '$1') ?? '';
+  const afterFailure = (cond) => /\b(?:failure|always|cancelled)\(\)/.test(cond);
+  // The condition's top-level `op` operands, outer parentheses dropped.
+  const split = (text, op) => {
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '(') depth++;
+      else if (text[i] === ')') depth--;
+      else if (depth === 0 && text.startsWith(op, i)) parts.push(text.slice(start, i).trim()), (start = i + op.length);
+    }
+    parts.push(text.slice(start).trim());
+    return parts.map((part) => (/^\(.*\)$/.test(part) && split(part.slice(1, -1), op).length === 1 ? part.slice(1, -1).trim() : part));
+  };
+
+  const macJobs = [];
+  const unsafe = [];
+  for (const [, job, body] of workflow.slice(workflow.indexOf('\njobs:\n')).matchAll(/^ {2}([\w-]+):\n((?: {4}.*\n|\n)*)/gm)) {
+    const spec = /^ {4}runs-on: (.*)$/m.exec(body)[1];
+    if (!runsOn(spec).some(onMac)) continue;
+    macJobs.push(job);
+    const steps = body.slice(body.indexOf('    steps:\n')).split(/\n(?= {6}- )/).slice(1);
+    // The steps that run only after a start that succeeded: their outcome is success or failure only in an admitted job.
+    const admitted = steps.filter((step) => !afterFailure(condition(step))).map((step) => /^ {6}- id: (\S+)$|^ {8}id: (\S+)$/m.exec(step)?.slice(1).find(Boolean)).filter(Boolean);
+    const waitsOnAdmitted = (cond) =>
+      split(cond, '&&').some((clause) => split(clause, '||').every((operand) => admitted.includes(/^steps\.([\w-]+)\.outcome == '(?:success|failure)'$/.exec(operand)?.[1])));
+    for (const step of steps) {
+      const cond = condition(step);
+      if (!afterFailure(cond) || /^ {6}- uses: actions\/upload-artifact@|^ {8}uses: actions\/upload-artifact@/m.test(step) || waitsOnAdmitted(cond)) continue;
+      unsafe.push(`${job}: ${/^ {8}run: (.*)$|^ {6}- run: (.*)$|^ {8}uses: (.*)$/m.exec(step)?.slice(1).find(Boolean) ?? step.trim().split('\n')[0]} (if: ${cond})`);
+    }
+  }
+  assert.deepEqual(macJobs.sort(), ['e2e', 'packaged', 'plan', 'probes', 'static', 'unit', 'unit-darwin']);
+  assert.deepEqual(unsafe, []);
+});
+
 // Selection for iteration runs (ci-kit's test-history spec, M4; gate-affected.mjs): a push whose commit says
 // `Selection: affected` lists its change, and the plan narrows unit and unit:darwin to vitest's related mode over it, or
 // says why it runs the full suite.
