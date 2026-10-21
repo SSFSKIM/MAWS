@@ -533,3 +533,55 @@ test('p4 R7 the eval: before, 4 of 11 mid-turn messages lost to progress notes, 
  assert.equal(runs.length,10);assert.ok(summary.before.cost+summary.after.cost<1);
  for(const r of runs.filter(r=>r.arm==='before'))for(const n of r.notes)assert.equal(n.addressed_to_human,true);
 });
+
+// P4-R7y (docs/doperpowers/plans/2026-10-19-p4-smoothing.md, after Decision Logs 48 and 49; scenarios/pass3/
+// p4-r7y-session-start.mjs): which mechanism gives the model a SessionStart context at every start of a session, on the
+// pinned engine 2.1.304: a host callback registered through `initialize.hooks`, or the command hook MAWS puts in its
+// `--settings` (src/shared/owner/contract.ts messageToolHookGroup). Read from each launch's `step` notes (every request
+// the engine sent, with each place the context appears), its `starts` note (the `hook_callback` requests, the hook
+// lifecycle frames) and, on the relay, what the model answered.
+const ownerContract=await import('../../src/shared/owner/contract.ts');
+const R7Y_STUB=['','-plain','-resume','-resume-again','-fork'].flatMap(s=>['callback','command'].map(m=>`p4-r7y-stub-${m}${s}`));
+const R7Y_RELAY=['p4-r7y-relay-control','p4-r7y-relay-resume','p4-r7y-relay-startup'];
+const steps7y=name=>meta4(load4(name),'step');
+// per step, the context's copies in each main-loop request (a side request, the title's, is left out)
+const copies7y=name=>steps7y(name).map(s=>s.requests.filter(q=>q.main!==false&&!q.prompts[0]?.head.startsWith('<session>')).map(q=>q.copies));
+const starts7y=name=>meta4(load4(name),'starts')[0];
+const ran7y=name=>starts7y(name).hookFrames.filter(h=>h.subtype==='hook_response').map(h=>`${h.hook_name}:${h.outcome}`);
+for(const name of [...R7Y_STUB,...R7Y_RELAY])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-R7y provenance on the pinned engine, the owner file unchanged and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R7y');assert.equal(prov.engineVersion,'2.1.304');assert.equal(prov.pin,'bd54d325b4c967eeafb98fb6426049bff1c55669');assert.equal(prov.text,ownerContract.MESSAGE_TOOL_ALIAS);
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ for(const s of meta4(rows,'step'))assert.equal(s.result.subtype,'success',s.prompt);
+});
+test('p4 R7y the host callback: called at a compaction and a clear, never at startup, a resume or a fork, the engine running those starts before it reads initialize',()=>{
+ assert.deepEqual(starts7y('p4-r7y-stub-callback').callbacks.map(c=>[c.callback_id,c.source]),[['maws_SessionStart_1','compact'],['maws_SessionStart_1','clear']]);
+ for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(starts7y('p4-r7y-stub-callback'+s).callbacks,[],s);
+ assert.equal(meta4(load4('p4-r7y-stub-callback'),'initialize_answer')[0].hooks_applied,true); // registered, only too late for the first start
+ // the first turn, the compaction, the turn after it, the clear (no request), the turn after it
+ assert.deepEqual(copies7y('p4-r7y-stub-callback'),[[0],[0],[1],[],[1]]);
+ for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(copies7y('p4-r7y-stub-callback'+s),[[0]],s);
+});
+test('p4 R7y the command hook MAWS puts in --settings: it runs at every start (startup, compact, clear, resume, fork) and the next request carries the context once, as a SessionStart system message',()=>{
+ const group=ownerContract.messageToolHookGroup();
+ for(const name of R7Y_STUB.filter(n=>n.includes('-command')&&!n.endsWith('-plain')))assert.deepEqual(meta4(load4(name),'provenance')[0].flagSettings.hooks,{SessionStart:[group]},name);
+ assert.deepEqual(ran7y('p4-r7y-stub-command'),['SessionStart:startup:success','SessionStart:compact:success','SessionStart:clear:success']);
+ assert.deepEqual(copies7y('p4-r7y-stub-command'),[[1],[1],[1],[],[1]]);
+ assert.deepEqual([ran7y('p4-r7y-stub-command-resume'),ran7y('p4-r7y-stub-command-fork')],[['SessionStart:resume:success'],['SessionStart:fork:success']]);
+ assert.deepEqual(copies7y('p4-r7y-stub-command-plain'),[[0]]); // the session the resumes and the fork read had none
+ for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(copies7y('p4-r7y-stub-command'+s),[[1]],s); // a later start's copy is not added again
+ const hit=steps7y('p4-r7y-stub-command-resume')[0].requests.find(q=>q.copies===1).hits[0];
+ assert.equal(hit.role,'system');assert.ok(hit.text.startsWith(`SessionStart hook additional context: ${ownerContract.MESSAGE_TOOL_ALIAS}`));
+ assert.ok(meta4(load4('p4-r7y-stub-command'),'disk')[0].context.every(c=>c.hookEvent==='SessionStart'&&c.content.includes(ownerContract.MESSAGE_TOOL_ALIAS)));
+});
+test('p4 R7y on a real model: without the hook it names no tool for mcp__to-human__message; with it, at a resume of that session and at a new session\'s startup, it names mcp__maws__message; under US$0.25',()=>{
+ const answers=name=>steps7y(name)[0].requests.filter(q=>q.prompts.some(p=>p.head.startsWith('Without calling any tool'))).map(q=>[q.copies,q.answer.trim()]);
+ assert.deepEqual(answers('p4-r7y-relay-control'),[[0,'none']]);
+ assert.deepEqual(answers('p4-r7y-relay-resume'),[[1,'mcp__maws__message']]);
+ assert.deepEqual(answers('p4-r7y-relay-startup'),[[1,'mcp__maws__message']]);
+ assert.deepEqual([ran7y('p4-r7y-relay-control'),ran7y('p4-r7y-relay-resume'),ran7y('p4-r7y-relay-startup')],[[],['SessionStart:resume:success'],['SessionStart:startup:success']]);
+ const spent=R7Y_RELAY.reduce((n,name)=>n+meta4(load4(name),'spend')[0].result.total_cost_usd,0);assert.ok(spent<0.25,String(spent));
+});

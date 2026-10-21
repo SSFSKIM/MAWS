@@ -16,7 +16,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
+import { CONTRACT_HEADER, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
 import { invoke, value } from './support/c7-replay';
 import { traceForeground } from './support/foreground-trace';
 import { launchMaws } from './support/launch';
@@ -202,8 +202,9 @@ test('a style declaring contract 4: the supplement once and never contract 1, th
     expect(args.filter((arg) => arg.includes(CONTRACT_HEADER(1)) || arg.includes(CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION)))).toEqual([]); // nor MAWS's full contract
     expect(args.flatMap((arg, k) => (arg === '--disallowedTools' ? [args[k + 1]] : []))).toEqual(['AskUserQuestion']); // Decision Log 33
     expect(args.flatMap((arg, k) => (arg === '--allowedTools' ? [args[k + 1]] : []))).toEqual(['mcp__maws__message']); // P4-R7: never a permission card
-    const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as { env?: Record<string, string> };
+    const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as { env?: Record<string, string>; hooks?: unknown };
     expect(settings.env?.[NATIVE_TO_HUMAN_ENV]).toBe(String(TO_HUMAN_CONTRACT_VERSION));
+    expect(settings.hooks).toEqual({ SessionStart: [messageToolHookGroup()] }); // P4-R7y: the context at every start
     await expect.poll(async () => { const row = await lane(); return [row.source, row.pending ?? null]; }).toEqual(['external-style-plus-supplement', null]);
 
     // The async ask: acknowledged at once, answered from its sheet, the answer written as a `next` steer.

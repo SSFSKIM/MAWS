@@ -6,7 +6,7 @@ import type { TrustState } from '@shared/sessions/trust';
 import { record } from '../../../test/support/builders';
 import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
 import { withOwnerChannel } from './launch-mapping'; // P2-C
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement
+import { CONTRACT_HEADER, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement; P4-R7y: the hook
 
 const APP = 'a0000000-0000-4000-8000-000000000001' as AppSessionId;
 const BOOT = 'b0000000-0000-4000-8000-000000000002' as AppSessionId;
@@ -130,17 +130,18 @@ describe('home directory attests without a bootstrap', () => {
 describe('withOwnerChannel', () => {
   const socket = '/u/browser/cua/a.sock';
   const spec = (extraSettings: Record<string, unknown> | null) => ({ ...toLaunchSpec({ ...base, browserBackend: null }), extraSettings });
+  const HOOKS = { SessionStart: [messageToolHookGroup()] }; // P4-R7y
 
   it('advertises the contract version beside the browser socket while the lane is on, and sets the two keys as decided', () => {
     const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { laneOn: true, append: 'contract', snapshotOff: true });
-    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, enableWorkflows: true });
+    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: HOOKS, enableWorkflows: true });
     expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off' });
     expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
   });
 
-  it('sets the variable alone when the lane is on and a compatible style carries the instructions', () => {
+  it('sets the variable and the hook alone when the lane is on and a compatible style carries the instructions', () => {
     const decided = withOwnerChannel(spec(null), { laneOn: true, append: null, snapshotOff: false });
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: HOOKS });
     expect(decided).not.toHaveProperty('appendSystemPrompt');
     expect(decided).not.toHaveProperty('systemPromptSnapshot');
   });
@@ -149,6 +150,17 @@ describe('withOwnerChannel', () => {
     expect(withOwnerChannel(spec(null), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull();
     expect(withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket } }), { laneOn: false, append: null, snapshotOff: true })).toMatchObject({ extraSettings: { env: { CUA_BROWSER_BACKENDS: socket } }, systemPromptSnapshot: 'off' });
     expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull(); // a retried spec
+  });
+  // P4-R7y: MAWS's SessionStart group after the caller's hooks, once; out again with the lane off
+  it('adds MAWS’s SessionStart group after the caller’s hooks once, a retried spec included, and takes only it out with the lane off', () => {
+    const own = { hooks: [{ type: 'command', command: 'echo own' }] };
+    const caller = { SessionStart: [own], PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo post' }] }] };
+    const on = withOwnerChannel(spec({ hooks: caller }), { laneOn: true, append: null, snapshotOff: false });
+    expect(on.extraSettings?.hooks).toEqual({ ...caller, SessionStart: [own, messageToolHookGroup()] });
+    expect(withOwnerChannel(on, { laneOn: true, append: null, snapshotOff: false }).extraSettings?.hooks).toEqual(on.extraSettings?.hooks); // a retried spec
+    expect(withOwnerChannel(on, { laneOn: false, append: null, snapshotOff: false }).extraSettings).toEqual({ hooks: caller });
+    expect(withOwnerChannel(withOwnerChannel(spec(null), { laneOn: true, append: null, snapshotOff: false }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull();
+    expect(LaunchSpecSchema.parse(on)).toEqual(on);
   });
   // P2-C2 (Decision Log 31): a message-tool style gets the supplement, the advertisement unchanged
   it('appends the supplement in place of the contract beside a message-tool style, the variable still the contract version', () => {
