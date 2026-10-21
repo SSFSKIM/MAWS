@@ -2,8 +2,9 @@
 // rendered system prompt into the transcript as an `attachment` of type `prompt_snapshot`, and a later launch reuses the
 // last one after the last compact boundary instead of rendering. MAWS's appended contract is that snapshot's segment
 // opening with the contract's header; an output style never reaches it (U2 run 6). So the state is `contract:<n>`,
-// `supplement:<n>` (P2-C2: the supplement appended beside a message-tool style, its own header), `none` (a snapshot
-// without either) or `unrecorded` (no snapshot after the last boundary, or no readable transcript).
+// `supplement:<n>` (P2-C2: the supplement appended beside a message-tool style, its own header), `alias` (P4-A2: the
+// to-human alias appended alone, a compatible style under the launch profile's hooks `none`), `none` (a snapshot without
+// any of them) or `unrecorded` (no snapshot after the last boundary, or no readable transcript).
 //
 // The read scans from the end of the file in chunks for the two record types and stops at the first it meets: a snapshot
 // is the answer, a boundary means nothing after it was recorded. The answer is kept per path with the offset it covers
@@ -14,9 +15,9 @@
 // (`transcriptEvidence`, Design §6) and what a rewind took off the chain (`transcriptChain`, Design §5).
 import { open } from 'node:fs/promises';
 import type { MessageUuid } from '@shared/graph/ids';
-import { CONTRACT_HEADER, SUPPLEMENT_HEADER } from '@shared/owner/contract';
+import { CONTRACT_HEADER, MESSAGE_TOOL_ALIAS, SUPPLEMENT_HEADER } from '@shared/owner/contract';
 
-export type RecordedState = 'unrecorded' | `contract:${number}` | `supplement:${number}` | 'none';
+export type RecordedState = 'unrecorded' | `contract:${number}` | `supplement:${number}` | 'alias' | 'none';
 
 // The texts MAWS appends, each by its header up to its version number.
 const HEADERS = [
@@ -24,11 +25,15 @@ const HEADERS = [
   { kind: 'supplement', header: SUPPLEMENT_HEADER, prefix: SUPPLEMENT_HEADER(-1).split('-1')[0]! },
 ] as const;
 
-// `contract:<n>` or `supplement:<n>` when a segment opens with the header line of that text's version n, else `none`.
+// `contract:<n>` or `supplement:<n>` when a segment opens with the header line of that text's version n; else `alias`
+// when a segment is exactly the alias (appended after either text it shares their segment, so they come first); else
+// `none`. The alias is told apart so that a launch not appending it alone renders the prompt anew (Decision Log 16).
 export function classifySnapshot(systemPrompt: unknown): RecordedState {
   if (!Array.isArray(systemPrompt)) return 'none';
+  let alias = false;
   for (const segment of systemPrompt) {
     if (typeof segment !== 'string') continue;
+    if (segment === MESSAGE_TOOL_ALIAS) alias = true;
     for (const { kind, header, prefix } of HEADERS) {
       if (!segment.startsWith(prefix)) continue;
       const version: number = Number(/^\d+/.exec(segment.slice(prefix.length))?.[0] ?? NaN);
@@ -36,7 +41,7 @@ export function classifySnapshot(systemPrompt: unknown): RecordedState {
       if (Number.isInteger(version) && (segment === line || segment.startsWith(`${line}\n`))) return `${kind}:${version}`;
     }
   }
-  return 'none';
+  return alias ? 'alias' : 'none';
 }
 
 // The last of the two record types in a line, if the line is one: a snapshot classified, or the boundary.

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MessageUuid } from '@shared/graph/ids';
-import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, MESSAGE_TOOL_ALIAS, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 
 // P2-C2: the full contract is now contract 5; sessions recorded under contract 1 keep reading as contract:1.
 const CONTRACT_1 = LEGACY_CONTRACT_1.text;
@@ -49,6 +49,17 @@ describe('classifySnapshot', () => {
     expect(classifySnapshot([...ENGINE_SEGMENTS, `${SUPPLEMENT_HEADER(3)}\n\nlater words`])).toBe('supplement:3');
     expect(classifySnapshot([...ENGINE_SEGMENTS, `Appended. ${SUPPLEMENT_HEADER(1)}`])).toBe('none');
     expect(classifySnapshot([...ENGINE_SEGMENTS, '# Messages to the human (MAWS to-human supplement)'])).toBe('none');
+  });
+
+  // P4-A2 (Decision Log 16): under hooks none a compatible style gets the alias appended alone, its own segment; after the
+  // contract or the supplement it shares their segment, which keeps their reading
+  it('reads alias from a segment that is exactly the alias, the contract and the supplement first', () => {
+    expect(classifySnapshot([...ENGINE_SEGMENTS, MESSAGE_TOOL_ALIAS])).toBe('alias');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `${TO_HUMAN_CONTRACT}\n\n${MESSAGE_TOOL_ALIAS}`])).toBe('contract:7');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `${TO_HUMAN_SUPPLEMENT}\n\n${MESSAGE_TOOL_ALIAS}`])).toBe('supplement:2');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, MESSAGE_TOOL_ALIAS, TO_HUMAN_CONTRACT])).toBe('contract:7'); // a header in any segment
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `Some appended prompt.\n\n${MESSAGE_TOOL_ALIAS}`])).toBe('none'); // inside other text
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `${MESSAGE_TOOL_ALIAS}\n\nmore`])).toBe('none');
   });
 });
 
