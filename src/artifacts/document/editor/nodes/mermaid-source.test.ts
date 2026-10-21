@@ -43,4 +43,19 @@ describe('a document diagram’s source', () => {
     expect(addedAfter('---\ntitle: Flow\n---\n')).toEqual({ theme: 'base', fontFamily: PAGE.fontFamily, themeVariables: PAGE.themeVariables });
     expect(addedAfter('')).toEqual({ theme: 'base', fontFamily: PAGE.fontFamily, themeVariables: PAGE.themeVariables });
   });
+
+  // mermaid cleans a source before it reads the front matter: an HTML tag's double-quoted attributes become single-quoted
+  // (so this title is YAML only after that), and every line ends in `\n`
+  it('reads a title holding an HTML tag after mermaid’s own cleanup, and keeps it as written', () => {
+    expect(addedAfter('---\ntitle: "<b class="label">Title</b>"\nconfig:\n  theme: forest\n---\n')).toEqual({ fontFamily: PAGE.fontFamily, themeVariables: PAGE.themeVariables });
+  });
+
+  it('reads an indented front matter with carriage-return line ends after mermaid’s own cleanup, and keeps it as written', () => {
+    expect(addedAfter('  ---\r  title: Flow\r  config:\r    theme: dark\r  ---\r')).toEqual({ fontFamily: PAGE.fontFamily, themeVariables: PAGE.themeVariables });
+  });
+
+  it('is left as written, for mermaid to judge, when its front matter cannot be read', () => {
+    const source = `---\nconfig:\n  theme: [forest\n---\n${BODY}`;
+    expect(withPage(source, PAGE)).toBe(source);
+  });
 });

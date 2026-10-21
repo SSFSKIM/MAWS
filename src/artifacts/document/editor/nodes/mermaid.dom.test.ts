@@ -107,6 +107,27 @@ describe('a document diagram drawn after the transcript configured mermaid', () 
     expect(config.fontFamily).toBe('Georgia, serif');
   });
 
+  // mermaid reads a front matter only after its own cleanup: an HTML tag's double-quoted attributes single-quoted, every
+  // line ended in `\n`
+  it('keeps what a front matter whose title holds an HTML tag sets', async () => {
+    const { source, config } = await renderedAfterTranscript('---\ntitle: "<b class="label">Title</b>"\nconfig:\n  theme: forest\n---\ngraph TD\n  A --> B');
+    expect(source.startsWith('---\ntitle: "<b class="label">Title</b>"\nconfig:\n  theme: forest\n---\n')).toBe(true);
+    expect(config.theme).toBe('forest');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+  });
+
+  it('keeps what an indented front matter with carriage-return line ends sets', async () => {
+    const { config } = await renderedAfterTranscript('  ---\r  title: Flow\r  config:\r    theme: dark\r  ---\rgraph TD\r  A --> B');
+    expect(config.theme).toBe('dark');
+    expect(config.themeVariables).toMatchObject({ ...PAGE_PALETTE, fontFamily: PAGE_FONT });
+  });
+});
+
+it('hands mermaid a source whose front matter cannot be read as written, for mermaid to judge', async () => {
+  const source = '---\nconfig:\n  theme: [forest\n---\ngraph TD\n  A --> B';
+  const render = vi.spyOn(mermaid, 'render').mockResolvedValue({ svg: '<svg></svg>', diagramType: 'flowchart-v2' } as Awaited<ReturnType<typeof mermaid.render>>);
+  await renderMermaid(source, onPage());
+  expect(render.mock.calls[0]?.[1]).toBe(source);
 });
 
 // mermaid reads a directive's single quotes as double quotes, so a face named with one must not break the directive (the
