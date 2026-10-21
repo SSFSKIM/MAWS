@@ -45,7 +45,7 @@ and see a third enrollment refused while the two stay, run `sminos hub leave` on
 - [x] (2026-10-21) M1 — reviewed clean (task-reviewer and reviewer-high; commits `ccbb539b0`, fix `0602580be`). The hub: the key, its code, redemption through it, `uses`, revocation of a key, a machine's own record
       and self-revoke bound to its enrollment, the offline sweep, the stand-in's 401 (MAWS).
 - [x] (2026-10-21) M2 — reviewed clean (task-reviewer; commits `be133c3a3`, fix `d6195c5ce`). The web: provisioning keys on the Machines page (MAWS).
-- [ ] M3 — sminos: both codes decoded, `hub enroll` through a key, `hub check`, `hub leave`, `hub show`'s exit code,
+- [x] (2026-10-21) M3 — reviewed clean (task-reviewer and reviewer-high; doperpowers commits `f3ea1a0e`, fix `7831e8ac`, sminos 1.3.2). sminos: both codes decoded, `hub enroll` through a key, `hub check`, `hub leave`, `hub show`'s exit code,
       the parity vectors regenerated (doperpowers).
 - [ ] M4 — Acceptance across both repositories against the local hub; the record completed.
 - [ ] Whole-branch review at xhigh (each repository's branch), then merge; the hub deploy is the orchestrator's, after
@@ -991,7 +991,11 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   frame before asserting it, a fix to #91's test).
 - `apps/desk-web/e2e-hub/session-plane.spec.ts` (outside the gate) failed five cases on M2's runs — the grid's
   offline-latency bound (3845 ms against 2500 ms) and four session-view cases — none opening the Machines dialog;
-  whether they predate the branch is settled in M4.
+  whether they predate the branch is settled in M4. Settled: all five fail the same way on MAWS master (`82a0967ff`; the grid's offline
+  latency 3844 ms there, 3861 ms on the branch), so they predate the branch; the other six cases pass on both
+  (evidence: the SDE workspace's `e2e-hub-baseline.md`, logs `/tmp/dsk-scripts/pe-e2e-{master1,branch1}.log`).
+- The one-time code's padding vector (`dx7-enroll-codes`) also ends its JSON in `x`, so it does not refuse on the
+  padding alone; left as it was (the provisioning case, fixed, exercises the shared decoder's padding refusal).
 
 ## Decision Log
 
@@ -1129,6 +1133,20 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   installed; the caller runs `leave` to make the machine gone (usually before deleting the server), and devcloud's
   teardown proceeds on either exit with the offline sweep covering the rest, so 1 costs it nothing.
   Date/Author: 2026-10-21, the orchestrator (ruling); recorded by the controller.
+- Decision: M3's executor's choices within the spec (doperpowers `f3ea1a0e`, `7831e8ac`), kept by the controller: a
+  `hub.json` that cannot be used (unreadable or incomplete) gives `check` 4 and `leave` 1 and nothing is removed (3
+  means the hub rejected it); `show` exits 0 whenever `hub.json` exists, readable or not, the test the `--replace`
+  guard and the daemon's supervisor use; a missing `enrolled` reads as inside the grace, in words of its own; a
+  provisioning code with no `--name` on a host whose name is not admitted exits 2 naming `--name <prefix>…`; the
+  `prefix-mismatch` line keeps the hub's message, so a hand-built code shows the key's real prefix; `leave` writes a
+  `daemon.log` line; `hub_standin.py` answers any token it does not hold with Access's 401 page on every `/machine/`
+  path, ends a simulated outage when a file appears (no timer to race), and serves from a thread; the vectors were
+  generated from copies of the hub's sources at `0602580be`, not the working tree M2 was changing;
+  `SMINOS_ACCESS_RECHECK_S` is read as a float. On review: the lock is an `flock` on `daemon/hub.lock` (0600) held
+  around enroll's write and `leave`'s check-and-remove, never across a request; `leave` compares client id and
+  secret; an unreadable file at removal counts as a replacement and is kept; a file another `leave` already removed is
+  reported as usual, exit 0. The provisioning padding vector now carries `=` on valid JSON.
+  Date/Author: 2026-10-21, M3's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
