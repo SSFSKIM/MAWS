@@ -39,6 +39,9 @@ and see a third enrollment refused while the two stay, run `sminos hub leave` on
       of the execution section, both "needs-attention"; every finding accepted and folded in (Decision Log, the fix
       wave entry): the self-revoke bound to the enrollment, Access's denial as an outcome and the stand-in's 401,
       `hub check` and the boot's rule, the security rationale corrected, the buildability fixes.
+- [x] (2026-10-21) The fix wave's re-review: two findings ruled by the orchestrator and folded in by the executing
+      session (Decision Log, the re-review entry): Access's 401 read through a propagation grace and a recheck; exit 4
+      of `hub check` is the boot's to retry.
 - [ ] M1 — The hub: the key, its code, redemption through it, `uses`, revocation of a key, a machine's own record
       and self-revoke bound to its enrollment, the offline sweep, the stand-in's 401 (MAWS).
 - [ ] M2 — The web: provisioning keys on the Machines page (MAWS).
@@ -78,7 +81,10 @@ and see a third enrollment refused while the two stay, run `sminos hub leave` on
   the body names `Cloudflare Access`). Distinct from the Worker's **`403 {"error":"not-enrolled"}`**, which a
   credential Access still admits gets while the Registry no longer holds it: the window between a revocation's row
   deletion and the orphan sweep's confirmed deletion of the token, or a lost mint. To the machine both say the same
-  thing — it is no longer enrolled — and §6 treats them as one outcome.
+  thing — it is no longer enrolled — and §6 treats them as one outcome, with one caveat: Access answers the same 401
+  to a token it **does** hold but whose creation has not yet reached its edge (the deploy probe's case A3 waits up to
+  60 s for a freshly minted token to stop drawing 401), so a 401 is read as a denial only for a credential past a
+  propagation grace and only when it holds on a recheck (§6, "How the CLI knows").
 - **The boot** — devcloud's VM provisioning (`devcloud/boot/devcloudlib/sminos_host.py` in doperpowers), owned by
   another session; this spec fixes only the interface it consumes (Interfaces, "What the boot consumes").
 - **The local hub and the stand-in** — `pnpm --filter desk-hub local`: the Worker on workerd behind a stand-in for
@@ -222,7 +228,8 @@ the enrollment id it read, since it holds its candidate list across the awaits o
 **What the credential gets afterwards.** The Worker refuses it `403 not-enrolled` (the Registry no longer holds it)
 until the orphan sweep's deletion of its Access service token is confirmed — in the same call on the local stand-in,
 within the retry against Cloudflare — and from then on Access's denial (Terms) answers it, 401, and the request never
-reaches the Worker. A machine reads both as "no longer enrolled" (§6).
+reaches the Worker. A machine reads the first as "no longer enrolled" at once and the second once its credential is
+past the propagation grace and the 401 holds on a recheck (§6).
 
 **`GET /machine/enrollment`**, by a machine with its own credential, answers `200 {org, machine, state, confirmed}`,
 its own record as the Registry holds it, and changes nothing: it is the cheap authenticated request a machine checks
@@ -331,36 +338,58 @@ about whether the hub still accepts the credential. That is `check`'s question.
 not hold with **401** and its own HTML page (Terms, Access's denial: `service_auth_401_redirect`, the probe's A4);
 the Worker answers 401 only to a request carrying no assertion at all, which no request through Access is. The
 stand-in answers the same from M1 on (a 401 whose body names `Cloudflare Access`), so the rule is one in every
-environment: a **401 whose body contains `Cloudflare Access`** is Access refusing this credential; a **`403` whose
-JSON `error` is `not-enrolled`** is the Worker refusing it (Access still admits it: the orphan window, or a lost
-mint). Both are **rejected**: this machine is no longer enrolled. Everything else is not that and is never read as
-it — no answer, a connection or TLS error, a 5xx, a redirect, a 404, a 403 of another error, a 401 without the mark
-(reported as "401 without Access's page"), a 200 whose body is not what was asked — because a teardown or a boot that
-mistook an outage for a revocation would throw away a live credential.
+environment. A **`403` whose JSON `error` is `not-enrolled`** is the Worker refusing the credential (Access still
+admits it: the orphan window, or a lost mint): **rejected** at once — only a credential Access holds reaches the
+Worker, and the Registry's answer is authoritative. A **401 whose body contains `Cloudflare Access`** is Access not
+admitting it, which is either a deleted token or a minted one that has not yet reached Access's edge (Terms; the
+probe's A3 allows 60 s for that). So it is **rejected** only when both hold:
+
+- the credential is past the **propagation grace**: 600 s after `hub.json`'s `enrolled` (written and read by the
+  machine's own clock) — ten times the probe's bound, and short beside a boot's other waits; and
+- the marked 401 **holds on a recheck**: the same request sent once more 90 s after the first 401 — one and a half
+  times the probe's bound, so a credential whose `enrolled` reads old because the clock jumped at boot is still given
+  the whole propagation window. The recheck's answer is the answer: a `200` is acceptance, a `403 not-enrolled` or
+  the marked 401 again rejection, anything else *other*.
+
+Inside the grace a marked 401 is **indeterminate**, read as *other* in words of its own (`Access answered 401 to a
+credential enrolled <n> s ago, which may not have reached Access's edge yet`). Everything else is not a rejection and
+is never read as one — no answer, a connection or TLS error, a 5xx, a redirect, a 404, a 403 of another error, a 401
+without the mark (reported as "401 without Access's page"), a 200 whose body is not what was asked — because a
+teardown or a boot that mistook an outage, or a credential still propagating, for a revocation would throw away a
+live credential (and a `--replace` after it would spend a key use, or meet `name-taken` on the machine's own name).
+The recheck's interval is read from `SMINOS_ACCESS_RECHECK_S` when set (the tests and the acceptance walk set it to
+1); nothing else is configurable, and tests and the walk move a credential past the grace by writing an older
+`enrolled` into its `hub.json`.
 
 **`sminos hub check`** asks the hub whether this machine's credential is still accepted, and changes nothing: `GET
 /machine/enrollment` with the stored credential (through the uplink's connection helpers, as `redeem_once` reaches the
 hub). Exit **0**: enrolled and accepted — the hub answered `200` naming the stored org and machine (stdout `enrolled
 as <name> at <hub> (org <org>): accepted`). Exit **1**: not enrolled here (no `hub.json`; stdout says so). Exit **3**:
-present but rejected (either refusal above), one stderr line saying which (`the hub no longer accepts this machine's
+present but rejected (by the rule above), one stderr line saying which (`the hub no longer accepts this machine's
 credential: Access answered 401` / `… the hub answered not-enrolled`); the credential is kept, since a check destroys
-nothing and what follows — `enroll --replace`, or `leave` — is the caller's. Exit **4**: the hub could not be asked, or
-answered something that is neither acceptance nor rejection (the "everything else" above); the credential is kept, the
-answer on stderr. Exit **2**: usage. Why a verb of its own rather than a remote `show`: `show` is local and instant,
+nothing and what follows — `enroll --replace`, or `leave` — is the caller's. Exit **4**: undecided — the hub could not
+be asked, or answered something that is neither acceptance nor rejection (the *other* above, a marked 401 inside the
+grace among it); the credential is kept, the answer on stderr. Exit 4 is never an end state for a caller: it means
+"ask again later", and the boot runs `check` again with backoff until it answers 0, 1 or 3 (Interfaces, "What the
+boot consumes"), since a VM revoked while it was stopped and booted into a brief hub outage would otherwise never
+learn it — its daemon cannot re-enroll, never holding the key. Exit **2**: usage. Why a verb of its own rather than a remote `show`: `show` is local and instant,
 which a boot's skip and `daemon status` rely on, while a remote check can wait `TIMEOUT` (30 s) on a dead hub and has
 four answers, not two; a verb named for what it does keeps both honest. Rejected: having the daemon mark `hub.json`
 when its uplink is refused (the daemon never validates enrollment today, and a flag in the credential file would be a
 second state every reader of the file must learn).
 
 **`sminos hub leave`** ends this machine's enrollment: `DELETE /machine/enrollment` with the stored credential. On
-`200`, or on either refusal above (the hub already revoked it, by an admin's hand or the offline sweep; or this
-machine's own earlier `leave` whose `200` was lost, after which the token is gone and Access answers 401), it removes
+`200`, or on a rejection by the rule above (the hub already revoked it, by an admin's hand or the offline sweep; or
+this machine's own earlier `leave` whose `200` was lost, after which the token is gone and Access answers 401 — read
+as a rejection once past the grace and the recheck, so a `leave` within ten minutes of enrolling whose `200` was lost
+exits 1 until then, and the teardown's retry or the offline sweep finishes it), it removes
 `daemon/hub.json` and prints one line saying which (`left the hub as <name>` / `the hub had already revoked <name>; the
 stale credential is removed`), exit 0; the daemon's `UplinkSupervisor`, which polls the credential file every 0.2 s
 while its child runs, stops the uplink within a second and starts none while no credential is held, so no restart or
 `daemon` verb is needed. A machine that is not enrolled here says so and exits 0: a teardown script runs `leave` on a
-VM whose boot may have failed before enrolling. The hub unreachable, a 5xx, or any answer that is not acceptance or
-rejection: the credential is kept, the reason is on stderr, exit 1, so the teardown can retry. There is no `--local`:
+VM whose boot may have failed before enrolling. The hub unreachable, a 5xx, a marked 401 inside the grace, or any
+answer that is not acceptance or rejection: the credential is kept, the reason is on stderr, exit 1, so the teardown
+can retry. There is no `--local`:
 a VM the hub cannot be told about is deleted anyway, and the offline sweep is for exactly that. Accepted edge: a Mac that enrolled under a name other than its host name and leaves writes
 as its host name afterwards, and the sessions it held under the enrolled name read as another machine's until it
 enrolls again (`former` is in `hub.json`, which `leave` removes); a VM about to be deleted has no such history, and a
@@ -441,13 +470,19 @@ are quoted in Concrete Steps; the behaviour:
    token named `desk-local-dc-a-0002` (deleted in the same call on the local stand-in; against Cloudflare, retried as
    an orphan until the API confirms). `sminos hub leave` again exits 0 with `not enrolled`. Then two ways a
    credential is already dead, both through the Access stand-in, which now answers a token it no longer holds as
-   production does (401, a page naming `Cloudflare Access`): **admin-revoked** — remove `dc-a-0001` from the web, then
-   `sminos hub check` in its home exits 3 with `Access answered 401`, and `sminos hub leave` exits 0 with `had already
-   revoked`, `hub.json` gone; **a lost 200** — enroll `dc-a-0003`, revoke it by hand with its own credential
-   (`curl -X DELETE …/machine/enrollment`, standing in for a `leave` whose answer never arrived), then `sminos hub
-   leave` exits 0 with `had already revoked`. The other kind of refusal, the Worker's `403 not-enrolled` while a
-   token's deletion is still owed, is proved by the hub suite with a faulted deletion (M1) and by the CLI suite
-   against its own stand-in (M3).
+   production does (401, a page naming `Cloudflare Access`): **admin-revoked** — remove `dc-a-0001` from the web;
+   first, minutes after its enrollment, `sminos hub check` in its home exits 4 (`… enrolled <n> s ago, which may not
+   have reached Access's edge yet`) and `sminos hub leave` exits 1 with `hub.json` kept: inside the propagation grace
+   a 401 decides nothing; then, with that `hub.json`'s `enrolled` written 700 s back and `SMINOS_ACCESS_RECHECK_S=1`
+   (the walk does not wait ten minutes and a half), `check` exits 3 with `Access answered 401`, and `leave` exits 0
+   with `had already revoked`, `hub.json` gone; **a lost 200** — enroll `dc-a-0003`, revoke it by hand with its own
+   credential (`curl -X DELETE …/machine/enrollment`, standing in for a `leave` whose answer never arrived), then,
+   past the grace as above, `sminos hub leave` exits 0 with `had already revoked`. The other kind of refusal, the
+   Worker's `403 not-enrolled` while a token's deletion is still owed, which is a rejection at once whatever the
+   credential's age, is proved by the hub suite with a faulted deletion (M1) and by the CLI suite against its own
+   stand-in (M3); so is a credential Access has not admitted yet (the CLI suite's stand-in answers a freshly minted
+   token 401 for its first requests, then accepts it: `check` exits 4 and `leave` exits 1 inside the grace, the
+   credential kept, and the next `check` exits 0).
 6. **A machine that vanishes is revoked after the key's offline time.** An hour is not walked by hand: the hub
    suite demonstrates it (M1's test, through the test-only path that backdates `seen`). With a key whose
    `offline_revoke_s` is 3600, a machine enrolled and connected, then its stream closed and its `seen` set an hour
@@ -468,10 +503,14 @@ are quoted in Concrete Steps; the behaviour:
 10. **Stop, revoke, reboot, re-enroll unattended.** The boot's rule, walked by hand with `dc-a-0001` enrolled and
     its home intact: (a) `sminos hub check` exits 0 — a reboot skips the enrollment; (b) the hub stopped: `check`
     exits 4 with the connection error on stderr, `hub.json` kept, `show` still exits 0 — a reboot keeps the
-    credential and goes on, the daemon retrying; (c) the hub back and `dc-a-0001` removed (from the web, or by the
-    sweep as item 6's suite shows): `check` exits 3 with `Access answered 401`, then `printf %s "$CODE" | sminos hub
-    enroll --name dc-a-0001 --replace` exits 0, the machine is listed again under the key (`uses` one more), its new
-    credential's `check` exits 0, and `hub.json` holds the new client id — no human step anywhere in (a)–(c).
+    credential and goes on, the daemon retrying, and the boot runs `check` again later; (c) revoked while down, then
+    an outage at the check: with the hub back, `dc-a-0001` removed (from the web, or by the sweep as item 6's suite
+    shows) and its `hub.json` past the grace (`enrolled` 700 s back, `SMINOS_ACCESS_RECHECK_S=1`), the hub stopped
+    again: `check` exits 4 (the connection error), `hub.json` kept; the hub started again, the same home, no reboot:
+    `check` exits 3 with `Access answered 401`, then `printf %s "$CODE" | sminos hub enroll --name dc-a-0001
+    --replace` exits 0, the machine is listed again under the key (`uses` one more), its new credential's `check`
+    exits 0, and `hub.json` holds the new client id — no human step anywhere in (a)–(c), the boot's retry of exit 4
+    being the only loop.
 11. **A revoke-and-replace between resolve and leave touches nothing but the caller.** The hub suite (M1) holds
     the Worker between resolving `dc-x`'s credential and the Registry's revocation, revokes `dc-x` as an admin and
     enrolls another machine as `dc-x` meanwhile, then releases: the first machine's `leave` answers `200 {revoked:
@@ -596,7 +635,9 @@ authenticated answer, `USAGE`, `cmd_hub`); the skill's `SKILL.md`/`references/se
 time, `check` and the boot's rule, `leave`, one paragraph each); `sminos/tests/hub_standin.py` (keys: a configured key
 with prefix, cap, revoked/expired flags; `GET` and `DELETE /machine/enrollment`; the two refusals of a dead credential
 — a token it deleted answered as Access does, 401 with a body naming `Cloudflare Access`, and a knob that answers a
-held token `403 {"error":"not-enrolled"}` as the Worker does in the orphan window; a request log the tests read);
+held token `403 {"error":"not-enrolled"}` as the Worker does in the orphan window; a knob that answers a token it
+holds with Access's 401 for its first N requests, as a token not yet at Access's edge, then admits it; a request log
+the tests read);
 `sminos/tests/test-hub.sh` (the cases below); `sminos/tests/dx7-enroll-codes.gen.mjs` and `dx7-enroll-codes.json`
 (regenerated; the header's MAWS commit updated); `sminos/tests/enroll_parity.py` (its adapter and its "both kinds"
 check, below); `.version-bump.json`'s sminos files through `scripts/bump-version.sh --plugin sminos`.
@@ -612,7 +653,10 @@ its own — so `enroll_parity.py`'s adapter (`verdict`) compares `str(e)` whole 
 code: ` itself, and its "both kinds" check asserts one decoded case of kind `enroll` and one of kind `provision`
 (not merely a decoded and a refused case). `check` and `leave` share one reading of an authenticated answer
 (`accepted` / `rejected` with which refusal / `other` with what came), the rule of §6, over `uplink.connection` and
-the credential reader rather than a second HTTP client; `leave` on `200` or `rejected` ends in `os.remove(hub.json)`
+the credential reader rather than a second HTTP client; the reading owns the grace (`ACCESS_GRACE_S = 600`, against
+`hub.json`'s `enrolled`) and the one recheck (`ACCESS_RECHECK_S = 90`, `SMINOS_ACCESS_RECHECK_S` overriding it), so
+`check` and `leave` cannot differ on what a 401 means, and a `hub.json` whose `enrolled` is missing or unreadable is
+treated as inside the grace (a 401 then decides nothing); `leave` on `200` or `rejected` ends in `os.remove(hub.json)`
 followed by `sminos.forget_caches()`, on `other` leaves the file; `check` never touches the file. The generator imports
 `decodeCode` for verdicts and `encodeProvisioningCode` for the positive provisioning cases,
 and its negative cases mirror the one-time code's (another prefix, no prefix field, an empty prefix, a prefix that is
@@ -629,13 +673,20 @@ half of 9. Its tests pin (in `test-hub.sh` against `hub_standin.py`): a provisio
 enrolls and `hub.json` is 0600 with no secret in any output; without `--name`, the host name is used when under the
 prefix, else exit 2 with no request in the stand-in's log; each hub refusal's exit code and its stderr line;
 `name-taken` exits 3; a one-time code still enrolls; `check` — 0 on a `200` naming the stored org and machine, 3 on
-the stand-in's 401 with the mark and 3 on `403 not-enrolled` (each named on stderr), 4 on a dead port, on a 5xx, on a
-401 without the mark and on a `200` naming another machine, 1 with no `hub.json`, and the file byte-identical after
-every one; `leave` — `200` removes the file and exits 0, the 401 with the mark and the `403 not-enrolled` each remove
-it and say `had already revoked`, a dead port and a 5xx keep it and exit 1, a second `leave` exits 0 with `not
-enrolled`; `enroll --replace` under the same name after a rejection, with the same piped code, enrolls anew; `show`'s
-exit codes; the enroll-parity run exits 0 with every line `ok`, and the vectors file holding a decoded case of each
-kind and refused cases of each.
+`403 not-enrolled` whatever the credential's age, 3 on the stand-in's 401 with the mark past the grace when the
+recheck answers it again (two requests in the log), 0 when past the grace the recheck is admitted, 4 on the marked
+401 inside the grace (one request, no recheck), 4 on a dead port, on a 5xx, on a 401 without the mark and on a `200`
+naming another machine, 1 with no `hub.json`, and the file byte-identical after every one; `leave` — `200` removes
+the file and exits 0, the marked 401 past the grace and its recheck and the `403 not-enrolled` each remove it and say
+`had already revoked`, the marked 401 inside the grace, a dead port and a 5xx keep it and exit 1, a second `leave`
+exits 0 with `not enrolled`; **a token not yet at Access's edge** (the stand-in's knob: 401 with the mark for its first
+requests, then admitted), freshly enrolled: `check` exits 4 and `leave` exits 1, the file byte-identical, then `check`
+exits 0 and `leave` exits 0 with `left the hub`; **an outage at the boot's check**: a credential the stand-in revoked,
+past the grace, `check` against the stand-in stopped exits 4, the stand-in restarted on the same port and state,
+`check` exits 3, and `enroll --replace` with the same piped code enrolls anew and its `check` exits 0, all in one
+home; `enroll --replace` under the same name after a rejection, with the same piped code, enrolls anew; `show`'s exit
+codes; the enroll-parity run exits 0 with every line `ok`, and the vectors file holding a decoded case of each kind
+and refused cases of each.
 
 ### M4 — Acceptance across both repositories
 
@@ -704,16 +755,23 @@ through the Access stand-in (production's answer, from M1):
     # {"revoked":"dc-a-0003"}
     curl -si -X DELETE http://127.0.0.1:8747/machine/enrollment -H 'CF-Access-Client-Id: <client_id>' -H 'CF-Access-Client-Secret: <client_secret>' | head -c 300
     # HTTP/1.1 401 … content-type: text/html … Cloudflare Access …   — the stand-in no longer holds the token, as Access would not
+    $S hub check; echo "exit $?"                     # sminos: … Access answered 401 to a credential enrolled <n> s ago, which may not have reached Access's edge yet / exit 4   (inside the grace; hub.json kept)
+    $S hub leave; echo "exit $?"                     # the same reason / exit 1   (hub.json kept)
+    # past the grace, without waiting ten minutes: enrolled written 700 s back, the recheck a second after the first 401
+    python3 -c 'import json,os,sys,datetime as d; p=os.path.join(os.environ["SMINOS_HOME"],"daemon","hub.json"); j=json.load(open(p)); j["enrolled"]=(d.datetime.now(d.timezone.utc)-d.timedelta(seconds=700)).strftime("%Y-%m-%dT%H:%M:%SZ"); open(p,"w").write(json.dumps(j)); os.chmod(p,0o600)'
+    export SMINOS_ACCESS_RECHECK_S=1
     $S hub check; echo "exit $?"                     # sminos: the hub no longer accepts this machine's credential: Access answered 401 / exit 3   (hub.json kept)
     $S hub leave; echo "exit $?"                     # the hub had already revoked dc-a-0003; the stale credential is removed / exit 0
 
-The reboot rule by hand (acceptance 10), in `dc-a-0001`'s home after it is removed from the web:
+The reboot rule by hand (acceptance 10), in `dc-a-0001`'s home after it is removed from the web, its `enrolled`
+written 700 s back as above and `SMINOS_ACCESS_RECHECK_S=1`:
 
+    # with the local hub stopped (revoked while the VM was down, and the hub unreachable at the boot's check):
+    $S hub check; echo "exit $?"                     # sminos: the hub did not answer: [Errno 61] Connection refused / exit 4   (hub.json kept; show still exits 0)
+    # the local hub started again; the same home, no reboot — the boot's retry of exit 4:
     $S hub check; echo "exit $?"                     # … Access answered 401 / exit 3
     printf %s "$CODE" | $S hub enroll --name dc-a-0001 --replace; echo "exit $?"   # enrolled this machine as dc-a-0001 … / exit 0
     $S hub check; echo "exit $?"                     # … accepted / exit 0
-    # with the local hub stopped:
-    $S hub check; echo "exit $?"                     # sminos: the hub did not answer: [Errno 61] Connection refused / exit 4   (hub.json kept; show still exits 0)
 
 The vectors (M3), from the doperpowers worktree, over the MAWS commit that closed M1; the proof keeps Python's exit
 status (a pipe into `grep -c` would hide a failure):
@@ -853,20 +911,27 @@ export const BOOT_COMMAND = (prefix: string) => `printf %s "$CODE" | sminos hub 
   before any request), or no code; already enrolled without `--replace` stays **1** as today.
 - `sminos hub show` — today's text, local only; exit **0** a credential is held here, **1** none.
 - **Reading an authenticated answer** (shared by `check` and `leave`): *accepted* — `200` with a JSON object naming
-  the stored `org` and `machine`; *rejected* — **401 whose body contains `Cloudflare Access`** (Access's denial) or
-  **`403` whose JSON `error` is `not-enrolled`** (the Worker's); *other* — everything else (no answer, a connection or
-  TLS error, a 5xx, a redirect, a 404, a 403 of another error, a 401 without the mark, a 200 that is not the record),
-  reported as what it was. A request goes out once; nothing is retried.
+  the stored `org` and `machine`; *rejected* — **`403` whose JSON `error` is `not-enrolled`** (the Worker's), at
+  once; or a **401 whose body contains `Cloudflare Access`** (Access's denial) when the credential is past the
+  propagation grace (`ACCESS_GRACE_S` = 600 s after `hub.json`'s `enrolled`) **and** the same request, sent once more
+  `ACCESS_RECHECK_S` = 90 s later (`SMINOS_ACCESS_RECHECK_S` overriding it), is answered the marked 401 again (the
+  recheck's answer is read by the same rule, without a further recheck); *other* — everything else (no answer, a
+  connection or TLS error, a 5xx, a redirect, a 404, a 403 of another error, a 401 without the mark, a marked 401
+  inside the grace or a missing/unreadable `enrolled`, a 200 that is not the record), reported as what it was. The
+  recheck is the only repeat; nothing else is retried.
 - `sminos hub check` — `GET /machine/enrollment`; never writes. Exit **0** accepted (stdout `enrolled as <name> at
   <hub> (org <org>): accepted`); **1** not enrolled here (stdout `this machine is not enrolled at a hub`); **3**
   rejected (stderr `sminos: the hub no longer accepts this machine's credential: Access answered 401` or `…: the hub
-  answered not-enrolled`); **4** other (stderr `sminos: the hub did not answer: <error>` or `sminos: the hub answered
-  <status> <body>`; credential kept); **2** usage.
+  answered not-enrolled`); **4** other — undecided, ask again later (stderr `sminos: the hub did not answer: <error>`,
+  `sminos: the hub answered <status> <body>`, or `sminos: Access answered 401 to a credential enrolled <n> s ago,
+  which may not have reached Access's edge yet`; credential kept); **2** usage. At most 30 s on a dead hub; up to
+  about 150 s (two requests and the recheck's wait) when Access refuses a credential past the grace.
 - `sminos hub leave` — `DELETE /machine/enrollment`. Exit **0**: left now (`left the hub as <name>`), or rejected —
   the hub had already revoked it, or an earlier `leave`'s `200` was lost (`the hub had already revoked <name>; the
   stale credential is removed`), or not enrolled here (`this machine is not enrolled at a hub: nothing to leave`); in
   the first two `daemon/hub.json` is removed and the daemon stops its uplink within a second on its own. Exit **1**:
-  other; the credential is kept, the reason on stderr, retry later. Exit **2**: usage.
+  other (a marked 401 inside the grace among it); the credential is kept, the reason on stderr, retry later. Exit
+  **2**: usage.
 
 ### What the boot consumes (pinned for the devcloud session's spec)
 
@@ -875,14 +940,20 @@ export const BOOT_COMMAND = (prefix: string) => `printf %s "$CODE" | sminos hub 
   shell, with `$DEVCLOUD_NAME` = `dc-<label>-<4 hex>` (e.g. `dc-build-7f3a`) under a key whose prefix is `dc-`. The
   boot keeps nothing of the secret on the host: stdin (or the hidden prompt) is the CLI's only intake, and the only
   file enrollment leaves is `daemon/hub.json` (0600), the machine's own credential.
-- **Every boot, before step 11:** `sminos hub check` (one request, nothing written, at most 30 s on a dead hub):
+- **Every boot, before step 11:** `sminos hub check` (nothing written; at most 30 s on a dead hub, about 150 s when
+  Access refuses a credential past the grace, since that 401 is confirmed by a second request 90 s later):
   - exit **0** — enrolled and accepted: skip the enrollment;
   - exit **1** — not enrolled here: `printf %s "$CODE" | sminos hub enroll --name "$DEVCLOUD_NAME"`;
   - exit **3** — the credential is present but rejected (revoked by an admin, by the offline sweep, or by an earlier
     `leave` whose answer was lost): `printf %s "$CODE" | sminos hub enroll --name "$DEVCLOUD_NAME" --replace`, the
     same key and the same name (the revocation freed it; this counts as a new use);
-  - exit **4** — the hub could not be asked (unreachable, a 5xx, an answer that is neither): keep the credential and
-    go on; the daemon's uplink retries with backoff. Do not re-enroll on 4: a hub outage is not a revocation.
+  - exit **4** — **undecided**: the hub could not be asked (unreachable, a 5xx, an answer that is neither), or Access
+    refused a credential still inside its propagation grace (enrolled less than 600 s ago). Keep the credential; the
+    boot may go on to start the daemon meanwhile, but it **owns the open decision**: run `sminos hub check` again
+    later, with backoff, until it answers 0, 1 or 3, then act on that answer as above. Never re-enroll or remove
+    anything on 4: an outage, or a credential still reaching Access's edge, is not a revocation; and never stop
+    asking, since a VM revoked while it was stopped that booted into a brief hub outage learns it only from a later
+    check — its daemon cannot re-enroll, never holding the key.
   - (`sminos hub show`, exit 0/1, says only whether a credential file is held; it asks the hub nothing.)
 - **Exit codes of `hub enroll`:** 0 enrolled; 3 `name-taken` (pick another suffix and run again, same code); 1 any
   other refusal or no answer (stderr has the hub's reason in one `sminos: ` line; `key-revoked`, `key-expired`,
@@ -890,8 +961,9 @@ export const BOOT_COMMAND = (prefix: string) => `printf %s "$CODE" | sminos hub 
   enrolled" without `--replace` is 1 too, which the `check` above avoids); 2 a mistake in the invocation, including a
   name not under the prefix.
 - **`sminos hub leave`:** run over SSH before the server is deleted; exit 0 means the machine is no longer enrolled
-  (left now, already revoked — Access's 401 or the hub's `not-enrolled` — or never was) and `hub.json` is gone; exit
-  1 means the hub could not be told (unreachable or a 5xx; the credential stays, the offline sweep covers it).
+  (left now, already revoked — the hub's `not-enrolled`, or Access's 401 past the grace and held on its recheck — or
+  never was) and `hub.json` is gone; exit 1 means the hub could not be told (unreachable, a 5xx, or Access's 401
+  inside the first 600 s after enrolling; the credential stays, a retry or the offline sweep covers it).
 - **Offline auto-revoke:** per key, `offline_revoke_s`, null = never, 3600 to 2 592 000; the hub revokes a machine of
   the key once it has been offline that long (the hub's view: no project reports a fresh lease of its credential).
   After it, the VM's `sminos hub show` still exits 0 (its `hub.json` is stale), `sminos hub check` exits 3, and its
@@ -984,6 +1056,29 @@ protocol`'s new exports. sminos: stdlib Python as today. The vectors' generator:
   0 or 1 on the credential file alone; `hub leave` removes `hub.json` (the `former` edge accepted); a revoked key's
   `offline_revoke_s` goes on applying to the machines it enrolled.
   Date/Author: 2026-10-21, the orchestrator; recorded by the spec's author.
+- Decision: The fix wave's re-review (2026-10-21), two findings, both accepted and ruled by the orchestrator; numbers
+  and placement chosen by the executing session (the plan-executor) and recorded here:
+  1. **[P1] A single Access 401 does not mean revoked.** Access answers a freshly minted, valid token 401 until it
+     reaches the edge (the deploy probe's A3 allows 60 s), so a quick check or `leave` after enrolling would have read
+     a good credential as rejected — `check` exit 3, then `--replace` spending a key use or meeting `name-taken`, or
+     `leave` deleting a live credential and revoking nothing. Now a marked 401 is a rejection only past a
+     **propagation grace of 600 s** after `hub.json`'s `enrolled` (ten times the probe's bound) **and** when it holds on
+     **one recheck 90 s later** (one and a half times the bound, so a clock that jumped at boot and made `enrolled` read
+     old still leaves the whole window). Inside the grace it is indeterminate: `check` 4, `leave` 1, the credential
+     kept. The Worker's `403 not-enrolled` stays a rejection at once. `SMINOS_ACCESS_RECHECK_S` overrides the recheck's
+     interval for tests and the acceptance walk; the grace has no override (tests write an older `enrolled`). The
+     propagating-token case lives in doperpowers' `hub_standin.py` (a knob: 401 for a held token's first requests, then
+     admitted), where the CLI tests prove `check` and `leave` keep it; MAWS's local stand-in is not given the case
+     (M1's scope unchanged), and the M4 walk shows the in-grace reading on a revoked credential instead.
+     Rejected: retrying the 401 for the whole 60 s inside one call (a `leave` over SSH would hang a minute on every
+     revoked machine, and a reboot within the minute would still misread it without the grace).
+  2. **[P2] Exit 4 must not end recovery.** A VM revoked while stopped that boots into a brief hub outage checks 4,
+     and nothing would check again: its daemon never holds the key and cannot re-enroll. The boot owns the open
+     decision: exit 4 means "undecided — run `hub check` again later, with backoff, until it answers 0, 1 or 3, then
+     act" ("What the boot consumes"); 4 itself stays non-destructive. The CLI half is proved in M3 (an outage at the
+     check: 4 with the stand-in down, 3 once it is back, `--replace` through, in one home) and in M4's walk
+     (acceptance 10 (c)). The boot's retry loop is devcloud's; the orchestrator tells that session.
+  Date/Author: 2026-10-21, the orchestrator (rulings); recorded by the executing session.
 
 ## Outcomes & Retrospective
 
