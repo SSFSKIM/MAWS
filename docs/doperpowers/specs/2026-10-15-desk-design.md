@@ -6244,6 +6244,23 @@ a hub that connects into machines (§2).
   MAWS can host sessions as the desktop app does.
   Date/Author: 2026-10-19, the owner (relayed by the RC research session, `2-1-300-19`); folded by the design session
   2026-10-20.
+- Decision: DX7 gains a child, **provisioning keys**
+  (`docs/doperpowers/specs/2026-10-21-desk-provisioning-keys-design.md`, standalone, with its own execution section).
+  A machine joins the desk today only through a one-time code an admin carries by hand, live an hour at most; the
+  owner's automated VM provisioning (devcloud, boot step 11) needs a credential that can wait in Secret Manager and
+  enroll each new VM at boot with no human. The child adds a reusable, revocable **provisioning key** (a name
+  prefix, an expiry, an optional cap on uses, an optional offline auto-revoke), whose code `smns-provision-v1.` an
+  admin's browser builds around the key's secret and the org key as it builds a one-time code; its secret is
+  redeemed at the same unguarded path, `POST /machine/enroll`, and becomes an ordinary pending enrollment, so DX7's
+  confirmation, expiry, rotation, orphan and revocation machinery carry over unchanged; a machine can end its own
+  enrollment (`DELETE /machine/enrollment`, `sminos hub leave`); and the Registry revokes a key's machine once it has
+  been offline for the key's time, through the revocation path an admin's removal uses. Storage: one new table and an
+  `enrollments.key` column, through `CREATE TABLE IF NOT EXISTS` and `ADDED_COLUMNS` (approved). The copy of the org
+  key this puts in Secret Manager is readable by a project owner of that GCP project, the same class as every enrolled
+  machine's `hub.json` (the child's §7). Rejected there: a second redemption path (an Access policy edit at deploy for
+  the same lookup), `smns-enroll-v1.` with a flag (an older sminos would read `machine` for a meaning it lacks), and a
+  browserless admin revoke (a member credential outside Access; deferred with its future shape).
+  Date/Author: 2026-10-21, the owner (design approved) and the spec's author.
 
 ## Outcomes & Retrospective
 
