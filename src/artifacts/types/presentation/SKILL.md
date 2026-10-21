@@ -39,7 +39,7 @@ A publish or read answer may carry two more fields:
 ## Assets and faces
 
 - **Pictures** are uploaded files. Call `artifact_upload_asset` with the file (under the working directory), then use the `ref` it returns, `assets/<name>`, as the `src`. A URL or a `data:` URI holds the slide. Claude's `/_blob/<id>` and `project/ds/<folder>/<file>` are kept but draw as placeholders until you upload the file and use its `assets/` ref. A picture whose asset is missing draws as a placeholder and is named in `warnings`.
-- **Faces**: prefer the design system's (`var(--ds-font-display)`, `var(--ds-font-body)`). A face of your own goes in `deck.json`'s `faces`, at most four. An uploaded font file is `{"family", "src": "assets/<name>"}`. A Google Fonts `href` is named but never fetched, so it draws only when the Mac has the face installed, else as its generic. Upload the font file when the face matters.
+- **Faces**: prefer the design system's (`var(--ds-font-display)`, `var(--ds-font-body)`). A face of your own goes in `deck.json`'s `faces`, at most four. An uploaded font file is `{"family", "src": "assets/<name>"}`. A Google Fonts face is `{"family", "href"}` with a link naming that family alone, such as `https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;1,400` (no `text=`). MAWS fetches it once into the deck's assets when its licence is OFL, and it then draws offline in the editor, the show and every export. A face under another licence (Roboto Slab is Apache-2.0) is refused by name and draws as its fallback: upload its font file instead. The publish does not wait for the fetch; `warnings` names a face not saved yet, or refused. MAWS records the fetch in the face's `google` key: leave it alone (one you send is ignored).
 
 ## Comments
 
