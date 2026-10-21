@@ -9,7 +9,7 @@ import { appWindows, registerAppWindow } from './windows'; // E2
 import { recordImeTrace } from './ime-trace'; // P2-F S ime-trace, temporary
 import { showAppWindow } from './window-show';
 // E2 start
-import { attributeConsole, guardFrames, isCspExempt } from './artifacts/policies';
+import { attributeConsole, guardFrames, guardWindowNavigation, isCspExempt } from './artifacts/policies';
 import { emit } from './ipc/events';
 // E2 end
 import type { ResolvedTheme } from './settings/store';
@@ -89,7 +89,8 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
   // E2 end
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  // refused, and on the seam log as a frame's; the dev server's page may reload itself (P4 W2-C)
+  guardWindowNavigation(win.webContents, process.env, { reloads: devServerUrl !== null });
   win.once('ready-to-show', () => {
     if (placement?.maximized) win.maximize(); // C5
     showAppWindow(win, process.env); // quiet under MAWS_E2E unless MAWS_E2E_QUIET=0 (owner's rulings 2026-10-06, 2026-10-10)
