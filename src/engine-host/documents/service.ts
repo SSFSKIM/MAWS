@@ -26,7 +26,8 @@
 //
 // Memory (Decision Log 29b; parent Decision Log 37). A document nobody holds (no renderer and no agent replica attached)
 // stays loaded for `IDLE_UNLOAD_MS` after its last connection closes or its last committed write, so a window reopened
-// within that time gets the same doc without a reload; then it is unloaded. Shutdown unloads at once.
+// within that time gets the same doc without a reload; then it is unloaded. Shutdown unloads at once. A session's host
+// replicas go at the session's end (`closeSession`), not with the doc, which a window may hold open all day.
 //
 // The artifact store (store.ts, M3) writes its own rows (entities, versions, ops) through `inBatch` and a write's
 // `inFrame`, inside the same batch, so they too commit before anything reveals them.
@@ -411,11 +412,7 @@ export class DocumentService {
       return result;
     } finally {
       replica.reading = false;
-      if (replica.editedWhileReading) {
-        replica.off();
-        replica.doc.destroy();
-        if (hostDoc.replicas.get(replica.key) === replica) hostDoc.replicas.delete(replica.key);
-      }
+      if (replica.editedWhileReading) this.dropReplica(hostDoc, replica);
     }
   }
 
@@ -549,12 +546,22 @@ export class DocumentService {
     return replica;
   }
 
-  // At the session's end (Decision Log 9): nothing is lost, every write already waited for its durable ack.
+  // At the session's end (Decision Log 9; its process exited, session-maws.ts): nothing is lost, every write already
+  // waited for its durable ack. Its agent replicas close, and its host replicas leave every loaded doc, main and
+  // suggestion docs alike. Nothing of the session's tool state outlives its process, and a document open in a window
+  // never unloads, so a host replica kept to the unload would be a whole mirror of the doc, taking every later update,
+  // for each session that ever read or wrote it (P4-R6: about 7.7 MB of host heap apiece on the 200-page seed). A later
+  // process of the same session gets a fresh one at its first read or write, under its bound clientID, as after an unload.
   closeSession(appSessionId: AppSessionId): void {
     for (const [key, replica] of this.agentReplicas) {
       if (!key.startsWith(`${appSessionId}\u0000`)) continue;
       replica.close();
       this.agentReplicas.delete(key);
+    }
+    const key = actorKey({ kind: 'session', appSessionId });
+    for (const hostDoc of this.docs.values()) {
+      const replica = hostDoc.replicas.get(key);
+      if (replica) this.dropReplica(hostDoc, replica);
     }
   }
 
@@ -918,6 +925,14 @@ export class DocumentService {
     };
     hostDoc.replicas.set(key, replica);
     return replica;
+  }
+
+  // A host replica torn down before its doc unloads (a refused read's, a closed session's): the actor's next use makes a
+  // fresh one from the live doc.
+  private dropReplica(hostDoc: HostDoc, replica: HostReplica): void {
+    replica.off();
+    replica.doc.destroy();
+    if (hostDoc.replicas.get(replica.key) === replica) hostDoc.replicas.delete(replica.key);
   }
 
   // Inside the live doc's transaction cleanup: the row joins the open batch; what reveals it waits for the commit.

@@ -5,7 +5,8 @@
 //   session as actor, which records the tool's op in the write's own savepoint, A's Decision Log 26c). A read reaches
 //   the same replica through A's `readAs` (`onSessionReplica`), so it warms the block index the
 //   writer plans with: the range it renders at once, every other block in slices off the host's loop (`warmInSlices`).
-//   The replica lives as long as the document is loaded, which A keeps while the session's agent replica is attached.
+//   The replica lives until the document unloads (A keeps it loaded while the session's agent replica is attached) or
+//   the session's process ends (A's `closeSession` drops it, and the session's views go with its tool state).
 // - A session's views (`DocumentViews`): for each revision the session has seen of a replica (a read, its own write,
 //   a refusal that showed it the targets' current text), the block index's epoch then and the block ids then. A batch's
 //   `baseRevision` maps to the latest view at or before it: the epoch the writer validates targets against, the ids a
@@ -85,7 +86,7 @@ export function warmInSlices(doc: Doc, sliceMs = WARM_SLICE_MS): void {
     try {
       done = timed('warm', () => DocIndex.of(doc).warm(() => performance.now() >= until)); // P4-R6: timed
     } catch {
-      // the replica was dropped (the document unloaded or evicted): nothing left to warm
+      // the replica was dropped (the document unloaded or evicted, or its session closed): nothing left to warm
     }
     if (done) warming.delete(doc);
     else setImmediate(step);

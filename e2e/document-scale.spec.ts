@@ -788,7 +788,10 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
 // Each round is a fresh session's 200-block read (its replica made, as perf-agent-1's first read makes it) and at once
 // its five-op first batch, on the 200-page document open in two windows, then the session's end and a pause of 1.5 to
 // 3 s. Every round's loop max, wall and background (what shared the call's loop: CallBackground in
-// support/document-scale.ts) is kept in test-results/document-scale-repeat.json; the rows are recorded, with no bound.
+// support/document-scale.ts) is kept in test-results/document-scale-repeat.json, written after each round so a run
+// that stops keeps what it measured; the rows are recorded, with no bound. A round whose batch is refused (a long run's
+// edits can leave the fifth op's unscoped quote matching several blocks) is kept with its refusal and left out of the
+// rows; more than a tenth of the rounds refused means the fixture is broken, and fails the test.
 const REPEAT = Number(process.env.MAWS_DOCUMENT_REPEAT ?? 0);
 const REPEAT_RESULTS = join(REPO_ROOT, 'test-results', 'document-scale-repeat.json');
 
@@ -804,23 +807,28 @@ test('5r: the first batch after a read, repeated in one launch (MAWS_DOCUMENT_RE
   await pageB.waitForLoadState('domcontentloaded');
   await openTimed(pageB, id, 'Scale 200', large.stats.topBlocks - 20);
   const sections = [...Array(SECTIONS).keys()].filter((s) => !KEPT_CLEAR(s) && s % 2 === 0); // perf-agent-1's (agentsFor)
-  const rounds: Array<{ round: number; max: number; wallMs: number; readMax: number; load: number; background?: CallBackground }> = [];
+  type Round = { round: number; max: number; wallMs: number; readMax: number; load: number; background?: CallBackground; refused?: string };
+  const rounds: Round[] = [];
   for (let round = 1; round <= REPEAT; round++) {
     await sleep(1_500 + Math.random() * 1_500);
     const agent = new Agent(`perf-repeat-${round}`, sections, prng(100 + round));
     const read = await readFirst(seam, agent, id);
     const { ops } = agent.firstBatch();
     const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
-    expect(answer.isError, answer.text).toBe(false);
-    rounds.push({ round, max: +answer.loop.max.toFixed(2), wallMs: +answer.wallMs.toFixed(1), readMax: +read.loop.max.toFixed(2), load: load1(), background: answer.background });
+    rounds.push({ round, max: +answer.loop.max.toFixed(2), wallMs: +answer.wallMs.toFixed(1), readMax: +read.loop.max.toFixed(2), load: load1(), background: answer.background, ...(answer.isError ? { refused: answer.text } : {}) });
+    rows.write({ repeat: rounds });
     await seam.release(agent.session);
   }
-  const maxes = stats(rounds.map((r) => r.max));
-  const slowest = rounds.reduce((a, b) => (b.max > a.max ? b : a));
-  const over = rounds.filter((r) => r.max > 50);
-  rows.add('5r p50', `the first batch after a read, ${REPEAT} rounds in one launch: host loop max over the call, p50`, maxes.p50, 'ms', null, 'recorded');
+  const applied = rounds.filter((r) => r.refused === undefined);
+  const refused = rounds.filter((r) => r.refused !== undefined);
+  const maxes = stats(applied.map((r) => r.max));
+  const slowest = applied.reduce<Round | null>((a, b) => (a === null || b.max > a.max ? b : a), null);
+  const over = applied.filter((r) => r.max > 50);
+  rows.add('5r p50', `the first batch after a read, ${applied.length} applied of ${REPEAT} rounds in one launch: host loop max over the call, p50`, maxes.p50, 'ms', null, 'recorded');
   rows.add('5r p95', 'the first batch after a read, repeated: p95', maxes.p95, 'ms', null, 'recorded');
-  rows.add('5r max', 'the first batch after a read, repeated: max (its record beside it)', maxes.max, 'ms', null, 'recorded', `round ${slowest.round}, wall ${slowest.wallMs} ms`, slowest.background);
+  rows.add('5r max', 'the first batch after a read, repeated: max (its record beside it)', maxes.max, 'ms', null, 'recorded', slowest ? `round ${slowest.round}, wall ${slowest.wallMs} ms` : undefined, slowest?.background);
   rows.add('5r over 50', 'the first batch after a read, repeated: rounds over row 5’s 50 ms', over.length, 'rounds', null, 'recorded', over.map((r) => `round ${r.round} ${r.max} ms`).join('; ') || undefined);
+  rows.add('5r refused', 'the first batch after a read, repeated: rounds whose batch was refused, left out of the rows above (the test fails past a tenth)', refused.length, 'rounds', null, 'recorded', refused.length > 0 ? `rounds ${refused.map((r) => r.round).join(', ')} (each refusal in repeat)` : undefined);
   rows.write({ repeat: rounds });
+  expect(refused.length, `${refused.length} of ${REPEAT} rounds refused, the first: ${refused[0]?.refused}`).toBeLessThanOrEqual(REPEAT / 10);
 });
