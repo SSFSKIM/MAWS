@@ -149,6 +149,21 @@ describe('measureDeckPage: the final review', () => {
       );
       const drawn = (id: string) => slide.elements.find((e) => e.id === id)!.drawn !== undefined;
       expect(['lean', 'grp', 'wire', 'member', 'turned'].map(drawn)).toEqual([true, true, true, true, false]);
+      // the review's second finding: the drawn box holds what the element paints past its border box (a shadow 40 px
+      // down, carried by the lean), within the slide; happy-dom lays nothing out, so every box is empty at the corner,
+      // and the slide is given its own 1920 × 1080
+      const box = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        return this.classList.contains('maws-slide') ? ({ left: 0, top: 0, right: 1920, bottom: 1080, width: 1920, height: 1080, x: 0, y: 0 } as DOMRect) : box.call(this);
+      };
+      try {
+        const cast = await measuredSlide('<p id="plain" style="position:absolute; left:0px; top:0px; width:200px; transform:skewX(30deg)">Lean</p><p id="cast" style="position:absolute; left:0px; top:0px; width:200px; box-shadow:0px 40px 0px #0000ff; transform:skewX(30deg)">Lean</p>');
+        const of = (id: string) => cast.elements.find((e) => e.id === id)!.drawn!;
+        expect([of('plain').w, of('plain').h]).toEqual([0, 0]);
+        expect([of('cast').w >= 40, of('cast').h >= 40, of('cast').x, of('cast').y]).toEqual([true, true, 0, 0]);
+      } finally {
+        Element.prototype.getBoundingClientRect = box;
+      }
     } finally {
       globalThis.DOMMatrixReadOnly = Native;
     }

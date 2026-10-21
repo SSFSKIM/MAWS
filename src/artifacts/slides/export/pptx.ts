@@ -72,11 +72,11 @@ export interface PictureJob {
   elementId: string | null;
   /**
    * `slide`: everything; `background`: the section alone; `self`: the element without its content; `tree`: the element
-   * and its content; `drawn` (P4): the element as drawn, its own and its ancestors' transforms kept (a skew), with its
-   * content but the elements measured on their own.
+   * and its content; `drawn` (P4): the element in place as the slide draws it, its own and its ancestors' transforms and
+   * clips kept (a skew), with its content but the elements measured on their own.
    */
   mode: 'slide' | 'background' | 'self' | 'tree' | 'drawn';
-  /** In slide px (the element's box before rotation; the window draws it unrotated); for `drawn`, the box it is drawn in. */
+  /** In slide px (the element's box before rotation; the window draws it unrotated); for `drawn`, the region it paints. */
   box: MeasuredBox;
 }
 
@@ -94,9 +94,10 @@ export function pictureJobs(measured: MeasuredDeck, variant: PptxFontVariant): P
     if (slide.background.image) jobs.push({ key: pictureKey(slide.id, ''), slideId: slide.id, elementId: '', mode: 'background', box: FULL });
     for (const el of slide.elements) {
       const job = (mode: PictureJob['mode'], box = el.box) => jobs.push({ key: pictureKey(slide.id, el.id), slideId: slide.id, elementId: el.id, mode, box });
-      // a skew has no native form (P4): the window's picture of the element as drawn (a group's own, when it paints)
+      // a skew has no native form (P4): the window's picture of the element as drawn (a group's own, when it paints; none
+      // where the slide shows none of it, which keeps its native object)
       if (el.drawn) {
-        if (el.tag !== 'div' || painted(el.paint) || el.paint.image) job('drawn', el.drawn);
+        if (el.drawn.w > 0 && el.drawn.h > 0 && (el.tag !== 'div' || painted(el.paint) || el.paint.image)) job('drawn', el.drawn);
       }
       // a turned table has no native form (a PowerPoint table does not turn): the window's picture of it (A11)
       else if (el.tag === 'x-embed' || el.tag === 'svg' || el.tag === 'x-icon' || (el.tag === 'table' && el.rotate !== 0)) job('tree');

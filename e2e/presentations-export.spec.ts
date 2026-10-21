@@ -406,6 +406,8 @@ const SKEWED = (): Record<string, string> => ({
 <div id="lean" style="position:absolute; left:200px; top:200px; width:200px; height:100px; background:#00ff00; transform:skewX(30deg)"></div>
 <div id="tilt" data-group="" style="position:absolute; left:800px; top:200px; width:300px; height:200px; transform:skewY(20deg)"><x-connector id="wire" x1="0" y1="100" x2="300" y2="100"></x-connector><p id="word" style="position:absolute; left:20px; top:20px; font-size:28px">Lean</p></div>
 <div id="plain" style="position:absolute; left:200px; top:600px; width:200px; height:100px; background:#00ff00; transform:rotate(30deg)"></div>
+<div id="cast" style="position:absolute; left:1300px; top:150px; width:200px; height:100px; background:#00ff00; box-shadow:0 40px 0 #0000ff; transform:skewX(30deg)"></div>
+<div id="wrap" style="width:500px"><div id="pin" style="position:absolute; left:50%; top:800px; width:200px; height:100px; background:#ff8800; transform:skewX(30deg)"></div></div>
 </section>`,
 });
 
@@ -418,7 +420,7 @@ test('a skewed element and a skewed group’s members export as pictures of them
   const xml = await slideXml(zip, 1);
   const part = (name: string) => xml.split(/(?=<p:(?:sp|pic)>)/).find((p) => p.includes(`name="${name}"`));
   // the skewed box, the group's connector and its text: pictures; the turned box its native shape; the unpainted group nothing
-  expect(['lean', 'wire', 'word', 'plain', 'tilt'].map((name) => /^<p:(sp|pic)>/.exec(part(name) ?? '')?.[1] ?? null)).toEqual(['pic', 'pic', 'pic', 'sp', null]);
+  expect(['lean', 'wire', 'word', 'plain', 'tilt', 'cast', 'pin', 'wrap'].map((name) => /^<p:(sp|pic)>/.exec(part(name) ?? '')?.[1] ?? null)).toEqual(['pic', 'pic', 'pic', 'sp', null, 'pic', 'pic', null]);
   expect(part('plain')).toContain('rot="1800000"');
   expect(part('lean')).not.toMatch(/ rot="/);
   // at the box skewX(30deg) draws the 200 × 100 box in: 200 + 100·tan 30° ≈ 257.7 px across, from 300 − 128.9 ≈ 171.1
@@ -427,16 +429,35 @@ test('a skewed element and a skewed group’s members export as pictures of them
   // its picture leans: its top-left and bottom-right corners green, the other two see-through (an unskewed box's picture
   // would be green to all four)
   const rels = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('string');
-  const rId = /<a:blip r:embed="(rId\d+)"/.exec(part('lean')!)![1];
-  const target = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels)![1]!;
-  const picture = Buffer.from(await zip.file(`ppt/media/${target}`)!.async('uint8array'));
-  const [pw, ph] = pngSize(picture) as [number, number];
+  const pictureOf = async (name: string) => {
+    const rId = /<a:blip r:embed="(rId\d+)"/.exec(part(name)!)![1];
+    const target = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels)![1]!;
+    const png = Buffer.from(await zip.file(`ppt/media/${target}`)!.async('uint8array'));
+    return { png, size: pngSize(png) as [number, number] };
+  };
+  const lean = await pictureOf('lean');
+  const [pw, ph] = lean.size;
   expect(pw).toBeGreaterThanOrEqual(255);
   // 8 px in across, 4 px down: each sample at least 5 px from a slanted edge (at 4 px down the edges run 2.3 px in)
-  const [topLeft, topRight, bottomLeft, bottomRight, centre] = await pixelsOf(picture, [[8, 4], [pw - 8, 4], [8, ph - 4], [pw - 8, ph - 4], [pw / 2, ph / 2]]);
+  const [topLeft, topRight, bottomLeft, bottomRight, centre] = await pixelsOf(lean.png, [[8, 4], [pw - 8, 4], [8, ph - 4], [pw - 8, ph - 4], [pw / 2, ph / 2]]);
   const green = ([r, g, b, a]: number[]) => r! < 60 && g! > 200 && b! < 60 && a! > 200;
   const clear = (rgba: number[]) => rgba[3]! < 30;
   expect([green(topLeft!), clear(topRight!), clear(bottomLeft!), green(bottomRight!), green(centre!)]).toEqual([true, true, true, true, true]);
+
+  // the review's findings. A shadow past the border box is in the picture: the region widened by the shadow's 40 px as
+  // the lean carries it (63 px across, 40 down, each side), so 180 px tall, the shadow below the box and leaning with it
+  const cast = await pictureOf('cast');
+  const [cw, ch] = cast.size;
+  expect(ch).toBeGreaterThanOrEqual(170);
+  const [shadow] = await pixelsOf(cast.png, [[cw / 2 + 40, ch / 2 + 70]]);
+  expect([shadow![0]! < 60, shadow![1]! < 60, shadow![2]! > 200, shadow![3]! > 200], 'blue: the shadow below the box').toEqual([true, true, true, true]);
+  // a pinned skewed box in a static flow wrapper is taken where the slide draws it, whole (moving the wrapper would have
+  // made it the box's containing block, laying it out elsewhere)
+  const pin = await pictureOf('pin');
+  expect(offsetOf(xml, 'pin')!.map((n) => Math.round(n / EMU))).toEqual([931, 800, 258, 100]);
+  expect(pin.size[0]).toBeGreaterThanOrEqual(255);
+  const [orange] = await pixelsOf(pin.png, [[pin.size[0] / 2, pin.size[1] / 2]]);
+  expect([orange![0]! > 200, orange![1]! > 100 && orange![1]! < 170, orange![2]! < 60, orange![3]! > 200], 'orange at its centre').toEqual([true, true, true, true]);
 });
 
 // S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load

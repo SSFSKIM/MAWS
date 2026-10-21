@@ -418,4 +418,11 @@ describe('the PPTX mapping: skewed elements', () => {
     // a turn alone: its native box, turned
     expect(named(out, 'turned')).toMatchObject({ kind: 'shape', shape: 'rect', options: { rotate: 30 } });
   });
+
+  it('takes no picture of a skewed element the slide shows none of, which keeps its native object', () => {
+    const off: MeasuredElement = { ...body.elements[0]!, id: 'off', tag: 'div', box: { x: 2000, y: 200, w: 200, h: 100 }, rotate: 0, linear: lean, drawn: { x: 1920, y: 200, w: 0, h: 100 }, paint: fill };
+    const measured = { slides: [{ ...body, elements: [off] }] };
+    expect(pictureJobs(measured, 'named')).toEqual([]);
+    expect(pptxSlides(deck(), measured, { variant: 'named', pictures: new Map(), asset })[0]!.objects).toMatchObject([{ kind: 'shape', name: 'off', options: { x: inches(2000) } }]);
+  });
 });
