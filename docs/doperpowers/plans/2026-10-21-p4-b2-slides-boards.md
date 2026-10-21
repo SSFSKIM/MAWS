@@ -298,6 +298,8 @@ D19: `egress.ts` with its source-guard test, `google-faces.ts` (portable and hos
 5. 2026-10-21: row 231's attribution is re-opened by measurement (D17), and 16 ms is a target, not a promise. Row 182 is re-deferred (D18).
 6. 2026-10-21: the Google Fonts design departs from the ledger's proposed X27 shape (refs, files per style and weight, `href` kept beside the record) and from the repository's TTFs, which are rejected on size (NotoSerifKR's variable TTF is 23.8 MB, over the 16 MB asset limit).
 7. 2026-10-21: the cluster click on a board fits its members. Figma's live check (prior art §1.5 item 10) never ran, and the fit's code exists.
+10. 2026-10-21 (the owner, relayed by the architect after LC-2's Canva half): T10 stays replace, "바꿔 쓰기 유지". It is binding, and `ARMED_TYPING` is `replace`. Canva's result is recorded in the findings: a first click selects with a hidden editable input focused, a printable key is ignored, and Enter and a second click give a caret. The hosts split three ways (PowerPoint and Keynote replace, Slides appends, Canva ignores); the owner chose replace.
+11. 2026-10-21 (the architect, on M7): history crediting the fetched faces to "You" is accepted, because the fetch follows the human's own choice of face; the system actor is a residue row. The three smaller departures are accepted: `google.request` as the canonical identity, `refused` with non-licence reasons, and the For-Claude zip dropping the record. M7's e2e case runs with the presentations group at M0's merge or in the landing set.
 9. 2026-10-21 (the executor, at the plan's adversarial review; doperpowers:adversarial-reviewer, verdict needs-attention, six findings, each taken):
    - (P1) K6's claimants claim by the focused editable surface, never by root containment, and claim nothing read-only or in a preview.
    - (P1) T3 acts on `click`, since pointer events carry no click count, and P12 is read for the already-armed case.
@@ -313,6 +315,7 @@ D19: `egress.ts` with its source-guard test, `google-faces.ts` (portable and hos
 - 2026-10-21 | P4-B2 (deferred) | The deck's threads rail keeps its own card, not X36's ThreadCard (it shares only the drafts map) | this plan D16; ThreadCard.tsx's fixed orphan note | The rail draws ThreadCard with an orphan note and a Show action
 - 2026-10-21 | P4-B3's carry (or the next view-carry change) | Moving a deck between the panel and a main tab drops its reply drafts, as it does for documents (view-carry.ts carries none) | tools/document/view-carry.ts | A move carries the editor's reply drafts
 - 2026-10-21 | The host's egress | No Settings view lists the declared egress rules | this plan D19 | Settings shows the host's egress rules
+- 2026-10-21 | X29 (with P4-B2) | The host's Google Fonts write is credited to the human ("You") in a deck's history, because X29 has no system actor | M7 at e2a582404; the architect's ruling (this plan's Decision Log 11) | X29 gains a host actor and the font write uses it
 
 ## Approval ask (what the architect should see before implementation)
 
