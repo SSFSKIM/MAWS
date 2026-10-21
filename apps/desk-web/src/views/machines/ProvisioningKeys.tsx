@@ -10,6 +10,7 @@ import { HubRequestError } from '../../hub/http';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
 import { buttonDanger, buttonPrimary, buttonQuiet, textInput } from '../common/Dialog';
+import { useDayClock } from '../conversation/StreamView';
 import { explainKeyFailure } from '../key/explain';
 import type { Confirming } from './CodeSteps';
 
@@ -51,6 +52,8 @@ export function KeySection(props: {
   const { me, keys, error, onCreate, onRevoke } = props;
   const keyState = useKeyHolder((s) => s.state);
   const admin = me.member.role === 'admin';
+  // Whether a key has expired, read against the time the section was drawn, as the stream's day labels are.
+  const now = useDayClock();
   return (
     <section className="flex flex-col gap-2 border-t border-border pt-3" data-testid="provisioning-keys" aria-label="Provisioning keys">
       <h3 className="m-0 text-ui font-semibold">Provisioning keys</h3>
@@ -64,7 +67,7 @@ export function KeySection(props: {
       ) : (
         <ul className="m-0 flex list-none flex-col p-0" data-testid="keys">
           {inOrder(keys).map((key) => (
-            <KeyRow key={key.id} provisioningKey={key} admin={admin} onRevoke={() => onRevoke(key)} />
+            <KeyRow key={key.id} provisioningKey={key} admin={admin} now={now} onRevoke={() => onRevoke(key)} />
           ))}
         </ul>
       )}
@@ -82,9 +85,9 @@ export function KeySection(props: {
   );
 }
 
-function KeyRow(props: { provisioningKey: ProvisioningKeyRecord; admin: boolean; onRevoke: () => void }) {
-  const { provisioningKey: key, admin, onRevoke } = props;
-  const when = key.revoked !== null ? `revoked ${day(key.revoked)}` : Date.parse(key.expires) <= Date.now() ? `expired ${day(key.expires)}` : `expires ${day(key.expires)}`;
+function KeyRow(props: { provisioningKey: ProvisioningKeyRecord; admin: boolean; now: number; onRevoke: () => void }) {
+  const { provisioningKey: key, admin, now, onRevoke } = props;
+  const when = key.revoked !== null ? `revoked ${day(key.revoked)}` : Date.parse(key.expires) <= now ? `expired ${day(key.expires)}` : `expires ${day(key.expires)}`;
   return (
     <li className="flex flex-col gap-0.5 border-b border-border py-1.5 text-ui last:border-b-0" data-key={key.id} data-key-label={key.label}>
       <div className="flex flex-wrap items-baseline gap-2">

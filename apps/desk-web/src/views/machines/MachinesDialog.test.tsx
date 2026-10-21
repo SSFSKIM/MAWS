@@ -276,6 +276,16 @@ describe('MachinesDialog: provisioning keys', () => {
     expect(screen.getByRole('dialog').textContent).not.toContain('smns-provision-v1.');
   });
 
+  it('says a key whose time is up expired, and one still enrolling when it expires', async () => {
+    hub.addKey('stale', 'old-', { created: '2025-01-01T00:00:00.000Z', expires: '2025-04-01T00:00:00.000Z' });
+    hub.addKey('fresh', 'new-', { expires: new Date(Date.now() + 86_400_000).toISOString() });
+    const { container } = open();
+    await waitFor(() => expect(keyRow(container, 'stale')).not.toBeNull());
+    expect(keyRow(container, 'stale')!.textContent).toContain('expired');
+    expect(keyRow(container, 'fresh')!.textContent).toContain('expires');
+    expect(keyRow(container, 'fresh')!.textContent).not.toContain('expired');
+  });
+
   it("offers no key while the org key is locked: the code carries it", async () => {
     open();
     const section = await screen.findByTestId('provisioning-keys');
