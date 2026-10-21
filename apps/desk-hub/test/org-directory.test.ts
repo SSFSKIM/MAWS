@@ -39,9 +39,9 @@ const isOrg = (frame: DownFrame): frame is OrgFrame => frame.t === 'org';
 const projectIn = (frame: OrgFrame, id: string) => frame.projects.find((p) => p.id === id);
 const machineIn = (frame: OrgFrame, name: string) => frame.machines.find((m) => m.name === name);
 
-/** The first `org` frame after `from` for which `predicate` holds. */
-async function nextOrg(m: MachineClient, from: number, predicate: (frame: OrgFrame) => boolean, what: string): Promise<OrgFrame> {
-  return (await m.next((f) => isOrg(f) && predicate(f), what, from)) as OrgFrame;
+/** The first `org` frame after `from` for which `predicate` holds, within `ms`. */
+async function nextOrg(m: MachineClient, from: number, predicate: (frame: OrgFrame) => boolean, what: string, ms?: number): Promise<OrgFrame> {
+  return (await m.next((f) => isOrg(f) && predicate(f), what, from, ms)) as OrgFrame;
 }
 
 const summariesOf = (frame: GridDown): ProjectSummary[] => (frame.t === 'grid' ? frame.projects : frame.t === 'summary' ? [frame.project] : []);
@@ -187,19 +187,24 @@ describe('a follow-only hello', () => {
   it("renews with the stream's heartbeats and lapses without them: the Registry's online flips and every machine is sent org", async () => {
     const project = newProject();
     const watcher = await connected();
-    const follower = await connected(newName(), { heartbeatMs: 200, leaseMs: 600 });
+    // A lease of 15 heartbeats, as session-plane's lease test has (the deployed one is 3 of 15 s). Each renewal goes from
+    // the hub's timer through the suite's proxy and client and back through the Worker to the project, and under a lease
+    // of 600 ms a renewal landing 400 ms late lapsed it and put the follower offline (MAWS's pool, run 39604097046).
+    const leaseMs = 3000;
+    const follower = await connected(newName(), { heartbeatMs: 200, leaseMs });
     let from = watcher.frames.length;
     await follower.postOk([{ t: 'hello', project, name: 'demo', have: {}, follow: true }]);
+    const helloed = Date.now(); // the hello's lease started before its POST was answered
     const online = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, follower.name)?.online === true, 'the follower online'), follower.name)!;
 
-    // Three lease periods with its heartbeats answered: still online.
+    // Its heartbeats answered, it is still online a second past the lease its hello started.
     from = watcher.frames.length;
-    await new Promise((resolve) => setTimeout(resolve, 1800));
+    await new Promise((resolve) => setTimeout(resolve, helloed + leaseMs + 1000 - Date.now()));
     expect(orgFramesOf(watcher, from).every((f) => machineIn(f, follower.name)?.online !== false)).toBe(true);
 
     // A suspended daemon answers none: the lease lapses, and the Registry says when it went offline.
     follower.autoAck = false;
-    const offline = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, follower.name)?.online === false, 'the follower offline'), follower.name)!;
+    const offline = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, follower.name)?.online === false, 'the follower offline', leaseMs + 5000), follower.name)!;
     expect(Date.parse(offline.seen!)).toBeGreaterThan(Date.parse(online.seen!));
     await follower.close();
     await watcher.close();

@@ -116,11 +116,14 @@ describe('republishing', () => {
 describe('fidelityProblems', () => {
   const agentFiles = { 'project/slides/b.html': '<p style="font-size:65px">B</p>', 'project/slides/c.html': '<p style="font-size:41px">C</p>' };
   const readBack = { 'project/slides/b.html': '<section id="b"><p id="p" style="color:red; font-size:65px">B</p></section>', 'project/slides/c.html': '<p style="font-size:41px">C</p>' };
-  const faithful = { revisionBefore: 7, published: [published(9, ['project/slides/b.html']), published(11, ['project/slides/c.html'])], remoteApplies: 2, agentFiles, readBack };
+  const faithful = { revisionBefore: 7, published: [published(9, ['project/slides/b.html']), published(11, ['project/slides/c.html'])], remoteApplies: 2, integrated: 11, agentFiles, readBack };
 
-  it('finds none when every publish rose in revision, reached the tab as a remote apply and reads back with its font size', () => {
+  it('finds none when every publish rose in revision, the tab integrated the last one’s row as a remote apply, and each reads back with its font size', () => {
     expect(fidelityProblems(faithful)).toEqual([]);
     expect(fidelityProblems({ ...faithful, remoteApplies: 5 })).toEqual([]); // a publish may reach the tab as more than one update
+    // P4-B2 M6: the gesture hold applies the publishes it held at the drop, merged into one update
+    expect(fidelityProblems({ ...faithful, remoteApplies: 1 })).toEqual([]);
+    expect(fidelityProblems({ ...faithful, integrated: 14 })).toEqual([]); // rows written after the drag's last publish
   });
 
   it('names a revision that did not rise, from the one the agent saw before the drag', () => {
@@ -128,8 +131,9 @@ describe('fidelityProblems', () => {
     expect(fidelityProblems({ ...faithful, published: [published(9, ['project/slides/b.html']), published(9, ['project/slides/c.html'])] })).toEqual(['publish 2 answered revision 9, not above 9']);
   });
 
-  it('names fewer remote applies on the tab than publishes', () => {
-    expect(fidelityProblems({ ...faithful, remoteApplies: 1 })).toEqual(['the tab’s replica applied 1 remote update for 2 publishes']);
+  it('names a tab whose replica has not integrated the last publish’s row, or applied no remote update', () => {
+    expect(fidelityProblems({ ...faithful, integrated: 10 })).toEqual(['the tab’s replica integrated rows through 10, not the last publish’s 11']);
+    expect(fidelityProblems({ ...faithful, remoteApplies: 0 })).toEqual(['the tab’s replica applied no remote update']);
   });
 
   it('names a slide whose read-back font size is not the agent’s last', () => {
@@ -138,6 +142,6 @@ describe('fidelityProblems', () => {
   });
 
   it('names a drag the agent published nothing in', () => {
-    expect(fidelityProblems({ ...faithful, published: [], remoteApplies: 0 })).toEqual(['the agent published nothing during the drag']);
+    expect(fidelityProblems({ ...faithful, published: [], remoteApplies: 0, integrated: 7 })).toEqual(['the agent published nothing during the drag']);
   });
 });

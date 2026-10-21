@@ -3,7 +3,7 @@
 import { importSlide } from '../../slides/model';
 import { loadSlide } from '../../slides/parse';
 import type { SlideIR } from '../../slides/ir';
-import { adoptClientId, applyV1, applyV2, diffV1, newDoc, onUpdate, stateV2, stateVector, transact, type Doc } from '../../yjs';
+import { adoptClientId, applyV1, applyV2, diffV1, mergeUpdates, newDoc, onUpdate, stateV2, stateVector, transact, type Doc } from '../../yjs';
 import type { BoardFrame } from '../canvas';
 import { writeBoardEntry, writeCanvasKeys } from '../model';
 
@@ -73,4 +73,35 @@ export function updatesOf(doc: Doc, edit: () => void): Uint8Array[] {
     off();
   }
   return out;
+}
+
+/**
+ * P4-B2 (D17): an agent's replica of `owner` under `clientId`, its writes reaching `owner` (origin 'agent') as the port
+ * provider delivers them: on arrival, or buffered in order while `holdRemote(true)` stands and applied merged at its
+ * release. Each write first takes what `owner` has, as the host relays the owner's frames before the agent writes.
+ */
+export function heldPeer(owner: Doc, clientId: number) {
+  const agent = replicaFrom(owner, clientId);
+  let held = false;
+  const buffer: Uint8Array[] = [];
+  const holds: boolean[] = [];
+  return {
+    agent,
+    /** Every hold set and released, in order. */
+    holds,
+    buffered: () => buffer.length,
+    holdRemote(on: boolean): void {
+      holds.push(on);
+      held = on;
+      if (!on && buffer.length > 0) applyV1(owner, mergeUpdates(buffer.splice(0)), 'agent');
+    },
+    write(edit: (agent: Doc) => void): void {
+      applyV1(agent, diffV1(owner, stateVector(agent)), 'host');
+      const before = stateVector(agent);
+      transact(agent, () => edit(agent), 'agent');
+      const update = diffV1(agent, before);
+      if (held) buffer.push(update);
+      else applyV1(owner, update, 'agent');
+    },
+  };
 }

@@ -7,16 +7,17 @@ import userEvent from '@testing-library/user-event';
 import { EditorView } from '@tiptap/pm/view';
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../../yjs';
+import { adoptClientId, applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
 import { DesignWorkbench } from '../../../design/editor/DesignWorkbench';
 import { DesignView } from '../../../design/editor/viewport';
-import { design } from '../../../design/fixtures/support';
+import { design, heldPeer } from '../../../design/fixtures/support';
+import { MISSING_SOURCE_KEY } from '../../../design/model';
 import { SlideCanvas } from '../../canvas';
-import { childLists, deleteElementTree, importSlide, readFlat, ROOT, slideFile, writeDeckKeys } from '../../model';
+import { childLists, deleteElementTree, importSlide, readFlat, ROOT, setStyle, slideFile, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { DeckEditor } from '../DeckEditor';
-import { DeckSession } from '../session';
+import { DeckSession, type DeckSessionOptions } from '../session';
 import { startFlowMove, startMarquee, startMove, startResize, startRotate, type GestureContext } from './gestures';
 import { CLIPBOARD_TYPE, copySelection, pasteClipboard } from './clipboard';
 import { apply, applyLinear } from '../../geometry';
@@ -80,13 +81,13 @@ function layoutRoot(root: HTMLElement, flow: Record<string, [number, number, num
 }
 
 const canvases: SlideCanvas[] = [];
-function gestureContext(doc: Doc, flow?: Record<string, [number, number, number, number]>): GestureContext & { session: DeckSession } {
+function gestureContext(doc: Doc, flow?: Record<string, [number, number, number, number]>, options?: DeckSessionOptions): GestureContext & { session: DeckSession } {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const canvas = new SlideCanvas(doc, 's', host);
   canvases.push(canvas);
   fakeLayout(canvas, flow);
-  return { session: new DeckSession(doc, 0), slideId: 's', canvas, scale: 0.5 };
+  return { session: new DeckSession(doc, 0, options), slideId: 's', canvas, scale: 0.5 };
 }
 afterEach(() => {
   cleanup();
@@ -911,5 +912,159 @@ describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () 
     const box = heading('b2').querySelector<HTMLElement & { editor: import('@tiptap/core').Editor }>('.deck-textbox')!;
     expect(document.activeElement).toBe(box);
     expect(selectionText(box)).toBe('Title');
+  });
+});
+
+// ---------------------------------------------------------------- P4-B2 M6: the gesture hold
+
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a drag holds the replica's remote frames (the
+// session's gesture reason; session.test.ts), and its drop writes the gesture's last values again wherever a write it
+// held moved them, so the owner's drop wins whatever the clientIDs; it writes nothing into a slide the flush held,
+// emptied of its file or removed, nor onto an element the flush deleted. The agent is the fixtures' `heldPeer`: its
+// writes reach the owner as the provider delivers them, buffered while held and applied merged at the release.
+describe('P4-B2: the gesture hold and the drop’s re-assert (D17)', () => {
+  const OWNER = 0x100;
+  const HIGHER = 0x7fff0000;
+  const LOWER = 0x10;
+
+  function heldDeck(clientId = HIGHER) {
+    const doc = deck();
+    adoptClientId(doc, OWNER);
+    const channel = heldPeer(doc, clientId);
+    return { doc, ctx: gestureContext(doc, undefined, { holdRemote: channel.holdRemote }), ...channel };
+  }
+  /** How many updates of the owner's own `run` made. */
+  const ownWrites = (doc: Doc, session: DeckSession, run: () => void): number => {
+    let n = 0;
+    const off = onUpdate(doc, (_update, origin) => {
+      if (origin === session.origin) n += 1;
+    });
+    try {
+      run();
+    } finally {
+      off();
+    }
+    return n;
+  };
+
+  it('holds the agent’s writes from the drag’s start; its drop applies them and the owner’s last values win, whatever the clientIDs, in the drag’s one step', () => {
+    for (const clientId of [HIGHER, LOWER]) {
+      const { doc, ctx, agent, holds, buffered, write } = heldDeck(clientId);
+      const g = startMove(ctx, ['a'], { x: 400, y: 350 });
+      expect(holds).toEqual([true]);
+      g.frame({ x: 410, y: 350 }, NO);
+      write((a) => setStyle(a, 's', 'a', { left: '900px', top: '20px' })); // the agent moves the dragged element
+      expect(buffered()).toBe(1);
+      g.frame({ x: 437, y: 371 }, NO);
+      expect(styleOf(doc, 'a')).toMatchObject({ left: '337px', top: '321px' });
+      g.end();
+      expect(holds, `agent ${clientId}`).toEqual([true, false]);
+      expect(buffered()).toBe(0);
+      expect(styleOf(doc, 'a'), `agent ${clientId}`).toMatchObject({ left: '337px', top: '321px' });
+      applyV1(agent, diffV1(doc, stateVector(agent)));
+      expect(styleOf(agent, 'a'), `the agent’s replica, agent ${clientId}`).toMatchObject({ left: '337px', top: '321px' });
+      // the re-assert is the drag's own: one undo takes the whole gesture back
+      ctx.session.undoStep();
+      expect(ctx.session.undo.canUndo(), `agent ${clientId}`).toBe(false);
+    }
+  });
+
+  it('re-asserts every key the gesture wrote at its last value: a pin only its first frame removed, set again under the hold, is removed again', () => {
+    const { doc, ctx, write } = heldDeck();
+    const g = startMove(ctx, ['b'], { x: 0, y: 0 });
+    g.frame({ x: 30, y: 0 }, { ...NO, meta: true }); // b's right/bottom pin becomes left/top
+    write((a) => setStyle(a, 's', 'b', { right: '50px' }));
+    g.frame({ x: 40, y: 0 }, { ...NO, meta: true });
+    g.end();
+    expect(styleOf(doc, 'b')).toMatchObject({ left: '1732px', top: '852px' });
+    expect(styleOf(doc, 'b').right).toBeUndefined();
+  });
+
+  it('writes nothing into a slide the flush held, emptied of its file or removed: the agent’s move and that arriving under the drag', () => {
+    for (const turn of ['held', 'missing', 'removed'] as const) {
+      const { doc, ctx, holds, write } = heldDeck();
+      const g = startMove(ctx, ['a'], { x: 400, y: 350 });
+      g.frame({ x: 410, y: 350 }, NO);
+      write((a) => setStyle(a, 's', 'a', { left: '900px' }));
+      write((a) => {
+        if (turn === 'held') Y.setSlideKey(a, 's', 'held', { source: '<section id="s"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+        else if (turn === 'missing') Y.setSlideKey(a, 's', MISSING_SOURCE_KEY, true);
+        else Y.deleteSlide(a, 's');
+      });
+      g.frame({ x: 437, y: 371 }, NO);
+      expect(ownWrites(doc, ctx.session, () => g.end()), turn).toBe(0);
+      expect(holds, turn).toEqual([true, false]);
+      if (turn === 'removed') expect(Y.hasSlide(doc, 's'), turn).toBe(false);
+      else expect(styleOf(doc, 'a').left, turn).toBe('900px'); // the agent's, its clientID the higher
+      expect(ctx.session.snapshot().dragging, turn).toBe(false);
+    }
+  });
+
+  it('the dragged element deleted under the hold: the drop applies the deletion, writes nothing and ends clean', () => {
+    const { doc, ctx, holds, write } = heldDeck();
+    const g = startMove(ctx, ['a', 'b'], { x: 400, y: 350 });
+    g.frame({ x: 410, y: 350 }, { ...NO, meta: true });
+    write((a) => deleteElementTree(a, 's', 'a'));
+    write((a) => setStyle(a, 's', 'b', { top: '10px' }));
+    g.frame({ x: 437, y: 371 }, { ...NO, meta: true });
+    expect(Y.hasElement(doc, 's', 'a')).toBe(true); // held
+    g.end();
+    expect(Y.hasElement(doc, 's', 'a')).toBe(false);
+    expect(styleOf(doc, 'b').top).toBe('873px'); // the other element the drag moved: re-asserted
+    expect(holds).toEqual([true, false]);
+    expect(ctx.session.snapshot().dragging).toBe(false);
+  });
+
+  /** The overlay alone over the deck's slide, its session holding through `holdRemote`, `a` selected. */
+  function overlaid(holdRemote: (on: boolean) => void) {
+    const doc = deck();
+    const session = new DeckSession(doc, 0, { holdRemote });
+    const canvas = new SlideCanvas(doc, 's', document.createElement('div'));
+    canvases.push(canvas);
+    fakeLayout(canvas);
+    function Stage() {
+      const surface = useRef<HTMLDivElement>(null);
+      const frame = useRef<HTMLDivElement>(null);
+      return (
+        <div ref={surface} tabIndex={0} data-stage-surface="">
+          <div ref={frame}>
+            <Overlay session={session} canvas={canvas} slideId="s" scale={0.5} readOnly={false} surface={surface} frame={frame} />
+          </div>
+        </div>
+      );
+    }
+    const utils = render(<Stage />);
+    act(() => session.select(['a']));
+    return { doc, session, utils, stage: utils.container.querySelector<HTMLElement>('[data-stage-surface]')!, handle: utils.container.querySelector('[data-handle="se"]')! };
+  }
+
+  it('a gesture the overlay unmounts in ends as a cancel does: the hold released, the drag over', () => {
+    const holds: boolean[] = [];
+    const { session, utils, handle } = overlaid((on) => holds.push(on));
+    fireEvent.pointerDown(handle, { button: 0, buttons: 1, clientX: 10, clientY: 10, pointerId: 1 });
+    expect(holds).toEqual([true]);
+    expect(session.snapshot().dragging).toBe(true);
+    utils.unmount();
+    expect(holds).toEqual([true, false]);
+    expect(session.snapshot().dragging).toBe(false);
+  });
+
+  it('a cancel whose drop throws (a listener of the flush) leaves no gesture behind: a later move writes nothing', () => {
+    const { doc, session, stage, handle } = overlaid((on) => {
+      if (!on) throw new Error('a listener of the flush');
+    });
+    // the move and the cancel on the stage itself: the handle is drawn again as the frame re-measures
+    fireEvent.pointerDown(handle, { button: 0, buttons: 1, clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(stage, { buttons: 1, clientX: 60, clientY: 10, pointerId: 1 });
+    const width = styleOf(doc, 'a').width;
+    expect(width).not.toBe('200px');
+    try {
+      fireEvent.pointerCancel(stage, { pointerId: 1 });
+    } catch {
+      // the flush's error, as the listener's caller sees it
+    }
+    expect(session.snapshot().dragging).toBe(false);
+    fireEvent.pointerMove(stage, { buttons: 0, clientX: 110, clientY: 10, pointerId: 1 });
+    expect(styleOf(doc, 'a').width).toBe(width);
   });
 });

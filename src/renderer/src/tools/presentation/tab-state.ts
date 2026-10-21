@@ -253,8 +253,11 @@ export class DeckTabState {
     open.delete(this);
     for (const stop of this.stops.splice(0)) stop();
     this.listeners.clear();
-    this.current.session?.dispose();
-    if (this.holders === 0) this.closeWhenSaved(); // M7: else the last release closes it
+    try {
+      this.current.session?.dispose(); // P4-B2 (D17): it releases a standing hold, whose flush's listeners may throw
+    } finally {
+      if (this.holders === 0) this.closeWhenSaved(); // M7: else the last release closes it
+    }
   }
 
   private closeWhenSaved(): void {

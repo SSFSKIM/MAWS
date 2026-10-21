@@ -99,6 +99,16 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     expect(handle.closed).toBe(true);
   });
 
+  it('(P4-B2 D17) disposed while a drag holds the replica, it closes the replica even when the hold’s flush throws', async () => {
+    const { handle, state } = await opened();
+    (handle as DocumentHandle).holdRemote = (on) => {
+      if (!on) throw new Error('a listener of the flush');
+    };
+    state.snapshot().session!.beginDrag();
+    expect(() => state.dispose()).toThrow('a listener of the flush');
+    expect(handle.closed).toBe(true);
+  });
+
   it('a restore it did not witness clears its undo stack', async () => {
     const { handle, state } = await opened();
     const session = state.snapshot().session!;

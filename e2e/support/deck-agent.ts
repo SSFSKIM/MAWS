@@ -5,7 +5,8 @@
 // publish is A's `publishDoc` over the deck's three-way publish, reaching the editor's replica through the host as an
 // agent's does. The workload: one slide at a time, its first font size stepped (64 → 65 → 64 …), every `everyMs`.
 // `fidelityProblems` is the drag's fidelity regression: the publishes were the host's (each answered with a rising
-// revision), reached the tab's replica as remote applies, and are what the deck reads back.
+// revision), reached the tab's replica as remote applies (P4-B2 M6: every publish's row integrated, since the gesture
+// hold applies those it held merged into one update at the drop), and are what the deck reads back.
 // Free of Playwright, so test/support/deck-agent.test.ts runs it against a fake seam.
 
 /** The agent's session name in the host's seam. */
@@ -118,8 +119,13 @@ export interface FidelityInput {
   revisionBefore: number;
   /** The drag's publishes, in order. */
   published: DeckCall<PublishResult>[];
-  /** The updates of other origins the tab's replica applied over the drag and after its drop (the drag probe's). */
+  /**
+   * The updates of other origins the tab's replica applied over the drag and after its drop (the drag probe's). P4-B2
+   * M6: the gesture hold applies the publishes it held at the drop merged into one, so this counts no publish.
+   */
   remoteApplies: number;
+  /** M6: the highest row the tab's replica integrated, read after the drop (the seam's `frames`). */
+  integrated: number;
   /** What the agent last published of each file. */
   agentFiles: Record<string, string>;
   /** The deck's files read back after the drop. */
@@ -127,7 +133,7 @@ export interface FidelityInput {
 }
 
 /** What makes a drag's agent not the product's (none when faithful): its publishes, the tab's applies, the read-back. */
-export function fidelityProblems({ revisionBefore, published, remoteApplies, agentFiles, readBack }: FidelityInput): string[] {
+export function fidelityProblems({ revisionBefore, published, remoteApplies, integrated, agentFiles, readBack }: FidelityInput): string[] {
   if (published.length === 0) return ['the agent published nothing during the drag'];
   const problems: string[] = [];
   let last = revisionBefore;
@@ -136,7 +142,9 @@ export function fidelityProblems({ revisionBefore, published, remoteApplies, age
     if (!(revision > last)) problems.push(`publish ${i + 1} answered revision ${revision}, not above ${last}`);
     last = Math.max(last, revision);
   });
-  if (remoteApplies < published.length) problems.push(`the tab’s replica applied ${remoteApplies} remote update${remoteApplies === 1 ? '' : 's'} for ${published.length} publish${published.length === 1 ? '' : 'es'}`);
+  // M6: every publish's row integrated (rows arrive in order: reaching the last one's is reaching them all), as remote
+  if (integrated < last) problems.push(`the tab’s replica integrated rows through ${integrated}, not the last publish’s ${last}`);
+  if (remoteApplies === 0) problems.push('the tab’s replica applied no remote update');
   const paths = [...new Set(published.flatMap((answer) => answer.result!.changed))].sort();
   for (const path of paths) {
     const want = firstFontSize(agentFiles[path] ?? '');

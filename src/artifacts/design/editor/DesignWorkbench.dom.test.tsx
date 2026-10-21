@@ -6,12 +6,12 @@
 // written nothing, and Insert on a phone board at screen type. Layout, paint and real pointers are the e2e's.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyV1, diffV1, newDoc, stateVector, transact, type Doc } from '../../yjs';
+import { applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { flushLayout } from '../../slides/canvas';
 import { readSlide, setStyle } from '../../slides/model';
 import { DeckSession } from '../../slides/editor/session';
-import { design, type BoardSeed } from '../fixtures/support';
+import { design, heldPeer, type BoardSeed } from '../fixtures/support';
 import { boardFrame, boardOrder, MISSING_SOURCE_KEY } from '../model';
 import { deleteBoard, setBoardFrame } from '../writers';
 import { DesignWorkbench } from './DesignWorkbench';
@@ -27,9 +27,9 @@ const BOARDS: BoardSeed[] = [
 afterEach(cleanup);
 
 const ASSET_URL = () => null;
-function mount(options: { doc?: Doc; readOnly?: boolean; zoom?: number } = {}) {
+function mount(options: { doc?: Doc; readOnly?: boolean; zoom?: number; holdRemote?: (on: boolean) => void } = {}) {
   const doc = options.doc ?? design(BOARDS);
-  const session = new DeckSession(doc, 0);
+  const session = new DeckSession(doc, 0, { holdRemote: options.holdRemote });
   const view = new DesignView();
   view.setRoom({ w: 1000, h: 800 });
   view.setViewport({ zoom: options.zoom ?? 1, x: 0, y: 0 });
@@ -490,6 +490,78 @@ describe('a frame gesture beside other writers (task review fix wave)', () => {
       expect(container.querySelector('[data-deck-notice]')!.textContent, turn).toBe('');
       cleanup();
     }
+  });
+});
+
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a board's frame drag holds the replica's remote
+// frames from its first move to its drop, as the overlay's gestures do, and its drop writes again the frame keys it
+// owns that a held write moved; nothing on a board the flush held, emptied of its file or deleted. The agent is the
+// fixtures' `heldPeer` (its writes buffered while held, applied merged at the release).
+describe('a frame drag under the gesture hold (P4-B2 D17)', () => {
+  const OWNER = 0x100;
+  const HIGHER = 0x7fff0000;
+  const LOWER = 0x10;
+
+  it('holds the agent’s writes from the first move to the drop; the owner’s position wins whatever the clientIDs, the agent’s size stands', () => {
+    for (const clientId of [HIGHER, LOWER]) {
+      const doc = design(BOARDS, OWNER);
+      const peer = heldPeer(doc, clientId);
+      const { container, world } = mount({ doc, holdRemote: peer.holdRemote });
+      press(title(container, 'b2'), 0, 0);
+      expect(peer.holds, 'a press is no drag yet').toEqual([]);
+      drag(world, 40, 0);
+      expect(peer.holds).toEqual([true]);
+      peer.write((agent) => setBoardFrame(agent, 'b2', { x: 900, w: 1280 }));
+      expect(peer.buffered()).toBe(1);
+      drag(world, 80, 0);
+      expect(boardFrame(doc, 'b2')).toEqual({ x: 580, y: 0, w: 1440, h: 1024 });
+      release(world, 80, 0);
+      expect(peer.holds, `agent ${clientId}`).toEqual([true, false]);
+      expect(boardFrame(doc, 'b2'), `agent ${clientId}`).toEqual({ x: 580, y: 0, w: 1280, h: 1024 });
+      applyV1(peer.agent, diffV1(doc, stateVector(peer.agent)));
+      expect(boardFrame(peer.agent, 'b2'), `the agent’s replica, agent ${clientId}`).toEqual({ x: 580, y: 0, w: 1280, h: 1024 });
+      cleanup();
+    }
+  });
+
+  it('writes nothing on a board the flush held, emptied of its file or deleted', () => {
+    for (const turn of ['held', 'missing', 'deleted'] as const) {
+      const doc = design(BOARDS, OWNER);
+      const peer = heldPeer(doc, HIGHER);
+      const { container, world, session } = mount({ doc, holdRemote: peer.holdRemote });
+      press(title(container, 'b2'), 0, 0);
+      drag(world, 40, 0);
+      peer.write((agent) => setBoardFrame(agent, 'b2', { x: 900 }));
+      peer.write((agent) => {
+        if (turn === 'held') Y.setSlideKey(agent, 'b2', 'held', { source: '<section id="b2"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+        else if (turn === 'missing') Y.setSlideKey(agent, 'b2', MISSING_SOURCE_KEY, true);
+        else deleteBoard(agent, 'b2');
+      });
+      drag(world, 80, 0);
+      let own = 0;
+      const off = onUpdate(doc, (_update, origin) => {
+        if (origin === session.origin) own += 1;
+      });
+      release(world, 80, 0);
+      off();
+      expect(own, turn).toBe(0);
+      expect(peer.holds, turn).toEqual([true, false]);
+      if (turn === 'deleted') expect(boardOrder(doc), turn).not.toContain('b2');
+      else expect(boardFrame(doc, 'b2')!.x, turn).toBe(900);
+      cleanup();
+    }
+  });
+
+  it('a frame drag the world unmounts in ends: the hold released, the drag over', () => {
+    const doc = design(BOARDS, OWNER);
+    const peer = heldPeer(doc, HIGHER);
+    const { container, world, session, unmount } = mount({ doc, holdRemote: peer.holdRemote });
+    press(title(container, 'b2'), 0, 0);
+    drag(world, 40, 0);
+    expect(session.snapshot().dragging).toBe(true);
+    unmount();
+    expect(peer.holds).toEqual([true, false]);
+    expect(session.snapshot().dragging).toBe(false);
   });
 });
 

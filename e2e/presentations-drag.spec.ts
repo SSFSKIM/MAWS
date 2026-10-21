@@ -7,12 +7,15 @@
 // stepped, while the cover's pinned picture is dragged over 200 pointer moves: the scale gate's row 2 workload
 // (e2e/presentations-scale.spec.ts). The renderer seam's drag probe splits each move into queue, handler and paint, and
 // counts the agent's updates as the tab's replica applies them (src/renderer/src/tools/presentation/drag-stats.ts).
+// P4-B2 M6 (D17's gesture hold): the drag holds the tab's remote frames, so the agent's publishes wait in the replica's
+// buffer and apply merged at the drop, or when the hold's 5 s cap clears it first; the probe records the frames held at
+// the drop and each cap, and an agent trial whose hold held none of the agent's frames is a problem.
 // One case, two runs:
 // - class 1 (`pnpm e2e:presentations`, MAWS_PRESENTATIONS_PERF unset): one drag with the agent, its fidelity regression
-//   (each publish answered by the host with a rising revision, the tab's replica applying at least one remote update per
-//   publish, the deck reading back the agent's last font size after the drop); its move-to-frame p95 and the 16 ms target
-//   logged as evidence, with no bound (the architect's ruling at P4-B2 M0's merge: a class-1 group runs beside other
-//   jobs, and every measured bound is the load rule's, asserted in the measured group alone).
+//   (each publish answered by the host with a rising revision, the tab's replica integrating the last publish's row
+//   as a remote apply, the deck reading back the agent's last font size after the drop); its move-to-frame p95 and the
+//   16 ms target logged as evidence, with no bound (the architect's ruling at P4-B2 M0's merge: a class-1 group runs
+//   beside other jobs, and every measured bound is the load rule's, asserted in the measured group alone).
 // - measured (`pnpm e2e:presentations-drag`, MAWS_PRESENTATIONS_PERF=1, a MEASURED_E2E group): after the measured specs'
 //   quiet admission (support/quiet.ts), four no-agent control trials alternating with four agent trials, the drag's
 //   direction turning with each pair so both kinds drag both ways; the agent trials judged on their best (the parent's
@@ -59,7 +62,8 @@ interface Seam {
   __maws_presentations: {
     seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>;
     files(artifactId: string): Promise<Record<string, string>>;
-    dragProbe: { start(artifactId: string): void; remotes(): number; stop(): DragStats };
+    dragProbe: { start(artifactId: string): void; stop(): DragStats };
+    frames(artifactId: string): { surface: string; received: number; held: number; capped: number; integrated: number }[];
   };
 }
 
@@ -139,10 +143,11 @@ async function dragOnce(page: Page, tab: Locator, id: string, agent: DeckAgent, 
   }
   if (publishing.status === 'rejected') throw publishing.reason;
   const published = publishing.value;
-  // a publish reaches the tab after the host answered it: wait, at most 10 s, for one remote apply per publish (the
-  // fidelity regression says whether they came)
-  const remotes = () => page.evaluate(() => (window as unknown as Seam).__maws_presentations.dragProbe.remotes());
-  for (const deadline = Date.now() + 10_000; published.length > 0 && Date.now() < deadline && (await remotes()) < published.length; ) await sleep(50);
+  // the last publish reaches the tab after the host answered it (those the hold kept, at the drop): wait, at most 10 s,
+  // for the tab's replica to integrate its row (the fidelity regression says whether it did)
+  const last = Math.max(revisionBefore, ...published.map((p) => p.result!.revision));
+  const integrated = async () => (await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.frames(a), id))[0]?.integrated ?? 0;
+  for (const deadline = Date.now() + 10_000; published.length > 0 && Date.now() < deadline && (await integrated()) < last; ) await sleep(50);
   const drag = await page.evaluate(() => (window as unknown as Seam).__maws_presentations.dragProbe.stop());
   const remote = drag.remote.duringMoves + drag.remote.afterDrop;
   const problems: string[] = [];
@@ -150,8 +155,10 @@ async function dragOnce(page: Page, tab: Locator, id: string, agent: DeckAgent, 
   if (kind === 'control' && remote > 0) problems.push(`the control trial’s replica applied ${remote} remote updates`);
   if (kind === 'agent') {
     if (published.length <= 2) problems.push(`the agent republished ${published.length} slides during the drag, not more than 2`);
+    // M6: a publish lands while the pointer moves, so the hold buffers it until the drop or its cap
+    if (drag.hold.heldAtDrop === 0 && drag.hold.capsMs.length === 0) problems.push('the gesture hold held none of the agent’s frames');
     const readBack = await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.files(a), id);
-    problems.push(...fidelityProblems({ revisionBefore, published, remoteApplies: remote, agentFiles: agent.files, readBack }));
+    problems.push(...fidelityProblems({ revisionBefore, published, remoteApplies: remote, integrated: await integrated(), agentFiles: agent.files, readBack }));
   }
   return { kind, order, direction, load: Math.max(load, load1()), drag, publishes: published.map((p) => ({ revision: p.result!.revision, busyMs: +p.busyMs.toFixed(1), wallMs: +p.wallMs.toFixed(1) })), problems };
 }
@@ -162,6 +169,7 @@ function trialLine({ kind, order, direction, load, drag: d, publishes, problems 
     `queue p95 ${d.queueMs.p95}, handler p95 ${d.handlerMs.p95}, paint p95 ${d.paintMs.p95} ms (move → transaction p95 ${d.inputToTxMs.p95})`,
     `${d.touched} moves touched by a remote apply, the untouched moves' move → frame p95 ${d.untouchedToFrameMs.p95} ms`,
     `remote applies ${d.remote.duringMoves} during the moves and ${d.remote.afterDrop} after the drop (apply p95 ${d.remote.applyMs.p95} ms)`,
+    `the hold had ${d.hold.heldAtDrop} frames at the drop, ${d.hold.capsMs.length > 0 ? `its 5 s cap cleared it at ${d.hold.capsMs.join(', ')} ms` : 'its 5 s cap never reached'}`,
     `${d.withTransaction}/${d.moves} moves wrote over ${d.durationMs} ms; ${d.longTasks} long tasks; ${publishes.length} publishes${problems.length > 0 ? `; problems: ${problems.join('; ')}` : ''}`,
   ].join('; ');
 }
@@ -182,6 +190,7 @@ function summarize(trials: Trial[]) {
       medianP95: { toTx: median(p95s((d) => d.inputToTxMs.p95)), queue: median(p95s((d) => d.queueMs.p95)), handler: median(p95s((d) => d.handlerMs.p95)), paint: median(p95s((d) => d.paintMs.p95)), untouchedToFrame: median(p95s((d) => d.untouchedToFrameMs.p95)) },
       touched: mine.reduce((n, t) => n + t.drag.touched, 0),
       remote: { duringMoves: mine.reduce((n, t) => n + t.drag.remote.duringMoves, 0), afterDrop: mine.reduce((n, t) => n + t.drag.remote.afterDrop, 0) },
+      hold: { heldAtDrop: mine.reduce((n, t) => n + t.drag.hold.heldAtDrop, 0), capped: mine.filter((t) => t.drag.hold.capsMs.length > 0).length }, // M6: trials the cap cleared
       publishes: mine.reduce((n, t) => n + t.publishes.length, 0),
     };
   };

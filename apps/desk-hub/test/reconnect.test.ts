@@ -37,6 +37,10 @@ let machines = 0;
 
 /** What a closed stream's lease is held for here: long enough to see the hold, short enough to see it run out. */
 const GRACE_MS = 1500;
+/** The grace the no-flap case reconnects within. Its close, a forwarded RPC, the next stream and that stream's hello take
+ * about 350 ms on an idle Mac and passed 1.5 s on a loaded pool box (run 39604097046), where the grace ran out first and
+ * failed the RPC the hello was to carry. */
+const RECONNECT_GRACE_MS = 5000;
 const PROBE_MS = 200;
 /** What a change may take past its bound before it counts as late, under the Mac's load rule. */
 const MARGIN_MS = 1500;
@@ -45,11 +49,12 @@ const machinePresence = { online: true, policy: { read_only: false, ceiling: 'de
 const envelope = (m: MachineClient, project: string, kind: SessionMessage['kind'], body: unknown, session: string | null = SESSION) =>
   ({ project, machine: m.name, session, kind, sub: null, n: null, body }) as unknown as SessionMessage;
 
-/** An enrolled machine with a long lease, the grace and probe above, connected and holding `project`, its presence sent. */
-async function machine(project: string): Promise<MachineClient> {
+/** An enrolled machine with a long lease, a grace (GRACE_MS unless given) and the probe above, connected and holding
+ * `project`, its presence sent. */
+async function machine(project: string, graceMs = GRACE_MS): Promise<MachineClient> {
   const name = `rc-${++machines}`;
   const m = new MachineClient(hub, name, await enroll(hub, ADMIN, name));
-  await hub.timing(name, { heartbeatMs: 15_000, leaseMs: 45_000, graceMs: GRACE_MS, probeMs: PROBE_MS });
+  await hub.timing(name, { heartbeatMs: 15_000, leaseMs: 45_000, graceMs, probeMs: PROBE_MS });
   await m.connect();
   await m.sync(project);
   await m.postOk([{ t: 'session', message: envelope(m, project, 'machine', machinePresence, null) }]);
@@ -172,7 +177,7 @@ describe("a closed stream's grace", () => {
 
   it('a reconnect within the grace is no flap: the browser sees no offline, an RPC sent between streams reaches the next one, and a new subscription is served', async () => {
     const project = newProject();
-    const m = await machine(project);
+    const m = await machine(project, RECONNECT_GRACE_MS);
     const b = await BrowserClient.open(hub, ADMIN, project);
     await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && x.online), 'online');
     const from = b.frames.length;
@@ -189,7 +194,7 @@ describe("a closed stream's grace", () => {
     b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
     await m.next((f) => f.t === 'subscribe' && f.sub === sub, 'the subscribe', reconnected);
     // Past the grace too: the new stream's lease holds.
-    await new Promise((resolve) => setTimeout(resolve, GRACE_MS + 300));
+    await new Promise((resolve) => setTimeout(resolve, RECONNECT_GRACE_MS + 300));
     expect(onlineStates(b, m.name, from)).not.toContain(false);
     b.close();
     await m.close();
