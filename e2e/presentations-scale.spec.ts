@@ -3,7 +3,8 @@
 // `e2e/document-scale.spec.ts` pattern): the product build with S7b's 100-slide deck (S6's bench shapes,
 // `benchDeckFiles(100)`) seeded through the renderer's presentations seam, an agent session driven by the host's own
 // tools through the deck's scale seam (`src/engine-host/presentations/scale-seam.ts`: A's real `artifact_read` and
-// `artifact_publish`, so every publish is A's `publishDoc` over the deck's three-way publish), and the editor measured
+// `artifact_publish`, so every publish is A's `publishDoc` over the deck's three-way publish; the agent is
+// `e2e/support/deck-agent.ts`, which the drag spec shares since P4-B2 M0), and the editor measured
 // through the renderer seam's timings and drag probe. Rows, each with the 1-minute load at its trials:
 //   1 open     cold to interactive with 100 live thumbnails ≤ 1,000 ms (the host's copy unloaded first; S7b 116 ms)
 //   2 drag     move to frame p95 ≤ 24 ms while the agent republishes a slide every 0.7 s (the parent's Decision Log 108;
@@ -31,7 +32,8 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { checkDeckHistory, generateDeckHistory } from './support/deck-history';
-import { collectGarbage, load1, MARGINAL_LOAD, MARGINAL_MISS, PerfSeam, processMemory, stats, verdictOf, type LoopStats, type Verdict } from './support/document-scale';
+import { DeckAgent, republishing, type DeckCall, type PublishResult } from './support/deck-agent';
+import { collectGarbage, load1, MARGINAL_LOAD, MARGINAL_MISS, PerfSeam, processMemory, stats, verdictOf, type Verdict } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { quietWait } from './support/quiet';
 
@@ -42,7 +44,6 @@ const RESULTS = join(REPO_ROOT, 'test-results', 'presentations-scale.json');
 const UNLOAD_WAIT_MS = 66_000; // the host's idle unload (A's IDLE_UNLOAD_MS, 60 s) and a margin
 const TRIALS = 3;
 const TITLE = 'Scale 100';
-const AGENT = 'deck-agent';
 const HEAVY = process.env.MAWS_DECK_HISTORY ?? '';
 const HEAVY_GENERATION_MS = 360_000; // the soak's budget in the job: the ruling's about five minutes, and a margin
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -166,67 +167,6 @@ async function headerAction(page: Page, label: string): Promise<void> {
   if (await button.isVisible()) return button.click();
   await header.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
-}
-
-// ---- the agent, through the host's scale seam -----------------------------------------------------------------------
-
-interface DeckCall<R> {
-  ok: true;
-  isError: boolean;
-  result?: R;
-  text: string;
-  wallMs: number;
-  loop: LoopStats;
-  busyMs: number;
-}
-type ReadResult = { revision: number; files: Record<string, string> };
-type PublishResult = { revision: number; changed: string[] };
-
-/** The agent's view of the deck: its last read's files, updated by what it publishes. */
-class DeckAgent {
-  files: Record<string, string> = {};
-  private turn = 0;
-  constructor(private readonly seam: PerfSeam, readonly artifactId: string) {}
-
-  async read(): Promise<DeckCall<ReadResult>> {
-    const answer = await this.seam.send<DeckCall<ReadResult>>({ cmd: 'call', session: AGENT, tool: 'artifact_read', args: { artifact: this.artifactId } });
-    if (answer.isError) throw new Error(`the agent's read was refused: ${answer.text}`);
-    this.files = { ...answer.result!.files };
-    return answer;
-  }
-
-  /** One publish of `paths`, each slide's first font size stepped (64 → 65 → 64 …), from the revision it last saw. */
-  async publish(paths: string[]): Promise<DeckCall<PublishResult>> {
-    this.turn += 1;
-    const sent: Record<string, string> = {};
-    for (const path of paths) {
-      sent[path] = this.files[path]!.replace(/font-size:(\d+)px/, (_m, size: string) => `font-size:${this.turn % 2 === 1 ? Number(size) + 1 : Number(size) - 1}px`);
-      if (sent[path] === this.files[path]) throw new Error(`${path} has no font size to step`);
-    }
-    const answer = await this.seam.send<DeckCall<PublishResult>>({ cmd: 'call', session: AGENT, tool: 'artifact_publish', args: { artifact: this.artifactId, baseRevision: 'last', files: sent } });
-    if (answer.isError) throw new Error(`the agent's publish was refused: ${answer.text}`);
-    expect(answer.result!.changed.sort()).toEqual([...paths].sort());
-    Object.assign(this.files, sent);
-    return answer;
-  }
-
-  slidePaths(): string[] {
-    return Object.keys(this.files).filter((path) => path.startsWith('project/slides/')).sort();
-  }
-}
-
-/** The agent republishing one slide every `everyMs` (the second slide on, round robin) until `until` settles. */
-async function republishing(agent: DeckAgent, until: Promise<unknown>, everyMs: number): Promise<DeckCall<PublishResult>[]> {
-  let done = false;
-  void until.finally(() => (done = true));
-  const slides = agent.slidePaths().slice(1);
-  const answers: DeckCall<PublishResult>[] = [];
-  for (let k = 0; !done; k++) {
-    await sleep(everyMs);
-    if (done) break;
-    answers.push(await agent.publish([slides[k % slides.length]!]));
-  }
-  return answers;
 }
 
 test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an agent republishing, the renderer, the publishes, the history preview', async () => {
@@ -449,7 +389,7 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
   });
 
   loads.end = load1();
-  await seam.send({ cmd: 'release', session: AGENT });
+  await agent.release();
   const marginal = rows.rows.filter((r) => r.verdict === 'marginal');
   rows.write({ loads, marginal: marginal.map((r) => ({ row: r.row, value: r.value, limit: r.limit, unit: r.unit, load: r.load })) });
   if (marginal.length > 0) console.log(`marginal rows (P3-F re-measures below load 10):\n${marginal.map((r) => `  ${r.row}: ${r.value} ${r.unit} against ${r.limit} at load ${r.load}`).join('\n')}`);
