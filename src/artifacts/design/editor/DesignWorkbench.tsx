@@ -55,6 +55,7 @@ import { MoveToBoard } from './MoveToBoard';
 import { BOARD_FIT_MAX, DesignView, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, type Rect } from './viewport';
 import { useViewFrame, useViewZoom, WithZoom } from './use-view';
 import { World } from './World';
+import { useEditClaim, type RegisterEditClaimant } from '../../slides/editor/edit-claim'; // P4-B2 K6
 import '../../slides/editor/chrome.css';
 import '../../slides/editor/deck.css';
 import './workbench.css';
@@ -92,6 +93,8 @@ export interface DesignWorkbenchProps extends DeckRevealProps /* P4-B4 */ {
   sessionTitle?: (appSessionId: string) => string | undefined;
   /** M4: an asset's URL at a revision (a version's), for a preview drawn with the version's assets. */
   assetUrlAt?: (ref: string, revision: number) => string | null;
+  /** P4-B2 K6: the host's registration of the Edit menu's Undo and Redo claimant; without it the menu stays native. */
+  registerEditClaimant?: RegisterEditClaimant;
 }
 
 const NOTICE_MS = 6_000;
@@ -401,6 +404,8 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
       session.redoStep();
     }
   };
+  const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
+  useEditClaim(props.registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
   const elementsSelected = state.selection.length > 0;
   const faces = versionFaces ? versionFaces.css : liveFaces.css;
@@ -426,7 +431,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     setNotice(C.movedTo(boardLabel(to)));
   };
   const editor = (
-    <div className="deck-editor design-workbench" data-design-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
+    <div ref={root /* P4-B2 K6 */} className="deck-editor design-workbench" data-design-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
       {faces && <style data-deck-faces>{faces}</style>}
       {!preview && historySnapshot?.banner && (
         <div className="deck-history-banner" role="status" aria-label={HISTORY_COPY.restoredBanner}>
