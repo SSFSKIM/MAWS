@@ -3,7 +3,7 @@
 // its number as an annotation and is asserted, or, on a loaded machine, held to the loose ceiling with the reason
 // annotated and printed, so the list reporter shows it.
 import { expect, test } from '@playwright/test';
-import { budgetVerdict, machineLoad, type MachineLoad } from '../../test/support/latency-budget';
+import { budgetVerdict, LOADED_CEILING, loosenedOn, machineLoad, type MachineLoad } from '../../test/support/latency-budget';
 
 // How long a case waits for the state whose latency it then measures: long enough that a loaded machine reaches the
 // measurement, so the bound, not the wait, is what can fail.
@@ -20,4 +20,17 @@ export function latencyBudgets(machine: MachineLoad = machineLoad()): (label: st
     }
     expect(ms, message).toBeLessThanOrEqual(ceiling);
   };
+}
+
+// A bound that is a wait's own timeout (the state must arrive within it, so a measurement after the wait would add the
+// assertion's polling to it): the bound on a quiet machine, else the loose ceiling, its reason annotated and printed as
+// above. Call it when the test starts, as latencyBudgets.
+export function latencyWait(label: string, budget: number, machine: MachineLoad = machineLoad()): number {
+  const where = loosenedOn(machine);
+  if (where === null) return budget;
+  const ceiling = budget * LOADED_CEILING;
+  const reason = `${label}: waited up to ${ceiling} ms for ${budget} ms ${where}`;
+  test.info().annotations.push({ type: 'latency bound loosened under load', description: reason });
+  console.log(`[latency] ${reason}`);
+  return ceiling;
 }
