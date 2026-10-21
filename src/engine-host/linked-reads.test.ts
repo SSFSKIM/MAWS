@@ -163,7 +163,7 @@ describe('a human message on an EngineSession (scripted, the real store)', () =>
     await run.session.exited;
   });
 
-  it('never undoes a read the agent made beside it: an artifact_read in flight while the message is prepared keeps its base', async () => {
+  it('beside an agent call it cannot tell apart, clears the memory it cannot restore: the next publish is refused as never read, never judged from a view the agent lacks', async () => {
     const other = mawsTools({ bridge: new PaneBridge({ show: () => {} }), capture: new HostBridge({ send: () => {}, answerMs: 1_000 }), asks: new AskTable(), askCancelled: () => {}, artifacts: () => documents.store });
     const made = await other.find((t) => t.name === 'artifact_create')!.call({ title: 'Page', content: `<p>${'x'.repeat(LINKED_READ_CAP_BYTES)}</p>` }, { appSessionId: 'app-other' as AppSessionId, cwd, toolUseId: 'toolu_big' as ToolUseId, requestId: 'rbig' as RequestId, signal: new AbortController().signal, fromSubagent: false });
     const big = JSON.parse((made.content[0] as { text: string }).text) as { artifactId: string; revision: number };
@@ -177,7 +177,11 @@ describe('a human message on an EngineSession (scripted, the real store)', () =>
     for (let i = 0; i < 2000 && !answerOf('own-read'); i++) await new Promise((r) => setTimeout(r, 5));
     call('publish', 'artifact_publish', { artifact: big.artifactId, baseRevision: big.revision, files: { 'index.html': '<p>mine</p>' } });
     for (let i = 0; i < 2000 && !answerOf('publish'); i++) await new Promise((r) => setTimeout(r, 5));
-    expect(answerOf('publish')!.response.response.mcp_response.result.isError).toBeUndefined(); // the agent's read still stands
+    const answer = answerOf('publish')!.response.response.mcp_response.result;
+    expect(answer.isError).toBe(true); // refused, and the page is as it was: the agent reads again
+    expect(answer.content[0]!.text).toContain('read');
+    const check = await other.find((t) => t.name === 'artifact_read')!.call({ artifact: big.artifactId }, { appSessionId: 'app-other' as AppSessionId, cwd, toolUseId: 'toolu_check' as ToolUseId, requestId: 'rcheck' as RequestId, signal: new AbortController().signal, fromSubagent: false });
+    expect((JSON.parse((check.content[0] as { text: string }).text) as { revision: number }).revision).toBe(big.revision);
     run.transport.exit(0);
     await run.session.exited;
   });

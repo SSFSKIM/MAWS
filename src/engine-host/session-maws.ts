@@ -133,10 +133,10 @@ export class SessionMaws {
   // A read changes the session's memory of the artifact: an html page's byte base, a file kind's replica base (what its
   // publish merges from). The agent must hold every read its memory reflects, so a read not attached puts both back at
   // once, and an attached one hands back `undo`, for a frame that is then not written; either puts back only what the
-  // read itself left, never a later change. A maws call the agent made while the read ran (a background agent's, the
-  // session being idle) may have set the same memory, which nothing here can tell apart from the read's, so then
-  // nothing is put back: at worst the agent's next publish is refused as from an old read, and it reads again. A
-  // document's read records its view too, which only validates an edit from
+  // read itself left, never a later change. A maws call of the session's that ran beside the read (a background
+  // agent's, the main turn idle) may have set the same memory, which nothing here can tell apart from the read's: then
+  // the memory of that artifact is cleared instead, so the agent's next publish of it is refused as never read and it
+  // reads again, never a publish judged from a view the agent does not hold. A document's read records its view too, which only validates an edit from
   // that revision; the agent learns a revision only from a read it does see, so that record is left. A read that throws
   // is one not attached.
   private async readLinked(link: LinkedArtifact, admit: (text: string | null) => Admission): Promise<ReadAnswer> {
@@ -159,7 +159,12 @@ export class SessionMaws {
     const after = { byteBase: this.artifactSession.byteBases.get(artifactId), base: service()?.existingReplica(sessionId, artifactId)?.base ?? null };
     const alone = this.toolServer.started === calls && this.toolServer.inFlight === 0;
     const undo = () => {
-      if (!alone) return;
+      if (!alone) {
+        this.artifactSession.byteBases.delete(artifactId);
+        const replica = service()?.existingReplica(sessionId, artifactId);
+        if (replica) replica.base = null;
+        return;
+      }
       if (this.artifactSession.byteBases.get(artifactId) === after.byteBase) {
         if (before.byteBase === undefined) this.artifactSession.byteBases.delete(artifactId);
         else this.artifactSession.byteBases.set(artifactId, before.byteBase);
