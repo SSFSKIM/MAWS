@@ -16,7 +16,7 @@
 // (V15); the open popover's pin never merges. A pin opens C's popover (PinPopover.tsx), which follows its pin through a
 // pan or a zoom and hides while the pin is outside the world's visible rect (V6); the compose card stands at its pin and
 // hides under a popover, as the deck's.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { clusterPins } from '../../comments/pin-clusters';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from '../../document/editor/comments/surface';
 import type { SlideCanvas } from '../../slides/canvas';
@@ -28,7 +28,7 @@ import { COMMENTS_ORIGIN, HUMAN_AUTHOR, samePin, useDeckComments, type DeckComme
 import { COMMENTS_COPY } from '../../slides/editor/comments/copy';
 import type { CommentsRailLabels } from '../../slides/editor/comments/CommentsRail';
 import { PinPopover } from '../../slides/editor/comments/PinPopover';
-import { inSlideOrder, PinButton, samePinBoxes, threadsByElement } from '../../slides/editor/comments/Pins';
+import { inSlideOrder, PinButton, pinKey, pinNode, samePinBoxes, threadsByElement } from '../../slides/editor/comments/Pins';
 import { useOpenDeckThreads, useOpenThreadCount } from '../../slides/editor/comments/use-threads';
 import type { DeckSession } from '../../slides/editor/session';
 import { measure } from '../../slides/editor/transform/measure';
@@ -313,8 +313,26 @@ function WorldPins(props: { api: DeckCommentsApi; threads: readonly DeckThread[]
     setBoxes((was) => (sameBoxes(was, next) ? was : next)); // unchanged geometry renders nothing and tells nobody
   }, [byBoard, canvases, zoom, version, laidOut]);
   // a re-measure that moved a pin tells the popover in this pass (a pan or a zoom renders it with this layer)
-  const { pinMoves } = api;
+  const { pinMoves, popover } = api;
   useLayoutEffect(() => pinMoves.placed(), [boxes, pinMoves]);
+
+  // The popover's last pin stays out of the clustering after the popover closes, for as long as it holds the keyboard:
+  // closing focuses that pin, and a merge into a count would remove the focused node and drop the keyboard on the body.
+  const layer = useRef<HTMLDivElement>(null);
+  const [kept, setKept] = useState<{ slideId: string; elementId: string } | null>(null);
+  useLayoutEffect(() => {
+    if (popover) setKept({ slideId: popover.slideId, elementId: popover.elementId }); // another popover replaces it
+  }, [popover]);
+  useEffect(() => {
+    // closed with the keyboard not on that pin (a press outside the frame closes and focuses nothing): nothing to keep
+    if (popover || !kept) return;
+    const node = layer.current ? pinNode(layer.current, kept) : null;
+    if (!node || node !== node.ownerDocument.activeElement) setKept(null);
+  }, [popover, kept]);
+  const released = (event: FocusEvent<HTMLDivElement>) => {
+    // the keyboard left the kept pin (while a popover is open, the pin hands it to the popover, which keeps its pin itself)
+    if (!popover && kept && (event.target as HTMLElement).dataset.pinKey === pinKey(kept)) setKept(null);
+  };
 
   const pins: WorldPin[] = drawn.flatMap((b) => {
     const elements = byBoard.get(b.id);
@@ -330,15 +348,15 @@ function WorldPins(props: { api: DeckCommentsApi; threads: readonly DeckThread[]
   });
   if (pins.length === 0) return null;
   // the open popover's pin stands alone, never merged, so the popover has its pin at any zoom (a zoom-out while it is
-  // open, the rail's Show of a merged pin's thread); every other pin may merge, each group drawn where its first member
-  // reads in the order
-  const open = pins.findIndex((p) => samePin(api.popover, p));
+  // open, the rail's Show of a merged pin's thread), and after it closes the pin that holds the keyboard; every other pin
+  // may merge, each group drawn where its first member reads in the order
+  const open = pins.findIndex((p) => samePin(popover ?? kept, p));
   const clusters = [
     ...(open < 0 ? [] : [{ ids: [String(open)], x: pins[open]!.x, y: pins[open]!.y }]),
     ...clusterPins(pins.flatMap((p, i) => (i === open ? [] : [{ id: String(i), x: p.x, y: p.y }]))),
   ].sort((a, b) => Number(a.ids[0]) - Number(b.ids[0]));
   return (
-    <div className="design-board-pins">
+    <div ref={layer} className="design-board-pins" onBlur={released}>
       {clusters.map((cluster) => {
         const members = cluster.ids.map((i) => pins[Number(i)]!);
         if (members.length === 1) {

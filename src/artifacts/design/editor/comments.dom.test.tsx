@@ -459,8 +459,10 @@ describe('the pin popover over the world', () => {
     expect(container.querySelector('[data-pin-cluster]')).toBeNull();
     expect(container.querySelectorAll('[data-comment-pin="cta"], [data-comment-pin="cta2"]')).toHaveLength(2); // the other a pin of its own
     expect(popover()!.style.visibility).toBe('');
-    // closed: they merge; the rail's Show of one's thread opens its popover on its own pin
+    // closed, the keyboard off its pin: they merge; the rail's Show of one's thread opens its popover on its own pin
     fireEvent.keyDown(popover()!.querySelector('textarea')!, { key: 'Escape' });
+    await settle();
+    act(() => (container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!.blur()));
     await settle();
     expect(container.querySelector('[data-pin-cluster]')).not.toBeNull();
     fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
@@ -470,6 +472,43 @@ describe('the pin popover over the world', () => {
     expect(container.querySelector('[data-comment-pin="cta2"]')).not.toBeNull();
     expect(popover()!.querySelector('[data-thread="b"]')!.getAttribute('aria-current')).toBe('true');
     expect(popover()!.style.visibility).toBe('');
+  });
+
+  // the review's P2: closing focuses the pin, and merging it into a count the next render would drop the keyboard on the body
+  it('a closed popover’s pin stays alone while it holds the keyboard, and merges once the keyboard leaves it or never reached it', async () => {
+    const { doc, view, container } = mount();
+    addThread(doc, { threadId: 'a', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'One' }, 'deck-comments');
+    addThread(doc, { threadId: 'b', slideId: 'b1', elementId: 'cta2', quote: 'Also', by: { kind: 'human' }, at: 2, body: 'Two' }, 'deck-comments');
+    fakeLayout(container, 'b1');
+    fakeRects(container);
+    await settle();
+    const pin = () => container.querySelector<HTMLElement>('[data-comment-pin="cta"]');
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    fireEvent.click(pin()!, { detail: 1 });
+    act(() => view.setViewport({ zoom: 0.25, x: 10, y: 20 })); // 25 px apart: they would merge
+    await settle();
+    fireEvent.keyDown(popover()!.querySelector('textarea')!, { key: 'Escape' });
+    await settle();
+    expect(popover()).toBeNull();
+    expect(container.querySelector('[data-pin-cluster]')).toBeNull(); // the pin stays, alone, with the keyboard on it
+    expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(2);
+    expect(document.activeElement).toBe(pin());
+    act(() => elsewhere.focus());
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')!.textContent).toBe('2');
+    expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(0);
+    // the keyboard never reached the pin (a press outside the frame closes): nothing to hold, so they merge at once
+    act(() => view.setViewport({ zoom: 0.5, x: 10, y: 20 }));
+    await settle();
+    fireEvent.click(pin()!, { detail: 1 });
+    act(() => view.setViewport({ zoom: 0.25, x: 10, y: 20 }));
+    await settle();
+    expect(container.querySelector('[data-pin-cluster]')).toBeNull();
+    fireEvent.pointerDown(elsewhere, { button: 0, pointerId: 1 });
+    await settle();
+    expect(popover()).toBeNull();
+    expect(container.querySelector('[data-pin-cluster]')).not.toBeNull();
+    elsewhere.remove();
   });
 
   it('pins under 32 screen px apart merge into one count at their centroid; its press fits them, and they part (V15)', async () => {
