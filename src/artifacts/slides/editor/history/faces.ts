@@ -1,8 +1,9 @@
-// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D11, D6; M8 fix waves 1 and 2, R2): the uploaded faces
-// a version's preview draws with. Each state of the comparison (the version shown, and the earlier state its deleted
-// elements are ghosted from) declares its own `faces`, each resolved against that state's assets (content-addressed and
-// kept while a version references them), under a private family name of its own (`deck-face-…`, from the face's URL,
-// which names the artifact and the revision, and the family), and the preview's canvases have their font-family values
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D11, D6; M8 fix waves 1 and 2, R2): the faces a
+// version's preview draws with (an upload's file, or the files the host saved for a Google Fonts face: P4-B2 D19). Each
+// state of the comparison (the version shown, and the earlier state its deleted elements are ghosted from) declares its
+// own `faces`, each resolved against that state's assets (content-addressed and kept while a version references them),
+// under a private family name of its own (`deck-face-…`, from the face's URLs, which name the artifact and the
+// revision, and the family), and the preview's canvases have their font-family values
 // rewritten to those names. An @font-face rule is the whole window's: under the authored name a live editor of the same
 // deck in the same window (a panel beside a main tab) and the preview, or the version and its earlier state, would
 // compete for one family. D's design-system scopes alias their faces the same way (design-system/assets.ts). Display

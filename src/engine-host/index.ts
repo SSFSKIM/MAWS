@@ -46,6 +46,7 @@ import { dashboardE2eSeamRequested, startDashboardE2eSeam } from './dashboards/e
 // P3-E start
 import { registerDesigns } from './designs'; // E1's M2
 // P3-E end
+import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 
@@ -101,6 +102,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const dashboards = registerDashboards({ documents }); // P3-E (E2 M2): the dashboard kind's adapter and its derived change index
   if (documents && dashboardE2eSeamRequested(process.env)) startDashboardE2eSeam(documents.store, join(userData, 'dashboard-e2e'), undefined, datasetRefresh); // P3-E (E2 M6): the agent's tools for the dashboard e2e groups, MAWS_E2E=1 and MAWS_DASHBOARD_E2E=1 only; E3 M4: with the host's refresh registry
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
+  const googleFaces = registerGoogleFaces({ documents }); // P4-B2 D19: a deck's or a design's named Google Fonts face fetched once into its assets (OFL only), under the host's egress rule
   let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
   // C3 start
   ipc = registerEngineIpc(on, emit, {
@@ -112,6 +114,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
       presentations.close(); // P3-C
       dashboards.close(); // P3-E
       designs.close(); // P3-E
+      googleFaces.close(); // P4-B2
       documents?.close(); // P3-A
     },
     duringShutdown: async () => connectors?.closeDirect(), // P3-HD M2: route D's owned processes, ended beside the sessions

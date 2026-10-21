@@ -179,3 +179,22 @@ describe('the presentation adapter', () => {
     });
   });
 });
+
+// P4-B2 D19: a restore to a state before the host's fetch keeps the face drawing offline, so the host never refetches it.
+describe('a restore carries the host’s Google Fonts record', () => {
+  const LORA = 'https://fonts.googleapis.com/css2?family=Lora';
+  const record = { request: LORA, licence: 'OFL', licenceSrc: 'assets/gf-lora-OFL.txt', files: [{ src: 'assets/gf-lora-400.woff2', weight: '400', style: 'normal' }] };
+  const setFace = (doc: Doc, key: string, face: unknown) => transact(doc, () => Y.setDeckEntry(doc, 'faces', key, face as Y.Json));
+  it('sets the live record on each restored face it still answers, and on no other', () => {
+    const live = newDoc();
+    adapter.initial!(live, { title: 'T' });
+    setFace(live, 'lora', { family: 'Lora', href: LORA, google: record });
+    setFace(live, 'slab', { family: 'Roboto Slab', href: 'https://fonts.googleapis.com/css2?family=Roboto+Slab', google: { request: 'https://fonts.googleapis.com/css2?family=Roboto+Slab', refused: 'Apache-2.0' } });
+    expect(adapter.revertScope!(live, newDoc(), { artifactId: 'r' })).toBeTruthy();
+    // what the restore's write leaves: the faces as they stood before the fetch, one of them under another link since
+    setFace(live, 'lora', { family: 'Lora', href: `${LORA}&display=swap` });
+    setFace(live, 'slab', { family: 'Roboto Slab', href: 'https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700' });
+    adapter.afterRestore!(live, { artifactId: 'r', versionId: 1 });
+    expect(Y.deckEntries(live, 'faces')).toEqual({ lora: { family: 'Lora', href: `${LORA}&display=swap`, google: record }, slab: { family: 'Roboto Slab', href: 'https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700' } });
+  });
+});

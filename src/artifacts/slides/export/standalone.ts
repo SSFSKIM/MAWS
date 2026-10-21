@@ -1,8 +1,11 @@
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D12 "Standalone HTML", "PDF"; Decision Log 18): a deck as
 // one HTML page of its own. Every slide is written from the model as the DOM canvas draws it (`CANVAS_CSS`, the
 // section's under-layer, the dialect's own elements), with the deck's design-system tokens resolved to literals, its
-// pictures and uploaded faces inlined as `data:`, and its embeds running in sandboxed frames with no network. Nothing on
-// the page loads from anywhere (its CSP says so), so the file opens anywhere.
+// pictures and faces inlined as `data:`, and its embeds running in sandboxed frames with no network. Nothing on the page
+// loads from anywhere (its CSP says so), so the file opens anywhere. P4-B2 D19 (docs/doperpowers/plans/
+// 2026-10-21-p4-b2-slides-boards.md): a face's files are `faceFiles`'s, so a Google Fonts face the engine host saved in
+// the deck's assets is inlined file by file as an upload is; one it has not saved (pending, or refused) is left out and
+// draws as its fallback.
 //
 // The page has three modes:
 // - `html`: the file the owner keeps: a keyboard viewer (arrows, Space, Home, End, F for full screen) over the visible
@@ -17,7 +20,7 @@
 import { mapStyleMapAssets, slideAssetRefs } from '../asset-refs';
 import { CANVAS_CSS } from '../canvas/css';
 import { resolveVars } from '../css';
-import type { DeckFace } from '../deck';
+import { faceFiles, type DeckFace } from '../deck';
 import { CONTAINER_TAGS, LIST_TAGS, TEXT_TAGS, type ElementIR, type SlideIR, type TextBlock } from '../ir';
 import { readDeckJson, readSlide, slideOrder } from '../model';
 import { cropStyle, embedDocument } from '../render-rules';
@@ -70,11 +73,11 @@ export function exportDeckOf(doc: Doc, fallbackTitle: string): ExportDeck {
   return { title, cover, slides, faces: deck.faces ?? {}, overrides: deck.dsOverrides ?? {} };
 }
 
-/** Every `assets/<name>` the deck draws (a picture's source, a style's url) or loads a face from. */
+/** Every `assets/<name>` the deck draws (a picture's source, a style's url) or loads a face from (each of its files). */
 export function deckAssetRefs(deck: ExportDeck): string[] {
   const refs = new Set<string>();
   for (const slide of deck.slides) for (const ref of slideAssetRefs(slide.ir)) refs.add(ref);
-  for (const face of Object.values(deck.faces)) if (typeof face.src === 'string' && face.src.startsWith('assets/')) refs.add(face.src);
+  for (const face of Object.values(deck.faces)) for (const file of faceFiles(face)) refs.add(file.src);
   return [...refs].sort();
 }
 
@@ -88,13 +91,20 @@ const inlinedStyle = (style: Readonly<Record<string, string>>, options: PageOpti
 /** The size an element is laid out at, before its own and its ancestors' transforms scale it (its box is drawn size). */
 const layoutSize = (m: MeasuredElement): { w: number; h: number } => ({ w: m.box.w / (m.scale?.[0] || 1), h: m.box.h / (m.scale?.[1] || 1) });
 
-/** The deck's uploaded faces as `@font-face` blocks, their files inlined (a face whose file is not there is left out). */
+/**
+ * The deck's faces as `@font-face` blocks, one per file with its weight and style when it has them (a fetched face's),
+ * each file inlined (a file the export does not have is left out).
+ */
 export function deckFacesCss(deck: ExportDeck, asset: (ref: string) => string | null): string {
   const blocks: string[] = [];
   for (const face of Object.values(deck.faces)) {
-    const url = typeof face.src === 'string' ? asset(face.src) : null;
-    if (!url || typeof face.family !== 'string') continue;
-    blocks.push(`@font-face { font-family: "${face.family.replace(/["\\\n]/g, '')}"; src: url("${url}"); }`);
+    if (typeof face.family !== 'string') continue;
+    const family = face.family.replace(/["\\\n]/g, '');
+    for (const file of faceFiles(face)) {
+      const url = asset(file.src);
+      if (!url) continue;
+      blocks.push(`@font-face { font-family: "${family}"; src: url("${url}");${file.weight ? ` font-weight: ${file.weight};` : ''}${file.style ? ` font-style: ${file.style};` : ''} }`);
+    }
   }
   return blocks.join('\n');
 }

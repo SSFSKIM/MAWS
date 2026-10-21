@@ -11,7 +11,9 @@ import { literalValues } from '../design-system/resolve-vars';
 import { builtinView } from '../design-system/view';
 import { FilesError, publishFiles } from '../files';
 import { isMirrorCopy, mirrorSlug, type MirrorCopy } from '../library/mirror';
-import { newDoc, stateV2, type Doc } from '../yjs';
+import { LORA_FILES, LORA_LICENCE, loraFace, robotoSlabFace, TODAYS_FACES } from '../slides/export/faces.test-support';
+import { newDoc, stateV2, transact, type Doc } from '../yjs';
+import * as Y from '../yjs/slides';
 import { boardPath, CANVAS_PATH } from './canvas';
 import { designMirrorWriter, designTokenValues } from './mirror';
 import { publishCanvas } from './publish';
@@ -83,6 +85,29 @@ describe('the design mirror writer', () => {
     expect(Object.keys(files).filter((file) => file.includes('/assets/')).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`, `${FOLDER}/assets/unused.png`]);
     const loaded = write(model({ ...FILES, [boardPath('broken')]: '<section id="broken"><p id="t">Fixed</p></section>' }));
     expect(Object.keys(loaded).filter((file) => file.includes('/assets/')).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`]);
+  });
+
+  // P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): a Google Fonts face the host fetched is its
+  // saved files and their licence, copied as the boards' uploads are
+  it('copies a fetched face’s files and its licence once every board loads; a refused face copies nothing', () => {
+    const doc = model({ ...FILES, [boardPath('broken')]: '<section id="broken"><p id="t">Fixed</p></section>' });
+    transact(doc, () => {
+      Y.setDeckEntry(doc, 'faces', 'lora', loraFace() as Y.Json);
+      Y.setDeckEntry(doc, 'faces', 'roboto-slab', robotoSlabFace() as Y.Json);
+    });
+    const gf = [...LORA_FILES.map((file) => file.src), LORA_LICENCE, 'assets/gf-robotoslab-400.woff2'].map((ref) => ({ ref, name: ref.slice('assets/'.length), mime: 'application/octet-stream', size: 1 }));
+    const files = designMirrorWriter(() => tokens)({ artifact: ARTIFACT, doc, assets: [...ASSETS, ...gf], readAsset: () => new Uint8Array([1]) }).files;
+    const saved = [...LORA_FILES.map((file) => file.src), LORA_LICENCE].map((ref) => `${FOLDER}/${ref}`);
+    expect(Object.keys(files).filter((file) => file.includes('/assets/')).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`, ...saved].sort());
+  });
+
+  // the architect's condition: a design whose faces are today's shape mirrors exactly as before (pinned from the pre-D19 code)
+  it('copies today’s faces as before: the upload, and nothing for a link with no record or a blob', () => {
+    const doc = model({
+      [CANVAS_PATH]: JSON.stringify({ v: 1, title: 'Launch', boards: { phone: { x: 0, y: 0, w: 390, h: 844 } }, order: ['phone'], faces: TODAYS_FACES }),
+      [boardPath('phone')]: '<section id="phone" style="background:#ffffff"><img id="logo" src="assets/logo.png" alt="Logo"></section>',
+    });
+    expect(Object.keys(write(doc)).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`, `${FOLDER}/boards/phone.html`, `${FOLDER}/canvas.json`]);
   });
 
   it('mirrors a legacy generic-file state as its migration would build it, writing nothing to the state', () => {

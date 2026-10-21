@@ -15,6 +15,12 @@ export const THEME_COPY = {
   systemFace: (family: string | null) => (family ? `System (${family})` : 'System'),
   deckFaces: 'This deck',
   basicFaces: 'Basic',
+  // P4-B2 D19: each of the deck's own faces and what it draws from (a refusal is the face's own sentence, deck.ts's)
+  faceList: 'This deck’s faces',
+  faceUploaded: 'Uploaded font file',
+  faceMissing: 'No font file in this deck: draws as its fallback',
+  faceSaved: 'Saved in this deck (Google Fonts, OFL)',
+  facePending: 'Draws as its fallback until MAWS reaches Google Fonts',
 } as const;
 
 export const TEXT_STYLE_COPY = {

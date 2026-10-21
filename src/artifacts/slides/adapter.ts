@@ -7,11 +7,14 @@
 // stored in its thread when the element is deleted, read just before the deletion on each of its routes: a replica's
 // frame (`beforeApply`'s forwarding edit), the agent's publish (`publish`) and a restore (`revertScope` reads, then
 // `afterRestore` writes). While the element lives its quote is derived by every reader, so no keystroke writes a thread.
+// P4-B2 D19: a restore carries the host's record of each Google Fonts face's fetch (`revertScope` reads the live records,
+// `afterRestore` sets each on the restored face it still answers), so a deck restored to before the fetch draws its face
+// offline at once and the host never fetches it again.
 import type { Actor } from '@shared/artifacts/actor';
 import type { KindAdapter, ThreadChange, ThreadRow } from '../host';
 import { transact, type Doc } from '../yjs';
-import { conversationsSince, slidesDeletedIn, touchedSlides, touchedThreads } from '../yjs/slides';
-import { DECK_PATH, slideIdOf, type DeckJson } from './deck';
+import { conversationsSince, deckEntries, setDeckEntry, slidesDeletedIn, touchedSlides, touchedThreads, type Json } from '../yjs/slides';
+import { carryRecord, DECK_PATH, googleRecord, slideIdOf, type DeckFace, type DeckJson } from './deck';
 import { deckFiles, deckPaths, importSlide, repair, writeDeckKeys } from './model';
 import { loadSlide } from './parse';
 import { publishDeck } from './publish';
@@ -108,6 +111,24 @@ const threadRow = (thread: DeckThread): ThreadRow => ({
   ...(thread.createdBy.kind === 'session' ? { appSessionId: (thread.createdBy as Extract<Actor, { kind: 'session' }>).appSessionId } : {}),
 });
 
+/** The faces whose host record validates, by key: what a restore carries (D19). */
+function liveRecords(doc: Doc): Map<string, DeckFace> {
+  const out = new Map<string, DeckFace>();
+  for (const [key, face] of Object.entries((deckEntries(doc, 'faces') ?? {}) as Record<string, DeckFace>)) if (face && typeof face === 'object' && googleRecord(face)) out.set(key, face);
+  return out;
+}
+
+/** Sets each carried record on the restored face it answers and that holds none (inside the restore's write). */
+function carryRecords(doc: Doc, records: ReadonlyMap<string, DeckFace>): void {
+  const faces = (deckEntries(doc, 'faces') ?? {}) as Record<string, DeckFace>;
+  for (const [key, live] of records) {
+    const restored = faces[key];
+    if (!restored || typeof restored !== 'object' || googleRecord(restored)) continue;
+    const carried = carryRecord(restored, live);
+    if (carried !== restored) setDeckEntry(doc, 'faces', key, carried as Json);
+  }
+}
+
 function mirrorRows(doc: Doc, threadIds: Iterable<string>): ThreadChange | undefined {
   const upsert: ThreadRow[] = [];
   const remove: string[] = [];
@@ -124,7 +145,7 @@ export function createPresentationAdapter(options: { now?: () => Date } = {}): K
   const now = options.now ?? (() => new Date());
   // Per artifact, the quotes a restore's `revertScope` read from the live deck just before its write, for its
   // `afterRestore` (Decision Log 27 of A: a kind's per-artifact state); taken by the next restore of that artifact.
-  const beforeRestore = new Map<string, Map<string, string>>();
+  const beforeRestore = new Map<string, { quotes: Map<string, string>; faces: Map<string, DeckFace> }>();
   // Fix wave 1: the threads a frame's forwarding edit stored a quote in, for the `afterUpdate` that follows it on the same
   // replica (A calls both in one frame), whose mirror rows otherwise cover only what the frame itself touched.
   const forwarded = new WeakMap<Doc, string[]>();
@@ -168,14 +189,15 @@ export function createPresentationAdapter(options: { now?: () => Date } = {}): K
       return threads ? { threads } : undefined;
     },
     revertScope: (live, old, { artifactId }) => {
-      beforeRestore.set(artifactId, captureQuotes(live));
+      beforeRestore.set(artifactId, { quotes: captureQuotes(live), faces: liveRecords(live) });
       return { keep: conversationsSince(live, old) };
     },
     afterRestore: (live, { artifactId }) => {
       repair(live);
-      const quotes = beforeRestore.get(artifactId);
+      const before = beforeRestore.get(artifactId);
       beforeRestore.delete(artifactId);
-      if (quotes) storeDeletedQuotes(live, quotes); // M7: the elements the restore took away keep their last text
+      if (before) storeDeletedQuotes(live, before.quotes); // M7: the elements the restore took away keep their last text
+      if (before?.faces.size) transact(live, () => carryRecords(live, before.faces)); // D19
       const upsert = listThreads(live).map(threadRow);
       return upsert.length ? { threads: { upsert } } : undefined;
     },

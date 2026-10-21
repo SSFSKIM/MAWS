@@ -1,8 +1,12 @@
 // P3-C M9 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D12 "Standalone HTML", "PDF"): the deck's own page.
 import { describe, expect, it } from 'vitest';
 import { builtinView } from '../../design-system/view';
+import { transact } from '../../yjs';
+import * as Y from '../../yjs/slides';
+import { DECK_PATH, type DeckFace } from '../deck';
 import { deckTokenValues } from '../mirror';
 import { FIXTURE_FILES, fixtureDoc, MEASURED } from './deck.test-support';
+import { LORA_FILES, loraFace, robotoSlabFace, TODAYS_FACES } from './faces.test-support';
 import { cropOf, cropViewBox, deckAssetRefs, deckFacesCss, deckPage, exportDeckOf, type PageOptions } from './standalone';
 
 const LOGO = 'data:image/png;base64,iVBORw0KGgo=';
@@ -202,5 +206,46 @@ describe('the deck’s standalone page: the final review', () => {
     const measured = gradients(page('measure'));
     expect(measured).toHaveLength(3);
     expect(measured.slice(1)).toEqual(shown); // the hidden slide's drawing shifts nothing
+  });
+});
+
+// P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): a Google Fonts face the engine host fetched
+// travels as its saved files, each inlined in a block of its own with its weight and style, so the HTML, PDF and PPTX
+// exports draw it offline; a refused face, and one with no record yet, draw as their fallbacks. Today's faces export
+// exactly as the pre-D19 code wrote them.
+describe('the deck’s standalone page: Google Fonts faces saved in the deck (D19)', () => {
+  const withFaces = (faces: Record<string, DeckFace>) => {
+    const doc = fixtureDoc();
+    transact(doc, () => {
+      for (const [key, face] of Object.entries(faces)) Y.setDeckEntry(doc, 'faces', key, face as Y.Json);
+    });
+    return exportDeckOf(doc, 'x');
+  };
+  const fonts = (ref: string) => (ref.startsWith('assets/gf-lora-') ? `data:font/woff2;base64,${btoa(ref)}` : asset(ref));
+  const LORA_BLOCKS = LORA_FILES.map((file) => `@font-face { font-family: "Lora"; src: url("${fonts(file.src)}"); font-weight: ${file.weight}; font-style: ${file.style}; }`);
+
+  it('lists every saved file among the deck’s assets, not its licence; a refused or pending face lists none', () => {
+    const deck = withFaces({ lora: loraFace(), 'roboto-slab': robotoSlabFace(), 'source-serif-4': TODAYS_FACES['source-serif-4']! });
+    expect(deckAssetRefs(deck)).toEqual(['assets/brand.woff2', ...LORA_FILES.map((file) => file.src), 'assets/logo.png'].sort());
+  });
+
+  it('writes one block per saved file with its weight and style, its file inlined; a file the export lacks is left out', () => {
+    const deck = withFaces({ lora: loraFace(), 'roboto-slab': robotoSlabFace() });
+    const css = deckFacesCss(deck, fonts);
+    expect(css.split('\n').sort()).toEqual([`@font-face { font-family: "Brand Sans"; src: url("${FONT}"); }`, ...LORA_BLOCKS].sort());
+    const lacking = deckFacesCss(deck, (ref) => (ref.endsWith('-italic.woff2') ? null : fonts(ref)));
+    expect(lacking.split('\n').filter((line) => line.includes('"Lora"'))).toEqual(LORA_BLOCKS.filter((line) => !line.includes('italic')));
+    // the page still loads nothing from anywhere: the faces are `data:` under the same policy
+    const html = deckPage(deck, { mode: 'html', resolveVar: () => undefined, asset: fonts, facesCss: css });
+    for (const line of LORA_BLOCKS) expect(html).toContain(line);
+    expect(html).toContain(`content="default-src 'none'; img-src data:; font-src data:;`);
+    expect(html).not.toContain('fonts.googleapis.com');
+  });
+
+  // the architect's condition: a deck whose faces are today's shape exports exactly as before
+  it('exports today’s faces byte for byte as before: an upload inlined, a link with no record and a blob left out', () => {
+    const deck = exportDeckOf(fixtureDoc({ ...FIXTURE_FILES, [DECK_PATH]: JSON.stringify({ ...JSON.parse(FIXTURE_FILES[DECK_PATH]!), faces: TODAYS_FACES }) }), 'x');
+    expect(deckAssetRefs(deck)).toEqual(['assets/brand.woff2', 'assets/logo.png']);
+    expect(deckFacesCss(deck, asset)).toBe('@font-face { font-family: "Brand Sans"; src: url("data:font/woff2;base64,d09GMg=="); }');
   });
 });

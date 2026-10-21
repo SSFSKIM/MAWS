@@ -37,7 +37,7 @@ A manifest entry whose file you have not sent is kept as an empty board with no 
 
 ## Assets and faces
 
-Pictures are uploaded files: call `artifact_upload_asset`, then use the `assets/<name>` ref it returns as a `src` or in a `url(…)`. A URL or `data:` URI holds the board. Faces go in `canvas.json`'s `faces`, at most four, as a deck's do; prefer the design system's.
+Pictures are uploaded files: call `artifact_upload_asset`, then use the `assets/<name>` ref it returns as a `src` or in a `url(…)`. A URL or `data:` URI holds the board. Faces go in `canvas.json`'s `faces`, at most four, as a deck's do; prefer the design system's. A Google Fonts `href` naming that family alone is fetched once into the design's assets when its licence is OFL, and draws offline from then on; any other licence is refused by name in `warnings`, and the face draws as its fallback. Leave the `google` key MAWS adds to a face alone.
 
 ## Comments
 
