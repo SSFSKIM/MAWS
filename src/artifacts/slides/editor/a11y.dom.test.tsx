@@ -7,6 +7,10 @@ import { newDoc, onUpdate, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { deleteElementTree, importSlide, readFlat, setAttrs, slideFile, writeDeckKeys } from '../model';
 import { loadSlide } from '../parse';
+import { DesignWorkbench } from '../../design/editor/DesignWorkbench';
+import { DesignView } from '../../design/editor/viewport';
+import { design } from '../../design/fixtures/support';
+import { armedBox } from './armed';
 import { DeckEditor } from './DeckEditor';
 import { DeckSession } from './session';
 
@@ -198,3 +202,123 @@ function cellsOf(doc: Doc): string[] {
     .filter((e) => e.tag === 'th' || e.tag === 'td')
     .map((e) => e.id);
 }
+
+describe('P4-B2 (D14, tracker row 253): F6 and ⇧F6 cycle the editor’s regions, the selection kept', () => {
+  const SLIDE = `<section id="s" style="background:#ffffff">
+<h1 id="title" style="font-size:64px">Quarterly plan</h1>
+<div id="band" style="position:absolute; left:0px; top:0px; width:1920px; height:96px; background:#eef2f1"></div>
+<x-shape id="dot" kind="ellipse" style="position:absolute; left:500px; top:800px; width:100px; height:100px; background:#2b7a78"></x-shape>
+<x-icon id="star" name="Star" style="position:absolute; left:700px; top:800px; width:64px; height:64px; color:#2b7a78"></x-icon>
+</section>`;
+  const key = (init: KeyboardEventInit) => act(() => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
+  const f6 = (init: KeyboardEventInit = {}) => key({ key: 'F6', ...init });
+  const within = (selector: string) => document.activeElement?.closest(selector) !== null && document.activeElement?.closest(selector) !== undefined;
+
+  function mount(props: { bindsKey?: (event: KeyboardEvent) => boolean } = {}) {
+    const doc = deck(SLIDE);
+    const session = new DeckSession(doc, 0);
+    const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} {...props} />);
+    const stage = container.querySelector<HTMLElement>('[data-stage-surface]')!;
+    const node = (id: string) => stage.querySelector<HTMLElement>(`[data-eid="${id}"]`)!;
+    const box = (id: string) => node(id).querySelector<HTMLElement>('.deck-textbox');
+    act(() => stage.focus());
+    return { doc, session, stage, node, box };
+  }
+
+  it('a middle element’s selection reaches the inspector by F6 and comes back by ⇧F6; the stage says its exit', () => {
+    const { session, stage, node } = mount();
+    expect(stage.getAttribute('aria-keyshortcuts')).toBe('F6');
+    act(() => session.select(['dot'])); // neither the first nor the last: Tab leaves the stage only past an end
+    f6();
+    expect(within('[data-deck-inspector]')).toBe(true);
+    expect(session.snapshot()).toMatchObject({ selection: ['dot'], keyboard: 'away' });
+    f6({ shiftKey: true });
+    expect([document.activeElement, session.snapshot().selection]).toEqual([node('dot'), ['dot']]);
+  });
+
+  it('T23: leaving the stage from ARMED drops to SEL (the box unmounts), coming back arms it again; an edit ends first', () => {
+    const { session, box } = mount();
+    act(() => session.select(['title']));
+    expect(document.activeElement).toBe(box('title'));
+    f6();
+    expect(within('[data-deck-inspector]')).toBe(true);
+    expect(armedBox(session)).toBeNull();
+    expect(box('title')).toBeNull();
+    expect(session.snapshot().selection).toEqual(['title']);
+    f6({ shiftKey: true });
+    expect(document.activeElement).toBe(box('title'));
+    expect(armedBox(session)?.elementId).toBe('title');
+    act(() => session.editText('title'));
+    f6();
+    expect(session.snapshot()).toMatchObject({ editingText: null, selection: ['title'] });
+    expect(within('[data-deck-inspector]')).toBe(true);
+  });
+
+  it('the ring: the toolbar, the filmstrip’s current slide, the stage, the inspector (its last field), the notes, the open rail', () => {
+    const { session, stage, node } = mount();
+    act(() => session.select(['band']));
+    f6({ shiftKey: true });
+    expect(document.activeElement?.closest('[data-slide-thumb]')?.hasAttribute('data-current')).toBe(true);
+    expect(session.snapshot().selection).toEqual(['band']); // the thumbnail's focus showed the slide already shown
+    f6({ shiftKey: true });
+    expect(within('.deck-toolbar')).toBe(true);
+    f6({ shiftKey: true }); // around to the last region: the notes (no rail is open)
+    expect(within('.deck-notes')).toBe(true);
+    act(() => session.toggleRail('theme')); // a rail with something to focus (one with nothing is skipped)
+    f6();
+    expect(within('[data-deck-rail]')).toBe(true);
+    f6();
+    expect(within('.deck-toolbar')).toBe(true);
+    // the inspector's last field is where F6 comes back to, for this selection or another
+    act(() => stage.focus());
+    f6({ shiftKey: true }); // the filmstrip
+    f6(); // the stage: its selection's node
+    expect(document.activeElement).toBe(node('band'));
+    f6(); // the inspector
+    const y = document.querySelector<HTMLElement>('[data-deck-inspector] input[aria-label="Y"]')!;
+    act(() => y.focus());
+    f6({ shiftKey: true });
+    act(() => session.select(['dot']));
+    f6();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Y');
+    expect(within('[data-deck-inspector]')).toBe(true);
+  });
+
+  it('steps aside while an input method composes, and for a key the owner’s keymap binds', () => {
+    const { session, node } = mount();
+    act(() => session.select(['dot']));
+    f6({ isComposing: true });
+    f6({ keyCode: 229 });
+    expect(document.activeElement).toBe(node('dot'));
+    cleanup();
+    const bound = mount({ bindsKey: (event) => event.key === 'F6' });
+    act(() => bound.session.select(['dot']));
+    f6();
+    expect(document.activeElement).toBe(bound.node('dot'));
+  });
+
+  it('the board does the same: a selected element reaches the inspector and comes back armed', () => {
+    const doc = design();
+    const session = new DeckSession(doc, 0);
+    const view = new DesignView();
+    view.setRoom({ w: 1000, h: 800 });
+    view.setViewport({ zoom: 1, x: 0, y: 0 });
+    const { container } = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} />);
+    const world = container.querySelector<HTMLElement>('[data-design-world]')!;
+    const heading = container.querySelector<HTMLElement>('[data-board-id="b1"] [data-eid="title"]')!;
+    expect(world.getAttribute('aria-keyshortcuts')).toBe('F6');
+    act(() => {
+      session.show('b1');
+      session.select(['title']);
+    });
+    act(() => world.focus());
+    expect(document.activeElement).toBe(heading.querySelector('.deck-textbox'));
+    f6();
+    expect(within('[data-design-rail="inspector"]')).toBe(true);
+    expect(session.snapshot()).toMatchObject({ selection: ['title'], keyboard: 'away' });
+    f6({ shiftKey: true });
+    expect(document.activeElement).toBe(heading.querySelector('.deck-textbox'));
+    f6({ shiftKey: true });
+    expect(document.activeElement?.closest('[data-design-rail="boards"] [data-current]')).not.toBeNull();
+  });
+});

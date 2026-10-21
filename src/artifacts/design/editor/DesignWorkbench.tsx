@@ -15,7 +15,9 @@
 // shows; the pill and the restore banner as C's).
 // P4-B4: a place asked from outside (a link's `#slide=` naming a board, `#v<id>`) through C's `useDeckReveal`: the board
 // selected and brought into view, as a shown thread's is; a version previewed in the history rail.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D14; tracker row 253): F6 and ⇧F6 cycle the
+// workbench's regions (C's a11y.ts), keeping the selection.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
 import { onUpdate, type Doc } from '../../yjs';
@@ -36,6 +38,7 @@ import { TextStyleMenu } from '../../slides/editor/menus/TextStyle';
 import { ThemePanel, type DeckThemeChoice } from '../../slides/editor/menus/Theme';
 import { useCanvasCss, useDeckFaces } from '../../slides/editor/page-styles';
 import { useDeckReveal, type DeckRevealProps } from '../../slides/editor/reveal'; // P4-B4
+import { BOARD_REGIONS, RegionRing, regionKey } from '../../slides/editor/a11y';
 import type { DeckSession } from '../../slides/editor/session';
 import type { ImportAsset } from '../../slides/editor/transform/clipboard';
 import { measureInHost } from '../../slides/editor/transform/Overlay';
@@ -92,6 +95,8 @@ export interface DesignWorkbenchProps extends DeckRevealProps /* P4-B4 */ {
   sessionTitle?: (appSessionId: string) => string | undefined;
   /** M4: an asset's URL at a revision (a version's), for a preview drawn with the version's assets. */
   assetUrlAt?: (ref: string, revision: number) => string | null;
+  /** P4-B2 (D14): whether the owner's keymap binds a key (the shell's): the workbench's own F6 then steps aside. */
+  bindsKey?: (event: KeyboardEvent) => boolean;
 }
 
 const NOTICE_MS = 6_000;
@@ -131,7 +136,7 @@ function useBoardCss(): void {
 }
 
 export function DesignWorkbench(props: DesignWorkbenchProps) {
-  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, onCanvases, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt } = props;
+  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, onCanvases, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, bindsKey } = props;
   useCanvasCss();
   useBoardCss();
   const doc = session.doc;
@@ -386,7 +391,9 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     [editable, active, session, doc],
   );
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const [regions] = useState(() => new RegionRing(BOARD_REGIONS)); // P4-B2 (D14)
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (regionKey(event, regions, session, bindsKey)) return; // P4-B2 (D14): F6 and ⇧F6
     const mod = event.metaKey || event.ctrlKey;
     if (!mod || readOnly || preview) return; // M4: no undo in history (the live design is not shown)
     const target = event.target as HTMLElement;
@@ -426,7 +433,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     setNotice(C.movedTo(boardLabel(to)));
   };
   const editor = (
-    <div className="deck-editor design-workbench" data-design-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
+    <div className="deck-editor design-workbench" data-design-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown} onFocus={(event) => regions.note(event.currentTarget, event.target)}>
       {faces && <style data-deck-faces>{faces}</style>}
       {!preview && historySnapshot?.banner && (
         <div className="deck-history-banner" role="status" aria-label={HISTORY_COPY.restoredBanner}>

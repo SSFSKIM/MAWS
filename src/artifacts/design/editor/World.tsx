@@ -435,6 +435,7 @@ export function World(props: WorldProps) {
       tabIndex={0}
       data-design-world
       data-stage-surface
+      aria-keyshortcuts="F6" // P4-B2 (D14): its keyboard exit
       data-panning={panning || undefined}
       data-space={spaceHeld || undefined}
     >

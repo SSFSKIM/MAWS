@@ -59,7 +59,7 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
           </ul>
         </div>
       )}
-      <div ref={viewport} className="deck-stage" aria-label={C.stage} role="region" tabIndex={0} data-stage-surface>
+      <div ref={viewport} className="deck-stage" aria-label={C.stage} role="region" tabIndex={0} data-stage-surface aria-keyshortcuts="F6" /* P4-B2 (D14): its keyboard exit */>
         {slide ? (
           <div className="deck-stage-center">
             <div ref={setFrame} className="deck-stage-frame" data-stage-slide={slide.id} data-held={slide.held ? '' : undefined}>
