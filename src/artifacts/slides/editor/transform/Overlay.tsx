@@ -374,6 +374,17 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     };
   }, [surface, ctx, slidePoint, session, slideId, scale, readOnly, editing, catchUpLayout]);
 
+  // P4-B2 (D17): a gesture the overlay unmounts in (its slide gone, the tab closing) ends as a cancel does, so its hold
+  // of the replica's frames, its undo step and the session's `dragging` end with it
+  useEffect(
+    () => () => {
+      const g = gesture.current;
+      gesture.current = null;
+      g?.end(false);
+    },
+    [],
+  );
+
   // ---- keys and the clipboard, while the stage has focus
   useEffect(() => {
     const el = surface.current;
