@@ -8,6 +8,11 @@
 // the machine's real presence says it. And a connected machine removed from the Machines dialog: off the list, its
 // stream ended, and its credential refused.
 //
+// A direct channel is the session view wherever its machine serves the session's transcript (§4 as amended 2026-10-17,
+// §9.1): its pending requests are cards at its tail, gone once settled, and a retired session's end is a marker row
+// there. Settled decisions, lifecycle lines and the traffic between agents are the group chat's, and the log-built
+// channel is a direct channel's only where the machine serves no transcript for the session.
+//
 // The fake machine replays the committed recording (a haiku session with two subagents, a Bash permission prompt, a
 // question, a `<message>`, an interrupted turn). Where its API does not reach, a DX2 test client (test/local/machine.ts)
 // stands beside it: a session in `shell` (the recording has none), and a forged event and request (the fake machine
@@ -116,7 +121,7 @@ function sentRpcs(target: Page, project: string): Rpc[] {
   return rpcs;
 }
 
-test("M1: the grid's counts change within 2 s of a change on the machine side (a dropped stream within one local heartbeat)", async () => {
+test("M1: the grid's counts change within 2 s of a change on the machine side (a dropped stream within one local heartbeat and the lease's grace)", async () => {
   test.setTimeout(90_000);
   const fm = await fakeMachine({ recordings: [recording()] });
   await page.goto(hub.localhost);
@@ -158,11 +163,12 @@ test("M1: the grid's counts change within 2 s of a change on the machine side (a
   await after('offline', () => fm.drop(), 'data-working', '1');
   await expect(tile.getByTestId('machines')).toContainText('1 of 2 machines online');
   test.info().annotations.push({ type: 'grid latency (ms)', description: JSON.stringify(took) });
-  // A change the machine makes reaches the tile within 2 s. A dropped stream is the exception under the local command:
-  // DX2 has a close seen within one heartbeat there (wrangler dev's proxy closes gracefully, noticed at the next write),
-  // so the offline step is bounded by the hub's configured heartbeat plus a margin for the chain after the abort (DC3
-  // measured under 25 ms). The 2 s offline claim is acceptance 1's, proved on the deployed hub.
-  const offlineBound = hub.heartbeatMs + 500;
+  // A change the machine makes reaches the tile within 2 s. A dropped stream is the exception: under the local command
+  // DX2 has a close seen within one heartbeat (wrangler dev's proxy closes gracefully, noticed at the next write), and
+  // then the closed stream's lease holds the machine online for its grace, one more heartbeat, for a reconnect to take
+  // over without a flap (DX2, MAWS #57). So the offline step is bounded by two of the hub's configured heartbeats plus a
+  // margin for the chain after the lapse (DC3 measured under 25 ms).
+  const offlineBound = 2 * hub.heartbeatMs + 500;
   const bounds: Record<string, number> = { busy: 2000, waiting: 2000, 'busy again': 2000, shell: 2000, offline: offlineBound };
   expect(Object.entries(took).filter(([what, ms]) => ms > bounds[what]), `the tile's latencies (ms): ${JSON.stringify(took)}; bounds ${JSON.stringify(bounds)}`).toEqual([]);
 });
@@ -194,39 +200,47 @@ test('G2: the pending set is decided and answered from the web through the routi
   const fm = await fakeMachine({ recordings: [rec], decisions: 'wait' });
   await fm.play({ speed: 0, until: (step) => step.k === 'log' && step.event.kind === 'joined' && step.event.session === rec.session });
   await open(page, fm.project, rec.session);
+  const view = center(page).getByTestId('session-view');
+  await expect(view).toHaveAttribute('data-session', rec.session);
 
+  // In the session's channel each pending request is a card at the tail, decided in place, and gone once its machine
+  // settles it.
   await fm.play({ speed: 0, until: (step) => step.k === 'raised' });
   const [bash] = fm.pendingRequests();
   expect(bash.tool).toBe('Bash');
-  const card = center(page).locator(`[data-request="${bash.request}"]`);
+  const card = view.locator(`[data-tail-request="${bash.request}"]`);
   await expect(card).toContainText(/wants to run a command/i);
-  await expect(nav(page).locator(`[data-session="${rec.session}"]`)).toBeVisible();
   await card.getByRole('button', { name: 'Allow' }).click();
-  await expect(card.getByTestId('settled')).toHaveText('Allowed from the web by you', { timeout: 15_000 });
+  await expect(card).toHaveCount(0, { timeout: 15_000 });
   expect(fm.rpcs).toMatchObject([{ rpc: 'decide', executed: true, outcome: { state: 'done' } }]);
 
   await fm.play({ speed: 0, until: (step) => step.k === 'raised' });
   const [question] = fm.pendingRequests();
-  const asked = center(page).locator(`[data-request="${question.request}"]`);
+  const asked = view.locator(`[data-tail-request="${question.request}"]`);
   await expect(asked).toContainText('Which color should we use?');
   // The ask mod's blocking question is raised under the engine dialog's id; the transcript holds the outer call, which
-  // `toolUseId` names (DX4): the working record's folds end and begin at that call's row, never at the dialog's id.
+  // `toolUseId` names (DX4), and the session view draws the question at that call's row, never under the dialog's id.
   const call = question.toolUseId!;
   expect(call).not.toBe(question.request);
   expect(rec.rows.main.some((row) => JSON.stringify(row).includes(`"id":"${call}"`))).toBe(true);
-  const folds = center(page).getByTestId('working-record');
-  await expect(folds.and(page.locator(`[data-to="${call}"]`))).toHaveCount(1);
-  await expect(folds.and(page.locator(`[data-from="${call}"]`))).toHaveCount(1);
-  await expect(page.locator(`[data-to="${question.request}"], [data-from="${question.request}"]`)).toHaveCount(0);
+  await expect(view.locator(`[data-row-id^="question:${call}"]`)).toHaveCount(1);
+  await expect(view.locator(`[data-row-id^="question:${question.request}"]`)).toHaveCount(0);
   await asked.getByRole('radio', { name: 'blue' }).click();
   await asked.getByRole('button', { name: 'Submit' }).click();
-  await expect(asked.getByTestId('settled')).toHaveText('Answered from the web by you', { timeout: 15_000 });
+  await expect(asked).toHaveCount(0, { timeout: 15_000 });
+  expect(fm.rpcs).toMatchObject([{ rpc: 'decide' }, { rpc: 'answer', executed: true, outcome: { state: 'done' } }]);
   expect(fm.pendingRequests()).toEqual([]);
 
-  // Nothing of the tab is kept across a reload: the audit record's `decided`, replayed after caught-up, draws both.
+  // The group chat draws each settled decision, and nothing of the tab is kept across a reload: the audit record's
+  // `decided`, replayed after caught-up, draws both again.
+  const group = `/p/${fm.project}`;
+  await open(page, fm.project, rec.session, group);
+  const settled = (request: string) => center(page).locator(`[data-request="${request}"]`).getByTestId('settled');
+  await expect(settled(bash.request)).toHaveText('Allowed from the web by you', { timeout: 20_000 });
+  await expect(settled(question.request)).toHaveText('Answered from the web by you');
   await page.reload();
-  await expect(card.getByTestId('settled')).toHaveText('Allowed from the web by you', { timeout: 20_000 });
-  await expect(asked.getByTestId('settled')).toHaveText('Answered from the web by you');
+  await expect(settled(bash.request)).toHaveText('Allowed from the web by you', { timeout: 20_000 });
+  await expect(settled(question.request)).toHaveText('Answered from the web by you');
 });
 
 test("G2: an RPC is drawn forwarded, uncertain when its machine drops, retried under its own nonce, and done from the machine's ledger; a failure is drawn as one", async () => {
@@ -337,7 +351,9 @@ test('G2: an event and a request whose code fails are not drawn, the view report
     { t: 'pending', project, raised: [forgedRequest] },
   ]);
 
-  await open(page, project, session);
+  // The group chat, drawn from the log. The session's own channel is its session view, and the test client answers no
+  // subscription, so that view would wait on a transcript that never comes.
+  await open(page, project, session, `/p/${project}`);
   await expect(center(page)).toContainText('genuine words');
   await expect(page.getByTestId('refused')).toContainText(`${writer}:${genuine.seq + 1} (its code does not match)`);
   await expect(page.getByTestId('refused-requests')).toContainText(`a request toolu_forged from ${forger.name}`);
@@ -380,8 +396,13 @@ test("G2: §5's controls by the session's kind as the machine's presence says it
   const header = page.getByTestId('channel-header');
   await header.getByRole('button', { name: 'Retire…' }).click();
   await header.getByRole('button', { name: 'Retire', exact: true }).click();
-  await expect(center(page)).toContainText('fakerec retired by you', { timeout: 15_000 });
+  // The session view ends with its marker row; the lifecycle line is the group chat's.
+  const marker = center(page).getByTestId('end-marker');
+  await expect(marker).toHaveAttribute('data-end', 'retired', { timeout: 15_000 });
+  await expect(marker).toContainText('Retired by you');
   // Retired is the owner taking it out of the project: its history stays, and no Resume is offered.
+  await expect(marker).toContainText('it cannot be resumed');
+  await expect(marker.getByRole('button')).toHaveCount(0);
   await expect(header.getByTestId('retired-by')).toHaveText('Retired by you');
   await expect(header.getByRole('button', { name: 'Resume' })).toHaveCount(0);
 
@@ -408,7 +429,7 @@ test("G2: §5's controls by the session's kind as the machine's presence says it
   expect(bare.rpcs).toMatchObject([{ rpc: 'steer', executed: true, outcome: { state: 'done', result: { row: null } } }]);
 });
 
-test('G2: the replayed log draws as §4 says — lifecycle lines, agent traffic folded per run, addressing — in the group chat and each direct channel', async () => {
+test('G2: the replayed log draws as §4 says — lifecycle lines, agent traffic folded per run, addressing — in the group chat and a log-built direct channel; a session view keeps to its transcript', async () => {
   test.setTimeout(90_000);
   const rec = recording();
   const fm = await fakeMachine({ recordings: [rec] });
@@ -435,16 +456,22 @@ test('G2: the replayed log draws as §4 says — lifecycle lines, agent traffic 
   const human = group.locator('[data-item="human"]').filter({ hasText: 'keep the blue' });
   await expect(human.getByTestId('deliveries')).toHaveText(/fakerec: delivered/, { timeout: 15_000 });
 
-  // fakerec's channel: its own message, the traffic it took part in, what was addressed to it, its working record.
+  // fakerec's channel is its session view, over its own transcript: its message, its working record folded per turn,
+  // and what was addressed to it waiting at the tail as delivered. The log's traffic between agents is not in it.
   await nav(page).locator(`[data-session="${rec.session}"]`).click();
-  await expect(center(page)).toContainText('You chose blue');
-  await expect(center(page).getByTestId('agent-run')).toContainText('2 messages between agents');
-  await expect(center(page)).toContainText('keep the blue');
-  await expect(center(page).getByTestId('working-record').first()).toBeVisible();
+  const view = center(page).getByTestId('session-view');
+  await expect(view).toHaveAttribute('data-session', rec.session);
+  await expect(view).toContainText('You chose blue');
+  await expect(view.locator('[data-kind="divider"]').first()).toBeVisible();
+  const sent = view.getByTestId('tail-send').filter({ hasText: 'keep the blue' });
+  await expect(sent).toHaveAttribute('data-state', 'delivered');
+  await expect(center(page).getByTestId('agent-run')).toHaveCount(0);
   await expect(center(page)).not.toContainText('fakepeer joined');
 
-  // fakepeer's channel: its own traffic, nothing of fakerec's exchange with the human.
+  // fakepeer's channel: the machine serves no transcript for it, so it is the channel built from the log — its own
+  // traffic, nothing of fakerec's exchange with the human.
   await nav(page).locator(`[data-session="${PEER}"]`).click();
+  await expect(center(page).getByTestId('no-transcript')).toContainText(`${fm.name} serves no transcript for this session`);
   await expect(center(page).getByTestId('agent-run')).toContainText('2 messages between agents');
   await expect(center(page)).not.toContainText('You chose blue');
   await expect(center(page)).not.toContainText('keep the blue');
@@ -497,9 +524,9 @@ test('an admin removes a connected machine from the Machines dialog: it leaves t
   expect(listed.machines.map((m) => m.name)).not.toContain(fm.name);
   enrolledNames.splice(enrolledNames.indexOf(fm.name), 1); // revoked here: the teardown has nothing left to revoke for it
 
-  // The hub ended its stream with the revocation, not at a lapsed lease. Under the local command that is bounded like
-  // M1's offline step: DX2 has a close seen within one heartbeat there (wrangler dev's proxy closes gracefully, noticed
-  // at the next write), plus a margin for the chain after the abort.
+  // The hub ended its stream with the revocation, not at a lapsed lease. Under the local command DX2 has a close seen
+  // within one heartbeat (wrangler dev's proxy closes gracefully, noticed at the next write), plus a margin for the
+  // chain after the abort; the stream's end, unlike M1's offline step, waits on no grace.
   const endedAfter = await ended;
   const endBound = hub.heartbeatMs + 500;
   test.info().annotations.push({ type: 'stream end after the confirming click (ms)', description: String(endedAfter) });

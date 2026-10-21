@@ -5279,6 +5279,13 @@ a hub that connects into machines (§2).
   gate-offload plan §3.5–3.6). Rejected: a shorter local heartbeat (DC3's to set, and nothing needs it); keeping
   the MacBook pass at `3de8a15e` (it predates the panel's fixes to resume and routing, and passed by timing).
   Date/Author: 2026-10-16, design session (DC5).
+  Amended 2026-10-20: the bound is two configured heartbeats plus 500 ms. Since MAWS #57 (merged as #58, 2026-10-18)
+  a closed stream's lease holds the machine online for a grace of one heartbeat, so the machine reads offline once the
+  close is seen (within one heartbeat locally) and the grace has run: 3,815 to 3,861 ms on the MacBook against the old
+  2,500 ms bound, which failed at #58's merge and on every master after it, unseen, since the suite runs in no default
+  gate set. The same grace means a dropped machine reads offline on the deployed hub after 15 s, not within the 2 s this
+  entry claimed for acceptance 1; #57 chose that over a flap at every reconnect, and acceptance 1's reading of it is
+  the owner's.
 - Decision: The web names a session by its title (§4): the harness's "Session name" (`/rename`'s `custom-title`,
   else the generated `ai-title`), carried through the log as sminos's `titled` (smns §3, §5, §8), which the session's
   machine writes into its file when the value changes. The owner, working a day from the desk, could not tell sessions
