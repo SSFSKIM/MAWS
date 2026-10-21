@@ -46,13 +46,12 @@ import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, S
 import type { JournalRow } from '@shared/wire/journal';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../src/engine-host/binary-info';
 import { RELAY_URL } from '../src/engine-host/launch';
-import { journalCost } from '../test/live/support/live';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { forwardingScript } from './support/live-budget';
+import { forwardingScript, spentUnder } from './support/live-budget';
 import { mcpCalls } from './support/maws-tools';
 import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
@@ -205,15 +204,9 @@ function cli(args: string[]): string {
 // ---- journals, the index, the transcript, the probe ------------------------------------------------------------------
 
 const journal = (id: string): JournalRow[] => sessionJournal(userData, id);
-function spent(): number {
-  const dir = join(userData, 'engine-host', 'journal');
-  if (!existsSync(dir)) return 0;
-  let usd = 0;
-  for (const id of readdirSync(dir)) {
-    for (const file of readdirSync(join(dir, id)).filter((f) => f.endsWith('.jsonl'))) usd += journalCost(readFileSync(join(dir, id, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow)).costUsd;
-  }
-  return usd;
-}
+// What the run has spent: each session's launches read as one cumulative stream (live-budget.ts), so the resume case's
+// session counts its first launch's spend once.
+const spent = (): number => spentUnder(userData);
 // Before every launch: the session process may spend what the run's cap leaves.
 function budget(cap: number): number {
   const left = cap - spent();

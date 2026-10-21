@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JournalRow } from '@shared/wire/journal';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../../src/engine-host/binary-info';
+import { JournalReader } from '../../src/engine-host/journal';
 import { journalCost } from '../../test/live/support/live';
 
 // The run's cap in US$ from MAWS_LIVE_MAX_USD: null when unset; above 0 and at most 1 when set, else a throw (a value
@@ -22,17 +23,39 @@ export function liveMaxUsd(env: Record<string, string | undefined> = process.env
   return cap;
 }
 
-// What the sessions under a MAWS profile spent, from their journals' receipts.
+// What the sessions under a MAWS profile spent, from their journals' receipts, session by session (sessionSpent).
 export function spentUnder(userData: string): number {
   const dir = join(userData, 'engine-host', 'journal');
   if (!existsSync(dir)) return 0;
+  return readdirSync(dir).reduce((usd, id) => usd + sessionSpent(join(dir, id)), 0);
+}
+
+const rowsOf = (file: string): JournalRow[] => readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow);
+const metaOf = (rows: readonly JournalRow[], event: string) => rows.findLast((r) => r.direction === 'meta' && (r.frame as { event?: unknown }).event === event)?.frame as Record<string, unknown> | undefined;
+
+// What one session spent, from its journal directory: its launches in launch order (JournalReader: by their first row,
+// each launch's rotations after its base file in index order), the cost read once over the stream (journalCost: the
+// figure is cumulative, a drop opening a segment), since a resumed process restores the `cost-state` its session's last
+// exit recorded (src/main/sessions/restored-cost.ts) and so carries the earlier launch's spend in its own figure. A
+// launch continues that stream only when it resumes and the launch before it journaled a clean exit; otherwise (a fresh
+// launch, or one after a kill or an exit never journaled, whose restored figure is unknown) the stream so far is counted
+// whole and the launch starts its own, which can only over-count, the safe side of a cap.
+export function sessionSpent(dir: string): number {
   let usd = 0;
-  for (const id of readdirSync(dir)) {
-    for (const file of readdirSync(join(dir, id)).filter((f) => f.endsWith('.jsonl'))) {
-      usd += journalCost(readFileSync(join(dir, id, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow)).costUsd;
+  let stream: JournalRow[] = [];
+  let before: JournalRow[] | null = null; // the launch before
+  for (const launch of JournalReader.launches(dir)) {
+    const rows = launch.files.flatMap(rowsOf);
+    const args = metaOf(rows, 'spawn')?.args;
+    const exit = before && metaOf(before, 'exit');
+    if (before && !(Array.isArray(args) && args.includes('--resume') && exit?.code === 0 && exit.signal === null)) {
+      usd += journalCost(stream).costUsd;
+      stream = [];
     }
+    stream.push(...rows);
+    before = rows;
   }
-  return usd;
+  return usd + journalCost(stream).costUsd;
 }
 
 export interface CappedEngine {

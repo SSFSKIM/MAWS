@@ -72,8 +72,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
+import { JournalReader } from '../src/engine-host/journal';
 import { RELAY_URL } from '../src/engine-host/launch';
-import { assertConfigHomeSafe, journalCost, redactJournal } from '../test/live/support/live';
+import { assertConfigHomeSafe, redactJournal } from '../test/live/support/live';
 import { guardToolTime } from '../test/live/support/tool-time'; // P4-A2 (X34)
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { relayText } from '../src/renderer/src/tools/agents/model/relay';
@@ -85,6 +86,7 @@ import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { sessionSpent } from './support/live-budget';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
 import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
@@ -143,16 +145,13 @@ function charge(note: (line: string) => void, c: Charge): void {
   note(`  charged US$${c.usd.toFixed(4)} to ${CASE_SITTING[c.case].toUpperCase()} for ${c.label}${c.against ? ` (counted beyond ${c.against}'s receipts)` : ''} [${c.key}]; ${spendLine(CASE_SITTING[c.case])}`);
 }
 
-// One session's receipts, each of its launch journals summed as journalSpend sums them.
-function sessionReceipts(name: CaseName, id: string): number {
-  const dir = join(ROOT, name, 'user-data', 'engine-host', 'journal', id);
-  if (!existsSync(dir)) return 0;
-  return readdirSync(dir).filter((file) => file.endsWith('.jsonl')).reduce((usd, file) => usd + journalCost(journal(join(dir, file))).costUsd, 0);
-}
+// One session's receipts, its launches read as journalSpend reads them (live-budget.ts, sessionSpent).
+const sessionReceipts = (name: CaseName, id: string): number => sessionSpent(join(ROOT, name, 'user-data', 'engine-host', 'journal', id));
 
-// What each sitting and the run have spent: every journal of every case's profile under the run's root (a resumed or
-// forked process may restore its session's cost, so summing journals can only over-count, the safe side of a cap),
-// plus the charges, a launch reservation counted beyond its session's receipts.
+// What each sitting and the run have spent: every session of every case's profile under the run's root (its launches
+// one cumulative stream where a resume restored the figure, each counted whole where that is unknown; a fork may still
+// restore its source's cost, which can only over-count, the safe side of a cap), plus the charges, a launch reservation
+// counted beyond its session's receipts.
 function spent() {
   const receipts: Partial<Record<CaseName, number>> = {};
   for (const name of Object.keys(CASE_SITTING) as CaseName[]) {
@@ -287,12 +286,9 @@ const idleNow = async (live: Live, id: string) => {
 const events = (live: Live, id: string) => eventsOf(live.page, id);
 const mainTurnsEnded = (all: SessionEvent[]) => ofKind(all, 'turn.ended').filter((e) => e.parentToolUseId === null && !e.isEchoReceipt);
 
-// Every row of every launch of the session (one journal file per launch), in launch order.
-function sessionRows(live: Live, id: string): JournalRow[] {
-  const dir = join(live.sc.userData, 'engine-host', 'journal', id);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort().flatMap((name) => journal(join(dir, name)));
-}
+// Every row of every launch of the session, in launch order (JournalReader: by each launch's first row, its rotations
+// after it), not by the launch ids' names.
+const sessionRows = (live: Live, id: string): JournalRow[] => JournalReader.forSession(join(live.sc.userData, 'engine-host', 'journal', id)).flatMap(journal);
 const outUsers = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
 
 // A session launched under the record `id` as the app launches (C7's X6 fields; Haiku, default mode, the gateway),
