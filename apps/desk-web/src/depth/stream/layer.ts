@@ -153,7 +153,8 @@ export class StreamingLayer {
    * goes on): its text the snapshot's, or, for a block the old subscription had named, the text drawn (its `block-row`
    * came once the block was whole, so no copy holds more of it, and a copy cut before that holds less), or, for a block
    * still streaming that the snapshot carries cut to its tail (`truncated`), that tail spliced onto the text drawn
-   * where the two overlap, so the block stays whole (`spliced`; the tail alone where they do not); named by the
+   * where the two overlap, so the block stays whole (`spliced`; the tail alone where they do not, or overlap more than
+   * one way); named by the
    * snapshot's `uuid` when it carries one, else by what named it before (a snapshot cut before a `block-row` the old
    * subscription delivered carries the block unnamed, and that `block-row` follows it). So a block named and carried
    * across an empty-history reconnect — its row not yet on disk, none landing — stays drawn until its row lands.
