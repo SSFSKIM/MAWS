@@ -19,6 +19,10 @@
 // during its trials; failed for a miss of 20 % or more, any miss below load 10, or any miss of a zero bound. A row
 // measured in trials is judged on its best (the parent's Decision Log 54); every trial is in the results JSON,
 // `test-results/presentations-scale.json`. The run exits 0 when no row failed and prints the marginal rows for P3-F.
+// The first trial waits, after the seed, for the measured specs' shared quiet admission (support/quiet.ts: the 1-minute
+// load under 5 on two reads 30 s apart, at most three minutes; on its expiry the trials run and are judged as above),
+// recorded as the results' `quiet`; the heavy row's first trial waits for it again after the heavy deck's generation and
+// setup (`heavyQuiet`).
 // Run on purpose only, at the quietest load the machine gives:
 //   pnpm e2e:presentations-scale   (the script sets MAWS_PRESENTATIONS_SCALE=1)
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,6 +33,7 @@ import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { checkDeckHistory, generateDeckHistory } from './support/deck-history';
 import { collectGarbage, load1, MARGINAL_LOAD, MARGINAL_MISS, PerfSeam, processMemory, stats, verdictOf, type LoopStats, type Verdict } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { quietWait } from './support/quiet';
 
 test.skip(process.env.MAWS_PRESENTATIONS_SCALE !== '1', 'the deck scale gate runs only under MAWS_PRESENTATIONS_SCALE=1');
 test.describe.configure({ timeout: 1_200_000 });
@@ -243,6 +248,9 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
   expect(seeded.held).toEqual([]);
   expect(await page.evaluate((a) => (window as unknown as DeckSeam).__maws_presentations.order(a), id)).toHaveLength(100);
   await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Seeded', note: 'S7b’s 100-slide deck' });
+  const admission = await quietWait(); // the first trial's (support/quiet.ts), after the build, the launch and the seed
+  console.log(`[deck scale] the first trial's admission: ${admission.summary}`);
+  rows.write({ quiet: admission });
 
   await test.step('1: open cold (the host’s copy unloaded) with 100 live thumbnails, three times; warm, three times', async () => {
     const cold: Trial[] = [];
@@ -419,6 +427,9 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       await headerAction(page, 'Version history');
       const rail = heavyTab.getByRole('complementary', { name: 'Version history' });
       const bar = heavyTab.getByRole('toolbar', { name: 'Version preview' });
+      const heavyQuiet = await quietWait(); // the heavy row's first trial's, after the soak and the heavy deck's setup
+      console.log(`[deck scale] the heavy row's admission: ${heavyQuiet.summary}`);
+      rows.write({ heavyQuiet });
       const trials: Trial[] = [];
       for (let k = 0; k < TRIALS; k++) {
         // the 3-month-old version against today, as S7a measured it and M8's case reads it: a click, then a shift-click

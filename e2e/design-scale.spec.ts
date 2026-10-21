@@ -39,8 +39,11 @@
 //               the longest gap and wall time beside each
 //   6 pdf       every board as one PDF through main's export service: the request to the committed file, its 24 pages
 //               checked against each board's native size                                                    < 55 s
-// Raw trials, frame lists, publish cadences, the machine and its loads go to test-results/design-scale.json, each trial's
-// trace to test-results/design-scale/. Run on purpose only, at the quietest load the machine gives:
+// The first trial waits, after the seed, for the measured specs' shared quiet admission (support/quiet.ts: the 1-minute
+// load under 5 on two reads 30 s apart, at most three minutes; on its expiry the trials run as above), recorded as the
+// results' `quiet`. Raw trials, frame lists, publish cadences, the machine and its loads go to
+// test-results/design-scale.json, each trial's trace to test-results/design-scale/. Run on purpose only, at the quietest
+// load the machine gives:
 //   pnpm e2e:design-scale          (MAWS_DESIGN_SCALE=1 inline; never in a default list)
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -52,6 +55,7 @@ import { frameWork, inside, rafDrops, relayoutCallback, type FrameWork, type Raf
 import { armLayoutProbe, boardOf, boardsOf, disarmLayoutProbe, findIn, frameOf, headerAction, layoutProbeResult, ok, seamInstalled, seed, tabsOf, type TabView } from './support/design';
 import { PerfSeam, type LoopStats } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { quietWait } from './support/quiet';
 
 test.skip(process.env.MAWS_DESIGN_SCALE !== '1', 'the design scale gate runs only under MAWS_DESIGN_SCALE=1');
 test.describe.configure({ timeout: 3_600_000 });
@@ -485,6 +489,9 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   const seeded = await seed(page, id, benchDesignFiles(TITLE));
   expect(seeded.held).toEqual([]);
   expect((await boardsOf(page, id)).map((b) => [b.id, b.frame])).toEqual(BOARDS.map((b) => [b.id, { x: b.x, y: b.y, w: b.w, h: b.h }]));
+  const admission = await quietWait(); // the first trial's (support/quiet.ts), after the build, the launch and the seed
+  console.log(`[design scale] the first trial's admission: ${admission.summary}`);
+  rows.write({ quiet: admission });
 
   await test.step('1: open artifact-cold, three times: the row’s press to every canvas laid out, every board verified', async () => {
     const trials: Trial[] = [];

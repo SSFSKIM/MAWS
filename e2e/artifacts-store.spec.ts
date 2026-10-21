@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { documents, seamReady } from './support/documents';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { quietWait } from './support/quiet';
 import { seedDocument } from './support/seed-doc';
 
 const require = createRequire(__filename);
@@ -403,6 +404,11 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   await expect.poll(async () => (await writer.state(seeded)).unsaved, { timeout: 60_000, message: 'the seed is durable' }).toBe(0);
   const size = await writer.stateSize(seeded);
   expect(size).toBeGreaterThanOrEqual(seed.length);
+  // the first trial's admission (support/quiet.ts: the 1-minute load under 5 on two reads 30 s apart, at most three
+  // minutes; on its expiry the trials run as below), after the build, the cases before this one and the seed; recorded
+  // on the first sync's line
+  const quiet = await quietWait();
+  console.log(`[artifacts perf] the first trial's admission: ${quiet.summary}`);
 
   // First sync, cold: a fresh app over the profile each trial, the window's first open of the document.
   const trials: { ms: number; load: number[] }[] = [];
@@ -423,7 +429,7 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
     trials.push({ ms: round(opened.ms), load: atLoad });
   }
   const firstSyncMs = Math.max(...trials.map((t) => t.ms));
-  recordBound('firstSyncMs', firstSyncMs, { seedV2Bytes: seed.length, stateV2Bytes: size, trials });
+  recordBound('firstSyncMs', firstSyncMs, { seedV2Bytes: seed.length, stateV2Bytes: size, trials, quiet });
 
   // Keystroke to durable ack on the open 1 MB document.
   const typing = documents(launch.page);
