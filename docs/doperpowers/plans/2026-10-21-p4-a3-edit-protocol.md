@@ -111,7 +111,9 @@ Round 2, the same reviewer over the fixes (b96347122..da5859ac6): the six fixes 
 
 Round 3, the same reviewer over da5859ac6..a88b5ea82: the removal and the post-exit save are closed. Two P2 interleavings were left in the undo, both real, both fixed:
 - The settle re-read the entry after the write, which an edit's failed save had changed meanwhile. Fixed: it is decided before the write.
-- An agent call beside the linked read (a background agent's, the main turn idle) could set the same memory, which the undo then cleared. Fixed: nothing is undone when a call ran beside the read. The cost of that choice is that, in that overlap, an unseen read may stay the session's base: the agent's next publish is refused as from an old read and it reads again (a residue row).
+- An agent call beside the linked read (a background agent's, the main turn idle) could set the same memory, which the undo then cleared. Fixed: nothing is undone when a call ran beside the read.
+
+Round 4, the last one for lever 2 (the architect's rule), over a88b5ea82..6c2fc5077: round 3's two fixes close their findings. One P2 was left: keeping an unseen read beside a call could put a whole-file base under a view the agent held only in part (a read of some paths). A publish could then overwrite a user's change without force. That is a correctness problem on the link-and-send path, so it is fixed (160cb5419). Beside a call, the memory of that artifact is cleared instead of kept, and the next publish of it is refused as never read. The reviewer's reproduction passes in both its cases. What remains is the cost, a residue row: in that overlap the agent reads the artifact once more before it publishes.
 
 ## Surprises & Discoveries
 
