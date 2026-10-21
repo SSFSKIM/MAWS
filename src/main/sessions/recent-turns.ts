@@ -9,6 +9,7 @@ import type { SessionId } from '@shared/graph/ids';
 import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, type RecentTurn, type RecentTurns } from '@shared/ipc/schema/session';
 import { isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
 import { messageLine, previewLine } from '@shared/owner/preview';
+import { withoutLinkedReads } from '@shared/maws/linked-read'; // P4-A3
 import { slashCommandLine } from '@shared/wire/local-command';
 import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, withResponseGroups, type Delivery, type TranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, isHumanPrompt, isTaskNotification, localCommandKind, recordToEvents } from '../../engine-host/fs/backfill';
@@ -20,8 +21,9 @@ export const RECENT_TURNS_TAIL_BYTES = 256 * 1024;
 
 export const NO_TURNS: RecentTurns = { turns: [], earlier: false, source: 'none' };
 
+// P4-A3: a linked read sent with a prompt is not the prompt's words
 const textOf = (content: string | ContentBlock[]): string =>
-  typeof content === 'string' ? content : content.map((block) => (block.type === 'text' && typeof block.text === 'string' ? block.text : block.type === 'image' ? '[Image]' : '')).filter(Boolean).join('\n');
+  typeof content === 'string' ? content : withoutLinkedReads(content).map((block) => (block.type === 'text' && typeof block.text === 'string' ? block.text : block.type === 'image' ? '[Image]' : '')).filter(Boolean).join('\n');
 
 // What a human prompt reads as in the preview: a slash command as typed, `!` before a bash command, else its text.
 function promptText(event: Extract<SessionEvent, { kind: 'user.message' }>): string {

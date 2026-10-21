@@ -11,7 +11,7 @@ import type { TranscriptListHandle } from '../../../../../src/renderer/src/trans
 import { FakePlane, mount, settle } from '../../../test/double/fake-plane';
 import { readRecording, rowsBefore, scriptOf } from '../../../test/double/session-stream';
 import { DeskTranscript } from '../source/desk-transcript';
-import { drawnRows } from './drawn-rows';
+import { drawnRows, useDrawnRowCount } from './drawn-rows';
 import { useOlderPages } from './older-pages';
 
 const recorded = readRecording().session;
@@ -126,5 +126,38 @@ describe('paging older rows in', () => {
     await answer(); // the last two responses and the prompt, drawn above the record; nothing older
     expect(drawn().some((id) => id.startsWith('user:'))).toBe(true);
     expect(plane.current.asked).toHaveLength(3);
+  });
+});
+
+describe('the drawn row count, which a page is measured against', () => {
+  it('in the report, follows a working record opened and closed again', async () => {
+    const plane = new FakePlane('proj');
+    const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: `s-${Math.random()}`, agentId: null }, store: useTranscriptStore });
+    controller.open();
+    const unmount = mount(controller, useTranscriptStore);
+    const lane = useTranscriptStore.subscribe((s) => s.entries[controller.key] && s.entries[controller.key].state.ui.ownerLane !== true && s.setOwnerLane(controller.key, true));
+    try {
+      const script = scriptOf(markedTurn, null);
+      await act(async () => {
+        plane.snapshot(script, script.length);
+        await settle();
+        await settle();
+      });
+      const count = renderHook(() => useDrawnRowCount(controller.key));
+      const drawn = () => drawnRows(controller.key, []);
+      const record = drawn().find((row) => row.id.startsWith('owner-record:'))!;
+      const folded = count.result.current;
+      expect(folded).toBe(drawn().length);
+      act(() => useTranscriptStore.getState().toggleReportRecord(controller.key, record.turnId!));
+      expect(drawn().length).toBeGreaterThan(folded); // the record's work drawn
+      expect(count.result.current).toBe(drawn().length);
+      act(() => useTranscriptStore.getState().toggleReportRecord(controller.key, record.turnId!));
+      expect(count.result.current).toBe(folded);
+    } finally {
+      lane();
+      unmount();
+      controller.close();
+      useTranscriptStore.getState().drop(controller.key);
+    }
   });
 });

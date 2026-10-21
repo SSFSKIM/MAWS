@@ -1,0 +1,61 @@
+{
+  "arm": "maws",
+  "task": "B3",
+  "rep": 7,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "document",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T20:59:18.014Z",
+  "prompt": "In the document [Riverside Community Garden: Spring Season Plan](maws-artifact:b286bedb-dfbb-4023-ae3b-bca827b8c5cf), rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "promptMatch": ", rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "artifactId": "b286bedb-dfbb-4023-ae3b-bca827b8c5cf",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/9910b96b-5417-4213-becf-6935857351da.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/23982000-ad36-45bc-93fd-949ce2d4b1dd/c6vkxaly.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "9910b96b-5417-4213-becf-6935857351da",
+  "appSessionId": "23982000-ad36-45bc-93fd-949ce2d4b1dd",
+  "load": {
+    "before": [
+      1.82,
+      2.71,
+      3.08
+    ],
+    "after": [
+      1.7,
+      2.6,
+      3.03
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "the introduction rewritten (128 -> 134 words), nothing else changed"
+  },
+  "pin": null,
+  "measurementOnly": false,
+  "variant": "attach",
+  "build": {
+    "commit": "80e89dd2",
+    "builtAt": "2026-10-21T20:43:57.352Z",
+    "checkout": "80e89dd2365d3016cde0b502dadfe53cf8da4f9b"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.2494655,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_edit",
+      "ms": 28,
+      "toolUseId": "toolu_015vWSmG1tQv8YBpsHbEmzUD"
+    }
+  ]
+}

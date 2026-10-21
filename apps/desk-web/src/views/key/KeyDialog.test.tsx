@@ -16,8 +16,13 @@ import { memoryKeyStore, type KeyStore } from '../../key/org-key';
 import { prepareMethod, setUpOrgKey } from '../../key/unlock';
 import { KeyDialog } from './KeyDialog';
 
-const device = vi.hoisted(() => ({ store: null as KeyStore | null, opening: null as { started: () => void; gate: Promise<void> } | null }));
+const device = vi.hoisted(() => ({ store: null as KeyStore | null, opening: null as { started: () => void; gate: Promise<void> } | null, adding: null as Promise<unknown> | null }));
 vi.mock('../../key/org-key', async (original) => ({ ...(await original<typeof import('../../key/org-key')>()), idbKeyStore: () => device.store! }));
+// The dialog's latest add attempt, to await its end: what it settles to is what it did.
+vi.mock('../../key/unlock', async (original) => {
+  const actual = await original<typeof import('../../key/unlock')>();
+  return { ...actual, addMethod: (...args: Parameters<typeof actual.addMethod>) => (device.adding = actual.addMethod(...args)) };
+});
 // The key's bytes, opened for a new copy, can be held at the moment they open (the confirmation still running).
 vi.mock('../../key/wrap', async (original) => {
   const actual = await original<typeof import('../../key/wrap')>();
@@ -39,6 +44,7 @@ let hub: OrgKeysDouble;
 beforeEach(() => {
   device.store = memoryKeyStore();
   device.opening = null;
+  device.adding = null;
   hub = new OrgKeysDouble();
   vi.stubGlobal('fetch', hub.fetch(ME.member));
   useKeyHolder.setState({ state: 'loading', key: null, kept: null, fingerprint: null, forgetError: null });
@@ -117,7 +123,8 @@ describe('KeyDialog', () => {
     await opened;
     await act(() => lock(ME.org.id));
     await act(async () => release());
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The attempt ends refused for the Lock, before anything is posted.
+    await expect(device.adding).rejects.toMatchObject({ reason: 'locked' });
     expect(useKeyHolder.getState().state).toBe('locked');
     expect(hub.keys).toHaveLength(1);
   });

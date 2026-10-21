@@ -1,0 +1,69 @@
+{
+  "arm": "maws",
+  "task": "B1",
+  "rep": 1,
+  "attempt": 1,
+  "surface": "maws",
+  "kind": "document",
+  "host": "Mac-mini.local",
+  "scope": "owner",
+  "startedAt": "2026-10-21T20:45:15.280Z",
+  "prompt": "In the document [Riverside Community Garden: Spring Season Plan](maws-artifact:47a27dd5-1da0-418d-8fd4-2d75c465ac77), change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "promptMatch": ", change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else.",
+  "artifactId": "47a27dd5-1da0-418d-8fd4-2d75c465ac77",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-maws-arm/b9948bfe-3bca-4f8c-ab5a-367968acb5ac.jsonl",
+  "journal": "/tmp/maws-parity-bench/a3/maws-profile/engine-host/journal/07b6b57c-6af9-4b7b-8f2d-05585178d0ef/xe73nrff.jsonl",
+  "relay": [
+    "/Users/new/Library/Application Support/ClaudeUsage/gateway-requests.jsonl"
+  ],
+  "landing": [
+    "mcp__maws__artifact_edit",
+    "mcp__maws__artifact_publish"
+  ],
+  "sessionId": "b9948bfe-3bca-4f8c-ab5a-367968acb5ac",
+  "appSessionId": "07b6b57c-6af9-4b7b-8f2d-05585178d0ef",
+  "load": {
+    "before": [
+      3.49,
+      2.62,
+      2.37
+    ],
+    "after": [
+      4.28,
+      2.84,
+      2.45
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "block 3: Thursday -> Friday, nothing else changed"
+  },
+  "pin": {
+    "model": "sonnet",
+    "effort": "low"
+  },
+  "measurementOnly": true,
+  "variant": "alwaysLoad",
+  "build": {
+    "commit": "646970a5",
+    "builtAt": "2026-10-21T20:43:13.358Z",
+    "checkout": "646970a54a2861582fafd12a34e5ffff94604568"
+  },
+  "engine": {
+    "bin": "/Users/new/.local/share/claude/versions/2.1.306",
+    "version": "2.1.306"
+  },
+  "costUsd": 0.1408678,
+  "mawsToolSpans": [
+    {
+      "name": "artifact_read",
+      "ms": 20,
+      "toolUseId": "toolu_013hV8ZwWq9wsK3HsNhwWd4a"
+    },
+    {
+      "name": "artifact_edit",
+      "ms": 22,
+      "toolUseId": "toolu_019gEosxCkm76hW5bQHJDHiz"
+    }
+  ]
+}

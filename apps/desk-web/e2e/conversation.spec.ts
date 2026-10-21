@@ -630,7 +630,6 @@ test('a new message arriving below a reader scrolled back leaves the row they re
   // Held by the engine's scroll anchoring; it scrolls by whole pixels while rows are fractional, so up to 1 px remains.
   const moved = (await line(36).boundingBox())!.y - reading!.y;
   test.info().annotations.push({ type: 'row moved (px)', description: moved.toFixed(2) });
-  console.log(`row moved ${moved.toFixed(2)} px (a message arriving below)`);
   expect(Math.abs(moved)).toBeLessThanOrEqual(1);
 });
 

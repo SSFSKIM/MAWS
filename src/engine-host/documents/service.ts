@@ -531,6 +531,12 @@ export class DocumentService {
     for (const conn of [...hostDoc.conns]) this.send(conn, frame);
   }
 
+  // P4-A3: the session's replica of the artifact if it has one, making none (a linked read not attached puts its base back)
+  existingReplica(appSessionId: AppSessionId, artifactId: string): AgentReplica | null {
+    const replica = this.agentReplicas.get(`${appSessionId}\u0000${artifactId}`);
+    return replica && !replica.closed ? replica : null;
+  }
+
   // The agent session's replica of the artifact (Decision Log 9), made on first use, reconnected if the host closed it.
   replica(appSessionId: AppSessionId, artifactId: string): AgentReplica {
     if (this.closed) throw new Error('the document service is closed');

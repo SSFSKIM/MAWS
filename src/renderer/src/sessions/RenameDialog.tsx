@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { withoutLinkedReads } from '@shared/maws/linked-read'; // P4-A3: a linked read is not the prompt's words
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { closeDialog } from './dialogs';
@@ -30,7 +31,7 @@ async function describe(appSessionId: AppSessionId, fallback: string): Promise<s
   if (!events.ok) return fallback;
   for (const event of events.value.events) {
     if (event.kind !== 'user.message' || event.isSynthetic || event.bash !== null) continue;
-    const text = typeof event.content === 'string' ? event.content : event.content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n');
+    const text = typeof event.content === 'string' ? event.content : withoutLinkedReads(event.content).flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n');
     if (text.trim()) return text;
   }
   return fallback;

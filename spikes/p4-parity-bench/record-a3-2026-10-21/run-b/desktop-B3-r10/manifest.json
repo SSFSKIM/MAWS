@@ -1,0 +1,69 @@
+{
+  "arm": "desktop",
+  "task": "B3",
+  "rep": 10,
+  "attempt": 1,
+  "kind": "document",
+  "surface": "code",
+  "host": "Mac-mini.local",
+  "startedAt": "2026-10-21T21:26:59.507825+00:00",
+  "prompt": "In the document doc.md, rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "promptMatch": ", rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else.",
+  "transcript": "/Users/new/.claude/projects/-private-tmp-maws-parity-bench-MAWS-parity-bench/a5ab55e8-48f2-4b39-b0fc-e3d5a3e597c7.jsonl",
+  "audit": null,
+  "relay": [],
+  "landing": [
+    "Edit",
+    "Write",
+    "MultiEdit"
+  ],
+  "landingFiles": [
+    "doc.md"
+  ],
+  "landingActions": null,
+  "load": {
+    "before": [
+      2.59,
+      2.83,
+      2.89
+    ],
+    "after": [
+      2.16,
+      2.67,
+      2.82
+    ]
+  },
+  "check": {
+    "pass": true,
+    "detail": "the introduction rewritten (128 -> 143 words), nothing else changed"
+  },
+  "before": "/tmp/maws-parity-bench/a3/run-b/desktop-B3-r10/before-doc.md",
+  "after": "/tmp/maws-parity-bench/a3/run-b/desktop-B3-r10/after-doc.md",
+  "afterSource": "the file in the folder",
+  "rebuildError": null,
+  "deckUrl": null,
+  "deckUrlFrom": null,
+  "seedId": null,
+  "seedTranscript": null,
+  "seedCheck": null,
+  "freshSession": null,
+  "permissionsAnswered": 0,
+  "humanStop": null,
+  "pin": null,
+  "measurementOnly": false,
+  "desktop": {
+    "local": "/Users/new/Library/Application Support/Claude/claude-code-sessions/fa95bd34-0db9-44ae-be00-4f2b7387054b/2b86a6ed-5c24-49b5-8fa3-77671976f84e/local_646956e8-e83a-4be4-8e51-840aa64c531e.json",
+    "meta": {
+      "cliSessionId": "a5ab55e8-48f2-4b39-b0fc-e3d5a3e597c7",
+      "cwd": "/private/tmp/maws-parity-bench/MAWS parity bench",
+      "model": "claude-opus-5-5",
+      "effort": "xhigh",
+      "effortInherited": true,
+      "permissionMode": "auto",
+      "createdAt": 1792618028911,
+      "latestUserFrameAt": 1792618030006,
+      "completedTurns": 1
+    },
+    "cliVersion": "2.1.304"
+  }
+}

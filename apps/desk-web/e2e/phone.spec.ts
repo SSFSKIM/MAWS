@@ -489,14 +489,16 @@ test('@layout a channel opens at its tail and follows it; a reader scrolled back
   await page.waitForTimeout(300);
   const moved = (await line(28).boundingBox())!.y - reading!.y;
   test.info().annotations.push({ type: `row moved (px), ${browserName}`, description: moved.toFixed(2) });
-  console.log(`row moved ${moved.toFixed(2)} px in ${browserName}`);
   expect(Math.abs(moved)).toBeLessThanOrEqual(1);
 });
 
-test('@layout on an engine without scroll anchoring (Safari before 27), a reader scrolled back keeps their row as a message arrives below and as a row below or above them grows or shrinks; at the tail the channel follows', async ({ browserName, page, hub }) => {
-  // The engine's own anchoring is turned off in the channel and `overflow-anchor` reported unsupported, so the channel
-  // takes its fallback and nothing else can hold the reader: the owner's phone on iOS 26 or older.
-  await page.addInitScript(() => {
+/**
+ * The engine's own scroll anchoring turned off in the channel and `overflow-anchor` reported unsupported, so the channel
+ * takes its fallback and nothing else holds the reader: the owner's phone on iOS 26 or older. Whether the engine has
+ * anchoring of its own is kept as `nativeAnchoring` on the window.
+ */
+const withoutAnchoring = (page: Page) =>
+  page.addInitScript(() => {
     const supports = CSS.supports.bind(CSS) as (...args: string[]) => boolean;
     (window as { nativeAnchoring?: boolean }).nativeAnchoring = supports('overflow-anchor', 'auto');
     Object.defineProperty(CSS, 'supports', { value: (...args: string[]) => !args.join(' ').includes('overflow-anchor') && supports(...args) });
@@ -504,6 +506,95 @@ test('@layout on an engine without scroll anchoring (Safari before 27), a reader
     off.textContent = '[data-testid="channel-events"], [data-testid="channel-events"] * { overflow-anchor: none !important; }';
     document.addEventListener('DOMContentLoaded', () => document.head?.append(off));
   });
+
+for (const anchoring of ['the engine’s', 'none'] as const)
+  test(`@layout a reader scrolled back keeps their row when the channel itself resizes: the composer growing and shrinking, the window shorter and taller, a rotation, nearer the oldest edge than it grows too; at the tail the tail stays in view (scroll anchoring: ${anchoring})`, async ({ browserName, page, hub }) => {
+    // The column-reverse scroller keeps a reader at their distance from the bottom, so a change of its own height moves
+    // every row they can see by as much (the composer growing, a keyboard that resizes the page, a rotation) unless the
+    // engine's anchoring holds them, which none can where the change clamps them at the oldest edge, and which Safari
+    // before 27 does not have.
+    if (anchoring === 'none') await withoutAnchoring(page);
+    await stageProject(hub);
+    // Long enough to wrap on a phone held upright and not on one turned on its side.
+    const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}: a line that wraps on a phone held upright, not on its side`, src: `rz${n}#0` });
+    for (let n = 1; n <= 40; n++) await message(n);
+    await seedKey(page, hub);
+    await page.goto(`${hub.url}/p/${PROJECT}`);
+    await page.getByRole('navigation', { name: 'Channels' }).getByRole('button', { name: /MAWS/ }).click();
+    const events = center(page).getByTestId('channel-events');
+    const textbox = page.getByRole('textbox', { name: 'Message #MAWS' });
+    const last = center(page).getByText(/^line 40:/);
+    await expect(last).toBeInViewport();
+    if (anchoring === 'none') expect(await events.evaluate((el) => getComputedStyle(el).overflowAnchor)).toBe('none');
+    /** The reader's row: the first item whose top is inside the view. */
+    const topItem = async () =>
+      events.locator('[data-item]').nth(
+        await events.evaluate((el) => {
+          const top = el.getBoundingClientRect().top;
+          return [...el.querySelectorAll('[data-item]')].findIndex((item) => item.getBoundingClientRect().top >= top);
+        }),
+      );
+    const moves: string[] = [];
+    /** How far the reader's row moved through `change`, which resizes the channel; under 1 px is whole-pixel rounding. */
+    const holds = async (what: string, change: () => Promise<unknown>, held = true) => {
+      const row = await topItem();
+      const [before, height] = [(await row.boundingBox())!.y, await events.evaluate((el) => el.clientHeight)];
+      await change();
+      await page.waitForTimeout(300);
+      expect(Math.abs((await events.evaluate((el) => el.clientHeight)) - height), `${what} resizes the channel`).toBeGreaterThan(50);
+      const moved = (await row.boundingBox())!.y - before;
+      moves.push(`${what}: ${moved.toFixed(2)}`);
+      if (held) expect.soft(Math.abs(moved), `${what}, moved ${moved.toFixed(2)} px`).toBeLessThanOrEqual(1);
+    };
+    await events.evaluate((el) => (el.scrollTop = -300));
+    await page.waitForTimeout(300);
+    await holds('the composer growing', () => textbox.evaluate((el) => (el.style.height = '200px')));
+    await holds('the composer shrinking', () => textbox.evaluate((el) => (el.style.height = '')));
+    await holds('the window shorter', () => page.setViewportSize({ width: 390, height: 560 }));
+    await holds('the window taller', () => page.setViewportSize({ width: 390, height: 844 }));
+    // A rotation that keeps the phone's layout (an iPhone SE's landscape) rewraps every row as the channel shrinks:
+    // without the engine's anchoring the channel holds the row through both, its hold and then the fallback's
+    // anchoring of the rewrap; with it, the rewrap is the engine's to hold.
+    await holds('a rotation to landscape', () => page.setViewportSize({ width: 667, height: 375 }), anchoring === 'none');
+    await holds('a rotation back', () => page.setViewportSize({ width: 390, height: 844 }), anchoring === 'none');
+    // Nearer the oldest edge than the channel grows: the browser clamps the reader to the edge before the channel sees
+    // the change, so where they were is the place they last scrolled to.
+    await page.setViewportSize({ width: 390, height: 560 });
+    await events.evaluate((el) => el.scrollBy(0, -1e7));
+    await page.waitForTimeout(300);
+    await events.evaluate((el) => el.scrollBy(0, 100));
+    await page.waitForTimeout(300);
+    await holds('the window taller, the reader nearer the oldest edge than it grows', () => page.setViewportSize({ width: 390, height: 844 }));
+    test.info().annotations.push({ type: `row moved on a resize (px), ${browserName}, anchoring: ${anchoring}`, description: moves.join('; ') });
+
+    // At the tail the tail stays in view.
+    await events.evaluate((el) => (el.scrollTop = 0));
+    await page.waitForTimeout(300);
+    await textbox.evaluate((el) => (el.style.height = '200px'));
+    await page.waitForTimeout(300);
+    expect(await events.evaluate((el) => el.scrollTop)).toBeCloseTo(0, 0);
+    await expect(last).toBeInViewport();
+
+    // A scroll of the reader's own in the same moment as a resize, before either is reported, stands: from the tail
+    // back into the history, and from there to the tail.
+    const together = (top: number, composer: string) =>
+      textbox.evaluate(
+        (el, [top, composer]) => {
+          document.querySelector<HTMLElement>('[data-testid="channel-events"]')!.scrollTop = Number(top);
+          el.style.height = String(composer);
+        },
+        [top, composer],
+      );
+    await together(-200, '');
+    await page.waitForTimeout(300);
+    expect(await events.evaluate((el) => el.scrollTop), 'scrolled back as the composer shrank').toBeLessThan(-1);
+    await together(0, '200px');
+    await page.waitForTimeout(300);
+    expect(await events.evaluate((el) => el.scrollTop), 'scrolled to the tail as the composer grew').toBeCloseTo(0, 0);
+  });
+
+test('@layout on an engine without scroll anchoring (Safari before 27), a reader scrolled back keeps their row as a message arrives below and as a row below or above them grows or shrinks, nearer the oldest edge than a shrink too, and their line in an opened run of agent traffic as a say arrives in it; at the tail the channel follows', async ({ browserName, page, hub }) => {
+  await withoutAnchoring(page);
   await stageProject(hub);
   const say = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'say', from: 'maws-45', to: [{ session: S.works, alias: 'maws-fe' }], text: `say ${n}` });
   const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rf${n}#0` });
@@ -559,6 +650,16 @@ test('@layout on an engine without scroll anchoring (Safari before 27), a reader
   const oldest = center(page).getByText('the migration is merged', { exact: true });
   await expect(oldest).toBeInViewport();
   await holds('a row below shrinking, at the oldest edge', oldest, () => toggle(runs.nth(1), false));
+  // Nearer the oldest edge than a row below them shrinks, but not at it: the browser clamps the reader to the edge
+  // before the fallback sees the change, so where they were is the place they last scrolled to.
+  await toggle(runs.nth(1), true);
+  const shrink = await runs.nth(1).getByTestId('agent-run-messages').evaluate((el) => el.getBoundingClientRect().height);
+  expect(shrink).toBeGreaterThan(60);
+  await events.evaluate((el) => el.scrollBy(0, -1e7));
+  await page.waitForTimeout(300);
+  await events.evaluate((el, by) => el.scrollBy(0, by), Math.round(shrink / 2));
+  await page.waitForTimeout(300);
+  await holds('a row below shrinking, the reader nearer the oldest edge than it shrinks', line(1), () => toggle(runs.nth(1), false));
   // A sender's run is one block, so a message arriving in the run the reader is in changes that block from inside it:
   // the run below the traffic grows past a screen at the tail, and the reader, scrolled back within it, keeps their row.
   await events.evaluate((el) => (el.scrollTop = 0));
@@ -574,8 +675,27 @@ test('@layout on an engine without scroll anchoring (Safari before 27), a reader
     await message(81);
     await expect(center(page).getByTestId('run').filter({ has: page.getByText('line 31', { exact: true }) })).toContainText('line 81');
   });
+  // An opened run of agent traffic is one item with its lines inside it: at the tail, the run taller than the view, the
+  // reader scrolled back into it keeps their line as a say arrives in the run.
+  await events.evaluate((el) => (el.scrollTop = 0));
+  for (let n = 17; n <= 76; n++) await say(n);
+  const tail = runs.last();
+  await expect(tail).toContainText('60 messages between agents');
+  await toggle(tail, true);
+  await events.evaluate((el) => (el.scrollTop = -150));
+  await page.waitForTimeout(300);
+  await expect(tail.getByText('say 17', { exact: true })).not.toBeInViewport(); // the view's top is inside the run
+  const first = await events.evaluate((el) => {
+    const top = el.getBoundingClientRect().top;
+    const lines = [...el.querySelectorAll('[data-testid="agent-run-messages"] > li')];
+    return lines.find((li) => li.getBoundingClientRect().top >= top)?.querySelector('.desk-chat-said')?.textContent?.trim() ?? '';
+  });
+  expect(first).toMatch(/^say \d+$/);
+  await holds('a say arriving in the opened run the reader is in', tail.getByText(first, { exact: true }), async () => {
+    await say(77);
+    await expect(tail.getByText('say 77', { exact: true })).toBeAttached();
+  });
   test.info().annotations.push({ type: `row moved (px), ${browserName}, no anchoring (native: ${native})`, description: moves.join('; ') });
-  console.log(`row moved in ${browserName} without anchoring (native: ${native}): ${moves.join('; ')}`);
 });
 
 type Shown ={ title: string; options: { body?: string; tag?: string; data?: { url?: string }; actions?: unknown[] } };
