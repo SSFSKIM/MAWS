@@ -31,6 +31,7 @@ import { isDocKind, type ArtifactKind, type DocKind } from '@shared/artifacts/en
 import { instrTerms, matchExpression, type QueryTerm } from '@shared/artifacts/search-query';
 import type { ArtifactSearchRead } from '@shared/maws/search-tools';
 import { byteContentOf, fileBytes } from '../library/reads';
+import { timed } from './host-work'; // P4-R6
 import type { ArtifactStore, EntityRow } from './store';
 
 export const SEARCH_CATCHUP_MS = 400; // a search's budget for bringing stale rows up to date before it queries
@@ -233,16 +234,18 @@ export class ArtifactSearch {
     let failed = 0;
     while (next < stale.length && inBudget()) {
       const slice = this.now();
-      const pending = [this.refresh(stale[next++]!)]; // a slice takes one at least, however long it runs
-      while (next < stale.length && inBudget() && this.now() - slice < CATCHUP_SLICE_MS) pending.push(this.refresh(stale[next++]!));
+      const pending = [this.refresh(stale[next++]!, 'mirror catch-up')]; // a slice takes one at least, however long it runs
+      while (next < stale.length && inBudget() && this.now() - slice < CATCHUP_SLICE_MS) pending.push(this.refresh(stale[next++]!, 'mirror catch-up'));
       failed += (await Promise.all(pending)).filter((done) => !done).length;
     }
     return stale.length - next + failed;
   }
 
-  // One artifact's row brought up to date in its own savepoint of the batch; true once that batch committed.
-  private refresh(artifactId: string): Promise<boolean> {
-    return this.store.service.inBatch(() => this.refreshInFrame(artifactId)).then(
+  // One artifact's row brought up to date in its own savepoint of the batch; true once that batch committed. P4-R6: timed
+  // as the host's work (`what`: the background refresh or a search's catch-up), named by what it did.
+  private refresh(artifactId: string, what: 'mirror' | 'mirror catch-up'): Promise<boolean> {
+    let did: string | undefined;
+    return this.store.service.inBatch(() => timed(what, () => (did = this.refreshInFrame(artifactId)), () => did)).then(
       () => true,
       (error: unknown) => {
         this.log(`the search mirror of ${artifactId} was not written: ${error instanceof Error ? error.message : String(error)}`);
@@ -251,7 +254,8 @@ export class ArtifactSearch {
     );
   }
 
-  private refreshInFrame(artifactId: string): void {
+  // What it did, for the host's work record (P4-R6).
+  private refreshInFrame(artifactId: string): string {
     const db = this.store.storage.db;
     const row = this.store.entity(artifactId);
     const mirrored = db.prepare('SELECT textRowid, revision, title FROM artifact_text_rows WHERE artifactId = ?').get(artifactId) as MirrorRow | undefined;
@@ -260,15 +264,15 @@ export class ArtifactSearch {
         db.prepare('DELETE FROM artifact_text WHERE rowid = ?').run(mirrored.textRowid);
         db.prepare('DELETE FROM artifact_text_rows WHERE artifactId = ?').run(artifactId);
       }
-      return;
+      return 'a deleted row dropped';
     }
     const revision = this.store.revision(artifactId);
     if (mirrored && mirrored.revision === revision) {
-      if (mirrored.title === row.title) return;
+      if (mirrored.title === row.title) return 'current';
       // a rename moves no revision: the title alone is rewritten
       db.prepare('UPDATE artifact_text SET title = ? WHERE rowid = ?').run(row.title.normalize('NFC'), mirrored.textRowid);
       db.prepare('UPDATE artifact_text_rows SET title = ? WHERE artifactId = ?').run(row.title, artifactId);
-      return;
+      return 'a title';
     }
     const text = this.extract(row);
     const sections = JSON.stringify(text.sections);
@@ -279,6 +283,7 @@ export class ArtifactSearch {
       const textRowid = Number(db.prepare('INSERT INTO artifact_text (artifact_id, title, body) VALUES (?, ?, ?)').run(artifactId, row.title.normalize('NFC'), text.body).lastInsertRowid);
       db.prepare('INSERT INTO artifact_text_rows (artifactId, textRowid, revision, title, sections) VALUES (?, ?, ?, ?, ?)').run(artifactId, textRowid, revision, row.title, sections);
     }
+    return `${row.kind} text, ${text.body.length} characters`;
   }
 
   // The artifact's text as its frame's batch holds it: a loaded document's live doc, another's stored state, a byte
@@ -396,7 +401,7 @@ export class ArtifactSearch {
     if (this.storedBytes(artifactId) >= MIRROR_BACKGROUND_MAX_BYTES) return this.pump(); // Decision Log 25: the search's
     this.stepping = true;
     try {
-      await this.refresh(artifactId);
+      await this.refresh(artifactId, 'mirror');
     } finally {
       this.stepping = false;
     }

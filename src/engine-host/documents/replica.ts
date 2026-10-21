@@ -7,6 +7,7 @@
 // provider's awareness, which the host relays to every other replica.
 import { PortProvider, type PortLike, type SaveState } from '@artifacts/provider/port';
 import { newDoc, stateV2, transact, type Doc } from '@artifacts/yjs';
+import { frameLabel, timed } from './host-work'; // P4-R6
 
 export interface Base {
   revision: number;
@@ -57,7 +58,7 @@ export class AgentReplica {
   // The host closed this replica's connection (an eviction, a rejected frame): a new one re-syncs, and the provider's
   // step 2 re-sends whatever it held unacknowledged.
   reconnectIfClosed(): void {
-    if (!this.destroyed && this.provider.state.phase === 'off') this.provider.connect(this.connectPort());
+    if (!this.destroyed && this.provider.state.phase === 'off') this.provider.connect(timedPort(this.connectPort()));
   }
 
   // One edit as one outbound update (Decision Log 25i): `fn` runs inside one transaction, so the provider ships a single
@@ -114,7 +115,7 @@ export class AgentReplica {
   private connectNew(): { doc: Doc; provider: PortProvider } {
     const doc = this.makeDoc();
     const provider = new PortProvider(doc, { log: this.log });
-    provider.connect(this.connectPort());
+    provider.connect(timedPort(this.connectPort()));
     return { doc, provider };
   }
 
@@ -138,4 +139,26 @@ export class AgentReplica {
       });
     });
   }
+}
+
+// P4-R6: the replica's end, each frame from the host it applies timed as the host's work (a first read's replica applies
+// the whole document here, a loop stretch of its own after the read).
+function timedPort(port: PortLike): PortLike {
+  const wrapped = new Map<(event: { data?: unknown }) => void, (event: { data?: unknown }) => void>();
+  return {
+    postMessage: (message) => port.postMessage(message),
+    addEventListener: (type, listener) => {
+      if (type !== 'message') return port.addEventListener(type, listener);
+      const timedListener = (event: { data?: unknown }) => timed('replica', () => listener(event), () => frameLabel(event.data));
+      wrapped.set(listener, timedListener);
+      port.addEventListener(type, timedListener);
+    },
+    removeEventListener: (type, listener) => {
+      const timedListener = type === 'message' ? wrapped.get(listener) : undefined;
+      if (timedListener) wrapped.delete(listener);
+      port.removeEventListener(type, timedListener ?? listener);
+    },
+    start: () => port.start?.(),
+    close: () => port.close(),
+  };
 }

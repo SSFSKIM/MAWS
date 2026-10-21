@@ -26,6 +26,7 @@ import { ArtifactFiles, safeName, type ContentRef } from './bytes';
 import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreTooNewError
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
+import { timed } from './host-work'; // P4-R6
 import { restoreArtifact } from './restore';
 import { datasetRefsOf, isQuerySnapshotName, SnapshotRetention, type AssetHold } from './retention'; // E3
 import { mainOf, type Committed, type DocumentService, type WriteOptions } from './service';
@@ -1551,7 +1552,7 @@ export class ArtifactStore {
     const row = this.entity(artifactId);
     if (!row || row.deletedAt !== null || !isDocKind(row.kind) || this.closed) return;
     if (this.versions.latest(artifactId)?.seq === this.service.revision(artifactId)) return;
-    const id = await this.service.inBatch(() => this.versionInFrame(row, { kind: 'auto', actor: this.lastWriter(artifactId) }));
+    const id = await this.service.inBatch(() => timed('auto version', () => this.versionInFrame(row, { kind: 'auto', actor: this.lastWriter(artifactId) }), () => artifactId)); // P4-R6: timed
     if (id !== null) this.emit(artifactId, 'updated');
   }
 

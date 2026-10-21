@@ -506,14 +506,14 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   const agents = agentsFor();
   for (const [k, agent] of agents.entries()) {
     const read = await readFirst(seam, agent, id);
-    rows.add(`read idle ${k + 1}`, `the 200-block read, ${agent.session}'s first (its replica made), host loop max over the call`, read.loop.max, 'ms', null, 'recorded (36–44 ms headless, Decision Log 34)', `wall ${read.wallMs.toFixed(1)} ms`);
+    rows.add(`read idle ${k + 1}`, `the 200-block read, ${agent.session}'s first (its replica made), host loop max over the call`, read.loop.max, 'ms', null, 'recorded (36–44 ms headless, Decision Log 34)', `wall ${read.wallMs.toFixed(1)} ms`, read.background);
     const shown = Math.max(...[...agent.blocks.keys()].map((blockId) => /^s(\d+)p5$/.exec(blockId)).filter((m) => m !== null).map((m) => Number(m![1]))) + 1;
     const { ops, run } = agent.firstBatch();
     const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
     agent.record(run, answer);
     expect(answer.isError, answer.text).toBe(false);
     expect(ops, 'a five-op batch').toHaveLength(5);
-    rows.add(`5 first after read ${k + 1}`, `the first batch after a read: ${agent.session}'s five ops right after its 200-block read, on the replica that read made (sections 0 to ${shown - 1}), host loop max over the call`, answer.loop.max, 'ms', 50, '≤ 50 ms (Decision Log 20, 37)', `wall ${answer.wallMs.toFixed(1)} ms; ops ${ops.map((op) => op.op).join(', ')}`);
+    rows.add(`5 first after read ${k + 1}`, `the first batch after a read: ${agent.session}'s five ops right after its 200-block read, on the replica that read made (sections 0 to ${shown - 1}), host loop max over the call`, answer.loop.max, 'ms', 50, '≤ 50 ms (Decision Log 20, 37)', `wall ${answer.wallMs.toFixed(1)} ms; ops ${ops.map((op) => op.op).join(', ')}`, answer.background);
     await readRest(seam, agent, id, read.result!);
   }
   const steadyFrom = agents.map((agent) => agent.applied.length); // the steady state's batches follow
@@ -545,10 +545,11 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     rows.add('5 p99', 'host event-loop delay over the run (A’s testLoopDelay: the whole gaps of its own 10 ms timer), p99, documents live with the writer’s batches', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.add('5 max', 'host event-loop delay over the run, max', loop.max, 'ms', 100, 'max ≤ 100 ms');
     const all = agents.flatMap((a, k) => a.applied.slice(steadyFrom[k]));
-    rows.add('5 batch max', 'an agent batch of five ops in the steady state (replicas fully read, typing and the other agent running): the host loop’s max over each batch', Math.max(...all.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 37)', `${all.length} batches; loop max p95 ${stats(all.map((b) => b.loop.max)).p95}; call wall p95 ${stats(all.map((b) => b.wallMs)).p95} ms`);
+    const slowest = all.reduce<(typeof all)[number] | undefined>((a, b) => (a === undefined || b.loop.max > a.loop.max ? b : a), undefined); // P4-R6: its record names what shared its loop
+    rows.add('5 batch max', 'an agent batch of five ops in the steady state (replicas fully read, typing and the other agent running): the host loop’s max over each batch', Math.max(...all.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 37)', `${all.length} batches; loop max p95 ${stats(all.map((b) => b.loop.max)).p95}; call wall p95 ${stats(all.map((b) => b.wallMs)).p95} ms`, slowest?.background);
     const seamLoop = await seam.send<{ loop: { max: number; p99: number } }>({ cmd: 'loop' });
     rows.add('5 max (gaps)', 'host loop over the run measured by the seam’s 1 ms tick gaps (beside A’s 10 ms testLoopDelay), max', seamLoop.loop.max, 'ms', 100, 'max ≤ 100 ms', `p99 ${seamLoop.loop.p99.toFixed(1)} ms`);
-    for (const [k, r] of reads.entries()) rows.add(`read load ${k + 1}`, `the 200-block read under load (${r.session}, typing and the other agent running), host loop max over the call`, r.answer.loop.max, 'ms', 100, 'held to row 5’s max ≤ 100 ms', `wall ${r.answer.wallMs.toFixed(1)} ms`);
+    for (const [k, r] of reads.entries()) rows.add(`read load ${k + 1}`, `the 200-block read under load (${r.session}, typing and the other agent running), host loop max over the call`, r.answer.loop.max, 'ms', 100, 'held to row 5’s max ≤ 100 ms', `wall ${r.answer.wallMs.toFixed(1)} ms`, r.answer.background);
     rows.write({ steady: { loads, typing: { ...keys, ack: counted.ack, acked: counted.acked }, painted, paintedKeys: counted.painted, drain: drained, loop, agents: agents.map((a) => ({ session: a.session, applied: a.applied.length, refused: a.refused })) } });
     expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
     const landed = (await blockText(page, id, `s${TYPING_SECTION}p2`)) ?? '';

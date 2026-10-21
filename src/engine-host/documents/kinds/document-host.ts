@@ -18,6 +18,7 @@ import { DocIndex, type TopBlock } from '@artifacts/document/block-index';
 import { blockIdsOf, deletedSince, touchedBlocks } from '@artifacts/document/since';
 import { applyV1, applyV2, decodeMap, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
+import { timed } from '../host-work'; // P4-R6
 import type { ArtifactStore } from '../store';
 
 const VIEWS_KEPT = 8; // per replica: the session's recent revisions
@@ -82,7 +83,7 @@ export function warmInSlices(doc: Doc, sliceMs = WARM_SLICE_MS): void {
     const until = performance.now() + sliceMs;
     let done = true;
     try {
-      done = DocIndex.of(doc).warm(() => performance.now() >= until);
+      done = timed('warm', () => DocIndex.of(doc).warm(() => performance.now() >= until)); // P4-R6: timed
     } catch {
       // the replica was dropped (the document unloaded or evicted): nothing left to warm
     }

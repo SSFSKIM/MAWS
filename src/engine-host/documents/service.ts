@@ -71,6 +71,7 @@ import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { StoreTooNewError } from './errors';
+import { frameLabel, timed } from './host-work'; // P4-R6
 import { fromNodePort, type HostPort } from './ports';
 import { AgentReplica, type Presence } from './replica';
 
@@ -269,7 +270,7 @@ export class DocumentService {
     this.cancelIdle(hostDoc);
     const conn: Connection = { kind: 'connection', id: this.nextConnId++, artifactId, actor, key: actorKey(actor), received: 0, ackDue: false, closed: false, awarenessClients: new Set(), port };
     hostDoc.conns.add(conn);
-    port.onMessage((data) => this.receive(conn, data));
+    port.onMessage((data) => timed('frame', () => this.receive(conn, data), () => `${frameLabel(data)} from ${actorKey(actor)}`)); // P4-R6
     port.onClose(() => this.detach(conn));
     this.queue(conn, encodeFrame({ type: 'step1', sv: stateVector(hostDoc.doc) }));
     const states = [...hostDoc.awareness.getStates().keys()];
@@ -558,12 +559,14 @@ export class DocumentService {
   }
 
   closeIdleReplicas(): void {
-    const cutoff = this.now() - this.replicaIdleMs;
-    for (const [key, replica] of this.agentReplicas) {
-      if (replica.lastUsed > cutoff) continue;
-      replica.close();
-      this.agentReplicas.delete(key);
-    }
+    timed('replica sweep', () => { // P4-R6
+      const cutoff = this.now() - this.replicaIdleMs;
+      for (const [key, replica] of this.agentReplicas) {
+        if (replica.lastUsed > cutoff) continue;
+        replica.close();
+        this.agentReplicas.delete(key);
+      }
+    });
   }
 
   // The host's shutdown: the open batch commits and what it reveals is sent, then every replica and connection closes.
@@ -993,7 +996,7 @@ export class DocumentService {
       }
     }
     try {
-      this.storage.commit();
+      timed('commit', () => this.storage.commit(), () => (this.dirty.size === 1 ? '1 document' : `${this.dirty.size} documents`)); // P4-R6
     } catch (error) {
       return this.batchFailed(`commit failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1051,6 +1054,10 @@ export class DocumentService {
   // The head checkpoint at the doc's committed revision (an open doc's live state, else read from the store).
   private rewriteHead(target: HostDoc | string): void {
     const artifactId = typeof target === 'string' ? target : target.id;
+    timed('head', () => this.rewriteHeadOf(target, artifactId), () => artifactId); // P4-R6
+  }
+
+  private rewriteHeadOf(target: HostDoc | string, artifactId: string): void {
     try {
       const { revision, state } = typeof target === 'string' ? this.readState(target) : { revision: target.revision, state: stateV2(target.doc) };
       this.storage.writeHead(artifactId, revision, state);
@@ -1106,6 +1113,10 @@ export class DocumentService {
   }
 
   private unload(hostDoc: HostDoc): void {
+    timed('unload', () => this.unloadDoc(hostDoc), () => hostDoc.id); // P4-R6
+  }
+
+  private unloadDoc(hostDoc: HostDoc): void {
     this.cancelIdle(hostDoc);
     for (const conn of [...hostDoc.conns]) this.closeConn(conn);
     for (const replica of hostDoc.replicas.values()) {
