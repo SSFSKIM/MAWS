@@ -19,8 +19,8 @@
 // - endpoint: a pinned connector's end.
 // - marquee: the slide's children the rectangle touches (with Shift, added at the selection's level).
 //
-// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a move, a resize, a rotation and an endpoint hold
-// the replica's remote frames from their start to their drop, and the drop writes again what a held write moved.
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a move, a resize, a rotation and an endpoint
+// hold the replica's remote frames from their start to their drop, and the drop writes again what a held write moved.
 import {
   angleFromPointer,
   apply,

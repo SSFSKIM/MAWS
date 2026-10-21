@@ -494,9 +494,9 @@ describe('a frame gesture beside other writers (task review fix wave)', () => {
 });
 
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a board's frame drag holds the replica's remote
-// frames from its first move to its drop, as the overlay's gestures do, and its drop writes again the frame keys it owns
-// that a held write moved; nothing on a board the flush held, emptied of its file or deleted. The agent is the fixtures'
-// `heldPeer` (its writes buffered while held, applied merged at the release).
+// frames from its first move to its drop, as the overlay's gestures do, and its drop writes again the frame keys it
+// owns that a held write moved; nothing on a board the flush held, emptied of its file or deleted. The agent is the
+// fixtures' `heldPeer` (its writes buffered while held, applied merged at the release).
 describe('a frame drag under the gesture hold (P4-B2 D17)', () => {
   const OWNER = 0x100;
   const HIGHER = 0x7fff0000;

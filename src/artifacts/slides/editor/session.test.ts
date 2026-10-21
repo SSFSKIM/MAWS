@@ -1,8 +1,9 @@
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): the session's one replica hold for two reasons,
 // an input method composing and a gesture dragging. A drag holds the replica's remote frames from its start; its drop
 // releases them before the step's closing cut and runs the gesture's re-assert after that flush, in the gesture's step;
-// a composition outliving the drop keeps the hold, and the re-assert waits for its flush; a throw leaves no hold, no open
-// step and no drag. What the re-assert writes is the gestures' (transform.dom.test.tsx, DesignWorkbench.dom.test.tsx).
+// a composition outliving the drop keeps the hold, and the re-assert waits for its flush; a throw leaves no hold, no
+// open step and no drag. What the re-assert writes is the gestures' (transform.dom.test.tsx and
+// DesignWorkbench.dom.test.tsx).
 import { describe, expect, it, vi } from 'vitest';
 import { newDoc, transact } from '../../yjs';
 import { importSlide, writeDeckKeys } from '../model';

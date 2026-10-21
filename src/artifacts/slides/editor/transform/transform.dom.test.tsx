@@ -909,8 +909,8 @@ describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () 
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a drag holds the replica's remote frames (the
 // session's gesture reason; session.test.ts), and its drop writes the gesture's last values again wherever a write it
 // held moved them, so the owner's drop wins whatever the clientIDs; it writes nothing into a slide the flush held,
-// emptied of its file or removed, nor onto an element the flush deleted. The agent is the fixtures' `heldPeer`: its writes
-// reach the owner as the provider delivers them, buffered while held and applied merged at the release.
+// emptied of its file or removed, nor onto an element the flush deleted. The agent is the fixtures' `heldPeer`: its
+// writes reach the owner as the provider delivers them, buffered while held and applied merged at the release.
 describe('P4-B2: the gesture hold and the drop’s re-assert (D17)', () => {
   const OWNER = 0x100;
   const HIGHER = 0x7fff0000;
