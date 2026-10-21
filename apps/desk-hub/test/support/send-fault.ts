@@ -70,3 +70,17 @@ export const SUMMARIES_BEFORE_LIVE_PATH = '/__test/summaries-before-live';
 /** Where the suites' `Registry` is armed to take its next summary report as the version before `live` took it: the
  * counts stored without `live`, nothing answered. */
 export const SUMMARY_AS_PREVIOUS_PATH = '/__test/summary-as-previous';
+/** Where the suites' `Registry` moves times back (`{machines?: [{name, seen?, confirmed?}], key?: {id, expires},
+ * enrollment?: {machine, expires}}`, all in one step), as an hour or a pending window having passed would leave them, schedules its alarm as its own
+ * changes do, and answers the alarm (`{alarm}`, ms or null). The Registry reads `Date.now()`, and a key's offline time is
+ * an hour at least. */
+export const BACKDATE_PATH = '/__test/backdate';
+/** Where the suites' `Registry` answers its alarm (`{alarm}`, ms or null); a POST of `{clear: true}` deletes it first. */
+export const ALARM_PATH = '/__test/alarm';
+/** Where the suites' `Registry` is armed to hold its next `leave` until it is released, as the Worker would be held
+ * between resolving a machine's credential and asking for its revocation. */
+export const LEAVE_HOLD_PATH = '/__test/leave-hold';
+/** Where the suites' `Registry` says whether a `leave` is held: `held` or `none`. */
+export const LEAVE_HELD_PATH = '/__test/leave-held';
+/** Where the suites' `Registry` releases a held `leave`: answers `released`, or `none` while none is held. */
+export const LEAVE_RELEASE_PATH = '/__test/leave-release';

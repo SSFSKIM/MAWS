@@ -9,12 +9,18 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse, type V4WorkerOptions } from 'miniflare';
 import { inject } from 'vitest';
+import { codeHelpers } from '../../local/helpers.ts';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import type { OrgFrame } from '../../src/protocol/machine';
 import { generateVapidKey } from '../../src/push/web-push';
 import {
   ABORT_REASON,
+  ALARM_PATH,
+  BACKDATE_PATH,
+  LEAVE_HELD_PATH,
+  LEAVE_HOLD_PATH,
+  LEAVE_RELEASE_PATH,
   MACHINE_ABORT_PATH,
   MACHINE_FETCH_FAULT_PATH,
   MACHINE_PROBE_PATH,
@@ -149,7 +155,11 @@ export async function startLocalHub() {
     return mf;
   };
   let mf = await start();
-  const proxy: Proxy = await startProxy({ standin, upstream: () => `http://127.0.0.1:${port}` });
+  const proxy: Proxy = await startProxy({
+    standin,
+    upstream: () => `http://127.0.0.1:${port}`,
+    extra: codeHelpers({ origin: () => proxy.url, org: ORG, standin, admin: ADMIN }),
+  });
 
   /** A request to an object's own fetch, which only Miniflare reaches: the suites' seams. */
   const seam = async (binding: 'MACHINE' | 'PROJECT' | 'REGISTRY', name: string, path: string, body?: unknown): Promise<string> => {
@@ -292,6 +302,33 @@ export async function startLocalHub() {
       const deadline = Date.now() + 10_000;
       while ((await seam('MACHINE', machine, REVOKE_RELEASE_PATH)) !== 'released') {
         if (Date.now() > deadline) throw new Error(`no revocation of ${machine} was held`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
+    /** Moves a machine's `seen` or `confirmed`, a provisioning key's expiry, or a machine's pending enrollment's expiry
+     * back, as the time having passed would leave them; the Registry schedules its alarm after, and the alarm is
+     * answered (ms, or null). */
+    async backdate(change: { machines?: Array<{ name: string; seen?: string; confirmed?: string }>; key?: { id: string; expires: string }; enrollment?: { machine: string; expires: string } }): Promise<number | null> {
+      return (JSON.parse(await seam('REGISTRY', ORG, BACKDATE_PATH, change)) as { alarm: number | null }).alarm;
+    },
+    /** The Registry's alarm (ms, or null); with `clear`, deleted first. */
+    async registryAlarm(clear = false): Promise<number | null> {
+      return (JSON.parse(await seam('REGISTRY', ORG, ALARM_PATH, clear ? { clear } : undefined)) as { alarm: number | null }).alarm;
+    },
+    /** Holds the Registry's next `leave` (a machine's `DELETE /machine/enrollment`, once the Worker resolved it) until
+     * `releaseLeave`. */
+    async holdNextLeave() {
+      await seam('REGISTRY', ORG, LEAVE_HOLD_PATH);
+    },
+    /** Whether a `leave` is held. */
+    async leaveHeld(): Promise<boolean> {
+      return (await seam('REGISTRY', ORG, LEAVE_HELD_PATH)) === 'held';
+    },
+    /** Releases the held `leave`, once it is held (waiting for it to be). */
+    async releaseLeave() {
+      const deadline = Date.now() + 10_000;
+      while ((await seam('REGISTRY', ORG, LEAVE_RELEASE_PATH)) !== 'released') {
+        if (Date.now() > deadline) throw new Error('no leave was held');
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     },

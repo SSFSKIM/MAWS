@@ -14,6 +14,13 @@
 // is the one thing held only in memory (`busy`): an object restart ends the mint with it, and the name makes whatever
 // it left behind findable. Every call to the API under one token name (a sweep's deletion by name, a redemption's
 // deletion and mint) runs in turn on that name's queue, so a deletion by name never lists a token minted after it began.
+//
+// A provisioning key (docs/doperpowers/specs/2026-10-21-desk-provisioning-keys-design.md) is redeemed on the same path:
+// its secret, found where no one-time token is, makes an enrollment row already pending, bound to the key
+// (`enrollments.key`), from which point nothing downstream knows how it was made. A machine revokes its own enrollment,
+// and the alarm revokes a key's machine offline past the key's time; with an admin's removal, three callers of the one
+// revocation (`revokeMachine`), each bound to the enrollment it read, so a name enrolled anew between two of its
+// caller's steps is never revoked in the old one's place.
 import { DurableObject } from 'cloudflare:workers';
 import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
@@ -32,16 +39,22 @@ import {
   serviceTokenName,
   type EnrollmentIssued,
   type EnrollmentRecord,
+  type Left,
   type MachineRecord,
+  type MachineState,
   type MemberRecord,
   type OrgRecord,
   type ProjectKind,
   type ProjectRecord,
+  type ProvisioningKeyIssued,
+  type ProvisioningKeyRecord,
+  type ProvisioningKeyRevoked,
   type PushSubscriptionRecord,
   type Redeemed,
   type WrappedKeyRemoved,
 } from '../protocol/identity';
 import { OrgKeys, type StoredKey } from './org-keys';
+import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
 
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
@@ -61,7 +74,7 @@ CREATE TABLE IF NOT EXISTS machines (
   online INTEGER NOT NULL DEFAULT 0, seen TEXT);
 CREATE TABLE IF NOT EXISTS enrollments (
   id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL, created TEXT NOT NULL,
-  expires TEXT NOT NULL, ttl_s INTEGER NOT NULL, state TEXT NOT NULL, machine TEXT);
+  expires TEXT NOT NULL, ttl_s INTEGER NOT NULL, state TEXT NOT NULL, machine TEXT, key TEXT);
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT,
   kind TEXT NOT NULL DEFAULT 'hub', machine TEXT, retired INTEGER NOT NULL DEFAULT 0);
@@ -81,6 +94,8 @@ CREATE TABLE IF NOT EXISTS machine_states (
 const ADDED_COLUMNS: Record<string, string[]> = {
   org: ['key_check TEXT', 'key_auth TEXT'],
   machines: ['online INTEGER NOT NULL DEFAULT 0', 'seen TEXT'],
+  // The provisioning key an enrollment was made through; null for a one-time token's.
+  enrollments: ['key TEXT'],
   projects: ["kind TEXT NOT NULL DEFAULT 'hub'", 'machine TEXT', 'retired INTEGER NOT NULL DEFAULT 0'],
   summaries: ['report_seq INTEGER', 'live INTEGER NOT NULL DEFAULT 0'],
 };
@@ -101,7 +116,7 @@ type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 
 export type SummaryReport = Omit<Counts, 'live'> & { live?: number; seq?: number; machines_state?: Array<{ name: string; online: boolean; client: string }> };
 
 const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
-const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s';
+const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s, key';
 const PROJECT_COLUMNS = 'id, name, registered_by, created, archive_machine, kind, retired';
 type ProjectRow = Omit<ProjectRecord, 'retired'> & { retired: number };
 const projectOf = (row: ProjectRow): ProjectRecord => ({ ...row, retired: row.retired === 1 });
@@ -117,7 +132,7 @@ const sha256 = async (text: string) => hex(new Uint8Array(await crypto.subtle.di
 const iso = (ms: number) => new Date(ms).toISOString();
 const lapsed = (enrollment: { expires: string }, now = Date.now()) => Date.parse(enrollment.expires) <= now;
 
-type EnrollmentRow = EnrollmentRecord & { ttl_s: number };
+type EnrollmentRow = EnrollmentRecord & { ttl_s: number; key: string | null };
 
 export class Registry extends DurableObject<Env> {
   /** Enrollments whose mint is in flight in this object's life. */
@@ -126,6 +141,9 @@ export class Registry extends DurableObject<Env> {
   private readonly nameQueues = new Map<string, Promise<unknown>>();
 
   private readonly keys: OrgKeys;
+  private readonly provisioning: ProvisioningKeys;
+  /** Not before then is an overdue offline revocation tried again, after one failed (an object restart forgets it). */
+  private offlineRetry = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -137,6 +155,7 @@ export class Registry extends DurableObject<Env> {
       for (const column of added) if (!columns.includes(column.split(' ')[0])) ctx.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`);
     }
     this.keys = new OrgKeys(ctx.storage);
+    this.provisioning = new ProvisioningKeys(ctx.storage);
   }
 
   private get config(): HubConfig {
@@ -204,7 +223,28 @@ export class Registry extends DurableObject<Env> {
     return ok({ enrollment, token });
   }
 
-  /** Redeems a one-time token for the machine's own service token (the path Access does not guard). */
+  /** A provisioning key for an admin to build a provisioning code from; the hub keeps only its secret's hash. */
+  async createProvisioningKey(member: MemberRecord, body: unknown): Promise<Result<ProvisioningKeyIssued>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const request = checkRequest(body);
+    if (!request.ok) return fail(400, 'bad-shape', request.message);
+    const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const key = this.provisioning.add(member, request.value, newId(), await sha256(token), Date.now());
+    return ok({ key, token });
+  }
+
+  provisioningKeys(): ProvisioningKeyRecord[] {
+    return this.provisioning.list();
+  }
+
+  /** Stops new enrollments through the key; the machines it enrolled stay. A second revocation keeps the first's time. */
+  revokeProvisioningKey(member: MemberRecord, id: string): Result<ProvisioningKeyRevoked> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    return this.provisioning.revoke(id, iso(Date.now())) ? ok({ revoked: id }) : fail(404, 'unknown-key');
+  }
+
+  /** Redeems a one-time token, or a provisioning key's secret, for the machine's own service token (the path Access does
+   * not guard). */
   async redeem(body: unknown): Promise<Result<Redeemed>> {
     const { token, machine } = (typeof body === 'object' && body !== null ? body : {}) as { token?: unknown; machine?: unknown };
     if (typeof token !== 'string' || token === '' || typeof machine !== 'string') return fail(400, 'bad-shape', 'the body is {token, machine}');
@@ -214,7 +254,10 @@ export class Registry extends DurableObject<Env> {
 
     // From here to the first await below, nothing else runs in this object: the checks and the reservation are one step.
     let enrollment = this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE token_hash = ?`, hash).toArray()[0];
-    if (!enrollment) return fail(404, 'unknown-token');
+    if (!enrollment) {
+      const key = this.provisioning.bySecret(hash);
+      return key ? this.redeemThrough(key, machine) : fail(404, 'unknown-token');
+    }
     if (this.busy.has(enrollment.id)) return fail(409, 'busy', 'a redemption of this token is in flight; try again');
     if ((enrollment.state === 'open' || enrollment.state === 'pending') && lapsed(enrollment)) {
       this.expire(enrollment);
@@ -250,13 +293,78 @@ export class Registry extends DurableObject<Env> {
       });
     } else {
       // A rotation: the credential minted before stops at the hub at once, before Cloudflare deletes it.
-      this.ctx.storage.transactionSync(() => {
-        this.sql.exec('UPDATE enrollments SET expires = ? WHERE id = ?', expires, id);
-        this.sql.exec('UPDATE machines SET client_id = NULL WHERE name = ?', machine);
-      });
+      this.rotate(id, machine, expires);
     }
-    this.busy.add(id);
+    return this.mint(id, machine, tokenName, org.id);
+  }
 
+  /**
+   * A redemption through a provisioning key: §2's checks in order, then the reservation, all in the synchronous step the
+   * caller began at the lookup. A new enrollment is a row already pending, bound to the key, whose `token_hash` no
+   * SHA-256 equals; a redemption under a name the key's own pending enrollment holds rotates it, as a token's second
+   * redemption does, and counts no use.
+   */
+  private async redeemThrough(key: KeyRow, machine: string): Promise<Result<Redeemed>> {
+    const now = Date.now();
+    if (key.revoked !== null) return fail(410, 'key-revoked', 'this provisioning key was revoked; ask an admin for a new key');
+    if (Date.parse(key.expires) <= now) return fail(410, 'key-expired', 'this provisioning key has expired; ask an admin for a new key');
+    if (!machineNameKey(machine).startsWith(machineNameKey(key.prefix))) {
+      return fail(403, 'prefix-mismatch', `this key enrolls only machines named "${key.prefix}…"; redeem it under such a name`);
+    }
+    const held = this.sql.exec<{ name: string; state: MachineState; enrollment: string }>('SELECT name, state, enrollment FROM machines WHERE name_key = ?', machineNameKey(machine)).toArray()[0];
+    if (held?.state === 'pending' && this.busy.has(held.enrollment)) return fail(409, 'busy', 'a redemption of this name is in flight; try again');
+    const org = this.ensureOrg().id;
+    const tokenName = serviceTokenName(org, machine);
+    const expires = iso(now + ENROLLMENT_TTL_S * 1000);
+    if (held?.state === 'pending' && held.name === machine && this.enrollmentById(held.enrollment)?.key === key.id) {
+      this.rotate(held.enrollment, machine, expires);
+      return this.mint(held.enrollment, machine, tokenName, org);
+    }
+    if (held) return fail(409, 'name-taken', `a machine named "${held.name}" is enrolled in this org; pick another name and redeem this key under it`);
+    if (key.max_uses !== null && key.uses >= key.max_uses) {
+      return fail(410, 'key-exhausted', `this provisioning key has made all the ${key.max_uses} enrollments it may; ask an admin for a new key or a higher cap`);
+    }
+    const id = newId();
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        "INSERT INTO enrollments (id, token_hash, created_by, created, expires, ttl_s, state, machine, key) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+        id,
+        `key:${id}`,
+        key.created_by,
+        iso(now),
+        expires,
+        ENROLLMENT_TTL_S,
+        machine,
+        key.id,
+      );
+      this.sql.exec(
+        "INSERT INTO machines (name, name_key, client_id, token_name, state, enrollment, created, confirmed) VALUES (?, ?, NULL, ?, 'pending', ?, ?, NULL)",
+        machine,
+        machineNameKey(machine),
+        tokenName,
+        id,
+        iso(now),
+      );
+      this.provisioning.use(key.id);
+      // This redemption deletes every token of the name before it mints, which is what an orphan of it waited for.
+      this.sql.exec('DELETE FROM orphans WHERE token_name = ?', tokenName);
+    });
+    return this.mint(id, machine, tokenName, org);
+  }
+
+  /** A pending enrollment redeemed again: its time moves on, and the credential minted before stops at the hub at once,
+   * before Cloudflare deletes it. */
+  private rotate(id: string, machine: string, expires: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('UPDATE enrollments SET expires = ? WHERE id = ?', expires, id);
+      this.sql.exec('UPDATE machines SET client_id = NULL WHERE name = ?', machine);
+    });
+  }
+
+  /** Mints the reserved machine's service token, on its name's queue, after deleting every token of the name. The
+   * enrollment is busy from this call's synchronous start until its answer. */
+  private async mint(id: string, machine: string, tokenName: string, org: string): Promise<Result<Redeemed>> {
+    this.busy.add(id);
     try {
       return await this.onName(tokenName, async (): Promise<Result<Redeemed>> => {
         const api = serviceTokens(this.config.api);
@@ -269,7 +377,7 @@ export class Registry extends DurableObject<Env> {
           return fail(410, 'expired', 'the enrollment ended while its token was minted');
         }
         this.sql.exec('UPDATE machines SET client_id = ? WHERE name = ?', minted.client_id, machine);
-        return ok({ org: org.id, machine, client_id: minted.client_id, client_secret: minted.client_secret });
+        return ok({ org, machine, client_id: minted.client_id, client_secret: minted.client_secret });
       });
     } catch (error) {
       if (error instanceof ServiceTokenApiError) return fail(502, 'mint-failed', `${error.message}; redeem again`);
@@ -278,6 +386,19 @@ export class Registry extends DurableObject<Env> {
       this.busy.delete(id);
       await this.scheduleAlarm();
     }
+  }
+
+  /** An admin's removal of a machine: whatever holds the name now (`revokeMachine`). */
+  async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    if (this.sql.exec('SELECT 1 FROM machines WHERE name_key = ?', machineNameKey(name)).toArray().length === 0) return fail(404, 'unknown-machine');
+    return ok(await this.revokeMachine(name));
+  }
+
+  /** A machine's revocation of its own enrollment (`DELETE /machine/enrollment`), bound to the enrollment the Worker
+   * resolved its credential to: should the name have been revoked and enrolled anew since, that machine is left be. */
+  async leave(machine: MachineRecord): Promise<Result<Left>> {
+    return ok(await this.revokeMachine(machine.name, { enrollment: machine.enrollment }));
   }
 
   /**
@@ -290,12 +411,16 @@ export class Registry extends DurableObject<Env> {
    * enrollment may have finished meanwhile and the name been enrolled anew, and that machine is not this one. The object
    * answers a revocation of a credential it already refused as it did the first, so a DELETE whose answer was lost after
    * the object took it completes when the admin asks again.
+   *
+   * With `expected`, the caller read the enrollment in an earlier step (a machine's own credential resolved by the
+   * Worker; a sweep's candidate), and the name may have been revoked and enrolled anew since: a row that is gone, or is
+   * another enrollment's, is answered as revoked and nothing of the name's is touched. The check and the call that fences
+   * the credential are one synchronous step.
    */
-  async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
+  private async revokeMachine(name: string, expected?: { enrollment: string }): Promise<{ revoked: string }> {
     const org = this.ensureOrg();
     let machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ?`, machineNameKey(name)).toArray()[0];
-    if (!machine) return fail(404, 'unknown-machine');
+    if (!machine || (expected && machine.enrollment !== expected.enrollment)) return { revoked: name };
     const object = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`));
     let generation = await object.revoke(machine.client_id);
     // A credential minted for it while its object answered (a pending machine's token redeemed again) is refused there too.
@@ -303,7 +428,7 @@ export class Registry extends DurableObject<Env> {
       const now = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name = ? AND enrollment = ?`, machine.name, machine.enrollment).toArray()[0];
       // Its record went while its object answered (another revocation of it, or its enrollment's expiry), and what the
       // name holds now, if anything, is another machine's: nothing of the name's is touched.
-      if (!now) return ok({ revoked: machine.name });
+      if (!now) return { revoked: machine.name };
       if (!now.client_id || now.client_id === machine.client_id) break;
       machine = now;
       generation = Math.max(generation, await object.revoke(machine.client_id));
@@ -330,7 +455,7 @@ export class Registry extends DurableObject<Env> {
     await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
-    return ok({ revoked: revoked.name });
+    return { revoked: revoked.name };
   }
 
   machines(): MachineRecord[] {
@@ -417,17 +542,21 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** Each enrolled machine is online while any project reports a fresh lease of it, opened with its own credential,
-   * and `seen` is when that last changed; the directory goes out when it did. */
+   * and `seen` is when that last changed; the directory goes out when it did. A machine put offline may start a key's
+   * offline time, so the alarm is scheduled then (detached: this runs in `summary`'s synchronous step). */
   private refreshOnline(): void {
     const now = iso(Date.now());
     let changed = false;
+    let offline = false;
     for (const m of this.sql.exec<{ name: string; name_key: string; client_id: string | null; online: number }>("SELECT name, name_key, client_id, online FROM machines WHERE state = 'active'").toArray()) {
       const online = this.sql.exec('SELECT 1 FROM machine_states WHERE name_key = ? AND client = ? AND online = 1 LIMIT 1', m.name_key, m.client_id ?? '').toArray().length > 0;
       if (online === (m.online === 1)) continue;
       this.sql.exec('UPDATE machines SET online = ?, seen = ? WHERE name = ?', online ? 1 : 0, now, m.name);
       changed = true;
+      offline ||= !online;
     }
     if (changed) this.directoryChanged();
+    if (offline) void this.scheduleAlarm().catch(() => {});
   }
 
   // ---- The grid (DX3's registry socket) ------------------------------------------------------------------------
@@ -660,9 +789,40 @@ export class Registry extends DurableObject<Env> {
     const now = Date.now();
     const live = this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE state IN ('open', 'pending')`).toArray();
     for (const enrollment of live) if (lapsed(enrollment, now) && !this.busy.has(enrollment.id)) this.expire(enrollment);
+    await this.sweepOffline(now);
     await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
+  }
+
+  /**
+   * Revokes each machine a provisioning key enrolled that has been offline the key's `offline_revoke_s` (a revoked key's
+   * too: the machines it enrolled outlive it). The candidates are read in one step and revoked in turn, each bound to
+   * the enrollment read: while one's revocation waits on its `Machine` object, a later one's name may be revoked and
+   * enrolled anew, and that machine is not the candidate. A lease report that reaches `summary` once a candidate's
+   * revocation began does not save it. One that fails is tried again a minute on, the others going ahead.
+   */
+  private async sweepOffline(now: number): Promise<void> {
+    for (const { name, enrollment, deadline } of this.offlineDeadlines()) {
+      if (deadline > now) continue;
+      try {
+        await this.revokeMachine(name, { enrollment });
+      } catch (error) {
+        this.offlineRetry = Date.now() + RETRY_MS;
+        console.error(JSON.stringify({ desk: 'offline-revoke', machine: name, message: error instanceof Error ? error.message : String(error) }));
+      }
+    }
+  }
+
+  /** Each active machine enrolled through a key with an offline time, offline now, and when that time is up: from `seen`,
+   * when it last went offline, or from its confirmation for a machine never seen online. */
+  private offlineDeadlines(): Array<{ name: string; enrollment: string; deadline: number }> {
+    return this.sql
+      .exec<{ name: string; enrollment: string; since: string; offline_revoke_s: number }>(
+        "SELECT m.name AS name, m.enrollment AS enrollment, COALESCE(m.seen, m.confirmed) AS since, k.offline_revoke_s AS offline_revoke_s FROM machines m JOIN enrollments e ON e.id = m.enrollment JOIN provisioning_keys k ON k.id = e.key WHERE m.state = 'active' AND m.online = 0 AND k.offline_revoke_s IS NOT NULL ORDER BY m.name",
+      )
+      .toArray()
+      .map((m) => ({ name: m.name, enrollment: m.enrollment, deadline: Date.parse(m.since) + m.offline_revoke_s * 1000 }));
   }
 
   /** Tells each project a revocation it has not taken (`Project.forget` keeps the newest generation it is told, so a
@@ -714,14 +874,16 @@ export class Registry extends DurableObject<Env> {
     return run;
   }
 
-  /** The alarm at the next expiry, or sooner when an orphan or a revocation waits for a retry; never in the past, so an
-   * enrollment kept open by a mint in flight does not spin it. */
-  private async scheduleAlarm(): Promise<void> {
+  /** The alarm at the next expiry or offline revocation, or sooner when an orphan or a revocation waits for a retry;
+   * never in the past, so an enrollment kept open by a mint in flight does not spin it, and an offline revocation that
+   * failed waits for its retry. */
+  protected async scheduleAlarm(): Promise<void> {
     const now = Date.now();
     const next = this.sql
       .exec<{ expires: string }>("SELECT expires FROM enrollments WHERE state IN ('open', 'pending')")
       .toArray()
       .map((e) => Date.parse(e.expires));
+    for (const { deadline } of this.offlineDeadlines()) next.push(Math.max(deadline, this.offlineRetry));
     if (this.sql.exec('SELECT 1 FROM orphans UNION ALL SELECT 1 FROM revocations LIMIT 1').toArray().length > 0) next.push(now + RETRY_MS);
     if (next.length === 0) return;
     const at = Math.max(Math.min(...next), now + 250);
@@ -733,8 +895,9 @@ export class Registry extends DurableObject<Env> {
    * The org, created from the deploy configuration the first time it is needed, with its admin as the first member.
    * This Registry is the one the Worker names by the configured org id, so a stored org of another id was made under a
    * previous configuration: after a deploy, Durable Objects, new ones included, run the previous version with its
-   * variables for minutes (M5). While nothing was built on the stored id (no machine, enrollment, project, or wrapped
-   * key), the org takes its id and name from the configuration; after that, the stored org stands.
+   * variables for minutes (M5). While nothing was built on the stored id (no machine, enrollment, project, wrapped key,
+   * or provisioning key, whose code carries the id), the org takes its id and name from the configuration; after that,
+   * the stored org stands.
    */
   private ensureOrg(): OrgRecord {
     const { org: config } = this.config;
@@ -753,7 +916,7 @@ export class Registry extends DurableObject<Env> {
   }
 
   private holdsAnything(): boolean {
-    return ['machines', 'enrollments', 'projects'].some((table) => this.sql.exec(`SELECT 1 FROM ${table} LIMIT 1`).toArray().length > 0);
+    return ['machines', 'enrollments', 'projects'].some((table) => this.sql.exec(`SELECT 1 FROM ${table} LIMIT 1`).toArray().length > 0) || this.provisioning.any();
   }
 
   // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------

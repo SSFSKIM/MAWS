@@ -1,13 +1,13 @@
 // The hub's Worker: verifies Access's assertion on every request, asks the org's Registry who it names, and routes to
 // the object that serves the path. Nothing behind it trusts a header it did not set. The one path that takes no
-// assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token
-// does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
+// assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token, or
+// a provisioning key's secret, does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
 import { drain, readLimited } from './drain';
 import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
-import { ORG_KEYS_PATH, PUSH_KEY_PATH, PUSH_SUBSCRIPTIONS_PATH, REDEEM_PATH } from './protocol/identity';
+import { MACHINE_ENROLLMENT_PATH, ORG_KEYS_PATH, PROVISIONING_KEYS_PATH, PUSH_KEY_PATH, PUSH_SUBSCRIPTIONS_PATH, REDEEM_PATH, type MachineSelf } from './protocol/identity';
 import { POST_LIMIT } from './protocol/machine';
 
 export { Machine } from './objects/machine';
@@ -19,6 +19,7 @@ const PROJECT_SOCKET = new RegExp(`^/api/projects/(${UUID})/socket$`);
 const PROJECT_ARCHIVE = new RegExp(`^/api/projects/(${UUID})/archive$`);
 const MACHINE_PATH = /^\/api\/machines\/([^/]+)$/;
 const ORG_KEY_PATH = /^\/api\/org\/keys\/([^/]+)$/;
+const PROVISIONING_KEY_PATH = /^\/api\/provisioning-keys\/([^/]+)$/;
 /** A JSON body of an endpoint other than the machine's POST is small. */
 const BODY_LIMIT = 64 * 1024;
 
@@ -121,7 +122,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (error instanceof AccessError) return json(error.reason === 'missing' ? 401 : 403, { error: error.reason });
     throw error;
   }
-  return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, principal);
+  return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, registry, principal);
 }
 
 async function member(request: Request, url: URL, env: Env, registry: DurableObjectStub<Registry>, principal: Extract<Principal, { kind: 'member' }>): Promise<Response> {
@@ -140,6 +141,10 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (pathname === ORG_KEYS_PATH && method === 'POST') return answer(await registry.addOrgKey(you, await body(request)), 201);
   const orgKey = ORG_KEY_PATH.exec(pathname);
   if (orgKey && method === 'DELETE') return answer(await registry.removeOrgKey(you, orgKey[1], await body(request)));
+  if (pathname === PROVISIONING_KEYS_PATH && method === 'GET') return json(200, { keys: await registry.provisioningKeys() });
+  if (pathname === PROVISIONING_KEYS_PATH && method === 'POST') return answer(await registry.createProvisioningKey(you, await body(request)), 201);
+  const provisioningKey = PROVISIONING_KEY_PATH.exec(pathname);
+  if (provisioningKey && method === 'DELETE') return answer(await registry.revokeProvisioningKey(you, decodeURIComponent(provisioningKey[1])));
   if (pathname === PUSH_KEY_PATH && method === 'GET') return json(200, await registry.pushKey());
   if (pathname === PUSH_SUBSCRIPTIONS_PATH) {
     if (method === 'GET') return json(200, await registry.pushSubscriptions(you));
@@ -161,7 +166,14 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   return json(404, { error: 'not-found' });
 }
 
-async function machine(request: Request, url: URL, env: Env, principal: Extract<Principal, { kind: 'machine' }>): Promise<Response> {
+async function machine(request: Request, url: URL, env: Env, registry: DurableObjectStub<Registry>, principal: Extract<Principal, { kind: 'machine' }>): Promise<Response> {
+  // The machine's own enrollment: its record as resolved (resolving confirmed a pending one), or its own revocation,
+  // bound to the enrollment resolved, not to the name.
+  if (url.pathname === MACHINE_ENROLLMENT_PATH) {
+    const { org, machine: self } = principal;
+    if (request.method === 'GET') return json(200, { org: org.id, machine: self.name, state: self.state, confirmed: self.confirmed } satisfies MachineSelf);
+    if (request.method === 'DELETE') return answer(await registry.leave(self));
+  }
   const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
   const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name, [CLIENT_HEADER]: principal.machine.client_id ?? '' };
   if (url.pathname === '/machine/stream' && request.method === 'GET') return stub.fetch(forward(request, 'https://machine/stream', identity));
