@@ -306,7 +306,7 @@ describe('Sync bookmarks now', () => {
     for (let k = 0; k < 3; k++) await syncBookmarks('Default');
     expect(b.calls.filter((c) => c.name === 'browser.bookmarks.sync').map((c) => c.input)).toEqual(Array(4).fill({ profileDir: 'Default' }));
     expect(useNotices.getState().notices.map((notice) => notice.text)).toEqual([
-      BROWSER_COPY.profile.syncFailed('Chrome의 북마크 파일을 읽지 못함'),
+      BROWSER_COPY.profile.syncFailed('Couldn’t read Chrome’s bookmarks file'),
       BROWSER_COPY.profile.syncFailed('an import is running'),
       BROWSER_COPY.profile.syncFailed('Unavailable in this build'),
     ]);

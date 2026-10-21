@@ -164,7 +164,7 @@ describe('an imported profile', () => {
     const consented = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt, count: 46, error: null, errorAt: null } };
     renderBlock({ 'browser.import.list': () => ({ profiles: [consented], fileBroken: false, running: null }), 'browser.bookmarks.sync': () => ({ syncedAt, count: 46 }) });
     const region = await screen.findByRole('region', { name: 'Person 1' });
-    expect(within(region).getByText('마지막 동기화 2 hours ago')).toBeTruthy();
+    expect(within(region).getByText('Last synced 2 hours ago')).toBeTruthy();
     fireEvent.click(within(region).getByRole('button', { name: 'Sync bookmarks now' }));
     await vi.waitFor(() => expect(calls('browser.bookmarks.sync')).toEqual([{ profileDir: 'Default' }]));
     cleanup();

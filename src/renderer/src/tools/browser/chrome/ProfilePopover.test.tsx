@@ -94,7 +94,7 @@ describe('an imported profile’s popover', () => {
     const popover = await openPopover('Person 1');
     expect(popover.querySelector('header img')?.getAttribute('src')).toBe(PICTURE);
     expect(within(popover).getByText('Person 1')).toBeTruthy();
-    expect(popover.querySelector('[data-profile-account]')!.textContent).toBe('로그인: Probe Owner · probe@example.test');
+    expect(popover.querySelector('[data-profile-account]')!.textContent).toBe('Signed in as Probe Owner · probe@example.test');
     const switchList = within(popover).getByRole('region', { name: BROWSER_COPY.profile.switchProfile });
     expect(within(switchList).getByText(BROWSER_COPY.profile.appliesToNewTabs)).toBeTruthy();
     expect([...popover.querySelectorAll<HTMLElement>('[data-profile-switch]')].map((row) => [row.dataset.profileSwitch, row.textContent])).toEqual([
@@ -102,7 +102,7 @@ describe('an imported profile’s popover', () => {
       ['default', 'Default'],
     ]);
     expect(popover.querySelector('[data-profile-sync]')!.textContent).toContain(BROWSER_COPY.profile.syncNow);
-    expect(popover.querySelector('[data-profile-sync-line]')!.textContent).toBe('마지막 동기화 5 minutes ago');
+    expect(popover.querySelector('[data-profile-sync-line]')!.textContent).toBe('Last synced 5 minutes ago');
     expect(popover.querySelector('[data-profile-reimport]')!.textContent).toBe(BROWSER_COPY.profile.reimport);
     expect(popover.querySelector('[data-profile-settings]')!.textContent).toBe(BROWSER_COPY.profile.settings);
   });
@@ -112,17 +112,17 @@ describe('an imported profile’s popover', () => {
     showPill(profilePartition('Profile 1'));
     await vi.waitFor(() => expect(pill().textContent).toContain('Work'));
     const popover = await openPopover('Work');
-    expect(popover.querySelector('[data-profile-account]')!.textContent).toBe('Chrome에 로그인되지 않은 프로필');
+    expect(popover.querySelector('[data-profile-account]')!.textContent).toBe('Not signed in to Chrome');
     expect(popover.querySelector('[data-profile-sync]')).toBeNull();
     expect(popover.querySelector('[data-profile-reimport]')).not.toBeNull();
   });
 
-  it('a failed read shows the 읽지 못함 line with the last good sync', async () => {
+  it('a failed read shows the “Couldn’t read” line with the last good sync', async () => {
     browserImport.setState({ records: [{ ...PERSON_RECORD, bookmarks: { ...PERSON_RECORD.bookmarks!, error: 'missing', errorAt: new Date().toISOString() } }] });
     showPill(PERSON);
     await vi.waitFor(() => expect(pill().textContent).toContain('Person 1'));
     const popover = await openPopover('Person 1');
-    expect(popover.querySelector('[data-profile-sync-line]')!.textContent).toBe('Chrome의 북마크 파일을 읽지 못함 · 마지막 동기화 5 minutes ago');
+    expect(popover.querySelector('[data-profile-sync-line]')!.textContent).toBe('Couldn’t read Chrome’s bookmarks file · Last synced 5 minutes ago');
   });
 
   it('Switch profile writes browser.profile, then opens a new selected tab of this session; this tab is left as it is', async () => {

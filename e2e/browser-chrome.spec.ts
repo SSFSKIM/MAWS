@@ -22,7 +22,7 @@
 // and Work's initial, and opens the profile popover with the name, the signed-in account (Work: not signed in), Switch
 // profile, Sync bookmarks now with its line, Re-import this profile… and Browser settings, the main area keeping its
 // Browser tab, a click on the chrome outside closing it; (5, the popover half) Sync bookmarks now shows an edited file at
-// once, and a deleted one's "읽지 못함" line; (8) Switch profile → Work opens a new selected tab in Work's partition, the
+// once, and a deleted one’s “Couldn’t read” line; (8) Switch profile → Work opens a new selected tab in Work's partition, the
 // first tab staying in its own; Re-import from the popover runs the removal and the import sheet at app level and the
 // active profile is active again after it; (10, the avatar) removal takes avatar.png with the partition folder. The
 // Chrome account's names reach no log line, console message or the e2e seam.
@@ -509,12 +509,12 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       let popover = await openPopover(s, main);
       await expect(popover).toHaveAttribute('data-profile-popover', 'profile');
       await expect(popover.locator('header')).toContainText('Person 1');
-      await expect(popover.locator('[data-profile-account]')).toHaveText('로그인: Probe Owner · probe@example.test');
-      await expect(popover.getByRole('region', { name: 'Switch profile' })).toContainText('새 탭에 적용');
+      await expect(popover.locator('[data-profile-account]')).toHaveText('Signed in as Probe Owner · probe@example.test');
+      await expect(popover.getByRole('region', { name: 'Switch profile' })).toContainText('Applies to new tabs');
       expect(await popover.locator('[data-profile-switch]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-profile-switch')))).toEqual(['Profile 1', 'default']);
       await expect(popover.locator('[data-profile-switch="Profile 1"] [data-profile-avatar="initials"]')).toHaveText('W');
       await expect(popover.locator('[data-profile-sync]')).toContainText('Sync bookmarks now');
-      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^마지막 동기화 (now|\d+ minutes? ago)$/);
+      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Last synced (now|\d+ minutes? ago)$/);
       await expect(popover.locator('[data-profile-reimport]')).toHaveText('Re-import this profile…');
       await expect(popover.locator('[data-profile-settings]')).toHaveText('Browser settings');
       // the main area keeps the Browser tab: no Settings tab opened
@@ -531,11 +531,11 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       await popover.locator('[data-profile-sync]').click();
       await expect(chipNamed(main, 'A2')).toBeVisible();
       await expect(popover.locator('[data-profile-sync]')).not.toHaveAttribute('aria-disabled', 'true');
-      // the file deleted: the bar kept, the 읽지 못함 line with the last good sync, a toast
+      // the file deleted: the bar kept, the “Couldn’t read” line with the last good sync, a toast
       rmSync(bookmarks.file);
       await popover.locator('[data-profile-sync]').click();
-      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Chrome의 북마크 파일을 읽지 못함 · 마지막 동기화 (now|\d+ minutes? ago)$/);
-      await expect(s.page.getByText('Bookmarks could not be synced: Chrome의 북마크 파일을 읽지 못함', { exact: true })).toBeVisible();
+      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Couldn’t read Chrome’s bookmarks file · Last synced (now|\d+ minutes? ago)$/);
+      await expect(s.page.getByText('Bookmarks could not be synced: Couldn’t read Chrome’s bookmarks file', { exact: true })).toBeVisible();
       await expect(chipNamed(main, 'A2')).toBeVisible();
       await s.page.keyboard.press('Escape'); // the toast is the top layer: Esc dismisses it first, then the popover
       await s.page.keyboard.press('Escape');
@@ -558,7 +558,7 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       await expect(pillIn(main).locator('[data-profile-avatar="initials"]')).toHaveText('W');
       // Work's popover: not signed in, no Sync row (its bookmarks were not imported)
       popover = await openPopover(s, main);
-      await expect(popover.locator('[data-profile-account]')).toHaveText('Chrome에 로그인되지 않은 프로필');
+      await expect(popover.locator('[data-profile-account]')).toHaveText('Not signed in to Chrome');
       await expect(popover.locator('[data-profile-sync]')).toHaveCount(0);
       await s.page.keyboard.press('Escape');
       await expect(popover).toHaveCount(0);
