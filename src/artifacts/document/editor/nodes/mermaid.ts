@@ -16,6 +16,7 @@ import type { Mermaid } from 'mermaid';
 type MermaidPlugin = ReturnType<(typeof import('@streamdown/mermaid'))['createMermaidPlugin']>;
 
 let loaded: Promise<[MermaidPlugin, Mermaid, typeof import('./mermaid-source')]> | null = null;
+let configKeys: ReadonlySet<string> | null = null; // the key names mermaid's directive check keeps
 let n = 0;
 
 function themeOf(into: HTMLElement): Record<string, string> {
@@ -43,14 +44,16 @@ export async function renderMermaid(source: string, into: HTMLElement): Promise<
   ]);
   const themeVariables = themeOf(into);
   const { fontFamily, ...colours } = themeVariables;
-  const [plugin, mermaid, { authorTheme, pinnable, withPage }] = await loaded;
-  const named = authorTheme(source);
+  const [plugin, mermaid, { authorTheme, configKeysOf, pinnable, withPage }] = await loaded;
+  configKeys ??= configKeysOf(mermaid.mermaidAPI.defaultConfig);
+  const named = authorTheme(source, configKeys);
   const settings = { securityLevel: 'strict', suppressErrorRendering: true } as const;
   let page;
   let drawer;
   if (named) {
-    // the theme as the author's own variables colour it; read back at once, before anything else can configure mermaid
-    drawer = plugin.getMermaid({ ...settings, theme: named.theme, themeVariables: named.themeVariables });
+    // the theme as the author's own variables colour it, in the page's face, which then holds even when mermaid drops every
+    // init directive for a malformed one of the author's; read back at once, before anything else can configure mermaid
+    drawer = plugin.getMermaid({ ...settings, theme: named.theme, themeVariables: { fontFamily, ...named.themeVariables } });
     page = { theme: named.theme, fontFamily, themeVariables: pinnable(mermaid.mermaidAPI.getSiteConfig().themeVariables) };
   } else {
     drawer = plugin.getMermaid({ ...settings, theme: 'base', themeVariables });

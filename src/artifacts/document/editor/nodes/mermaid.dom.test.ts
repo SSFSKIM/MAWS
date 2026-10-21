@@ -45,11 +45,12 @@ const TRANSCRIPT = {
   },
 } as const;
 
-// The source mermaid was handed for `source`, and the configuration in force as its render started.
-async function renderedAfterTranscript(source: string): Promise<{ source: string; config: MermaidConfig }> {
+// The source mermaid was handed for `source`, and the configuration in force as its render started (with no transcript
+// configuration between, when `transcript` is false).
+async function renderedAfterTranscript(source: string, transcript = true): Promise<{ source: string; config: MermaidConfig }> {
   let seen: { source: string; config: MermaidConfig } | undefined;
   vi.spyOn(mermaid, 'render').mockImplementation(async (_id, text) => {
-    mermaid.initialize(TRANSCRIPT);
+    if (transcript) mermaid.initialize(TRANSCRIPT);
     await mermaid.parse(text);
     seen = { source: text, config: mermaid.mermaidAPI.getConfig() };
     return { svg: '<svg></svg>', diagramType: 'flowchart-v2' } as Awaited<ReturnType<typeof mermaid.render>>;
@@ -170,6 +171,33 @@ describe('a document diagram that names a theme, drawn after the transcript conf
     const { config } = await renderedAfterTranscript('  ---\r  title: Flow\r  config:\r    theme: dark\r  ---\rgraph TD\r  A --> B');
     expect(config.theme).toBe('dark');
     expect(hues(config.themeVariables)).toEqual(hues({ ...dark, fontFamily: PAGE_FONT }));
+  });
+
+  // mermaid's directive check keeps only its configuration's key names, so a theme's method named here never reaches it
+  it('draws a front matter whose theme variables name no variable mermaid knows, in its theme’s colours', async () => {
+    const forest = ownVariables('forest');
+    const { config } = await renderedAfterTranscript('---\nconfig:\n  theme: forest\n  themeVariables:\n    updateColors: red\n---\ngraph TD\n  A --> B');
+    expect(config.theme).toBe('forest');
+    expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
+  });
+
+  // mermaid drops a directive's null values before it merges the directives, so a later null leaves an earlier value
+  it('keeps an author’s variable a later directive sets to null, and what the theme derives from it', async () => {
+    const forest = ownVariables('forest', { mainBkg: '#ffeeaa' });
+    const { config } = await renderedAfterTranscript(
+      '%%{init: {"theme": "forest", "themeVariables": {"mainBkg": "#ffeeaa"}}}%%\n%%{init: {"themeVariables": {"mainBkg": null}}}%%\ngraph TD\n  A --> B',
+    );
+    expect(config.themeVariables).toMatchObject({ mainBkg: '#ffeeaa', actorBkg: '#ffeeaa' });
+    expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
+  });
+
+  // a malformed init directive makes mermaid drop every one, the page's too; the theme then draws as this render
+  // configured it
+  it('takes the page’s face when an init directive of the author’s is malformed', async () => {
+    const forest = ownVariables('forest');
+    const { config } = await renderedAfterTranscript('---\nconfig:\n  theme: forest\n---\n%%{init: {theme: neo}}%%\ngraph TD\n  A --> B', false);
+    expect(config.theme).toBe('forest');
+    expect(hues(config.themeVariables)).toEqual(hues({ ...forest, fontFamily: PAGE_FONT }));
   });
 });
 

@@ -75,25 +75,47 @@ function initArgs(text: string): unknown[] {
   }
 }
 
+// mermaid's configKeys (defaultConfig.ts's keyify): every key name of its default configuration, at any depth, but an
+// array's; its directive check deletes any other
+export function configKeysOf(config: object): Set<string> {
+  const keys = new Set<string>();
+  const walk = (value: object) => {
+    for (const [name, child] of Object.entries(value)) {
+      if (Array.isArray(child)) continue;
+      keys.add(name);
+      if (typeof child === 'object' && child !== null) walk(child);
+    }
+  };
+  walk(config);
+  return keys;
+}
+
+// theme variables as mermaid's directive check (sanitizeDirective.ts) leaves each front matter or directive before it
+// merges them: only its configuration's key names (never a theme's own methods), none null, and a value holding
+// anything beyond SAFE blanked
+function checked(value: unknown, keys: ReadonlySet<string>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record(value))
+      .filter(([name, variable]) => variable != null && keys.has(name) && !name.startsWith('__') && !name.includes('proto') && !name.includes('constr'))
+      .map(([name, variable]) => [name, typeof variable === 'string' && !SAFE.test(variable) ? '' : variable]),
+  );
+}
+
 // The theme the author names, from the front matter's config and then the init directives, a later one winning as mermaid
-// merges them, with the author's own theme variables merged and checked as mermaid does; null when none is named. An
-// explicit `base` names none: base has no colours of its own (its variables are how it is meant to be coloured), and a
-// document's are its page's, so it keeps the page's palette, the author's own base variables still winning key by key.
-export function authorTheme(source: string): { theme: Theme; themeVariables: Record<string, unknown> } | null {
+// merges them, with the author's own theme variables merged and checked as mermaid does (`keys`: configKeysOf mermaid's
+// default configuration); null when none is named. An explicit `base` names none: base has no colours of its own (its
+// variables are how it is meant to be coloured), and a document's are its page's, so it keeps the page's palette, the
+// author's own base variables still winning key by key.
+export function authorTheme(source: string, keys: ReadonlySet<string>): { theme: Theme; themeVariables: Record<string, unknown> } | null {
   const author = authored(source);
   if (!author) return null;
   let theme = author.config.theme;
-  const variables = { ...record(author.config.themeVariables) };
+  const themeVariables = checked(author.config.themeVariables, keys);
   for (const args of initArgs(author.rest).map(record)) {
     if (args.theme != null) theme = args.theme;
-    Object.assign(variables, record(args.themeVariables));
+    Object.assign(themeVariables, checked(args.themeVariables, keys));
   }
   if (typeof theme !== 'string' || theme === 'base' || !THEMES.has(theme)) return null;
-  const themeVariables = Object.fromEntries(
-    Object.entries(variables)
-      .filter(([, value]) => value != null)
-      .map(([name, value]) => [name, typeof value === 'string' && !SAFE.test(value) ? '' : value]),
-  );
   return { theme: theme as Theme, themeVariables };
 }
 
