@@ -228,7 +228,20 @@ const trees = [];
 after(() => {
   for (const dir of trees) rmSync(dir, { recursive: true, force: true });
 });
-const packageJson = JSON.stringify({ scripts: { e2e: 'x', 'e2e:side': 'x', 'e2e:tools': 'x', 'e2e:library': 'x', 'e2e:perf': 'x', 'e2e:fg': 'MAWS_E2E_FOREGROUND=1 playwright test fg' } });
+// A group the guest can take restores out/ from the pool's e2e-build job, so it builds through scripts/e2e-build.sh (the
+// plan keeps any other off the guest's labels); `nobuild` builds another way.
+const built = (variant, rest) => `scripts/e2e-build.sh ${variant} && ${rest}`;
+const packageJson = JSON.stringify({
+  scripts: {
+    e2e: 'x',
+    'e2e:side': built('harness', 'playwright test side'),
+    'e2e:tools': built('plain', 'playwright test tools'),
+    'e2e:library': built('plain', 'playwright test library'),
+    'e2e:perf': built('plain', 'playwright test perf'),
+    'e2e:fg': built('harness', 'MAWS_E2E_FOREGROUND=1 playwright test fg'),
+    'e2e:nobuild': 'x',
+  },
+});
 function tree(workflow, scripts = packageJson) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-ci-gate-alerts-tree-'));
   trees.push(dir);
@@ -292,6 +305,15 @@ test('anything that keeps the plan from running leaves the run needing a host', 
   assert.equal(ask(tree(envOf('  CLASS1_E2E: side\n  MAC_VM_E2E: [side]\n'))), null); // an env it cannot read
   assert.equal(ask(tree('name: gate\n')), null); // no list: every group on the host's labels
   assert.equal(ask(tree(envOf('  MAC_VM_E2E: side\n'), '{')), null); // a package.json the plan cannot read
+});
+
+// The plan keeps a group whose out/ e2e-build cannot make off the guest's labels (ci-kit's mac-lane concurrency spec,
+// "out/ is built on the pool"); e2e-build itself runs on the pool, no Mac.
+test("a MAC_VM_E2E group that does not build through scripts/e2e-build.sh needs a host; e2e-build's pool job does not", () => {
+  const vm = tree(envOf('  CLASS1_E2E: side nobuild\n  MAC_VM_E2E: side nobuild\n'));
+  assert.equal(guestRun({ ...vm, gates: 'e2e:side', variables: today }), 'vm');
+  for (const lane of ['', 'vm']) assert.equal(guestRun({ ...vm, gates: 'e2e:side,e2e:nobuild', lane, variables: today }), null, lane);
+  assert.equal(guestRun({ ...vm, gates: 'e2e:nobuild', variables: today }), null);
 });
 
 // The reads, the tree and the decision together, for the runs the architect's ruling names.

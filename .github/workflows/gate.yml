@@ -8,7 +8,10 @@
 # A `Selection: affected` trailer (ci-gate.sh --affected) makes an iteration run: unit and unit:darwin test only what the
 # change its `Affected:` trailers list can reach, or the whole suite where vitest's module graph cannot see (the plan
 # says which, and why, in its summary). Such a run is never landing evidence (ci-kit's test-history spec, M4). A `Lane:`
-# trailer (ci-gate.sh --lane vm or vm-trial) sends the run's MAC_VM_E2E groups to ci-kit's macOS guest alone.
+# trailer (ci-gate.sh --lane vm or vm-trial) sends the run's MAC_VM_E2E groups to ci-kit's macOS guest alone. A job the
+# plan puts on the guest's labels never builds out/, which the guest's 4 GB cannot: the pool's e2e-build job builds the
+# variants those jobs need at the tested sha, and e2e-vm runs them, restoring out/ from its artifacts (ci-kit's mac-lane
+# concurrency spec, Decision Log "out/ is built on the pool").
 #
 # ci-kit's VM contract (its mac-lane concurrency spec, The VM lane): on a Mac with ci-kit's guest, the exclusive
 # instance's job-started hook reads the workflow a job runs under at its sha, and lets the job run beside a guest only
@@ -140,7 +143,8 @@ jobs:
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
     # GATE_RUNNER (linux, macos or pool), each e2e job its lane's runner or, for POOL_E2E, the pool's or hosted Linux's;
     # on the Mac, the exclusive instance's labels, the shared instances' for unit:darwin and the e2e groups on
-    # MAC_SHARED_E2E, or [ci-kit-mac-solo] for those on MAC_VM_E2E (the guest's alone under a `Lane:`).
+    # MAC_SHARED_E2E, or [ci-kit-mac-solo] for those on MAC_VM_E2E (the guest's alone under a `Lane:`), which e2e-vm runs
+    # after e2e-build, on the pool, made their out/.
     # A push to master runs nothing here (the warm job of Decision Log 26 left with Decision Log 53); master's class 1a
     # is the landing gate's.
     runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-slim' }}
@@ -164,6 +168,10 @@ jobs:
       unit_shards: ${{ steps.plan.outputs.unit_shards }}
       unit_darwin_runner: ${{ steps.plan.outputs.unit_darwin_runner }}
       timeouts: ${{ steps.plan.outputs.timeouts }}
+      e2e_host: ${{ steps.plan.outputs.e2e_host }}
+      e2e_vm: ${{ steps.plan.outputs.e2e_vm }}
+      e2e_build: ${{ steps.plan.outputs.e2e_build }}
+      e2e_build_runner: ${{ steps.plan.outputs.e2e_build_runner }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -390,9 +398,43 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # The out/ variants the guest-eligible e2e groups restore (the plan's e2e_build; ci-kit's mac-lane concurrency spec,
+  # Decision Log "out/ is built on the pool"), each built once at this sha on a pool box through scripts/e2e-build.sh's
+  # own build-and-store, into a cache of this job's own, and uploaded as the artifact e2e-build-<sha>-<variant>, which
+  # holds that cache's <sha>/<variant>/{out,digest}. Only when the plan puts an e2e job on the guest's labels; else the
+  # job does not run and the pool's minutes are as before. Kept a week, as the e2e reports are, so a rerun of an e2e-vm
+  # job finds its build; overwritten by a rerun of this job.
+  e2e-build:
+    needs: plan
+    if: needs.plan.outputs.e2e_build != '[]'
+    runs-on: ${{ fromJSON(needs.plan.outputs.e2e_build_runner) }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.plan.outputs.e2e_build) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          rm -rf "$RUNNER_TEMP/maws-e2e-build"
+          export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA
+          .github/scripts/gate-run.sh 'built in|error|^e2e-build: ' scripts/e2e-build.sh "$VARIANT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-build-${{ github.sha }}-${{ matrix.variant }}
+          path: ${{ runner.temp }}/maws-e2e-build/
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  # The e2e groups the plan keeps off the guest's labels (its e2e_host); e2e-vm below runs the rest with these same steps.
   e2e:
     needs: plan
-    if: needs.plan.outputs.e2e != '[]'
+    if: needs.plan.outputs.e2e_host != '[]'
     name: e2e:${{ matrix.group }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     # 30, a measured group's 45, and on the Mac the wait bound of its instance's start on top (gate-plan.mjs).
@@ -400,8 +442,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.e2e) }}
-    env:
+        include: ${{ fromJSON(needs.plan.outputs.e2e_host) }}
+    env: &e2e-env
       MAWS_E2E_QUIET: '1'
       SHELL: /bin/zsh # the Mac's login shell, which the app's terminals and its login-shell capture start (setup installs it)
       # The live groups' run flags, `1` only when the plan says live, which it says only for a set of LIVE_E2E groups;
@@ -409,7 +451,9 @@ jobs:
       MAWS_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
       MAWS_LIBRARY_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
       MAWS_LIVE_DOCUMENT: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
-    steps:
+    # One list for both e2e jobs (a YAML anchor, which e2e-vm aliases): what differs is the entry's `variant`, which only
+    # a guest-eligible entry carries.
+    steps: &e2e-steps
       # A measured group waits here, before its checkout, until the Mac's desktop has settled (MEASURED_E2E above).
       - if: matrix.measured && runner.os == 'macOS'
         uses: SSFSKIM/ci-kit/mac/settle@v1
@@ -419,6 +463,13 @@ jobs:
         with:
           e2e: 'true'
           libreoffice: ${{ matrix.libreoffice }}
+      # A guest-eligible group's out/, e2e-build's artifact for its variant at this sha, into this job's temp directory,
+      # the build cache its run below restores from.
+      - if: matrix.variant
+        uses: actions/download-artifact@v8
+        with:
+          name: e2e-build-${{ github.sha }}-${{ matrix.variant }}
+          path: ${{ runner.temp }}/maws-e2e-build
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
       # Decision Log 60(2): beside other e2e groups, `default` runs only the specs none of them collects, derived at this
@@ -444,14 +495,19 @@ jobs:
         run: pnpm --filter desk-web exec playwright install --with-deps chromium webkit
       - env:
           SCRIPT: ${{ matrix.script }}
+          VARIANT: ${{ matrix.variant }}
         run: |
           display=()
           if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
-          # The Mac builds each out/ variant once per run and runner: scripts/e2e-build.sh restores it from this disk
+          # A guest-eligible group restores e2e-build's out/, downloaded above, and never builds: scripts/e2e-build.sh fails
+          # naming the key and the variant when the entry is missing or does not match its digest.
+          # Else the Mac builds each out/ variant once per run and runner: scripts/e2e-build.sh restores it from this disk
           # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries. One directory per
           # runner instance (ci-kit's mac-lane concurrency spec, M2): two shared jobs on one variant would otherwise race
           # its restore, its store and the prune.
-          if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build/$RUNNER_NAME MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
+          if [[ -n $VARIANT ]]; then
+            export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA MAWS_E2E_BUILD_REQUIRE=1
+          elif [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build/$RUNNER_NAME MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
           # default's own specs, when the step above derived them (macOS's bash 3.2 has no mapfile).
           specs=()
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
@@ -468,3 +524,19 @@ jobs:
             test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  # The guest-eligible e2e groups (the plan's e2e_vm: on ci-kit-mac-solo, -vm or -vm-trial), on whichever desktop takes
+  # them, once e2e-build has made their out/: the e2e job's env and steps, which restore it under MAWS_E2E_BUILD_REQUIRE=1.
+  e2e-vm:
+    needs: [plan, e2e-build]
+    if: needs.plan.outputs.e2e_vm != '[]'
+    name: e2e:${{ matrix.group }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    # As the e2e job's: 30, and on the exclusive instance's labels or the solo label its wait bound on top (gate-plan.mjs).
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.e2e_vm) }}
+    env: *e2e-env
+    steps: *e2e-steps
