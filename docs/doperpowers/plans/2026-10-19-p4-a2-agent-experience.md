@@ -209,6 +209,8 @@ The slide and design editors' layer, with the dashboard view's beside it. The ac
 |---|---|---|---|---|
 | 2026-10-22 | P4 coordinator | Localize the G2 renderer working-set increase before landing | Design-scale 39749104800: 377.2/376.9 MiB versus master 233.0/232.8 and 254.7/254.8. No provisional stream in that workload; idle 24-board DOM unchanged, compiled heap increments 0.033–0.184 MiB, JS bundle +63,631 bytes. Small per-publish history fixed independently. | Quiet matched mini A/B establishes whether the code reproduces the delta; if it does, staged renderer heap/DOM/native-memory evidence localizes the added resident allocation. |
 
+**Resolved at landing (the architect, P4 Decision Log 71).** The interleaved design-scale A/B on the mini read master 265.2 and 342.7 MiB, G2 339.3 and 345.6: master moved 77 MiB between its own runs, and G2 sat within 3.4 MiB of master's second, so the increase above was the machine's state, not the layer, and the row closes (`docs/doperpowers/evidence/p4-a2/design-scale-ab-2026-10-22.txt`).
+
 ## Acceptance (this dispatch's share of §5 A2 and §2 items 9, 10)
 
 - Item 9, the document half: presence from the first delta; the provisional layer at the target block, never written to the document, replaced by the real text only once the replica has integrated the commit's update, withdrawn without trace on refusal, the composition never touched; first visible change at first-token time. Evidence: M4 and M5's unit tests, M6's e2e, M8's live run.
