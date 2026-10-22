@@ -96,8 +96,9 @@ interface Computed {
 }
 
 export class DeckProvisional {
-  /** The provisional slides, as the canvases draw them; never the live doc. */
-  readonly scratch: Doc = newDoc();
+  private drawing: Doc = newDoc();
+  /** The provisional slides; renewed when the last drawing goes so deleted Yjs history cannot accumulate. */
+  get scratch(): Doc { return this.drawing; }
   private current: DeckProvisionalSnapshot = EMPTY;
   private readonly listeners = new Set<() => void>();
   private readonly computed = new Map<string, Computed>();
@@ -230,6 +231,10 @@ export class DeckProvisional {
     if (ids.length === 0) return;
     transact(this.scratch, () => ids.forEach((id) => Y.hasSlide(this.scratch, id) && Y.deleteSlide(this.scratch, id)));
     ids.forEach((id) => this.written.delete(id));
+    if (this.written.size === 0) {
+      this.drawing.destroy();
+      this.drawing = newDoc();
+    }
   }
 
   // One observer per live slide being written, bound to its node as it is now (a slide written anew is a new node).

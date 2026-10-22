@@ -883,6 +883,32 @@ describe('the provisional layer’s frames (P4-A2)', () => {
     provider.destroy();
   });
 
+  it.each(['committed', 'dropped'] as const)('bounds stale-call bookkeeping after 100 %s publishes without retaining their payloads', (state) => {
+    const { provider, replicaEnd, hostEnd, announce, doc, host } = replica();
+    const internal = provider as unknown as { ended: Set<string>; streaming: Map<string, ArtifactProvisional> };
+    try {
+      for (let i = 0; i < 100; i++) {
+        const toolUseId = `publish-${i}` as ArtifactProvisional['toolUseId'];
+        announce(provisional({ toolUseId, kind: 'presentation', ops: [{ op: 'file', path: 'project/slides/s1.html', text: `<section id="s1">${i}</section>` }] }));
+        announce(provisional({ toolUseId, state, commitSeq: i + 1, ops: [] }));
+        pump(replicaEnd, hostEnd);
+        expect(internal.streaming.size).toBe(0);
+      }
+      expect(internal.ended.size, 'a long-lived connection retains only a recent stale-frame guard').toBeLessThanOrEqual(64);
+      announce(provisional({ toolUseId: 'publish-99' as ArtifactProvisional['toolUseId'] }));
+      pump(replicaEnd, hostEnd);
+      let replayed = 0;
+      provider.onProvisional(() => replayed++)();
+      expect(replayed, 'the most recent ended call cannot re-enter replay').toBe(0);
+      provider.disconnect();
+      expect(internal.ended.size).toBe(0);
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      host.doc.destroy();
+    }
+  });
+
   // G2 (G-R1's mid-stream condition): the host restates every open call to a connection in the flush that carries its
   // step 2, before an editor that opens the document has attached a listener (the open resolves on that step 2)
   it('keeps every call still streaming for a listener that attaches after its frames, files merged by path; not a dropped or committed one', () => {

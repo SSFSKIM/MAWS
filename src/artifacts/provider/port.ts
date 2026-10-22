@@ -102,7 +102,9 @@ export class PortProvider {
   // P4-A2 G2 (G-R1's mid-stream condition): each call still streaming on this connection, as its frames so far make it
   // (a publish's files merged by path), for a listener that attaches after them
   private readonly streaming = new Map<string, ArtifactProvisional>();
-  private readonly ended = new Set<string>(); // calls committed or dropped on this connection: a late tick is stale
+  // The host ends a call before its terminal frame on this ordered port. A recent-ID guard also rejects a stray
+  // late tick from replay, without keeping every call ID for the lifetime of a long-open document.
+  private readonly ended = new Set<string>();
   private readonly log: (line: string) => void;
   private readonly offUpdate: () => void;
   private readonly onMessage = (event: { data?: unknown }) => this.receive(event.data);
@@ -379,6 +381,7 @@ export class PortProvider {
         if (parsed.data.state !== 'streaming') {
           this.streaming.delete(id); // G2
           this.ended.add(id);
+          if (this.ended.size > 64) this.ended.delete(this.ended.values().next().value!);
         } else if (!this.ended.has(id)) this.streaming.set(id, mergeProvisional(this.streaming.get(id), parsed.data));
         return { provisional: parsed.data };
       }

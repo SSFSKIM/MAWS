@@ -146,6 +146,24 @@ describe('the deck’s provisional model', () => {
     expect(stateVector(w.doc)).toEqual(before);
   });
 
+  it('keeps a concurrent drawing on its scratch doc until the last call ends, then starts the next call fresh', () => {
+    const w = world();
+    w.live.frame(publishFrame('one', 'streaming', { [slidePath('s1')]: w.file('s1').replace('Launch', 'Lunch') }));
+    w.live.frame(publishFrame('two', 'streaming', { [slidePath('s2')]: w.file('s2').replace('Numbers', 'Figures') }));
+    const scratch = w.provisional.scratch;
+    w.live.frame(publishFrame('one', 'dropped'));
+    expect(w.provisional.scratch).toBe(scratch);
+    expect(textOf(scratch, 's2', 't2')).toBe('Figures');
+    w.live.frame(publishFrame('two', 'dropped'));
+    expect(w.provisional.scratch.store.clients.size).toBe(0);
+    expect(scratch.isDestroyed).toBe(true);
+    w.live.frame(publishFrame('three', 'streaming', { [slidePath('s1')]: w.file('s1').replace('Launch', 'Lunch') }));
+    expect(w.provisional.scratch).not.toBe(scratch);
+    expect(textOf(w.provisional.scratch, 's1', 'title')).toBe('Lunch review');
+    w.stop();
+    expect(w.provisional.scratch.store.clients.size).toBe(0);
+  });
+
   it('draws nothing for a held file or one that is not a slide, and stops with every trace cleared', () => {
     const w = world();
     w.live.frame(publishFrame('call1', 'streaming', { [slidePath('s1')]: '<section id="s1"><iframe src="x"></iframe></section>', 'project/notes.txt': 'x' }));
