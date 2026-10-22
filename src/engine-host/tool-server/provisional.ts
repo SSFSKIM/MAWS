@@ -5,7 +5,9 @@
 // tells every open port of the target doc what the call will write, as far as it parses (`ArtifactProvisional`):
 //
 //   streaming  per batch tick (PROVISIONAL_TICK_MS, longer for a long input: INPUT_PER_MS), only when the ops changed;
-//              sent now (`DocumentService.broadcast`), since it reveals nothing of the store
+//              sent now (`DocumentService.broadcast`), since it reveals nothing of the store. A batch's and a dataset's
+//              ops are cumulative; a publish's frame lists the files whose text changed since its last (G-R1), and a
+//              connection that syncs mid-stream is sent one complete frame per call open on its doc (`onSynced`)
 //   committed  from the write's own frame (`committed`, called by the tool), queued ahead of the write's update frames
 //              (`DocumentService.announceWrite`), naming the row the edit's own transaction is, which its update
 //              carries as its seq (rows the kind's hooks append after it reveal nothing the layer stands for)
@@ -21,6 +23,8 @@
 // the owner takes agent edits as suggestions, the layer is the suggestion doc's; a `mode: 'suggest'` read late moves it
 // there, dropped on the main doc (R7). Nothing here writes a doc, a row or a version (rule 1), and nothing here throws
 // into a tool: a failure is logged and the layer is left to the call's ending.
+import { datasetIdFromSource } from '@artifacts/dashboard/datasets';
+import { chartSpecs } from '@artifacts/dashboard/views';
 import { DocIndex } from '@artifacts/document/block-index';
 import { needleOf } from '@artifacts/document/edit-plan';
 import { stripMilestones } from '@artifacts/document/markdown';
@@ -30,7 +34,7 @@ import { isDocKind, type ArtifactKind } from '@shared/artifacts/entity';
 import { isProvisionalTool, PROVISIONAL_TICK_MS, ProvisionalOpSchema, type ArtifactProvisional, type ProvisionalOp, type ProvisionalTool } from '@shared/artifacts/provisional';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
-import { readPartialJson } from '@shared/maws/partial-json';
+import { isWhole, openPath, readPartialJson, type JsonPath as Path } from '@shared/maws/partial-json';
 import { MAWS_SERVER_NAME } from '@shared/maws/tools';
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
@@ -43,13 +47,17 @@ const MAX_INPUT = 2 * 1024 * 1024;
 const INPUT_PER_MS = 8_000;
 const MAWS_PREFIX = `mcp__${MAWS_SERVER_NAME}__`; // the engine's name for a `maws` tool, as its tool_use block carries it
 
-// Whose ops stream to the renderers: the document batch's, which the document editor draws (M5). A publish's files and
-// a dataset's id are not drawn until G2 (the slide, design and dashboard layers), so until then their input is read
+// Whose ops stream to the renderers, by the kind the call writes: those a view draws. The document batch on a document
+// or a dashboard (the document editor, M5); a deck's or a design's publish (G2: the slide and design editors' layer); a
+// dashboard's dataset (G2: the label on its bound charts). A design system's publish draws nothing, so its input is read
 // only until its target resolves (presence from the first delta, which needs the `artifact` key alone) and no further:
-// re-reading a whole-deck publish at every tick and decoding its frame on every connection of the doc, the host's own
-// agent replicas included, would cost the host loop and the open editor for nothing visible (the hand-back review).
-// G2 flips the flag per kind it draws; `opsOf` already reads the files and the id.
-const STREAMS_OPS: Record<ProvisionalTool, boolean> = { artifact_edit: true, artifact_publish: false, artifact_dataset: false };
+// re-reading a long publish at every tick and decoding its frame on every connection of the doc, the host's own agent
+// replicas included, would cost the host loop and the open view for nothing visible (Decision Log 8).
+const STREAMS_OPS: Record<ProvisionalTool, (kind: ArtifactKind) => boolean> = {
+  artifact_edit: () => true,
+  artifact_publish: (kind) => kind === 'presentation' || kind === 'design',
+  artifact_dataset: () => true,
+};
 
 // The kinds each call writes; another kind's call is refused by its tool, so it shows nothing.
 const WRITES: Record<ProvisionalTool, (kind: ArtifactKind) => boolean> = {
@@ -66,21 +74,22 @@ export interface ProvisionalEmitterDeps {
   onFrame?: (frame: ArtifactProvisional) => void; // every frame as sent (the perf seam counts them)
 }
 
-type Path = (string | number)[];
-
 interface Call {
   toolUseId: ToolUseId;
   tool: ProvisionalTool;
   buffer: string;
   timer: ReturnType<typeof setTimeout> | null;
   started: boolean; // its `tools/call` arrived: the input is whole, nothing more is read
-  inert: boolean; // past MAX_INPUT, a kind its tool does not write, or a tool whose ops are not drawn yet (presence stands)
+  inert: boolean; // past MAX_INPUT, a kind its tool does not write, or a kind whose view draws no ops (presence stands)
   target: { id: string; kind: ArtifactKind; asSuggestions: boolean } | null;
   key: string | null; // the doc the layer is on: the artifact's, or its suggestion doc's
-  sent: string | null; // the ops of the last streaming frame on `key` (JSON), null before one
-  ops: ProvisionalOp[];
+  drawn: boolean; // a streaming frame went to `key`
+  sent: string; // the ops of the last streaming frame on `key` (JSON); a publish's files are compared per path instead
+  ops: ProvisionalOp[]; // the last streaming frame's (a batch's and a dataset's are cumulative)
+  files: Map<string, string>; // G-R1: a publish's files as sent so far, by path in input order
   presence: { key: string; agent: AgentReplica; blocks: string } | null;
   quotes: Map<number, string | null>; // an unscoped quote's block, by op index, once found (or found in none)
+  bound: { dataset: string; blocks: string[] } | null; // G-R7: the chart blocks a dataset's id names, once read
 }
 
 export class ProvisionalEmitter {
@@ -88,6 +97,7 @@ export class ProvisionalEmitter {
   private readonly ended = new Set<ToolUseId>(); // calls of this turn already committed or dropped: later deltas are not read
   private readonly actor: Actor;
   private readonly display: { name: string; color: string };
+  private unsync: (() => void) | null = null; // G-R1: the restatement to a newly synced connection, while a call is open
 
   constructor(private readonly deps: ProvisionalEmitterDeps) {
     this.actor = { kind: 'session', appSessionId: deps.appSessionId };
@@ -113,7 +123,7 @@ export class ProvisionalEmitter {
     if (!isProvisionalTool(toolName) || this.ended.has(toolUseId)) return;
     let call = this.calls.get(toolUseId);
     if (!call) {
-      call = { toolUseId, tool: toolName, buffer: '', timer: null, started: false, inert: false, target: null, key: null, sent: null, ops: [], presence: null, quotes: new Map() };
+      call = { toolUseId, tool: toolName, buffer: '', timer: null, started: false, inert: false, target: null, key: null, drawn: false, sent: '[]', ops: [], files: new Map(), presence: null, quotes: new Map(), bound: null };
       this.calls.set(toolUseId, call);
     }
     if (call.started || call.inert) return;
@@ -138,14 +148,15 @@ export class ProvisionalEmitter {
   // From the write's own frame (rule 2): the committed notice, queued ahead of the write's update frames on `docKey`,
   // names `commitSeq`, the row the edit's own transaction is (`WriteOptions.inFrame`'s `edited`: the seq its update
   // carries, so a replica withdraws the layer in the task that applies it, not at a later row of the kind's hooks), and
-  // carries the last ops. A layer on another doc (the owner's setting changed under the call) is dropped there instead.
+  // carries the last ops (a publish's none: every file went in a streaming frame, G-R1). A layer on another doc (the
+  // owner's setting changed under the call) is dropped there instead.
   committed(toolUseId: ToolUseId, docKey: string, commitSeq: number): void {
     const call = this.calls.get(toolUseId);
     if (!call) return;
     this.flush(call);
     this.end(call, (store) => {
-      if (call.key !== null && call.sent !== null) {
-        if (call.key === docKey) store.service.announceWrite(docKey, this.frame(call, 'committed', call.ops, commitSeq));
+      if (call.key !== null && call.drawn) {
+        if (call.key === docKey) store.service.announceWrite(docKey, this.frame(call, 'committed', call.tool === 'artifact_publish' ? [] : call.ops, commitSeq));
         else store.service.broadcast(call.key, this.frame(call, 'dropped', []));
       }
       this.handOver(store, call, docKey);
@@ -160,7 +171,7 @@ export class ProvisionalEmitter {
     if (!call) return;
     this.cancel(call);
     this.end(call, (store) => {
-      if (call.key !== null && call.sent !== null) store.service.broadcast(call.key, this.frame(call, 'dropped', []));
+      if (call.key !== null && call.drawn) store.service.broadcast(call.key, this.frame(call, 'dropped', []));
       this.handOver(store, call, docKey);
     });
   }
@@ -215,6 +226,10 @@ export class ProvisionalEmitter {
   private end(call: Call, finish: (store: ArtifactStore) => void): void {
     this.calls.delete(call.toolUseId);
     this.ended.add(call.toolUseId);
+    if (this.calls.size === 0 && this.unsync) {
+      this.unsync();
+      this.unsync = null;
+    }
     const store = this.deps.store();
     if (!store) return;
     try {
@@ -232,7 +247,7 @@ export class ProvisionalEmitter {
 
   // The layer's `dropped` on the doc it was drawn on, and the outline back to the idle name.
   private withdraw(store: ArtifactStore, call: Call): void {
-    if (call.key !== null && call.sent !== null) store.service.broadcast(call.key, this.frame(call, 'dropped', []));
+    if (call.key !== null && call.drawn) store.service.broadcast(call.key, this.frame(call, 'dropped', []));
     if (call.presence) store.service.releasePresence(call.presence.agent, this.display);
   }
 
@@ -267,7 +282,7 @@ export class ProvisionalEmitter {
     }
     const suggest = call.tool !== 'artifact_dataset' && (call.target.asSuggestions || input.mode === 'suggest');
     const key = suggest ? store.service.suggestionDoc(call.target.id) : call.target.id;
-    if (!STREAMS_OPS[call.tool]) {
+    if (!STREAMS_OPS[call.tool](call.target.kind)) {
       // presence on the doc the owner's setting names, then nothing more of the input (the call's end releases it)
       call.key = key;
       this.present(store, call, key, []);
@@ -277,18 +292,55 @@ export class ProvisionalEmitter {
     if (call.key !== null && call.key !== key) {
       // R7: the layer moves to the suggestion doc, withdrawn where it was drawn
       this.withdraw(store, call);
-      call.sent = null;
+      call.drawn = false;
+      call.sent = '[]';
+      call.ops = [];
+      call.files.clear();
       call.presence = null;
       call.quotes.clear();
+      call.bound = null;
     }
     call.key = key;
+    this.unsync ??= store.service.onSynced((docKey) => this.restated(docKey));
+    if (call.tool === 'artifact_publish') return this.readFiles(store, call, key, input);
     const { ops, blocks } = this.opsOf(store, call, input, whole);
     this.present(store, call, key, blocks);
     const json = JSON.stringify(ops);
-    if (json === (call.sent ?? '[]')) return;
+    if (json === call.sent) return;
     call.ops = ops;
     call.sent = json;
+    call.drawn = true;
     store.service.broadcast(key, this.frame(call, 'streaming', ops));
+  }
+
+  // G-R1: a publish's frame lists, in input order, the files whose text changed since its frame before (a file the
+  // input sends as `null` is not drawn): a whole-deck publish's files each go once as they grow, not again at every
+  // tick. Compared path by path, never as the whole input.
+  private readFiles(store: ArtifactStore, call: Call, key: string, input: Record<string, unknown>): void {
+    this.present(store, call, key, []);
+    if (!isRecord(input.files)) return;
+    const ops: ProvisionalOp[] = [];
+    for (const [path, text] of Object.entries(input.files)) {
+      if (typeof text !== 'string' || path === '' || call.files.get(path) === text) continue;
+      call.files.set(path, text);
+      ops.push({ op: 'file', path, text });
+    }
+    if (ops.length === 0) return;
+    call.drawn = true;
+    store.service.broadcast(key, this.frame(call, 'streaming', ops));
+  }
+
+  // G-R1: what a connection of `docKey` that has just synced is told of the layers open there, one complete frame per
+  // call (a publish's every file so far, a batch's or a dataset's last ops), so a view attaching mid-stream draws them
+  // as the views already open do. Not a frame of the call's stream (`onFrame` is not told): it restates, to one view.
+  private restated(docKey: string): Uint8Array[] {
+    const frames: Uint8Array[] = [];
+    for (const call of this.calls.values()) {
+      if (call.key !== docKey || !call.drawn) continue;
+      const ops = call.tool === 'artifact_publish' ? [...call.files].map(([path, text]): ProvisionalOp => ({ op: 'file', path, text })) : call.ops;
+      frames.push(encodeFrame({ type: 'provisional', json: JSON.stringify(this.shape(call, 'streaming', ops)) }));
+    }
+    return frames;
   }
 
   // R6: the agent's presence on `key`, the blocks named so far outlined, held as a batch's outline is (a turn end
@@ -315,12 +367,12 @@ export class ProvisionalEmitter {
     const target = (block: string | null | undefined) => {
       if (block && !blocks.includes(block)) blocks.push(block);
     };
-    if (call.tool === 'artifact_publish') {
-      if (isRecord(input.files)) for (const [path, text] of Object.entries(input.files)) if (typeof text === 'string') add({ op: 'file', path, text });
-      return { ops, blocks };
-    }
     if (call.tool === 'artifact_dataset') {
-      if (typeof input.id === 'string' && whole('id')) add({ op: 'dataset', dataset: input.id, text: '' });
+      // G-R7: the id once whole, and the chart blocks bound to it outlined
+      if (typeof input.id === 'string' && whole('id')) {
+        add({ op: 'dataset', dataset: input.id, text: '' });
+        blocks.push(...this.boundBlocks(store, call, input.id));
+      }
       return { ops, blocks };
     }
     if (!Array.isArray(input.ops)) return { ops, blocks };
@@ -392,13 +444,27 @@ export class ProvisionalEmitter {
     return found;
   }
 
+  // G-R7: the chart blocks of the layer's doc whose source names `dataset` (as the chart view reads a block's dataset),
+  // tab by tab in display order, read once per call on the session's host replica of the dashboard.
+  private boundBlocks(store: ArtifactStore, call: Call, dataset: string): string[] {
+    if (call.bound?.dataset !== dataset) {
+      const blocks = store.service.readAs(call.key!, this.actor, (doc) => chartSpecs(doc).filter((chart) => chart.blockId !== '' && datasetIdFromSource(chart.source) === dataset).map((chart) => chart.blockId));
+      call.bound = { dataset, blocks };
+    }
+    return call.bound.blocks;
+  }
+
   private frame(call: Call, state: ArtifactProvisional['state'], ops: ProvisionalOp[], commitSeq?: number): Uint8Array {
-    const frame: ArtifactProvisional = {
+    const frame = this.shape(call, state, ops, commitSeq);
+    this.deps.onFrame?.(frame);
+    return encodeFrame({ type: 'provisional', json: JSON.stringify(frame) });
+  }
+
+  private shape(call: Call, state: ArtifactProvisional['state'], ops: ProvisionalOp[], commitSeq?: number): ArtifactProvisional {
+    return {
       toolUseId: call.toolUseId, appSessionId: this.deps.appSessionId, artifactId: call.key!, kind: call.target!.kind, state,
       ...(commitSeq !== undefined && { commitSeq }), at: Date.now(), ...this.display, ops,
     };
-    this.deps.onFrame?.(frame);
-    return encodeFrame({ type: 'provisional', json: JSON.stringify(frame) });
   }
 
   private log(call: Call, line: string): void {
@@ -418,92 +484,6 @@ export async function withProvisional<T>(emitter: ProvisionalEmitter | undefined
     emitter.dropped(toolUseId);
   }
 }
-
-// The path of the member a streamed JSON text ends inside (`['ops', 2, 'new']` while that string streams), down to the
-// innermost container still open; null once the text is a whole value. Every value of the partial parse off this path
-// is whole: a string closed, a container closed. The partial parse cannot tell (it closes what is open), so a name is
-// read only once it is off the path.
-export function openPath(text: string): Path | null {
-  interface Level {
-    object: boolean;
-    key: string | number; // an object's last key; an array's index of its last value (-1 before one)
-    open: boolean; // a value of the current member started and has not ended
-    expectKey: boolean; // an object between members: the next string is a key
-  }
-  const stack: Level[] = [];
-  let inString = false;
-  let isKey = false;
-  let escape = false;
-  let from = 0;
-  let inLiteral = false;
-  const begin = (level: Level | undefined) => {
-    if (!level) return;
-    if (!level.object) level.key = (level.key as number) + 1;
-    level.open = true;
-  };
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i]!;
-    const top = stack[stack.length - 1];
-    if (inString) {
-      if (escape) escape = false;
-      else if (ch === '\\') escape = true;
-      else if (ch === '"') {
-        inString = false;
-        if (isKey && top) top.key = JSON.parse(text.slice(from, i + 1)) as string;
-        else if (top) top.open = false;
-      }
-      continue;
-    }
-    if (inLiteral) {
-      if (ch !== ',' && ch !== '}' && ch !== ']' && !/\s/.test(ch)) continue;
-      inLiteral = false;
-      if (top) top.open = false;
-    }
-    if (/\s/.test(ch)) continue;
-    switch (ch) {
-      case '"':
-        inString = true;
-        escape = false;
-        from = i;
-        isKey = top?.object === true && top.expectKey;
-        if (isKey) top!.expectKey = false;
-        else begin(top);
-        break;
-      case '{':
-      case '[':
-        begin(top);
-        stack.push({ object: ch === '{', key: ch === '{' ? '' : -1, open: false, expectKey: ch === '{' });
-        break;
-      case '}':
-      case ']': {
-        stack.pop();
-        const parent = stack[stack.length - 1];
-        if (parent) parent.open = false;
-        break;
-      }
-      case ',':
-        if (top) {
-          top.open = false;
-          top.expectKey = top.object;
-        }
-        break;
-      case ':':
-        break;
-      default:
-        begin(top);
-        inLiteral = true;
-    }
-  }
-  if (stack.length === 0) return null;
-  const path: Path = [];
-  stack.forEach((level, k) => {
-    if (k < stack.length - 1 || level.open) path.push(level.key);
-  });
-  return path;
-}
-
-// Whether the value at `path` is whole: off the open path (or the text is whole).
-const isWhole = (open: Path | null, path: Path): boolean => open === null || path.length > open.length || path.some((key, k) => open[k] !== key);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));

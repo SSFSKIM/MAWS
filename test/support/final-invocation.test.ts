@@ -13,7 +13,7 @@ const REPO = resolve(__dirname, '..', '..');
 const SCRIPTS = (JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')) as { scripts: Record<string, string> }).scripts;
 const ROOT = '/repo';
 const RUNNER = ['/usr/local/bin/node', '/repo/node_modules/@playwright/test/cli.js', 'test'];
-const DESIGN_SPECS = ['design.spec.ts', 'design-comments.spec.ts', 'design-history.spec.ts', 'design-export.spec.ts'];
+const DESIGN_SPECS = ['design.spec.ts', 'design-comments.spec.ts', 'design-history.spec.ts', 'design-export.spec.ts', 'design-provisional.spec.ts' /* P4-A2 G2.6 */];
 
 const argvOf = (script: string) => [...RUNNER, ...playwrightArgs(script)!];
 const casesOf = (files: readonly { file: string; tests: number }[]) => files.flatMap(({ file, tests }) => Array.from({ length: tests }, (_, k) => ({ file, title: `case ${k}`, outcome: 'expected' })));

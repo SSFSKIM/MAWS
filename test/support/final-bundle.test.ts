@@ -386,7 +386,7 @@ describe('the reporter', () => {
   });
 
   describe('as the design group names it', () => {
-    const SPECS = ['design.spec.ts', 'design-comments.spec.ts', 'design-history.spec.ts', 'design-export.spec.ts'];
+    const SPECS = ['design.spec.ts', 'design-comments.spec.ts', 'design-history.spec.ts', 'design-export.spec.ts', 'design-provisional.spec.ts' /* P4-A2 G2.6 */];
     const cases = SPECS.map((file, k) => caseIn(file, k));
 
     it('writes E1’s bundle on `ci/e1-final-*` for the `e2e:design` command, and fails it narrowed', async () => {

@@ -6,20 +6,29 @@
 // ahead of its update, naming the edit's own row (not a later row of the kind's hooks); the layer dropped on a refusal,
 // a `tool.result`, the turn's end and the process's exit, and at once from the frame of a write that changed nothing
 // (an edit or a publish); suggest mode moving the layer; nothing for another tool or an unjoined delta; nothing written
-// by a tick. Then the same path on a session: the engine's deltas and `tools/call` over a scripted transport.
+// by a tick. Then the same path on a session: the engine's deltas and `tools/call` over a scripted transport. G2.1
+// (G-R1, G-R7): a deck's publish frame by frame, each listing only the files that changed, restated whole to a view that
+// syncs mid-stream, committed by the publish's own row; a dataset's id once whole, outlining the charts bound to it.
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Frame } from '@artifacts/provider/frames';
-import { stateVector } from '@artifacts/yjs';
+import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
+import { DECK_PATH } from '@artifacts/slides/deck';
+import { newDoc, stateVector } from '@artifacts/yjs';
 import { ArtifactProvisionalSchema, PROVISIONAL_TICK_MS, type ArtifactProvisional } from '@shared/artifacts/provisional';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { scriptedSession } from '../conformance/session-harness';
+import { registerDashboards, type Dashboards } from '../dashboards';
 import { HUMAN, openDocumentWorld, sessionActor, type DocumentWorld, type RawEnd } from '../documents/kinds/document-world.fixture';
-import { ArtifactSession } from './artifact-context';
+import type { HostPort } from '../documents/ports';
+import { registerPresentations, type Presentations } from '../presentations';
+import { ArtifactSession, type ArtifactToolDeps } from './artifact-context';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactReadTool } from './artifact-tools';
-import { artifactEditTool, documentReadTool, DocumentToolSession, type DocumentToolDeps } from './documents';
-import { openPath, ProvisionalEmitter } from './provisional';
+import { artifactDatasetTool } from './datasets';
+import { artifactEditTool, documentCreateTool, documentReadTool, DocumentToolSession, type DocumentToolDeps } from './documents';
+import { ProvisionalEmitter } from './provisional';
 import type { McpToolContext, McpToolResult } from './server';
 
 const SELF = 'app-self' as AppSessionId;
@@ -47,6 +56,7 @@ const json = <T = Record<string, unknown>>(result: McpToolResult): T => {
 };
 const tick = () => new Promise((resolve) => setTimeout(resolve, PROVISIONAL_TICK_MS + 15));
 const id = (n: string) => n as ToolUseId;
+const toolUse = id; // where `id` names an artifact
 
 /** The pieces of one call's input, each fed as a delta and given its tick. */
 async function feed(toolUseId: ToolUseId, ...pieces: string[]): Promise<void> {
@@ -56,7 +66,7 @@ async function feed(toolUseId: ToolUseId, ...pieces: string[]): Promise<void> {
   }
 }
 /** The provisional frames a raw end received, as their shape parses. */
-const layer = (end: RawEnd): ArtifactProvisional[] => end.received.filter((frame): frame is Extract<Frame, { type: 'provisional' }> => frame.type === 'provisional').map((frame) => ArtifactProvisionalSchema.parse(JSON.parse(frame.json)));
+const layer = (end: Pick<RawEnd, 'received'>): ArtifactProvisional[] => end.received.filter((frame): frame is Extract<Frame, { type: 'provisional' }> => frame.type === 'provisional').map((frame) => ArtifactProvisionalSchema.parse(JSON.parse(frame.json)));
 const presence = (docKey: string) => world.store.service.replica(SELF, docKey).provider.awareness.getLocalState() as { name?: string; editing?: { blocks: string[] } } | null;
 
 describe('the streamed layer', () => {
@@ -141,27 +151,6 @@ describe('the streamed layer', () => {
     expect(presence(doc)).toMatchObject({ editing: { blocks: ['tb1', 'p3', 'c1'] } }); // an insert's anchor is not edited
   });
 
-  it('shows a publish’s presence from the frame that names its deck and reads nothing more of its files until G2 draws them, and nothing of a call to a kind its tool does not write', async () => {
-    const deck = (await world.store.create({ kind: 'presentation', title: 'Deck' }, HUMAN)).id;
-    const end = world.connect(deck, HUMAN);
-    const publish = id('toolu_publish');
-    for (const piece of [`{"artifact":"${deck}","baseRevision":1,"files":{"slides/01.html":"<section>One`, `</section>","slides/02.html":null,"slides/03.html":"<sec`]) {
-      emitter.delta(publish, 'artifact_publish', piece);
-      await tick();
-    }
-    expect(presence(deck)).toMatchObject({ name: 'Claude', editing: { blocks: [] } }); // on the deck from the first tick
-    expect(layer(end)).toEqual([]); // no frame: nothing draws a deck's files before G2
-    emitter.dropped(publish);
-    expect(layer(end)).toEqual([]); // and so nothing to withdraw
-    expect(presence(deck)?.editing).toBeUndefined();
-    const page = (await world.store.create({ kind: 'html', title: 'Page', content: { bytes: Buffer.from('<p>Hi</p>'), name: 'index.html' } }, HUMAN)).id;
-    emitter.delta(id('toolu_page'), 'artifact_publish', `{"artifact":"${page}","baseRevision":1,"files":{"index.html":"<p>Bye`);
-    emitter.delta(id('toolu_edit_deck'), 'artifact_edit', `{"artifact":"${deck}","baseRevision":1,"ops":[{"op":"delete","id":"p4"}]}`);
-    await tick();
-    expect(world.service.loaded(page)).toBeNull(); // no replica, no presence, no frame
-    expect(layer(end)).toEqual([]);
-  });
-
   it('never writes: the document, its revision and its versions are as they were', async () => {
     const doc = await world.seeded();
     const revision = world.store.revision(doc);
@@ -240,7 +229,7 @@ describe('the layer’s endings', () => {
     expect(layer(end)).toMatchObject([{ toolUseId: call, state: 'dropped', ops: [] }]);
   });
 
-  it('releases a publish’s outline when it changes no file, sending no frame (its ops are not drawn until G2)', async () => {
+  it('releases a design system publish’s outline when it changes no file, sending no frame (no view draws its files)', async () => {
     const artifactDeps = { artifacts: () => world.store, session: new ArtifactSession(), provisional: emitter };
     const created = json<{ artifactId: string }>(await artifactCreateTool(artifactDeps).call({ kind: 'design_system', title: 'Site', files: { 'a.html': 'A' } }, ctx()));
     const site = created.artifactId;
@@ -330,16 +319,184 @@ describe('the layer’s endings', () => {
   });
 });
 
-describe('openPath', () => {
-  it('names the member the text ends inside, down to the innermost open container; null once whole', () => {
-    expect(openPath('{"artifact":"pla')).toEqual(['artifact']);
-    expect(openPath('{"artifact":"plan"')).toEqual([]);
-    expect(openPath('{"artifact":"plan","ops":[{"op":"replace_text","old":"ab')).toEqual(['ops', 0, 'old']);
-    expect(openPath('{"ops":[{"op":"x"},{"old":"a\\"b"')).toEqual(['ops', 1]);
-    expect(openPath('{"ops":[{"op":"x"}')).toEqual(['ops']);
-    expect(openPath('{"ops":[{"op":"x"}],"baseRevision":12')).toEqual(['baseRevision']);
-    expect(openPath('{"ops":[[1,2],[3')).toEqual(['ops', 1, 0]);
-    expect(openPath('{"a":{"b":"c"}}')).toBeNull();
+// G2.1 (G-R1, G-R9): a deck's publish streams its files, each frame listing the files whose text changed since the frame
+// before; a connection completing its sync mid-stream is restated every file so far; the publish's own write commits
+// the layer, a refusal drops it.
+describe('a publish’s files (G2)', () => {
+  let presentations: Presentations;
+  let artifactDeps: ArtifactToolDeps & { provisional: ProvisionalEmitter };
+  beforeEach(() => {
+    presentations = registerPresentations({ documents: world, chain: null, refresh: () => {} });
+    artifactDeps = { artifacts: () => world.store, session: new ArtifactSession(), provisional: emitter };
+  });
+  afterEach(() => presentations.close());
+
+  const S1 = 'project/slides/s1.html';
+  const S2 = 'project/slides/s2.html';
+  const S3 = 'project/slides/s3.html';
+  const slide = (id: string, body: string) => `<section id="${id}" style="padding:128px">\n${body}\n</section>`;
+  const DECK = {
+    [DECK_PATH]: JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: '2026-10-14T09:00:00Z' }, title: 'Q3 review', cover: 's1', order: ['s1', 's2'] }),
+    [S1]: slide('s1', '<h2 id="title" style="font-size:64px">Plan</h2>'),
+    [S2]: slide('s2', '<h2 id="t2" style="font-size:64px">Numbers</h2>'),
+  };
+  async function deck(): Promise<{ id: string; revision: number }> {
+    const { artifactId } = json<{ artifactId: string }>(await artifactCreateTool(artifactDeps).call({ kind: 'presentation', title: 'Q3 review', files: DECK }, ctx()));
+    const { revision } = json<{ revision: number }>(await artifactReadTool(artifactDeps).call({ artifact: artifactId }, ctx()));
+    return { id: artifactId, revision };
+  }
+  /** The input's text cut at each marker's end, fed piece by piece to the call, each given its tick. */
+  async function publishing(toolUseId: ToolUseId, input: Record<string, unknown>, ...cuts: string[]): Promise<string> {
+    const text = JSON.stringify(input);
+    let from = 0;
+    for (const cut of [...cuts, null]) {
+      const to = cut === null ? text.length : text.indexOf(cut, from) + cut.length;
+      expect(to, cut ?? 'the end').toBeGreaterThan(from);
+      emitter.delta(toolUseId, 'artifact_publish', text.slice(from, to));
+      from = to;
+      await tick();
+    }
+    return text;
+  }
+  const files = (frame: ArtifactProvisional) => frame.ops.map((op) => (op.op === 'file' ? [op.path, op.text] : [op.op, '']));
+  /** A replica end that attaches now and completes its sync (its step 1 answered) once `sync` is called. */
+  function attaching(docKey: string) {
+    let onMessage: ((data: unknown) => void) | null = null;
+    const received: Frame[] = [];
+    const port: HostPort = { send: (frame) => void received.push(decodeFrame(frame)), close: () => {}, onMessage: (listener) => void (onMessage = listener), onClose: () => {} };
+    world.store.service.attach(docKey, port, HUMAN);
+    return { received, sync: () => onMessage!(encodeFrame({ type: 'step1', sv: stateVector(newDoc()) })) };
+  }
+
+  it('streams each file’s growth: a frame lists, in input order, only the files whose text changed since the frame before; a null file is never drawn', async () => {
+    const { id, revision } = await deck();
+    const end = world.connect(id, HUMAN);
+    const s1 = slide('s1', '<h2 id="title" style="font-size:64px">Plan for Q4</h2>');
+    const s3 = slide('s3', '<h2 id="t3">Three</h2>');
+    await publishing(toolUse('toolu_files'), { artifact: id, baseRevision: revision, files: { [S1]: s1, [S2]: null, [S3]: s3 }, force: false }, `"baseRevision":${revision}`, 'Plan fo', 'id=\\"t3\\">Th', 'ree</h2>', '"}', ',"force":false');
+    expect(presence(id)).toMatchObject({ name: 'Claude', editing: { blocks: [] } });
+    const frames = layer(end);
+    expect(frames.every((frame) => frame.state === 'streaming' && frame.artifactId === id && frame.kind === 'presentation')).toBe(true);
+    expect(frames.map((frame) => frame.ops.map((op) => (op.op === 'file' ? op.path : op.op)))).toEqual([[S1], [S1, S3], [S3], [S3]]); // the force flag adds none
+    expect(files(frames[0])).toEqual([[S1, s1.slice(0, s1.indexOf('Plan fo') + 7)]]);
+    expect(files(frames[1])).toEqual([[S1, s1], [S3, s3.slice(0, s3.indexOf('Th') + 2)]]);
+    expect(files(frames.at(-1)!)).toEqual([[S3, s3]]);
+    // each path's text a prefix of its next
+    const texts = new Map<string, string[]>();
+    for (const frame of frames) for (const op of frame.ops) if (op.op === 'file') texts.set(op.path, [...(texts.get(op.path) ?? []), op.text]);
+    for (const [path, seen] of texts) seen.slice(1).forEach((text, k) => expect(text.startsWith(seen[k]!), path).toBe(true));
+  });
+
+  it('restates every file streamed so far, to a connection completing its sync mid-stream alone, after its step 2', async () => {
+    const { id, revision } = await deck();
+    const end = world.connect(id, HUMAN);
+    const call = toolUse('toolu_attach');
+    const s2 = slide('s2', '<h2 id="t2">Numbers, again</h2>');
+    const input = JSON.stringify({ artifact: id, baseRevision: revision, files: { [DECK_PATH]: DECK[DECK_PATH], [S1]: DECK[S1], [S2]: s2 } });
+    // one file a frame: the index, the first slide, then the second as far as `aga`
+    const cuts = [input.indexOf(`"${S1}"`), input.indexOf(`"${S2}"`), input.indexOf('again') + 3];
+    for (const [k, cut] of cuts.entries()) {
+      emitter.delta(call, 'artifact_publish', input.slice(k === 0 ? 0 : cuts[k - 1], cut));
+      await tick();
+    }
+    expect(layer(end).map((frame) => frame.ops.map((op) => (op.op === 'file' ? op.path : op.op)))).toEqual([[DECK_PATH], [S1], [S2]]);
+    end.received.length = 0;
+    const late = attaching(id);
+    await tick();
+    late.received.length = 0; // its attach's own frames
+    late.sync();
+    await tick();
+    expect(late.received.map((frame) => frame.type)).toEqual(['step2', 'provisional']);
+    const [restated] = layer(late);
+    expect(restated).toMatchObject({ toolUseId: call, state: 'streaming', artifactId: id });
+    expect(files(restated)).toEqual([[DECK_PATH, DECK[DECK_PATH]], [S1, DECK[S1]], [S2, s2.slice(0, s2.indexOf('again') + 3)]]); // all three
+    expect(end.received).toEqual([]); // the other connection is told nothing again
+    // the stream goes on to both alike: the file that grew alone
+    emitter.delta(call, 'artifact_publish', input.slice(cuts.at(-1)));
+    await tick();
+    expect(files(layer(end).at(-1)!)).toEqual([[S2, s2]]);
+    expect(layer(late).at(-1)).toEqual(layer(end).at(-1));
+    // once the call ended, a sync restates nothing
+    emitter.dropped(call);
+    await tick(); // the drop and the outline's release reach it first
+    late.received.length = 0;
+    late.sync();
+    await tick();
+    expect(late.received.map((frame) => frame.type)).toEqual(['step2']);
+  });
+
+  it('announces the publish’s commit ahead of its update, naming the publish’s own row and carrying no new files; a refusal drops the layer', async () => {
+    const { id, revision } = await deck();
+    const end = world.connect(id, HUMAN);
+    const call = toolUse('toolu_publish');
+    const args = { artifact: id, baseRevision: revision, files: { [S1]: slide('s1', '<h2 id="title" style="font-size:64px">Plan for Q4</h2>') } };
+    await publishing(call, args, 'Plan');
+    end.received.length = 0;
+    const answer = json<{ changed: string[] }>(await artifactPublishTool(artifactDeps).call(args, ctx({ toolUseId: call })));
+    expect(answer.changed).toEqual([S1]);
+    const committedAt = end.received.findIndex((frame) => frame.type === 'provisional');
+    const firstUpdate = end.received.findIndex((frame) => frame.type === 'update');
+    expect(committedAt).toBeGreaterThanOrEqual(0);
+    expect(firstUpdate).toBeGreaterThan(committedAt);
+    expect(layer(end)).toEqual([expect.objectContaining({ toolUseId: call, state: 'committed', commitSeq: (end.received[firstUpdate] as { seq?: number }).seq, ops: [] })]);
+    expect(presence(id)?.editing).toBeUndefined(); // the publish's outline ends with it
+
+    const refused = toolUse('toolu_stale');
+    await publishing(refused, { ...args, baseRevision: 1 }, 'Plan');
+    expect((await artifactPublishTool(artifactDeps).call({ ...args, baseRevision: 1 }, ctx({ toolUseId: refused }))).isError).toBe(true);
+    expect(layer(end).filter((frame) => frame.toolUseId === refused).map((frame) => [frame.state, frame.ops.length])).toEqual([['streaming', 1], ['streaming', 1], ['dropped', 0]]);
+  });
+
+  it('shows nothing of a page’s publish, nor of a document batch aimed at a deck', async () => {
+    const { id } = await deck();
+    const end = world.connect(id, HUMAN);
+    const page = (await world.store.create({ kind: 'html', title: 'Page', content: { bytes: Buffer.from('<p>Hi</p>'), name: 'index.html' } }, HUMAN)).id;
+    emitter.delta(toolUse('toolu_page'), 'artifact_publish', `{"artifact":"${page}","baseRevision":1,"files":{"index.html":"<p>Bye`);
+    emitter.delta(toolUse('toolu_edit_deck'), 'artifact_edit', `{"artifact":"${id}","baseRevision":1,"ops":[{"op":"delete","id":"p4"}]}`);
+    await tick();
+    expect(world.service.loaded(page)).toBeNull(); // no replica, no presence, no frame
+    expect(layer(end)).toEqual([]);
+  });
+});
+
+// G2.1 (G-R7): a dataset call names its id once whole, and outlines the chart blocks whose source names it
+describe('a dataset’s call (G2)', () => {
+  let dashboards: Dashboards;
+  let artifactDeps: ArtifactToolDeps & { provisional: ProvisionalEmitter };
+  beforeEach(() => {
+    dashboards = registerDashboards({ documents: world });
+    artifactDeps = { artifacts: () => world.store, session: new ArtifactSession(), provisional: emitter };
+  });
+  afterEach(() => dashboards.close());
+
+  const chart = (id: string, dataset: string) => [`:::chart {spec-json='{"view":"table","title":"${id}"}'}`, dataset, ':::', `^${id}`, ''];
+  const MARKDOWN = ['# Sales ^h1', '', 'Revenue by region. ^p1', '', ...chart('c1', 'sales'), ...chart('c2', 'costs'), ...chart('c3', 'sales')].join('\n');
+
+  it('names the dataset once its id is whole, outlines the charts bound to it, and commits from the dataset’s write', async () => {
+    const create = documentCreateTool(deps(), artifactCreateTool(artifactDeps));
+    const { artifactId: board } = json<{ artifactId: string }>(await create.call({ kind: 'dashboard', title: 'Sales board', content: MARKDOWN }, ctx()));
+    const { revision } = json<{ revision: number }>(await documentReadTool(deps(), artifactReadTool(artifactDeps)).call({ artifact: board }, ctx()));
+    writeFileSync(join(world.dir, 'sales.csv'), 'region,sales\nSeoul,120\nBusan,98\n');
+    const end = world.connect(board, HUMAN);
+    const call = toolUse('toolu_dataset');
+    const args = { artifact: board, baseRevision: revision, id: 'sales', path: 'sales.csv' };
+    const text = JSON.stringify(args);
+    const cut = text.indexOf('"sal') + 4;
+    emitter.delta(call, 'artifact_dataset', text.slice(0, cut));
+    await tick();
+    expect(layer(end)).toEqual([]); // `sal` on its way to `sales` names nothing
+    expect(presence(board)).toMatchObject({ editing: { blocks: [] } });
+    emitter.delta(call, 'artifact_dataset', text.slice(cut));
+    await tick();
+    expect(layer(end)).toEqual([expect.objectContaining({ toolUseId: call, state: 'streaming', kind: 'dashboard', artifactId: board, ops: [{ op: 'dataset', dataset: 'sales', text: '' }] })]);
+    expect(presence(board)).toMatchObject({ editing: { blocks: ['c1', 'c3'] } });
+    end.received.length = 0;
+    json(await artifactDatasetTool(artifactDeps).call(args, ctx({ toolUseId: call })));
+    const committedAt = end.received.findIndex((frame) => frame.type === 'provisional');
+    const firstUpdate = end.received.findIndex((frame) => frame.type === 'update');
+    expect(firstUpdate).toBeGreaterThan(committedAt);
+    expect(layer(end)).toEqual([expect.objectContaining({ state: 'committed', commitSeq: (end.received[firstUpdate] as { seq?: number }).seq, ops: [{ op: 'dataset', dataset: 'sales', text: '' }] })]);
+    expect(presence(board)?.editing).toBeUndefined();
   });
 });
 

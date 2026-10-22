@@ -119,6 +119,16 @@
   font-size: var(--text-ui-sm);
 }
 /* a board whose file never arrived: its ground (its label is screen chrome, below) */
+/* P4-A2 G2.4 (G-R6): a board new to the design as a publish streams it, at its frame: no press, focus or name; held
+   (transparent with its box kept, its label with it, which no descendant can undo: a raw svg's own visibility) while it
+   meets an element the human is protected on (G-R4). */
+.design-provisional-board {
+  pointer-events: none;
+}
+.design-provisional-board[data-provisional-held] {
+  opacity: 0 !important;
+}
+
 .design-board-missing {
   position: absolute;
   inset: 0;

@@ -7,6 +7,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDoc, TAB } from '@artifacts/document/writer.fixture';
+import { DECK_PATH } from '@artifacts/slides/deck';
+import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import { registerDashboards } from '../../dashboards';
+import { registerPresentations } from '../../presentations';
+import { ArtifactSession } from '../../tool-server/artifact-context';
+import { artifactCreateTool } from '../../tool-server/artifact-tools';
+import { documentCreateTool, DocumentToolSession } from '../../tool-server/documents';
+import type { McpToolResult } from '../../tool-server/server';
 import { listTabs } from '@artifacts/document/tabs';
 import { DocIndex } from '@artifacts/document/block-index';
 import { stateV2 } from '@artifacts/yjs';
@@ -192,6 +200,43 @@ describe('the seam’s commands', () => {
     expect(await seam.run({ cmd: 'drop', session: 'perf-agent-1', toolUseId: 'toolu_seam_2' })).toEqual({ ok: true });
     expect(states()).toEqual(['streaming', 'streaming', 'committed', 'streaming', 'dropped']);
     seam.close();
+  });
+
+  // P4-A2 G2 (G-R9): a deck's and a dashboard's tools as a session, so an e2e drives a publish's layer without a model
+  it('reads a deck and streams its publish, committed by the publish under the same id; binds a dashboard’s dataset', async () => {
+    const presentations = registerPresentations({ documents: world, chain: null, refresh: () => {} });
+    const dashboards = registerDashboards({ documents: world });
+    try {
+      const owner = { artifacts: () => world.store, session: new ArtifactSession() };
+      const ctx = { appSessionId: 'owner' as AppSessionId, cwd: world.dir, toolUseId: null, requestId: 'r-owner' as RequestId, signal: new AbortController().signal, fromSubagent: false };
+      const S1 = 'project/slides/s1.html';
+      const files = { [DECK_PATH]: JSON.stringify({ v: 4, title: 'Q3', cover: 's1', order: ['s1'] }), [S1]: '<section id="s1">\n<h2 id="title" style="font-size:64px">Plan</h2>\n</section>' };
+      const createdId = (result: McpToolResult) => (JSON.parse((result.content[0] as { text: string }).text) as { artifactId: string }).artifactId;
+      const deck = createdId(await artifactCreateTool(owner).call({ kind: 'presentation', title: 'Q3', files }, ctx));
+      const seam = new DocumentPerfSeam(world.store);
+      const read = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: { artifact: deck } })) as CallAnswer & { result: { files: Record<string, string> } };
+      expect(read).toMatchObject({ ok: true, isError: false });
+      expect(read.result.files[S1]).toContain('Plan');
+      const end = world.connect(deck, HUMAN);
+      const states = () => end.received.flatMap((frame) => (frame.type === 'provisional' ? [(JSON.parse(frame.json) as { state: string }).state] : []));
+      const args = { artifact: deck, baseRevision: 'last', files: { [S1]: read.result.files[S1]!.replace('Plan', 'Plan for Q4') } };
+      const text = JSON.stringify(args);
+      expect(await seam.run({ cmd: 'stream', session: 'perf-agent-1', toolUseId: 'toolu_seam_deck', name: 'artifact_publish', deltas: [text.slice(0, text.indexOf('for Q4')), text.slice(text.indexOf('for Q4'))] })).toEqual({ ok: true, frames: 2 });
+      const published = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_publish', args: { ...args, toolUseId: 'toolu_seam_deck' } })) as CallAnswer & { result: { changed: string[] } };
+      expect(published).toMatchObject({ ok: true, isError: false, result: { changed: [S1] } });
+      expect(states()).toEqual(['streaming', 'streaming', 'committed']);
+
+      const dashboard = { kind: 'dashboard', title: 'Board', content: ':::chart {spec-json=\'{"view":"table"}\'}\nsales\n:::\n^c1' };
+      const board = createdId(await documentCreateTool({ artifacts: () => world.store, session: new DocumentToolSession() }, artifactCreateTool(owner)).call(dashboard, ctx));
+      writeFileSync(join(world.dir, 'sales.csv'), 'region,sales\nSeoul,120\n');
+      await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: { artifact: board } });
+      const bound = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_dataset', args: { artifact: board, baseRevision: 'last', id: 'sales', path: join(world.dir, 'sales.csv') } })) as CallAnswer;
+      expect(bound).toMatchObject({ ok: true, isError: false, result: { status: 'dataset', id: 'sales', rows: 1 } });
+      seam.close();
+    } finally {
+      dashboards.close();
+      presentations.close();
+    }
   });
 
   it('answers the heap after a collection', async () => {

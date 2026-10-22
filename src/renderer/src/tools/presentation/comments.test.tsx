@@ -102,7 +102,7 @@ describe('a deck’s compose card keeps its draft', () => {
     window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: null } }).client;
     const doc = deck();
     const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
-    const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
+    const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
     const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
     const confirmDiscard = vi.fn<(title: string, about?: 'comment') => Promise<boolean>>(async () => false);
     act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it

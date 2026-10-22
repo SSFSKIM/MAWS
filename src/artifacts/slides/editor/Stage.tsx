@@ -14,6 +14,7 @@ import { SlideView } from './SlideView';
 import { TextBox } from './TextBox';
 import type { ImportAsset } from './transform/clipboard';
 import { Overlay } from './transform/Overlay';
+import { SlideLayer, type DeckProvisional } from './provisional';
 
 export interface StageProps {
   session: DeckSession;
@@ -36,9 +37,11 @@ export interface StageProps {
   scope: (children: ReactNode) => ReactNode;
   /** B6: the deck's uploaded faces' private names (editor/page-styles.ts). */
   faces?: FaceAliases;
+  /** P4-A2 G2.3 (X35): a publish's slides as they stream, drawn on the shown slide beneath the human's states. */
+  provisional?: DeckProvisional | null;
 }
 
-export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanvas, canvas, readOnly, onNotice, artifactId, importAsset, scope, faces }: StageProps) {
+export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanvas, canvas, readOnly, onNotice, artifactId, importAsset, scope, faces, provisional }: StageProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const setFrame = useCallback(
     (element: HTMLDivElement | null) => {
@@ -64,6 +67,7 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
           <div className="deck-stage-center">
             <div ref={setFrame} className="deck-stage-frame" data-stage-slide={slide.id} data-held={slide.held ? '' : undefined}>
               {scope(<SlideView doc={session.doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} size={slide.size ?? null} /* P3-E: a board's size */ describe={describeElement} /* P4-B2 (D15, A1) */ />)}
+              {provisional && canvas?.slideId === slide.id && scope(<SlideLayer deck={provisional} canvas={canvas} slideId={slide.id} scale={scale} size={slide.size ?? null} session={session} assetUrl={assetUrl} faces={faces} /> /* P4-A2 G2.3 (G-R3) */)}
               <div className="deck-stage-overlay">
                 {scope(
                   <Overlay

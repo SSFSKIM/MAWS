@@ -14,6 +14,8 @@
 // P4-B4: a place asked from outside (a link's `#slide=` and `#v<id>`, `show_pane`'s `at`) through `useDeckReveal`.
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D14; tracker row 253): F6 and ⇧F6 cycle the editor's
 // regions (a11y.ts), keeping the selection, so a middle element's selection reaches the inspector by keyboard.
+// P4-A2 G2.3 (X35; G-R3 to G-R5 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn
+// as it streams, from the tab's provisional layers: on the shown slide beneath the human's states, and in the filmstrip.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
@@ -51,6 +53,8 @@ import { Stage } from './Stage';
 import { useDeckReveal, type DeckRevealProps } from './reveal'; // P4-B4
 import { useEditClaim, type RegisterEditClaimant } from './edit-claim'; // P4-B2 K6
 import { DECK_REGIONS, RegionRing, regionKey } from './a11y';
+import type { ProvisionalLayers } from '../../provisional';
+import { useDeckProvisional } from './provisional';
 import './chrome.css';
 import './deck.css';
 
@@ -91,6 +95,8 @@ export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked
   registerEditClaimant?: RegisterEditClaimant;
   /** P4-B2 (D14): whether the owner's keymap binds a key (the shell's): the editor's own F6 then steps aside. */
   bindsKey?: (event: KeyboardEvent) => boolean;
+  /** P4-A2 G2.3 (X35): the replica's provisional layers (the tab's, one per handle); without them, none are drawn. */
+  provisional?: ProvisionalLayers | null;
 }
 
 const NOTICE_MS = 6_000;
@@ -98,10 +104,11 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey, provisional = null }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
+  const written = useDeckProvisional(provisional, doc); // P4-A2 G2.3
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   const order = useMemo(() => view.slides.map((s) => s.id), [view.slides]);
 
@@ -280,6 +287,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               width={compact ? 120 : SLIDE_W / 8}
               readOnly={readOnly}
               onDrawn={onThumbnailsDrawn}
+              provisional={written}
               fromLayout={<LayoutsMenu system={system} disabled={readOnly || view.slides.length >= DECK_LIMITS.slides} scope={scope} onPick={(layout) => void insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null, importAsset).then((r) => 'reason' in r && setNotice(r.reason))} />}
             />,
           )}
@@ -323,6 +331,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
                 importAsset={importAsset}
                 scope={scope}
                 faces={liveFaces.aliases}
+                provisional={written}
               />
             </CommentFrame>
             {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}

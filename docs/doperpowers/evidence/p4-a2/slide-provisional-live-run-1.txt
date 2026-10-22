@@ -1,0 +1,16 @@
+P4-A2 G2.7 slide provisional live run (§5 A2's acceptance on a slide publish), 2026-10-22T07:00:41.369Z
+engine: ~/.local/share/claude/versions/2.1.307 (2.1.307), unmodified, through the relay http://127.0.0.1:8641; model haiku; default permission mode; --max-budget-usd 0.5
+app: the product build (MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR /private/tmp/maws-presentations-provisional-live-CI2ylj/claude-config; CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING in the launching shell: null (MAWS sets it in the engine's environment itself)
+A-15 before the launch: 17 keys, sha1 05a29a2b9585d4c1fe9143bb9494524a5ad69023 (identical)
+the deck: 8e25ce90-ca2c-4262-8019-a16b00cb8ed3 "Harbor open house", one slide event on the panel's stage, its date reading "Thursday, 12 November 2026"
+turn 1: calls ["artifact_read","artifact_publish"]; reply "READY"; permissions allowed for the session: ["mcp__maws__artifact_read","mcp__maws__artifact_publish"]
+G0: the warm-up publish drew its layer in 2 sample(s) (its stream ran before the permission card)
+turn 2: the publish {"files":["project/slides/event.html"],"baseRevision":6,"toolUseId":"toolu_01N4s35xPSG2Xp5AryS3DuvV"} → {"status":"published","revision":7,"changed":["project/slides/event.html"]}; reply "DONE"
+G1 timeline: {"toolUseId":"toolu_01N4s35xPSG2Xp5AryS3DuvV","deltas":45,"streamedChars":723,"firstDeltaAt":1792652451726,"fileNamedAt":1792652452106,"dateWrittenAt":1792652452413,"requestedAt":1792652452732,"answeredAt":1792652452742,"labelAfterFileNamedMs":21,"labelBeforeCallMs":605,"ghostAfterFirstDeltaMs":497,"wholeGhostAfterDateWrittenMs":22,"wholeGhostBeforeCallMs":297,"swapAfterAnswerMs":2,"ghostTexts":["Fri","Friday, 4 December 2","Friday, 4 December 2026"],"ghostKinds":["date:changed"],"held":[],"thumbRinged":true,"samples":5}
+G4 tool time: 3 store calls, median 11 ms, max 21 ms (bound 1,000 ms, median 500 ms); 0 render calls, max 0 ms (bound 3,500 ms)
+the window's console errors: []
+PASS: the label and the changed date drawn before the tools/call, swapped without a gap or a double, the tool time within the guard
+engine process: pid 61551 gone
+spend: receipts [0.00361269,0.00438522], total_cost_usd 0.0044; accounted exposure US$0.0044 (settled by its receipt); cap US$0.5; journal /private/tmp/maws-presentations-provisional-live-CI2ylj/user-data/engine-host/journal/473f1b2f-5d4a-4d02-bdf2-b14a7cd13f23/2olgo7cz.jsonl
+A-15 after the app closed: 17 keys, sha1 05a29a2b9585d4c1fe9143bb9494524a5ad69023 (identical)
+scratch kept for inspection: /private/tmp/maws-presentations-provisional-live-CI2ylj

@@ -8,7 +8,7 @@
 // upstream's yhub-tiptap-demo/src/schema.js (MIT).
 import { getSchema, Mark, mergeAttributes, Node, type AnyExtension, type Editor, type Extensions, type KeyboardShortcutCommand, type RawCommands } from '@tiptap/core';
 import type { Mark as PMMark, Node as PMNode, Schema, Slice } from '@tiptap/pm/model';
-import { Plugin, TextSelection, type EditorState } from '@tiptap/pm/state';
+import { Plugin, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { isInTable, moveCellForward, selectionCell } from '@tiptap/pm/tables'; // P3-F (c17)
 import type { Step } from '@tiptap/pm/transform'; // F (L170)
 import { Blockquote } from '@tiptap/extension-blockquote';
@@ -33,6 +33,7 @@ import { customAlphabet } from 'nanoid';
 import { isBindingTransaction } from '../yjs';
 import { ySyncPluginKey } from '../yjs/prosemirror';
 import { uniqueId } from './ids';
+import { provisionalKey } from './provisional-key'; // P4-A2 (X35)
 
 // ── the four reserved attribution marks (names fixed by the binding; history and suggestions render through them) ──
 export const ATTRIBUTION_MARKS = ['y-attributed-insert', 'y-attributed-delete', 'y-attributed-format', 'y-attributed-attrs'] as const;
@@ -223,15 +224,18 @@ function parseOptions(json: string | null): string[] {
 
 // ── guard document-repairing plugins against the binding's own dispatches (S1; upstream's CAVEATS) ──
 // A plugin whose appendTransaction repairs the document (tables, the trailing node, autolink) must not answer the
-// binding's remote writes or an attribution render, or every peer writes the same repair.
+// binding's remote writes or an attribution render, or every peer writes the same repair. P4-A2 (X35, rule 1): nor the
+// provisional layer's redraws, a decoration change alone, or an agent's streaming frame would write the person's doc
+// (a remote write that left a chart last, then a frame: the trailing paragraph). The person's next transaction repairs.
 const renderingAttribution = (state: EditorState): boolean => (ySyncPluginKey.getState(state) as { renderer?: unknown } | undefined)?.renderer != null;
+const isLayerRedraw = (tr: Transaction): boolean => tr.getMeta(provisionalKey) !== undefined;
 const guard = (plugin: Plugin): Plugin => {
   const append = plugin.spec.appendTransaction;
   if (append == null) return plugin;
   return new Plugin({
     ...plugin.spec,
     appendTransaction(trs, oldState, newState) {
-      if (renderingAttribution(newState) || trs.some(isBindingTransaction)) return null;
+      if (renderingAttribution(newState) || trs.some(isBindingTransaction) || trs.every(isLayerRedraw)) return null;
       return append.call(this, trs, oldState, newState);
     },
   });

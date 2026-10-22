@@ -1,0 +1,88 @@
+/* P4-A2 G2.3 (X35; docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md G-R3 to G-R5): a publish's slide drawn
+   as it streams, in the agent's colour (--provisional-color, its author colour) and named, beneath the human's states.
+   Nothing here takes a pointer, the focus or a name (the layers are inert and aria-hidden as well); nothing changes a
+   live element's layout: a veil hides an element with its box kept, and the ghost's hidden elements keep theirs. */
+
+/* The stage's (or a board's) layer: over the slide's frame, under the overlay. */
+.deck-provisional {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+}
+.deck-provisional,
+.deck-provisional *,
+.deck-provisional-thumb,
+.deck-provisional-thumb * {
+  pointer-events: none !important;
+}
+
+/* The ghost canvas: only the elements that differ (or that the provisional layout moves) are drawn. A subtree holding
+   nothing shown is transparent (data-provisional-off), which no descendant can undo (a raw svg's own visibility); the
+   root and a container around a shown element are hidden by the inherited visibility, which the dialect gives no
+   element's style a way to undo. */
+.maws-slide[data-provisional-ghost] {
+  visibility: hidden;
+}
+.maws-slide[data-provisional-ghost] [data-provisional-shown] {
+  visibility: visible;
+}
+.maws-slide[data-provisional-ghost] [data-provisional-off] {
+  opacity: 0 !important;
+}
+.maws-slide[data-provisional-ghost] [data-provisional-shown='changed'],
+.maws-slide[data-provisional-ghost] [data-provisional-shown='added'] {
+  outline: var(--provisional-outline, 2px) solid var(--provisional-color);
+  outline-offset: var(--provisional-outline, 2px);
+}
+
+/* The live canvas's elements the ghost redraws (or the publish removes): transparent, still pressed and laid out. */
+.maws-slide [data-provisional-veiled] {
+  opacity: 0 !important;
+}
+
+/* "<name> is writing…" at the slide's top left, as the document's layer names its author; in screen px under a design's
+   zoom (--provisional-label-scale, the zoom's inverse, written on the layer). */
+.deck-provisional-label {
+  position: absolute;
+  left: calc(8px * var(--provisional-label-scale, 1));
+  top: calc(8px * var(--provisional-label-scale, 1));
+  max-width: calc(100% / var(--provisional-label-scale, 1) - 16px);
+  transform: scale(var(--provisional-label-scale, 1));
+  transform-origin: 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--bg-raised);
+  background: var(--provisional-color);
+}
+
+/* G-R4: held while it would meet the human's protected element (transparent, its box kept so it is measured again). */
+.deck-provisional-label[data-provisional-held] {
+  opacity: 0;
+}
+
+/* A filmstrip entry being written: the agent's ring, and the whole provisional slide opaque over the thumbnail. */
+.deck-provisional-thumb {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.deck-provisional-thumb[data-provisional-writing]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 var(--provisional-outline, 2px) var(--provisional-color);
+}
+.deck-provisional-entry {
+  position: relative;
+  flex-shrink: 0;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}

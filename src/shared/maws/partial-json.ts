@@ -152,3 +152,96 @@ export function readPartialJson(text: string): unknown {
     return undefined;
   }
 }
+
+/** A member's place in a JSON value: object keys and array indices from the root. */
+export type JsonPath = (string | number)[];
+
+// G2: the host's emitter's reading (src/engine-host/tool-server/provisional.ts, which holds its own copy until it
+// imports this one), here so the renderer's core reads a streamed index (deck.json, canvas.json) the same way.
+/**
+ * The path of the member a streamed JSON text ends inside (`['ops', 2, 'new']` while that string streams), down to the
+ * innermost container still open; null once the text is a whole value. Every value of the partial parse off this path
+ * is whole: a string closed, a container closed. The partial parse cannot tell (it closes what is open), so a name is
+ * read only once it is off the path.
+ */
+export function openPath(text: string): JsonPath | null {
+  interface Level {
+    object: boolean;
+    key: string | number; // an object's last key; an array's index of its last value (-1 before one)
+    open: boolean; // a value of the current member started and has not ended
+    expectKey: boolean; // an object between members: the next string is a key
+  }
+  const stack: Level[] = [];
+  let inString = false;
+  let isKey = false;
+  let escape = false;
+  let from = 0;
+  let inLiteral = false;
+  const begin = (level: Level | undefined) => {
+    if (!level) return;
+    if (!level.object) level.key = (level.key as number) + 1;
+    level.open = true;
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    const top = stack[stack.length - 1];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') {
+        inString = false;
+        if (isKey && top) top.key = JSON.parse(text.slice(from, i + 1)) as string;
+        else if (top) top.open = false;
+      }
+      continue;
+    }
+    if (inLiteral) {
+      if (ch !== ',' && ch !== '}' && ch !== ']' && !/\s/.test(ch)) continue;
+      inLiteral = false;
+      if (top) top.open = false;
+    }
+    if (/\s/.test(ch)) continue;
+    switch (ch) {
+      case '"':
+        inString = true;
+        escape = false;
+        from = i;
+        isKey = top?.object === true && top.expectKey;
+        if (isKey) top!.expectKey = false;
+        else begin(top);
+        break;
+      case '{':
+      case '[':
+        begin(top);
+        stack.push({ object: ch === '{', key: ch === '{' ? '' : -1, open: false, expectKey: ch === '{' });
+        break;
+      case '}':
+      case ']': {
+        stack.pop();
+        const parent = stack[stack.length - 1];
+        if (parent) parent.open = false;
+        break;
+      }
+      case ',':
+        if (top) {
+          top.open = false;
+          top.expectKey = top.object;
+        }
+        break;
+      case ':':
+        break;
+      default:
+        begin(top);
+        inLiteral = true;
+    }
+  }
+  if (stack.length === 0) return null;
+  const path: JsonPath = [];
+  stack.forEach((level, k) => {
+    if (k < stack.length - 1 || level.open) path.push(level.key);
+  });
+  return path;
+}
+
+/** Whether the value at `path` is whole: off the open path (or the text is whole). */
+export const isWhole = (open: JsonPath | null, path: JsonPath): boolean => open === null || path.length > open.length || path.some((key, k) => open[k] !== key);

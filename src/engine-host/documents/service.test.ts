@@ -1578,6 +1578,48 @@ describe('DocumentService: the provisional layer’s frames (P4-A2)', () => {
     expect(a.take().filter((frame) => frame.type === 'update')).toHaveLength(1); // afterWrite's alone; no hook ran
   });
 
+  // P4-A2 G2 (G-R1): a view attaching mid-stream is restated the layers open on its doc, after its sync
+  it('sends a connection whose step 1 it answers, alone, the frames its sync listeners build when they are sent, after the step 2 and a restore’s catch-up', () => {
+    make();
+    const a = raw('a1', human);
+    const b = raw('a1', human);
+    tick();
+    a.take();
+    b.take();
+    let text = 'as the step 1 arrived';
+    const asked: string[] = [];
+    const off = service.onSynced((artifactId) => {
+      asked.push(artifactId);
+      return [notice(text)];
+    });
+    service.onSynced(() => {
+      throw new Error('a listener failed');
+    });
+    b.send({ type: 'step1', sv: stateVector(b.doc) });
+    expect(asked).toEqual([]); // built when sent, not when the step 1 arrived
+    text = 'as sent';
+    tick();
+    const frames = b.take();
+    expect(frames.map((frame) => frame.type)).toEqual(['step2', 'provisional']);
+    expect(frames[1]).toEqual({ type: 'provisional', json: 'as sent' });
+    expect(asked).toEqual(['a1']);
+    expect(a.take()).toEqual([]); // the connection alone
+    expect(logs.some((line) => line.includes('a listener failed'))).toBe(true);
+    expect(b.closed).toBe(false); // a failing listener costs the connection nothing
+
+    service.announceRestored('a1', { revision: 7, versionId: 99 });
+    tick();
+    b.take();
+    b.send({ type: 'step1', sv: stateVector(b.doc) });
+    tick();
+    expect(b.take().map((frame) => frame.type)).toEqual(['step2', 'restored', 'provisional']); // the catch-up keeps its place
+
+    off();
+    b.send({ type: 'step1', sv: stateVector(b.doc) });
+    tick();
+    expect(b.take().map((frame) => frame.type)).toEqual(['step2', 'restored']);
+  });
+
   it('refuses an announce from a write naming another doc', async () => {
     make();
     const a = raw('a1', human);
