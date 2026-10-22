@@ -15,8 +15,7 @@
 //               BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads
 //               its whole length at any display rate (the input's handling, React, style, layout, paint, layerization
 //               and commit all count; e2e/support/design-frames.ts), p95 over the active frames; not E0's 4 ms
-//               callback-CPU stand-in. Precondition, recorded with the row: the window's display at most 100 Hz
-//               (DL40's 60 Hz frame); a faster display, or one whose rate cannot be read, fails the row    ≤ 10 ms
+//               callback-CPU stand-in. The window's display rate is recorded with the machine, not judged      ≤ 10 ms
 //   2 drops     the rAF-gap proxy over its calibrated idle interval (≤ 2 %); the compositor's own PipelineReporter drops
 //               beside it, separately labelled (≤ 2 %, or unavailable when the trace carries none)
 //   2 stress    the same frame rows, a pan and a pinch zoom each in its own rows, for at least 5 s while the owner drags a
@@ -91,13 +90,7 @@ async function quiet(): Promise<number> {
 
 // ---- rows: each judged on its worst trial; a trial at load ≥ 10 is not acceptance ------------------------------------
 
-type Verdict = 'met' | 'missed' | 'not acceptance (load ≥ 10)' | 'unreadable' | 'recorded' | 'precondition unmet';
-/** What a row's figure means only when it holds, read once for the run: unmet, the row is not judged and fails. */
-interface Precondition {
-  rule: string;
-  reading: string;
-  holds: boolean;
-}
+type Verdict = 'met' | 'missed' | 'not acceptance (load ≥ 10)' | 'unreadable' | 'recorded';
 interface Trial {
   /** null when the trial could not be read (its error says why); never a stand-in number. */
   value: number | null;
@@ -118,7 +111,6 @@ interface Row {
   verdict: Verdict;
   loads: number[];
   trials: Trial[];
-  precondition?: Precondition;
 }
 
 class Rows {
@@ -126,25 +118,21 @@ class Rows {
   private readonly extra: Record<string, unknown> = {};
   constructor(private readonly meta: Record<string, unknown>) {}
 
-  /**
-   * A row judged on its worst trial, or (DL39's one-board publish row alone) on the median of its trials; with a
-   * `precondition`, only while it holds.
-   */
-  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], strict = false, judgedBy: 'worst' | 'median' = 'worst', precondition?: Precondition): Row {
+  /** A row judged on its worst trial, or (DL39's one-board publish row alone) on the median of its trials. */
+  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], strict = false, judgedBy: 'worst' | 'median' = 'worst'): Row {
     const read = trials.filter((t) => t.value !== null).map((t) => t.value!);
     const worst = read.length === 0 ? null : judgedBy === 'median' ? median(read) : Math.max(...read);
     const loads = trials.map((t) => t.load);
     const verdict: Verdict =
-      precondition && !precondition.holds ? 'precondition unmet'
-      : trials.length === 0 || trials.some((t) => t.value === null) ? 'unreadable'
+      trials.length === 0 || trials.some((t) => t.value === null) ? 'unreadable'
       : limit === null ? 'recorded'
       : loads.some((l) => l >= LOAD_LIMIT) ? 'not acceptance (load ≥ 10)'
       : (strict ? worst! < limit : worst! <= limit) ? 'met'
       : 'missed';
-    const entry: Row = { row, measure, unit, bound, limit, ...(strict && { strict }), judgedBy, value: worst === null ? null : +worst.toFixed(3), verdict, loads, trials: trials.map((t) => ({ ...t, value: t.value === null ? null : +t.value.toFixed(3) })), ...(precondition && { precondition }) };
+    const entry: Row = { row, measure, unit, bound, limit, ...(strict && { strict }), judgedBy, value: worst === null ? null : +worst.toFixed(3), verdict, loads, trials: trials.map((t) => ({ ...t, value: t.value === null ? null : +t.value.toFixed(3) })) };
     this.rows.push(entry);
     this.write();
-    console.log(`[design scale] ${row}: ${entry.value ?? '—'} ${unit} (${judgedBy} of ${trials.length}; ${verdict}; bound ${bound}${precondition ? `; precondition ${precondition.rule}: ${precondition.reading}` : ''}; trials ${trials.map((t) => `${t.value === null ? `unreadable (${t.error})` : t.value.toFixed(2)} at load ${t.load}`).join(', ')})`);
+    console.log(`[design scale] ${row}: ${entry.value ?? '—'} ${unit} (${judgedBy} of ${trials.length}; ${verdict}; bound ${bound}; trials ${trials.map((t) => `${t.value === null ? `unreadable (${t.error})` : t.value.toFixed(2)} at load ${t.load}`).join(', ')})`);
     return entry;
   }
 
@@ -467,7 +455,7 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
     cores: cpus().length,
     memoryGiB: +(totalmem() / 2 ** 30).toFixed(1),
     os: `${process.platform} ${release()}`,
-    // the display the window is on, whose refresh paces the renderer's frames (the frame rows' precondition)
+    // the display the window is on, whose refresh paces the renderer's frames (recorded, not judged)
     ...(await app.evaluate(({ screen, BrowserWindow }) => {
       const bounds = BrowserWindow.getAllWindows()[0]!.getBounds();
       const display = screen.getDisplayMatching(bounds);
@@ -475,10 +463,7 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
     })),
     build: process.env.MAWS_E2E_BUILD_KEY ?? null,
   };
-  // the frame work rows' precondition (the header's row 2): a frame's slice never exceeds the frame, so the 10 ms bound
-  // can be missed only where a frame lasts at least 10 ms
-  const hz = machine.display.hz;
-  const frameDisplay: Precondition = { rule: 'the window’s display at most 100 Hz', reading: `${hz} Hz`, holds: Number.isFinite(hz) && hz > 0 && hz <= 100 };
+  console.log(`[design scale] the window's display: ${machine.display.hz} Hz at scale ${machine.display.scale}`);
   const rows = new Rows({ run: new Date().toISOString(), design: 'benchDesignFiles(): E0’s 24-board mix with its card grids (src/artifacts/design/fixtures/bench.ts)', boards: BOARDS.map((b) => ({ id: b.id, size: b.size, w: b.w, h: b.h, elements: b.elements })), machine, loads });
   const failures: string[] = [];
 
@@ -548,7 +533,7 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   });
 
   const frameRows = (label: string, what: string, trials: (FrameTrial & { load: number; note?: string })[]) => {
-    rows.add(`2 ${label} frame work p95`, `${what}: main-thread work per frame (each top-level task whole in the renderer's BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads its whole length; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)`, 'ms', 10, '≤ 10 ms of main-thread work per frame, on a display at most 100 Hz (DL40; not E0’s 0.4 ms callback CPU)', trials.map((t) => (t.work ? { value: t.work.active.p95, load: t.load, note: `${t.work.active.n} active of ${t.work.all.n} frames; all-frames p95 ${t.work.all.p95.toFixed(2)} ms; active max ${t.work.active.max.toFixed(2)} ms; ${t.work.inputs} inputs dispatched${t.note ? `; ${t.note}` : ''}` } : { value: null, load: t.load, error: t.error })), false, 'worst', frameDisplay);
+    rows.add(`2 ${label} frame work p95`, `${what}: main-thread work per frame (each top-level task whole in the renderer's BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads its whole length; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)`, 'ms', 10, '≤ 10 ms of main-thread work per frame (DL40; not E0’s 0.4 ms callback CPU)', trials.map((t) => (t.work ? { value: t.work.active.p95, load: t.load, note: `${t.work.active.n} active of ${t.work.all.n} frames; all-frames p95 ${t.work.all.p95.toFixed(2)} ms; active max ${t.work.active.max.toFixed(2)} ms; ${t.work.inputs} inputs dispatched${t.note ? `; ${t.note}` : ''}` } : { value: null, load: t.load, error: t.error })));
     rows.add(`2 ${label} dropped (rAF proxy)`, `${what}: the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval`, '%', 2, '≤ 2 % (E0 0–0.4 %)', trials.map((t) => (t.drops ? { value: t.drops.share * 100, load: t.load, note: `${t.drops.dropped} of ${t.drops.expected} at ${t.drops.intervalMs.toFixed(2)} ms; longest gap ${t.drops.longestGapMs.toFixed(1)} ms` } : { value: null, load: t.load, error: t.error })));
     const compositor = trials.map((t) => t.work?.compositor ?? null);
     if (compositor.every((c) => c !== null))
@@ -854,6 +839,6 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   await seam.send({ cmd: 'release', session: AGENT });
   rows.write({ loads, failures });
   const failed = rows.rows.filter((r) => r.verdict !== 'met' && r.verdict !== 'recorded');
-  expect([...failures, ...failed.map((r) => `${r.row}: ${r.value ?? '—'} ${r.unit} against ${r.limit} (${r.verdict}${r.verdict === 'precondition unmet' ? ` (${r.precondition!.rule}, read ${r.precondition!.reading})` : ''}; loads ${r.loads.join(', ')})`)], `rows not met (the figures are in ${RESULTS})`).toEqual([]);
+  expect([...failures, ...failed.map((r) => `${r.row}: ${r.value ?? '—'} ${r.unit} against ${r.limit} (${r.verdict}; loads ${r.loads.join(', ')})`)], `rows not met (the figures are in ${RESULTS})`).toEqual([]);
   expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
