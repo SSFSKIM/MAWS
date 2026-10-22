@@ -57,6 +57,11 @@ describe('routeOf', () => {
     expect(check('goal', 'ship the release')).toMatchObject({ ok: false, code: 'disabled', reason: 'comes with M1' });
   });
 
+  it("checks a route's forms before its class: arguments a non-run row's forms forbid are bad-args, not its class", () => {
+    expect(check('clear')).toMatchObject({ ok: false, code: 'follow' });
+    expect(check('clear', 'extra')).toEqual({ ok: false, code: 'bad-args', reason: 'it takes no arguments' });
+  });
+
   it("routes a non-built-in as run-prompt (enabled with M1), a plugin exception by its row, and the bridge's own plugin as self", () => {
     expect(check('doperpowers:execspec', 'go')).toEqual({ ok: false, code: 'disabled', reason: 'comes with M1' });
     expect(routeOf(table, { name: 'diff', source: 'plugin', plugin: 'cc-plugin-diff' }, 'diff', '', 'mini')).toMatchObject({ ok: false, code: 'panel' });
@@ -71,6 +76,8 @@ describe('Commands', () => {
     const rename = commands.plan('rename', 'desk-m0', 's', 'mini');
     expect(rename).toMatchObject({ ok: true, route: 'run', name: 'rename', args: 'desk-m0', outcome: { settled: { ok: true }, readback: { how: 'row', text: 'Session renamed to: desk-m0' }, title: 'desk-m0' } });
     expect(commands.plan('usage', '', 's', 'mini')).toMatchObject({ ok: false, code: 'panel' });
+    // A plugin exception the session lists by its bare name (cc-plugin-diff's `/diff`) takes its row: a panel.
+    expect(commands.plan('diff', '', 's', 'mini')).toEqual({ ok: false, code: 'panel', reason: "opens a panel in the terminal; it would hold the session's queue" });
     expect(defaultOutcome('reload-plugins', '')).toEqual({ readback: { how: 'effect' } });
     expect(defaultOutcome('reload-skills', '').readback.how).toBe('text');
     expect(defaultOutcome('mcp', 'disable github').readback).toMatchObject({ how: 'row', text: 'MCP server "github" disabled' });

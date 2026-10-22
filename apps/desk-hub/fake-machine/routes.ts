@@ -29,11 +29,14 @@ export type CommandRefusalCode = 'unknown-builtin' | 'panel' | 'routed' | 'follo
 export type RouteCheck = { ok: true; route: Route } | { ok: false; code: CommandRefusalCode; reason: string };
 
 /**
- * What the fake's sessions list: every built-in the table names, and a `<plugin>:<command>` as a plugin's (a skill, a
- * plugin command); anything else is no command the session knows.
+ * What the fake's sessions list: every built-in the table names, every plugin exception under its bare name and its
+ * plugin (the engine lists cc-plugin-diff's `/diff` so), and a `<plugin>:<command>` as a plugin's (a skill, a plugin
+ * command); anything else is no command the session knows.
  */
 export function listedOf(table: RouteTable, name: string): Listed | null {
   if (table.entries.some((e) => e.name === name)) return { name, source: 'builtin' };
+  const exception = table.pluginExceptions.find((e) => e.name === name);
+  if (exception) return { name, source: 'plugin', plugin: exception.plugin };
   const colon = name.indexOf(':');
   if (colon > 0) return { name, source: 'plugin', plugin: name.slice(0, colon) };
   return null;
