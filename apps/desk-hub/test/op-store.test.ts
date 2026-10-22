@@ -1,3 +1,5 @@
+/// <reference types="node" />
+// This Worker-typed suite executes its SQL adapter with Node's SQLite.
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { SessionStore } from '../src/objects/session-store';
