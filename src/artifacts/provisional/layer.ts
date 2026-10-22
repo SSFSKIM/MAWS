@@ -1,7 +1,8 @@
 // P4-A2 (X35, the editors' provisional layer; docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.2's four rules
 // [binding]; the child's execution document R3, R4 and M5): the layers an editor draws over an open document, one per
 // streaming artifact call, kept from the host's provisional frames on the document's port. A `streaming` frame replaces
-// the call's layer (its text is cumulative); `dropped` withdraws it at once, under a composition hold too (rule 3, R4);
+// the call's layer (its text is cumulative), save a publish's files, which merge by path (G2's G-R1: each frame lists
+// only the files that grew); `dropped` withdraws it at once, under a composition hold too (rule 3, R4);
 // `committed` keeps it until the replica has integrated the write's row (`state().integrated >= commitSeq`, rule 2),
 // checked at the frame and on every state change. The provider runs its state listeners in the same task as the row's
 // application, the held row's included when the hold releases, so the layer goes in the task that puts the real text on
@@ -57,14 +58,14 @@ export class ProvisionalLayers {
     switch (frame.state) {
       case 'streaming':
         // a late tick after the commit is stale: the committed frame carries the batch whole
-        if (this.layers.get(id)?.state !== 'committed') this.set(id, frame);
+        if (this.layers.get(id)?.state !== 'committed') this.set(id, withFiles(this.layers.get(id), frame));
         return;
       case 'committed':
         // kept until its row is integrated; a frame without its seq names no row to wait for, so it goes at once. A
         // replica that never drew the call (attached after its last tick, or reconnected since) draws nothing now
         // either: the real text is the next frame, and a layer for one paint before it would be a flash.
         if (!this.layers.has(id)) return;
-        this.set(id, (frame.commitSeq ?? 0) > this.source.state().integrated ? frame : null);
+        this.set(id, (frame.commitSeq ?? 0) > this.source.state().integrated ? withFiles(this.layers.get(id), frame) : null);
         return;
       case 'dropped':
         this.set(id, null);
@@ -95,4 +96,29 @@ export class ProvisionalLayers {
     this.layers = next.size === 0 ? NONE : next;
     for (const listener of [...this.listeners]) listener();
   }
+}
+
+/**
+ * The path of the layer's file still streaming, or null (G-R1): a JSON object's members stream one after another, so
+ * while the layer streams every file but the last is whole and the last is open; at the commit all are whole.
+ */
+export function openFile(layer: ArtifactProvisional): string | null {
+  if (layer.state !== 'streaming') return null;
+  const files = layer.ops.filter((op) => op.op === 'file');
+  return files[files.length - 1]?.path ?? null;
+}
+
+/**
+ * The frame as the call's layer (G2, G-R1): a publish's frame lists only the files that grew or appeared since the frame
+ * before, so its `file` ops merge into the layer's by path, a later text replacing the earlier in its place and a new
+ * path appended; a file no frame touched keeps its op object, so a reader can tell an unchanged file by identity. Every
+ * other op list replaces the one before (R1: cumulative). A frame with no file ops over a layer with none is the frame.
+ */
+function withFiles(layer: ArtifactProvisional | undefined, frame: ArtifactProvisional): ArtifactProvisional {
+  const earlier = layer?.ops.filter((op) => op.op === 'file') ?? [];
+  const later = frame.ops.filter((op) => op.op === 'file');
+  if (earlier.length === 0) return frame;
+  const files = new Map(earlier.map((op) => [op.path, op]));
+  for (const op of later) files.set(op.path, op); // a Map keeps a replaced key in its place and appends a new one
+  return { ...frame, ops: [...frame.ops.filter((op) => op.op !== 'file'), ...files.values()] };
 }
