@@ -8,7 +8,7 @@ test('@layout a retained tab reloads the current build after a missing project c
   await stageProject(hub);
   await seedKey(page, hub);
   let documents = 0;
-  page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) documents++; });
+  page.on('request', (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents++; });
   let chunks = 0;
   await page.route(/\/assets\/ProjectView-[^/]+\.js$/, async (route) => {
     if (++chunks === 1) await route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
@@ -26,7 +26,7 @@ test('@layout a persistently missing chunk reloads only once and leaves a visibl
   await stageProject(hub);
   await seedKey(page, hub);
   let documents = 0;
-  page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) documents++; });
+  page.on('request', (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents++; });
   await page.route(/\/assets\/ProjectView-[^/]+\.js$/, (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' }));
   await page.goto(`${hub.url}/p/${PROJECT}`);
   await expect(page.getByRole('alert')).toContainText('The desk could not load.');
