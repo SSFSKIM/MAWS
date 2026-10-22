@@ -46,7 +46,7 @@ answer in a side pane while the session's turn goes on. When the session asks to
 file, the card offers *Allow*, *Deny*, *Allow for this session* and *Allow and switch to
 accept edits*. Pick the mini, still on last week's plugin: the same `/` opens, and each
 control the mini cannot take says *mini's plugin is older than the desk's controls:
-update doperpowers on mini*. Turn the latency readout on (`?latency`) and read each new
+update sminos on mini*. Turn the latency readout on (`?latency`) and read each new
 control's time against its budget.
 
 Done means both are shown working on the owner's two Macs (`macbook` and `mini`), which
@@ -191,7 +191,7 @@ milestone's walk includes one.
   nothing ran: `sminos watch` shows no `run` event); from M1 the composer refuses
   before sending, from the catalog, with the same words.
 - A5. On the older-plugin machine, typing `/rename x` is refused in the composer with
-  *mini's plugin is older than the desk's controls: update doperpowers on mini*, with a
+  *mini's plugin is older than the desk's controls: update sminos on mini*, with a
   *Send as text anyway* that delivers it as words as today. On a stale session of the
   updated macbook the refusal reads *this session's plugin loaded before the update:
   run /reload-plugins in it, or restart it*, and after `/reload-plugins` typed in that
@@ -560,7 +560,7 @@ need no bridge). So two lists:
   loaded before the update: run /reload-plugins in it, or restart it*; a session with
   no `capabilities` on a machine whose `desk` is absent or below is the **older
   machine** — *<machine>'s plugin (<desk.sminos>, when known) is older than the desk's
-  controls: update doperpowers on <machine>*; a `--bg` seat or terminal session without
+  controls: update sminos on <machine>*; a `--bg` seat or terminal session without
   a bridge at all keeps the kind table's reasons as today. The capability's own `sminos`
   decides a control's availability; the machine's `desk.sminos` only names the number.
 
@@ -1710,7 +1710,7 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; a replaced `reload-plugins` module cannot emit it (the daemon finishes by effect); an unchanged module kept loaded emits the returned text (Decision 11) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
-| `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
+| `catalog` (M1) | `Catalog`: `{fingerprint, skills?: string[], commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
 | `session` / `start` (M4) | gains `previous?: {session, reason: "clear" \| "resume" \| "branch" \| "unknown"}` |
@@ -1720,6 +1720,15 @@ The child's snapshot line gains `capabilities`, `mode` and `catalog` (the latest
 A catalog command's `route` is its bare form; for non-empty trimmed arguments the
 consumer selects `withArgs ?? route`, then applies that form's validation and
 `otherwise`. These are advertised routes, not a second route table in the web.
+
+From sminos 1.8.1, `Catalog.skills?: string[]` carries the names in
+`$.session.usage({breakdown: "summary"}).context.breakdown?.skills?.skillFrontmatter`,
+verbatim and fully qualified for plugin skills. A current producer sends `[]` when
+none are listed or the optional summary is unavailable/shapeless; commands, models
+and aliases still publish when that enrichment fails; an older producer omits the field. Names participate in the catalog
+fingerprint. This is the engine's model-context listing, not a complete filesystem
+skill inventory: a `disable-model-invocation: true` skill is absent and keeps the
+previous provenance grouping. No context text or token counts cross the wire.
 
 **`POST /requests/<request>/decision`** (M3) admits `updatedPermissions?:
 PermissionUpdate[]` (at most 8) on a permission; refuses it on a question (400). The
@@ -1867,6 +1876,9 @@ VERBS gains 'command' | 'status' (M0), 'btw' | 'usage' | 'mcp' | 'settings' (M2)
 ops: Record<string /* nonce */, { op: string; phase: 'start' | 'end'; body: JsonObject }>
 // state/catalog.ts (M1)
 useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | null }
+// A10 grouping with skills present: unqualified built-ins are Engine, listed skills are Skills,
+// then names containing a colon are Plugins and the rest Custom (the native MAWS rule).
+// An absent skills field (sminos 1.8.0, including its disk cache) keeps the old source/plugin grouping.
 ```
 
 ### Dependencies
@@ -2470,6 +2482,74 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   approved gate to keep a window of minutes usable. Rejected: deploying the web as
   soon as its gates pass, which leaves every desk slash command refused until
   16:40Z or later. Date/Author: 2026-10-22, the orchestrator's integration ruling.
+
+- Decision: The M1 live-walk fix adds `Catalog.skills?: string[]` in sminos
+  1.8.1, from the mod API's summary context skill listing, and the web tests
+  membership before assigning Plugins or Custom (built-ins stay Engine, as MAWS
+  does). `$.command.list()`'s `source` is provenance, not a skill discriminator.
+  An absent field keeps 1.8.0's grouping; an empty list means no skills were listed.
+  Skill membership participates in the fingerprint, so a change pushes a new catalog
+  even if commands and models did not change.
+  Evidence: the engine-generated 2.1.308 declarations expose `CommandInfo` with
+  `name`, `description`, `source`, `plugin?`, and `ContextSkills.skillFrontmatter`
+  with `name`, `source`, `pluginName?`, `tokens`. Live throwaway sessions with
+  temporary HOME and SMINOS_HOME confirmed that user and plugin skills share
+  `user`/`plugin` command sources with ordinary commands. The summary listed
+  `user-skill`, the markdown command `custom`, and `catalog-probe:plugin-skill`,
+  but not the mod-registered `ordinary-command`. It also omitted a user-invocable
+  `manual-only` skill with `disable-model-invocation: true`; that known limit keeps
+  such commands in their prior group rather than guessing from disk or names.
+  Cost: a live 2.1.308 session with 116 listed skills and 70,245 locally estimated
+  context tokens took 11, 4, 3, 3, 3 ms for five summary reads; a final command-list
+  plus summary read took 4 ms. A local API trap received zero requests, including
+  zero count-token calls. The types say summary estimates locally, unlike full.
+  Smaller startup probes took 43 and 13 ms including command.list. The summary runs
+  alongside the existing catalog reads, adding no serial read or network dependency
+  to catalog arrival or the snapshot. No full token count is requested. A failed or
+  shapeless summary is isolated to an empty skills list, not a failed catalog. The
+  child and session-plane catalog allowlists carry the field on changes as well as
+  resync snapshots; transport tests cover both and older producers that omit it.
+  Rejected for now: waiting for a richer engine skill-list API that also exposes
+  manual-only skills; it would leave the observed Skills group empty. Also rejected:
+  inferring skills from command source or a colon, which the live probe disproves.
+  The orchestrator accepted the bounded listing and its documented manual-only gap.
+  Date/Author: 2026-10-22, the M1 live-walk fix executor and orchestrator.
+
+- Decision: Every rejected lazy import, and Vite's `vite:preloadError` event
+  (including CSS and imports outside the lazy views), triggers a guarded reload of
+  the current URL. Browser error text is not an interface: a WebKit run rejected
+  HTML with a MIME-type message unlike Chromium's import message. A tab-scoped
+  sessionStorage marker is keyed by the page's hashed module-entry URL. Each build
+  gets at most one automatic reload, and markers are retained, so another chunk's
+  success or alternating old indexes cannot restart a loop. Without writable
+  storage no automatic reload is attempted. Persistent failure leaves a visible
+  manual reload action. All lazy surfaces, including depth and diff, use this path.
+  Navigation freshness: the production notification worker has no fetch handler or
+  Cache API and caches no shell. `desk-hub/wrangler.jsonc` sends SPA assets through
+  Cloudflare's asset service, not worker.ts (worker-first is `/api/*`, `/machine/*`),
+  with no `_headers` override. Cloudflare documents its default as `Cache-Control:
+  public, max-age=0, must-revalidate`, requiring network revalidation before reuse
+  (https://developers.cloudflare.com/workers/static-assets/headers/). The WebKit
+  and Chromium fixture serves an obsolete hashed entry for the first index and
+  the current index for recovery under that cache policy; it must fetch the new
+  document, retain the route and load the current module. A persistently missing
+  module must stop after one reload. The production hub was not contacted for
+  this check; source, provider documentation and the controlled browsers are the
+  evidence. The fixture serves actual files from an isolated build directory,
+  waits for the production notification worker to claim the tab, then replaces
+  index.html. Both Chromium and WebKit fetch the current entry on recovery with
+  that worker enabled. The local static double mirrors Cloudflare's revalidation
+  header; production asset and service-worker behavior is unchanged.
+  A14's minimum-version prefix belongs only to the older-machine capability
+  branch; an updated machine with a stale session gets reload guidance alone,
+  and the plugin to update is sminos.
+  Rationale: the owner's home-screen app remains open across deploys, whose removed
+  hashed modules get the SPA HTML fallback. Rejected: matching particular error
+  strings, which already missed WebKit's MIME refusal; unconditional reloads,
+  which loop on persistent failures; and clearing a guard on chunk success, which
+  can rearm it while another chunk is still broken.
+  Date/Author: 2026-10-22, the M1 live-walk fix executor, incorporating the
+  orchestrator's event-based recovery and navigation-cache checks.
 
 ## Outcomes & Retrospective
 

@@ -122,7 +122,7 @@ test("A5: an older machine's plugin is refused in the composer with its reason, 
   await box.fill('/rename x');
   await composer.getByRole('button', { name: 'Send', exact: true }).click();
   const refusal = composer.getByTestId('command-refused');
-  await expect(refusal).toContainText(`${MACHINE}'s plugin is older than the desk's controls: update doperpowers on ${MACHINE}`);
+  await expect(refusal).toContainText(`${MACHINE}'s plugin is older than the desk's controls: update sminos on ${MACHINE}`);
   expect(commandsSent(hub)).toBe(0);
   await refusal.getByRole('button', { name: 'Send as text anyway' }).click();
   await expect.poll(() => wordsSent(hub)).toEqual(['/rename x']);
@@ -208,6 +208,11 @@ test('A14: a cached catalog is labelled and run items withdraw after downgrade; 
   await box.fill('/');
   await expect(composer.getByTestId('slash-palette')).toContainText('as of');
   await expect(composer.getByRole('option', { name: /color/ })).toHaveAttribute('aria-disabled', 'true');
+  // Withdrawing the bridge alone makes a stale session, not an older machine.
+  await expect(composer.getByTestId('slash-palette')).toContainText("this session's plugin loaded before the update");
+  await expect(composer.getByTestId('slash-palette')).not.toContainText('commands need sminos');
+  hub.setMachines(PROJECT, [{ machine: MACHINE, online: true, policy: { read_only: false, ceiling: 'default' },
+    checkouts: [{ path: fm.recording.cwd, branch: 'main' }], desk: { sminos: '1.7.1', rpcs: ['command'], reads: [] } }]);
   await expect(composer.getByTestId('slash-palette')).toContainText('commands need sminos ≥ 1.8.0');
 });
 

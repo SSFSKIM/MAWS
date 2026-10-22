@@ -144,7 +144,8 @@ function deskCapability(s: CapabilityInput, verb: DeskVerb): Capability {
   const daemonHas = !need.rpc || (desk?.rpcs.includes(need.rpc) ?? false);
   if (bridgeHas && daemonHas) return verb === 'command' && turnRunning(s) ? yes(`queued until ${name} is idle`) : yes();
   if (!bridgeHas && desk !== null && versionAtLeast(desk.sminos, need.sminos)) return no("this session's plugin loaded before the update: run /reload-plugins in it, or restart it");
-  return no(`${s.machine}'s plugin${desk ? ` (${desk.sminos})` : ''} is older than the desk's controls: update doperpowers on ${s.machine}`);
+  const older = `${s.machine}'s plugin${desk ? ` (${desk.sminos})` : ''} is older than the desk's controls: update sminos on ${s.machine}`;
+  return no(verb === 'catalog' ? `commands need sminos ≥ ${need.sminos} on ${s.machine} · ${older}` : older);
 }
 
 function capabilitiesByKind(s: CapabilityInput): Record<KindVerb, Capability> {

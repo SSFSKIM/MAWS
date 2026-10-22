@@ -41,3 +41,29 @@ describe('advertised command forms', () => {
     expect(slashItems(null, 'mini', 'update mini').map((i) => i.name)).toEqual(['model', 'compact']);
   });
 });
+
+describe('the engine skill listing (sminos 1.8.1)', () => {
+  const listed: Catalog = { ...catalog, commands: [
+    { name: 'init', description: 'Built-in skill', source: 'builtin', route: prompt },
+    { name: 'playwright-cli', description: 'User skill', source: 'user', route: prompt },
+    { name: 'doperpowers:progress-report', description: 'Plugin skill', source: 'plugin', plugin: 'doperpowers', route: prompt },
+    { name: 'other:command', description: 'Plugin command', source: 'plugin', plugin: 'other', route: prompt },
+    { name: 'ordinary-command', description: 'Mod command without a namespace', source: 'plugin', plugin: 'catalog-probe', route: prompt },
+    { name: 'custom', description: 'Custom command', source: 'user', route: prompt },
+    { name: 'manual-only', description: 'Skill absent from the model context listing', source: 'user', route: prompt },
+    { name: 'probe:prompt (MCP)', description: 'MCP prompt', source: 'mcp', route: prompt },
+  ] };
+  const origins = (input: Catalog) => slashItems(input, 'macbook', null).filter((i) => i.origin !== 'widget').map((i) => [i.name, i.origin]);
+  it('puts listed user and plugin skills ahead of provenance, but keeps built-ins in Engine as MAWS does', () => {
+    expect(origins({ ...listed, skills: ['init', 'playwright-cli', 'doperpowers:progress-report'] })).toEqual([
+      ['init', 'engine'], ['playwright-cli', 'skills'], ['doperpowers:progress-report', 'skills'],
+      ['other:command', 'plugins'], ['ordinary-command', 'custom'], ['custom', 'custom'], ['manual-only', 'custom'], ['probe:prompt (MCP)', 'plugins'],
+    ]);
+  });
+  it('keeps the 1.8.0 grouping when skill membership is absent, including cached catalogs', () => {
+    expect(origins(JSON.parse(JSON.stringify(listed)))).toEqual([
+      ['init', 'engine'], ['playwright-cli', 'custom'], ['doperpowers:progress-report', 'plugins'],
+      ['other:command', 'plugins'], ['ordinary-command', 'plugins'], ['custom', 'custom'], ['manual-only', 'custom'], ['probe:prompt (MCP)', 'plugins'],
+    ]);
+  });
+});

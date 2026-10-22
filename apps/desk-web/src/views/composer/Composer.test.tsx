@@ -167,7 +167,7 @@ describe('a slash command', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(command).not.toHaveBeenCalled();
     expect(say).not.toHaveBeenCalled();
-    expect(screen.getByTestId('command-refused').textContent).toContain("mini's plugin is older than the desk's controls: update doperpowers on mini");
+    expect(screen.getByTestId('command-refused').textContent).toContain("mini's plugin is older than the desk's controls: update sminos on mini");
     fireEvent.click(screen.getByRole('button', { name: 'Send as text anyway' }));
     expect(say).toHaveBeenCalledWith('m1', [{ session: S1, alias: 'maws-45' }], '/rename x', false);
     expect(screen.queryByTestId('command-refused')).toBeNull();
@@ -292,5 +292,22 @@ describe('the cached command palette', () => {
     type('/color red'); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     type('/color blue'); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await vi.waitFor(() => expect(screen.getAllByTestId('command-receipt')).toHaveLength(2));
+  });
+});
+
+describe('typeahead version guidance', () => {
+  function open(machineVersion?: string) {
+    mount(<SessionComposer session={{ ...session(S1, 'maws-45'), machineDesk: machineVersion ? { sminos: machineVersion, rpcs: ['command'], reads: [] } : undefined }} />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message maws-45' }), { target: { value: '/', selectionStart: 1 } });
+  }
+  it('asks an older machine to update sminos and states the required version', () => {
+    open('1.7.1');
+    expect(screen.getByText(/commands need sminos/).textContent).toContain('commands need sminos ≥ 1.8.0 on mini');
+    expect(screen.getByText(/commands need sminos/).textContent).toContain('update sminos on mini');
+  });
+  it('asks only to reload a stale session on an already updated machine', () => {
+    open('1.8.0');
+    expect(screen.getByText(/this session's plugin loaded before the update/, { selector: 'p' }).textContent).toContain("this session's plugin loaded before the update: run /reload-plugins in it, or restart it");
+    expect(screen.queryByText(/commands need sminos/)).toBeNull();
   });
 });
