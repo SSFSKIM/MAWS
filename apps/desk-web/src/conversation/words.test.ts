@@ -1,7 +1,7 @@
 // The words for what came back: a settlement by who decided (a late decision's `by` may come without its side), and a
 // steer's result, whose row is null when the session had no bridge to append one.
 import { describe, expect, it } from 'vitest';
-import { commandFailureText, commandOutcomeText, commandOutlives, resultText, settledText } from './words';
+import { commandFailureText, commandOutcomeText, commandOutlives, resultText, settledText, STOPPED_AT_TERMINAL } from './words';
 
 const ME = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 const OTHER = '0f1e2d3c4b5a69788796a5b4c3d2e1f0';
@@ -49,6 +49,11 @@ describe('a command', () => {
     expect(end({ name: 'reload-plugins', readback: { how: 'effect' } })).toEqual({ state: 'ran', text: 'ran: the plugins reloaded', mark: 'confirmed by effect' });
     expect(end({ settled: { ok: true }, readback: { how: 'none' } })).toEqual({ state: 'unconfirmed', text: 'ran, unconfirmed', mark: null });
     expect(end({ settled: { ok: false, error: 'the bridge did not come back within 60 s' } })).toEqual({ state: 'failed', text: 'failed: the bridge did not come back within 60 s', mark: null });
+  });
+
+  it("says a queued run the engine refused after an Esc (settled code stopped) as the terminal's, as the RPC's refusal says it", () => {
+    const end = (body: Record<string, unknown>) => commandOutcomeText({ rpc: 'n', op: 'command', phase: 'end', id: 'c1', name: 'reload-plugins', args: '', ...body } as never);
+    expect(end({ settled: { ok: false, error: 'commands are disabled until the user types', code: 'stopped' } })).toEqual({ state: 'failed', text: STOPPED_AT_TERMINAL, mark: null });
   });
 
   it('labels what outlives the session: an MCP server disabled or enabled stays so for the project on the machine', () => {

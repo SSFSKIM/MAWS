@@ -106,10 +106,12 @@ export function commandFailureText(failure: RpcError, machine: string): string {
 /**
  * A command's `op` end in words (the desk control surface spec, §6): what ran is confirmed by the transcript row the
  * bridge linked, the text the engine settled with, or the effect the daemon checked; nothing linkable is *ran,
- * unconfirmed*, never success; a settled failure is the engine's error.
+ * unconfirmed*, never success; a settled failure is the engine's error, but a queued run the engine refused after an
+ * Esc (`code: "stopped"`) is said as the RPC's own Esc refusal is, the terminal's to cure.
  */
 export function commandOutcomeText(body: OpBody): { state: 'ran' | 'unconfirmed' | 'failed'; text: string; mark: string | null } {
-  const settled = body.settled as { ok?: boolean; error?: string } | undefined;
+  const settled = body.settled as { ok?: boolean; error?: string; code?: string } | undefined;
+  if (settled?.ok === false && settled.code === 'stopped') return { state: 'failed', text: STOPPED_AT_TERMINAL, mark: null };
   if (settled?.ok === false) return { state: 'failed', text: `failed: ${settled.error ?? 'the engine refused it'}`, mark: null };
   const readback = (body.readback ?? { how: 'none' }) as Readback;
   switch (readback.how) {
