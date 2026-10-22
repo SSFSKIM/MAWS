@@ -22,6 +22,8 @@
 | [desktop-modes-main.md](desktop-modes-main.md), [desktop-modes-renderer.md](desktop-modes-renderer.md) | Desktop의 로컬·SSH·클라우드·RC 세션 차이, 구조적인가 메울 수 있는가 |
 | [rc-parity-research.ko.md](rc-parity-research.ko.md) | 이전 리서치(RC 기준). 엔진 제어 표면(stdio 96종, mod)과 성능 분석은 여전히 유효하다 |
 | [bridge-perf-bench.md](bridge-perf-bench.md) | bridge mod 구간과 세션 열기 경로의 측정(sminos 1.1.1, Claude Code 2.1.304). 스크립트는 `bridge-bench/` |
+| [mod-command-run-probe.md](mod-command-run-probe.md) | slash 명령을 mod(`$.command.run`), `control.sock` `reply`, PTY 키로 돌린 결과(2.1.307) |
+| [background-work-handoff.md](background-work-handoff.md) | 세션을 옮길 때 백그라운드 셸·서브에이전트·Monitor·MCP 작업·cron이 어떻게 되는가, headless가 인계를 받는가(2.1.307) |
 
 desk 설계 문서(spec)는 MAWS `48fec4bd1`의 `docs/doperpowers/specs/2026-10-15-desk-design.md`다.
 
@@ -307,19 +309,29 @@ benchmark에 넣을 항목과, 선행 사례에서 온 하한이다. 숫자는 �
 | 제어 폭 | mod API + slash 명령 + TUI 키 입력 | stdio 제어 요청 96종 |
 | 화면에 그릴 데이터 | transcript 행 + `turn.step` 조각 (desk-web이 이미 그린다) | stream-json (MAWS X1 렌더러) |
 
-- **`--bg` 경로에서 프로그램으로 할 수 없는 것.** mod API(dts)에 해당 기능이 없다.
-  - 권한 모드를 마음대로 바꾸기. `/plan`과, 권한 답에 실은 `setMode`만 된다.
-  - 대화 rewind와 파일 rewind. TUI의 picker로만 된다. 파일 쪽은 세션을 멈춘 뒤 `claude --resume <id>
-    --rewind-files <message>`를 한 번 실행하는 길이 있어 보인다(cli:906312, 미검증).
-  - 다른 MCP 서버의 toggle과 reconnect. `$.mcp.connect`는 플러그인이 자기 manifest에 둔 서버만
-    다룬다(dts:2746-2785).
-  - 일반 dialog(`request_user_dialog`)와 엔진의 `ui_*` 원격 표면(MAWS D-9의 R2).
-  - `!` 셸. 확인하지 않았다.
-  - 읽기는 대부분 된다: `$.settings.read`, `$.session.model`, usage. diff, 파일, export는 데몬이
-    파일에서 답한다. MAWS의 SDK MCP 서버 `maws`(X9 도구)는 데몬이 띄우는 일반 MCP 서버로 옮길 수 있다(추론).
+- **`--bg` 경로에서 프로그램으로 되는 것과 안 되는 것** (2026-10-21 Claude Code 2.1.307에서 실행해 확인,
+  [mod-command-run-probe.md](mod-command-run-probe.md)).
+  - **slash 명령은 대부분 된다.** `$.command.run`은 built-in을 포함해 어떤 명령이든 사람이 친 것처럼 큐에
+    넣고 idle에 돌린다. 인자로 panel을 건너뛰는 것: `/model <id>`, `/effort`, `/mcp disable|enable|reconnect
+    <server>`(서버 프로세스가 실제로 내려가고 올라온다), `/rename`, `/branch`, `/resume <id>`, `/cd`,
+    `/export`, `/compact <지시>`, `/clear`, `/config key=value`, `/background`, `/plan`(권한 모드를 plan으로).
+  - **`control.sock` `reply`도 slash 명령을 사람으로서 돌린다.** 턴 중에는 `/model`, `/effort`, `/rename`,
+    `/usage`가 즉시 돈다. mod 경로는 이것들도 턴이 끝날 때까지 기다린다. reply는 AskUserQuestion에 답하지만
+    권한 프롬프트는 승인하지 못한다.
+  - **panel은 큐를 막는다.** `/usage`, `/permissions`, `/config`, 인자 없는 `/mcp`는 터미널에 panel을 열고,
+    닫힐 때까지 `$.command.run`의 promise와 그 뒤의 명령이 멈춘다. mod로는 panel을 닫을 수 없다.
+  - **결과에 출력이 거의 없고, 실패가 성공처럼 보인다.** `/model nonsense`도 `{}`로 끝난다. 출력은
+    transcript의 `local-command-stdout` 행에만 있으므로 데몬은 그 행으로 결과를 판정한다.
+  - **dialog가 끼는 것.** 대화가 있는 세션의 `/model <id>`는 "Switch model?" 확인을 띄우고, `/add-dir`는 항상
+    확인을 띄운다. `/rewind`는 picker를 연다.
+  - **프로그램으로 안 되는 것.** plan 모드에서 나오기를 포함한 권한 모드 전환(Shift+Tab), rewind 지점 고르기,
+    panel 조작, 일반 dialog(`request_user_dialog`)와 엔진의 `ui_*` 원격 표면. 턴을 멈춘 Esc 뒤에는 사람이 입력할
+    때까지 mod의 명령이 거부된다(reply는 이 상태를 푼다).
+  - 읽기는 대부분 된다: `$.settings.read`, `$.session.model`, usage. diff, 파일, export는 데몬이 파일에서 답한다.
 - **남는 빈 곳은 웹 터미널로 메운다.** 데몬이 자기 PTY 안에서 `claude attach <short>`를 돌리고 그 바이트를
   웹의 터미널로 중계하면, TUI가 할 수 있는 것은 전부 웹에서 된다. rewind picker, `/permissions`, `/mcp`도
-  포함된다. Arkho A6 설계가 이 방식이다(spec:205). 내부 `control.sock`의 `attach`를 직접 말하는 것보다
+  포함된다. probe에서 PTY 키로 `/mcp` panel의 toggle, `/rewind` picker의 복원(28→20 메시지), `/add-dir`와 모델
+  전환 확인, `claude attach`를 통한 bg job의 권한 프롬프트, Shift+Tab 모드 순환이 모두 됐다. Arkho A6 설계가 이 방식이다(spec:205). 내부 `control.sock`의 `attach`를 직접 말하는 것보다
   공개 CLI 동사를 쓰는 편이 엔진 버전이 바뀔 때 덜 깨진다.
 - **우리가 만든 supervisor로 엔진의 supervisor를 대체하는 것은 권하지 않는다.**
   - CLI가 붙는 socket 경로는 설정으로 바꿀 수 없다. `/tmp/cc-daemon-<uid>/<sha256(config 디렉터리) 앞
@@ -387,9 +399,34 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
   id는 그대로이고, launch epoch가 바뀌어 시청자는 snapshot을 받는다.
   - B → A ("터미널에서 쥐기"): MAWS가 세션을 멈추고 `claude --bg --resume <id>`. 그 뒤 `claude attach`.
   - A → B ("GUI 전체 제어로 열기"): `control.sock`의 `kill`로 job을 멈추고 MAWS가 `--resume`.
-  - 터미널 세션 → A: `/background`. 웹에서 할 수 있는지는 §3.6의 확인할 것이다.
+  - 터미널 세션 → A: `/background`. mod의 `$.command.run`으로도 되지만, 멈출 일이 있으면 확인 dialog가 사람의
+    터미널에서 Enter를 기다린다(2026-10-21 측정).
   - 두 번째 소유자는 기계가 막는다. resume 전에 엔진 레지스트리(`~/.claude/sessions/<pid>.json`)로 살아 있는
     소유자를 확인하고, 살아 있으면 handoff가 아닌 resume은 거절한다(porting §5 충돌 4, `holders.ts`의 W7 경합).
+- **돌고 있는 일을 데리고 옮기기** (2026-10-21, Claude Code 2.1.307에서 실행해 확인;
+  [background-work-handoff.md](background-work-handoff.md)).
+  세션은 거의 idle이 아니다. 백그라운드 Bash, 서브에이전트, Monitor, MCP 작업이 늘 돈다.
+  - **엔진의 인계 파일 `adopt.json`을 읽는 것은 엔진 bg job의 interactive REPL뿐이다.** headless
+    `-p --resume … --input-format stream-json`은 읽지 않는다. `CLAUDE_JOB_DIR`과 `CLAUDE_CODE_SESSION_KIND=bg`를
+    줘도 그렇다. 그러므로 돌고 있는 일을 잃지 않고 옮길 수 있는 곳은 경로 A의 job뿐이다.
+  - **`/background`가 데려가는 것:** 백그라운드 셸(같은 pid로 계속 돌고 완료 알림도 온다. 다만 종료 코드는 -1로
+    잃는다), 짧은 도구 호출 중인 서브에이전트(자동 재개), 세션 cron. **잃는 것:** Monitor, stdio MCP 서버의 작업
+    (아무에게도 알리지 않는다), 2초 넘는 foreground 명령 안의 서브에이전트("failed").
+  - **터미널 세션을 그냥 끝내면** 셸은 죽는다(`/exit`, SIGTERM, SIGHUP). SIGKILL이면 살아남지만 아무도 읽지
+    않고, 엔진은 "stopped"라고 잘못 보고한다.
+  - **끊긴 턴은 headless에서도 이어진다.** 첫 resume에 `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`을 주면 끊긴 턴을
+    프롬프트부터 다시 돌린다(돌던 명령은 처음부터). 첫 resume에 빠뜨리면 그 턴은 합성 답으로 닫혀 다시 이을 수
+    없다. 그러니 idle까지 기다릴 필요는 없고, 기다려야 하는 것은 백그라운드 일이다.
+  - **권고 절차.** 터미널 세션을 넘겨받을 때는 먼저 `/background`로 job으로 옮긴다(경로 A). 돌던 일은 거기서
+    계속된다. GUI 전체 제어(경로 B)가 필요하면 job의 일이 비었을 때(`jobs/<short>/state.json`의 `fan`이 비고
+    `inFlight`에 `session_cron`만 남을 때) `claude stop` 뒤 `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`로 headless
+    resume한다. `/background`가 session id를 새로 만들므로 웹은 새 id를 따라간다.
+  - **일이 끝나지 않는 세션**(dev server 등)은 경로 A에 둔다. 경로 A에서도 mod, `control.sock` `reply`, PTY로
+    TUI가 하는 것은 다 된다(§3.6). 대안은 holder가 job의 `adopt.json`을 읽기만 해서 셸을 이어 감시하고 완료를
+    주입하는 것인데, 모델이 먼저 받는 거짓 "stopped" 알림을 고쳐야 하고 버전이 매겨진 내부 파일에 기댄다.
+    `adopt.json`을 직접 쓰는 것은 권하지 않는다.
+  - **경로 B 세션은 프로세스를 holder가 쥐고 있는 한 이 문제가 없다.** 일은 같은 프로세스 안에서 계속된다.
+    그래서 Query를 재시작해도 프로세스는 건드리지 않는 holder 분리가 중요하다.
 - **웹에서 새로 띄우는 세션 (권고).** MAWS 데몬이 도는 기계에서는 경로 B로 띄운다. MAWS가 기능의 기준이고,
   그 기능을 GUI로 다 주는 것은 경로 B뿐이다. MAWS 데몬이 없는 기계(Linux, devcloud)나 사람이 "터미널에서
   쥘 세션"을 고른 경우에는 경로 A(`claude --bg`)로 띄운다.
