@@ -151,8 +151,9 @@ export function runsOn(json) {
 // pushes (`gates`, `runner`, `class1a`, `lane`, `live`).
 export function guestRun({ gitDir, sha, gates = '', runner = '', class1a = '', lane = '', live = '', variables = {} }) {
   if (!gitDir || !sha || (variables.GATE_RUNNER ?? '').toLowerCase() === 'macos') return null; // the plan job itself is on the host
-  const dir = mkdtempSync(join(tmpdir(), 'maws-ci-gate-alerts-'));
+  let dir;
   try {
+    dir = mkdtempSync(join(tmpdir(), 'maws-ci-gate-alerts-'));
     const top = execFileSync('git', ['-C', gitDir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     const archive = execFileSync('git', ['-C', top, 'archive', '--format=tar', sha, '--', '.github/scripts', '.github/workflows/gate.yml', 'package.json'], { maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
     execFileSync('tar', ['-x', '-C', dir], { input: archive, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -185,7 +186,11 @@ export function guestRun({ gitDir, sha, gates = '', runner = '', class1a = '', l
   } catch {
     return null;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    try {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // a temp directory left behind changes nothing the run needs
+    }
   }
 }
 

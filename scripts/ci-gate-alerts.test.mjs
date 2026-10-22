@@ -309,6 +309,17 @@ test('check: a run with host jobs is refused at the host alert, an all-VM run go
   assert.deepEqual(run('e2e:side', { lane: 'vm' }), { stop: false, lines: ['ci-gate: ci-kit alert open on mini; going ahead on mini-vm'] });
   assert.equal(run('e2e:side', { lane: 'vm-trial' }).stop, true); // the trial slot is not online
   assert.equal(run('e2e:side,e2e:tools', { gitDir: undefined, sha: undefined }).stop, true); // no tree to ask
+  // A temp directory that cannot be made is the guest decision failing, not a failed GitHub read: still refused.
+  const tmp = process.env.TMPDIR;
+  process.env.TMPDIR = join(root, 'no-such-directory');
+  try {
+    const result = run('e2e:side,e2e:tools');
+    assert.equal(result.stop, true);
+    assert.equal(result.lines[1], '  mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)');
+  } finally {
+    if (tmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = tmp;
+  }
   // No alert: both kinds of run go ahead, as before.
   assert.deepEqual(run('e2e:library', {}, { runners }), { stop: false, lines: [] });
   assert.deepEqual(run('e2e:side,e2e:tools', {}, { runners }), { stop: false, lines: [] });
