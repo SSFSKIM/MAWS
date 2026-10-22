@@ -12,7 +12,7 @@ import { URL, fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const { alertLine, check, decide, macJobs, parseAlert, poolE2e } = await import(join(root, 'scripts/ci-gate-alerts.mjs'));
+const { alertLine, check, decide, macJobs, parseAlert, poolE2e, vmE2e } = await import(join(root, 'scripts/ci-gate-alerts.mjs'));
 
 test('an alert title parses into machine, dialog, time and source; other alert kinds do not', () => {
   assert.deepEqual(parseAlert('ci-kit alert: mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)'), { machine: 'mini', dialog: 'SecurityAgent', since: '2026-10-17T20:06Z', source: 'source unknown' });
@@ -114,6 +114,12 @@ const alert = (number, title) => ({ ...parseAlert(title), number });
 const mini = alert(12, 'ci-kit alert: mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)');
 const jobs = ['unit:darwin', 'the class-1 e2e groups'];
 
+// The guest takes only the jobs on MAC_VM_E2E (a fixture list here); a host job (packaged, a class 1a job, the plan job, a
+// measured or unlisted group, an unlisted unit:darwin) is refused at the host's alert whatever the guest does.
+const vmGroups = ['side', 'tools'];
+const vmJobs = ['e2e:side', 'e2e:tools'];
+const guest = [{ name: 'ci-kit-mac-mini', status: 'online' }, { name: 'ci-kit-mac-mini-vm', status: 'online' }];
+
 test('nothing to say when the run needs no Mac or no alert is open', () => {
   assert.deepEqual(decide({ jobs: [], alerts: [mini], runners: [] }), { stop: false, lines: [] });
   assert.deepEqual(decide({ jobs, alerts: [], runners: [] }), { stop: false, lines: [] });
@@ -153,16 +159,85 @@ test('no online Mac free of an alert: stop, naming each alert and where it lives
 // A machine's runners (ci-kit's mac-lane concurrency spec): its exclusive instance, ci-kit-mac-<machine>; its shared
 // instances, ci-kit-mac-<machine>-<n>, on the same desktop, which a dialog there holds as it holds the exclusive one; and
 // its guest, ci-kit-mac-<machine>-vm (and the trial slot's -vm-trial), a desktop of its own, so a machine of its own,
-// which opens no alert.
+// which opens no alert and, for a run with a host job, is no free Mac.
 test("a shared instance is its machine's, held by its alert; the guest is a machine of its own", () => {
   const online = (...names) => names.map((name) => ({ name, status: 'online' }));
   assert.equal(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-mini', 'ci-kit-mac-mini-2', 'ci-kit-mac-mini-3') }).stop, true);
   assert.deepEqual(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-mini-2', 'ci-kit-mac-studio-2') }).lines, ['ci-gate: ci-kit alert open on mini; going ahead on studio']);
   for (const [guest, machine] of [['ci-kit-mac-mini-vm', 'mini-vm'], ['ci-kit-mac-mini-vm-trial', 'mini-vm-trial'], ['ci-kit-mac-mini-vm2', 'mini-vm2']]) {
-    assert.deepEqual(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-mini', guest) }), { stop: false, lines: [`ci-gate: ci-kit alert open on mini; going ahead on ${machine}`] }, guest);
+    assert.deepEqual(decide({ jobs: vmJobs, vmGroups, alerts: [mini], runners: online('ci-kit-mac-mini', guest) }), { stop: false, lines: [`ci-gate: ci-kit alert open on mini; going ahead on ${machine}`] }, guest);
   }
   // Two instances of one free machine name it once.
   assert.deepEqual(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-studio', 'ci-kit-mac-studio-2') }).lines, ['ci-gate: ci-kit alert open on mini; going ahead on studio']);
+});
+
+test('a run with a host Mac job is refused at the host alert though the guest is online and free', () => {
+  for (const hostJobs of [jobs, ['packaged'], ['plan', 'e2e:side'], ['static', 'e2e:side'], ['e2e:side', 'e2e:library'], ['e2e:side', 'unit:darwin']]) {
+    const result = decide({ jobs: hostJobs, vmGroups, alerts: [mini], runners: guest });
+    assert.equal(result.stop, true, hostJobs.join(' '));
+    assert.equal(result.lines[1], '  mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)');
+    assert.match(result.lines[2], /^ci-gate: ci-kit's macOS guest \(mini-vm\) is online, but it takes only the jobs on MAC_VM_E2E/);
+  }
+  // With MAC_VM_E2E empty, as gate.yml has it, every Mac run is a host run.
+  assert.equal(decide({ jobs: vmJobs, vmGroups: [], alerts: [mini], runners: guest }).stop, true);
+  assert.equal(decide({ jobs: vmJobs, alerts: [mini], runners: guest }).stop, true);
+  // A free host still takes a host run, the guest not named among the free.
+  assert.deepEqual(decide({ jobs, vmGroups, alerts: [mini], runners: [...guest, { name: 'ci-kit-mac-studio', status: 'online' }] }).lines, ['ci-gate: ci-kit alert open on mini; going ahead on studio']);
+});
+
+test('an all-VM run (every Mac job a MAC_VM_E2E group) goes ahead on the guest past the host alert', () => {
+  assert.deepEqual(decide({ jobs: vmJobs, vmGroups, alerts: [mini], runners: guest }), { stop: false, lines: ['ci-gate: ci-kit alert open on mini; going ahead on mini-vm'] });
+  // unit:darwin follows the list as an e2e group does: listed, it is a guest job; unlisted, a host job.
+  const listedDarwin = vmE2e(fixture({ MEASURED_E2E: 'perf', MAC_SHARED_E2E: "''", MAC_VM_E2E: 'side unit:darwin' }));
+  assert.deepEqual(decide({ jobs: ['unit:darwin'], vmGroups: listedDarwin, alerts: [mini], runners: guest }), { stop: false, lines: ['ci-gate: ci-kit alert open on mini; going ahead on mini-vm'] });
+  assert.deepEqual(decide({ jobs: ['unit:darwin', 'e2e:side'], vmGroups: listedDarwin, alerts: [mini], runners: guest }).stop, false);
+  assert.equal(decide({ jobs: ['unit:darwin'], vmGroups: vmE2e(fixture({ MAC_VM_E2E: 'side' })), alerts: [mini], runners: guest }).stop, true);
+  // The guest offline, there is nothing free: stopped, with no word on the guest.
+  const offline = [{ name: 'ci-kit-mac-mini', status: 'online' }, { name: 'ci-kit-mac-mini-vm', status: 'offline' }];
+  const result = decide({ jobs: vmJobs, vmGroups, alerts: [mini], runners: offline });
+  assert.equal(result.stop, true);
+  assert.equal(result.lines.length, 3);
+});
+
+test('with no alert open, a host run and an all-VM run both go ahead', () => {
+  assert.deepEqual(decide({ jobs, vmGroups, alerts: [], runners: guest }), { stop: false, lines: [] });
+  assert.deepEqual(decide({ jobs: vmJobs, vmGroups, alerts: [], runners: guest }), { stop: false, lines: [] });
+});
+
+// A fixture of gate.yml's env list (two-space indent, a quoted empty list for an empty one), read as gate-plan.mjs reads it.
+const fixture = (lists) => `env:\n${Object.entries(lists).map(([name, value]) => `  # ${name} comment\n  ${name}: ${value}\n`).join('')}\njobs:\n`;
+
+test("the guest's groups: MAC_VM_E2E less the measured, and less the shared when the run has no Lane:", () => {
+  const workflow = fixture({ MEASURED_E2E: 'perf scale', MAC_SHARED_E2E: 'tools', MAC_VM_E2E: 'side tools perf' });
+  assert.deepEqual(vmE2e(workflow), ['side']);
+  assert.deepEqual(vmE2e(workflow, 'vm'), ['side', 'tools']);
+  assert.deepEqual(vmE2e(workflow, 'vm-trial'), ['side', 'tools']);
+  assert.deepEqual(vmE2e(fixture({ MEASURED_E2E: 'perf', MAC_SHARED_E2E: "''", MAC_VM_E2E: "''" })), []);
+  assert.deepEqual(vmE2e(fixture({ MAC_VM_E2E: 'side' })), ['side']);
+  assert.deepEqual(vmE2e(''), []);
+  // Today's gate.yml: the list is empty, so every Mac run needs the host; the reader sees the lists the plan does.
+  const own = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  assert.deepEqual(vmE2e(own, 'vm'), []);
+  assert.ok(poolE2e(own).length > 0);
+});
+
+// The reads and the decision together, over a fixture list, for the runs the architect's ruling names.
+test('check: a run with host jobs is refused at the host alert, an all-VM run goes ahead, a mix is refused', () => {
+  const issues = [{ number: 12, title: 'ci-kit alert: mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)' }];
+  const runners = [{ name: 'ci-kit-mac-mini', status: 'online' }, { name: 'ci-kit-mac-mini-vm', status: 'online' }];
+  const workflow = fixture({ MEASURED_E2E: 'perf', MAC_SHARED_E2E: "''", MAC_VM_E2E: 'side tools perf' });
+  const run = (gates, vmLane = '') => check({ gates, runner: '', class1a: 'linux', vmGroups: vmE2e(workflow, vmLane), gh: fakeGh({ issues, runners }).gh });
+  for (const gates of ['unit:darwin', 'e2e:library', 'e2e:perf', 'e2e:side,e2e:library', 'e2e:side,unit:darwin', 'e2e:side,packaged', 'e2e:side,e2e:perf']) {
+    const result = run(gates);
+    assert.equal(result.stop, true, gates);
+    assert.equal(result.lines[1], '  mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)', gates);
+  }
+  assert.deepEqual(run('e2e:side,e2e:tools'), { stop: false, lines: ['ci-gate: ci-kit alert open on mini; going ahead on mini-vm'] });
+  assert.deepEqual(run('e2e:side', 'vm'), { stop: false, lines: ['ci-gate: ci-kit alert open on mini; going ahead on mini-vm'] });
+  // No alert: both kinds of run go ahead, as before.
+  const quiet = (gates) => check({ gates, runner: '', class1a: 'linux', vmGroups: vmE2e(workflow), gh: fakeGh({ runners }).gh });
+  assert.deepEqual(quiet('e2e:library'), { stop: false, lines: [] });
+  assert.deepEqual(quiet('e2e:side,e2e:tools'), { stop: false, lines: [] });
 });
 
 // A fake gh: each read answers with the lines of its --jq, or throws as execFileSync does on a failed gh.
