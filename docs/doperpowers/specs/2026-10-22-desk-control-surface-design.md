@@ -88,8 +88,9 @@ allows today.
 - [x] (2026-10-22 12:36Z) M1 — the command spine: the route table whole, the typeahead;
   built and reviewed, walk pending. Both task reviews and both `high` branch
   reviews are clean; sminos 1.8.0's final machine head `70fc4bc6` passed all eight
-  gates. MAWS's final combined-head gates and local screenshot evidence are still
-  being completed; neither merge nor rollout is part of this executor's handoff.
+  gates. MAWS's final combined-head gates are being completed; local headless
+  desktop/phone screenshot tests passed (2/2), and both images were inspected.
+  Neither merge nor rollout is part of this executor's handoff.
 - [ ] M2 — native panels from reads: side question, context and usage, model and effort,
   MCP, compact with instructions, status, permissions and hooks.
 - [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
@@ -2508,6 +2509,12 @@ cases. MAWS's code review is clean through `52b93b3e`, with the final test-only
 Node typing correction and this evidence record proceeding to combined-head
 verification. The prior command browser scenarios all passed; final combined-head
 CI and local screenshot inspection remain separate evidence, not implied by review.
+The focused headless screenshots passed 2/2 against `52b93b3e` production code
+(the later Node-type annotation changes no runtime): desktop 1280×720 and phone
+390×844 images under `/tmp/maws-desk-m1-evidence/52b93b3e4-QS7jyz/` were inspected
+by executor and controller. The palette, descriptions/refusals and mixed-version
+copy fit those viewports. These fake-session images are supporting evidence,
+not a substitute for the deployed phone/keyboard and mixed-Mac walk.
 
 The executor leaves both PRs unmerged. The orchestrator deploys MAWS first, rolls
 out sminos to the MacBook before the mini, and performs A10–A14, the three M0
