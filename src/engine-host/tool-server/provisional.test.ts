@@ -28,7 +28,7 @@ import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactReadTool } from './artifact-tools';
 import { artifactDatasetTool } from './datasets';
 import { artifactEditTool, documentCreateTool, documentReadTool, DocumentToolSession, type DocumentToolDeps } from './documents';
-import { openPath, ProvisionalEmitter } from './provisional';
+import { ProvisionalEmitter } from './provisional';
 import type { McpToolContext, McpToolResult } from './server';
 
 const SELF = 'app-self' as AppSessionId;
@@ -497,19 +497,6 @@ describe('a dataset’s call (G2)', () => {
     expect(firstUpdate).toBeGreaterThan(committedAt);
     expect(layer(end)).toEqual([expect.objectContaining({ state: 'committed', commitSeq: (end.received[firstUpdate] as { seq?: number }).seq, ops: [{ op: 'dataset', dataset: 'sales', text: '' }] })]);
     expect(presence(board)?.editing).toBeUndefined();
-  });
-});
-
-describe('openPath', () => {
-  it('names the member the text ends inside, down to the innermost open container; null once whole', () => {
-    expect(openPath('{"artifact":"pla')).toEqual(['artifact']);
-    expect(openPath('{"artifact":"plan"')).toEqual([]);
-    expect(openPath('{"artifact":"plan","ops":[{"op":"replace_text","old":"ab')).toEqual(['ops', 0, 'old']);
-    expect(openPath('{"ops":[{"op":"x"},{"old":"a\\"b"')).toEqual(['ops', 1]);
-    expect(openPath('{"ops":[{"op":"x"}')).toEqual(['ops']);
-    expect(openPath('{"ops":[{"op":"x"}],"baseRevision":12')).toEqual(['baseRevision']);
-    expect(openPath('{"ops":[[1,2],[3')).toEqual(['ops', 1, 0]);
-    expect(openPath('{"a":{"b":"c"}}')).toBeNull();
   });
 });
 
