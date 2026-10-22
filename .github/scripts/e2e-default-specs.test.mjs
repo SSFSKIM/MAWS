@@ -69,7 +69,7 @@ for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {});
 
 test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
   const { specs, total } = await whole;
-  assert.equal(total, 84); // P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations
+  assert.equal(total, 87); // P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations; P4-A2 G2.6: presentations-provisional.spec.ts, design-provisional.spec.ts and dashboard-provisional.spec.ts in their groups
   assert.deepEqual(specs, [
     'e2e/agent-tools-live.spec.ts',
     'e2e/bench-edit-live.spec.ts',
@@ -124,7 +124,7 @@ test("this tree: a relaunch of default and two groups, DefaultBeside naming the 
 
 test("this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out, read from the job's output", async () => {
   const [all, part] = await Promise.all([whole, widened]);
-  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 84 specs, beside 2 other e2e groups \(/);
+  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 87 specs, beside 2 other e2e groups \(/);
   assert.deepEqual(all.specs.filter((spec) => !part.specs.includes(spec)), []);
   assert.ok(part.specs.includes('e2e/artifacts-store.spec.ts'), 'e2e:artifacts, absent from the relaunch, leaves its spec to default');
   assert.ok(!part.specs.includes('e2e/side.spec.ts') && !part.specs.includes('e2e/library.spec.ts'));
@@ -148,7 +148,7 @@ test("every class-1 group's script on this tree has a shape the derivation reads
   }
   assert.deepEqual(readScript(scripts['e2e:desk-web'], rootName), { elsewhere: 'desk-web' });
   assert.deepEqual(readScript(scripts['e2e:dashboard'], rootName), { env: { MAWS_HARNESS: '0' }, args: ['--config', 'playwright.dashboard.config.ts'] });
-  assert.deepEqual(readScript(scripts['e2e:design'], rootName).args, ['e2e/design.spec.ts', 'e2e/design-comments.spec.ts', 'e2e/design-history.spec.ts', 'e2e/design-export.spec.ts']);
+  assert.deepEqual(readScript(scripts['e2e:design'], rootName).args, ['e2e/design.spec.ts', 'e2e/design-comments.spec.ts', 'e2e/design-history.spec.ts', 'e2e/design-export.spec.ts', 'e2e/design-provisional.spec.ts']); // P4-A2 G2.6
 });
 
 test('this tree: default alone, or beside a group whose script it cannot read, runs the bare set', async () => {
