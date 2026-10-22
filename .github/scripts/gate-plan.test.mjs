@@ -401,8 +401,8 @@ test('every MAC_VM_E2E name is unit:darwin or a class-1 Mac group, and not measu
 // is on MEASURED_E2E, and every MEASURED_E2E job on a Mac runs ci-kit's settle first, which holds the guest off for it.
 // This test is that promise: the number moves only when what it pins does, and ci-kit then learns the new number.
 const VM_CONTRACT = 1;
-// A group's measurement switch, which turns its timing-bound cases on (each such spec skips without it): MAWS_<name>_PERF
-// or MAWS_<name>_SCALE set to 1 in its package script.
+// A group's measurement switch, which turns its timing-bound cases on (each such spec skips without it, or asserts its
+// bounds only under it): MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in its package script.
 const switches = (script = '') => [...script.matchAll(/(?:^|\s)(MAWS_\w+_(?:PERF|SCALE))=1(?=\s)/g)].map((match) => match[1]);
 
 test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every timing-bound group on MEASURED_E2E, each settling first on a Mac, on the exclusive instance whatever the lists and the Lane: say", () => {
@@ -421,11 +421,14 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
     assert.ok(scripts[`e2e:${group}`], `e2e:${group} has a package script`);
     assert.ok(switches(scripts[`e2e:${group}`]).length > 0 || group === 'tool-time-heavy-live', `e2e:${group} turns a measurement switch on`);
   }
-  // Each spec a switch gates skips without it, so no other group runs its bounds (`default` collects it and skips it).
+  // Each spec a switch gates runs its bounds under it alone, so no other group runs them (`default` collects it): it
+  // skips without the switch, or reads the switch into a const its bounds sit behind, as presentations-drag's class-1
+  // trial in e2e:presentations does; the time-bound walk below holds every raw bound outside that const to a form.
   for (const group of switched) {
     for (const spec of scripts[`e2e:${group}`].split(/\s+/).filter((word) => /^e2e\/.*\.spec\.ts$/.test(word))) {
-      const gated = [...readFileSync(join(root, spec), 'utf8').matchAll(/test\.skip\(process\.env\.(MAWS_\w+) !== '1'/g)].map((match) => match[1]);
-      assert.ok(gated.some((flag) => switches(scripts[`e2e:${group}`]).includes(flag)), `${spec} skips without e2e:${group}'s switch`);
+      const text = readFileSync(join(root, spec), 'utf8');
+      const gated = [...text.matchAll(/test\.skip\(process\.env\.(MAWS_\w+) !== '1'/g), ...text.matchAll(/^const \w+ = process\.env\.(MAWS_\w+) === '1'/gm)].map((match) => match[1]);
+      assert.ok(gated.some((flag) => switches(scripts[`e2e:${group}`]).includes(flag)), `${spec} skips without e2e:${group}'s switch, or reads it for its bounds`);
     }
   }
 
@@ -452,7 +455,9 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
 // MAWS_*_SCALE switch), so it runs in a measured job alone; through the load-aware budget (e2e/support/latency.ts,
 // which a guest or ci-kit's VM lane holds to its loaded ceiling); or as one of the bounds below, each on a timer of the
 // product's own with seconds of margin, or in a spec no gate job runs, which a neighbour's load cannot reach. A new raw
-// bound fails here until it takes one of those forms, or joins this list with its reason.
+// bound fails here until it takes one of those forms, or joins this list with its reason. A time window that only halts
+// or skips a case is no bound: presentations-ime-live's L4 retries a press-to-first-key window of 100 ms and halts the
+// case when no try lands in it, in a spec that skips without MAWS_IME_LIVE=1, which no gate job sets.
 const LIVENESS_BOUNDS = {
   'e2e/browser-cua.spec.ts': {
     'expect(Date.now() - refusedAt).toBeLessThan(2_000);': 'the refusal of an acting command while a person holds the tab is immediate; 2 s against the command\'s own 3 s timeout tells it from a timeout',

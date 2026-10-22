@@ -110,7 +110,8 @@ env:
   # presentations-drag (P4-B2 M0) is the deck drag's fast group: no-agent control trials alternating with agent trials
   # that republish through the host, the class-1 drag case under MAWS_PRESENTATIONS_PERF=1.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
-  # its package script, each such spec skipping without it, and is on this list: ci-kit's VM contract above rests on it.
+  # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
+  # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
   MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
