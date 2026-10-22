@@ -423,16 +423,16 @@ Four more rules bind the table:
   "no hook answered" text). A listed command whose `plugin` is `sminos` is refused
   `self` with *run it from the terminal*. The sminos plugin registers none today; the
   rule keeps a later one honest.
-- **`/reload-plugins` reloads the bridge itself.** The probe's `Reloaded: 1 plugin` with
-  one plugin loaded says every loaded plugin reloads, the sminos mod included: the old
-  module instance's posts are fenced off (DX5's nonce, 409), its child is replaced, and
-  its `run end` never reaches the stream (S4's own `reload-plugins` run that never
-  resolved, the spikes file's contradiction 11). So the bridge never awaits its own
-  reload: the op answers `queued`,
-  and the **daemon finishes the outcome by effect** (§6): when the session's bridge
-  answers again from a new socket within 60 s of the claim, `op end` with `readback
-  {how: "effect"}`; otherwise `op end` with `settled {ok: false, error: "the bridge did
-  not come back within 60 s"}`. `reload-skills` reloads no plugin and keeps its `{text}`.
+- **`/reload-plugins` can replace the bridge itself.** If replaced, the old module's
+  posts are fenced off (DX5's nonce, 409), its child is replaced, and its `run end`
+  cannot reach the stream. The op answers `queued` before running; the **daemon
+  finishes by effect** when a fresh probe sees a different (socket inode, pid), or
+  fails at the 60 s deadline. If the engine keeps an unchanged module loaded, the
+  bridge instead emits the returned text as `run end`, with readback `text`, and
+  frees its desk queue immediately. The first accepted end wins, including for
+  nonce-free CLI runs. Decision 11 records the 2.1.308 live walk that superseded the
+  assumption that every reload replaces the bridge. `reload-skills` reloads no
+  plugin and keeps its `{text}`.
 
 The web never decides a class: it reads the class from the catalog (§5) to draw the
 hint and to refuse before sending, and the bridge checks the class again on every
@@ -1683,15 +1683,18 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | type / phase | fields |
 | --- | --- |
 | `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
-| `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; never emitted by the module a `reload-plugins` run replaces (the daemon finishes that op) |
+| `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; a replaced `reload-plugins` module cannot emit it (the daemon finishes by effect); an unchanged module kept loaded emits the returned text (Decision 11) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
-| `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
+| `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
 | `session` / `start` (M4) | gains `previous?: {session, reason: "clear" \| "resume" \| "branch" \| "unknown"}` |
 | `raised` (M3) | gains `suggestions?: PermissionUpdate[]` (at most 8; each rule string at most 512 characters; the list is the engine's `permission_suggestions` verbatim within those bounds, or absent) |
 
 The child's snapshot line gains `capabilities`, `mode` and `catalog` (the latest of each).
+A catalog command's `route` is its bare form; for non-empty trimmed arguments the
+consumer selects `withArgs ?? route`, then applies that form's validation and
+`otherwise`. These are advertised routes, not a second route table in the web.
 
 **`POST /requests/<request>/decision`** (M3) admits `updatedPermissions?:
 PermissionUpdate[]` (at most 8) on a permission; refuses it on a question (400). The
@@ -2282,6 +2285,35 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   effect only with a forced module replacement (would make every reload restart the
   bridge child and drop its live state).
   Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's M0 live walk.
+
+- Decision: M1 advertises both command forms. `Catalog.commands[].route` is the
+  bare `Route`; optional `withArgs: Route` is selected for non-empty trimmed args,
+  falling back to `route` when absent. `otherwise` remains on the form whose pattern
+  it follows (`goal`'s with-args form). The shared fixture includes verbatim MCP
+  names, source/plugin, both forms, and model options/aliases as model ids only.
+  Rationale: a single resolved bare route cannot advertise `/mcp enable …` or
+  distinguish `/goal clear` from `/goal <condition>`. This additive field beats a
+  web-side form table: the bridge remains the one classification source.
+  Date/Author: 2026-10-22, the M1 plan-executor, agreed with both executors and the
+  orchestrator.
+
+- Decision: M1 recovers command outcomes by replay on browser reconnect. The hub
+  durably keeps the latest nonce-bearing `op` for each (machine, session, nonce),
+  preserving an `end` over a late `start`, and replays it when an authenticated
+  browser joins the project. Retention is bounded to the latest 256 operations,
+  24 hours and 4 MiB per project; nonce-free CLI operations are not cached. This
+  is an operation-receipt cache (command name, arguments, op envelope and result
+  line), not transcript storage: no transcript/message bodies or rows. The owner
+  approved this bounded storage on 2026-10-22. The table is created in code in the
+  Project Durable Object's SQLite; deployment needs no wrangler migration. This
+  changes no machine frame. A reconnect test must miss the live end and recover its readback from the
+  replay; repeated delivery must not regress a terminal outcome.
+  Rationale: reading the RPC's terminal state cannot recover this outcome: its
+  `done` means `{queued: true, route, id}`, not that the command finished, and the
+  browser drops its resend entry at that acknowledgement. Replay closes the
+  browser leg without reissuing an effect or widening the daemon's protocol.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the hub-and-web executor's
+  inspection of the RPC and project reconnect paths.
 
 ## Outcomes & Retrospective
 
