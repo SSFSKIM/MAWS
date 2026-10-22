@@ -34,6 +34,9 @@ import { ProjectLog, type ProjectLogState } from '../log/project-log';
 import { HumanRefused, ProjectClient, type ConnectionStatus } from '../hub/project-client';
 import { Conversation, type RequestRecord } from './conversation';
 
+const JS_HEARTBEAT_MS = 2_000;
+const SUSPENSION_GAP_MS = 10_000;
+
 export type LiveState = {
   status: ConnectionStatus;
   /**
@@ -91,6 +94,9 @@ export class ProjectConnection {
    * catch-up of a superseded connection is never drawn; its starts stay for the next one.
    */
   private caughtUpTo: number | null = null;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private lastPulse = Date.now();
+  private frozen = false;
 
   constructor(
     readonly project: string,
@@ -103,6 +109,7 @@ export class ProjectConnection {
       project,
       delay: options.delay,
       handlers: {
+        beforeFrame: this.frameCurrent,
         held: () => this.log.held(),
         welcome: (frame) => {
           this.caughtUpTo = null;
@@ -186,6 +193,11 @@ export class ProjectConnection {
     this.startedAt = performance.now();
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.shown);
+      this.lastPulse = Date.now();
+      this.heartbeat = setInterval(this.pulse, JS_HEARTBEAT_MS);
+      document.addEventListener('freeze', this.freezing);
+      document.addEventListener('resume', this.resumed);
+      addEventListener('pageshow', this.restored);
       addEventListener('online', this.online);
     }
     await this.log.load();
@@ -196,20 +208,55 @@ export class ProjectConnection {
     this.stopped = true;
     this.caughtUpTo = null;
     this.client.stop();
+    if (this.heartbeat !== null) clearInterval(this.heartbeat);
+    this.heartbeat = null;
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.shown);
+      document.removeEventListener('freeze', this.freezing);
+      document.removeEventListener('resume', this.resumed);
+      removeEventListener('pageshow', this.restored);
       removeEventListener('online', this.online);
     }
   }
 
   // Returns and catch-ups (`latency.ts`).
 
-  private readonly shown = () => {
-    if (document.visibilityState === 'visible') this.returned = { kind: 'wake', at: performance.now(), welcomed: false };
+  private readonly frameCurrent = (): boolean => {
+    if (typeof document === 'undefined' || (!this.frozen && Date.now() - this.lastPulse < SUSPENSION_GAP_MS)) return true;
+    // Buffered WebSocket tasks can run before both the heartbeat and visibility event. Do not spend that wake
+    // window reducing/rendering stale chunks; latch the gap and let a current snapshot replace this generation.
+    this.frozen = true;
+    if (document.visibilityState === 'visible') this.shown();
+    return false;
   };
 
+  private readonly pulse = () => {
+    const now = Date.now();
+    // WebKit has no freeze/resume events. Latch a wall-clock gap before updating the heartbeat: buffered network
+    // callbacks can run before visibilitychange, but cannot erase evidence that JavaScript was suspended.
+    if (now - this.lastPulse >= SUSPENSION_GAP_MS) this.frozen = true;
+    this.lastPulse = now;
+    if (this.frozen && document.visibilityState === 'visible') this.shown();
+  };
+
+  private readonly shown = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!this.frozen && Date.now() - this.lastPulse < SUSPENSION_GAP_MS) return;
+    this.frozen = false;
+    this.lastPulse = Date.now();
+    this.returned = { kind: 'wake', at: performance.now(), welcomed: false };
+    this.client.reconnect();
+  };
+
+  private readonly freezing = () => { this.frozen = true; };
+  private readonly resumed = () => { this.frozen = true; this.shown(); };
+  private readonly restored = (event: PageTransitionEvent) => { if (event.persisted) this.resumed(); };
+
   private readonly online = () => {
+    this.frozen = false;
+    this.lastPulse = Date.now();
     this.returned = { kind: 'online', at: performance.now(), welcomed: false };
+    this.client.reconnect();
   };
 
   /**
@@ -275,8 +322,10 @@ export class ProjectConnection {
    * slash, `args` the rest (none when blank). `busy`: a turn runs, so the outcome waits for it, and its time is kept
    * apart (`latency.ts`'s `op.ran.busy`).
    */
-  async command(member: string, machine: string, session: string, name: string, args: string, busy: boolean): Promise<string> {
+  async command(member: string, machine: string, session: string, name: string, args: string, busy: boolean, outlives?: string): Promise<string> {
     const nonce = await this.rpc(member, machine, 'command', { session, name, ...(args.trim() && { args: args.trim() }) });
+    const state = this.conversation.store.getState().rpcs[nonce]?.state;
+    if (state !== 'not-connected' && state !== 'failed') this.conversation.rememberCommand(nonce, machine, session, name, outlives);
     latency.commandSent(nonce, busy);
     return nonce;
   }

@@ -63,9 +63,16 @@ export class HubSocket<Down extends { t: string }, Up extends object> {
     return true;
   }
 
-  /** Drops the connection and connects again, as a close from the hub would. */
+  /** A returning page needs current state, not the old socket's buffered stream or its close handshake. */
   restart(): void {
-    this.ws?.close();
+    if (this.stopped) return;
+    const old = this.ws;
+    this.ws = null; // Fence already queued events before closing a possibly half-open connection.
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    old?.close();
+    this.attempt = 0;
+    this.connect();
   }
 
   private connect(): void {

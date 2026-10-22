@@ -2,9 +2,10 @@
 // The composers on a phone (mockups/desk/05-phone.html, 4–5): Return makes a new line and posting is the button, while
 // a desk keeps Return to post; the group composer completes an @-tag from the project's live members. A slash in a
 // session's composer is a command where the session can take one (the desk control surface's M0), and its status.
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { catalogs, catalogKey } from '../../state/catalog';
+import { pendingCommands } from '../../state/pending-commands';
 import fixture from '../../../../desk-hub/fake-machine/dx4/routes-2.1.307.json';
 import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../../latency/latency';
@@ -150,7 +151,7 @@ describe('a slash command', () => {
     mount(<SessionComposer session={capable()} />);
     type('/rename desk-m0');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'rename', 'desk-m0', false);
+    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'rename', 'desk-m0', false, undefined);
     expect(say).not.toHaveBeenCalled();
     cleanup();
     // Mid-turn Enter steers words, but a slash is a command, queued until the turn ends (H-queue).
@@ -158,7 +159,7 @@ describe('a slash command', () => {
     type('/reload-plugins ');
     expect(screen.getByTestId('composer-note').textContent).toContain('a command is queued until maws-45 is idle');
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message maws-45' }), { key: 'Enter' });
-    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'reload-plugins', '', true);
+    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'reload-plugins', '', true, undefined);
   });
 
   it("refuses a command the session cannot take in place, with the capability's reason, and sends it as words only when asked", () => {
@@ -248,7 +249,7 @@ describe('the cached command palette', () => {
     expect((screen.getByRole('textbox', { name: 'Message maws-45' }) as HTMLTextAreaElement).value).toBe('/color ');
     type('/color red');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'color', 'red', false);
+    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'color', 'red', false, undefined);
     expect(say).not.toHaveBeenCalled();
   });
   it('refuses an unknown or a terminal panel before RPC and opens existing Model locally', () => {
@@ -309,5 +310,42 @@ describe('typeahead version guidance', () => {
     open('1.8.0');
     expect(screen.getByText(/this session's plugin loaded before the update/, { selector: 'p' }).textContent).toContain("this session's plugin loaded before the update: run /reload-plugins in it, or restart it");
     expect(screen.queryByText(/commands need sminos/)).toBeNull();
+  });
+});
+
+describe('unseen receipts across a reopened session or fresh page', () => {
+  const end = { op: 'command', phase: 'end', session: S1, body: { rpc: 'own-op', op: 'command', phase: 'end', id: 'c1', name: 'color', args: 'orange', settled: { ok: true }, readback: { how: 'row', text: 'Session color set to: orange', uuid: 'color-row' } } };
+  beforeEach(() => {
+    localStorage.clear();
+    // happy-dom has no layout. Browser e2e exercises actual clipping; this boundary says the mounted line is in view.
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(private callback: IntersectionObserverCallback) {}
+      observe(target: Element) { queueMicrotask(() => this.callback([{ target, isIntersecting: true, intersectionRatio: 1, time: 0, boundingClientRect: new DOMRect(), intersectionRect: new DOMRect(), rootBounds: null }], this as unknown as IntersectionObserver)); }
+      disconnect() {}
+    });
+  });
+  afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
+
+  it('renders our unseen replay without the old RPC, and acknowledges it only while actually visible', async () => {
+    pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'own-op': end } });
+    expect(screen.getByTestId('command-status').textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+    cleanup(); // A closed view does not own the pending receipt.
+    visibility.mockReturnValue('visible');
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'own-op': end } });
+    expect(screen.getByTestId('command-status').textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+    await waitFor(() => expect(pendingCommands.pending('p1', 'mini', S1)).toEqual([]));
+    expect(screen.getByTestId('command-status')).toBeTruthy(); // Acknowledgement never makes the line vanish while read.
+    cleanup();
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'own-op': end } });
+    expect(screen.queryByTestId('command-status')).toBeNull(); // A later view is not a command-history dump.
+  });
+
+  it('never renders stale hub-replayed commands this browser did not send', () => {
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'someone-else': { ...end, body: { ...end.body, rpc: 'someone-else' } } } });
+    expect(screen.queryByLabelText('Command outcomes')).toBeNull();
   });
 });
