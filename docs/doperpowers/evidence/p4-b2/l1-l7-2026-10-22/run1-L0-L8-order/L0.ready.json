@@ -1,0 +1,38 @@
+{
+ "case": "L0",
+ "policy": "replace",
+ "steps": "The r-then-k gate: click `notes`; with 2-Set selected the probe posts r, k. Passes when the notes field ends in 가 (the probe’s keys reach the input method); otherwise the slot stops.",
+ "page": {
+  "a": {
+   "x": 821,
+   "y": 514
+  },
+  "b": {
+   "x": 1364,
+   "y": 514
+  },
+  "empty": {
+   "x": 712,
+   "y": 1023
+  },
+  "shape": {
+   "x": 1425,
+   "y": 751
+  },
+  "notes": {
+   "x": 320,
+   "y": 1310
+  }
+ },
+ "scale": 0.6791666666666667,
+ "window": {
+  "outerX": 0,
+  "outerY": 30,
+  "outerW": 2560,
+  "outerH": 1358,
+  "innerW": 2560,
+  "innerH": 1358,
+  "dpr": 2
+ },
+ "note": "page px are CSS px from the content’s top-left; on macOS the content sits at the window’s top-left (MAWS hides the title bar), so window points = page px at zoom 1. Calibrate cua’s coordinate space with the L0 step before L1."
+}

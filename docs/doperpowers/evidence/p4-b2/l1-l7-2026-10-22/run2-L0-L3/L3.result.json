@@ -1,0 +1,524 @@
+{
+ "case": "L3",
+ "policy": "replace",
+ "checks": {
+  "a reads 한글": [
+   "gksrmf",
+   "한글"
+  ],
+  "no bare jamo": [
+   false,
+   false
+  ]
+ },
+ "facts": {
+  "a": "gksrmf",
+  "b": "World",
+  "elements": 3,
+  "left": "200px",
+  "state": {
+   "surface": "main",
+   "selection": [],
+   "editingText": null,
+   "keyboard": "stage"
+  },
+  "firstKey": {
+   "key": "g",
+   "keyCode": 71,
+   "isComposing": false,
+   "textBefore": "Hello"
+  },
+  "pressToFirstKeyMs": 864.6,
+  "focusChanges": [
+   "focusout stage @129.3",
+   "focusin textbox:a @129.7",
+   "focusout textbox:a @1296.5",
+   "focusin stage @1297"
+  ]
+ },
+ "probes": [
+  {
+   "args": [
+    "--probe",
+    "input-source",
+    "com.apple.keylayout.ABC"
+   ],
+   "startedAt": 1792641571622,
+   "ms": 100,
+   "report": {
+    "selected": true,
+    "previous": {
+     "asciiCapable": false,
+     "id": "com.apple.inputmethod.Korean.2SetKorean",
+     "name": "2-Set Korean",
+     "keyboardLayout": false,
+     "perContextInput": false
+    },
+    "current": {
+     "perContextInput": false,
+     "name": "ABC",
+     "id": "com.apple.keylayout.ABC",
+     "keyboardLayout": true,
+     "asciiCapable": true
+    },
+    "exitStatus": 0,
+    "selectedAt": 1792641571700
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 0
+  },
+  {
+   "args": [
+    "--probe",
+    "input-source",
+    "com.apple.inputmethod.Korean.2SetKorean"
+   ],
+   "startedAt": 1792641572057,
+   "ms": 99,
+   "report": {
+    "selectedAt": 1792641572139,
+    "previous": {
+     "perContextInput": false,
+     "asciiCapable": true,
+     "keyboardLayout": true,
+     "id": "com.apple.keylayout.ABC",
+     "name": "ABC"
+    },
+    "current": {
+     "id": "com.apple.inputmethod.Korean.2SetKorean",
+     "asciiCapable": false,
+     "name": "2-Set Korean",
+     "keyboardLayout": false,
+     "perContextInput": false
+    },
+    "exitStatus": 0,
+    "selected": true
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 0
+  },
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "42498",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--ansi-keys",
+    "gksrmf"
+   ],
+   "startedAt": 1792641572469,
+   "ms": 140,
+   "report": {
+    "units": 6,
+    "chars": 6,
+    "postedAt": 1792641572585,
+    "mode": "ansiKeys",
+    "layout": "com.apple.keylayout.ABC",
+    "presses": [
+     {
+      "unicode": null,
+      "keyCode": 5,
+      "flags": 0
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 40
+     },
+     {
+      "keyCode": 1,
+      "unicode": null,
+      "flags": 0
+     },
+     {
+      "keyCode": 15,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "keyCode": 46,
+      "unicode": null,
+      "flags": 0
+     },
+     {
+      "flags": 0,
+      "keyCode": 3,
+      "unicode": null
+     }
+    ],
+    "pid": 42539,
+    "exitStatus": 0
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 3
+  }
+ ],
+ "events": [
+  {
+   "t": 104.7,
+   "type": "pointerdown",
+   "target": "node:a",
+   "slide": {
+    "x": 261,
+    "y": 250
+   },
+   "defaultPrevented": true,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 129.3,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 129.7,
+   "type": "focusin",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 969.3,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "g",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 969.6,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "g",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": false,
+   "textBefore": "g",
+   "defaultPrevented": false,
+   "textAfter": "g"
+  },
+  {
+   "t": 974.6,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "k",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": false,
+   "textBefore": "g",
+   "defaultPrevented": false,
+   "textAfter": "g"
+  },
+  {
+   "t": 974.6,
+   "type": "keypress",
+   "target": "textbox:a",
+   "key": "k",
+   "code": "KeyK",
+   "keyCode": 107,
+   "isComposing": false,
+   "textBefore": "g",
+   "defaultPrevented": false,
+   "textAfter": "g"
+  },
+  {
+   "t": 994.7,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "k",
+   "isComposing": false,
+   "textBefore": "g",
+   "defaultPrevented": false,
+   "textAfter": "g"
+  },
+  {
+   "t": 995,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "k",
+   "isComposing": false,
+   "textBefore": "gk",
+   "defaultPrevented": false,
+   "textAfter": "gk"
+  },
+  {
+   "t": 974.9,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "k",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": false,
+   "textBefore": "gk",
+   "defaultPrevented": false,
+   "textAfter": "gk"
+  },
+  {
+   "t": 976.3,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "s",
+   "code": "KeyS",
+   "keyCode": 83,
+   "isComposing": false,
+   "textBefore": "gk",
+   "defaultPrevented": false,
+   "textAfter": "gk"
+  },
+  {
+   "t": 976.3,
+   "type": "keypress",
+   "target": "textbox:a",
+   "key": "s",
+   "code": "KeyS",
+   "keyCode": 115,
+   "isComposing": false,
+   "textBefore": "gk",
+   "defaultPrevented": false,
+   "textAfter": "gk"
+  },
+  {
+   "t": 999.5,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "s",
+   "isComposing": false,
+   "textBefore": "gk",
+   "defaultPrevented": false,
+   "textAfter": "gk"
+  },
+  {
+   "t": 999.8,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "s",
+   "isComposing": false,
+   "textBefore": "gks",
+   "defaultPrevented": false,
+   "textAfter": "gks"
+  },
+  {
+   "t": 976.6,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "s",
+   "code": "KeyS",
+   "keyCode": 83,
+   "isComposing": false,
+   "textBefore": "gks",
+   "defaultPrevented": false,
+   "textAfter": "gks"
+  },
+  {
+   "t": 978.7,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "r",
+   "code": "KeyR",
+   "keyCode": 82,
+   "isComposing": false,
+   "textBefore": "gks",
+   "defaultPrevented": false,
+   "textAfter": "gks"
+  },
+  {
+   "t": 978.7,
+   "type": "keypress",
+   "target": "textbox:a",
+   "key": "r",
+   "code": "KeyR",
+   "keyCode": 114,
+   "isComposing": false,
+   "textBefore": "gks",
+   "defaultPrevented": false,
+   "textAfter": "gks"
+  },
+  {
+   "t": 1002.3,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "r",
+   "isComposing": false,
+   "textBefore": "gks",
+   "defaultPrevented": false,
+   "textAfter": "gks"
+  },
+  {
+   "t": 1002.4,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "r",
+   "isComposing": false,
+   "textBefore": "gksr",
+   "defaultPrevented": false,
+   "textAfter": "gksr"
+  },
+  {
+   "t": 979,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "r",
+   "code": "KeyR",
+   "keyCode": 82,
+   "isComposing": false,
+   "textBefore": "gksr",
+   "defaultPrevented": false,
+   "textAfter": "gksr"
+  },
+  {
+   "t": 980.5,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "m",
+   "code": "KeyM",
+   "keyCode": 77,
+   "isComposing": false,
+   "textBefore": "gksr",
+   "defaultPrevented": false,
+   "textAfter": "gksr"
+  },
+  {
+   "t": 980.5,
+   "type": "keypress",
+   "target": "textbox:a",
+   "key": "m",
+   "code": "KeyM",
+   "keyCode": 109,
+   "isComposing": false,
+   "textBefore": "gksr",
+   "defaultPrevented": false,
+   "textAfter": "gksr"
+  },
+  {
+   "t": 1004.5,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "m",
+   "isComposing": false,
+   "textBefore": "gksr",
+   "defaultPrevented": false,
+   "textAfter": "gksr"
+  },
+  {
+   "t": 1004.6,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "m",
+   "isComposing": false,
+   "textBefore": "gksrm",
+   "defaultPrevented": false,
+   "textAfter": "gksrm"
+  },
+  {
+   "t": 980.9,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "m",
+   "code": "KeyM",
+   "keyCode": 77,
+   "isComposing": false,
+   "textBefore": "gksrm",
+   "defaultPrevented": false,
+   "textAfter": "gksrm"
+  },
+  {
+   "t": 982.2,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "f",
+   "code": "KeyF",
+   "keyCode": 70,
+   "isComposing": false,
+   "textBefore": "gksrm",
+   "defaultPrevented": false,
+   "textAfter": "gksrm"
+  },
+  {
+   "t": 982.2,
+   "type": "keypress",
+   "target": "textbox:a",
+   "key": "f",
+   "code": "KeyF",
+   "keyCode": 102,
+   "isComposing": false,
+   "textBefore": "gksrm",
+   "defaultPrevented": false,
+   "textAfter": "gksrm"
+  },
+  {
+   "t": 1024.2,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "f",
+   "isComposing": false,
+   "textBefore": "gksrm",
+   "defaultPrevented": false,
+   "textAfter": "gksrm"
+  },
+  {
+   "t": 1024.4,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertText",
+   "data": "f",
+   "isComposing": false,
+   "textBefore": "gksrmf",
+   "defaultPrevented": false,
+   "textAfter": "gksrmf"
+  },
+  {
+   "t": 982.6,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "f",
+   "code": "KeyF",
+   "keyCode": 70,
+   "isComposing": false,
+   "textBefore": "gksrmf",
+   "defaultPrevented": false,
+   "textAfter": "gksrmf"
+  },
+  {
+   "t": 1293.8,
+   "type": "pointerdown",
+   "target": "stage",
+   "slide": {
+    "x": 101,
+    "y": 1000
+   },
+   "textBefore": "gksrmf",
+   "defaultPrevented": true
+  },
+  {
+   "t": 1296.5,
+   "type": "focusout",
+   "target": "textbox:a",
+   "defaultPrevented": false
+  },
+  {
+   "t": 1297,
+   "type": "focusin",
+   "target": "stage",
+   "defaultPrevented": false
+  }
+ ]
+}

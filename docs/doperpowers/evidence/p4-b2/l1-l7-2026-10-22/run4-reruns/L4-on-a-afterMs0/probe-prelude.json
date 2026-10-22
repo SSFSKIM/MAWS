@@ -1,0 +1,66 @@
+{
+ "build": "1abea7b0eea810db35f0d42ad28bf12cde8820ed004fa9bca29be8a19b0b987a",
+ "sourceBefore": "( { \"Bundle ID\" = \"com.apple.PressAndHold\"; InputSourceKind = \"Non Keyboard Input Method\"; }, { InputSourceKind = \"Keyboard Layout\"; \"KeyboardLayout ID\" = 252; \"KeyboardLayout Name\" = ABC; } )",
+ "selected2Set": {
+  "args": [
+   "--probe",
+   "input-source",
+   "com.apple.inputmethod.Korean.2SetKorean"
+  ],
+  "startedAt": 1792641863281,
+  "ms": 85,
+  "report": {
+   "selected": true,
+   "previous": {
+    "name": "ABC",
+    "keyboardLayout": true,
+    "asciiCapable": true,
+    "id": "com.apple.keylayout.ABC",
+    "perContextInput": false
+   },
+   "selectedAt": 1792641863348,
+   "current": {
+    "name": "2-Set Korean",
+    "id": "com.apple.inputmethod.Korean.2SetKorean",
+    "asciiCapable": false,
+    "perContextInput": false,
+    "keyboardLayout": false
+   },
+   "exitStatus": 0
+  },
+  "stderr": "",
+  "failure": null,
+  "traceFrom": 0
+ },
+ "putBack": {
+  "args": [
+   "--probe",
+   "input-source",
+   "com.apple.keylayout.ABC"
+  ],
+  "startedAt": 1792641867897,
+  "ms": 87,
+  "report": {
+   "selectedAt": 1792641867967,
+   "previous": {
+    "asciiCapable": false,
+    "name": "2-Set Korean",
+    "id": "com.apple.inputmethod.Korean.2SetKorean",
+    "keyboardLayout": false,
+    "perContextInput": false
+   },
+   "selected": true,
+   "current": {
+    "asciiCapable": true,
+    "id": "com.apple.keylayout.ABC",
+    "perContextInput": false,
+    "keyboardLayout": true,
+    "name": "ABC"
+   },
+   "exitStatus": 0
+  },
+  "stderr": "",
+  "failure": null,
+  "traceFrom": 0
+ }
+}

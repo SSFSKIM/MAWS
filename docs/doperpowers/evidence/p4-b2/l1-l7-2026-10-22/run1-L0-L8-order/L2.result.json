@@ -1,0 +1,450 @@
+{
+ "case": "L2",
+ "policy": "replace",
+ "checks": {
+  "b reads 하나": [
+   "하나",
+   "하나"
+  ],
+  "b stays bold": [
+   [
+    {
+     "text": "하나",
+     "marks": {
+      "b": {}
+     }
+    }
+   ],
+   [
+    {
+     "text": "하나",
+     "marks": {
+      "b": {}
+     }
+    }
+   ]
+  ]
+ },
+ "facts": {
+  "a": "Hello",
+  "b": "하나",
+  "elements": 3,
+  "left": "200px",
+  "state": {
+   "surface": "main",
+   "selection": [],
+   "editingText": null,
+   "keyboard": "stage"
+  },
+  "firstKey": {
+   "key": "ㅎ",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "World",
+   "textAfter": ""
+  },
+  "pressToFirstKeyMs": 437.6,
+  "compositionStartText": "",
+  "focusChanges": [
+   "focusout stage @6",
+   "focusin textbox:b @6.2",
+   "focusout textbox:b @761.1",
+   "focusin stage @761.5"
+  ],
+  "runs": [
+   {
+    "text": "하나",
+    "marks": {
+     "b": {}
+    }
+   }
+  ]
+ },
+ "probes": [
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "41353",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--ansi-keys",
+    "gksk"
+   ],
+   "startedAt": 1792641433737,
+   "ms": 132,
+   "report": {
+    "layout": "com.apple.keylayout.2SetHangul",
+    "units": 4,
+    "presses": [
+     {
+      "keyCode": 5,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "keyCode": 40,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "unicode": null,
+      "flags": 0,
+      "keyCode": 1
+     },
+     {
+      "keyCode": 40,
+      "unicode": null,
+      "flags": 0
+     }
+    ],
+    "pid": 41451,
+    "mode": "ansiKeys",
+    "chars": 4,
+    "exitStatus": 0,
+    "postedAt": 1792641433849
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 3
+  }
+ ],
+ "events": [
+  {
+   "t": 0.8,
+   "type": "pointerdown",
+   "target": "node:b",
+   "slide": {
+    "x": 1061,
+    "y": 250
+   },
+   "defaultPrevented": true,
+   "textAfter": "World"
+  },
+  {
+   "t": 6,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 6.2,
+   "type": "focusin",
+   "target": "textbox:b",
+   "textBefore": "World",
+   "defaultPrevented": false,
+   "textAfter": "World"
+  },
+  {
+   "t": 438.4,
+   "type": "keydown",
+   "target": "textbox:b",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "World",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 454.9,
+   "type": "compositionstart",
+   "target": "textbox:b",
+   "data": "",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 456.4,
+   "type": "compositionupdate",
+   "target": "textbox:b",
+   "data": "ㅎ",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 456.5,
+   "type": "beforeinput",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 457,
+   "type": "input",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 438.8,
+   "type": "keyup",
+   "target": "textbox:b",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 443.7,
+   "type": "keydown",
+   "target": "textbox:b",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 500.7,
+   "type": "compositionupdate",
+   "target": "textbox:b",
+   "data": "하",
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 500.7,
+   "type": "beforeinput",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 500.8,
+   "type": "input",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 444,
+   "type": "keyup",
+   "target": "textbox:b",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 445.4,
+   "type": "keydown",
+   "target": "textbox:b",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 503,
+   "type": "compositionupdate",
+   "target": "textbox:b",
+   "data": "한",
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 503,
+   "type": "beforeinput",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 503.2,
+   "type": "input",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 445.8,
+   "type": "keyup",
+   "target": "textbox:b",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 83,
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 447.1,
+   "type": "keydown",
+   "target": "textbox:b",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 504.6,
+   "type": "compositionupdate",
+   "target": "textbox:b",
+   "data": "하",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 504.7,
+   "type": "beforeinput",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 504.9,
+   "type": "input",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 504.9,
+   "type": "compositionend",
+   "target": "textbox:b",
+   "data": "하",
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 506.1,
+   "type": "compositionstart",
+   "target": "textbox:b",
+   "data": "",
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 506.3,
+   "type": "compositionupdate",
+   "target": "textbox:b",
+   "data": "나",
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 506.3,
+   "type": "beforeinput",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "나",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 506.4,
+   "type": "input",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "나",
+   "isComposing": true,
+   "textBefore": "하나",
+   "defaultPrevented": false,
+   "textAfter": "하나"
+  },
+  {
+   "t": 447.4,
+   "type": "keyup",
+   "target": "textbox:b",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": true,
+   "textBefore": "하나",
+   "defaultPrevented": false,
+   "textAfter": "하나"
+  },
+  {
+   "t": 758.5,
+   "type": "pointerdown",
+   "target": "stage",
+   "slide": {
+    "x": 101,
+    "y": 1000
+   },
+   "textBefore": "하나",
+   "defaultPrevented": true
+  },
+  {
+   "t": 760.4,
+   "type": "compositionend",
+   "target": "textbox:b",
+   "data": "나",
+   "textBefore": "하나",
+   "defaultPrevented": false,
+   "textAfter": "하나"
+  },
+  {
+   "t": 761.1,
+   "type": "focusout",
+   "target": "textbox:b",
+   "defaultPrevented": false
+  },
+  {
+   "t": 761.5,
+   "type": "focusin",
+   "target": "stage",
+   "defaultPrevented": false
+  }
+ ]
+}

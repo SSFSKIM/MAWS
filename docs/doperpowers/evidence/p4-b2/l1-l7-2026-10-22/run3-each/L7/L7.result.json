@@ -1,0 +1,575 @@
+{
+ "case": "L7",
+ "policy": "replace",
+ "checks": {
+  "a reads a Hanja in place of 한": [
+   false,
+   true
+  ]
+ },
+ "facts": {
+  "a": "한韓",
+  "b": "World",
+  "elements": 3,
+  "left": "200px",
+  "state": {
+   "surface": "main",
+   "selection": [],
+   "editingText": null,
+   "keyboard": "stage"
+  },
+  "firstKey": {
+   "key": "ㅎ",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "textAfter": ""
+  },
+  "pressToFirstKeyMs": 390.9,
+  "compositionStartText": "",
+  "focusChanges": [
+   "focusout stage @19.2",
+   "focusin textbox:a @19.5",
+   "focusout textbox:a @1767.5",
+   "focusin stage @1768.2"
+  ],
+  "hanjaWindow": "opened"
+ },
+ "probes": [
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "44012",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--keys",
+    "g",
+    "k",
+    "s"
+   ],
+   "startedAt": 1792641668709,
+   "ms": 77,
+   "report": {
+    "postedAt": 1792641668772,
+    "keys": "g k s",
+    "flagsChanged": [
+     [],
+     [],
+     []
+    ],
+    "layout": "com.apple.keylayout.2SetHangul",
+    "exitStatus": 0,
+    "mode": "keySpecs",
+    "presses": [
+     {
+      "keyCode": 5,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "unicode": null,
+      "flags": 0,
+      "keyCode": 40
+     },
+     {
+      "keyCode": 1,
+      "flags": 0,
+      "unicode": null
+     }
+    ],
+    "units": 3,
+    "pid": 44072
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 3
+  },
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "44012",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--keys",
+    "alt+Return"
+   ],
+   "startedAt": 1792641668820,
+   "ms": 89,
+   "report": {
+    "exitStatus": 0,
+    "mode": "keySpecs",
+    "layout": "com.apple.keylayout.2SetHangul",
+    "keys": "alt+Return",
+    "pid": 44074,
+    "flagsChanged": [
+     [
+      {
+       "keyCode": 58,
+       "flags": 524320
+      },
+      {
+       "keyCode": 58,
+       "flags": 0
+      }
+     ]
+    ],
+    "presses": [
+     {
+      "keyCode": 36,
+      "flags": 524320,
+      "unicode": null
+     }
+    ],
+    "units": 1,
+    "postedAt": 1792641668901
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 19
+  },
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "44012",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--keys",
+    "Return"
+   ],
+   "startedAt": 1792641669724,
+   "ms": 115,
+   "report": {
+    "presses": [
+     {
+      "unicode": null,
+      "keyCode": 36,
+      "flags": 0
+     }
+    ],
+    "exitStatus": 0,
+    "pid": 44078,
+    "mode": "keySpecs",
+    "keys": "Return",
+    "flagsChanged": [
+     []
+    ],
+    "layout": "com.apple.keylayout.2SetHangul",
+    "postedAt": 1792641669830,
+    "units": 1
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 30
+  }
+ ],
+ "events": [
+  {
+   "t": 1.1,
+   "type": "pointerdown",
+   "target": "node:a",
+   "slide": {
+    "x": 261,
+    "y": 250
+   },
+   "defaultPrevented": true,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 19.2,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 19.5,
+   "type": "focusin",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 392,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 420.4,
+   "type": "compositionstart",
+   "target": "textbox:a",
+   "data": "",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 421.1,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "ㅎ",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 421.1,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 425.3,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 395.6,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 401.1,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 429.9,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "하",
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 430,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 430.1,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 401.3,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 402,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 432.4,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "한",
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 432.5,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 432.5,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 402.4,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 83,
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 520.8,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "Alt",
+   "code": "AltLeft",
+   "keyCode": 18,
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 524.7,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "Enter",
+   "code": "Enter",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 608.1,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "한",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 608.1,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 608.3,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 608.4,
+   "type": "compositionend",
+   "target": "textbox:a",
+   "data": "한",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 608.7,
+   "type": "compositionstart",
+   "target": "textbox:a",
+   "data": "",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 609.4,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "韓",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 609.4,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "韓",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 611,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "韓",
+   "isComposing": true,
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 525,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "Enter",
+   "code": "Enter",
+   "keyCode": 13,
+   "isComposing": true,
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 1450,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "Enter",
+   "code": "Enter",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 1470,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "韓",
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 1470.1,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "韓",
+   "isComposing": true,
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 1470.2,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "韓",
+   "isComposing": true,
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 1470.2,
+   "type": "compositionend",
+   "target": "textbox:a",
+   "data": "韓",
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 1455.2,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "Enter",
+   "code": "Enter",
+   "keyCode": 13,
+   "isComposing": false,
+   "textBefore": "한韓",
+   "defaultPrevented": false,
+   "textAfter": "한韓"
+  },
+  {
+   "t": 1764.5,
+   "type": "pointerdown",
+   "target": "stage",
+   "slide": {
+    "x": 101,
+    "y": 1000
+   },
+   "textBefore": "한韓",
+   "defaultPrevented": true
+  },
+  {
+   "t": 1767.5,
+   "type": "focusout",
+   "target": "textbox:a",
+   "defaultPrevented": false
+  },
+  {
+   "t": 1768.2,
+   "type": "focusin",
+   "target": "stage",
+   "defaultPrevented": false
+  }
+ ]
+}

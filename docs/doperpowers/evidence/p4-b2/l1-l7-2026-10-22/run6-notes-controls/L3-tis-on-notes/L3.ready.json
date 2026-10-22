@@ -1,0 +1,38 @@
+{
+ "case": "L3",
+ "policy": "replace",
+ "steps": "Select ABC first. Click `a`; wait 300 ms; press ctrl+space (to 2-Set); wait 300 ms; press g k s r m f; wait 300 ms; click `empty`.",
+ "page": {
+  "a": {
+   "x": 614,
+   "y": 428
+  },
+  "b": {
+   "x": 1394,
+   "y": 428
+  },
+  "empty": {
+   "x": 458,
+   "y": 1159
+  },
+  "shape": {
+   "x": 1481,
+   "y": 769
+  },
+  "notes": {
+   "x": 320,
+   "y": 1310
+  }
+ },
+ "scale": 0.975,
+ "window": {
+  "outerX": 0,
+  "outerY": 30,
+  "outerW": 2560,
+  "outerH": 1358,
+  "innerW": 2560,
+  "innerH": 1358,
+  "dpr": 2
+ },
+ "note": "page px are CSS px from the content’s top-left; on macOS the content sits at the window’s top-left (MAWS hides the title bar), so window points = page px at zoom 1. Calibrate cua’s coordinate space with the L0 step before L1."
+}
