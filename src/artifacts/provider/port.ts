@@ -40,7 +40,7 @@
 // keeps its accounting. An exception from an application listener (`subscribe`, `onRestored`) is the application's:
 // every listener still runs, the connection stays, and the first error is rethrown to the caller once state is settled.
 import * as awarenessProtocol from '@y/protocols/awareness';
-import { ArtifactProvisionalSchema, type ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-A2 (X35)
+import { ArtifactProvisionalSchema, mergeProvisional, type ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-A2 (X35)
 import { applyV1, diffV1, mergeUpdates, onUpdate, stateVector, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
 
@@ -99,6 +99,10 @@ export class PortProvider {
   private readonly listeners = new Set<(state: SaveState) => void>();
   private readonly restoredListeners = new Set<(restored: Restored) => void>();
   private readonly provisionalListeners = new Set<(frame: ArtifactProvisional) => void>(); // P4-A2 (X35)
+  // P4-A2 G2 (G-R1's mid-stream condition): each call still streaming on this connection, as its frames so far make it
+  // (a publish's files merged by path), for a listener that attaches after them
+  private readonly streaming = new Map<string, ArtifactProvisional>();
+  private readonly ended = new Set<string>(); // calls committed or dropped on this connection: a late tick is stale
   private readonly log: (line: string) => void;
   private readonly offUpdate: () => void;
   private readonly onMessage = (event: { data?: unknown }) => this.receive(event.data);
@@ -144,8 +148,14 @@ export class PortProvider {
   // frame's listener reads `state.integrated` against its `commitSeq`). A provisional frame passes the composition
   // hold: the layer moves while the person composes elsewhere and a refusal withdraws at once; the withdrawal on commit
   // waits for the held row through `integrated`.
+  // G2 (G-R1): a new listener is told at once of every call still streaming, as one frame each. The host restates the
+  // open calls to a connection in the flush that carries its step 2, and an editor's open resolves on that step 2, so
+  // its store attaches after those frames: without them a view opened mid-stream would draw nothing until the next tick
+  // (and a publish's files already whole would never come again). A committed or dropped call is not kept: a store
+  // draws no committed layer it never streamed (its write is on the page or in the hold), and a dropped one is gone.
   onProvisional(listener: (frame: ArtifactProvisional) => void): () => void {
     this.provisionalListeners.add(listener);
+    for (const frame of [...this.streaming.values()]) listener(frame);
     return () => this.provisionalListeners.delete(listener);
   }
 
@@ -188,6 +198,8 @@ export class PortProvider {
     this.synced = false;
     this.catchUp = 'none';
     this.buffered = [];
+    this.streaming.clear(); // G2: the streams ended with the connection; the next step 2 brings the host's restatement
+    this.ended.clear();
     this.endAwarenessWindow();
     const others = [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID);
     awarenessProtocol.removeAwarenessStates(this.awareness, others, this);
@@ -363,6 +375,11 @@ export class PortProvider {
         // P4-A2: the host's JSON, read strictly (a frame the shape does not fit is a broken peer, as a malformed frame is)
         const parsed = ArtifactProvisionalSchema.safeParse(JSON.parse(frame.json));
         if (!parsed.success) throw new Error(`a provisional frame the shape refuses: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+        const id = parsed.data.toolUseId as string;
+        if (parsed.data.state !== 'streaming') {
+          this.streaming.delete(id); // G2
+          this.ended.add(id);
+        } else if (!this.ended.has(id)) this.streaming.set(id, mergeProvisional(this.streaming.get(id), parsed.data));
         return { provisional: parsed.data };
       }
     }

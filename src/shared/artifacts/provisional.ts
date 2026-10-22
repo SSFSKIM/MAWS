@@ -54,3 +54,18 @@ export type ArtifactProvisional = z.infer<typeof ArtifactProvisionalSchema>;
 
 // The batch tick: Desktop batches its deltas at about this rate (the spec §4.2), one frame per tick per call at most.
 export const PROVISIONAL_TICK_MS = 16;
+
+/**
+ * A call's frame over what its earlier frames made (G2, G-R1): a publish's frame lists only the files that grew or
+ * appeared since the frame before, so its `file` ops merge into the earlier ones by path, a later text replacing the
+ * earlier in its place and a new path appended; a file no frame touched keeps its op object, so a reader can tell an
+ * unchanged file by identity. Every other op list replaces the one before (R1: cumulative). The renderer's store and the
+ * port's provider (which keeps each call still streaming for a listener that attaches later) merge alike.
+ */
+export function mergeProvisional(earlier: ArtifactProvisional | undefined, frame: ArtifactProvisional): ArtifactProvisional {
+  const files = earlier?.ops.filter((op) => op.op === 'file') ?? [];
+  if (files.length === 0) return frame;
+  const byPath = new Map(files.map((op) => [op.path, op]));
+  for (const op of frame.ops) if (op.op === 'file') byPath.set(op.path, op); // a Map keeps a replaced key in its place and appends a new one
+  return { ...frame, ops: [...frame.ops.filter((op) => op.op !== 'file'), ...byPath.values()] };
+}

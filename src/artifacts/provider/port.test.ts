@@ -4,6 +4,7 @@ import { applyV1, checkUpdate, diffV1, newDoc, onUpdate, stateVector, transact, 
 import { decodeFrame, encodeFrame, type Frame } from './frames';
 import type { ArtifactProvisional } from '@shared/artifacts/provisional';
 import { PortProvider, type PortLike, type SaveState } from './port';
+import { ProvisionalLayers } from '../provisional';
 
 type Listener = (event: { data?: unknown }) => void;
 
@@ -880,5 +881,36 @@ describe('the provisional layer’s frames (P4-A2)', () => {
     pump(replicaEnd, hostEnd);
     expect(heard).toEqual(['streaming']);
     provider.destroy();
+  });
+
+  // G2 (G-R1's mid-stream condition): the host restates every open call to a connection in the flush that carries its
+  // step 2, before an editor that opens the document has attached a listener (the open resolves on that step 2)
+  it('keeps every call still streaming for a listener that attaches after its frames, files merged by path; not a dropped or committed one', () => {
+    const { provider, replicaEnd, hostEnd, announce } = replica();
+    const file = (path: string, text: string) => ({ op: 'file' as const, path, text });
+    const deck = { kind: 'presentation' as const };
+    // the restated frame (every file so far), then a tick that grew the last one only
+    announce(provisional({ ...deck, toolUseId: 'toolu_1' as ArtifactProvisional['toolUseId'], ops: [file('project/slides/a.html', '<section id="a">A</section>'), file('project/slides/b.html', '<section id="b">B</section>'), file('project/slides/c.html', '<section id="c">C')] }));
+    announce(provisional({ ...deck, toolUseId: 'toolu_1' as ArtifactProvisional['toolUseId'], ops: [file('project/slides/c.html', '<section id="c">Ce')] }));
+    announce(provisional({ ...deck, toolUseId: 'toolu_2' as ArtifactProvisional['toolUseId'] }));
+    announce(provisional({ ...deck, toolUseId: 'toolu_2' as ArtifactProvisional['toolUseId'], state: 'dropped', ops: [] }));
+    announce(provisional({ ...deck, toolUseId: 'toolu_3' as ArtifactProvisional['toolUseId'] }));
+    announce(provisional({ ...deck, toolUseId: 'toolu_3' as ArtifactProvisional['toolUseId'], state: 'committed', commitSeq: 3, ops: [] }));
+    announce(provisional({ ...deck, toolUseId: 'toolu_3' as ArtifactProvisional['toolUseId'] })); // a late tick after the commit: stale
+    pump(replicaEnd, hostEnd);
+
+    // the store over the provider as a handle presents it (a handle's state adds `readOnly`)
+    const source = { onProvisional: (l: (frame: ArtifactProvisional) => void) => provider.onProvisional(l), subscribe: (l: (state: SaveState & { readOnly: boolean }) => void) => provider.subscribe((state) => l({ ...state, readOnly: false })), state: () => ({ ...provider.state, readOnly: false }) };
+    const layers = new ProvisionalLayers(source);
+    const stop = layers.attach();
+    expect([...layers.get().keys()], 'the dropped and the committed calls are not replayed').toEqual(['toolu_1']);
+    expect(layers.get().get('toolu_1' as never)!.ops).toEqual([file('project/slides/a.html', '<section id="a">A</section>'), file('project/slides/b.html', '<section id="b">B</section>'), file('project/slides/c.html', '<section id="c">Ce')]);
+    stop();
+
+    // the connection lost: nothing is kept; the next connection's step 2 brings the host's restatement again
+    provider.disconnect();
+    const again = new ProvisionalLayers(source);
+    again.attach();
+    expect(again.get().size).toBe(0);
   });
 });

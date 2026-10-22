@@ -8,7 +8,7 @@
 // application, the held row's included when the hold releases, so the layer goes in the task that puts the real text on
 // the page: no paint shows neither, and none shows both. The layer is never written anywhere (rule 1); what it covers
 // is the editor's (rule 4).
-import type { ArtifactProvisional } from '@shared/artifacts/provisional';
+import { mergeProvisional, type ArtifactProvisional } from '@shared/artifacts/provisional';
 import type { DocumentHandle } from '../host';
 
 /** What the layers read of an open document: its provisional frames and its integration state. */
@@ -58,14 +58,14 @@ export class ProvisionalLayers {
     switch (frame.state) {
       case 'streaming':
         // a late tick after the commit is stale: the committed frame carries the batch whole
-        if (this.layers.get(id)?.state !== 'committed') this.set(id, withFiles(this.layers.get(id), frame));
+        if (this.layers.get(id)?.state !== 'committed') this.set(id, mergeProvisional(this.layers.get(id), frame));
         return;
       case 'committed':
         // kept until its row is integrated; a frame without its seq names no row to wait for, so it goes at once. A
         // replica that never drew the call (attached after its last tick, or reconnected since) draws nothing now
         // either: the real text is the next frame, and a layer for one paint before it would be a flash.
         if (!this.layers.has(id)) return;
-        this.set(id, (frame.commitSeq ?? 0) > this.source.state().integrated ? withFiles(this.layers.get(id), frame) : null);
+        this.set(id, (frame.commitSeq ?? 0) > this.source.state().integrated ? mergeProvisional(this.layers.get(id), frame) : null);
         return;
       case 'dropped':
         this.set(id, null);
@@ -106,19 +106,4 @@ export function openFile(layer: ArtifactProvisional): string | null {
   if (layer.state !== 'streaming') return null;
   const files = layer.ops.filter((op) => op.op === 'file');
   return files[files.length - 1]?.path ?? null;
-}
-
-/**
- * The frame as the call's layer (G2, G-R1): a publish's frame lists only the files that grew or appeared since the frame
- * before, so its `file` ops merge into the layer's by path, a later text replacing the earlier in its place and a new
- * path appended; a file no frame touched keeps its op object, so a reader can tell an unchanged file by identity. Every
- * other op list replaces the one before (R1: cumulative). A frame with no file ops over a layer with none is the frame.
- */
-function withFiles(layer: ArtifactProvisional | undefined, frame: ArtifactProvisional): ArtifactProvisional {
-  const earlier = layer?.ops.filter((op) => op.op === 'file') ?? [];
-  const later = frame.ops.filter((op) => op.op === 'file');
-  if (earlier.length === 0) return frame;
-  const files = new Map(earlier.map((op) => [op.path, op]));
-  for (const op of later) files.set(op.path, op); // a Map keeps a replaced key in its place and appends a new one
-  return { ...frame, ops: [...frame.ops.filter((op) => op.op !== 'file'), ...files.values()] };
 }
