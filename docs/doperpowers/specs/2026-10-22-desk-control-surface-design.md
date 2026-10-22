@@ -2602,8 +2602,20 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   There are no arguments, signed RPCs or transcript/result bodies in this record;
   it never reissues an effect. A fresh page can match the hub's replay by nonce and
   draw the actual op end even though the original in-memory RPC is gone. Until the
-  replay arrives it says Checking command outcome, not Ran. A terminal receipt is
-  acknowledged only when its line intersects the viewport while the document is
+  replay arrives it says Checking command outcome, not Ran. Refusals before an op
+  starts are not retained by the hub: a restored nonce with neither a live RPC nor
+  an op must not wait forever. After a join replay completed beyond that nonce's
+  60-second RPC_FRESHNESS_MS acceptance window, it says Command outcome unavailable
+  · may not have run; check the session. This is not a claimed refusal or success.
+  The join sends every retained op before handling resume, whose caught-up frame
+  supplies the replay timestamp. A fresh restored batch waits for acceptance to
+  expire and requests a deduplicated, visible-only rejoin; this observes outcomes,
+  never re-executes commands. Existing RPCs and real starts/ends take precedence,
+  including a late op replacing the fallback while its line remains mounted.
+  Chosen over extending the hub cache with RPC refusals: the bounded client fallback
+  covers any unrecoverable receipt without a protocol/storage change and states
+  exactly what is known. A terminal receipt is acknowledged only when its line
+  intersects the viewport while the document is
   visible. The mounted composer leaves that line in place while it is read; the
   next view does not resurrect an acknowledged receipt. Other browsers' replayed
   history is not drawn in this composer's receipt list. Rejected: sessionStorage,
@@ -2612,20 +2624,6 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   which would bury the reader under other devices' history. The coordinator set
   this browser-ownership boundary explicitly after the phone walk.
   Date/Author: 2026-10-22, the phone-fix executor and orchestrator.
-
-- Decision: The shared transcript list releases following on upward wheel, touch
-  or navigation-key intent, before the native scroll event, and on a DOM offset
-  that moved upward before that event arrived. A streaming update must not consume
-  that movement by pinning the tail first. The old 80-pixel near-end band could
-  repeatedly undo small movements, and the virtualizer's independent follow policy
-  and pending last-row target could keep chasing the tail after the list detached.
-  The list now owns following; releasing it cancels that pending target without a
-  scrollTop write, preserving touch momentum. Returning to the actual bottom (one
-  pixel for rounding), or Jump to latest, resumes following. History anchoring and
-  carried positions remain. This is the shared MAWS/desk list, not a phone-only
-  fork. Tests exercise continuous 20 ms chunks, native Chromium wheel/touch, and
-  WebKit touch-like movement; the owner's physical iPhone walk remains the final
-  momentum check. Date/Author: 2026-10-22, the phone scroll executor.
 
 ## Outcomes & Retrospective
 
