@@ -74,8 +74,12 @@ allows today.
   (Decision Log, entries 4 and 6).
 - [x] (2026-10-22) sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries
   `updatedInput`) landed (doperpowers #338, `2920e494`); M3 treats it as its floor.
-- [ ] M0 — foundation: capabilities, the `read` relay, the op-outcome pattern, the
-  `command` op's dispatch with five measured rows (doperpowers; MAWS).
+- [x] (2026-10-22 09:30Z) M0 — foundation: capabilities, the `read` relay, the op-outcome
+  pattern, the `command` op's dispatch with five measured rows; built, task-reviewed clean
+  and branch-reviewed at `high` in both repositories (doperpowers `desk-ctl-m0`, sminos
+  1.7.0; MAWS `desk-ctl-m0`), one late-restart reload edge deferred (Decision Log, entry
+  10). Its acceptance walk on both Macs (A1–A9, A33's paths) is the orchestrator's, after
+  the rollout of §13.
 - [ ] M1 — the command spine: the route table whole, the typeahead.
 - [ ] M2 — native panels from reads: side question, context and usage, model and effort,
   MCP, compact with instructions, status, permissions and hooks.
@@ -2242,6 +2246,46 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from the fix waves' reports
   and both task reviews.
 
+- Decision: The fixes after the doperpowers branch review (`4cab5c44`), and the one
+  finding left. (1) The plane numbers its probes as they begin, and a reload counts as
+  done only on a different child seen by a probe begun after the daemon first looked at
+  the op (ordinals, since the plane's clock is monotonic and the daemon's is wall time);
+  a cached predecessor is no evidence. (2) `recover_ops()` reads a reload's kept end like
+  any op's, so a reload the engine refused while the daemon was down ends as the child
+  kept it; only a reload that ran (module gone, nothing kept) is left to the effect
+  check. (3) A respawned child rebuilds its id → nonce map from its kept `command`
+  answers that have no end. Left, recorded as an unresolved review finding on the
+  doperpowers PR: the probe fence can turn a reload that succeeded while the daemon was
+  down into a false 60 s timeout when the daemon returns within a probe of the claim's
+  deadline, since the deadline still runs from the claim; the fix is to run the
+  deadline from the daemon's first look (or grant one fresh probe before failing).
+  Rationale: the three fixes close the ways an outcome could be lost or falsely
+  confirmed; the one left needs a daemon outage ending within ~2 s of a reload's 60 s
+  deadline, reports a failure the transcript contradicts rather than a false success,
+  and the third review round on the same path is where the loop stops.
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from the reviewer-high
+  rounds on doperpowers.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**M0 (2026-10-22).** Built in both repositories as two parallel tasks against the
+Interfaces and one route fixture, each proved against the other repository's stand-in:
+doperpowers `desk-ctl-m0` (sminos 1.7.0: the route table and its check, the `read` and
+`command` ops, the child's capabilities and nonce keeping, the daemon's `command` RPC,
+`op` outcomes owed and recovered across restart and reload, the `read` relay, `sminos
+command` and `sminos read`), MAWS `desk-ctl-m0` (the protocol's new fields, kinds and
+frame, the hub's shape checks and `welcome.kinds`, the fake machine's M0 producer, the
+web's capabilities from both presences with the three fallbacks, the composer's slash
+path and `CommandStatus`, the Info tab's status read, M0's latency paths). What the
+reviews found was concentrated where the spec said the risk was: the op-outcome
+guarantee. The task reviews and the doperpowers branch review found five ways an
+outcome could be lost or falsely confirmed across a daemon restart, a reload or a child
+respawn — none visible to a happy-path test — and each became a red test first; the
+MAWS reviews found latency marks that measured receipt rather than the draw §12 names.
+Not yet shown: the acceptance on the owner's Macs (A1–A9, A33's paths), which needs the
+deployed hub and the rollout; the fake machine does not model A8, which rests on the
+machine half's tests and the walk. For M1: the route fixture's reading (entries 5, 9)
+is the one source both halves read; the web's `outlives` label is local until the
+catalog carries it; a browser that misses an `op end` while its socket is down shows
+*queued* (Surprises) — a replay or a resync of owed outcomes to a reconnecting browser
+is the open design question, not settled by M0.
