@@ -397,10 +397,13 @@ Four more rules bind the table:
 
 - **A built-in not in the table is refused**, `unknown-builtin`, with *not measured on
   this engine* — never tried (the brief's decision 2). A row the spikes did not reach
-  (`list-agents`, `subtask <task>`, `fast on|off` — the test machine's gateway disables
-  fast mode, S4) is in the table with `enabled: false` and *not measured on <engine>*
-  until the research session measures it; a measured row is enabled by a one-line table
-  change.
+  (`fast on|off` — the test machine's gateway disables fast mode, S4) is in the table
+  with `enabled: false` and *not measured on <engine>* until the research session
+  measures it; a measured row is enabled by a one-line table change (spike 13 did this
+  for `list-agents` and `subtask`: both `run`, no panel; `list-agents` names the
+  machine's other Claude sessions as well as the subagents, sessions outside this
+  project included, so its item says so; `subtask <task>` starts a background fork
+  agent whose finish arrives as a `<task-notification>` that starts a main turn).
 - **What outlives the session is labelled or not offered** (the brief's design rule;
   the inventory's H-default). A `run` row whose command saves a setting carries
   `outlives`, a sentence the web shows with the command: `mcp disable` and `mcp enable`
@@ -699,22 +702,26 @@ was read:
    sets itself — an allow it handed out carrying `setMode` (a scoped allow, a plan's
    approval), and `/plan` when it ran one — so it publishes the new mode the moment the
    decision is handed to the engine, without waiting for a hook.
-2. **The classic hooks' input.** Every classic hook input carries `permission_mode`
-   (read from code: the classic base input sets it on every fire, cli 2.1.307 ~1084852;
-   not traced to every caller, not measured). The bridge registers
-   `classic.PermissionRequest` and `classic.SubagentStop` today; in auto mode requests
-   are rare, so a reading fed by those alone goes stale for long stretches. M3 adds a
-   pass-through on a frequent classic hook — `classic.PostToolUse`, which fires on every
-   tool result; and `classic.UserPromptSubmit`, on every prompt — that reads
-   `permission_mode` and calls `next(e)` with nothing else (no `$` call, so it holds the
-   turn for nothing). A reading from a hook never overrides a decision of the bridge's
-   own that is newer.
+2. **Five classic hooks' input, measured (spike 12, 2.1.307).** `permission_mode` is
+   carried by `classic.UserPromptSubmit`, `classic.PermissionRequest`,
+   `classic.PostToolUse`, `classic.PostToolBatch` and `classic.Stop`, read as the hook
+   fires (a Shift+Tab mid-turn showed in the same turn's next `PostToolUse`). It is
+   **not** carried by `classic.PreToolUse` (a mod's `e` there is the `ToolCallEnvelope`,
+   not the classic input: 34 of 34 had none) nor by `classic.MessageDisplay`. The bridge
+   registers `PermissionRequest` today; in auto mode requests are rare, so a reading fed
+   by it alone goes stale for long stretches. M3 adds pass-through hooks on the other
+   four — `UserPromptSubmit` on every prompt, `PostToolUse` on every tool result,
+   `PostToolBatch`, `Stop` — each reading `permission_mode` and calling `next(e)` with
+   nothing else (no `$` call, so it holds the turn for nothing). A reading from a hook
+   never overrides a decision of the bridge's own that is newer.
 3. **Not the rows.** The transcript's `permission-mode` rows appear at flush points and
    skip changes: an allow's `setMode` wrote none; `auto` first showed at the next
    prompt, `acceptEdits` never got a row (S1). They are not read.
 
-**The gap, labelled.** A Shift+Tab at the terminal fires no hook, so an idle session shows
-the old mode until its next classic hook fires. The bridge emits DX5 `mode {mode, at}`
+**The gap, labelled.** A Shift+Tab at the terminal fires no hook at all
+(`ConfigChange` stays silent), and the mod API has no mode read to poll (spike 12), so
+a change made at an idle terminal is invisible until the next prompt or tool result
+fires one of the five. The bridge emits DX5 `mode {mode, at}`
 when its reading changes, the child keeps it, `GET /status` carries it and the plane
 forwards it in `presence.mode` (§4); the web draws MAWS's `ModeChip` stamped *as of
 <time>* from `at`, and *unknown* before any reading. The menu (`ModeMenu`, with
@@ -1290,7 +1297,9 @@ gateway disables it). S5: every non-built-in is `run-prompt`, named verbatim, an
 mod's own command returns `{text}`; the bridge refuses its own plugin's commands `self`.
 S6: the Esc refusal's copy is *stopped at the terminal: commands resume after input is
 typed there*, with no cure offered; the desk's Interrupt is checked not to set it (A13).
-S7: the readback rule of §6, as M0 built it.
+S7: the readback rule of §6, as M0 built it. Spike 13: `list-agents` is `run`, bare,
+`{text}` in 24 ms, no panel — its item says it lists this machine's other Claude
+sessions too, outside this project (X class like every command, the readback `text`).
 
 **Machine half.** `bridge-commands.tsx`: every measured `run` and `run-prompt` row
 enabled; the catalog (§5): `catalogNow($)` joins `$.command.list()` with the route each
@@ -1401,11 +1410,13 @@ decision's resolved suggestion or `mode`, beside the `updatedInput` 1.6.3 added;
 `sminos_bridge.py` `_check_decision` admits `updatedPermissions` (an array of at most 8
 objects) on a permission and refuses it on a question. The mode (§7): `bridge.tsx`
 publishes the mode from its own decisions at once (an allow it hands out carrying
-`setMode`; a `/plan` it ran), reads `permission_mode` from every classic hook input it
-registers, adds pass-through `classic.PostToolUse` and `classic.UserPromptSubmit`
-hooks that read it and call `next(e)` with no `$` call, never lets a hook's reading
-override a newer decision of its own, and emits DX5 `mode {mode, at}` on change; the
-child keeps it and answers it in `status()`.
+`setMode`; a `/plan` it ran), reads `permission_mode` from `classic.PermissionRequest`,
+and adds pass-through `classic.UserPromptSubmit`, `classic.PostToolUse`,
+`classic.PostToolBatch` and `classic.Stop` hooks that read it and call `next(e)` with
+no `$` call (the five hooks spike 12 measured to carry it; never `PreToolUse`, whose
+`e` carries none), never lets a hook's reading override a newer decision of its own,
+and emits DX5 `mode {mode, at}` on change; the child keeps it and answers it in
+`status()`.
 `sminos_requests.py` `raised_draft` passes `suggestions`; `sminos_rpc.py` `shape()` and
 `check_digest`: `scope.suggestion` an integer within the re-read list, `scope.sha256`
 equal to that suggestion's canonical hash (else `not-pending`, *the suggestions
@@ -1451,13 +1462,19 @@ and the preservation of old RPC outcomes.
 both kinds of agent; the note row must tell the parent not to redo the task. S8:
 `--fork-session` on a live session is clean. S10: `/background`'s dialog opens for a
 running subagent, not for a shell; no job record names the old id; the `continued-in`
-record is best-effort. HN: what `/background` carries and loses (§8.3's confirm).
+record is best-effort. HN: what `/background` carries and loses (§8.3's confirm). Spike
+13: `subtask <task>` is `run` (`{}` in 0.32 s, no panel): it starts a background fork
+agent (`$.agent.list()` type `fork`, with a name), its row reads `⑂ forked <name>
+(<last 4 of id>)`, and its finish is a `<task-notification>` that starts a main turn.
 
 **Machine half.** (a) `bridge.tsx`: ops `stop-agent` and `tell` (§9) with the note's
 text; `bridge-agents.tsx`: the workflows it saw launched, each held as running from the
 task id in the `Workflow` tool's result until the `<task-notification>` row naming it
 reaches `session.append` with `completed`, `failed` or `killed`, for (c)'s `background`
-condition (§8.3). `sminos_rpc.py`:
+condition (§8.3). (b) also enables the `subtask <task>` row beside `fork`: its readback
+is the `⑂ forked …` row by the name-and-args rule, the fork agent appears in the
+subagent tree from `$.agent.list()` as any agent does, and its finish notification is
+one more task notification the jobs ledger already reads. `sminos_rpc.py`:
 `stop-agent` (the agent in the plane's tree, `unknown-agent` otherwise), `tell`;
 `RPC_NAMES`. (b) `sminos_rpc.py`: `fork` (the spawn path with `--resume <id>
 --fork-session`, around the copy guard, `fork_of` on the `joined` event). (c)
@@ -1694,8 +1711,8 @@ milestone that enables it; `—` means the same as the bare route):
 | `plan` | `routed`, to the mode control (M3 runs it through the command path) | `run-prompt` | — | M1 (args), M3 (bare) |
 | `init`, `security-review`, `insights`, `team-onboarding` | `run-prompt` | `run-prompt` | — | M1 |
 | `fast` | `bad-args` | `run`, required, `^(on\|off)$` | *not settled: fast mode was disabled where it was measured* | disabled (I) |
-| `list-agents` | `run` | `bad-args` | *not measured on 2.1.307* | disabled (I) |
-| `subtask` | `bad-args` | `run`, required | *not measured on 2.1.307* | disabled (I) |
+| `list-agents` | `run` (readback `text`; the item says *lists this machine's other Claude sessions too, outside this project*) | `bad-args` | — | M1 (spike 13) |
+| `subtask` | `bare: bad-args` | `run`, required (a background fork agent; its finish is a `<task-notification>` that starts a main turn, tracked as a workflow's is) | — | M4 (spike 13) |
 | `model`, `effort` | `routed`, to `model` | — | *use Model instead: /model saves a default for new sessions* | — |
 | `compact` | `routed`, to `compact` | — | — | — |
 | `btw` | `routed`, to `btw` | — | — | — |
@@ -1894,12 +1911,16 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   unmeasured, and nothing here depends on it now.
 - Observation: An allow's `setMode` writes no `permission-mode` row; the rows appear at
   flush points, `auto` first showing at the next prompt and `acceptEdits` never getting
-  one. The transcript is no source for the mode; the bridge's own decisions and the
+  one. The transcript is no source for the mode; the bridge's own decisions and five
   classic hooks' `permission_mode` are, and a Shift+Tab at the terminal is the one
-  change neither sees until the next hook.
-  Evidence: S1, "Transcript rows lag"; the classic base input setting
-  `permission_mode: r` on every fire (cli 2.1.307 ~1084852, read from code, not traced
-  to every caller, not measured).
+  change neither sees until the next of those hooks fires.
+  Evidence: S1, "Transcript rows lag"; spike 12 (`desk-mod-run-spikes.md` §12,
+  2.1.307): `permission_mode` present on `UserPromptSubmit`, `PermissionRequest`,
+  `PostToolUse`, `PostToolBatch` and `Stop`, read as each fires (a mid-turn Shift+Tab
+  showed in the same turn's next `PostToolUse`); absent on `PreToolUse` (34 of 34; a
+  mod's `e` there is the `ToolCallEnvelope`) and `MessageDisplay`; a Shift+Tab fires no
+  hook (`ConfigChange` silent) and the mod API has no mode read. This replaces the
+  earlier reading from code (cli ~1084852, the classic base input).
 - Observation: `$.command.list()` is cheap enough to re-list every heartbeat — 1 ms for
   92 entries in one sample — and the start-time list is incomplete: MCP prompts exist
   only once their server connects, a mod's entries once its `register()` ran (from the
@@ -1915,6 +1936,13 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   into the same session's PTY set the refusal and a typed prompt cleared it. What §2
   had from code is a fact.
   Evidence: spike 11 (`desk-mod-run-spikes.md` §11, 2.1.307, isolated).
+- Observation: The two built-in rows the table had marked unmeasured open no panel:
+  `list-agents` resolves `{text}` with its listing in 24 ms, and the listing names the
+  machine's other Claude sessions as well as the subagents; `subtask <task>` resolves
+  `{}` in 0.32 s, starts a background fork agent (`$.agent.list()` type `fork`, named),
+  writes the row `⑂ forked <name> (<last 4 of id>)`, and finishes with a
+  `<task-notification>` that starts a main turn.
+  Evidence: spike 13 (`desk-mod-run-spikes.md` §13, 2.1.307, idle session).
 - Observation: `FIRST_WAIT_S` is 8 s, not 5; it is the CLI verbs' wait for a first
   snapshot. The 5 s the brief and the inventory cite is the child's
   `SMINOS_BRIDGE_READY_WAIT` (`_ready_wait()`), and the plane's own bound on a bridge
@@ -2018,11 +2046,13 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   as the workflow starts and the test was always true. The "the terminal is asking"
   fallback stays for a module that loaded after a workflow was launched. (2) The mode
   is published from the bridge's own decisions the moment it hands one out, then from
-  the classic hooks' `permission_mode`, fed by pass-through `classic.PostToolUse` and
-  `classic.UserPromptSubmit` hooks beside the two the bridge registers, since
-  `PermissionRequest` alone goes stale for long stretches in auto mode; the rows are
-  not read (an allow's `setMode` writes none), the reading carries its time and the
-  chip is stamped *as of <time>*, and a Shift+Tab at the terminal is the labelled gap.
+  the five classic hooks spike 12 measured to carry `permission_mode`
+  (`UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, `PostToolBatch`, `Stop`),
+  the four the bridge lacks added as pass-throughs, since `PermissionRequest` alone
+  goes stale for long stretches in auto mode; `PreToolUse` carries none and is not
+  used; the rows are not read (an allow's `setMode` writes none), the reading carries
+  its time and the chip is stamped *as of <time>*, and a Shift+Tab at the terminal —
+  which fires no hook, with no mode read to poll — is the labelled gap.
   DX5 `mode` and `presence.mode` become `{mode, at}` (M3's shapes; M0's are untouched).
   Also from the re-check: the catalog re-lists `$.command.list()` at every heartbeat and
   compares fingerprints, in place of a trigger on `$.tool.list()`'s server set, which
@@ -2031,10 +2061,16 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   `run-prompt`'s outcome is its turn, a mod's command reads back by `text` — since an
   MCP prompt's row carries another name and a mod's row empty args (the minor). Spike
   11, measured after the merge, turns §2's "from code" on the desk's Interrupt into a
-  fact; A13 keeps checking the built path.
+  fact; A13 keeps checking the built path. Spike 12 replaces the "every classic hook
+  carries `permission_mode`" reading from code with the five hooks measured to carry it
+  and the two that do not. Spike 13 measures the two table rows that were marked
+  unmeasured: `list-agents` becomes `run` in M1 (readback `text`; it names sessions
+  outside this project, which the item says), `subtask <task>` becomes `run` in M4
+  beside fork, its finish notification tracked as a workflow's is.
   Rejected: keeping the rows as the mode's fallback (S1 shows an allow's `setMode`
   writes none, so the fallback would show a mode the engine left); reading the mode
-  from `PermissionRequest` alone (stale in auto mode); the server-set trigger for the
+  from `PermissionRequest` alone (stale in auto mode); a `PreToolUse` pass-through
+  (its `e` carries no `permission_mode`, spike 12); the server-set trigger for the
   catalog (misses three cases the heartbeat catches for 1 ms).
   Rationale: two conditions in the design were vacuous or stale against the engine's
   own behavior, measured or read from code; the re-check found them before M0 starts.
