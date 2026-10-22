@@ -30,6 +30,11 @@
 3. 경로는 세션이 어디서 시작됐는지로 정한다. 터미널에서 시작한 세션은 TUI로 holder 안에, MAWS 앱이나 웹에서 시작한
    세션은 SDK 경로로 간다. 그리고 웹에 "full-control 모드로 이어 가기" 버튼을 두어 터미널 세션을 SDK 경로로 넘긴다.
 4. 키로만 되는 조작은 웹의 터미널 창으로 하고, 검증된 몇 가지만 GUI 매크로로 만든다.
+5. 터미널 창을 닫으면 세션은 detach되어 계속 돈다(F1).
+6. detach된 세션은 클라이언트가 없고, 턴이 돌지 않고, 백그라운드 일과 예약된 cron이 없는 상태로 24시간이 지나면
+   끝낸다. transcript로 다시 연다. 시간은 설정이다(F2, §3.2 정리).
+7. holder는 독립된 작은 서비스다. MAWS 저장소의 workspace app으로 두고 wrapper, sminos 데몬, MAWS 데몬이 그
+   클라이언트가 된다. MAWS가 없는 기계에도 따로 설치된다(F3).
 
 ## 2. 구조
 
@@ -74,7 +79,7 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
   상한 1 MiB). 세션마다 token. 제어: `hello`(host 버전, 세션 id, claude pid, 상태), `resize`, `signal`, `kill`, `exit`,
   `checkpoint.put/get`, `ring.read(fromOffset)`.
 - **수명.** 스스로 세션을 끝내지 않는다. 엔진의 "부모가 없고 클라이언트가 없으면 60초 뒤 kill" 규칙은 두지 않는다.
-  claude가 끝나면 종료 상태와 마지막 화면을 일정 시간 남겨 두었다가 정리한다.
+  세션을 끝내는 결정은 manager의 정리 규칙(§3.2)만 내린다. claude가 끝나면 종료 상태와 마지막 화면을 일정 시간 남겨 두었다가 정리한다.
 - **구현.** 정적 native binary. Go가 유력하다(claude-ssh와 같은 선택, PTY와 process group을 다루기 쉽다).
 
 ### 3.2 holder manager (사용자당 하나, 언제든 바꿀 수 있는 것)
@@ -100,9 +105,28 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
     돌아간다.
   - 크기는 owner의 크기를 따른다. observer는 PTY 크기로 그리고 자기 화면에 맞춰 축소하거나 스크롤한다.
   - TUI의 터미널 질의(DA, 배경색 등)에는 owner의 터미널만 답한다. owner가 없을 때는 에뮬레이터가 표준 질의에 답한다.
+- **정리 (F2).** manager가 세션마다 시계를 하나 둔다. 시계는 다음이 모두 참인 동안만 간다.
+  - PTY 클라이언트가 하나도 없다(owner, observer, macro 모두).
+  - desk에서 그 세션을 구독한 화면이 없다.
+  - 턴이 돌지 않는다(bridge mod가 보고하는 상태).
+  - 마지막 Stop hook이 보고한 `background_tasks`와 `session_crons`가 비어 있다. mod API에서 이 두 목록을 주는 곳은
+    Stop·SubagentStop hook 입력뿐이다([2.1.307 d.ts](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L12912)).
+    session cron은 세션과 함께 사라지므로, 남아 있는 cron은 일로 센다.
+
+  하나라도 거짓이 되면 시계는 0으로 돌아간다. 시계가 24시간(설정)에 이르면:
+  1. bridge mod로 `/exit`을 돌린다. SessionEnd hook이 돌고 transcript가 닫힌다.
+  2. 30초 안에 끝나지 않으면 host에 SIGTERM을 보내고, 다시 10초 뒤 `kill`한다.
+  3. roster에 "잠듦" 기록(session id, argv, cwd, 끝난 시각)을 남긴다. wrapper의 이어 붙기 질문과 웹 목록이 이를
+     보여 주고, 다시 열면 같은 argv에 `--resume <id>`를 붙여 새 host를 띄운다.
+
+  오래된 신호는 오래 사는 쪽으로 틀린다. 알림 없이 끝난 백그라운드 일이 마지막 Stop 기록에 남아 있으면 세션은
+  끝나지 않는다. 일을 잃는 것보다 메모리를 더 쓰는 쪽이 낫다. manager가 재시작하면 시계도 0부터 다시 간다.
 - **API.** `spawn {kind, argv, cwd, env, size, termios}`, `list`, `attach {session, role}`, `kill`, `signal`, 상태 이벤트
-  (`running | stopped | detached | ended`)를 낸다. 클라이언트는 wrapper, sminos 데몬, MAWS 데몬이다.
-- **구현.** Node(에뮬레이터를 브라우저와 같은 xterm.js로 쓰기 위해). launchd·systemd unit으로 돈다.
+  (`running | stopped | detached | asleep | ended`; `asleep`은 정리 규칙이 끝낸 세션)를 낸다. 클라이언트는 wrapper, sminos 데몬, MAWS 데몬이다.
+- **구현 (F3).** 독립된 작은 서비스다. MAWS 저장소의 workspace app `apps/session-holder`로 `apps/desk-hub`,
+  `apps/desk-web` 옆에 둔다. manager는 Node(에뮬레이터를 브라우저와 같은 xterm.js로 쓰기 위해)이고, host(§3.1)와
+  wrapper(§3.3)도 같은 app에서 나온다. launchd·systemd unit으로 돈다. MAWS도 sminos도 이 서비스의 클라이언트일 뿐
+  그 안에 들어 있지 않으므로, MAWS가 없는 Linux·devcloud 기계에도 같은 서비스가 설치된다.
 
 ### 3.3 claude wrapper (사람이 치는 `claude`)
 
@@ -118,7 +142,7 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
 - **Ctrl+Z.** plain과 같게 한다. TUI가 멈추면(host가 `stopped` 이벤트를 보냄) wrapper도 스스로 SIGTSTP로 멈춰 셸이
   job을 돌려받는다. `fg`로 wrapper가 이어지면 host에 SIGCONT를 보내 claude를 잇는다.
 - **끝.** `/exit`이면 claude의 종료 코드를 그대로 내고 끝난다. 터미널 창을 닫으면(wrapper가 SIGHUP을 받으면) 세션은
-  detach되어 계속 돈다(§7 F1). 같은 디렉터리에서 다음에 `claude`를 치면 "이 디렉터리에 실행 중인 세션이 있다:
+  detach되어 계속 돈다(F1). 같은 디렉터리에서 다음에 `claude`를 치면 "이 디렉터리에 실행 중인 세션이 있다:
   이어 붙을까?"를 묻는다. 이름으로 붙는 명령은 `claude-holder attach <name>`이다(엔진의 `claude attach`와 겹치지 않게).
 
 ### 3.4 bridge mod (모든 claude 안, 구조화된 제어)
@@ -191,18 +215,19 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령. 추가는 둘이
   lease를 얻는 것("키보드 가져오기")에 passkey step-up을 둔다. observer는 읽기 전용이 기본이다.
 - 녹화는 꺼 둔다.
 
-## 7. 열린 결정 (owner)
+## 7. owner가 정한 갈림길 (2026-10-22)
 
-- **F1. 터미널 창을 닫으면?** 권고: 세션은 detach되어 계속 돈다. 다음 `claude`에서 이어 붙기를 묻는다. 원격에서
-  이어 쓰는 것이 목적이므로. 대안: plain과 같이 끝낸다(원격 이어 쓰기는 사람이 명시적으로 detach했을 때만).
-- **F2. 떠 있는 detach 세션의 수명.** Claude Code 프로세스 하나가 수백 MB를 쓴다(이 MacBook에서 24개 평균
-  281 MB, 최대 549 MB RSS, 2026-10-22). 권고: 클라이언트가 없고,
-  idle이고, 백그라운드 일이 없는 상태로 24시간이 지나면 끝낸다(transcript로 다시 열 수 있다). 시간은 설정.
-  대안: 절대 스스로 끝내지 않는다.
-- **F3. holder는 어느 제품에 속하는가.** 권고: 독립된 작은 서비스(MAWS 저장소의 workspace app)로 두고 sminos 데몬과
-  MAWS 데몬이 둘 다 클라이언트가 된다. MAWS가 없는 Linux·devcloud 기계에도 설치된다. 대안: MAWS headless 데몬의
-  일부(설치가 하나로 줄지만 MAWS 없는 기계에 MAWS 데몬을 깔아야 한다), sminos의 일부(Python이라 xterm.js 에뮬레이터를
-  쓰지 못한다).
+세 갈림길 모두 권고대로 정해졌다(§1의 5–7). 버린 대안과 그 까닭을 남긴다.
+
+- **F1. 터미널 창을 닫으면?** 정함: detach되어 계속 돈다. 다음 `claude`에서 이어 붙기를 묻는다. 원격에서 이어
+  쓰는 것이 목적이기 때문이다. 버린 대안: plain과 같이 끝내고, 원격 이어 쓰기는 사람이 명시적으로 detach했을
+  때만 한다.
+- **F2. detach된 세션의 수명.** Claude Code 프로세스 하나가 수백 MB를 쓴다(이 MacBook에서 24개 평균 281 MB, 최대
+  549 MB RSS, 2026-10-22). 정함: 클라이언트가 없고, idle이고, 백그라운드 일이 없는 상태로 24시간이 지나면 끝낸다
+  (§3.2 정리). transcript로 다시 연다. 시간은 설정이다. 버린 대안: 절대 스스로 끝내지 않는다.
+- **F3. holder는 어느 제품에 속하는가.** 정함: 독립된 작은 서비스(MAWS 저장소의 workspace app)로 두고 sminos
+  데몬과 MAWS 데몬이 둘 다 클라이언트가 된다(§3.2 구현). 버린 대안: MAWS headless 데몬의 일부(설치가 하나로
+  줄지만 MAWS 없는 기계에 MAWS 데몬을 깔아야 한다), sminos의 일부(Python이라 xterm.js 에뮬레이터를 쓰지 못한다).
 
 ## 8. 검증 계획 (구현할 때)
 
@@ -216,6 +241,8 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령. 추가는 둘이
 6. 이어 가기: 일이 비었을 때와 일이 있을 때(잃는 것 목록이 실제와 같은가), 턴 도중, 돌려받기.
 7. 모든 holder 세션에 bridge mod가 로드되고 PTY 채널과 같은 세션으로 묶인다.
 8. 키 입력 지연: holder가 더하는 것은 같은 기계 한 홉이다. 2 ms 미만을 목표로 잰다.
+9. 정리: 클라이언트, 웹 구독, 턴, 백그라운드 셸, Monitor, cron 중 하나만 남아 있어도 끝나지 않는다. 모두 없을 때는
+   설정한 시간(시험에서는 짧게) 뒤 `/exit`으로 끝나고 `asleep`이 되며, 다시 열면 같은 session id로 이어진다.
 
 ## 9. 남은 미지수 (spike로 풀 것)
 
@@ -238,3 +265,10 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령. 추가는 둘이
 - 엔진 supervisor의 job 기능(dispatch, transcript 자동 respawn, spare, 예약 worker, 업그레이드 이주)은 가져오지 않는다.
 - 녹화는 꺼 둔다.
 - 경로 이동은 같은 session id로 한다(`--fork-session` 없음).
+- 정리 시계는 웹 구독자도 클라이언트로 센다. 잊힌 탭이 세션을 붙잡을 수 있으므로 웹 목록에 세션마다 떠 있은 시간과
+  RSS를 보인다.
+- 정리 시계는 manager 메모리에만 둔다. 재시작하면 0부터 다시 간다.
+- 끝낼 때는 `/exit`이 먼저이고 신호는 그다음이다(SessionEnd hook과 transcript 닫기를 지키려고).
+- 이름: workspace app `apps/session-holder`, 사람이 치는 명령 `claude-holder`.
+- 설치: MAWS 앱이 있는 Mac에서는 MAWS가 함께 깔고, 그 밖의 기계에는 플랫폼별 release 묶음(manager, host, wrapper)을
+  따로 깐다.
