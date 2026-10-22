@@ -1678,7 +1678,7 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 
 | type / phase | fields |
 | --- | --- |
-| `run` / `start` | `id, name, args, t` — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
+| `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; never emitted by the module a `reload-plugins` run replaces (the daemon finishes that op) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
 | `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
@@ -2184,7 +2184,8 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   `read` go up only when `welcome.kinds` lists them (owed `op` messages are dropped and
   logged otherwise); `presence.capabilities` and `machine.desk` are not gated, the
   deployed hub passing the first and rebuilding the body that holds the second. (6) The
-  route check refuses by class before the form check; a disabled `run` row answers
+  route check refused by class before the form check (reversed in the fix wave: entry
+  9); a disabled `run` row answers
   `disabled` with its reason; an engine older than every table measures `none` and
   refuses every built-in as not measured. (7) The Esc refusal is caught as the answer
   (`stopped`) when the engine rejects within 250 ms; a queued run that meets it later
@@ -2210,6 +2211,36 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   union; command samples pass the nonce as the recorder's `ref`.
   Rationale: as task 2's report argues each; recorded so M1's executor reads them.
   Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from task 2's report.
+
+- Decision: The fix waves after M0's task reviews (doperpowers `a2f4a444`, `f7cfaa3d`;
+  MAWS `b28519272`, `26c988573`, `9afee68ae`). Machine half: (1) a route's `forms` are
+  checked before its class, so `/clear extra` is `bad-args`, not `follow` (the fake
+  machine already did; entry 7's item 6 reversed). (2) A reload is the module's last act:
+  its `queued` answer and `run start` reach the child before `$.command.run` is called
+  (the start's acknowledgement awaited at most 10 s, `RELOAD_TAKEN_WAIT_MS`; a start not
+  taken is not run and ends `{ok: false}`); a desk command arriving while a reload is
+  queued or running is refused with *the plugins are reloading: send it again once the
+  session answers from its reloaded bridge*, carrying no code (none in the DX5 list
+  fits; the web draws it as a plain failure with the reason); a module that outlives its
+  reload holds the desk 60 s (`RELOAD_HOLD_MS`); an Esc refusal of a queued reload ends
+  the run `settled {ok: false, error, code: "stopped"}`, which the web draws with the
+  terminal's guidance. (3) A reload's `run start` names the child it left from (`child:
+  [inode, pid]`, DX5 revised), so a reload from the CLI, which carries no nonce, is
+  finished by effect from the start alone; a start naming no child fails at 60 s, since
+  without it no successor can be told from the predecessor. (4) A command claim keeps
+  `op_name` and `op_args` before dispatch; reconcile re-arms a claim it answers `done`
+  by writing its `op_id` to the still-open claim before the outcome, so a stop between
+  the two writes leaves a claim the next restart re-arms; a failed id write leaves the
+  claim unanswered until a later pass. Web: `op.queued` survives an early `op end`, each
+  mark taken once; `op.readback` is marked where `CommandStatus` commits that nonce's
+  outcome, and an outcome nobody draws gives no sample; a failed *Refresh* draws its
+  error beside the kept answer; the fake machine lists a plugin exception by its bare
+  name.
+  Rationale: the task reviews found A8's outcome lost in two restart windows and a
+  reload that could swallow its own acknowledgement; each fix keeps §3's guarantee
+  that an issued command's outcome reaches the desk.
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from the fix waves' reports
+  and both task reviews.
 
 ## Outcomes & Retrospective
 
