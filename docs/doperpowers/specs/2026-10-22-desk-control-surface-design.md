@@ -2317,10 +2317,11 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   orchestrator.
 
 - Decision: M1 recovers command outcomes by replay on browser reconnect. The hub
-  durably keeps the latest nonce-bearing `op` for each (machine, session, nonce),
-  preserving an `end` over a late `start`, and replays it when an authenticated
+  durably keeps the latest nonce-bearing command `op` (`op: "command"`) for each
+  (machine, session, nonce), preserving an `end` over a late `start`, and replays it when an authenticated
   browser joins the project. Retention is bounded to the latest 256 operations,
-  24 hours and 4 MiB per project; nonce-free CLI operations are not cached. This
+  24 hours and 4 MiB per project; nonce-free CLI operations and non-command ops
+  (including future `btw` answers) are not cached. This
   is an operation-receipt cache (command name, arguments, op envelope and result
   line), not transcript storage: no transcript/message bodies or rows. The owner
   approved this bounded storage on 2026-10-22. The table is created in code in the
@@ -2386,10 +2387,24 @@ guarantee. The task reviews and the doperpowers branch review found five ways an
 outcome could be lost or falsely confirmed across a daemon restart, a reload or a child
 respawn — none visible to a happy-path test — and each became a red test first; the
 MAWS reviews found latency marks that measured receipt rather than the draw §12 names.
-Not yet shown: the acceptance on the owner's Macs (A1–A9, A33's paths), which needs the
-deployed hub and the rollout; the fake machine does not model A8, which rests on the
-machine half's tests and the walk. For M1: the route fixture's reading (entries 5, 9)
+At the M0 build handoff, acceptance on the owner's Macs (A1–A9, A33's paths) still
+needed deployment and rollout; the partial live walk below updates that evidence.
+The fake machine does not model A8, which rests on the machine half's tests and the walk. For M1: the route fixture's reading (entries 5, 9)
 is the one source both halves read; the web's `outlives` label is local until the
 catalog carries it; a browser that misses an `op end` while its socket is down shows
 *queued* (Surprises) — a replay or a resync of owed outcomes to a reconnecting browser
-is the open design question, not settled by M0.
+was left open by M0 and is resolved by M1's Decision 13.
+
+**M0 live walk, partial (2026-10-22 11:35–11:40Z, orchestrator evidence).** On
+`web@master.f12fb35c`, `/rename desk-m0` on seat `m0-walk` showed *Queued* at
+349 ms and *Session renamed to: desk-m0 · confirmed by its row* at 630 ms. Both
+sidebar primary title and session header became `desk-m0`, retaining `m0-walk`
+as the supplementary alias: A2's title behavior works live, and production title
+handling needs no M1 change. The daemon publishes the custom title; reading the
+web's `title || alias` binding alone had not established the live outcome.
+Two display findings enter M1's web work: the completed status should make *ran*
+explicit even when readback arrives immediately, and unavailable Context/Cost
+must not say *no bridge* while status says *Running, bridged*. The walk stopped
+when the MacBook lid closed. A3 and A6–A9 desk checks remain owed; older/stale
+A1/A5 cases move to the M1 walk because the previous fixtures now answer
+`read.status`. Single-use timings above are not A33's 20-use or RC-parity proof.
