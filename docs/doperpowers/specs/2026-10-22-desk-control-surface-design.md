@@ -1744,7 +1744,7 @@ milestone that enables it; `—` means the same as the bare route):
 | `branch` | `follow` | `follow`, optional | — | M4 |
 | `resume` | `panel` (the picker) | `follow`, required (a session id) | — | M4 (args) |
 | `background` | `follow`, confirm, under §8.3's condition | `bad-args` | the confirm names the loss (§8.3) | M4 |
-| `exit` | `run`, confirm, only while the bridge sees no running task (shell, monitor, agent, workflow, MCP task) and no worktree the session created; otherwise refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome is the session's `session.end`, never the settled `{}` | M1 |
+| `exit` | `run`, confirm, only while every running-task class (shell, monitor, agent, workflow, MCP task) and session-created worktree state is positively established clear; unknown state is refused *can't tell whether work is running here: exit there* (Decision 14); known work is refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome is the session's `session.end`, never the settled `{}` | M1 |
 | `config` | `panel` | `drop` (*saves a default on <machine>; terminal only*, F1) | — | — |
 | `autocompact` | `panel` | `drop` (F1) | — | — |
 | `output-style` | `panel` | `drop` (F1) | — | — |
@@ -2019,6 +2019,25 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
 - Observation: A plugin's mod cannot import JSON and `claude plugin test` gives it no
   filesystem, so a data table reaches a mod only as a TS module.
   Evidence: task 1's report, decision 2.
+
+- Observation: M1's `/exit` guard has no single authoritative task/worktree-state
+  read in the bundled mod API: the agent list alone omits other task classes, and
+  hook tracking after a module reload misses work started earlier. A missing
+  observation is not evidence that the class is clear. The transcript and sminos
+  worktree record may bridge the reload; TUI child processes are only a cross-check,
+  since MCP servers also appear there. Decision 14 requires a refusal for any class
+  not positively established clear.
+  Evidence: the machine executor's 2.1.308 API inspection and the orchestrator's
+  research record check, 2026-10-22; spike 14 proves the dialog condition, not a
+  complete mod-readable state noun.
+- Observation: RC comparison budgets remain unmeasured. MAWS #52 records the owner's
+  deferral of the RC column until a separate claude.ai configuration exists; the
+  gateway-configured MacBook cannot start `claude remote-control`. The orchestrator
+  confirms no desk load samples yet either; the pending M0 live walk provides the
+  first A33 numbers. M1 retains `B.catalog`/`B.read` and the fixed 50 ms palette
+  budget, and cannot claim comparative A33 parity from code or automated tests.
+  Evidence: MAWS #52's latency-baseline comment and orchestrator checkpoint,
+  2026-10-22.
 
 ## Decision Log
 
@@ -2314,6 +2333,20 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   browser leg without reissuing an effect or widening the daemon's protocol.
   Date/Author: 2026-10-22, the M1 plan-executor, from the hub-and-web executor's
   inspection of the RPC and project reconnect paths.
+
+- Decision: `/exit` fails closed when any running-work or session-created-worktree
+  class cannot be established. It runs only when shells, monitors, agents,
+  workflows, MCP tasks and a worktree the session created are each positively
+  shown clear; an agent list alone is insufficient. Unknown state is refused with
+  *can't tell whether work is running here: exit there* (or the existing known-work
+  refusal). Transcript/record evidence across a reload may establish a class;
+  process descendants can cross-check but cannot replace complete evidence.
+  Rationale: the mod API exposes no complete task/worktree-state noun. More
+  refusal in M1 is acceptable; a false clear opens a terminal dialog and stalls
+  the desk queue, including on seats with no person attached. An engine-level
+  task/worktree noun for exit remains residue for a later ticket.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's ruling on
+  the machine executor's API gap.
 
 ## Outcomes & Retrospective
 
