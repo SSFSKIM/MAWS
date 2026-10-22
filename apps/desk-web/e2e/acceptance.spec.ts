@@ -51,7 +51,15 @@ async function shot(page: Page, name: string): Promise<void> {
 /** Scrolls the virtualized list a window at a time (`direction` -1 up, 1 down) until `target` is drawn. */
 async function scrollUntil(view: Locator, target: Locator, direction: 1 | -1, steps = 120): Promise<void> {
   for (let i = 0; i < steps; i++) {
-    if ((await target.count()) > 0) return target.first().scrollIntoViewIfNeeded();
+    // Resolve and act in one browser turn: the virtualizer can recycle a node between count() and a later
+    // Playwright scroll action. A missing/recycled match stays in this bounded search instead of using a stale handle.
+    const reached = await target.evaluateAll((matches) => {
+      const node = matches.find((match) => match.isConnected);
+      if (!node) return false;
+      node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      return node.isConnected;
+    });
+    if (reached) return;
     await scroller(view).evaluate((el, d) => el.scrollBy({ top: d * el.clientHeight * 0.6 }), direction);
     await view.page().waitForTimeout(60);
   }
