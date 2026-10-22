@@ -71,7 +71,11 @@
 # Before the push, a run that puts jobs on a Mac (resolved from the flags and the repository variables as the plan does)
 # reads ci-kit's open alerts (SSFSKIM/ci-kit-sandbox, label ci-kit-alert: a system dialog holds a Mac's front) and MAWS's
 # runners. When no online ci-kit-mac-<machine> runner is free of an alert, it pushes nothing, prints each alert and exits
-# 2, since the runner's job-started check would refuse those jobs; when one is, it names the blocked and goes ahead. A
+# 2, since the runner's job-started check would refuse those jobs; when one is, it names the blocked and goes ahead. ci-kit's
+# macOS guest (ci-kit-mac-<machine>-vm…) counts as a free Mac only for a run whose Mac jobs all can run in it, which the tested
+# commit's own plan (its gate-plan.mjs on its gate.yml, the trailers below) decides: every Mac job on a label the guest carries
+# (ci-kit-mac-solo, ci-kit-mac-vm, or the trial slot's ci-kit-mac-vm-trial), so only the groups on MAC_VM_E2E, and --lane is
+# read for that; a run with any other Mac job needs a host free of alerts, and so does one the plan cannot be run for. A
 # failed read warns and goes ahead (scripts/ci-gate-alerts.mjs).
 #
 #   MAWS_GATE_IGNORE_ALERTS=1  skip that check, for an alert left open by mistake
@@ -155,7 +159,7 @@ fi
 if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
   alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
 else
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a")
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --git-dir "$git_dir" --sha "$sha")
   case $? in
     0) ;;
     2)
