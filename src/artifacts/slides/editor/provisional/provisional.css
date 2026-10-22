@@ -56,6 +56,11 @@
   background: var(--provisional-color);
 }
 
+/* G-R4: held while it would meet the human's protected element (its box kept, so it is measured again). */
+.deck-provisional-label[data-provisional-held] {
+  visibility: hidden;
+}
+
 /* A filmstrip entry being written: the agent's ring, and the whole provisional slide opaque over the thumbnail. */
 .deck-provisional-thumb {
   position: absolute;

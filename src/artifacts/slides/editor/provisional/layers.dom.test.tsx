@@ -23,17 +23,23 @@ const ONE = `<section id="s1" style="background:#ffffff; padding:96px; display:f
 <p id="foot" style="font-size:24px">Draft</p>
 <x-shape id="badge" kind="rounded" style="position:absolute; right:64px; bottom:64px; width:200px; height:60px; background:#eef2f1"></x-shape>
 </section>`;
+// a relative group whose pinned child reaches out of its box, onto the line below
+const GROUPED = `<section id="s1" style="background:#ffffff; padding:96px; display:flex; flex-direction:column; gap:24px">
+<h1 id="title" style="font-size:80px">Launch review</h1>
+<div id="g" style="position:relative; height:80px; background:#eef2f1"><p id="gc" style="position:absolute; left:0; top:60px; font-size:24px">Callout</p></div>
+<p id="date" style="font-size:40px">Friday, 24 October</p>
+</section>`;
 const TWO = '<section id="s2" style="background:#ffffff"><h2 id="t2" style="font-size:64px">Numbers</h2></section>';
 
 type Rect = [left: number, top: number, width: number, height: number];
-const boxes = { live: new Map<string, Rect>(), ghost: new Map<string, Rect>() };
+const boxes = { live: new Map<string, Rect>(), ghost: new Map<string, Rect>(), label: [0, 0, 0, 0] as Rect };
 
 beforeEach(() => {
   // the layer reads boxes from each canvas's origin: an element's box is given here by its canvas and id (zero else)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const root = this.closest('section.maws-slide');
     const table = root?.hasAttribute('data-provisional-ghost') ? boxes.ghost : boxes.live;
-    const [left, top, width, height] = (this.dataset.eid && table.get(this.dataset.eid)) || [0, 0, 0, 0];
+    const [left, top, width, height] = this.hasAttribute('data-provisional-label') ? boxes.label : (this.dataset.eid && table.get(this.dataset.eid)) || [0, 0, 0, 0];
     return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
   });
 });
@@ -42,10 +48,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   boxes.live.clear();
   boxes.ghost.clear();
+  boxes.label = [0, 0, 0, 0];
 });
 
-function mount() {
-  const world = deckWorld({ s1: ONE, s2: TWO });
+function mount(one = ONE) {
+  const world = deckWorld({ s1: one, s2: TWO });
   const live = replica(world.doc);
   const stopLayers = live.layers.attach(); // the tab's state attaches its store
   const session = new DeckSession(world.doc, 0, { holdRemote: live.holdRemote });
@@ -161,6 +168,63 @@ describe('the deck’s provisional layer on the stage', () => {
     expect(w.stage.veiled()).toEqual(['date']);
     act(() => w.session.endDrag());
     expect(Object.keys(w.stage.shown()).sort()).toEqual(['date', 'n1', 'title']);
+  });
+
+  it('holds back a shown container whose drawn descendant meets a protected element', () => {
+    const w = mount(GROUPED);
+    boxes.live.set('date', [96, 300, 1728, 56]);
+    boxes.ghost.set('g', [96, 200, 1728, 80]); // the group's own box stops above the date
+    boxes.ghost.set('gc', [96, 260, 400, 60]); // its pinned child reaches onto it
+    act(() => {
+      w.session.setKeyboard('stage');
+      w.session.select(['date']);
+    });
+    w.stream({ [slidePath('s1')]: edit(w.file('s1'), ['background:#eef2f1', 'background:#ffd8a8'], ['Launch review', 'Launch plan']) });
+    expect(w.stage.shown(), 'the group is not drawn: its child would cover the armed line').toEqual({ title: 'changed' });
+    expect(w.stage.veiled()).toEqual(['title']);
+    expect(w.stage.held()).toBe('g');
+    act(() => w.session.select([]));
+    expect(w.stage.shown()).toEqual({ title: 'changed', g: 'changed' });
+  });
+
+  it('checks the protection again after a layout pass: a drawn element grown over a protected one is held back', async () => {
+    const w = mount();
+    boxes.live.set('date', [96, 200, 1728, 56]);
+    boxes.ghost.set('date', [96, 200, 1728, 56]); // unmoved: the layout pass finds no new move
+    boxes.ghost.set('title', [96, 96, 1728, 88]);
+    act(() => w.session.editText('date'));
+    w.stream({ [slidePath('s1')]: edit(w.file('s1'), ['Launch review', 'Launch review and the plan for the next quarter']) });
+    expect(w.stage.shown()).toEqual({ title: 'changed' });
+    // the title's fit (or a face arriving) grows it over the date: no deck write, a layout pass alone
+    boxes.ghost.set('title', [96, 96, 1728, 140]);
+    const restyle = document.createElement('style');
+    restyle.setAttribute('data-ds-scope-style', '');
+    document.head.appendChild(restyle);
+    await act(async () => {
+      await Promise.resolve();
+      flushLayout();
+    });
+    restyle.remove();
+    expect(w.stage.shown()).toEqual({});
+    expect(w.stage.held()).toBe('title');
+    expect(w.stage.veiled()).toEqual([]);
+  });
+
+  it('hides the label while it meets a protected element, and shows it again when the protection ends', () => {
+    const w = mount();
+    boxes.live.set('title', [0, 0, 1728, 120]); // the human's title at the slide's top left
+    boxes.label = [8, 8, 160, 20];
+    act(() => w.session.editText('title'));
+    w.stream({ [slidePath('s1')]: edit(w.file('s1'), ['Friday, 24 October', 'Monday']) });
+    const label = () => w.q('[data-stage-slide] [data-provisional-label]')!;
+    expect(label().hasAttribute('data-provisional-held'), 'over the text the human edits').toBe(true);
+    expect(w.stage.shown()).toEqual({ date: 'changed' });
+    act(() => {
+      w.session.editText(null);
+      w.session.select([]);
+    });
+    expect(label().hasAttribute('data-provisional-held')).toBe(false);
+    expect(label().textContent).toBe('Fix the dates is writing…');
   });
 
   it('withdraws the layer in the call that applies the write, and under a held drag at the drop', () => {
