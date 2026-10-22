@@ -20,8 +20,8 @@ export const TOP = 160;
 
 type Asked = { drawn: number; source: TranscriptSource; installed: boolean };
 
-export function useOlderPages(controller: DeskTranscript, list: RefObject<TranscriptListHandle | null>, state: Pick<DepthTranscriptState, 'phase' | 'more' | 'loadingOlder' | 'source'>): void {
-  const drawnRows = useDrawnRowCount(controller.key);
+export function useOlderPages(controller: DeskTranscript, list: RefObject<TranscriptListHandle | null>, state: Pick<DepthTranscriptState, 'phase' | 'more' | 'loadingOlder' | 'source'>, atRest = false): void {
+  const drawnRows = useDrawnRowCount(controller.key, atRest);
   const storePhase = useTranscriptStore((s) => s.entries[controller.key]?.phase ?? null);
   const drawn = useRef(drawnRows);
   const asked = useRef<Asked | null>(null);

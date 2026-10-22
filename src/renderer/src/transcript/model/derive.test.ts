@@ -1,7 +1,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { afterEach, describe, expect, it } from 'vitest';
-import { heldRow, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withQueueTail } from './derive';
+import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withQueueTail } from './derive';
 import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState, withAgents, type AgentLookup } from './reduce';
 import type { Row, SubagentRef } from './rows';
@@ -508,6 +508,52 @@ describe('the queue tail', () => {
     expect(shown.filter((row) => row.kind === 'user').map((row) => row.id)).toEqual(['user:u1', 'held:q-1']);
     expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(rows); // a prompt that ran is never hidden
     expect(withQueueTail(rows, new Set(), [])).toBe(rows);
+  });
+});
+
+// DC9 (the desk): a host that knows the session runs no turn, though no row ended the one it was running, draws that
+// turn as MAWS's own app does once its disk follower ends a transcript nobody is writing; the state stays as it was.
+describe('a turn at rest', () => {
+  it('draws the running turn as an exit nobody saw closes it, at its last event, the state untouched', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'pnpm test' });
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('m1', 0, 'Now the slow one.');
+    b.toolUse('t2', 'Bash', { command: 'sleep 600' }, 'm2', 0);
+    const turn = turnId.ofMessage(uuid('u1'));
+    const open = reduce(b.events);
+    const held = rowsOf(open);
+    expect(find(held, 'divider')).toMatchObject({ state: 'working', endedAt: null });
+    expect(group(held)).toMatchObject({ state: 'active' });
+
+    const resting = restingRows(open, held);
+    const lastAt = b.events.at(-1)!.at;
+    expect(find(resting, 'divider')).toMatchObject({ state: 'completed', endedAt: lastAt, expanded: true });
+    expect(resting.find((row) => row.kind === 'cell' && row.toolUseId === 't2')).toMatchObject({ status: 'stopped' });
+    // What MAWS draws once the disk follower's exit (reason unknown, no seq, at the last record) closed the turn, its
+    // work area open as the reader had it.
+    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null }, { atMs: Date.parse(lastAt) });
+    const exited = reduce(b.events.map((event) => (event.kind === 'process.exited' ? { ...event, seq: null } : event)));
+    expect(resting).toEqual(rowsOf({ ...exited, memo: new Map(), ui: { ...exited.ui, expandedTurns: new Set([turn]) } }));
+    // The state still runs the turn, and draws it so.
+    expect(open.turns.get(turn)).toMatchObject({ state: 'open', endedAt: null });
+    expect(rowsOf(open)).toBe(held);
+  });
+
+  it('reads stopped on interrupt evidence, keeps a work area the reader folded, and leaves rows with no running turn as they are', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'rm -rf build' });
+    b.result('t1', 'User rejected tool use', { isError: true, denial: 'user-rejected' });
+    const open = reduce(b.events);
+    const folded = { ...open, memo: new Map(), ui: { ...open.ui, collapsedTurns: new Set([turnId.ofMessage(uuid('u1'))]) } };
+    expect(find(restingRows(folded, rowsOf(folded)), 'divider')).toMatchObject({ state: 'stopped', expanded: false });
+
+    b.end(['u1']);
+    const ended = reduce(b.events);
+    const rows = rowsOf(ended);
+    expect(restingRows(ended, rows)).toBe(rows);
   });
 });
 

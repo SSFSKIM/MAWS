@@ -468,7 +468,10 @@ test("a desk Steer waits at the tail until the row its result names, then is the
   await expect(view.locator('[data-kind="user"]').filter({ hasText: 'Use the split store.' })).toHaveCount(1);
 });
 
-/** The recording with one more turn before the session's end: a prompt, a Bash call and its result, then `interrupt`. */
+/**
+ * The recording with one more turn before the session's end: a prompt, a Bash call and its result, then `interrupt`;
+ * its machine reports the session busy from the prompt on, as it does for a turn it runs.
+ */
 function withInterruptedTurn(recording: Recording, interrupt: (task: string) => string[]): Recording {
   const main = recording.rows.main;
   const lastRow = main.at(-1)!;
@@ -490,7 +493,7 @@ function withInterruptedTurn(recording: Recording, interrupt: (task: string) => 
     ...interrupt('bk3x9a1').map((text, i) => appended(3 + i, text)),
     { ...envelope(6), type: 'user', promptId: 'p-interrupt', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_interrupt1', content: 'Command was manually backgrounded by user with ID: bk3x9a1.', is_error: false }] }, toolUseResult: { stdout: '', stderr: '', interrupted: false, isImage: false, backgroundTaskId: 'bk3x9a1' } },
   ];
-  const steps: Step[] = rows.map((row) => ({ at, k: 'row', agentId: null, row: row as never }));
+  const steps: Step[] = [{ at, k: 'presence', record: { status: 'busy', waitingFor: null, needs: null } }, ...rows.map((row): Step => ({ at, k: 'row', agentId: null, row: row as never }))];
   return { ...recording, rows: { ...recording.rows, main: [...main, ...(rows as never[])] }, steps: [...recording.steps.slice(0, end), ...steps, ...recording.steps.slice(end)] };
 }
 
@@ -663,6 +666,7 @@ test('a message sent through a message tool draws as the message while its input
   const land = (row: JsonObject) => fm.depth.apply({ at: 0, k: 'row', agentId: null, row: row as never });
   const chunk = (chunkIndex: number, body: JsonObject) => fm.depth.apply({ at: 0, k: 'chunk', turnId, agentId: null, step: 0, chunkIndex, chunk: body });
   land(next(ownerPrompt('How far along is the relabelling?')));
+  presence(hub, fm.session, { status: 'busy' }); // the prompt's turn runs, as its machine reports
   await expect(view).toContainText('How far along is the relabelling?');
 
   chunk(0, { kind: 'tool', index: 0, id, name: MESSAGE_TOOL });

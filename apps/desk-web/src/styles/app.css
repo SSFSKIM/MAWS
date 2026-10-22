@@ -68,19 +68,6 @@
     margin-inline-start: auto;
   }
 }
-/* While the session is at rest (presence idle, or no process), the control draws its arrow, not its working dots: the
-   transcript keeps the turn its rows left open (DX4's rows carry no SDK result to end it), and only this drawing
-   follows the session's presence. The arrow is MAWS's own path, drawn by mask. */
-[data-session-view][data-at-rest] .transcript-jump .transcript-working-dots {
-  display: none;
-}
-[data-session-view][data-at-rest] .transcript-jump:has(.transcript-working-dots)::after {
-  content: "";
-  width: 14px;
-  height: 14px;
-  background: currentColor;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3v10M3.5 8.5 8 13l4.5-4.5'/%3E%3C/svg%3E") center / contain no-repeat;
-}
 /* DC9 M6: the transcript row a tapped notification's <message> landed on, its reading column outlined as a landed card
    is, just outside the reading column's text. An outline takes no space, so the list's measurements stay as they are. */
 [data-session-view] [data-row-id][data-landed] .transcript-row {

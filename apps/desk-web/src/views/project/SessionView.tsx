@@ -19,11 +19,14 @@
 // for an async question with no request waiting (MAWS's own ask), on its call's row. A send's row draws without its delivery frame line, a peer's send labelled with who sent it
 // (`conversation/delivery-frame.ts`).
 //
-// Two decorations of MAWS's view are the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps
-// every row, breakouts included, clear of MAWS's floating "Jump to latest"; and, while the session is at rest, that
-// control's arrow in place of its working dots. MAWS reads a turn as working until a row ends it, and DX4's rows carry
-// no SDK result, so an idle session's last turn stays open in the store; the transcript is left as the rows say it, and
-// only the control's drawing follows the session's presence.
+// A decoration of MAWS's view is the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps every
+// row, breakouts included, clear of MAWS's floating "Jump to latest". MAWS reads a turn as working until a row ends it,
+// and DX4's rows carry no SDK result, so a turn whose rows never ended it (a process killed mid-turn, an interrupt with
+// no marker the desk reads) stays open in the store. The store keeps it so; the drawing follows the session's presence:
+// while its machine reports it idle or with no process, MAWS draws that turn as its own app does once its disk follower
+// ends a transcript nobody is writing (`atRest`, `restingRows`): its divider in a finished turn's words ("Worked for …",
+// "Continued for …") up to its last row, no running mark on its working record, the control's arrow. Busy or waiting,
+// or with presence unknown, it draws working.
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
@@ -119,6 +122,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
   const known = useMemo(() => Object.values(conversation.requests).filter((r) => r.machine === session.machine && r.raised.session === session.session), [conversation.requests, session.machine, session.session]);
   const requests = useMemo(() => known.filter((r) => r.pending).sort((a, b) => a.at - b.at), [known]);
   const ended = session.group === 'ended';
+  const resting = atRest(session);
   const items = useMemo<TailItem[]>(
     () => [...sends.map((send) => ({ kind: 'send' as const, send })), ...requests.map((r) => ({ kind: 'request' as const, key: r.key, request: r.request })), ...(ended ? [{ kind: 'end' as const }] : [])],
     [sends, requests, ended],
@@ -152,7 +156,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       className="relative flex min-h-0 min-w-0 flex-1 flex-col"
       data-testid="session-view"
       data-session-view=""
-      data-at-rest={atRest(session) ? '' : undefined}
+      data-at-rest={resting ? '' : undefined}
       data-session={session.session}
       aria-label={`${sessionName(session)}'s session`}
     >
@@ -169,7 +173,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       )}
       <ReportToggle storeKey={owner.main.key} />
       <TailProvider value={tail}>
-        <TranscriptPane controller={owner.main} state={state} variant="session" ownerLane actions={actions} list={list} extraTail={drawn.rows} renderRequest={renderTailRow} rowIndex={rowIndex} />
+        <TranscriptPane controller={owner.main} state={state} variant="session" ownerLane actions={actions} list={list} extraTail={drawn.rows} renderRequest={renderTailRow} rowIndex={rowIndex} atRest={resting} />
       </TailProvider>
       <QuestionOverlays root={root} facts={overlays} />
       <WaitingPill list={list} count={requests.length} />

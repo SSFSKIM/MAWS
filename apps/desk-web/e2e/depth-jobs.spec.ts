@@ -352,7 +352,10 @@ test('G2: Stop stays disabled with §5’s reason without the bridge, on a read-
   await expect(jobRow(jobs, SUITE).getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
 });
 
-/** The recording with one more turn after its last row: a prompt, a Bash call and its result, then Esc's marker. */
+/**
+ * The recording with one more turn after its last row: a prompt, a Bash call and its result, then Esc's marker; its
+ * machine reports the session busy from the prompt on, as it does for a turn it runs.
+ */
 function withInterruptedTurn(recording: Recording): Recording {
   const main = recording.rows.main;
   const lastRow = main.at(-1)!;
@@ -373,7 +376,7 @@ function withInterruptedTurn(recording: Recording): Recording {
     // Esc's marker as 2.1.300 writes it: one text block, no origin, the interrupted response named.
     { ...envelope(4), type: 'user', promptId: 'p-interrupt', interruptedMessageId: 'msg_interrupt2', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
   ];
-  const steps: Step[] = rows.map((row) => ({ at, k: 'row', agentId: null, row: row as never }));
+  const steps: Step[] = [{ at, k: 'presence', record: { status: 'busy', waitingFor: null, needs: null } }, ...rows.map((row): Step => ({ at, k: 'row', agentId: null, row: row as never }))];
   return {
     ...recording,
     rows: { ...recording.rows, main: [...main, ...(rows as never[])] },

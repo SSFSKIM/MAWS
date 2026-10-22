@@ -202,19 +202,52 @@ for (const width of [1280, 1440, 1920]) {
     const text = await view.locator('.transcript-row:has([data-streamdown="table-wrapper"])').evaluate((row) => row.getBoundingClientRect().width - parseFloat(getComputedStyle(row).paddingLeft) - parseFloat(getComputedStyle(row).paddingRight));
     expect((await view.locator('[data-streamdown="table-wrapper"]').boundingBox())!.width).toBeGreaterThanOrEqual(text);
 
-    // At rest (idle), the control draws its arrow and no dots, and the transcript is as it was.
-    const before = await rowIds(view);
-    presence(hub, { status: 'idle' });
-    await expect(view).toHaveAttribute('data-at-rest', '');
-    await expect(jump.locator('.transcript-working-dots')).toBeHidden();
-    expect(await jump.evaluate((el) => getComputedStyle(el, '::after').content)).not.toBe('none');
-    expect(await rowIds(view)).toEqual(before);
-    // With no process at all, the same.
-    presence(hub, null);
-    await expect(view).toHaveAttribute('data-at-rest', '');
-    await expect(jump.locator('.transcript-working-dots')).toBeHidden();
+    // At rest (idle), the control draws MAWS's arrow, not its dots; with no process at all, the same.
+    for (const record of [{ status: 'idle' }, null]) {
+      presence(hub, record);
+      await expect(view).toHaveAttribute('data-at-rest', '');
+      await expect(jump.locator('.transcript-working-dots')).toHaveCount(0);
+      await expect(jump.locator('svg')).toBeVisible();
+    }
   });
 }
+
+test('a turn no row ended draws at rest while its machine reports the session idle or with no process, as MAWS draws one its disk follower closed; waiting or busy, it works', async ({ page, hub }) => {
+  await stageProject(hub); // the session's presence: waiting on its owner
+  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks }));
+  // Up to the marked answer's turn and no further: the recording ends no turn on disk, and the next is not yet written.
+  played.skip(played.script.findLastIndex((item) => item.kind === 'row' && JSON.stringify(item.body.row).includes('<task-notification>')));
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  const view = page.getByTestId('session-view');
+  await expect(view).toContainText('Both subagents reported back.');
+  const record = records(view).last().locator('.owner-record');
+  const divider = view.locator('[data-row-id^="divider:"]').last().locator('.transcript-disclosure');
+  /** The turn draws working (true) or at rest: its record's running mark in the report, its divider in the transcript. */
+  const draws = async (working: boolean) => {
+    await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
+    if (working) {
+      await expect(record).toHaveAttribute('data-working', '');
+      await expect(record.locator('.owner-record-running')).toBeVisible();
+    } else {
+      await expect(record).not.toHaveAttribute('data-working');
+      await expect(record.locator('.owner-record-running')).toHaveCount(0);
+    }
+    await toggle(page, 'Transcript').click();
+    await expect(divider).toHaveText(working ? /^Working( for \d+s)?$/ : 'Continued for 2s'); // MAWS's words for the engine's turn, closed at its last row
+    await toggle(page, 'Report').click();
+  };
+
+  await draws(true); // waiting
+  for (const status of ['idle', null]) {
+    presence(hub, status === null ? null : { status });
+    await expect(view).toHaveAttribute('data-at-rest', '');
+    await draws(false);
+  }
+  presence(hub, { status: 'busy' }); // the store kept the turn open: busy again, it works again
+  await expect(view).not.toHaveAttribute('data-at-rest');
+  await draws(true);
+});
 
 test('a marked response folds its turn and shows its mark while it streams, before its row is written; settling leaves no double', async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
