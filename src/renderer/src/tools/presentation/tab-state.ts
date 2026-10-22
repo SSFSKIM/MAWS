@@ -14,8 +14,11 @@
 // P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; X36's draft rule, as the document's tab): the
 // comment card host's id is this state's, the same for every body over it, and the close guard asks first about an
 // unsent comment typed in this tab's compose card.
+// P4-A2 G2.3 (X35; docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md G2.3): the replica's provisional layers,
+// one store per handle held here, so a layer a commit has not yet swapped outlives a body unmounting on a tab switch.
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import { ProvisionalLayers } from '@artifacts/provisional';
 import { DeckSession } from '@artifacts/slides/editor/session';
 import { observeThreads, openThreadCount } from '@artifacts/slides/threads';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -53,6 +56,8 @@ export interface DeckTabSnapshot {
   saving: boolean;
   /** M7: the deck's open threads, orphans included (the header's count). */
   unresolved: number;
+  /** P4-A2 G2.3: the replica's provisional layers (an agent's publish as it streams), listening while the tab holds it. */
+  provisional: ProvisionalLayers | null;
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -76,7 +81,7 @@ export class DeckTabState {
   private viewedBefore: number | null = null; // M8: the owner's last view before this showing
   private resolveShown: () => void = () => {};
   private readonly whenShown = new Promise<void>((resolve) => (this.resolveShown = resolve));
-  private current: DeckTabSnapshot = { failed: null, handle: null, session: null, document: null, saving: false, unresolved: 0 };
+  private current: DeckTabSnapshot = { failed: null, handle: null, session: null, document: null, saving: false, unresolved: 0, provisional: null };
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
   private disposed = false;
@@ -136,7 +141,9 @@ export class DeckTabState {
     const { name, color } = this.deps.host.identity();
     const session = new DeckSession(handle.doc, this.openedAt, { holdRemote: (on) => handle.holdRemote(on), presence: { awareness: handle.awareness, name, color }, readOnly: () => handle.state().readOnly });
     session.timings.syncedAt = performance.now();
+    const provisional = new ProvisionalLayers(handle); // P4-A2 G2.3
     this.stops.push(
+      provisional.attach(),
       handle.subscribe((document) => this.follow(handle, document)),
       handle.onRestored(() => session.undo.clear()),
       () => this.stopSavingTimer(),
@@ -145,7 +152,7 @@ export class DeckTabState {
         if (unresolved !== this.current.unresolved) this.set({ unresolved });
       }), // M7
     );
-    this.set({ handle, session, document: handle.state(), unresolved: openThreadCount(handle.doc) });
+    this.set({ handle, session, document: handle.state(), unresolved: openThreadCount(handle.doc), provisional });
   }
 
   // M8: the owner's last view as the artifact's row holds it before this showing records its own (L's `onShown`, after

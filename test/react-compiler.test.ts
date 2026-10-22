@@ -28,6 +28,7 @@ const FILES: Record<string, string[]> = {
   'src/artifacts/design/editor/DesignWorkbench.tsx': ['DesignWorkbench'], // P4-B2 M4 (D14)
   'src/artifacts/slides/editor/Stage.tsx': ['Stage'], // P4-B2 M4 (D14, D15)
   'src/artifacts/design/editor/World.tsx': ['World', 'Board'], // P4-B2 M4 (D13, D15)
+  'src/artifacts/slides/editor/provisional/layers.tsx': ['useDeckProvisional', 'useWrittenOrder', 'SlideLayer', 'ThumbnailLayer', 'NewSlideEntry'], // P4-A2 G2.3
 };
 
 /** The compiler's events for one file, compiled as plugin-react's transform does (its parser plugins for a .tsx). */
