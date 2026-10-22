@@ -4,11 +4,15 @@
 // context use and cost from DX4 `usage` — unavailable with no bridge, then the first one, an update after a turn, and
 // the same after a reconnect. And the main transcript's `<message>` marks — drawn in the center's session view since
 // DC9's M3, as MAWS's report draws them — are its message cards while they stream and once settled, and the turn a
-// subagent's hand-back opens reads as the session's own.
+// subagent's hand-back opens reads as the session's own. The desk control surface's M0 (A1): the Info tab reads the
+// engine's status (`read status`) when it opens and on Refresh, where the session's bridge can answer it, and otherwise
+// says the plugin cannot and what it would need.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
-import { TWO_SUBAGENTS } from 'desk-hub/fake-machine';
+import { M0_CAPABILITIES, TWO_SUBAGENTS } from 'desk-hub/fake-machine';
+import type { StatusRead } from 'desk-hub/protocol';
+import type { LatencyReport } from '../src/latency/latency';
 import { DepthPlayer, type PlayerOptions } from './depth-player';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
@@ -19,6 +23,8 @@ const recording = readRecording();
 const DIFF = readFileSync(join(TWO_SUBAGENTS, 'diff.patch'), 'utf8');
 const FIRST = { context: { tokens: 36820, window: 1_000_000, percent: 4 }, cost: { usd: 0.003228125 } };
 const LATER = { context: { tokens: 38686, window: 1_000_000, percent: 4 }, cost: { usd: 0.005277275 } };
+const POLICY = { read_only: false, ceiling: 'default' };
+const STATUS: StatusRead = { version: { version: '2.1.307', base: '2.1.300' }, model: null, cwd: '/Users/new/Developer/GitHub/MAWS', root: '/Users/new/Developer/GitHub/MAWS', repo: { remote: 'https://github.com/SSFSKIM/MAWS.git', branch: 'master' }, surfaces: ['cli'], override: null };
 
 async function openDepth(page: Page, hub: HubDouble, options: Partial<PlayerOptions> = {}, setUp: (player: DepthPlayer) => void = () => {}): Promise<{ player: DepthPlayer; depth: Locator }> {
   await stageProject(hub);
@@ -126,4 +132,41 @@ test("a <message> draws as the report's message card while it streams and once s
   expect(await view.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
   await expect(view).not.toContainText('Peer session worked');
   await expect(view).toContainText('Continued for');
+});
+
+test("the engine's status: read when Info opens and on Refresh, never on a presence; from an older plugin, not available and what it needs", async ({ page, hub }) => {
+  await page.addInitScript(() => localStorage.setItem('desk.latency', '1'));
+  const { player, depth } = await openDepth(page, hub, {}, (p) => {
+    p.skip(p.script.length);
+    p.status = STATUS;
+  });
+  await depth.getByTestId('depth-tab-info').click();
+  const info = (id: string) => depth.getByTestId(`depth-info-${id}`);
+  // The scene's mini runs a plugin older than the desk's controls: the fields say so, not a spinner, and nothing is read.
+  for (const id of ['engine', 'root', 'repo', 'surfaces']) await expect(info(id)).toHaveText('not available from this plugin (needs sminos ≥ 1.7.0)');
+  await expect(info('status-reason')).toHaveText("mini's plugin is older than the desk's controls: update doperpowers on mini");
+  await page.waitForTimeout(300);
+  expect(player.readsAsked).toBe(0);
+
+  // mini updated, the session's bridge at M0: the tab reads the status once.
+  hub.setMachines(PROJECT, [
+    { machine: 'mini', online: true, policy: POLICY, checkouts: [], desk: { sminos: '1.7.0', rpcs: ['command'], reads: [] } },
+    { machine: 'SK.local', online: true, policy: POLICY, checkouts: [] },
+  ]);
+  hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.asks, kind: 'presence', sub: null, n: null, body: { record: { status: 'waiting' }, bridge: true, capabilities: M0_CAPABILITIES } });
+  await expect.poll(() => player.readsAsked).toBe(1);
+  await expect(info('engine')).toHaveText('2.1.307 (base 2.1.300)');
+  await expect(info('root')).toHaveText('/Users/new/Developer/GitHub/MAWS');
+  await expect(info('repo')).toHaveText('https://github.com/SSFSKIM/MAWS.git · master');
+  await expect(info('surfaces')).toHaveText('cli');
+  await expect.poll(async () => (await page.evaluate(() => (window as unknown as { deskLatency: () => LatencyReport }).deskLatency())).paths['read.status']?.n ?? 0).toBe(1);
+
+  // A presence is no reason to read again; Refresh is.
+  hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.asks, kind: 'presence', sub: null, n: null, body: { record: { status: 'idle' }, bridge: true, capabilities: M0_CAPABILITIES } });
+  await page.waitForTimeout(300);
+  expect(player.readsAsked).toBe(1);
+  player.status = { ...STATUS, surfaces: ['cli', 'desk'] };
+  await info('refresh').click();
+  await expect.poll(() => player.readsAsked).toBe(2);
+  await expect(info('surfaces')).toHaveText('cli, desk');
 });

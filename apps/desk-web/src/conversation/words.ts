@@ -1,6 +1,6 @@
 // The words for what came back: an RPC's failure by its DX6 code, a result by its RPC, a delivery's outcome, a
 // settlement's winner. Kept in one place so every surface says the same thing.
-import type { Delivery, JsonObject, RpcError, Settled } from 'desk-hub/protocol';
+import type { Delivery, JsonObject, OpBody, Readback, RpcError, Settled } from 'desk-hub/protocol';
 
 export function failureText(failure: RpcError, machine: string): string {
   const said = failure.message ? `: ${failure.message}` : '';
@@ -77,9 +77,62 @@ export function resultText(rpc: string, result: JsonObject): { text: string; war
       return { text: 'resumed; it rejoins in a moment', warning: false };
     case 'stop':
       return { text: 'stopped; the job reads so in a moment', warning: false };
+    case 'command':
+      // Answered at once: what the command did comes on its `op` (`commandOutcomeText`).
+      return { text: 'queued', warning: false };
     default:
       return { text: 'done', warning: false };
   }
+}
+
+/** The bridge's refusal codes for a command (DX5's `command` op), which a `failed` RPC's message starts with. */
+const BRIDGE_CODES = new Set(['unknown-builtin', 'panel', 'routed', 'follow', 'drop', 'local', 'bad-args', 'disabled', 'self', 'stopped', 'turn-unknown']);
+
+/** After an Esc at the terminal the engine refuses every mod's run until someone types there (H-esc): no cure from here. */
+export const STOPPED_AT_TERMINAL = 'stopped at the terminal: commands resume after input is typed there';
+
+/**
+ * A command's failure: a refusal of the bridge's (`failed`, its code the message's first word) by its reason alone,
+ * the Esc refusal as the terminal's; any other failure as `failureText` says it.
+ */
+export function commandFailureText(failure: RpcError, machine: string): string {
+  if (failure.code === 'failed') {
+    const refused = /^([a-z-]+):?\s+([\s\S]*)$/.exec(failure.message);
+    if (refused && BRIDGE_CODES.has(refused[1])) return refused[1] === 'stopped' ? STOPPED_AT_TERMINAL : refused[2];
+  }
+  return failureText(failure, machine);
+}
+
+/**
+ * A command's `op` end in words (the desk control surface spec, §6): what ran is confirmed by the transcript row the
+ * bridge linked, the text the engine settled with, or the effect the daemon checked; nothing linkable is *ran,
+ * unconfirmed*, never success; a settled failure is the engine's error.
+ */
+export function commandOutcomeText(body: OpBody): { state: 'ran' | 'unconfirmed' | 'failed'; text: string; mark: string | null } {
+  const settled = body.settled as { ok?: boolean; error?: string } | undefined;
+  if (settled?.ok === false) return { state: 'failed', text: `failed: ${settled.error ?? 'the engine refused it'}`, mark: null };
+  const readback = (body.readback ?? { how: 'none' }) as Readback;
+  switch (readback.how) {
+    case 'row':
+      return { state: 'ran', text: readback.text ?? 'ran', mark: 'confirmed by its row' };
+    case 'text':
+      return { state: 'ran', text: readback.text ?? 'ran', mark: 'confirmed by text' };
+    case 'effect':
+      return { state: 'ran', text: body.name === 'reload-plugins' ? 'ran: the plugins reloaded' : 'ran', mark: 'confirmed by effect' };
+    default:
+      return { state: 'unconfirmed', text: 'ran, unconfirmed', mark: null };
+  }
+}
+
+/**
+ * What a command saves beyond the session, said with it (the spec's H-default rule): `mcp enable|disable` writes the
+ * project's `.claude.json` on the machine. Null for a command whose effect ends with the session.
+ */
+export function commandOutlives(name: string, args: string, machine: string): string | null {
+  const verb = name === 'mcp' ? args.trim().split(/\s+/)[0] : '';
+  if (verb === 'disable') return `saved for this project on ${machine} until enabled again`;
+  if (verb === 'enable') return `saved for this project on ${machine} until disabled again`;
+  return null;
 }
 
 export const DELIVERY_TEXT: Record<Delivery['outcome'], string> = {

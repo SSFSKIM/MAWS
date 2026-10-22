@@ -31,6 +31,12 @@ export const PATHS = {
   'stream.chunk': 'streaming chunk: bridge stamp → drawn (cross-clock: Mac → browser)',
   'stream.row': 'live row: engine timestamp → drawn (cross-clock: Mac → browser)',
   'resume.gap': 'subscription resume: disruption → fresh snapshot merged',
+  // The desk control surface (its spec, §12): budgets B.read, B.op, B.ran, B.readback.
+  'read.status': 'status read: read sent → its answer in (web↔hub↔machine↔bridge)',
+  'op.queued': 'command: RPC sent → queued (web↔hub↔machine↔bridge)',
+  'op.ran': 'command: RPC sent → its op end in, the session idle when sent',
+  'op.ran.busy': 'command: RPC sent → its op end in, sent mid-turn: it waited for the turn (kept apart from op.ran)',
+  'op.readback': 'command: RPC sent → its readback drawn',
 } as const;
 export type LatencyPath = keyof typeof PATHS;
 
@@ -101,6 +107,8 @@ export class LatencyRecorder {
   private readonly sends = new Map<string, Send>();
   /** When each tool call's row was written (its engine timestamp, ms), by tool-use id: a raised request's anchor. */
   private readonly calls = new Map<string, number>();
+  /** The commands sent from this tab, by their RPC's nonce: when, and whether the session was mid-turn then. */
+  private readonly commands = new Map<string, { sent: number; busy: boolean; queued: boolean }>();
 
   constructor(private readonly log: (line: string) => void = (line) => console.info(line)) {}
 
@@ -177,6 +185,37 @@ export class LatencyRecorder {
       this.done(send);
       return;
     }
+  }
+
+  // A read's answer, and a command's three moments.
+
+  /** A read answered after `ms`: its kind's path, when the instrument has one (`read.status`). */
+  readAnswered(what: string, ms: number): void {
+    const path = `read.${what}`;
+    if (path in PATHS) this.record(path as LatencyPath, ms);
+  }
+
+  /** A command RPC sent, by its nonce; `busy`: a turn was running, so its end waits for the turn. */
+  commandSent(nonce: string, busy: boolean): void {
+    this.commands.set(nonce, { sent: now(), busy, queued: false });
+    this.forgetOldest(this.commands);
+  }
+
+  /** Its RPC answered `queued` (the hub's `rpc-state` done). */
+  commandQueued(nonce: string): void {
+    const command = this.commands.get(nonce);
+    if (!command || command.queued) return;
+    command.queued = true;
+    this.record('op.queued', now() - command.sent);
+  }
+
+  /** Its `op` end came in: ran (kept apart when sent mid-turn), and its readback drawn at the next frame. */
+  commandEnded(nonce: string): void {
+    const command = this.commands.get(nonce);
+    if (!command) return;
+    this.commands.delete(nonce);
+    this.record(command.busy ? 'op.ran.busy' : 'op.ran', now() - command.sent);
+    this.drawn('op.readback', command.sent);
   }
 
   // A raised request's anchor.

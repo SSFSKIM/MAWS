@@ -28,6 +28,7 @@ import {
   importOrgKey,
   isOutputTail,
   isTaskId,
+  readShapeError,
   seal,
   toWire,
   PartAssembler,
@@ -589,6 +590,13 @@ export class HubDouble {
         // Carried to the machine at the hub; here a test answers it with `sendSub`, as a machine would.
         if (!isTaskId(frame.taskId) || !isOutputTail(frame.tail)) this.refuseFrame(project, 'output is {sub, taskId: [A-Za-z0-9_-]{1,64}, tail: 1 to 524288 bytes}');
         return;
+      case 'read': {
+        // Carried to the machine at the hub (the desk control surface's DX3 `read`); here a test or the fake machine
+        // answers it with `sendSub`, as a machine would.
+        const problem = readShapeError(frame);
+        if (problem) this.refuseFrame(project, `read is {sub, id, what, args?}: ${problem}`);
+        return;
+      }
       case 'diff': {
         // Answered as DX4 `diff` on that sub; a main-transcript subscription's only, as DX3 has it.
         const target = this.subscriptions(project).find((s) => s.sub === frame.sub);

@@ -3,7 +3,7 @@
 // group. The depth panel receives one as a prop; these hooks serve any view inside an open project.
 import { useMemo } from 'react';
 import { useStore } from 'zustand';
-import type { SessionPresence } from 'desk-hub/protocol';
+import type { DeskCapabilities, SessionPresence } from 'desk-hub/protocol';
 import { drawable } from '../log/project-log';
 import { groupOf, groupSessions, namesakes, openQuestions, projectSessions, type Liveness, type OpenQuestion, type ProjectedSession, type SessionGroup } from '../log/projection';
 import type { LiveState, ProjectConnection } from '../project/connection';
@@ -18,6 +18,8 @@ export type DeskSession = ProjectedSession & {
   machineOnline: boolean | null;
   /** The machine's owner set it read-only (its DX4 `machine` presence's policy): it runs nothing sent from outside it. */
   machineReadOnly?: boolean;
+  /** What the machine's daemon can do itself (its DX4 `machine` presence's `desk`); null from an older daemon or hub. */
+  machineDesk?: DeskCapabilities | null;
   /** Another session of the project goes by its name or its alias (`namesakes`): its label then carries its id. */
   namesake?: boolean;
 };
@@ -41,7 +43,8 @@ export function livenessOf(live: LiveState, requests: ConversationState['request
 function view(project: string, live: LiveState, session: ProjectedSession, liveness: Liveness, namesake: boolean): DeskSession {
   const machineOnline = liveness.machineOnline ?? null;
   const machineReadOnly = live.machines[session.machine]?.policy?.read_only === true;
-  return { ...session, project, group: groupOf(session, liveness), presence: machineOnline === false ? null : (liveness.presence ?? null), machineOnline, machineReadOnly, namesake };
+  const machineDesk = live.machines[session.machine]?.desk ?? null;
+  return { ...session, project, group: groupOf(session, liveness), presence: machineOnline === false ? null : (liveness.presence ?? null), machineOnline, machineReadOnly, machineDesk, namesake };
 }
 
 /** Every session the project's log names, grouped for the sidebar (each group newest member first). */

@@ -2,7 +2,8 @@
 // **Subagents**, the session's subagent tree, where opening an agent subscribes to that agent's own transcript;
 // **Jobs**, the session's background shells and monitors, a shell's output opened under its row, and its MCP servers
 // (DC9, `JobsPane.tsx`); **Diff**, the working tree against its base branch, asked for when the tab opens and on
-// Refresh; and **Info**, where the session runs, its model, and its context use and cost. They read the session's main
+// Refresh; and **Info**, where the session runs, its model, its context use and cost, and the engine's status (read when
+// the tab opens and on Refresh). They read the session's main
 // transcript through its per-session owner (`owner/session-owner.ts`), which the center's session view holds too, so
 // the tree, the jobs, the diff and the usage come over the one subscription that draws the transcript there (DC9: the
 // Transcript tab moved to the center, and the status word with it). An `Agent` row in the center opens its agent here, through the owner's
@@ -99,7 +100,7 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
         )}
         {tab === 'info' && (
           <div role="tabpanel" aria-label="Info" className="absolute inset-0 flex flex-col overflow-y-auto">
-            <SessionInfo session={session} state={state} />
+            <SessionInfo session={session} state={state} controller={main} />
           </div>
         )}
       </div>

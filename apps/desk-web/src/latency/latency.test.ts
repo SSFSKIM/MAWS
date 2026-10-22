@@ -94,6 +94,36 @@ describe('the recorder', () => {
     expect(paths['owner.delivered']?.n).toBe(1);
     expect(paths['owner.row']?.n).toBe(1);
   });
+
+  it('times a command from its RPC to queued, to its op end (a mid-turn one kept apart), and to its readback drawn, each once', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date', 'performance'] });
+    const recorder = new LatencyRecorder(() => {});
+    recorder.commandSent('idle', false);
+    recorder.commandSent('busy', true);
+    vi.advanceTimersByTime(40);
+    recorder.commandQueued('idle');
+    recorder.commandQueued('idle'); // the same answer again (a retry answered from the record): once
+    recorder.commandQueued('busy');
+    vi.advanceTimersByTime(60);
+    recorder.commandEnded('idle');
+    vi.advanceTimersByTime(900);
+    recorder.commandEnded('busy');
+    recorder.commandEnded('busy'); // ended already: forgotten
+    recorder.commandEnded('elsewhere'); // a command another tab or the CLI sent: not this tab's to time
+    vi.runAllTimers();
+    const { paths } = recorder.report();
+    expect(paths['op.queued']).toMatchObject({ n: 2, max: 40 });
+    expect(paths['op.ran']).toMatchObject({ n: 1, max: 100 });
+    expect(paths['op.ran.busy']).toMatchObject({ n: 1, max: 1000 });
+    expect(paths['op.readback']).toMatchObject({ n: 2, max: 1000 });
+  });
+
+  it("times a read by its kind's path, and keeps none for a kind it has no path for", () => {
+    const recorder = new LatencyRecorder(() => {});
+    recorder.readAnswered('status', 35);
+    recorder.readAnswered('usage', 50);
+    expect(recorder.report().paths).toEqual({ 'read.status': expect.objectContaining({ n: 1, max: 35 }) });
+  });
 });
 
 describe('one transcript’s hops', () => {
