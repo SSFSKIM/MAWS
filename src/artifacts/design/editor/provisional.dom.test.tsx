@@ -9,6 +9,8 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyV2, diffV1, newDoc, stateV2, stateVector, transact } from '../../yjs';
+import { flushLayout } from '../../slides/canvas';
+import { setStyle } from '../../slides/model';
 import { publishFrame, replica } from '../../slides/editor/provisional/testing';
 import { DeckSession } from '../../slides/editor/session';
 import { boardPath, CANVAS_PATH } from '../canvas';
@@ -32,13 +34,17 @@ const boxes = { live: new Map<string, Rect>(), ghost: new Map<string, Rect>() };
 const LABEL: Rect = [8, 8, 160, 20]; // the label's box in its own px, at its board's top left
 
 beforeEach(() => {
-  // the layer reads boxes on screen: an element's box is given here in its board's px by its canvas and key (zero else)
-  // and drawn at the world's zoom as the layer's transform says it now; the label's own box at its counter-scale too
+  // the layer reads boxes on screen: an element's box is given here in its board's px by its canvas and key (zero else),
+  // placed at its board's (or new board's) place in the world and drawn at the world's zoom as the layer's transform says
+  // it now; the label's own box at its counter-scale too
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const transform = this.closest<HTMLElement>('[data-design-layer]')?.style.transform ?? '';
     const zoom = Number(/scale\(([^)]+)\)/.exec(transform)?.[1] ?? 1);
+    const frame = this.closest<HTMLElement>('.design-board');
+    const [x, y] = [Number.parseFloat(frame?.style.left ?? '') || 0, Number.parseFloat(frame?.style.top ?? '') || 0];
     let rect: Rect;
-    if (this.hasAttribute('data-provisional-label')) {
+    if (this === frame) rect = [0, 0, Number.parseFloat(frame.style.width) || 0, Number.parseFloat(frame.style.height) || 0];
+    else if (this.hasAttribute('data-provisional-label')) {
       const own = Number(this.parentElement!.style.getPropertyValue('--provisional-label-scale') || 1);
       rect = [LABEL[0] * own, LABEL[1] * own, LABEL[2] * own, LABEL[3] * own];
     } else {
@@ -47,7 +53,7 @@ beforeEach(() => {
       const board = this.closest<HTMLElement>('[data-board-id]')?.dataset.boardId;
       rect = (this.dataset.eid && table.get(`${board}/${this.dataset.eid}`)) || [0, 0, 0, 0];
     }
-    const [left, top, width, height] = rect.map((v) => v * zoom) as Rect;
+    const [left, top, width, height] = [rect[0] + x, rect[1] + y, rect[2], rect[3]].map((v) => v * zoom) as Rect;
     return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
   });
 });
@@ -304,6 +310,49 @@ describe('a board new to the design', () => {
     act(() => w.live.frame(publishFrame('callB', 'dropped')));
     expect(ghost(w)?.dataset.provisionalFrame).toBe('2100 40 800 600');
     expect(b4Ghost()).toBeNull();
+  });
+
+  it('is held whole while its frame meets the human’s text box on the active board, rechecked as the box grows, the protection changes and the frame moves', () => {
+    const w = mount();
+    boxes.live.set('b1/title', [0, 300, 50, 20]); // the phone's title, clear of the new board's frame
+    act(() => w.session.editText('title'));
+    w.stream({ [boardPath('b3')]: NEW, [CANVAS_PATH]: w.manifest({ b3: { x: 100, y: 50, w: 200, h: 200 } }) }); // over the phone
+    const held = () => ghost(w)!.hasAttribute('data-provisional-held');
+    expect(held(), 'clear of the text box: drawn').toBe(false);
+    // the text box grows under the frame (the human typing): held from the active board's next layout pass
+    boxes.live.set('b1/title', [0, 64, 390, 60]);
+    act(() => {
+      setStyle(w.doc, 'b1', 'title', { 'font-size': '80px' }, 'remote');
+      flushLayout();
+    });
+    expect(held(), 'over the text the human edits').toBe(true);
+    expect(ghost(w)!.querySelector('[data-provisional-label]'), 'its label goes with it').not.toBeNull();
+    act(() => {
+      w.session.editText(null);
+      w.session.select([]);
+    });
+    expect(held(), 'drawn once the protection ends').toBe(false);
+    act(() => {
+      w.session.setKeyboard('stage');
+      w.session.select(['title']);
+    });
+    expect(held(), 'ARMED: the same').toBe(true);
+    w.stream({ [CANVAS_PATH]: w.manifest({ b3: { x: 100, y: 400, w: 200, h: 200 } }) });
+    expect(ghost(w)!.dataset.provisionalFrame).toBe('100 400 200 200');
+    expect(held(), 'its frame streamed clear of the box').toBe(false);
+  });
+
+  it('is held while its screen-sized label meets the human’s text box after a zoom, though its frame does not', async () => {
+    const w = mount();
+    boxes.live.set('b1/title', [0, 64, 390, 60]);
+    act(() => w.session.editText('title'));
+    w.stream({ [boardPath('b3')]: NEW, [CANVAS_PATH]: w.manifest({ b3: { x: 0, y: 0, w: 390, h: 60 } }) }); // ends above the title
+    const held = () => ghost(w)!.hasAttribute('data-provisional-held');
+    expect(held()).toBe(false);
+    await act(async () => w.view.setViewport({ zoom: 0.25, x: 0, y: 0 })); // the label four times the frame's px
+    expect(held(), 'the label over the text box').toBe(true);
+    await act(async () => w.view.setViewport({ zoom: 1, x: 0, y: 0 }));
+    expect(held()).toBe(false);
   });
 
   it('leaves no trace at a refusal, on the boards or in the world', () => {

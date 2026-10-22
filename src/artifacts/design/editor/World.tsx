@@ -487,7 +487,17 @@ export function World(props: WorldProps) {
                 />
               ) : null,
             )}
-            {provisional && <ProvisionalBoards deck={provisional} zoom={worldZoom} assetUrl={assetUrl} faces={faces} /> /* P4-A2 G2.4 (G-R6) */}
+            {provisional && (
+              <ProvisionalBoards
+                deck={provisional}
+                zoom={worldZoom}
+                assetUrl={assetUrl}
+                faces={faces}
+                session={session}
+                canvases={canvases}
+                activeFrame={active?.frame ? `${active.frame.x} ${active.frame.y} ${active.frame.w} ${active.frame.h}` : null}
+              /> /* P4-A2 G2.4 (G-R6, G-R4) */
+            )}
           </>,
         )}
       </div>
