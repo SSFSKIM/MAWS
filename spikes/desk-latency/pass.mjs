@@ -5,6 +5,9 @@
 // a load. Each run written adds a line to `<dir>/done.txt`: the file, its repetitions and how many met their marks.
 //
 //   node spikes/desk-latency/pass.mjs --pw <playwright-cli session> [--dir /tmp/lat] <build.mjs arguments>…
+//
+// Run it from the directory the session was attached from: playwright-cli names a session within the nearest directory
+// that holds a `.playwright` (else its own install), so another directory may not see it.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -24,8 +27,7 @@ mkdirSync(dir, { recursive: true });
 
 const pending = `${dir}/.pending-${process.pid}`;
 execFileSync(process.execPath, [fileURLToPath(new URL('build.mjs', import.meta.url)), ...args, '--out', `${pending}.js`], { stdio: 'inherit' });
-// From `dir`, where playwright-cli keeps its own files.
-const text = execFileSync('playwright-cli', [`-s=${pw}`, '--raw', 'run-code', `--filename=${pending}.js`], { cwd: dir, encoding: 'utf8', maxBuffer: 1 << 28 });
+const text = execFileSync('playwright-cli', [`-s=${pw}`, '--raw', 'run-code', `--filename=${pending}.js`], { encoding: 'utf8', maxBuffer: 1 << 28 });
 const run = readRun(text);
 const ok = (run.reps ?? []).filter((r) => r.ok).length;
 if (!run.reps?.length) {

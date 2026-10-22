@@ -147,6 +147,7 @@ export function rcSurface(config) {
       useful: { all: [RC.sessionRow, { ...RC.disconnected, gone: true }] },
       down: RC.disconnected,
       extra: {},
+      fresh: 'list',
     },
     project: null,
     // Rows name no session here: after an in-app switch the content is the rows that were not there before it.
@@ -157,16 +158,30 @@ export function rcSurface(config) {
         useful: { all: [rows, RC.composer, ...(variant === 'mid-turn' ? [RC.stopButton] : []), { ...RC.disconnected, gone: true }] },
         down: RC.disconnected,
         extra: variant === 'mid-turn' ? { streaming: { ...RC.assistantMessage, changed: true } } : {},
+        fresh: 'session',
       };
     },
+    wakeFresh: 'session',
     /**
-     * When the page's state was fresh after `sinceWall`: its socket open again with the `initialize` reply in, or its
-     * tail of events fetched, whichever came first (the open's hops); `paths` are the desk's and mean nothing here.
+     * When the page's state was fresh after `sinceWall`, whichever proof came first: for the list (`fresh: 'list'`) its
+     * GET again, or its watch reopened and its first message in; for a session (`'session'`) its socket open again with
+     * the reply to the `initialize` it sent, or its tail of events fetched.
      */
-    async freshAt(ctx, paths, sinceWall) {
-      const open = this.hops(ctx.net, sinceWall, 'open')?.times;
-      const times = [open?.initialized, open?.history].filter((v) => v != null);
-      return times.length ? Math.min(...times) : null;
+    async freshAt(ctx, fresh, sinceWall) {
+      const net = ctx.net;
+      if (!net) return null;
+      let times;
+      if (fresh === 'list') {
+        const list = net.first(sinceWall, (e) => e.dir === 'done' && e.type === 'done:list');
+        const watch = net.first(sinceWall, (e) => e.dir === 'req' && e.type === 'req:watch');
+        const synced = watch && net.first(watch.at, (e) => (e.dir === 'sse' || e.dir === 'data') && RC_NET.watch.test(e.url));
+        times = [list?.at, synced?.at];
+      } else {
+        const open = this.hops(net, sinceWall, 'open').times;
+        times = [open.initialized, open.history];
+      }
+      const seen = times.filter((v) => v != null);
+      return seen.length ? Math.min(...seen) : null;
     },
     toApp: null,
     toProject: null,
@@ -208,7 +223,7 @@ export function rcSurface(config) {
       const delta = (after) => first(after, (e) => e.dir === 'in' && e.type === 'stream_event' && e.delta && e.main !== false);
       if (kind === 'send' || kind === 'steer') {
         const post = first(null, (e) => e.dir === 'req' && e.type === 'req:events' && (e.events ?? []).some((x) => x.startsWith('user')));
-        const back = post && first(post, (e) => e.dir === 'in' && e.type === 'user' && e.uuid === post.uuid && (kind === 'send' || e.replay === true));
+        const back = post?.uuid && first(post, (e) => e.dir === 'in' && e.type === 'user' && e.uuid === post.uuid && (kind === 'send' || e.replay === true));
         const firstDelta = delta(back ?? post);
         const ids = { uuid: post?.uuid };
         if (kind === 'steer') return { times: { post: t(post), posted: t(posted(post)), consumed: t(back), firstDelta: t(firstDelta) }, ids };
@@ -229,8 +244,11 @@ export function rcSurface(config) {
       if (kind === 'open') {
         const history = first(null, (e) => e.dir === 'done' && e.type === 'done:events' && e.method === 'GET');
         const socket = first(null, (e) => e.dir === 'ws-open');
-        const initialized = socket && first(socket, (e) => e.dir === 'in' && e.type === 'control_response');
-        return { times: { history: t(history), socket: t(socket), initialized: t(initialized) }, ids: {} };
+        // The reply to the `initialize` the page sent once that socket was open (on it, or in a POST), by its request id:
+        // another client's control reply on the session may come first.
+        const init = socket && first(socket, (e) => (e.dir === 'out' || e.dir === 'req') && e.subtype === 'initialize' && e.request_id !== undefined);
+        const initialized = init && first(init, (e) => e.dir === 'in' && e.type === 'control_response' && e.request_id === init.request_id);
+        return { times: { history: t(history), socket: t(socket), initialized: t(initialized) }, ids: { request_id: init?.request_id } };
       }
       return null;
     },

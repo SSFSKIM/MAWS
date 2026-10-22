@@ -35,7 +35,7 @@ So a reconnect's `useful` is the later of two marks, both kept:
 - **`controls`:** the DOM's useful, as above.
 - **`fresh`:** the proof of fresh content after the `online`.
   - On the desk, its own sample: `grid.socket` (grid), `online.caught-up` or `socket.gap` (project, caught up and verified), `resume.gap` (session, a fresh snapshot merged). A drawn sample's time is the frame that paints it.
-  - On RC, its frames: a socket opened after the `online` and then its `initialize` reply, or the tail `GET …/events` finished, whichever comes first.
+  - On RC, its frames, whichever proof comes first. For a session: a socket opened after the `online` and then the reply to the `initialize` the page sent (matched by its request id), or the tail `GET …/events` finished. For the list: its GET again, or its watch reopened and its first message in.
 
 ## The method, per load
 
@@ -82,8 +82,9 @@ A load's frames chain the same way, each hop found by the ids the one before it 
 The end mark the tables compare is `useful` for an open (after a return, with fresh content), `grew` for an older page,
 `firstToken` for a send or a spawn, `steered` for a steer, `stopped` for an interrupt, `decide.gone` / `answer.gone`,
 and `current` for a wake. A wake's `current` is the first change after the page is shown. Where the wake needed a
-reconnect, it is the later of that change (kept as `changed`) and the proof of fresh content (`fresh`: the desk's
-`wake.caught-up`, RC's frames as above). The machine-anchored raise is `raise.machine`: the card's paint less the tool
+reconnect (the app showed the hub lost once the page was shown, `down`), the repetition also waits for the proof of
+fresh content (`fresh`: the desk's `wake.caught-up`, RC's frames as above), and `current` is the later of that change
+(kept as `changed`) and the proof; a wake that needed none takes the proof where one came. The machine-anchored raise is `raise.machine`: the card's paint less the tool
 call's row, both wall times. It and `raise.card` (Enter → card) stay out of the decision's timeline. The others are
 kept alongside them.
 
@@ -131,7 +132,8 @@ it may never be drawn.
 | `standin/rc-mock.mjs` | A page built to the RC guesses, for the dry run of the RC loads only |
 | `test/harness.test.mjs` | `node --test spikes/desk-latency/test/*.test.mjs` |
 
-Run one load (`pass.mjs` takes build.mjs's arguments, plus the playwright-cli session and the directory):
+Run one load (`pass.mjs` takes build.mjs's arguments, plus the playwright-cli session and the directory), from the
+directory the session was attached from (the live pass's runbook below uses `/tmp/lat` for both):
 
 ```sh
 node spikes/desk-latency/pass.mjs --pw chrome --dir /tmp/lat --target desk --load session --cohort cold --variant idle \
@@ -209,7 +211,9 @@ done separately, with them (below).
    window as it is. A locked screen or a sleeping display hides Chrome's tabs, which then paint nothing (a run on a
    hidden page refuses to start), and RC commits every 200 ms while hidden.
 2. Keep the display awake for the window: `caffeinate -dimsu -t <seconds> &`.
-3. Attach: `playwright-cli attach --extension=chrome` (session `chrome`), the tab in front.
+3. Attach from `/tmp/lat`: `cd /tmp/lat && playwright-cli attach --extension=chrome` (session `chrome`), the tab in
+   front. playwright-cli names a session within the nearest directory holding a `.playwright` (the home directory on
+   this Mac), else its own install, so the attach and every pass run from the same directory.
 4. Check the throwaway sessions are in shape (below): `lat-busy` still in its turn, the ended ones still ended.
 
 ### After each window
@@ -244,11 +248,12 @@ It settles everything the dry run could not see, before the first load. Both app
 
 ### The loads: a checklist to stop and resume
 
-Each row is one command, run from the MAWS checkout in zsh after:
+Each row is one command, run in zsh from `/tmp/lat` (where the session was attached) after:
 
 ```sh
 L=/tmp/lat
-p() { node spikes/desk-latency/pass.mjs --pw chrome --dir $L "$@" }
+M=~/Developer/GitHub/MAWS   # the checkout
+p() { node $M/spikes/desk-latency/pass.mjs --pw chrome --dir $L "$@" }
 DESK=(--target desk --url https://desk-hub.opencognita-platform.workers.dev --project $PROJECT)
 RC=(--target rc)
 # The throwaway sessions' ids (below): IDLE IDLE2 BUSY ASK LONG END1…END10 ENDED; RC_IDLE RC_IDLE2 RC_BUSY RC_ASK RC_LONG RC_ENDED RC_ENV

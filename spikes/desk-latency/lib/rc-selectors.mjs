@@ -65,14 +65,14 @@ export function classifyRc(direction, url, text) {
     if (direction === 'req' && known[0] === 'events') {
       try {
         const body = JSON.parse(text.slice(text.indexOf(' ') + 1));
-        label.events = (body.events ?? []).map((e) => {
-          const p = e.payload ?? e;
-          return `${p.type}${p.request?.subtype ? `:${p.request.subtype}` : ''}${p.response?.subtype ? `:${p.response.subtype}` : ''}`;
-        });
-        const p = (body.events ?? [])[0]?.payload ?? (body.events ?? [])[0];
-        if (p?.uuid) label.uuid = p.uuid;
-        if (p?.request_id) label.request_id = p.request_id;
-        if (p?.response?.request_id) label.request_id = p.response.request_id;
+        const payloads = (body.events ?? []).map((e) => e.payload ?? e);
+        label.events = payloads.map((p) => `${p.type}${p.request?.subtype ? `:${p.request.subtype}` : ''}${p.response?.subtype ? `:${p.response.subtype}` : ''}`);
+        // A batch may carry settings ahead of its message: the ids are the user event's and the control's own.
+        const user = payloads.find((p) => p.type === 'user');
+        if (user?.uuid) label.uuid = user.uuid;
+        const control = payloads.find((p) => p.request_id || p.response?.request_id);
+        if (control) label.request_id = control.request_id ?? control.response.request_id;
+        if (control?.request?.subtype) label.subtype = control.request.subtype;
       } catch {
         // not JSON
       }

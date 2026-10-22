@@ -6,10 +6,12 @@ import { cohortOf, join, milestones, readRun, render, summarizeGroup } from '../
 import { parseDaemonLog, parseRcDebug, parseTranscript } from '../machine.mjs';
 import { describe, percentile } from '../lib/stats.mjs';
 import { classifyDesk, DESK } from '../lib/desk-selectors.mjs';
-import { deskSurface } from '../lib/surfaces.mjs';
+import { startNet } from '../lib/net.mjs';
+import { classifyRc, RC, RC_NET } from '../lib/rc-selectors.mjs';
+import { deskSurface, rcSurface } from '../lib/surfaces.mjs';
 
 // build.mjs inlines every lib module into one scope, where the surfaces read the selectors as free names.
-globalThis.DESK = DESK;
+Object.assign(globalThis, { DESK, RC, RC_NET });
 
 test('percentiles by nearest rank, as the instrument takes them', () => {
   const sorted = Array.from({ length: 20 }, (_, i) => i + 1);
@@ -180,6 +182,63 @@ test("a frame over the bound is labelled once its parts are joined, at the last 
   const hops = deskSurface({ url: 'http://x', project: 'p' }).hops(net, 0, 'open', 's-1');
   assert.deepEqual(hops.times, { subscribe: 11, snapshot: 27 });
   assert.deepEqual(hops.ids, { sub: 'sub-1', session: 's-1' });
+});
+
+/** RC's frames as the network half keeps them: `[at, dir, url, text, rid?]`, each line labelled by the classifier. */
+const rcNet = (frames) => {
+  const labels = (dir, url, text) => (dir === 'ws-open' ? [{}] : [classifyRc(dir, url, text) ?? []].flat());
+  const events = frames.flatMap(([at, dir, url, text, rid]) => labels(dir, url, text).map((label) => ({ dir, url, at, ...(rid && { rid }), ...label })));
+  return { first: (since, match) => events.find((e) => e.at >= since && match(e)) ?? null };
+};
+const API = 'https://api.example/v1/sessions/cse_abc/events';
+const WS = 'wss://api.example/v1/sessions/ws/cse_abc/subscribe';
+
+test("RC's hops chain by the ids the page sent: a batch's user uuid, its own POST's end, a control's request id", () => {
+  const batch = JSON.stringify({ events: [{ payload: { type: 'control_request', uuid: 'settings-uuid', request_id: 'set-1', request: { subtype: 'set_model' } } }, { payload: { type: 'user', uuid: 'u-1' } }] });
+  const net = rcNet([
+    [10, 'req', API, `POST ${batch}`, 'r-post'],
+    [12, 'done', 'https://api.example/v1/code/sessions?x', 'GET', 'r-list'], // another request ending first
+    [14, 'done', API, 'GET', 'r-history'],
+    [20, 'in', WS, JSON.stringify({ type: 'user', uuid: 'other' })],
+    [25, 'in', WS, JSON.stringify({ type: 'user', uuid: 'u-1', isReplay: true })],
+    [30, 'done', API, 'POST', 'r-post'],
+  ]);
+  const steer = rcSurface({}).hops(net, 0, 'steer');
+  assert.deepEqual(steer.times, { post: 10, posted: 30, consumed: 25, firstDelta: null });
+  assert.equal(steer.ids.uuid, 'u-1');
+});
+
+test("RC's initialize reply is the one to the page's own initialize, and the list's freshness is its own", async () => {
+  const init = JSON.stringify({ type: 'control_request', request_id: 'init-1', request: { subtype: 'initialize' } });
+  const net = rcNet([
+    [10, 'ws-open', WS, null],
+    [12, 'out', WS, init],
+    [15, 'in', WS, JSON.stringify({ type: 'control_response', response: { request_id: 'perm-9', subtype: 'success' } })], // another client's
+    [40, 'in', WS, JSON.stringify({ type: 'control_response', response: { request_id: 'init-1', subtype: 'success' } })],
+    [50, 'done', 'https://api.example/v1/code/sessions', 'GET', 'r-list'],
+  ]);
+  const rc = rcSurface({});
+  assert.deepEqual(rc.hops(net, 0, 'open').times, { history: null, socket: 10, initialized: 40 });
+  const ctx = { net };
+  assert.equal(await rc.freshAt(ctx, 'session', 0), 40);
+  assert.equal(await rc.freshAt(ctx, 'list', 0), 50);
+});
+
+test("without CDP, a request's start and end still share an id, so its own end is told from another's", async () => {
+  const on = {};
+  const page = { context: () => ({ newCDPSession: async () => Promise.reject(new Error('refused')) }), on: (name, f) => (on[name] = f), evaluate: async () => null };
+  const net = await startNet(page, classifyRc);
+  const request = (method, url) => ({ url: () => url, method: () => method, postData: () => (method === 'POST' ? JSON.stringify({ events: [{ type: 'user', uuid: 'u-1' }] }) : null) });
+  const post = request('POST', API);
+  const meta = request('GET', API);
+  on.request(post);
+  on.request(meta);
+  on.requestfinished(meta);
+  on.requestfinished(post);
+  const started = net.first(0, (e) => e.dir === 'req' && e.method === 'POST');
+  const ended = net.first(0, (e) => e.dir === 'done' && e.rid === started.rid);
+  assert.equal(net.mode, 'playwright');
+  assert.equal(ended.method, 'POST');
 });
 
 test("a group's timeline in median order, and its costliest hop up to the end mark", () => {

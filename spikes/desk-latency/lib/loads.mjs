@@ -476,9 +476,10 @@ export function makeLoads(S) {
         const session = sessionOf(ctx);
         const view = S.session(session, ctx.config.variant);
         // Hidden behind another tab of the same window, as the owner leaves it; the session goes on working meanwhile.
-        // Both marks wait for the page shown again and take the page as it is then: a change while hidden is not
-        // `current`, and controls usable as it is shown are `useful` at that moment.
-        const armed = await ctx.arm({ current: { ...S.changed, afterVisible: true }, useful: { ...view.useful, afterVisible: true } });
+        // Every mark waits for the page shown again and takes the page as it is then: a change while hidden is not
+        // `current`, and controls usable as it is shown are `useful` at that moment. `down` is the app showing the hub
+        // lost once it is shown: a wake that needs a reconnect.
+        const armed = await ctx.arm({ current: { ...S.changed, afterVisible: true }, useful: { ...view.useful, afterVisible: true }, down: { ...view.down, afterVisible: true } });
         const clock = await ctx.clock();
         let other;
         try {
@@ -498,12 +499,15 @@ export function makeLoads(S) {
           throw new Error('the page never went hidden and back (a headless browser keeps every tab visible): wake runs in a headed browser, or by hand');
         }
         const need = ctx.config.need ?? ['current', 'useful'];
-        const marks = await ctx.wait(armed, { need, timeoutMs: ctx.config.timeoutMs ?? 30_000 });
         // A wake that needed a reconnect is current only once caught up after it (the old rows stay in place until
-        // then): where the app says so, `current` is the later of the DOM's change (kept as `changed`) and that.
+        // then): once the app has shown the drop, the wait is for that proof too, and `current` is the later of the
+        // DOM's change (kept as `changed`) and it. A wake that needed none is taken with the proof if one came.
         const startWall = clock.origin + start.t;
-        const freshWall = await S.freshAt(ctx, S.wakeFresh, startWall);
-        const final = freshWall === null ? marks : freshEnd(marks, 'current', 'changed', freshWall, clock);
+        let freshWall = null;
+        const fresh = async () => (freshWall ??= await S.freshAt(ctx, S.wakeFresh, startWall));
+        const marks = await ctx.wait(armed, { need, timeoutMs: ctx.config.timeoutMs ?? 30_000, done: async (m) => m.down?.paint == null || (await fresh()) !== null });
+        await fresh();
+        const final = freshWall === null && marks.down?.paint == null ? marks : freshEnd(marks, 'current', 'changed', freshWall, clock);
         return extras(ctx, ctx.result(start, final, clock, need), 'open', startWall);
       },
     },

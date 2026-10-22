@@ -78,8 +78,15 @@ export async function startNet(page, classify, options = {}) {
       ws.on('framesent', (f) => lines('out', url, f.payload, Date.now(), 'wall'));
       ws.on('close', () => push({ dir: 'ws-close', url: shortUrl(url), wall: Date.now() }));
     });
-    page.on('request', (r) => lines('req', r.url(), `${r.method()} ${r.postData() ?? ''}`, Date.now(), 'wall'));
-    page.on('requestfinished', (r) => lines('done', r.url(), r.method(), Date.now(), 'wall'));
+    // Each request object named once, so its `req` and its `done` carry the same `rid` as over CDP.
+    const named = new WeakMap();
+    let requestsSeen = 0;
+    const rid = (r) => {
+      if (!named.has(r)) named.set(r, `pw${++requestsSeen}`);
+      return named.get(r);
+    };
+    page.on('request', (r) => lines('req', r.url(), `${r.method()} ${r.postData() ?? ''}`, Date.now(), 'wall', rid(r)));
+    page.on('requestfinished', (r) => lines('done', r.url(), r.method(), Date.now(), 'wall', rid(r)));
   }
   // An anchor for the monotonic clock: any request with its wallTime. The page's own traffic usually gives one; this makes
   // sure of it with a fetch of the origin's icon, which no load reads.
