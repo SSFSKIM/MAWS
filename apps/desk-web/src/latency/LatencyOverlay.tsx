@@ -1,6 +1,7 @@
-// The latency readout (`latency.ts`), drawn only while it is on: a small fixed panel listing each measured path's n,
-// p50, p95 and max in ms, and the reconnect counts. It reads the recorder at most twice a second, so a burst of samples
-// (a response streaming) costs one render, not one per sample.
+// The latency readout (`latency.ts`), drawn only while it is on: a small fixed panel listing each path measured so far
+// with its n, p50, p95 and max in ms (a path with no sample yet takes no row, so the panel stays small enough to read a
+// phone around it), and the reconnect counts. It reads the recorder at most twice a second, so a burst of samples (a
+// response streaming) costs one render, not one per sample.
 import { useEffect, useState } from 'react';
 import { COUNTS, latency, PATHS, type LatencyCount, type LatencyPath, type LatencyReport } from './latency';
 
@@ -41,13 +42,14 @@ export function LatencyOverlay() {
         <tbody>
           {(Object.keys(PATHS) as LatencyPath[]).map((path) => {
             const stats = report.paths[path];
+            if (!stats) return null;
             return (
-              <tr key={path} title={PATHS[path]} className={stats ? '' : 'text-fg-muted'}>
+              <tr key={path} title={PATHS[path]}>
                 <td>{path}</td>
-                <td className="text-right">{stats?.n ?? 0}</td>
-                <td className="text-right">{stats ? ms(stats.p50) : '–'}</td>
-                <td className="text-right">{stats ? ms(stats.p95) : '–'}</td>
-                <td className="text-right">{stats ? ms(stats.max) : '–'}</td>
+                <td className="text-right">{stats.n}</td>
+                <td className="text-right">{ms(stats.p50)}</td>
+                <td className="text-right">{ms(stats.p95)}</td>
+                <td className="text-right">{ms(stats.max)}</td>
               </tr>
             );
           })}

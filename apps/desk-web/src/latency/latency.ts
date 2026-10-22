@@ -5,6 +5,11 @@
 // `console.info('[desk latency] <path> <ms>')` line and a small overlay lists each path's n, p50, p95 and max
 // (`LatencyOverlay.tsx`). `window.deskLatency()` returns the same numbers for a scripted read, on or off.
 //
+// A measurement run joins samples to its own repetitions and to the machine's log, so the last `LOG` samples of every path
+// are also kept raw, each with the wall-clock time it was taken (`at`, ms since the epoch) and, where the hop has one, the
+// id that names its item on the other side (`ref`: a send's or an RPC's nonce, a request, a session):
+// `window.deskLatency.samples(since)` returns those taken after `since`, oldest first (spikes/desk-latency reads them).
+//
 // Two clocks. A path within the browser is timed on `performance.now()`. A path that starts on another clock — the Mac's
 // engine timestamp on a row, the machine's `ts` on a log event, the bridge's `t` on a chunk — is timed as the browser's
 // `Date.now()` less that stamp, so it carries the skew between the two clocks; its label says so ("cross-clock").
@@ -31,8 +36,34 @@ export const PATHS = {
   'stream.chunk': 'streaming chunk: bridge stamp → drawn (cross-clock: Mac → browser)',
   'stream.row': 'live row: engine timestamp → drawn (cross-clock: Mac → browser)',
   'resume.gap': 'subscription resume: disruption → fresh snapshot merged',
+  'view.older-page': 'session view: an older page asked → its rows in (web↔hub↔machine)',
+  'app.me': 'cold load: navigation start → /api/me answered, the desk drawn (web↔hub)',
+  'app.key': "cold load: navigation start → the device's org key read and held, unlocked (web)",
+  'app.grid': "cold load: navigation start → the grid drawn with the hub's counts (web)",
+  'grid.socket': 'grid socket: connecting → the whole grid in (web↔hub)',
+  'project.caught-up': "project opened: its log read and socket started → the hub's backlog caught up and verified, drawn (web↔hub)",
+  'socket.gap': 'project socket: dropped → welcomed, caught up again and verified, drawn (web↔hub)',
+  'wake.caught-up': 'tab shown again → caught up and verified after the reconnect that followed, drawn (web↔hub)',
+  'online.caught-up': 'browser back online → caught up and verified after the reconnect that followed, drawn (web↔hub)',
+  'rpc.steer': 'steer: sent → its result in (web→hub→machine→session, and back)',
+  'rpc.interrupt': 'interrupt: sent → its result in (web→hub→machine→session, and back)',
+  'rpc.decide': 'allow or deny: sent → its result in (web→hub→machine→session, and back)',
+  'rpc.answer': 'answer: sent → its result in (web→hub→machine→session, and back)',
+  'rpc.spawn': 'spawn: sent → its result in (web→hub→machine, and back)',
+  'rpc.resume': 'resume: sent → its result in (web→hub→machine, and back)',
 } as const;
 export type LatencyPath = keyof typeof PATHS;
+const PATH_NAMES = Object.keys(PATHS) as LatencyPath[];
+const PATH_INDEX = new Map(PATH_NAMES.map((path, i) => [path, i]));
+
+/** How many raw samples are kept across every path (`samples`): the latest ones. */
+export const LOG = 1000;
+
+/** One raw sample: its path, its ms, when it was taken (ms since the epoch), and the id of what it timed, where it has one. */
+export type Sample = { path: LatencyPath; ms: number; at: number; ref?: string };
+
+/** How long after the tab is shown again (or the browser is back online) a reconnect counts as the one that return needed. */
+export const RETURN_WINDOW_MS = 60_000;
 
 /** Every count the instrument keeps. */
 export const COUNTS = {
@@ -73,7 +104,7 @@ class Ring {
 export type SendRef = { writer: string; seq: number; wake: boolean };
 
 /** An owner's send, from its sending until its row, delivery and acknowledgement are measured. */
-type Send = { sentPerf: number; sentWall: number; wake: boolean; ref: SendRef | null; delivered: boolean; row: boolean };
+type Send = { nonce: string; sentPerf: number; sentWall: number; wake: boolean; ref: SendRef | null; delivered: boolean; row: boolean };
 
 /** How many sends, calls and awaited draws are remembered at most: older ones are forgotten unmeasured. */
 const REMEMBERED = 64;
@@ -92,24 +123,41 @@ export class LatencyRecorder {
   private readonly rings = new Map<LatencyPath, Ring>();
   private readonly counts = new Map<LatencyCount, number>();
   private readonly listeners = new Set<() => void>();
-  /** Samples waiting for the next frame: their paths, their starts, and which clock each start is on. */
+  /** Samples waiting for the next frame: their paths, their starts, which clock each start is on, and their refs. */
   private readonly framePaths: LatencyPath[] = [];
   private readonly frameStarts: number[] = [];
   private readonly frameWall: boolean[] = [];
+  private readonly frameRefs: Array<string | undefined> = [];
   private frameAsked = false;
+  /** The last `LOG` samples of every path, raw: a ring of their paths (by index), ms, wall-clock times and refs. */
+  private readonly rawPath = new Uint8Array(LOG);
+  private readonly rawMs = new Float64Array(LOG);
+  private readonly rawAt = new Float64Array(LOG);
+  private readonly rawRef: Array<string | undefined> = new Array<string | undefined>(LOG);
+  private rawNext = 0;
+  private rawSize = 0;
   /** The owner's sends by nonce, then by their event once acknowledged. */
   private readonly sends = new Map<string, Send>();
   /** When each tool call's row was written (its engine timestamp, ms), by tool-use id: a raised request's anchor. */
   private readonly calls = new Map<string, number>();
+  /** The RPCs sent and not answered yet, by nonce: the path each is timed on and when it was sent. */
+  private readonly rpcs = new Map<string, { path: LatencyPath; sent: number }>();
 
   constructor(private readonly log: (line: string) => void = (line) => console.info(line)) {}
 
-  /** One sample of `path`; a non-finite one (a stamp absent or unparseable) is not kept. */
-  record(path: LatencyPath, ms: number): void {
+  /** One sample of `path`, `ref` naming what it timed; a non-finite one (a stamp absent or unparseable) is not kept. */
+  record(path: LatencyPath, ms: number, ref?: string): void {
     if (!Number.isFinite(ms)) return;
     let ring = this.rings.get(path);
     if (!ring) this.rings.set(path, (ring = new Ring()));
     ring.push(ms);
+    const at = this.rawNext;
+    this.rawPath[at] = PATH_INDEX.get(path)!;
+    this.rawMs[at] = ms;
+    this.rawAt[at] = Date.now();
+    this.rawRef[at] = ref;
+    this.rawNext = (at + 1) % LOG;
+    this.rawSize = Math.min(LOG, this.rawSize + 1);
     if (!this.on) return;
     this.log(`[desk latency] ${path} ${Math.round(ms)}`);
     this.changed();
@@ -119,21 +167,23 @@ export class LatencyRecorder {
    * Records `path` at the next frame, from `start` on the browser's clock (`performance.now()`), or on the wall clock
    * (`Date.now()`) when `wall`; not while the page is hidden, nor past the `PENDING` samples already waiting for it.
    */
-  drawn(path: LatencyPath, start: number, wall = false): void {
+  drawn(path: LatencyPath, start: number, wall = false, ref?: string): void {
     if (!Number.isFinite(start) || hidden() || this.framePaths.length >= PENDING) return;
     this.framePaths.push(path);
     this.frameStarts.push(start);
     this.frameWall.push(wall);
+    this.frameRefs.push(ref);
     if (this.frameAsked) return;
     this.frameAsked = true;
     nextFrame(() => {
       this.frameAsked = false;
       const perf = now();
       const wallNow = Date.now();
-      for (let i = 0; i < this.framePaths.length; i++) this.record(this.framePaths[i], (this.frameWall[i] ? wallNow : perf) - this.frameStarts[i]);
+      for (let i = 0; i < this.framePaths.length; i++) this.record(this.framePaths[i], (this.frameWall[i] ? wallNow : perf) - this.frameStarts[i], this.frameRefs[i]);
       this.framePaths.length = 0;
       this.frameStarts.length = 0;
       this.frameWall.length = 0;
+      this.frameRefs.length = 0;
     });
   }
 
@@ -146,7 +196,7 @@ export class LatencyRecorder {
 
   /** A web `human` handed to the socket (or held for it), by its seal's nonce. */
   humanSent(nonce: string, wake: boolean): void {
-    this.sends.set(nonce, { sentPerf: now(), sentWall: Date.now(), wake, ref: null, delivered: false, row: false });
+    this.sends.set(nonce, { nonce, sentPerf: now(), sentWall: Date.now(), wake, ref: null, delivered: false, row: false });
     this.forgetOldest(this.sends);
   }
 
@@ -154,7 +204,7 @@ export class LatencyRecorder {
   humanAcked(nonce: string, event: { writer: string; seq: number }): void {
     const send = this.sends.get(nonce);
     if (!send) return;
-    this.record('owner.ack', now() - send.sentPerf);
+    this.record('owner.ack', now() - send.sentPerf, nonce);
     send.ref = { writer: event.writer, seq: event.seq, wake: send.wake };
   }
 
@@ -164,7 +214,7 @@ export class LatencyRecorder {
     const send = this.sendOf(event);
     if (!send || send.delivered) return;
     send.delivered = true;
-    this.record('owner.delivered', now() - send.sentPerf);
+    this.record('owner.delivered', now() - send.sentPerf, send.nonce);
     this.done(send);
   }
 
@@ -173,10 +223,28 @@ export class LatencyRecorder {
     for (const send of this.sends.values()) {
       if (send.ref === null || send.row || !matches(send.ref)) continue;
       send.row = true;
-      this.record('owner.row', parseTime(timestamp) - send.sentWall);
+      this.record('owner.row', parseTime(timestamp) - send.sentWall, send.nonce);
       this.done(send);
       return;
     }
+  }
+
+  // An RPC: sent, and its result.
+
+  /** An RPC was sent, by its nonce: timed until its result when its name has a path (`rpc.<name>`). */
+  rpcSent(nonce: string, name: string): void {
+    const path = `rpc.${name}`;
+    if (!(path in PATHS) || this.rpcs.has(nonce)) return; // a retry keeps the first send's time
+    this.rpcs.set(nonce, { path: path as LatencyPath, sent: now() });
+    this.forgetOldest(this.rpcs);
+  }
+
+  /** The hub reported an RPC's state: `done` is its result (a failure is not a latency, and `forwarded` not its end). */
+  rpcState(nonce: string, state: string): void {
+    const rpc = this.rpcs.get(nonce);
+    if (!rpc || (state !== 'done' && state !== 'failed')) return;
+    this.rpcs.delete(nonce);
+    if (state === 'done') this.record(rpc.path, now() - rpc.sent, nonce);
   }
 
   // A raised request's anchor.
@@ -203,6 +271,18 @@ export class LatencyRecorder {
       paths[path] = { label: PATHS[path], n: sorted.length, p50: round(percentile(sorted, 50)), p95: round(percentile(sorted, 95)), max: round(sorted[sorted.length - 1]) };
     }
     return { on: this.on, paths, counts: Object.fromEntries(this.counts) };
+  }
+
+  /** The raw samples taken after `since` (ms since the epoch), oldest first: at most the last `LOG`. */
+  samples(since = Number.NEGATIVE_INFINITY): Sample[] {
+    const out: Sample[] = [];
+    for (let i = 0; i < this.rawSize; i++) {
+      const at = (this.rawNext - this.rawSize + i + LOG) % LOG;
+      if (!(this.rawAt[at] > since)) continue;
+      const ref = this.rawRef[at];
+      out.push({ path: PATH_NAMES[this.rawPath[at]], ms: this.rawMs[at], at: this.rawAt[at], ...(ref !== undefined && { ref }) });
+    }
+    return out;
   }
 
   /** Called after each sample while the readout is on. */
@@ -245,8 +325,11 @@ export function latencyAsked(): boolean {
 /** The desk's one instrument, which every hop records into. */
 export const latency = new LatencyRecorder();
 
+/** What scripts read: `window.deskLatency()`, the report, and `window.deskLatency.samples(since)`, the raw samples. */
+export type DeskLatency = (() => LatencyReport) & { samples: (since?: number) => Sample[] };
+
 /** Turns the readout on when asked, and gives scripts `window.deskLatency()`. */
 export function installLatency(): void {
   latency.on = latencyAsked();
-  (window as unknown as { deskLatency: () => LatencyReport }).deskLatency = () => latency.report();
+  (window as unknown as { deskLatency: DeskLatency }).deskLatency = Object.assign(() => latency.report(), { samples: (since?: number) => latency.samples(since) });
 }
