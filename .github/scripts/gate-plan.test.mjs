@@ -423,7 +423,9 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
   }
   // Each spec a switch gates runs its bounds under it alone, so no other group runs them (`default` collects it): it
   // skips without the switch, or reads the switch into a const its bounds sit behind, as presentations-drag's class-1
-  // trial in e2e:presentations does; the time-bound walk below holds every raw bound outside that const to a form.
+  // trial in e2e:presentations does. The const form is only as strong as the walk below, which finds a raw bound in
+  // both of its forms (a number against a time, and a verdict on a bound) and fails any that sits off the switch: drop
+  // the `if (MEASURED)` from a bound and the walk, not this test, catches it.
   for (const group of switched) {
     for (const spec of scripts[`e2e:${group}`].split(/\s+/).filter((word) => /^e2e\/.*\.spec\.ts$/.test(word))) {
       const text = readFileSync(join(root, spec), 'utf8');
@@ -450,8 +452,10 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
 });
 
 // The contract's other half: outside a measured job no raw time bound can break beside a busy guest. A spec's upper bound
-// on a time (`expect(<a time>).toBeLessThan(<a number>)`, the time read from its own text or, for a bare name, from its
-// declaration) holds only behind a measurement switch (a skip, or an `if (<const>)` whose const reads a MAWS_*_PERF or
+// on a time is asserted in one of two forms: by number (`expect(<a time>).toBeLessThan(<a number>)`, the time read from
+// its own text or, for a bare name, from its declaration), or by verdict (`expect(summary.bound.verdict).not.toBe('failed')`,
+// or a list of rows built from `r.verdict`: a helper has judged the time against its bound, and the spec asserts the
+// judgement). Either holds only behind a measurement switch (a skip, or an `if (<const>)` whose const reads a MAWS_*_PERF or
 // MAWS_*_SCALE switch), so it runs in a measured job alone; through the load-aware budget (e2e/support/latency.ts,
 // which a guest or ci-kit's VM lane holds to its loaded ceiling); or as one of the bounds below, each on a timer of the
 // product's own with seconds of margin, or in a spec no gate job runs, which a neighbour's load cannot reach. A new raw
@@ -510,6 +514,9 @@ const firstArgument = (text, from) => {
   }
   return text.slice(from);
 };
+// A verdict read in an expect's subject: the bound's judgement, which a helper made from a time and the bound.
+const VERDICT_READ = /\.verdict\b/;
+const EXPECT_OPEN = /\bexpect(?:\.soft|\.poll)?\(/g;
 const indentOf = (line) => /^ */.exec(line)[0].length;
 // The lines (0-based) a measurement switch covers in one file: a skip on it covers its block (the whole file at the top
 // level); an `if (<const>)` on a const that reads it covers its statement or its block.
@@ -535,14 +542,21 @@ const switchedLines = (lines) => {
   });
   return covered;
 };
-// Every raw upper bound on a time in a file, outside its switched lines: the statement's text, trimmed.
+// Every raw upper bound on a time in a file, outside its switched lines: the statement's text, trimmed. A bound by verdict
+// is the line of the expect whose subject reads one; a bound by number is the line of its matcher.
 const rawTimeBounds = (text) => {
   const lines = text.split('\n');
   const switched = switchedLines(lines);
   const found = [];
   lines.forEach((line, i) => {
+    if (switched.has(i)) return;
+    const rest = lines.slice(i).join('\n');
+    if ([...line.matchAll(EXPECT_OPEN)].some((open) => VERDICT_READ.test(firstArgument(rest, open.index + open[0].length)))) {
+      found.push(line.trim());
+      return;
+    }
     const bound = /\.toBeLessThan(?:OrEqual)?\(/.exec(line);
-    if (!bound || switched.has(i)) return;
+    if (!bound) return;
     let k = i;
     while (k > 0 && !/\bexpect\b/.test(lines[k])) k--;
     const statement = lines.slice(k, i + 1).join('\n');
@@ -574,7 +588,7 @@ test("outside a measured job no raw time bound runs: each is behind a measuremen
   assert.deepEqual(Object.fromEntries(Object.entries(found).map(([file, bounds]) => [file, [...new Set(bounds)]])), listed);
 });
 
-test('the time-bound walk finds what it must: a raw bound by its subject or the subject\'s declaration, not one behind a switch, an order, or a distance', () => {
+test('the time-bound walk finds what it must: a raw bound by its subject or the subject\'s declaration, not one behind a switch, an order, or a distance; and a bound by verdict, unless behind a switch', () => {
   const spec = [
     "test('open', async () => {",
     '  const open = timings.drawnAt - timings.openedAt;',
@@ -583,6 +597,10 @@ test('the time-bound walk finds what it must: a raw bound by its subject or the 
     '  expect(Date.now() - startedAt).toBeLessThan(BOUND_MS + 500);',
     '  expect(firstPresence.at).toBeLessThanOrEqual(call.answeredAt);',
     '  expect(box.x + box.width).toBeLessThanOrEqual(1920);',
+    "  expect(summary.bound.verdict, 'the drag within its bound').not.toBe('failed');",
+    "  expect(rows.filter((r) => r.verdict !== 'met').map((r) => r.row)).toEqual([]);",
+    "  expect(judged).toMatchObject({ verdict: 'met' });",
+    '  if (MEASURED) expect(summary.bound.verdict).not.toBe(\'failed\');',
     '  if (MEASURED) expect(loaded.ms).toBeLessThan(3000);',
     '  if (MEASURED) {',
     '    expect(framesP95Ms).toBeLessThanOrEqual(17);',
@@ -602,10 +620,12 @@ test('the time-bound walk finds what it must: a raw bound by its subject or the 
     'expect(open).toBeLessThanOrEqual(1_000);',
     'expect(drag.inputToFrameMs.p95).toBeLessThanOrEqual(16);',
     'expect(Date.now() - startedAt).toBeLessThan(BOUND_MS + 500);',
+    "expect(summary.bound.verdict, 'the drag within its bound').not.toBe('failed');",
+    "expect(rows.filter((r) => r.verdict !== 'met').map((r) => r.row)).toEqual([]);",
     ').toBeLessThan(5_000);',
   ]);
   // A guard on a const that reads no measurement switch covers nothing.
-  assert.deepEqual(rawTimeBounds(["const MEASURED = process.env.MAWS_LIVE === '1';", ...spec].join('\n')).length, 6);
+  assert.deepEqual(rawTimeBounds(["const MEASURED = process.env.MAWS_LIVE === '1';", ...spec].join('\n')).length, 9);
 });
 
 test("gate.yml times every job that can take the exclusive Mac instance by the plan, and runs unit:darwin where the plan says", () => {
