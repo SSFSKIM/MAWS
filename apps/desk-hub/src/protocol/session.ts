@@ -207,7 +207,7 @@ export type Route = {
 /** A session's command catalog (M1): every command `$.command.list()` lists, with the route each gets, and its models. */
 export type Catalog = {
   fingerprint: string;
-  commands: Array<{ name: string; description: string; source: string; plugin?: string; route: Route }>;
+  commands: Array<{ name: string; description: string; source: string; plugin?: string; route: Route; withArgs?: Route }>;
   models: { options: string[]; aliases: Record<string, string | null> };
   measured: string;
 };
@@ -258,6 +258,8 @@ export type SessionBodies = {
     presence: SessionPresence;
     streaming: Streaming[];
     usage?: Usage | null;
+    /** The main session's pushed command catalog; absent from pre-M1 producers and agent subs. */
+    catalog?: Catalog;
     /** The loop's background jobs, as `subagents` carries them; absent from a producer older than DC8. */
     jobs?: Job[];
     /** The loop's MCP servers by name, as `subagents` carries them; absent from a producer older than DC8. */

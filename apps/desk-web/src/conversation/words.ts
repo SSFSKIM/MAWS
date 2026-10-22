@@ -113,6 +113,7 @@ export function commandOutcomeText(body: OpBody): { state: 'ran' | 'unconfirmed'
   const settled = body.settled as { ok?: boolean; error?: string; code?: string } | undefined;
   if (settled?.ok === false && settled.code === 'stopped') return { state: 'failed', text: STOPPED_AT_TERMINAL, mark: null };
   if (settled?.ok === false) return { state: 'failed', text: `failed: ${settled.error ?? 'the engine refused it'}`, mark: null };
+  if (body.route === 'run-prompt') return { state: 'ran', text: 'started a turn', mark: null };
   const readback = (body.readback ?? { how: 'none' }) as Readback;
   switch (readback.how) {
     case 'row':
@@ -124,17 +125,6 @@ export function commandOutcomeText(body: OpBody): { state: 'ran' | 'unconfirmed'
     default:
       return { state: 'unconfirmed', text: 'ran, unconfirmed', mark: null };
   }
-}
-
-/**
- * What a command saves beyond the session, said with it (the spec's H-default rule): `mcp enable|disable` writes the
- * project's `.claude.json` on the machine. Null for a command whose effect ends with the session.
- */
-export function commandOutlives(name: string, args: string, machine: string): string | null {
-  const verb = name === 'mcp' ? args.trim().split(/\s+/)[0] : '';
-  if (verb === 'disable') return `saved for this project on ${machine} until enabled again`;
-  if (verb === 'enable') return `saved for this project on ${machine} until disabled again`;
-  return null;
 }
 
 export const DELIVERY_TEXT: Record<Delivery['outcome'], string> = {

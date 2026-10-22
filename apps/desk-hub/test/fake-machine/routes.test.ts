@@ -49,12 +49,12 @@ describe('routeOf', () => {
     expect(check('copy')).toMatchObject({ ok: false, code: 'local' });
   });
 
-  it('refuses a row M0 does not enable yet, and the other forms of goal by its otherwise', () => {
-    expect(check('cd', '/src/maws')).toEqual({ ok: false, code: 'disabled', reason: 'comes with M1' });
-    expect(check('exit')).toEqual({ ok: false, code: 'disabled', reason: 'comes with M1' });
+  it('enables measured M1 forms, keeps exit disabled, and selects goal otherwise', () => {
+    expect(check('cd', '/src/maws')).toMatchObject({ ok: true, route: { class: 'run' } });
+    expect(check('exit')).toMatchObject({ ok: false, code: 'disabled' });
     expect(check('goal')).toMatchObject({ ok: false, code: 'panel' });
-    expect(check('goal', 'clear')).toMatchObject({ ok: false, code: 'disabled' });
-    expect(check('goal', 'ship the release')).toMatchObject({ ok: false, code: 'disabled', reason: 'comes with M1' });
+    expect(check('goal', 'clear')).toMatchObject({ ok: true, route: { class: 'run' } });
+    expect(check('goal', 'ship the release')).toMatchObject({ ok: true, route: { class: 'run-prompt' } });
   });
 
   it("checks a route's forms before its class: arguments a non-run row's forms forbid are bad-args, not its class", () => {
@@ -63,7 +63,7 @@ describe('routeOf', () => {
   });
 
   it("routes a non-built-in as run-prompt (enabled with M1), a plugin exception by its row, and the bridge's own plugin as self", () => {
-    expect(check('doperpowers:execspec', 'go')).toEqual({ ok: false, code: 'disabled', reason: 'comes with M1' });
+    expect(check('doperpowers:execspec', 'go')).toMatchObject({ ok: true, route: { class: 'run-prompt' } });
     expect(routeOf(table, { name: 'diff', source: 'plugin', plugin: 'cc-plugin-diff' }, 'diff', '', 'mini')).toMatchObject({ ok: false, code: 'panel' });
     expect(check('sminos:who')).toEqual({ ok: false, code: 'self', reason: 'run it from the terminal' });
     expect(routeOf(table, { name: 'brand-new', source: 'builtin' }, 'brand-new', '', 'mini')).toEqual({ ok: false, code: 'unknown-builtin', reason: 'not measured on 2.1.307' });

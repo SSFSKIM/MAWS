@@ -4,12 +4,12 @@
 // (name, args) takes, or the refusal and its reason. The web never decides a class; this is the machine's word, as the
 // bridge's `routeOf` is.
 import { fileURLToPath } from 'node:url';
-import type { Route } from '../src/protocol/session';
+import type { Catalog, Route } from '../src/protocol/session';
 // Imported, not read from beside the module: the fake machine's command runs bundled from a temporary directory.
 import vendored from './dx4/routes-2.1.307.json' with { type: 'json' };
 
 export type RouteEntry = { name: string; bare: Route; withArgs?: Route };
-export type RouteTable = { engine: string; entries: RouteEntry[]; pluginExceptions: Array<RouteEntry & { plugin: string }> };
+export type RouteTable = { catalog?: Catalog; engine: string; entries: RouteEntry[]; pluginExceptions: Array<RouteEntry & { plugin: string }> };
 
 /** Where the vendored 2.1.307 table lives (dx4/README.md says where it comes from, and its hash). */
 export const ROUTES_2_1_307 = fileURLToPath(new URL('./dx4/routes-2.1.307.json', import.meta.url));
@@ -17,7 +17,7 @@ export const ROUTES_2_1_307 = fileURLToPath(new URL('./dx4/routes-2.1.307.json',
 /** The vendored 2.1.307 table, its plugin exceptions defaulted. */
 export function loadRoutes(): RouteTable {
   const table = vendored as unknown as Partial<RouteTable> & Pick<RouteTable, 'engine' | 'entries'>;
-  return { engine: table.engine, entries: table.entries, pluginExceptions: table.pluginExceptions ?? [] };
+  return { catalog: table.catalog, engine: table.engine, entries: table.entries, pluginExceptions: table.pluginExceptions ?? [] };
 }
 
 /** A `$.command.list()` entry, as far as routing reads it. */
@@ -58,7 +58,7 @@ export function routeOf(table: RouteTable, listed: Listed | null, name: string, 
     if (!entry) return { ok: false, code: 'unknown-builtin', reason: `not measured on ${table.engine}` };
   } else {
     if (listed.plugin === 'sminos') return { ok: false, code: 'self', reason: 'run it from the terminal' };
-    entry = table.pluginExceptions.find((e) => e.name === name && e.plugin === listed.plugin) ?? { name, bare: { class: 'run-prompt', enabled: false, reason: 'comes with M1', measured: 'M' } };
+    entry = table.pluginExceptions.find((e) => e.name === name && e.plugin === listed.plugin) ?? { name, bare: { class: 'run-prompt', enabled: true, measured: 'M' } };
   }
   const trimmed = args.trim();
   let route = trimmed === '' ? entry.bare : (entry.withArgs ?? entry.bare);

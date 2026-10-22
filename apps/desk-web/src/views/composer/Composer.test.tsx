@@ -4,6 +4,9 @@
 // session's composer is a command where the session can take one (the desk control surface's M0), and its status.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { catalogs, catalogKey } from '../../state/catalog';
+import fixture from '../../../../desk-hub/fake-machine/dx4/routes-2.1.307.json';
+import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../../latency/latency';
 import type { ProjectConnection } from '../../project/connection';
 import type { DeskSession } from '../../shell/sessions';
@@ -138,7 +141,8 @@ describe('Model', () => {
 // can take one — the RPC `command`, its status drawn queued, ran, and read back — else refused in place with the
 // capability's reason and a way to send it as words as before; a path is words.
 describe('a slash command', () => {
-  const CAPS = { sminos: '1.7.0', protocol: 2, engine: '2.1.307', ops: ['read', 'command'], reads: ['status'], routes: { measured: '2.1.307' } };
+  beforeEach(() => catalogs.accept(catalogKey('p1', S1), fixture.catalog as Catalog));
+  const CAPS = { sminos: '1.8.0', protocol: 2, engine: '2.1.307', ops: ['read', 'command'], reads: ['status', 'catalog'], routes: { measured: '2.1.307' } };
   const capable = (status = 'idle'): DeskSession => ({ ...session(S1, 'maws-45'), presence: { record: { status }, bridge: true, capabilities: CAPS }, machineDesk: { sminos: '1.7.0', rpcs: ['command'], reads: [] } });
   const type = (text: string) => fireEvent.change(screen.getByRole('textbox', { name: 'Message maws-45' }), { target: { value: text } });
 
@@ -151,7 +155,7 @@ describe('a slash command', () => {
     cleanup();
     // Mid-turn Enter steers words, but a slash is a command, queued until the turn ends (H-queue).
     mount(<SessionComposer session={capable('busy')} />);
-    type('/reload-plugins');
+    type('/reload-plugins ');
     expect(screen.getByTestId('composer-note').textContent).toContain('a command is queued until maws-45 is idle');
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message maws-45' }), { key: 'Enter' });
     expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'reload-plugins', '', true);
@@ -182,8 +186,8 @@ describe('a slash command', () => {
 
 describe('CommandStatus', () => {
   const rpc = (args: Record<string, unknown>) => ({ rpc: 'command', machine: 'mini', nonce: 'n1', args: { session: S1, ...args } });
-  const draw = (conversation: Record<string, unknown>, running = false) => {
-    mount(<CommandStatus nonce="n1" session={{ ...session(S1, 'maws-45'), presence: { record: { status: running ? 'busy' : 'idle' }, bridge: true } }} />, conversation);
+  const draw = (conversation: Record<string, unknown>, running = false, outlives?: string) => {
+    mount(<CommandStatus nonce="n1" outlives={outlives} session={{ ...session(S1, 'maws-45'), presence: { record: { status: running ? 'busy' : 'idle' }, bridge: true } }} />, conversation);
     return screen.getByTestId('command-status');
   };
   const queued = { state: 'done', outcome: { state: 'done', result: { queued: true, route: 'run', id: 'c1' } } };
@@ -196,13 +200,13 @@ describe('CommandStatus', () => {
     const end = { op: 'command', phase: 'end', session: S1, body: { rpc: 'n1', op: 'command', phase: 'end', id: 'c1', name: 'rename', args: 'desk-m0', settled: { ok: true }, readback: { how: 'row', text: 'Session renamed to: desk-m0', uuid: 'u1' } } };
     const ran = draw({ rpcs: { n1: { ...queued, nonce: 'n1', rpc: rpc({ name: 'rename', args: 'desk-m0' }) } }, ops: { n1: end } });
     expect(ran.getAttribute('data-command-state')).toBe('ran');
-    expect(ran.textContent).toBe('Session renamed to: desk-m0 · confirmed by its row');
+    expect(ran.textContent).toBe('Ran · Session renamed to: desk-m0 · confirmed by its row');
   });
 
   it("names what outlives the session, an unconfirmed run as such, and a refusal by the bridge's reason", () => {
     const end = (body: Record<string, unknown>) => ({ op: 'command', phase: 'end', session: S1, body: { rpc: 'n1', op: 'command', phase: 'end', id: 'c1', ...body } });
-    const mcp = draw({ rpcs: { n1: { ...queued, nonce: 'n1', rpc: rpc({ name: 'mcp', args: 'disable github' }) } }, ops: { n1: end({ name: 'mcp', args: 'disable github', settled: { ok: true }, readback: { how: 'row', text: 'MCP server "github" disabled' } }) } });
-    expect(mcp.textContent).toBe('MCP server "github" disabled · confirmed by its row · saved for this project on mini until enabled again');
+    const mcp = draw({ rpcs: { n1: { ...queued, nonce: 'n1', rpc: rpc({ name: 'mcp', args: 'disable github' }) } }, ops: { n1: end({ name: 'mcp', args: 'disable github', settled: { ok: true }, readback: { how: 'row', text: 'MCP server "github" disabled' } }) } }, false, 'saved for this project on mini: .claude.json');
+    expect(mcp.textContent).toBe('Ran · MCP server "github" disabled · confirmed by its row · saved for this project on mini: .claude.json');
     cleanup();
     const none = draw({ rpcs: { n1: { ...queued, nonce: 'n1', rpc: rpc({ name: 'color', args: 'red' }) } }, ops: { n1: end({ name: 'color', args: 'red', settled: { ok: true }, readback: { how: 'none' } }) } });
     expect(none.getAttribute('data-command-state')).toBe('unconfirmed');
@@ -227,5 +231,66 @@ describe('CommandStatus', () => {
   it("leaves the RPC's own states to RpcStatus while it is on its way", () => {
     mount(<CommandStatus nonce="n1" session={session(S1, 'maws-45')} />, { rpcs: { n1: { nonce: 'n1', rpc: rpc({ name: 'rename', args: 'x' }), state: 'forwarded' } } });
     expect(screen.getByRole('status').getAttribute('data-rpc-state')).toBe('forwarded');
+  });
+});
+
+
+describe('the cached command palette', () => {
+  const capable: DeskSession = { ...session(S1, 'maws-45'), presence: { record: { status: 'idle' }, bridge: true,
+    capabilities: { sminos: '1.8.0', protocol: 2, engine: '2.1.307', ops: ['command', 'read'], reads: ['status', 'catalog'], routes: { measured: '2.1.307' } } }, machineDesk: { sminos: '1.8.0', rpcs: ['command'], reads: [] } };
+  const type = (value: string) => fireEvent.change(screen.getByRole('textbox', { name: 'Message maws-45' }), { target: { value } });
+  beforeEach(() => catalogs.accept(catalogKey('p1', S1), fixture.catalog as Catalog));
+  it('draws slash choices without fetching, inserts the selected command, then routes Send', () => {
+    mount(<SessionComposer session={capable} />);
+    type('/col');
+    const row = screen.getByRole('option', { name: /color/ });
+    fireEvent.mouseDown(row);
+    expect((screen.getByRole('textbox', { name: 'Message maws-45' }) as HTMLTextAreaElement).value).toBe('/color ');
+    type('/color red');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'color', 'red', false);
+    expect(say).not.toHaveBeenCalled();
+  });
+  it('refuses an unknown or a terminal panel before RPC and opens existing Model locally', () => {
+    mount(<SessionComposer session={capable} />);
+    type('/bogus');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByTestId('command-refused').textContent).toContain('not a command this session knows');
+    type('/usage');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByTestId('command-refused').textContent).toContain('panel');
+    type('/model');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByRole('form', { name: 'Model and effort' })).toBeTruthy();
+    expect(command).not.toHaveBeenCalled();
+  });
+  it('requires confirmation for an advertised confirm route and never runs a disabled item from the keyboard', () => {
+    const offered = structuredClone(fixture.catalog) as Catalog;
+    const exit = offered.commands.find((c) => c.name === 'exit')!;
+    exit.route.enabled = true;
+    catalogs.accept(catalogKey('p1', S1), offered);
+    mount(<SessionComposer session={capable} />);
+    type('/exit'); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByRole('alertdialog').textContent).toContain('mini');
+    expect(command).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(command).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run command' }));
+    expect(command).toHaveBeenCalledTimes(1);
+    type('/usage');
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message maws-45' }), { key: 'Enter' });
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('listbox', { name: 'Commands' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message maws-45' }), { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: 'Commands' })).toBeNull();
+  });
+
+  it('keeps two back-to-back command statuses rather than replacing the first nonce', async () => {
+    mount(<SessionComposer session={capable} />);
+    command.mockResolvedValueOnce('one').mockResolvedValueOnce('two');
+    type('/color red'); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    type('/color blue'); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await vi.waitFor(() => expect(screen.getAllByTestId('command-receipt')).toHaveLength(2));
   });
 });

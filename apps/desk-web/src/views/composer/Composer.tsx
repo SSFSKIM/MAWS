@@ -9,12 +9,17 @@
 // (the desk control surface spec, 2026-10-22, §3): run on Send or on Enter, mid-turn too — the session queues it until
 // the turn ends — or, when the session cannot take it, refused in place with the capability's reason and sent as words
 // only when asked.
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useStore } from 'zustand';
-import { formatCount } from '@shared/app/date-format';
+import { formatCount, formatClock } from '@shared/app/date-format';
 import { address } from '../../conversation/address';
 import { complete, completionAt, insertTag, type Completion } from '../../conversation/completion';
 import { turnRunning, type Capability } from '../../conversation/capabilities';
+import { commandRoute, slashItems, type SlashItem } from '../../conversation/catalog';
+import { catalogKey, useCatalog } from '../../state/catalog';
+import { M1_SMINOS } from '../../conversation/capabilities';
+import { SlashPalette, groupedItems } from './SlashPalette';
+import { rankItems, rememberChosen } from './rank';
 import { parseCommand } from '../../conversation/command';
 import { sessionName } from '../../log/projection';
 import { useNarrow } from '../../shell/viewport';
@@ -138,25 +143,66 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 export function SessionComposer({ session }: { session: DeskSession }) {
   const { connection, member } = useDesk();
   const [text, setText] = useState('');
-  const [rpc, setRpc] = useState<{ nonce: string; command: boolean } | null>(null);
+  const [rpc, setRpc] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<{ text: string; reason: string } | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  const [commands, setCommands] = useState<Array<{ nonce: string; outlives?: string }>>([]);
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const cached = useCatalog(catalogKey(connection.project, session.session));
+  const [paletteHidden, setPaletteHidden] = useState(false);
+  const [active, setActive] = useState(0);
+  const [opened, setOpened] = useState<number | null>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const paletteId = useId();
   const narrow = useNarrow();
   const [more, setMore] = useState(false);
   const can = useCapabilities(session);
   const running = turnRunning(session) && session.machineOnline !== false;
   const target = { session: session.session, alias: session.alias };
-  const issue = async (promise: Promise<string>, command = false) => setRpc({ nonce: await promise, command });
-  const typed = parseCommand(text);
+  const issue = async (promise: Promise<string>) => setRpc(await promise);
+  const typed = parseCommand(text, cached.catalog);
+  const unavailable = !can.command.can ? can.command.reason : !can.catalog.can ? can.catalog.reason : null;
+  const query = /^\/([^\s/]*)$/.exec(text)?.[1] ?? null;
+  const paletteOpen = query !== null && !paletteHidden;
+  const ranked = rankItems(query ?? '', slashItems(cached.catalog, session.machine, unavailable)).slice(0, 40);
+  const rows = groupedItems(ranked);
+  const [aimedAt, setAimedAt] = useState<string | null>(null);
+  if (aimedAt !== query) {
+    setAimedAt(query);
+    setActive(Math.max(0, rows.indexOf(ranked[0])));
+  }
+  const bounded = Math.min(active, Math.max(0, rows.length - 1));
+  const choose = (item: SlashItem) => {
+    if (item.action.kind === 'unavailable') return;
+    rememberChosen(item.name);
+    setText(`/${item.name} `);
+    setPaletteHidden(true);
+    setRefusal(null);
+    box.current?.focus();
+  };
 
   /** A typed command runs, or is refused in place; true when the text was one. */
-  const commanded = (): boolean => {
+  const commanded = (confirmed = false): boolean => {
     if (!typed) return false;
-    if (can.command.can) {
-      void issue(connection.command(member, session.machine, session.session, typed.name, typed.args, running), true);
-      setRefusal(null);
-      setText('');
-    } else setRefusal({ text, reason: can.command.reason ?? 'this session takes no commands' });
+    const action = commandRoute(cached.catalog, typed.name, typed.args, session.machine);
+    if (action.kind === 'widget') {
+      const capability = action.name === 'model' ? can.model : can.compact;
+      if (!capability.can) setRefusal({ text, reason: capability.reason ?? 'not available here' });
+      else {
+        if (action.name === 'model') setModelOpen(true);
+        else void issue(connection.rpc(member, session.machine, 'compact', { session: session.session }));
+        setText(''); setRefusal(null);
+      }
+    } else if (unavailable) setRefusal({ text, reason: unavailable });
+    else if (action.kind === 'unavailable') setRefusal({ text, reason: action.reason });
+    else {
+      const run = () => {
+        void connection.command(member, session.machine, session.session, typed.name, typed.args, running).then((nonce) => setCommands((held) => [...held, { nonce, outlives: action.route.outlives }]));
+        setRefusal(null); setText(''); setConfirm(null);
+      };
+      if (action.route.confirm && !confirmed) setConfirm(`Run /${typed.name} on ${session.machine}?${typed.name === 'exit' ? ' This closes the terminal session. The bridge refuses if it cannot prove no work will be lost.' : ''}`);
+      else run();
+    }
     return true;
   };
   const sendAsText = () => {
@@ -166,8 +212,9 @@ export function SessionComposer({ session }: { session: DeskSession }) {
     setText('');
   };
   const edit = (value: string) => {
-    setText(value);
-    setRefusal(null);
+    if (value.startsWith('/') && !paletteOpen) setOpened(performance.now());
+    setText(value); setPaletteHidden(false); setActive(0);
+    setRefusal(null); setConfirm(null);
   };
 
   const send = () => {
@@ -184,13 +231,33 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   };
   const reasons = [can.send.note, !running ? null : can.steer.can ? (can.steer.path === 'send' ? `Steer is ${can.steer.note}` : null) : can.steer.reason, typed && can.command.can && can.command.note ? `a command is ${can.command.note}` : null].filter(Boolean);
   return (
-    <div className="shrink-0 border-t border-border px-4 py-3" data-testid="composer">
+    <div className="relative shrink-0 border-t border-border px-4 py-3" data-testid="composer">
+      {paletteOpen && <SlashPalette id={paletteId} rows={rows} active={bounded} setActive={setActive} pick={choose} opened={opened}
+        stamp={cached.catalog && (cached.stale || !can.catalog.can) ? `as of ${formatClock(cached.asOf!)}` : null}
+        note={!can.catalog.can ? `commands need sminos ≥ ${M1_SMINOS} on ${session.machine} · ${can.catalog.reason}` : !cached.catalog ? 'Waiting for this session’s command catalog' : null} />}
       <textarea
+        ref={box}
+        aria-controls={paletteOpen ? paletteId : undefined}
+        aria-expanded={paletteOpen}
+        aria-activedescendant={paletteOpen && rows.length ? `${paletteId}-${bounded}` : undefined}
         aria-label={`Message ${sessionName(session)}`}
         rows={2}
         value={text}
         onChange={(e) => edit(e.target.value)}
-        onKeyDown={submitOnEnter(running && can.steer.can ? steer : send, narrow)}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (paletteOpen) {
+            if (event.key === 'Escape') { event.preventDefault(); setPaletteHidden(true); return; }
+            if (rows.length && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key) && !event.shiftKey) {
+              event.preventDefault();
+              if (event.key === 'ArrowDown') setActive((bounded + 1) % rows.length);
+              else if (event.key === 'ArrowUp') setActive((bounded - 1 + rows.length) % rows.length);
+              else choose(rows[bounded]);
+              return;
+            }
+          }
+          submitOnEnter(running && can.steer.can ? steer : send, narrow)(event);
+        }}
         className={BOX}
         placeholder={running && can.steer.can ? `Steer ${sessionName(session)}${narrow ? '' : ' (Enter)'}, or Send to queue it` : `Message ${sessionName(session)}`}
       />
@@ -213,8 +280,14 @@ export function SessionComposer({ session }: { session: DeskSession }) {
           </>
         )}
         <Compaction session={session.session} />
-        {rpc?.command ? <CommandStatus nonce={rpc.nonce} session={session} className="ml-auto" /> : <RpcStatus nonce={rpc?.nonce ?? null} className="ml-auto" />}
+        <RpcStatus nonce={rpc} className="ml-auto" />
       </div>
+      {commands.length > 0 && <div className="mt-2 max-h-32 space-y-1 overflow-y-auto" aria-label="Command outcomes">
+        {commands.map((command) => <div key={command.nonce} data-testid="command-receipt"><CommandStatus nonce={command.nonce} session={session} outlives={command.outlives} /></div>)}
+      </div>}
+      {confirm && <div role="alertdialog" aria-label="Confirm command" className="mt-2 rounded-md border border-border-strong bg-bg-raised p-3 text-ui-sm">
+        <p className="m-0 mb-2">{confirm}</p><button type="button" className={BUTTON} onClick={() => commanded(true)}>Run command</button>{' '}<button type="button" className={BUTTON} onClick={() => setConfirm(null)}>Cancel</button>
+      </div>}
       {refusal && (
         <p className="m-0 mt-1 text-ui-sm text-danger" role="alert" data-testid="command-refused">
           {refusal.reason}{' '}

@@ -1,11 +1,11 @@
-// A slash command as typed in a session's composer (the desk control surface spec, 2026-10-22, M0): `/<name>` and the
-// text after it. The name runs to the first space and never holds a slash, so a path (`/Users/new/notes.md is …`) and a
-// lone slash are words. Which class the command is, and whether it runs, is the bridge's to say (its route table);
-// the web never decides it.
-
+// Slash parsing preserves listed names verbatim (including an MCP prompt's suffix). A path and a lone slash are words.
+import type { Catalog } from 'desk-hub/protocol';
 export type TypedCommand = { name: string; args: string };
-
-export function parseCommand(text: string): TypedCommand | null {
-  const typed = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+export function parseCommand(text: string, catalog?: Catalog | null): TypedCommand | null {
+  const input = text.trim();
+  const listed = catalog?.commands.filter((c) => input.startsWith(`/${c.name}`) && (input.length === c.name.length + 1 || /\s/.test(input[c.name.length + 1])))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+  if (listed) return { name: listed.name, args: input.slice(listed.name.length + 1).trim() };
+  const typed = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(input);
   return typed ? { name: typed[1], args: (typed[2] ?? '').trim() } : null;
 }

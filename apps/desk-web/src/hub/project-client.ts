@@ -27,6 +27,8 @@ import {
   OUTPUT_TAIL_MAX,
   SUBSCRIPTION_KINDS,
 } from 'desk-hub/protocol';
+import { catalogs, catalogKey } from '../state/catalog';
+import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
 import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionListener, type SubscriptionMessage } from '../shell/session-plane';
 import { backoff, HubSocket, type ConnectionStatus } from './socket';
@@ -109,6 +111,7 @@ type OpenSubscription = {
   next: number;
   /** Discontinuities at `n` 0 in a row: the backoff's attempt. A snapshot resets it. */
   failedStarts: number;
+  catalogSent?: number;
   retry: ReturnType<typeof setTimeout> | null;
   /** The reads asked on the sub open now, by id, until each is answered, times out, or the sub is lost. */
   reads: Map<string, PendingRead>;
@@ -278,7 +281,10 @@ export class ProjectClient implements SessionPlane {
     clearTimeout(pending.timer);
     latency.readAnswered(pending.what, performance.now() - pending.sent);
     if (answer.error) pending.reject(new ReadError(answer.error.code, answer.error.message));
-    else pending.resolve(answer.result ?? null);
+    else {
+      if (pending.what === 'catalog' && answer.result) catalogs.accept(catalogKey(this.options.project, open.target.session), answer.result as unknown as Catalog);
+      pending.resolve(answer.result ?? null);
+    }
   }
 
   /** The sub the reads were asked on is gone: none of them will be answered on it. */
@@ -300,6 +306,7 @@ export class ProjectClient implements SessionPlane {
   private disconnected(): void {
     if (!this.welcomed) return;
     this.welcomed = false;
+    catalogs.invalidateProject(this.options.project);
     for (const open of this.subs) {
       if (open.retry) clearTimeout(open.retry); // the next welcome subscribes every open one again
       open.retry = null;
@@ -314,7 +321,13 @@ export class ProjectClient implements SessionPlane {
     open.sub = newNonce();
     open.next = 0;
     const { machine, session, agentId } = open.target;
+    open.catalogSent = performance.now();
+    if (agentId === null) catalogs.invalidate(catalogKey(this.options.project, session));
     this.socket.send({ t: 'subscribe', machine, session, agentId, sub: open.sub });
+    if (agentId === null && catalogs.get(catalogKey(this.options.project, session)).catalog) {
+      latency.record('catalog.ready', performance.now() - open.catalogSent, session);
+      open.catalogSent = undefined;
+    }
   }
 
   private receive(frame: ProjectDown): void {
@@ -418,6 +431,15 @@ export class ProjectClient implements SessionPlane {
     }
     open.next++;
     if (message.kind === 'snapshot') open.failedStarts = 0;
+    if (open.target.agentId === null && (message.kind === 'snapshot' || message.kind === 'catalog')) {
+      const key = catalogKey(this.options.project, open.target.session);
+      const catalog = message.kind === 'catalog' ? message.body as Catalog : (message.body as SessionBodies['snapshot']).catalog;
+      if (catalog) {
+        catalogs.accept(key, catalog);
+        if (open.catalogSent !== undefined) latency.record('catalog.ready', performance.now() - open.catalogSent, open.target.session);
+        open.catalogSent = undefined;
+      } else catalogs.invalidate(key);
+    }
     if (message.kind === 'read') return this.readAnswered(open, message.body as ReadAnswer);
     if (message.kind === 'end') {
       this.lostReads(open);

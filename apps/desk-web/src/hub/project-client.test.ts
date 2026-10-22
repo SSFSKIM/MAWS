@@ -7,6 +7,8 @@ import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { ProjectClient, type ConnectionStatus, type RpcStateFrame } from './project-client';
 import type { SubscriptionListener } from '../shell/session-plane';
+import { catalogs, catalogKey } from '../state/catalog';
+import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
 
 const until = async (check: () => boolean, ms = 3000) => {
@@ -291,6 +293,24 @@ describe('the session plane', () => {
     };
     return { log, listener };
   }
+
+  it('uses only this session’s cache until its snapshot confirms it, then consumes catalog pushes without a read', async () => {
+    const cached: Catalog = { fingerprint: 'cached', commands: [], models: { options: ['default'], aliases: {} }, measured: '2.1.307' };
+    const key = catalogKey(PROJECT, SESSION);
+    catalogs.accept(key, cached, 10);
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, recorder().listener);
+    expect(catalogs.get(key)).toMatchObject({ stale: true, asOf: 10 });
+    await until(() => double.subscriptions(PROJECT).length === 1);
+    const { sub } = double.subscriptions(PROJECT)[0];
+    double.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [], catalog: cached });
+    await until(() => !catalogs.get(key).stale);
+    double.sendSub(PROJECT, sub, 'catalog', { ...cached, fingerprint: 'changed' });
+    await until(() => catalogs.get(key).catalog?.fingerprint === 'changed');
+    expect(catalogs.get(catalogKey(PROJECT, 'another-session')).catalog).toBeNull();
+    expect(double.up.some(({ frame }) => frame.t === 'read')).toBe(false);
+  });
 
   it('delivers a subscription in order and routes the rest to the project', async () => {
     const { c, caughtUp, sessions } = client();

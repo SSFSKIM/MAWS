@@ -80,7 +80,19 @@ allows today.
   1.7.0; MAWS `desk-ctl-m0`), one late-restart reload edge deferred (Decision Log, entry
   10). Its acceptance walk on both Macs (A1–A9, A33's paths) is the orchestrator's, after
   the rollout of §13.
-- [ ] M1 — the command spine: the route table whole, the typeahead.
+- [x] (2026-10-22 12:31Z) M0 accepted by the orchestrator after the completed desk
+  walk on `web@master.f12fb35c`, MacBook sminos 1.7.1: A2–A4, A6–A8, A9's text
+  branch, reload-skills and MCP disable/re-enable passed. The literal *Ran* label,
+  A9's replaced-module effect branch and older/stale A1/A5 carry into M1's walk
+  below. Observed latency samples are in Outcomes; comparative A33 remains open.
+- [x] (2026-10-22 12:36Z) M1 — the command spine: the route table whole, the typeahead;
+  built and reviewed, walk pending. Both task reviews and both `high` branch
+  reviews are clean; sminos 1.8.0's final machine head `70fc4bc6` passed all eight
+  gates. MAWS's final combined-head gates are being completed; local headless
+  desktop/phone screenshot tests passed (2/2), and both images were inspected.
+  Neither merge nor rollout is part of this executor's handoff.
+- [ ] M1's rollout and walk: both halves ship back to back once cua's hold 3 on the
+  mini releases, and the walk follows the order in the Decision Log's last entry.
 - [ ] M2 — native panels from reads: side question, context and usage, model and effort,
   MCP, compact with instructions, status, permissions and hooks.
 - [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
@@ -234,6 +246,17 @@ milestone's walk includes one.
   <M1's> on mini*; a session whose catalog the desk cached before its machine fell
   behind (a downgrade; the e2e stages it) draws that catalog labelled *as of <time>*,
   every run item marked as A5 says.
+
+**M0 carryovers in M1's live walk** (M0 accepted with these obligations, 2026-10-22):
+
+- Recheck A2/A9's completed status: the DOM was already `data-command-state="ran"`,
+  but the M0 text showed only readback. M1 must visibly say *Ran* alongside it.
+- Prove A9's effect branch on the first `/reload-plugins` of an existing seat when
+  rolling from sminos 1.7.1 to 1.8.0. The two M0 reloads kept the unchanged module
+  and proved only the text branch; this run must actually replace the bridge.
+- Recreate A1's older-plugin case and A5's older/stale cases with the MacBook on
+  1.8.0, the mini deliberately held behind, and an existing MacBook session not yet
+  reloaded. The M0 fixtures had already gained `read.status` before their walk.
 
 **M2 — native panels from reads**
 
@@ -423,16 +446,16 @@ Four more rules bind the table:
   "no hook answered" text). A listed command whose `plugin` is `sminos` is refused
   `self` with *run it from the terminal*. The sminos plugin registers none today; the
   rule keeps a later one honest.
-- **`/reload-plugins` reloads the bridge itself.** The probe's `Reloaded: 1 plugin` with
-  one plugin loaded says every loaded plugin reloads, the sminos mod included: the old
-  module instance's posts are fenced off (DX5's nonce, 409), its child is replaced, and
-  its `run end` never reaches the stream (S4's own `reload-plugins` run that never
-  resolved, the spikes file's contradiction 11). So the bridge never awaits its own
-  reload: the op answers `queued`,
-  and the **daemon finishes the outcome by effect** (§6): when the session's bridge
-  answers again from a new socket within 60 s of the claim, `op end` with `readback
-  {how: "effect"}`; otherwise `op end` with `settled {ok: false, error: "the bridge did
-  not come back within 60 s"}`. `reload-skills` reloads no plugin and keeps its `{text}`.
+- **`/reload-plugins` can replace the bridge itself.** If replaced, the old module's
+  posts are fenced off (DX5's nonce, 409), its child is replaced, and its `run end`
+  cannot reach the stream. The op answers `queued` before running; the **daemon
+  finishes by effect** when a fresh probe sees a different (socket inode, pid), or
+  fails at the 60 s deadline. If the engine keeps an unchanged module loaded, the
+  bridge instead emits the returned text as `run end`, with readback `text`, and
+  frees its desk queue immediately. The first accepted end wins, including for
+  nonce-free CLI runs. Decision 11 records the 2.1.308 live walk that superseded the
+  assumption that every reload replaces the bridge. `reload-skills` reloads no
+  plugin and keeps its `{text}`.
 
 The web never decides a class: it reads the class from the catalog (§5) to draw the
 hint and to refuse before sending, and the bridge checks the class again on every
@@ -1579,9 +1602,11 @@ Expected: each script ends with its pass count and exit 0; `run-sminos-tests.sh`
 `PASS <n>` per suite and `all suites passed`.
 
 **MAWS, every milestone.** `scripts/ci-gate.sh` pushes the tree to a `ci/` ref and runs
-the gates on GitHub Actions; on the owner's Macs it is run under
-`/tmp/maws-review/with-slot.sh`, this host's convention for one heavy run at a time
-(not a repository file: another host runs the script bare).
+the gates on GitHub Actions. Run this watcher, and doperpowers' `ci-gate`, bare:
+waiting for remote gates is not local heavy work. On the owner's Macs,
+`/tmp/maws-review/with-slot.sh` is for local installs, builds and test runs only
+(Decision 16); holding a slot while CI waits can starve the focused regression
+that would fix the tested head.
 
 ```
 scripts/ci-gate.sh <worktree> --gates static,unit
@@ -1683,15 +1708,18 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | type / phase | fields |
 | --- | --- |
 | `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
-| `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; never emitted by the module a `reload-plugins` run replaces (the daemon finishes that op) |
+| `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; a replaced `reload-plugins` module cannot emit it (the daemon finishes by effect); an unchanged module kept loaded emits the returned text (Decision 11) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
-| `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
+| `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
 | `session` / `start` (M4) | gains `previous?: {session, reason: "clear" \| "resume" \| "branch" \| "unknown"}` |
 | `raised` (M3) | gains `suggestions?: PermissionUpdate[]` (at most 8; each rule string at most 512 characters; the list is the engine's `permission_suggestions` verbatim within those bounds, or absent) |
 
 The child's snapshot line gains `capabilities`, `mode` and `catalog` (the latest of each).
+A catalog command's `route` is its bare form; for non-empty trimmed arguments the
+consumer selects `withArgs ?? route`, then applies that form's validation and
+`otherwise`. These are advertised routes, not a second route table in the web.
 
 **`POST /requests/<request>/decision`** (M3) admits `updatedPermissions?:
 PermissionUpdate[]` (at most 8) on a permission; refuses it on a question (400). The
@@ -1741,7 +1769,7 @@ milestone that enables it; `—` means the same as the bare route):
 | `branch` | `follow` | `follow`, optional | — | M4 |
 | `resume` | `panel` (the picker) | `follow`, required (a session id) | — | M4 (args) |
 | `background` | `follow`, confirm, under §8.3's condition | `bad-args` | the confirm names the loss (§8.3) | M4 |
-| `exit` | `run`, confirm, only while the bridge sees no running task (shell, monitor, agent, workflow, MCP task) and no worktree the session created; otherwise refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome is the session's `session.end`, never the settled `{}` | M1 |
+| `exit` | `run`, confirm, only while every running-task class (shell, monitor, agent, workflow, MCP task) and session-created worktree state is positively established clear; unknown state is refused *can't tell whether work is running here: exit there* (Decision 14); known work is refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome, once a reliable guard exists, is the session's `session.end`, never the settled `{}` | disabled in M1: no complete state proof (Decision 14) |
 | `config` | `panel` | `drop` (*saves a default on <machine>; terminal only*, F1) | — | — |
 | `autocompact` | `panel` | `drop` (F1) | — | — |
 | `output-style` | `panel` | `drop` (F1) | — | — |
@@ -2017,6 +2045,55 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   filesystem, so a data table reaches a mod only as a TS module.
   Evidence: task 1's report, decision 2.
 
+- Observation: M1's `/exit` guard has no single authoritative task/worktree-state
+  read in the bundled mod API: the agent list alone omits other task classes, and
+  hook tracking after a module reload misses work started earlier. A missing
+  observation is not evidence that the class is clear. The transcript and sminos
+  worktree record may bridge the reload; TUI child processes are only a cross-check,
+  since MCP servers also appear there. Decision 14 requires a refusal for any class
+  not positively established clear.
+  Evidence: the machine executor's 2.1.308 API inspection and the orchestrator's
+  research record check, 2026-10-22; spike 14 proves the dialog condition, not a
+  complete mod-readable state noun.
+- Observation: RC comparison budgets remain unmeasured. MAWS #52 records the owner's
+  deferral of the RC column until a separate claude.ai configuration exists; the
+  gateway-configured MacBook cannot start `claude remote-control`. The orchestrator
+  initially had no desk samples either; the completed M0 walk now supplies the
+  small sample counts recorded in Outcomes, not twenty uses per path. M1 retains
+  `B.catalog`/`B.read` and the fixed 50 ms palette budget, and cannot claim
+  comparative A33 parity from code or automated tests.
+  Evidence: MAWS #52's latency-baseline comment and orchestrator checkpoint,
+  2026-10-22.
+
+- Observation: In the completed M0 walk the command DOM reached `ran`, but its
+  text replaced *Queued* directly with the readback. M1 now labels the completed
+  receipt *Ran* without inventing a timed intermediate phase. A9's two reloads
+  confirmed by text because the 1.7.1 module was unchanged; neither proves module
+  replacement. The first reload during the 1.8.0 rollout supplies that fixture.
+  Older/stale A1/A5 also move to M1's walk because the prior fixtures gained
+  `read.status`. These are explicit carryovers, not failed or silently waived tests.
+  Evidence: orchestrator's completed M0 walk, 2026-10-22 12:19–12:31Z; Outcomes.
+- Observation: Stable engine identity is insufficient to own a catalog: while old
+  posts drain, the engine can already have the successor id while the child still
+  belongs to the predecessor. M1 now fences refreshes and read responses to their
+  requesting bridge session and child generation, including same-session respawn.
+  Evidence: the high review's isolated reproduction and three RED-to-GREEN
+  lifecycle regressions, doperpowers `70fc4bc6` (305 bridge tests passed).
+- Observation: A replay TTL is not a storage-retention bound. Pruning only on
+  receipt ingestion or browser join leaves an idle project's SQLite data behind.
+  M1 schedules the earliest receipt expiry in the Project alarm and deletes there;
+  the regression inspects raw SQLite after the alarm without triggering lazy reads.
+  Evidence: MAWS task review and fix `3ecdcb396`, real-hub idle-expiry test.
+- Observation: The gate's root-only artifact upload misses desk-web's images under
+  `apps/desk-web/test-results`. Passed screenshot-producing tests therefore left no
+  downloadable images. CI-opt fixed this on master in MAWS #125 (`ecf2e64b1`);
+  the orchestrator explicitly does not move M1's head solely to import it. M1's
+  supporting desktop/phone screenshots run locally headless under a slot, with images under
+  `/tmp/maws-desk-m1-evidence/`. CI remains functional proof and the deployed live
+  walk remains the owner-facing visual acceptance.
+  Evidence: run 39774400638's upload log (no files found), reported to the
+  orchestrator and CI-opt; no desk-branch `gate.yml` change.
+
 ## Decision Log
 
 - Decision: Verification. One independent spec review of the design (a
@@ -2266,6 +2343,134 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from the reviewer-high
   rounds on doperpowers.
 
+- Decision: A `/reload-plugins` outcome has two confirmation paths. If the bridge
+  module survives (engine 2.1.308 keeps a module whose declaration, linked source,
+  options and metadata are deeply equal: "hooks modules unchanged, kept as loaded"),
+  the bridge emits the engine's returned text as `run end` with `readback {how:
+  "text", text}` and frees its desk queue at once, as `/reload-skills` does. If the
+  module is replaced, the daemon keeps the fresh-probe check for a different
+  (socket inode, pid) and ends by effect. The first accepted end wins, keyed by
+  session and op id even for nonce-free CLI runs; later ends and replayed starts
+  cannot re-arm it. The daemon logs each accepted reload end with its op id and path
+  (text, effect, timeout). Supersedes the assumption (M0, entries 7–10) that every
+  successful reload replaces the bridge. No wire or web change.
+  Rationale: found by the M0 machine-side live walk (child unchanged 2+ min after
+  "Reloaded: 10 plugins"); doperpowers #351, sminos 1.7.1. Rejected: confirming by
+  effect only with a forced module replacement (would make every reload restart the
+  bridge child and drop its live state).
+  Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's M0 live walk.
+
+- Decision: M1 advertises both command forms. `Catalog.commands[].route` is the
+  bare `Route`; optional `withArgs: Route` is selected for non-empty trimmed args,
+  falling back to `route` when absent. `otherwise` remains on the form whose pattern
+  it follows (`goal`'s with-args form). The shared fixture includes verbatim MCP
+  names, source/plugin, both forms, and model options/aliases as model ids only.
+  Rationale: a single resolved bare route cannot advertise `/mcp enable …` or
+  distinguish `/goal clear` from `/goal <condition>`. This additive field beats a
+  web-side form table: the bridge remains the one classification source.
+  Date/Author: 2026-10-22, the M1 plan-executor, agreed with both executors and the
+  orchestrator.
+
+- Decision: M1 recovers command outcomes by replay on browser reconnect. The hub
+  durably keeps the latest nonce-bearing command `op` (`op: "command"`) for each
+  (machine, session, nonce), preserving an `end` over a late `start`, and replays it when an authenticated
+  browser joins the project. Retention is bounded to the latest 256 operations,
+  24 hours and 4 MiB per project; nonce-free CLI operations and non-command ops
+  (including future `btw` answers) are not cached. This
+  is an operation-receipt cache (command name, arguments, op envelope and result
+  line), not transcript storage: no transcript/message bodies or rows. The owner
+  approved this bounded storage on 2026-10-22. The table is created in code in the
+  Project Durable Object's SQLite; deployment needs no wrangler migration. This
+  changes no machine frame. A reconnect test must miss the live end and recover its readback from the
+  replay; repeated delivery must not regress a terminal outcome.
+  Rationale: reading the RPC's terminal state cannot recover this outcome: its
+  `done` means `{queued: true, route, id}`, not that the command finished, and the
+  browser drops its resend entry at that acknowledgement. Replay closes the
+  browser leg without reissuing an effect or widening the daemon's protocol.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the hub-and-web executor's
+  inspection of the RPC and project reconnect paths.
+
+- Decision: `/exit` fails closed when any running-work or session-created-worktree
+  class cannot be established. It runs only when shells, monitors, agents,
+  workflows, MCP tasks and a worktree the session created are each positively
+  shown clear; an agent list alone is insufficient. Unknown state is refused with
+  *can't tell whether work is running here: exit there* (or the existing known-work
+  refusal). Transcript/record evidence across a reload may establish a class;
+  process descendants can cross-check but cannot replace complete evidence.
+  Rationale: the mod API exposes no complete task/worktree-state noun. More
+  refusal in M1 is acceptable; a false clear opens a terminal dialog and stalls
+  the desk queue, including on seats with no person attached. An engine-level
+  task/worktree noun, or a ledger whose completeness the mod can prove, remains
+  residue for a later ticket. This narrows F6's availability because of an
+  observation gap; it does not reverse the owner's approval of a positively safe
+  `/exit`. The owner confirmed *keep it off in M1* ("M1에선 끄기"), 2026-10-22,
+  relayed by the orchestrator; this is the approved M1 scope.
+  Implementation conclusion: the transcript's jobs ledger is partial after
+  reload/compaction, and the sminos member's worktree is spawn metadata rather than
+  authoritative `EnterWorktree` state. No complete clear-state proof was found.
+  Consequently M1 advertises `/exit` as disabled with the unknown-state reason and
+  independently refuses it in the command path, while retaining its measured
+  `run`/confirm semantics for a later reliable guard. All desk `/exit` remains
+  unavailable; partial trackers and unreachable success handling are not added.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's ruling on
+  the machine executor's API gap.
+
+- Decision: The daemon admits `/cd` only for a literal absolute path whose
+  canonical real path matches one of the project's known checkouts, and forwards
+  that canonical absolute path. Relative paths and `~` are refused
+  `unknown-checkout`, with guidance to use an absolute known-checkout path.
+  Rationale: the daemon's working directory is not the session's, and the joined
+  record may lag an earlier `/cd`. Resolving relative input against either could
+  validate a different target than the engine would use. This keeps the existing
+  known-checkout boundary without a new wire field or a guessed working directory.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the machine executor's policy
+  implementation and focused tests.
+
+- Decision: Remote CI watchers do not hold this Mac's heavy-run slots. Invoke
+  MAWS's `scripts/ci-gate.sh` and ci-kit's `ci-gate` without `with-slot.sh`; keep
+  the slot wrapper for local installs, builds and test runs. This supersedes the
+  earlier Concrete Steps convention of wrapping the remote watcher too.
+  Rationale: two remote CI watchers held both local slots during M1, starving the
+  focused RED test needed to fix the superseded head. The orchestrator directed
+  normal termination of the obsolete MAWS watcher (its trap released the slot),
+  leaving its GitHub run untouched; no slot lock was manually removed.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's execution
+  correction after the observed slot starvation.
+
+- Decision: A14's catalog gate stands with no M0 fallback, and M1 rolls out web and
+  machines back to back. Remote slash commands need sminos 1.8.0's catalog, so a
+  1.7.1 machine refuses `/list-agents`, `/rename` and `/reload-plugins` with the
+  older-plugin reason while the native controls and `read.status` keep working; once
+  the machine is on 1.8.0, a session still loaded on 1.7.1 gets the stale-session
+  reason. That is the designed mixed-version behaviour, not a regression, but it
+  would refuse every desk slash command from the web deploy to the machines'
+  install, so neither half ships early: after cua's hold 3 on the mini releases
+  (about 16:40Z on 2026-10-22; the mini pulls the doperpowers marketplace on its own,
+  and a sminos daemon restart inside the hold would stop cua's run), doperpowers #353
+  merges, MAWS #126 merges and deploys at once, and the MacBook rolls to 1.8.0
+  minutes later. M1's walk, in that order:
+  1. Before the deploy, open one `web@master.f12fb35c` tab and leave it unrefreshed.
+  2. After the deploy, on the still-1.7.1 MacBook: `/list-agents` and `/rename` are
+     refused with the older-plugin reason; the native controls work. This proves
+     A14 and A5's older-machine half; A1's historical no-`read.status` half has no
+     live fixture left (every machine runs 1.7.0 or later) and rests on the
+     old-producer tests.
+  3. After the MacBook's roll, before any reload: a seat loaded on 1.7.1 is refused
+     with the stale-session reason (A5's second half).
+  4. A9's replaced-module branch: `/reload-plugins` to that seat from the retained
+     old tab, its receipt *confirmed by effect* and `daemon.log`'s `how=effect` line
+     for the same op. If the old client can't be kept usable, `sminos command <seat>
+     reload-plugins` proves the machine half and the record names the CLI as the
+     route; the desk-visible effect receipt is then walked at the next sminos bump,
+     on a seat loaded on 1.8.0.
+  5. The visible *Ran* label, A10–A14, the sleeping-phone missed-end recovery, and
+     A33's samples. The comparative RC column stays deferred (MAWS #52).
+  Rationale: the new desk cannot send the first reload to a session whose mod
+  predates the catalog, and a browser-side legacy command table would reopen the
+  approved gate to keep a window of minutes usable. Rejected: deploying the web as
+  soon as its gates pass, which leaves every desk slash command refused until
+  16:40Z or later. Date/Author: 2026-10-22, the orchestrator's integration ruling.
+
 ## Outcomes & Retrospective
 
 **M0 (2026-10-22).** Built in both repositories as two parallel tasks against the
@@ -2282,10 +2487,74 @@ guarantee. The task reviews and the doperpowers branch review found five ways an
 outcome could be lost or falsely confirmed across a daemon restart, a reload or a child
 respawn — none visible to a happy-path test — and each became a red test first; the
 MAWS reviews found latency marks that measured receipt rather than the draw §12 names.
-Not yet shown: the acceptance on the owner's Macs (A1–A9, A33's paths), which needs the
-deployed hub and the rollout; the fake machine does not model A8, which rests on the
-machine half's tests and the walk. For M1: the route fixture's reading (entries 5, 9)
+At the M0 build handoff, acceptance on the owner's Macs (A1–A9, A33's paths) still
+needed deployment and rollout; the completed live walk below updates that evidence.
+The fake machine does not model A8, which rests on the machine half's tests and the walk. For M1: the route fixture's reading (entries 5, 9)
 is the one source both halves read; the web's `outlives` label is local until the
 catalog carries it; a browser that misses an `op end` while its socket is down shows
 *queued* (Surprises) — a replay or a resync of owed outcomes to a reconnecting browser
-is the open design question, not settled by M0.
+was left open by M0 and is resolved by M1's Decision 13.
+
+**M0 live walk accepted (2026-10-22, completed 12:19–12:31Z; orchestrator evidence).**
+On `web@master.f12fb35c`, MacBook sminos 1.7.1, the initial 11:35–11:40Z walk
+resumed after the lid-close interruption. The orchestrator accepted M0 with the
+three carryovers listed under M1 Acceptance. Observations:
+
+| Check | Observed result |
+| --- | --- |
+| A2 | `/rename desk-m0` on `m0-walk`: Queued 349 ms, row-confirmed 630 ms. Sidebar primary title and session header both became `desk-m0`, supplementary alias retained. The daemon publishes the custom title; production title handling needs no M1 change. |
+| A3 | Queued until `m0-busy` is idle at 710 ms; after the turn Queued at 6,090 ms, row-confirmed 6,109 ms. |
+| A4 | All three exact refusals, 290–356 ms. |
+| A6 | Bridge child 993 killed; controls re-enabled within 1.07 s; replacement 96148 advertised the same capabilities. |
+| A7 | Read-only refusal at 885 ms; name unchanged, no rename in bridge RPC records. Policy restored to its before-state: read-only no, ceiling auto from settings. |
+| A8 | Daemon restarted 8.8 s after queue; row-confirmed at 34.9 s under the same status line. |
+| A9 text | Two reloads confirmed by text at 1,071 and 2,548 ms (`Reloaded: 10 plugins`). Daemon accepted ends `01ea8dc4…` and `347c8bc7…`, `how=text ok=True`. No module replacement occurred, so effect remains owed. |
+| reload-skills | Confirmed by text, 502 ms. |
+| MCP | `disable notion` showed the saved-for-project label, 713 ms; re-enabled at 1,653 ms. |
+
+The first latency samples (milliseconds) are measured desk observations, not A33's
+20-use-per-path or comparative RC-parity proof:
+
+| Path | n | p50 | p95 | max |
+| --- | ---: | ---: | ---: | ---: |
+| read.status | 2 | 127.7 | 303.9 | 303.9 |
+| op.queued | 9 | 612.4 | 1811.5 | 1811.5 |
+| op.ran | 7 | 664.1 | 2475.1 | 2475.1 |
+| op.readback | 9 | 1035.1 | 34724.3 | 34724.3 |
+| op.ran.busy | 2 | 6039.3 | 34693.9 | 34693.9 |
+
+**M1 (2026-10-22): built and reviewed, walk pending.** Both repositories implement
+one catalog contract and share the byte-identical route/catalog fixture. Sminos
+1.8.0 enables measured M1 commands and prompt routes, pushes and serves catalogs,
+keeps them through child recovery, and applies the canonical known-checkout `/cd`
+boundary. `/exit` remains explicitly unavailable by the owner's ruling. MAWS
+provides the per-session cached palette, shared MAWS ranking, capability-aware
+form routing, independent command receipts, and bounded command-only replay on
+reconnect. Idle storage expiry is alarm-driven; no transcript rows or side-question
+answers enter the cache, and the new table is created in code without a wrangler
+migration. The two M0 wording defects are corrected: completed confirmations say
+*Ran*, and bridged missing usage says *not reported yet*.
+
+Both task reviews and the `high` branch reviews found their consequential issues
+at boundaries: malformed path admission, old-engine plugin-panel fallback,
+missing advertised argument guidance, durable retention without traffic, and
+catalog ownership while a successor session waits for predecessor posts to drain.
+Each became a regression before its fix. The final machine head `70fc4bc6` passed
+all eight committed gates (run 39776521538); its focused bridge check passed 305
+cases. MAWS's code review is clean through `52b93b3e`, with the final test-only
+Node typing correction and this evidence record proceeding to combined-head
+verification. The prior command browser scenarios all passed; final combined-head
+CI and local screenshot inspection remain separate evidence, not implied by review.
+The focused headless screenshots passed 2/2 against `52b93b3e` production code
+(the later Node-type annotation changes no runtime): desktop 1280×720 and phone
+390×844 images under `/tmp/maws-desk-m1-evidence/52b93b3e4-QS7jyz/` were inspected
+by executor and controller. The palette, descriptions/refusals and mixed-version
+copy fit those viewports. These fake-session images are supporting evidence,
+not a substitute for the deployed phone/keyboard and mixed-Mac walk.
+
+The executor leaves both PRs unmerged. The orchestrator deploys MAWS first, rolls
+out sminos to the MacBook before the mini, and performs A10–A14, the three M0
+carryovers, and A33's measurements. A sleeping phone must also be walked through a
+missed command end and reconnect. Residue: an engine task/worktree noun (or ledger
+whose completeness the mod can prove) is needed before re-enabling desk `/exit`.
+Comparative RC budgets remain deferred; no live M1 acceptance is claimed here.

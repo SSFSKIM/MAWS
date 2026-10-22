@@ -6,7 +6,7 @@
 // `reload-plugins` ends as the daemon finishes it, by effect.
 import { randomUUID } from 'node:crypto';
 import type { JsonObject } from '../src/protocol/json';
-import type { OpBody, Readback, SessionMessage } from '../src/protocol/session';
+import type { Catalog, OpBody, Readback, SessionMessage } from '../src/protocol/session';
 import { listedOf, loadRoutes, routeOf, type CommandRefusalCode, type RouteTable } from './routes';
 
 /** A command's outcome: the engine's settled value (absent when the daemon finished it, by effect), the readback, and
@@ -52,11 +52,14 @@ export class Commands {
   constructor(
     private readonly script: CommandScript = {},
     private readonly table: RouteTable = loadRoutes(),
+    private readonly m1 = false,
   ) {}
 
-  plan(name: string, args: string, session: string, machine: string): CommandPlan {
-    const checked = routeOf(this.table, listedOf(this.table, name), name, args, machine);
+  plan(name: string, args: string, session: string, machine: string, catalog: Catalog | null = this.table.catalog ?? null): CommandPlan {
+    const listed = this.m1 ? (catalog?.commands.find((c) => c.name === name) ?? null) : listedOf(this.table, name);
+    const checked = routeOf(this.table, listed, name, args, machine);
     if (!checked.ok) return checked;
+    if (!this.m1 && !['rename', 'color', 'reload-plugins', 'reload-skills', 'mcp'].includes(name)) return { ok: false, code: 'disabled', reason: 'comes with M1' };
     const scripted = this.script[name]?.(args, session);
     if (scripted && 'refuse' in scripted) return { ok: false, ...scripted.refuse };
     return { ok: true, route: checked.route.class, id: `cmd-${randomUUID()}`, name, args, outcome: scripted ?? defaultOutcome(name, args) };
@@ -69,7 +72,7 @@ export const refusalMessage = (plan: Extract<CommandPlan, { ok: false }>): strin
 /** The op's DX4 `start` and `end`, session-wide, under the RPC's nonce. */
 export function opMessages(where: { project: string; machine: string }, session: string, rpc: string | null, plan: Extract<CommandPlan, { ok: true }>): { start: SessionMessage<'op'>; end: SessionMessage<'op'> } {
   const base = { project: where.project, machine: where.machine, session, kind: 'op', sub: null, n: null } as const;
-  const head = { rpc, op: 'command', id: plan.id, name: plan.name, args: plan.args } as const;
+  const head = { rpc, op: 'command', id: plan.id, name: plan.name, args: plan.args, route: plan.route } as const;
   const { settled, readback } = plan.outcome;
   const end: OpBody = { ...head, phase: 'end', ...(settled && { settled: settled as unknown as JsonObject }), readback: readback as unknown as JsonObject, t: Date.now() };
   return { start: { ...base, body: { ...head, phase: 'start', t: Date.now() } }, end: { ...base, body: end } };

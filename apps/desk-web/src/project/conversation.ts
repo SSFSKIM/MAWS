@@ -75,7 +75,7 @@ export type ConversationState = {
   compactions: Record<string, CompactBody>;
   /**
    * The ops the RPCs of this tab started, by nonce (`OpEntry`). Unlike a compaction they are kept through a reconnect:
-   * the daemon owes an op's outcome under its nonce until the hub takes it, so an end missed while the socket was down
+   * the hub replays bounded command receipts on join, so an end missed while the socket was down
    * may still come; one that does not leaves its command drawn as queued.
    */
   ops: Record<string, OpEntry>;

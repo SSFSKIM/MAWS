@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import { turnRunning } from '../../conversation/capabilities';
 import { failureOf } from '../../conversation/outcome';
-import { commandFailureText, commandOutcomeText, commandOutlives } from '../../conversation/words';
+import { commandFailureText, commandOutcomeText } from '../../conversation/words';
 import { latency } from '../../latency/latency';
 import { sessionName } from '../../log/projection';
 import type { DeskSession } from '../../shell/sessions';
@@ -17,7 +17,7 @@ import { useDesk } from '../conversation/desk-context';
 
 const cap = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-export function CommandStatus({ nonce, session, className = '' }: { nonce: string | null; session: DeskSession; className?: string }) {
+export function CommandStatus({ nonce, session, outlives: advertised, className = '' }: { nonce: string | null; session: DeskSession; outlives?: string; className?: string }) {
   const { connection } = useDesk();
   const entry = useStore(connection.conversation.store, (s) => (nonce ? s.rpcs[nonce] : undefined));
   const op = useStore(connection.conversation.store, (s) => (nonce ? s.ops[nonce] : undefined));
@@ -26,7 +26,7 @@ export function CommandStatus({ nonce, session, className = '' }: { nonce: strin
     if (outcomeDrawn && nonce) latency.commandDrawn(nonce);
   }, [outcomeDrawn, nonce]);
   if (!entry || entry.rpc.rpc !== 'command') return null;
-  const { name, args = '' } = entry.rpc.args as { name: string; args?: string };
+  const { name } = entry.rpc.args as { name: string };
   const machine = entry.rpc.machine;
   const base = `text-ui-sm ${className}`;
   if (entry.state === 'failed') {
@@ -40,15 +40,16 @@ export function CommandStatus({ nonce, session, className = '' }: { nonce: strin
   if (op?.phase !== 'end') {
     return (
       <span className={`${base} text-fg-muted`} role="status" data-testid="command-status" data-command-state="queued">
-        {turnRunning(session) ? `Queued until ${sessionName(session)} is idle` : 'Queued'}
+        {[turnRunning(session) ? `Queued until ${sessionName(session)} is idle` : 'Queued', advertised].filter(Boolean).join(' · ')}
       </span>
     );
   }
-  const outcome = commandOutcomeText(op.body);
-  const outlives = outcome.state === 'failed' ? null : commandOutlives(name, args, machine);
+  const result = entry.outcome?.state === 'done' ? entry.outcome.result as { route?: string } : null;
+  const outcome = commandOutcomeText({ ...op.body, route: op.body.route ?? result?.route ?? 'run' });
+  const outlives = outcome.state === 'failed' ? null : advertised;
   return (
     <span className={`${base} ${outcome.state === 'failed' ? 'text-danger' : outcome.state === 'unconfirmed' ? 'text-warning' : 'text-fg-muted'}`} role="status" data-testid="command-status" data-command-state={outcome.state}>
-      {[cap(outcome.text), outcome.mark, outlives].filter(Boolean).join(' · ')}
+      {[outcome.state === 'ran' && outcome.mark && !outcome.text.startsWith('ran') ? 'Ran' : null, cap(outcome.text), outcome.mark, outlives].filter(Boolean).join(' · ')}
     </span>
   );
 }
