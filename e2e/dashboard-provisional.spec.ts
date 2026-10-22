@@ -66,9 +66,25 @@ test('a dataset call labels every chart bound to it while it streams, the agent 
   await expect(figures(tab)).toHaveCount(3, { timeout: 15_000 });
   // the insert's presence (its hold after the answer) clears before the dataset's call, so the outline judged is the call's
   await expect(editor.locator('[data-agent-editing]')).toHaveCount(0, { timeout: 20_000 });
+  // the insert left a chart last, so the owner's editor writes its trailing paragraph (Tiptap's TrailingNode, guarded
+  // against the binding's own write, runs on the editor's next transaction, here Presence's redraw): revision 24 in the
+  // Mac run 39733208468, one after the insert's. The baseline is the revision once that has landed and nothing moves
+  const trailing = () => editor.evaluate((root) => root.lastElementChild?.localName === 'p' && (root.lastElementChild.textContent ?? '') === '');
+  await expect.poll(trailing, { timeout: 10_000, message: 'the editor’s trailing paragraph after the charts' }).toBe(true);
+  await durable(tab);
+  let settled = await revisionOf(page, id);
+  await expect
+    .poll(async () => {
+      const now = await revisionOf(page, id);
+      const same = now === settled;
+      settled = now;
+      return same;
+    }, { intervals: [500], timeout: 10_000, message: 'the revision settled before the stream' })
+    .toBe(true);
   const seen = await recordDrawing(page, EDITOR(id));
 
-  // 1: `sales` bound from a CSV: streamed, then called
+  // 1: `sales` bound from a CSV: streamed, then called; the agent's base stays its own last write (the insert), the
+  // owner's trailing paragraph since merging as any unrelated change does
   const csv = join(app.dir, 'sales.csv');
   writeFileSync(csv, SALES_CSV);
   const toolUseId = 'toolu_dashboard_provisional_1';
@@ -88,9 +104,10 @@ test('a dataset call labels every chart bound to it while it streams, the agent 
     const costs = figures(tab).filter({ hasText: 'Costs by region' });
     await expect(costs).toHaveCount(1);
     expect(await costs.evaluate((n) => n.closest('[data-provisional]') === null && n.querySelector('[data-provisional]') === null), 'the chart over another dataset is not labelled').toBe(true);
-    expect(await revisionOf(page, id), 'nothing written before the call').toBe(inserted.result!.revision);
+    expect(await revisionOf(page, id), 'nothing written since the stream began').toBe(settled);
   });
   await expect.poll(async () => (await seen()).some((s) => s.provisional.some((p) => p.id === toolUseId) && s.outlines.includes(AGENT_NAME)), { timeout: 10_000, message: 'the agent’s outline beside the label' }).toBe(true);
+  expect(await revisionOf(page, id), 'nothing written by the stream, up to the call').toBe(settled);
   const bound = await seam.call<{ revision: number; rows: number }>(AGENT, 'artifact_dataset', { ...args, toolUseId });
   expect(bound.isError, bound.text).toBe(false);
   expect(bound.result!.rows).toBe(3);
