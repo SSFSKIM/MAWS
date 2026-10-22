@@ -1579,9 +1579,11 @@ Expected: each script ends with its pass count and exit 0; `run-sminos-tests.sh`
 `PASS <n>` per suite and `all suites passed`.
 
 **MAWS, every milestone.** `scripts/ci-gate.sh` pushes the tree to a `ci/` ref and runs
-the gates on GitHub Actions; on the owner's Macs it is run under
-`/tmp/maws-review/with-slot.sh`, this host's convention for one heavy run at a time
-(not a repository file: another host runs the script bare).
+the gates on GitHub Actions. Run this watcher, and doperpowers' `ci-gate`, bare:
+waiting for remote gates is not local heavy work. On the owner's Macs,
+`/tmp/maws-review/with-slot.sh` is for local installs, builds and test runs only
+(Decision 16); holding a slot while CI waits can starve the focused regression
+that would fix the tested head.
 
 ```
 scripts/ci-gate.sh <worktree> --gates static,unit
@@ -2370,6 +2372,17 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   known-checkout boundary without a new wire field or a guessed working directory.
   Date/Author: 2026-10-22, the M1 plan-executor, from the machine executor's policy
   implementation and focused tests.
+
+- Decision: Remote CI watchers do not hold this Mac's heavy-run slots. Invoke
+  MAWS's `scripts/ci-gate.sh` and ci-kit's `ci-gate` without `with-slot.sh`; keep
+  the slot wrapper for local installs, builds and test runs. This supersedes the
+  earlier Concrete Steps convention of wrapping the remote watcher too.
+  Rationale: two remote CI watchers held both local slots during M1, starving the
+  focused RED test needed to fix the superseded head. The orchestrator directed
+  normal termination of the obsolete MAWS watcher (its trap released the slot),
+  leaving its GitHub run untouched; no slot lock was manually removed.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's execution
+  correction after the observed slot starvation.
 
 ## Outcomes & Retrospective
 
