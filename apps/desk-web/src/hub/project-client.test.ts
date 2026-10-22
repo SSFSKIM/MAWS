@@ -33,7 +33,7 @@ afterEach(async () => {
   await double.close();
 });
 
-function client(options: { held?: () => number; frameLimit?: number; resubscribeDelay?: (attempt: number) => number; readTimeoutMs?: number } = {}) {
+function client(options: { beforeFrame?: () => boolean; held?: () => number; frameLimit?: number; resubscribeDelay?: (attempt: number) => number; readTimeoutMs?: number } = {}) {
   const got: Array<{ offset: number; event: LogEvent }> = [];
   const statuses: ConnectionStatus[] = [];
   const caughtUp: number[] = [];
@@ -48,6 +48,7 @@ function client(options: { held?: () => number; frameLimit?: number; resubscribe
     resubscribeDelay: options.resubscribeDelay,
     readTimeoutMs: options.readTimeoutMs,
     handlers: {
+      beforeFrame: options.beforeFrame,
       held,
       log: (entries) => got.push(...entries),
       caughtUp: (offset) => caughtUp.push(offset),
@@ -687,4 +688,18 @@ describe('visibility', () => {
       vi.useRealTimers();
     }
   });
+});
+
+it('drops a suspended generation before dispatch and recovers its current log through the new handshake', async () => {
+  let accept = true;
+  const { c, got, caughtUp } = client({ beforeFrame: () => accept });
+  await until(() => caughtUp.length === 1);
+  accept = false;
+  await double.append(PROJECT, say('buffered while suspended'));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(got).toEqual([]);
+  accept = true;
+  c.reconnect();
+  await until(() => caughtUp.length === 2);
+  expect(got.map((entry) => entry.event.text)).toEqual(['buffered while suspended']);
 });

@@ -42,6 +42,8 @@ afterEach(async () => {
   connection = null;
   gate.held = Promise.resolve();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
   await hub.close();
 });
 
@@ -81,28 +83,74 @@ it('times the catch-up only once the backlog it brought is verified, the only en
   expect(c.log.drawable()).toHaveLength(1);
 });
 
-it('times the tab shown again until caught up after the reconnect that followed, and not a return that needed none', async () => {
+function lifecycle() {
   const listeners = new Map<string, () => void>();
   const page = { visibilityState: 'visible', addEventListener: (name: string, f: () => void) => listeners.set(name, f), removeEventListener: () => {} };
   vi.stubGlobal('document', page);
   vi.stubGlobal('addEventListener', (name: string, f: () => void) => listeners.set(name, f));
   vi.stubGlobal('removeEventListener', () => {});
+  return { listeners, page };
+}
+
+it('a healthy tab switch opens neither a new socket nor a new subscription, even after a quiet minute with JS still running', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  const { listeners, page } = lifecycle();
+  const c = await connect();
+  await until(() => c.live.getState().caughtUp);
+  c.client.subscribe({ machine: 'mini', session: S1, agentId: null }, { message() {}, interrupted() {}, end() {} });
+  await until(() => hub.subscriptions(PROJECT).length === 1);
+  const resumes = hub.resumes(PROJECT).length;
+  const sub = hub.subscriptions(PROJECT)[0].sub;
+  page.visibilityState = 'hidden'; listeners.get('visibilitychange')!();
+  vi.advanceTimersByTime(1000);
+  page.visibilityState = 'visible'; listeners.get('visibilitychange')!();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(hub.resumes(PROJECT)).toHaveLength(resumes);
+  expect(hub.subscriptions(PROJECT)[0].sub).toBe(sub);
+
+  page.visibilityState = 'hidden'; listeners.get('visibilitychange')!();
+  vi.advanceTimersByTime(60_000); // The heartbeat kept running, even if this idle session sent no frames.
+  page.visibilityState = 'visible'; listeners.get('visibilitychange')!();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(hub.resumes(PROJECT)).toHaveLength(resumes);
+  expect(hub.up.filter(({ frame }) => frame.t === 'subscribe')).toHaveLength(1);
+});
+
+for (const timerFirst of [false, true]) it(`iOS visibility return resnapshots after suspension despite buffered frames arriving first (heartbeat first: ${timerFirst})`, async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  const { listeners, page } = lifecycle();
+  const before = count('wake.caught-up');
+  let bufferedArrived = false;
+  const NativeSocket = globalThis.WebSocket;
+  vi.stubGlobal('WebSocket', class extends NativeSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols);
+      this.addEventListener('message', (event) => { if (String(event.data).includes('"buffered":true')) bufferedArrived = true; });
+    }
+  });
+  const c = await connect();
+  await until(() => c.live.getState().caughtUp);
+  const resumes = hub.resumes(PROJECT).length;
+  page.visibilityState = 'hidden'; listeners.get('visibilitychange')!();
+  vi.setSystemTime(Date.now() + 60_000); // Wall clock advanced, but no JS timer or lifecycle event ran.
+  if (timerFirst) vi.advanceTimersByTime(2000); // The first resumed heartbeat must latch the gap before overwriting it.
+  hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S1, kind: 'presence', sub: null, n: null, body: { record: { status: 'idle', buffered: true }, bridge: true } });
+  await until(() => bufferedArrived); // Actual network delivery before visibilitychange, not a fresh liveness signal.
+  expect(c.live.getState().presence[S1]).toBeUndefined(); // Do not spend wake time dispatching the suspended generation.
+  page.visibilityState = 'visible'; listeners.get('visibilitychange')!();
+  await until(() => count('wake.caught-up') === before + 1);
+  expect(hub.resumes(PROJECT)).toHaveLength(resumes + 1);
+});
+
+it('explicit freeze/resume and online transitions renew state without a long suspension', async () => {
+  const { listeners } = lifecycle();
   const before = { wake: count('wake.caught-up'), online: count('online.caught-up') };
   const c = await connect();
   await until(() => c.live.getState().caughtUp);
-
-  listeners.get('visibilitychange')!(); // shown again with the socket still up: nothing to time
-  await new Promise((r) => setTimeout(r, 100));
-  expect(count('wake.caught-up')).toBe(before.wake);
-
-  listeners.get('visibilitychange')!(); // shown again, and the socket turns out to be gone (a phone's woken tab)
-  hub.dropConnections();
+  listeners.get('freeze')!(); listeners.get('resume')!();
   await until(() => count('wake.caught-up') === before.wake + 1);
-
-  listeners.get('online')!(); // back online, the socket dropped with the network
-  hub.dropConnections();
+  listeners.get('online')!();
   await until(() => count('online.caught-up') === before.online + 1);
-  expect(count('wake.caught-up')).toBe(before.wake + 1);
 });
 
 it('times an RPC from its sending until its result, by its nonce, and not one that failed', async () => {

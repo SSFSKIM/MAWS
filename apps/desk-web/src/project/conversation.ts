@@ -18,12 +18,14 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { verify, type Decision, type Delivery, type OpBody, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
+import { pendingCommands } from '../state/pending-commands';
 
 export type CompactBody = SessionBodies['compact'];
 
 /**
- * An async op this tab asked for (the desk control surface spec, §3), by its RPC's nonce: its latest phase and the
- * body of the `op` message that carried it (a command's `end` holds `settled` and `readback`).
+ * An async op receipt (the desk control surface spec, §3), by its RPC's nonce: its latest phase and the
+ * body of the `op` message that carried it (a command's `end` holds `settled` and `readback`). A replay may belong
+ * to another browser; pending-commands supplies this browser's ownership, not this map.
  */
 export type OpEntry = { op: OpBody['op']; phase: OpBody['phase']; session: string; body: OpBody };
 
@@ -74,7 +76,7 @@ export type ConversationState = {
   outbox: Record<string, OutboxItem>;
   compactions: Record<string, CompactBody>;
   /**
-   * The ops the RPCs of this tab started, by nonce (`OpEntry`). Unlike a compaction they are kept through a reconnect:
+   * The hub's op receipts, by nonce (`OpEntry`). Unlike a compaction they are kept through a reconnect:
    * the hub replays bounded command receipts on join, so an end missed while the socket was down
    * may still come; one that does not leaves its command drawn as queued.
    */
@@ -122,6 +124,11 @@ export class Conversation {
     /** Where a request first seen now belongs in the stream. */
     private readonly position: () => number,
   ) {}
+
+  /** Ownership outlives a composer and a killed page; the hub remains the authority for the eventual result. */
+  rememberCommand(nonce: string, machine: string, session: string, name: string, outlives?: string): void {
+    pendingCommands.remember({ project: this.project, nonce, machine, session, name, ...(outlives && { outlives }) });
+  }
 
   setKey(key: OrgKey | null): void {
     if (key === this.key) return;

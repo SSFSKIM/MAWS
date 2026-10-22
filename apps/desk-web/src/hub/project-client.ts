@@ -68,6 +68,8 @@ export class HumanRefused extends Error {
 }
 
 export type ProjectHandlers = {
+  /** False while a suspended page is replacing this generation; discard it before expensive state dispatch. */
+  beforeFrame?(): boolean;
   /** The offset of the last event the browser holds for the project; the client resumes after it. */
   held(): number;
   /** Before the client resumes: the owner may reconcile what it holds with the hub's `head` here. */
@@ -142,7 +144,7 @@ export class ProjectClient implements SessionPlane {
     this.socket = new HubSocket({
       url: `${options.base}/api/projects/${encodeURIComponent(options.project)}/socket`,
       open: () => {},
-      frame: (frame) => this.receive(frame),
+      frame: (frame) => { if (options.handlers.beforeFrame?.() !== false) this.receive(frame); },
       status: (status) => {
         if (status === 'connecting') this.disconnected();
         options.handlers.status?.(status);
@@ -154,6 +156,11 @@ export class ProjectClient implements SessionPlane {
 
   start(): void {
     this.socket.start();
+  }
+
+  /** Rotate the wire on wake: welcome replays receipts and every active subscription gets a fresh snapshot. */
+  reconnect(): void {
+    this.socket.restart();
   }
 
   stop(): void {

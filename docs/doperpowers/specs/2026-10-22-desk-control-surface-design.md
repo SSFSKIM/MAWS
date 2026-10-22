@@ -1874,6 +1874,9 @@ VERBS gains 'command' | 'status' (M0), 'btw' | 'usage' | 'mcp' | 'settings' (M2)
 // the three fallbacks of §4 by (capabilities present?, desk present?, desk.sminos ≥ needed?)
 // project/conversation.ts
 ops: Record<string /* nonce */, { op: string; phase: 'start' | 'end'; body: JsonObject }>
+// state/pending-commands.ts (M1 phone follow-up): browser-owned unseen receipts, localStorage, 24h expiry
+PendingCommand = {project: string, machine: string, session: string, nonce: string, name: string, outlives?: string, at: number}
+// The hub's op replay supplies the outcome; these nonces select what this browser is waiting on.
 // state/catalog.ts (M1)
 useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | null }
 // A10 grouping with skills present: unqualified built-ins are Engine, listed skills are Skills,
@@ -2550,6 +2553,86 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   can rearm it while another chunk is still broken.
   Date/Author: 2026-10-22, the M1 live-walk fix executor, incorporating the
   orchestrator's event-based recovery and navigation-cache checks.
+
+- Decision: A phone returning from explicit freeze/resume, back-forward cache, or
+  offline reconnects its project immediately. WebKit has no Page Lifecycle
+  freeze/resume events, so a 2-second local heartbeat records Date.now(); a gap of
+  at least 10 seconds latches JavaScript suspension before updating that timestamp.
+  Visibility return, the first visible heartbeat, or the first visible frame after
+  that gap reconnects once. The frame dispatch guard latches suspension before
+  reducing any buffered chunk; frames arriving before visibilitychange cannot
+  erase the gap or mutate the transcript while it awaits a fresh snapshot. This is a
+  wall-clock signal, not frame freshness: a burst of old frames at unlock was the
+  exact case a last-frame timestamp could misclassify as healthy. Healthy desktop
+  tab switches and quiet background tabs whose timers keep running preserve their
+  socket and subscription; a unit test pins both with no new subscribe frame.
+  Accepted side effect, not another fix: after roughly five quiet hidden minutes,
+  Chrome's intensive timer throttling may align callbacks to once a minute. That
+  creates a suspension-sized gap even on a healthy socket, so returning to that
+  desktop tab pays one reconnect/resnapshot (about a second). Shorter hidden tabs
+  have one-second timer throttling and keep the connection. The coordinator accepts
+  that long-absence trade because wall-clock suspension is the only signal iOS
+  reliably gives. The old socket is fenced before its
+  close handshake, so buffered stream frames cannot keep mutating the current
+  transcript while it catches up. A new welcome replays command outcomes and
+  re-subscribes each active transcript for a current snapshot; the normal staged
+  snapshot merge preserves the reader's held history. The old handlers only
+  timestamped visibility/online events: they did not request any fresh state, and
+  `HubSocket.restart` only called close, leaving queued frames authoritative until
+  the close event arrived. That permitted the owner’s observed slow wake catch-up
+  while reopening fetched current state; a physical lock/unlock re-check remains
+  the final validation of the iOS case. Rejected: speeding up replay of every missed
+  chunk, which still makes catch-up proportional to time asleep, and waiting for
+  a half-open connection to notice its own failure. Also rejected: rotating on
+  every visibility return, which would impose a reconnect on ordinary desktop tab
+  switches; a healthy-switch regression pins unchanged socket/subscription counts.
+  Browser proof uses an offline mounted page plus dropped socket across the end
+  of 1,000 numbered Markdown sentences, then compares current-snapshot and actual
+  command-receipt recovery with reopening. Both Chromium and WebKit pass. CDP
+  frozen→active could not resume even an empty page on this MacBook, so it supplies
+  no app evidence (friction tracker #92); real-WebSocket unit tests separately pin
+  iOS wall-clock gaps, buffered-frame-first and heartbeat-first orderings.
+  Scope of that proof: both the real bridge/plane and fake producer capture the
+  reply-so-far as aggregated streaming blocks plus watermarks, not chunk history.
+  Post-capture live deltas can still accumulate in the real plane while transcript
+  construction waits and drain individually afterward. A synthetic synchronous
+  574-chunk post-join burst delayed receipt visibility past five seconds in a
+  focused test; this does not measure production latency or prove its cause, but
+  is not grounds to dismiss real backlog exposure. Measuring/bounding that live
+  backlog is a separate latency follow-up; this change replaces stale generations
+  with current state, not a live-delta coalescing policy.
+  Date/Author: 2026-10-22, the phone-fix executor, from the owner's m1-busy walk.
+
+- Decision: Pending command receipts belong to the project conversation, not a
+  mounted composer. This browser persists only its own unobserved command nonces
+  and display metadata in localStorage (`desk.pending-commands`): project, machine,
+  session, nonce, name, optional outlives label and issue time. They expire 24 hours
+  after issue and are bounded to 256 per project, matching the hub's replay window.
+  There are no arguments, signed RPCs or transcript/result bodies in this record;
+  it never reissues an effect. A fresh page can match the hub's replay by nonce and
+  draw the actual op end even though the original in-memory RPC is gone. Until the
+  replay arrives it says Checking command outcome, not Ran. Refusals before an op
+  starts are not retained by the hub: a restored nonce with neither a live RPC nor
+  an op must not wait forever. After a join replay completed beyond that nonce's
+  60-second RPC_FRESHNESS_MS acceptance window, it says Command outcome unavailable
+  · may not have run; check the session. This is not a claimed refusal or success.
+  The join sends every retained op before handling resume, whose caught-up frame
+  supplies the replay timestamp. A fresh restored batch waits for acceptance to
+  expire and requests a deduplicated, visible-only rejoin; this observes outcomes,
+  never re-executes commands. Existing RPCs and real starts/ends take precedence,
+  including a late op replacing the fallback while its line remains mounted.
+  Chosen over extending the hub cache with RPC refusals: the bounded client fallback
+  covers any unrecoverable receipt without a protocol/storage change and states
+  exactly what is known. A terminal receipt is acknowledged only when its line
+  intersects the viewport while the document is
+  visible. The mounted composer leaves that line in place while it is read; the
+  next view does not resurrect an acknowledged receipt. Other browsers' replayed
+  history is not drawn in this composer's receipt list. Rejected: sessionStorage,
+  which need not survive a killed iOS home-screen app; component state alone,
+  which lost the nonce on reopen; and rendering the hub's entire 256-op/day replay,
+  which would bury the reader under other devices' history. The coordinator set
+  this browser-ownership boundary explicitly after the phone walk.
+  Date/Author: 2026-10-22, the phone-fix executor and orchestrator.
 
 ## Outcomes & Retrospective
 

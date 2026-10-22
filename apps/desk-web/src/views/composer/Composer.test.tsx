@@ -2,13 +2,17 @@
 // The composers on a phone (mockups/desk/05-phone.html, 4–5): Return makes a new line and posting is the button, while
 // a desk keeps Return to post; the group composer completes an @-tag from the project's live members. A slash in a
 // session's composer is a command where the session can take one (the desk control surface's M0), and its status.
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createStore } from 'zustand/vanilla';
+import { RPC_FRESHNESS_MS } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { catalogs, catalogKey } from '../../state/catalog';
+import { pendingCommands } from '../../state/pending-commands';
 import fixture from '../../../../desk-hub/fake-machine/dx4/routes-2.1.307.json';
 import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../../latency/latency';
 import type { ProjectConnection } from '../../project/connection';
+import type { OpEntry } from '../../project/conversation';
 import type { DeskSession } from '../../shell/sessions';
 import { noteModel } from '../../state/models';
 import { DeskContext } from '../conversation/desk-context';
@@ -40,16 +44,18 @@ const session = (id: string, alias: string, group: DeskSession['group'] = 'idle'
 
 let say: ReturnType<typeof vi.fn>;
 let command: ReturnType<typeof vi.fn>;
-function mount(ui: React.ReactNode, conversation: Record<string, unknown> = {}) {
+function mount(ui: React.ReactNode, conversation: Record<string, unknown> = {}, live: Record<string, unknown> = {}, project = 'p1') {
   say = vi.fn(async () => 'nonce');
   command = vi.fn(async () => 'cmd-nonce');
-  const store = <T,>(state: T) => ({ getState: () => state, subscribe: () => () => {} });
-  const connection = { project: 'p1', say, command, rpc: vi.fn(async () => 'nonce'), conversation: { store: store({ compactions: {}, rpcs: {}, ops: {}, ...conversation }) }, live: store({ connected: true }) } as unknown as ProjectConnection;
+  const store = <T,>(state: T) => createStore(() => state);
+  const connection = { project, say, command, rpc: vi.fn(async () => 'nonce'), client: { reconnect: vi.fn() }, conversation: { store: store({ compactions: {}, rpcs: {}, ops: {}, ...conversation }) }, live: store({ connected: true, caughtUp: true, caughtUpAt: Date.now(), ...live }) } as unknown as ProjectConnection;
   const sessions = new Map([
     [S1, session(S1, 'maws-45')],
     [S2, session(S2, 'maws-fe', 'working')],
   ]);
-  return render(<DeskContext.Provider value={{ connection, member: 'm1', sessions }}>{ui}</DeskContext.Provider>);
+  const wrap = (child: React.ReactNode) => <DeskContext.Provider value={{ connection, member: 'm1', sessions }}>{child}</DeskContext.Provider>;
+  const view = render(wrap(ui));
+  return { ...view, connection, redraw: (child: React.ReactNode) => view.rerender(wrap(child)) };
 }
 
 const phone = (narrow: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches: narrow && query.includes('max-width'), addEventListener() {}, removeEventListener() {} }));
@@ -150,7 +156,7 @@ describe('a slash command', () => {
     mount(<SessionComposer session={capable()} />);
     type('/rename desk-m0');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'rename', 'desk-m0', false);
+    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'rename', 'desk-m0', false, undefined);
     expect(say).not.toHaveBeenCalled();
     cleanup();
     // Mid-turn Enter steers words, but a slash is a command, queued until the turn ends (H-queue).
@@ -158,7 +164,7 @@ describe('a slash command', () => {
     type('/reload-plugins ');
     expect(screen.getByTestId('composer-note').textContent).toContain('a command is queued until maws-45 is idle');
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message maws-45' }), { key: 'Enter' });
-    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'reload-plugins', '', true);
+    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'reload-plugins', '', true, undefined);
   });
 
   it("refuses a command the session cannot take in place, with the capability's reason, and sends it as words only when asked", () => {
@@ -248,7 +254,7 @@ describe('the cached command palette', () => {
     expect((screen.getByRole('textbox', { name: 'Message maws-45' }) as HTMLTextAreaElement).value).toBe('/color ');
     type('/color red');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'color', 'red', false);
+    expect(command).toHaveBeenCalledWith('m1', 'mini', S1, 'color', 'red', false, undefined);
     expect(say).not.toHaveBeenCalled();
   });
   it('refuses an unknown or a terminal panel before RPC and opens existing Model locally', () => {
@@ -309,5 +315,136 @@ describe('typeahead version guidance', () => {
     open('1.8.0');
     expect(screen.getByText(/this session's plugin loaded before the update/, { selector: 'p' }).textContent).toContain("this session's plugin loaded before the update: run /reload-plugins in it, or restart it");
     expect(screen.queryByText(/commands need sminos/)).toBeNull();
+  });
+});
+
+describe('unseen receipts across a reopened session or fresh page', () => {
+  const end: OpEntry = { op: 'command', phase: 'end', session: S1, body: { rpc: 'own-op', op: 'command', phase: 'end', id: 'c1', name: 'color', args: 'orange', settled: { ok: true }, readback: { how: 'row', text: 'Session color set to: orange', uuid: 'color-row' } } };
+  beforeEach(() => {
+    localStorage.clear();
+    // happy-dom has no layout. Browser e2e exercises actual clipping; this boundary says the mounted line is in view.
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(private callback: IntersectionObserverCallback) {}
+      observe(target: Element) { queueMicrotask(() => this.callback([{ target, isIntersecting: true, intersectionRatio: 1, time: 0, boundingClientRect: new DOMRect(), intersectionRect: new DOMRect(), rootBounds: null }], this as unknown as IntersectionObserver)); }
+      disconnect() {}
+    });
+  });
+  afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
+
+  it('renders our unseen replay without the old RPC, and acknowledges it only while actually visible', async () => {
+    pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'own-op': end } });
+    expect(screen.getByTestId('command-status').textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+    cleanup(); // A closed view does not own the pending receipt.
+    visibility.mockReturnValue('visible');
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'own-op': end } });
+    expect(screen.getByTestId('command-status').textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+    await waitFor(() => expect(pendingCommands.pending('p1', 'mini', S1)).toEqual([]));
+    expect(screen.getByTestId('command-status')).toBeTruthy(); // Acknowledgement never makes the line vanish while read.
+    cleanup();
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'own-op': end } });
+    expect(screen.queryByTestId('command-status')).toBeNull(); // A later view is not a command-history dump.
+  });
+
+  it('settles an old missing receipt only after join replay, acknowledges it when visible, and accepts a late real end', async () => {
+    pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+    const saved = JSON.parse(localStorage.getItem('desk.pending-commands')!);
+    saved[0].at -= RPC_FRESHNESS_MS + 1;
+    localStorage.setItem('desk.pending-commands', JSON.stringify(saved));
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const { connection } = mount(<SessionComposer session={session(S1, 'maws-45')} />, {}, { connected: false, caughtUp: true, caughtUpAt: null });
+    expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('checking');
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+    act(() => connection.live.setState({ connected: true, caughtUp: false }));
+    expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('checking');
+    act(() => connection.live.setState({ caughtUp: true, caughtUpAt: Date.now() }));
+    expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('unknown');
+    expect(screen.getByTestId('command-status').textContent).toMatch(/may not have run.*check the session/i);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+    visibility.mockReturnValue('visible');
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(pendingCommands.pending('p1', 'mini', S1)).toEqual([]));
+    act(() => connection.conversation.store.setState({ ops: { 'own-op': end } }));
+    expect(screen.getByTestId('command-status').textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+    expect(command).not.toHaveBeenCalled();
+    expect(connection.client.reconnect).not.toHaveBeenCalled();
+    cleanup();
+    mount(<SessionComposer session={session(S1, 'maws-45')} />);
+    expect(screen.queryByTestId('command-status')).toBeNull();
+  });
+
+  it('keeps a live in-memory RPC pending even when its saved ownership is old and join replay is complete', () => {
+    pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+    const saved = JSON.parse(localStorage.getItem('desk.pending-commands')!);
+    saved[0].at -= RPC_FRESHNESS_MS + 1;
+    localStorage.setItem('desk.pending-commands', JSON.stringify(saved));
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { rpcs: { 'own-op': { nonce: 'own-op', state: 'forwarded', rpc: { rpc: 'command', machine: 'mini', args: { session: S1, name: 'color', args: 'orange' } } } } });
+    expect(screen.getByRole('status').getAttribute('data-rpc-state')).toBe('forwarded');
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+  });
+
+  it('gives a fresh in-flight command its freshness window, rechecks once while visible, and preserves a replayed start', async () => {
+    vi.useFakeTimers();
+    try {
+      pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+      vi.advanceTimersByTime(1000);
+      pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'second-op', name: 'color' });
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+      const { connection, redraw } = mount(<SessionComposer session={session(S1, 'maws-45')} />);
+      const reconnect = vi.mocked(connection.client.reconnect).mockImplementation(() => connection.live.setState({ connected: false }));
+      expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['checking', 'checking']);
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS - 999));
+      expect(reconnect).not.toHaveBeenCalled();
+      visibility.mockReturnValue('visible');
+      act(() => fireEvent(document, new Event('visibilitychange')));
+      expect(reconnect).not.toHaveBeenCalled(); // One join must wait for the newer nonce's freshness too.
+      visibility.mockReturnValue('hidden');
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(reconnect).not.toHaveBeenCalled(); // Expiry alone never rotates a hidden page.
+      visibility.mockReturnValue('visible');
+      act(() => fireEvent(document, new Event('visibilitychange')));
+      expect(reconnect).toHaveBeenCalledTimes(1); // The batch rotates once, not once per missing nonce.
+      expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['checking', 'checking']);
+      act(() => {
+        connection.conversation.store.setState({ ops: { 'own-op': { ...end, phase: 'start', body: { ...end.body, phase: 'start' } } } });
+        connection.live.setState({ connected: true, caughtUp: true, caughtUpAt: Date.now() });
+      });
+      expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['queued', 'unknown']);
+      expect(pendingCommands.pending('p1', 'mini', S1).some((row) => row.nonce === 'own-op')).toBe(true);
+      act(() => connection.conversation.store.setState({ ops: { 'own-op': end } }));
+      expect(screen.getAllByTestId('command-status')[0].textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(reconnect).toHaveBeenCalledTimes(1);
+      expect(command).not.toHaveBeenCalled();
+
+      // Another restored batch in this same connection still gets its own one-shot post-expiry replay.
+      pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'later-op', name: 'color' });
+      redraw(<SessionComposer key="later-batch" session={session(S1, 'maws-45')} />);
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(reconnect).toHaveBeenCalledTimes(2);
+      act(() => connection.live.setState({ connected: true, caughtUp: true, caughtUpAt: Date.now() }));
+      expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('unknown');
+      cleanup();
+
+      // Nor can this project's replay suppress another project's recovered receipt.
+      pendingCommands.remember({ project: 'p2', machine: 'mini', session: S1, nonce: 'other-project-op', name: 'color' });
+      const other = mount(<SessionComposer session={{ ...session(S1, 'other-project'), project: 'p2' }} />, {}, {}, 'p2').connection;
+      vi.mocked(other.client.reconnect).mockImplementation(() => other.live.setState({ connected: false }));
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(other.client.reconnect).toHaveBeenCalledTimes(1);
+      act(() => other.live.setState({ connected: true, caughtUp: true, caughtUpAt: Date.now() }));
+      expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('unknown');
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(other.client.reconnect).toHaveBeenCalledTimes(1);
+    } finally { cleanup(); vi.useRealTimers(); }
+  });
+
+  it('never renders stale hub-replayed commands this browser did not send', () => {
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'someone-else': { ...end, body: { ...end.body, rpc: 'someone-else' } } } });
+    expect(screen.queryByLabelText('Command outcomes')).toBeNull();
   });
 });

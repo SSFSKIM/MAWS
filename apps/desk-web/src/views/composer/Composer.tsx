@@ -17,6 +17,7 @@ import { complete, completionAt, insertTag, type Completion } from '../../conver
 import { turnRunning, type Capability } from '../../conversation/capabilities';
 import { commandRoute, slashItems, type SlashItem } from '../../conversation/catalog';
 import { catalogKey, useCatalog } from '../../state/catalog';
+import { pendingCommands } from '../../state/pending-commands';
 import { SlashPalette, groupedItems } from './SlashPalette';
 import { rankItems, rememberChosen } from './rank';
 import { parseCommand } from '../../conversation/command';
@@ -145,7 +146,8 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   const [rpc, setRpc] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<{ text: string; reason: string } | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
-  const [commands, setCommands] = useState<Array<{ nonce: string; outlives?: string }>>([]);
+  // This mounted view keeps a line while it is read; durable ownership is the project's pending receipt record.
+  const [commands, setCommands] = useState<Array<{ nonce: string; outlives?: string; at?: number }>>(() => pendingCommands.pending(connection.project, session.machine, session.session));
   const [confirm, setConfirm] = useState<string | null>(null);
   const cached = useCatalog(catalogKey(connection.project, session.session));
   const [paletteHidden, setPaletteHidden] = useState(false);
@@ -196,7 +198,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
     else if (action.kind === 'unavailable') setRefusal({ text, reason: action.reason });
     else {
       const run = () => {
-        void connection.command(member, session.machine, session.session, typed.name, typed.args, running).then((nonce) => setCommands((held) => [...held, { nonce, outlives: action.route.outlives }]));
+        void connection.command(member, session.machine, session.session, typed.name, typed.args, running, action.route.outlives).then((nonce) => setCommands((held) => [...held, { nonce, outlives: action.route.outlives }]));
         setRefusal(null); setText(''); setConfirm(null);
       };
       if (action.route.confirm && !confirmed) setConfirm(`Run /${typed.name} on ${session.machine}?${typed.name === 'exit' ? ' This closes the terminal session. The bridge refuses if it cannot prove no work will be lost.' : ''}`);
@@ -282,7 +284,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
         <RpcStatus nonce={rpc} className="ml-auto" />
       </div>
       {commands.length > 0 && <div className="mt-2 max-h-32 space-y-1 overflow-y-auto" aria-label="Command outcomes">
-        {commands.map((command) => <div key={command.nonce} data-testid="command-receipt"><CommandStatus nonce={command.nonce} session={session} outlives={command.outlives} /></div>)}
+        {commands.map((command) => <div key={command.nonce} data-testid="command-receipt"><CommandStatus nonce={command.nonce} session={session} sentAt={command.at} outlives={command.outlives} /></div>)}
       </div>}
       {confirm && <div role="alertdialog" aria-label="Confirm command" className="mt-2 rounded-md border border-border-strong bg-bg-raised p-3 text-ui-sm">
         <p className="m-0 mb-2">{confirm}</p><button type="button" className={BUTTON} onClick={() => commanded(true)}>Run command</button>{' '}<button type="button" className={BUTTON} onClick={() => setConfirm(null)}>Cancel</button>
