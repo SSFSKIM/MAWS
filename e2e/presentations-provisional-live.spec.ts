@@ -388,6 +388,7 @@ test('the live run: the agent’s publish of a slide is seen as it is written, i
     });
     await test.step('G3: the swap without a gap or a double; the layer gone after', () => {
       const offence = (smp: (typeof samples)[number]) => ({ at: smp.at - (call.firstDeltaAt ?? 0), ghost: ghostOf(smp, DATE), live: smp.live });
+      expect(swap.judged, 'a swap to judge: the ghost drew the whole new date in some sample').toBe(true);
       expect(swap.gaps.map(offence), 'a gap: the date showing neither the ghost nor the real text').toEqual([]);
       expect(swap.doubles.map(offence), 'a double: the date showing both').toEqual([]);
       expect(swapped, 'the real date shown').toBeDefined();

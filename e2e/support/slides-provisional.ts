@@ -173,11 +173,12 @@ export function boxDisturbed(sample: SlideSample, slide: string, eid: string, te
 /**
  * The swap of element `key` of `slide` judged over the samples from the first that drew it in the ghost: no sample in
  * which the element shows neither the layer nor the write (the live element, `liveName`'s text holding `written`, not
- * veiled), and none in which it shows both. Answers the offenders, empty when the swap was clean.
+ * veiled), and none in which it shows both. Answers the offenders, empty when the swap was clean; throws when no sample
+ * drew the element in the ghost, since a swap never seen is no clean one.
  */
 export function slideSwapOffenders(samples: SlideSample[], slide: string, key: string, liveName: string, written: string): { gaps: SlideSample[]; doubles: SlideSample[] } {
   const from = samples.findIndex((s) => shownOf(s, slide, key) !== undefined);
-  if (from < 0) return { gaps: [], doubles: [] };
+  if (from < 0) throw new Error(`no swap to judge: the ghost never drew ${slide}'s ${key} in ${samples.length} samples`);
   const after = samples.slice(from);
   const layerUp = (s: SlideSample) => shownOf(s, slide, key) !== undefined;
   const real = (s: SlideSample) => (s.live[liveName] ?? '').includes(written) && !isVeiled(s, slide, key);
@@ -186,11 +187,11 @@ export function slideSwapOffenders(samples: SlideSample[], slide: string, key: s
 
 /**
  * A new slide's (or board's) swap, judged from the first sample that drew its ghost (`ghost`): none in which it shows
- * neither the ghost nor its real entry (`real`), and none in which it shows both.
+ * neither the ghost nor its real entry (`real`), and none in which it shows both; throws when no sample drew the ghost.
  */
 export function entrySwapOffenders(samples: SlideSample[], ghost: (s: SlideSample) => boolean, real: (s: SlideSample) => boolean): { gaps: SlideSample[]; doubles: SlideSample[] } {
   const from = samples.findIndex(ghost);
-  if (from < 0) return { gaps: [], doubles: [] };
+  if (from < 0) throw new Error(`no swap to judge: no sample of ${samples.length} drew the ghost`);
   const after = samples.slice(from);
   return { gaps: after.filter((s) => !ghost(s) && !real(s)), doubles: after.filter((s) => ghost(s) && real(s)) };
 }

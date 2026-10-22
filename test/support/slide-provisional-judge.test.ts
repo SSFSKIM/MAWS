@@ -22,17 +22,17 @@ const judge = (samples: SlideSample[]) => slideSwapOffenders(samples, 'date', NE
 describe('slideSwapOffenders', () => {
   it('a clean swap: the whole ghost over the veiled live text, then the real text alone', () => {
     const samples = [sample(null, OLD, false), sample('Fri', OLD, true), sample(NEW, OLD, true), sample(null, NEW, false)];
-    expect(judge(samples)).toEqual({ from: 2, gaps: [], doubles: [] });
+    expect(judge(samples)).toEqual({ judged: true, from: 2, gaps: [], doubles: [] });
   });
 
   it('the ghost staying over the written but still veiled text is no offence: the ghost shows it', () => {
     const samples = [sample(NEW, OLD, true), sample(NEW, NEW, true), sample(null, NEW, false)];
-    expect(judge(samples)).toEqual({ from: 0, gaps: [], doubles: [] });
+    expect(judge(samples)).toEqual({ judged: true, from: 0, gaps: [], doubles: [] });
   });
 
   it('a gap: the layer withdrawn before the write, the old text shown', () => {
     const samples = [sample(NEW, OLD, true), sample(null, OLD, false), sample(null, NEW, false)];
-    expect(judge(samples)).toEqual({ from: 0, gaps: [samples[1]], doubles: [] });
+    expect(judge(samples)).toEqual({ judged: true, from: 0, gaps: [samples[1]], doubles: [] });
   });
 
   it('a gap: the ghost gone and the written text still veiled', () => {
@@ -42,7 +42,7 @@ describe('slideSwapOffenders', () => {
 
   it('a double: the real text unveiled while the ghost still draws it', () => {
     const samples = [sample(NEW, OLD, true), sample(NEW, NEW, false), sample(null, NEW, false)];
-    expect(judge(samples)).toEqual({ from: 0, gaps: [], doubles: [samples[1]] });
+    expect(judge(samples)).toEqual({ judged: true, from: 0, gaps: [], doubles: [samples[1]] });
   });
 
   it('judges from the first sample whose ghost holds the whole new text: the stream before it is not a gap', () => {
@@ -50,7 +50,11 @@ describe('slideSwapOffenders', () => {
     expect(judge(samples).from).toBe(2);
   });
 
-  it('no ghost ever drawn: nothing to judge, from -1', () => {
-    expect(judge([sample(null, OLD, false), sample(null, NEW, false)])).toEqual({ from: -1, gaps: [], doubles: [] });
+  it('no ghost ever drawn: not judged, which the caller fails (a swap never seen is no clean one)', () => {
+    expect(judge([sample(null, OLD, false), sample(null, NEW, false)])).toEqual({ judged: false, from: -1, gaps: [], doubles: [] });
+  });
+
+  it('a ghost that never held the whole text: not judged either', () => {
+    expect(judge([sample('Fri', OLD, true), sample(null, NEW, false)]).judged).toBe(false);
   });
 });

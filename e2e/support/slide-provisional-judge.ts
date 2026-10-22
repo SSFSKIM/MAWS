@@ -19,13 +19,15 @@ export const ghostOf = (sample: SlideSample, key: string) => sample.ghost.find((
 /**
  * The swap judged over the samples from the first whose ghost draws element `key` with the whole `written` text: no
  * sample in which the element shows neither (the ghost with that text, or its live node with it and unveiled), and none
- * in which it shows both. Answers where the judgement starts (-1 when no ghost ever held the text) and the offenders.
+ * in which it shows both. Answers whether there was a swap to judge (`judged`: false when no ghost ever held the text,
+ * which a caller must fail, since a swap never seen is no clean one), where the judgement starts (-1 then) and the
+ * offenders. It answers rather than throws so the paid run's timeline is still written before its assertions.
  */
-export function slideSwapOffenders(samples: readonly SlideSample[], key: string, written: string): { from: number; gaps: SlideSample[]; doubles: SlideSample[] } {
+export function slideSwapOffenders(samples: readonly SlideSample[], key: string, written: string): { judged: boolean; from: number; gaps: SlideSample[]; doubles: SlideSample[] } {
   const ghostUp = (s: SlideSample) => ghostOf(s, key)?.text === written;
   const real = (s: SlideSample) => s.live !== null && !s.live.veiled && s.live.text === written;
   const from = samples.findIndex(ghostUp);
-  if (from < 0) return { from, gaps: [], doubles: [] };
+  if (from < 0) return { judged: false, from, gaps: [], doubles: [] };
   const after = samples.slice(from);
-  return { from, gaps: after.filter((s) => !ghostUp(s) && !real(s)), doubles: after.filter((s) => ghostUp(s) && real(s)) };
+  return { judged: true, from, gaps: after.filter((s) => !ghostUp(s) && !real(s)), doubles: after.filter((s) => ghostUp(s) && real(s)) };
 }
