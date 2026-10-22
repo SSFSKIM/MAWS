@@ -87,7 +87,7 @@ export class SlideProvisional {
   private stopGhostLayout: (() => void) | null = null;
   private label: HTMLElement | null = null;
   private moved: ReadonlySet<string> = NONE;
-  private readonly marked = { ghost: new Set<HTMLElement>(), live: new Set<HTMLElement>() };
+  private readonly marked = { ghost: new Set<HTMLElement>(), live: new Set<HTMLElement>(), off: new Set<Element>() };
   private readonly stops: (() => void)[] = [];
   private disposed = false; // a transform's deferred check finds nothing to do after
 
@@ -223,6 +223,7 @@ export class SlideProvisional {
     this.ghost = null;
     this.ghostToken = null;
     this.marked.ghost.clear();
+    this.marked.off.clear();
   }
 
   // The label at the slide's top left, held (hidden, its box kept so it is measured again) while it meets a protected
@@ -241,6 +242,25 @@ export class SlideProvisional {
     if (held !== this.label.hasAttribute('data-provisional-held')) this.label.toggleAttribute('data-provisional-held', held);
   }
 
+  // Every subtree of the ghost holding nothing it shows, at its top, made transparent (`data-provisional-off`): a
+  // transparency no descendant can undo, as a raw svg's own `visibility: visible` undoes the ghost's hidden root; what
+  // stays hidden by visibility alone is a container's own box around a shown descendant, whose style cannot set
+  // visibility (the dialect has no such property).
+  private markOff(): void {
+    const off = new Set<Element>();
+    const walk = (node: Element) => {
+      for (const child of Array.from(node.children)) {
+        if (child.hasAttribute('data-provisional-shown')) continue;
+        if (child.querySelector('[data-provisional-shown]')) walk(child);
+        else off.add(child);
+      }
+    };
+    if (this.ghost) walk(this.ghost.root);
+    for (const node of this.marked.off) if (!off.has(node)) node.removeAttribute('data-provisional-off');
+    for (const node of off) if (!node.hasAttribute('data-provisional-off')) node.setAttribute('data-provisional-off', '');
+    this.marked.off = off;
+  }
+
   // The marks as drawn now, each attribute written only where it changes.
   private mark(ghost: ReadonlyMap<HTMLElement, [string, Shown]>, live: ReadonlyMap<HTMLElement, string>, held: ReadonlySet<string>): void {
     for (const node of this.marked.ghost) {
@@ -253,6 +273,7 @@ export class SlideProvisional {
       if (node.getAttribute('data-provisional-key') !== key) node.setAttribute('data-provisional-key', key);
     }
     this.marked.ghost = new Set(ghost.keys());
+    this.markOff();
     for (const node of this.marked.live) if (!live.has(node)) node.removeAttribute('data-provisional-veiled');
     for (const [node, key] of live) if (node.getAttribute('data-provisional-veiled') !== key) node.setAttribute('data-provisional-veiled', key);
     this.marked.live = new Set(live.keys());

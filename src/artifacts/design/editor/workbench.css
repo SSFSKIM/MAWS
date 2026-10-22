@@ -120,12 +120,13 @@
 }
 /* a board whose file never arrived: its ground (its label is screen chrome, below) */
 /* P4-A2 G2.4 (G-R6): a board new to the design as a publish streams it, at its frame: no press, focus or name; held
-   (hidden with its box kept, its label with it) while it meets an element the human is protected on (G-R4). */
+   (transparent with its box kept, its label with it, which no descendant can undo: a raw svg's own visibility) while it
+   meets an element the human is protected on (G-R4). */
 .design-provisional-board {
   pointer-events: none;
 }
 .design-provisional-board[data-provisional-held] {
-  visibility: hidden;
+  opacity: 0 !important;
 }
 
 .design-board-missing {

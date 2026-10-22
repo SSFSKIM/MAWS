@@ -20,6 +20,8 @@ import { publishCanvas } from '../publish';
 import { setBoardFrame } from '../writers';
 import { DesignWorkbench } from './DesignWorkbench';
 import { DesignView } from './viewport';
+import layerSheet from '../../slides/editor/provisional/provisional.css?raw';
+import worldSheet from './workbench.css?raw';
 
 const BOARDS: BoardSeed[] = [
   { id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 }, title: 'Phone' },
@@ -33,7 +35,15 @@ const boxes = { live: new Map<string, Rect>(), ghost: new Map<string, Rect>() };
 
 const LABEL: Rect = [8, 8, 160, 20]; // the label's box in its own px, at its board's top left
 
+/** Whether a node paints under the sheets: no transparent ancestor (opacity multiplies down), not itself hidden. */
+const paints = (node: Element) => {
+  for (let n: Element | null = node; n; n = n.parentElement) if (getComputedStyle(n).opacity === '0') return false;
+  return getComputedStyle(node).visibility !== 'hidden';
+};
+let styles: HTMLStyleElement | null = null;
+
 beforeEach(() => {
+  styles = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: `${layerSheet}\n${worldSheet}` })); // the sheets, applied
   // the layer reads boxes on screen: an element's box is given here in its board's px by its canvas and key (zero else),
   // placed at its board's (or new board's) place in the world and drawn at the world's zoom as the layer's transform says
   // it now; the label's own box at its counter-scale too
@@ -58,6 +68,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  styles?.remove();
   cleanup();
   vi.restoreAllMocks();
   boxes.live.clear();
@@ -316,9 +327,13 @@ describe('a board new to the design', () => {
     const w = mount();
     boxes.live.set('b1/title', [0, 300, 50, 20]); // the phone's title, clear of the new board's frame
     act(() => w.session.editText('title'));
-    w.stream({ [boardPath('b3')]: NEW, [CANVAS_PATH]: w.manifest({ b3: { x: 100, y: 50, w: 200, h: 200 } }) }); // over the phone
+    // the new board's file carries a raw svg whose rect asks to be visible
+    const art = '<svg id="art" width="120" height="120" viewBox="0 0 120 120"><rect style="visibility:visible" width="120" height="120" fill="#2b7a78"/></svg>';
+    w.stream({ [boardPath('b3')]: NEW.replace('</section>', `${art}</section>`), [CANVAS_PATH]: w.manifest({ b3: { x: 100, y: 50, w: 200, h: 200 } }) }); // over the phone
     const held = () => ghost(w)!.hasAttribute('data-provisional-held');
+    const painted = () => Array.from(ghost(w)!.querySelectorAll('*')).filter((node) => paints(node));
     expect(held(), 'clear of the text box: drawn').toBe(false);
+    expect(paints(ghost(w)!.querySelector('rect')!)).toBe(true);
     // the text box grows under the frame (the human typing): held from the active board's next layout pass
     boxes.live.set('b1/title', [0, 64, 390, 60]);
     act(() => {
@@ -326,12 +341,13 @@ describe('a board new to the design', () => {
       flushLayout();
     });
     expect(held(), 'over the text the human edits').toBe(true);
-    expect(ghost(w)!.querySelector('[data-provisional-label]'), 'its label goes with it').not.toBeNull();
+    expect(painted(), 'nothing of it paints, its label and the svg’s visible rect included').toEqual([]);
     act(() => {
       w.session.editText(null);
       w.session.select([]);
     });
     expect(held(), 'drawn once the protection ends').toBe(false);
+    expect(paints(ghost(w)!.querySelector('[data-eid="t3"]')!)).toBe(true);
     act(() => {
       w.session.setKeyboard('stage');
       w.session.select(['title']);

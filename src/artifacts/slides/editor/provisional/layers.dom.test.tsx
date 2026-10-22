@@ -18,6 +18,7 @@ import { SlideCanvas } from '../../canvas';
 import { DeckProvisional } from './deck';
 import { SlideLayer } from './layers';
 import { deckWorld, publishFrame, replica } from './testing';
+import sheet from './provisional.css?raw';
 
 const ONE = `<section id="s1" style="background:#ffffff; padding:96px; display:flex; flex-direction:column; gap:24px">
 <h1 id="title" style="font-size:80px">Launch review</h1>
@@ -37,7 +38,15 @@ const TWO = '<section id="s2" style="background:#ffffff"><h2 id="t2" style="font
 type Rect = [left: number, top: number, width: number, height: number];
 const boxes = { live: new Map<string, Rect>(), ghost: new Map<string, Rect>(), label: [0, 0, 0, 0] as Rect };
 
+/** Whether a node paints under the layer's sheet: no transparent ancestor (opacity multiplies down), not itself hidden. */
+const paints = (node: Element) => {
+  for (let n: Element | null = node; n; n = n.parentElement) if (getComputedStyle(n).opacity === '0') return false;
+  return getComputedStyle(node).visibility !== 'hidden';
+};
+let styles: HTMLStyleElement | null = null;
+
 beforeEach(() => {
+  styles = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: sheet })); // the layer's sheet, applied
   // the layer reads boxes from each canvas's origin: an element's box is given here by its canvas and id (zero else)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const root = this.closest('section.maws-slide');
@@ -47,6 +56,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  styles?.remove();
   cleanup();
   vi.restoreAllMocks();
   boxes.live.clear();
@@ -213,6 +223,23 @@ describe('the deck’s provisional layer on the stage', () => {
     expect(w.stage.veiled()).toEqual([]);
   });
 
+  it('paints nothing of the ghost but what it shows: an svg’s own visible descendant, a held container’s content included', () => {
+    const art = '<svg id="art" style="position:absolute; right:64px; top:64px" width="120" height="120" viewBox="0 0 120 120"><rect style="visibility:visible" width="120" height="120" fill="#2b7a78"/></svg>';
+    const w = mount(ONE.replace('</section>', `${art}\n</section>`));
+    w.stream({ [slidePath('s1')]: edit(w.file('s1'), ['Launch review', 'Launch plan']) });
+    expect(w.stage.shown()).toEqual({ title: 'changed' });
+    const ghost = (css: string) => w.q(`[data-stage-slide] [data-provisional-ghost] ${css}`)!;
+    expect(paints(ghost('[data-provisional-key="title"]')), 'what it shows paints').toBe(true);
+    expect(paints(ghost('[data-eid="date"]')), 'an unchanged element does not').toBe(false);
+    expect(paints(ghost('rect')), 'nor an svg’s descendant that asks to be visible').toBe(false);
+    // the human edits the title: held, the ghost shows nothing, and nothing in it paints
+    boxes.live.set('title', [96, 96, 1728, 88]);
+    boxes.ghost.set('title', [96, 96, 1728, 88]);
+    act(() => w.session.editText('title'));
+    expect(w.stage.held()).toBe('title');
+    expect(w.all('[data-stage-slide] [data-provisional-ghost] *').filter((node) => paints(node)), 'nothing of the held ghost paints').toEqual([]);
+  });
+
   it('hides the label while it meets a protected element, and shows it again when the protection ends', () => {
     const w = mount();
     boxes.live.set('title', [0, 0, 1728, 120]); // the human's title at the slide's top left
@@ -221,12 +248,14 @@ describe('the deck’s provisional layer on the stage', () => {
     w.stream({ [slidePath('s1')]: edit(w.file('s1'), ['Friday, 24 October', 'Monday']) });
     const label = () => w.q('[data-stage-slide] [data-provisional-label]')!;
     expect(label().hasAttribute('data-provisional-held'), 'over the text the human edits').toBe(true);
+    expect(paints(label()), 'and not painted').toBe(false);
     expect(w.stage.shown()).toEqual({ date: 'changed' });
     act(() => {
       w.session.editText(null);
       w.session.select([]);
     });
     expect(label().hasAttribute('data-provisional-held')).toBe(false);
+    expect(paints(label())).toBe(true);
     expect(label().textContent).toBe('Fix the dates is writing…');
   });
 

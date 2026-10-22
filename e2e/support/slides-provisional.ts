@@ -35,7 +35,8 @@ export interface SlideSample {
   entryText: Record<string, string>;
   newSlideText: Record<string, string>;
   // a design's new boards being written (G2.4): the board, its call, its frame in world px and whether it is drawn
-  newBoards: { board: string; writing: string; frame: string; drawn: boolean }[];
+  /** `painted`: drawn and not held (no ancestor transparent or hidden, as a held new board is). */
+  newBoards: { board: string; writing: string; frame: string; drawn: boolean; painted: boolean }[];
   // the live text of the elements the recorder was given, by name (null while absent)
   live: Record<string, string | null>;
   // the text boxes mounted (ARMED or EDIT): the element each is in, its text, and where it is on the page
@@ -79,12 +80,21 @@ export async function recordSlides(page: Page, rootSelector: string, live: Recor
           const r = node.getBoundingClientRect();
           return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
         };
-        // where a node is drawn, or null while it is not shown (no box, hidden, transparent)
+        // whether a node paints: not hidden itself, and nothing up its chain transparent or undisplayed (a held label or
+        // new board is transparent, which no descendant undoes)
+        const paints = (node: Element): boolean => {
+          if (getComputedStyle(node).visibility === 'hidden') return false;
+          for (let n: Element | null = node; n; n = n.parentElement) {
+            const style = getComputedStyle(n);
+            if (style.opacity === '0' || style.display === 'none') return false;
+          }
+          return true;
+        };
+        // where a node is drawn, or null while it is not shown (no box, hidden, transparent itself or by an ancestor)
         const shownBox = (node: HTMLElement | null): Box | null => {
           if (!node) return null;
-          const style = getComputedStyle(node);
           const box = rect(node);
-          return box.w > 0 && box.h > 0 && style.visibility !== 'hidden' && style.opacity !== '0' && style.display !== 'none' ? box : null;
+          return box.w > 0 && box.h > 0 && paints(node) ? box : null;
         };
         const drawn: Omit<SlideSample, 'at'> = {
           layers: all('[data-provisional-layer]').map((node) => {
@@ -123,6 +133,7 @@ export async function recordSlides(page: Page, rootSelector: string, live: Recor
             writing: node.getAttribute('data-provisional-writing') ?? '',
             frame: node.getAttribute('data-provisional-frame') ?? '',
             drawn: node.querySelector('[data-provisional-thumb] section.maws-slide') !== null,
+            painted: node.querySelector('[data-provisional-thumb] section.maws-slide') !== null && paints(node),
           })),
           live: Object.fromEntries(Object.entries(named).map(([name, css]) => [name, el.querySelector(css)?.textContent ?? null])),
           boxes: all('.deck-textbox').map((node) => ({ eid: node.closest('[data-eid]')?.getAttribute('data-eid') ?? '', text: node.textContent ?? '', box: rect(node) })),

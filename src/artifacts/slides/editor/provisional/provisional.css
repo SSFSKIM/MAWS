@@ -17,12 +17,18 @@
   pointer-events: none !important;
 }
 
-/* The ghost canvas: only the elements that differ (or that the provisional layout moves) are drawn. */
+/* The ghost canvas: only the elements that differ (or that the provisional layout moves) are drawn. A subtree holding
+   nothing shown is transparent (data-provisional-off), which no descendant can undo (a raw svg's own visibility); the
+   root and a container around a shown element are hidden by the inherited visibility, which the dialect gives no
+   element's style a way to undo. */
 .maws-slide[data-provisional-ghost] {
   visibility: hidden;
 }
 .maws-slide[data-provisional-ghost] [data-provisional-shown] {
   visibility: visible;
+}
+.maws-slide[data-provisional-ghost] [data-provisional-off] {
+  opacity: 0 !important;
 }
 .maws-slide[data-provisional-ghost] [data-provisional-shown='changed'],
 .maws-slide[data-provisional-ghost] [data-provisional-shown='added'] {
@@ -56,9 +62,9 @@
   background: var(--provisional-color);
 }
 
-/* G-R4: held while it would meet the human's protected element (its box kept, so it is measured again). */
+/* G-R4: held while it would meet the human's protected element (transparent, its box kept so it is measured again). */
 .deck-provisional-label[data-provisional-held] {
-  visibility: hidden;
+  opacity: 0;
 }
 
 /* A filmstrip entry being written: the agent's ring, and the whole provisional slide opaque over the thumbnail. */
