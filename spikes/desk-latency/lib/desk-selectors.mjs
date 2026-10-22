@@ -20,7 +20,13 @@ export const DESK = {
   rowOf: (session) => `[data-testid="session-view"][data-session="${session}"] [data-row-id]:not([data-row-id^="desk-tail:"])`,
   streamRow: '[data-testid="session-view"] [data-row-id^="desk-stream:"]',
   userRow: '[data-testid="session-view"] [data-kind="user"]',
+  // An answer's text, streaming or settled (a live thinking row or a message tool's row is not).
   assistantRow: '[data-testid="session-view"] [data-kind="assistant_text"]',
+  // The session view's Report · Transcript toggle; MAWS's label for the full transcript (`REPORT.transcript` in
+  // src/renderer/src/owner/report/copy.ts), and the toggle once it shows it.
+  viewToggle: '[data-testid="session-view-bar"] button',
+  transcriptLabel: 'Transcript',
+  transcriptShown: '[data-testid="session-view-bar"] button[aria-pressed="true"]',
   tailSend: '[data-testid="tail-send"]',
   delivered: '[data-testid="tail-send"] [data-testid="delivery-foot"][data-state="delivered"]',
   composer: '[data-testid="composer"] textarea',
@@ -43,7 +49,14 @@ export const DESK = {
   spawnFailed: '[role="dialog"] [data-rpc-state="failed"]',
 };
 
-/** The desk's frames, labelled for the joiner: each frame's type and the ids a load joins on. */
+/** The parts of a desk frame over the bound, by the frame's part id, until the last of them is in. */
+const deskParts = new Map();
+
+/**
+ * The desk's frames, labelled for the joiner: each frame's type and the ids a load chains its hops by. A frame over the
+ * bound (a large snapshot) comes in parts, in whatever order: its parts are held and joined when the last is in, and
+ * the whole frame is labelled then, at that part's time, when the app can read it (with `parts`, how many it took).
+ */
 export function classifyDesk(direction, url, text) {
   if (direction === 'req' || direction === 'done') return /\/api\//.test(url) ? { type: text.split(' ')[0] } : null;
   if (direction !== 'in' && direction !== 'out') return null;
@@ -53,18 +66,48 @@ export function classifyDesk(direction, url, text) {
   } catch {
     return { type: 'unparsed' };
   }
+  if (frame.t !== 'part') return labelDeskFrame(frame);
+  const held = deskParts.get(frame.id) ?? { data: [], n: 0 };
+  if (held.data[frame.index] === undefined) held.n++;
+  held.data[frame.index] = frame.data;
+  if (held.n < frame.count) {
+    deskParts.set(frame.id, held);
+    return null;
+  }
+  deskParts.delete(frame.id);
+  try {
+    return { ...labelDeskFrame(JSON.parse(held.data.join(''))), parts: frame.count };
+  } catch {
+    return { type: 'unparsed', parts: frame.count };
+  }
+}
+
+function labelDeskFrame(frame) {
   const label = { type: frame.t ?? '?' };
   if (frame.t === 'session') {
     const m = frame.message ?? {};
     label.type = `session:${m.kind}`;
+    if (m.session) label.session = m.session;
     if (m.sub) label.sub = m.sub;
     if (m.kind === 'chunk' && typeof m.body?.t === 'number') label.t = m.body.t;
-    if (m.kind === 'raised') label.request = m.body?.request;
-    if (m.kind === 'settled') label.request = m.body?.request;
+    if (m.kind === 'raised' || m.kind === 'settled') label.request = m.body?.request;
+    // A delivery names the owner's send by its event (the writer and seq its ack gave it).
+    if (m.kind === 'delivery') {
+      label.writer = m.body?.event?.writer;
+      label.seq = m.body?.event?.seq;
+      label.session = m.body?.session;
+    }
   }
-  if (frame.t === 'subscribe') label.sub = frame.sub;
+  if (frame.t === 'subscribe') {
+    label.sub = frame.sub;
+    label.session = frame.session;
+  }
   if (frame.t === 'human') label.nonce = frame.event?.mac?.nonce;
-  if (frame.t === 'human-ack') label.nonce = frame.nonce;
+  if (frame.t === 'human-ack') {
+    label.nonce = frame.nonce;
+    label.writer = frame.writer;
+    label.seq = frame.seq;
+  }
   if (frame.t === 'rpc') {
     label.nonce = frame.rpc?.nonce;
     label.rpc = frame.rpc?.rpc;
@@ -73,8 +116,5 @@ export function classifyDesk(direction, url, text) {
     label.nonce = frame.nonce;
     label.state = frame.state;
   }
-  // A frame over the bound comes in parts (a large snapshot): the last part completes it, and its type is in the first
-  // part's text.
-  if (frame.t === 'part') return { type: 'part', part: frame.id, index: frame.index, count: frame.count, ...(frame.index === 0 && { head: String(frame.data).slice(0, 80) }) };
   return label;
 }

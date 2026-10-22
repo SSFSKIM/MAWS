@@ -25,6 +25,8 @@ export async function runHarness(page, config, loads, classify, surface = null) 
   ctx.S = surface;
   const reps = config.reps ?? load.reps ?? 20;
   try {
+    // A hidden page (another tab in front, a locked screen or a sleeping display) paints nothing: every mark would time out.
+    if ((await page.evaluate(() => document.visibilityState)) === 'hidden') throw new Error('the page is hidden (another tab in front, a locked screen, a sleeping display): nothing paints, so no load runs');
     await ctx.probe();
     if (load.setup) await load.setup(ctx);
     let failed = 0;
@@ -87,10 +89,11 @@ export function makeContext(page, config, net, out) {
       return Object.fromEntries(names.map((n, i) => [n, ids[i]]));
     },
     /**
-     * Waits until each of `need` (names of `armed`, all by default) has painted or `timeoutMs` passed, then returns every
-     * armed mark: { seen, paint, already, error } on the page's clock (null where it never came).
+     * Waits until each of `need` (names of `armed`, all by default) has painted, and `done(marks)` (when given: what else
+     * ends the wait, a frame or a sample, polled each round and maybe async) is true, or `timeoutMs` passed; then returns
+     * every armed mark: { seen, paint, already, error } on the page's clock (null where it never came).
      */
-    async wait(armed, { need, timeoutMs } = {}) {
+    async wait(armed, { need, timeoutMs, done } = {}) {
       const names = Object.keys(armed);
       const required = need ?? names;
       const limit = Date.now() + (timeoutMs ?? config.timeoutMs ?? 60_000);
@@ -99,7 +102,7 @@ export function makeContext(page, config, net, out) {
         const read = await page.evaluate((ids) => window.__deskLat?.read(ids) ?? null, names.map((n) => armed[n]));
         if (read === null) throw new Error('the probe is gone from the page (it navigated): arm again after a navigation');
         marks = Object.fromEntries(names.map((n, i) => [n, read[i]]));
-        if (required.every((n) => marks[n]?.paint != null)) break;
+        if (required.every((n) => marks[n]?.paint != null) && (!done || (await done(marks)))) break;
         if (Date.now() > limit) break;
         await sleep(config.pollMs ?? 50);
       }

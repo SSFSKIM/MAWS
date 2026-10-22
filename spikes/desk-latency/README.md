@@ -3,7 +3,8 @@
 For each load the owner meets, the time from the person's action to useful content with usable controls, on the desk
 and on claude.ai/code driving a local Claude Code session through Remote Control (RC). Each load is reported with its
 p50 and p95 per cohort, and where the desk is behind, the hop that costs it. The live passes run later, in the owner's
-Chrome. This directory holds the method, the harness, and a dry run against the desk's local stand-in.
+Chrome, while the owner is away from the Mac. This directory holds the method, the harness, and a dry run against the
+desk's local stand-in.
 
 ## Cohorts
 
@@ -16,14 +17,25 @@ cohort:
 | warm | An in-app move with the app already loaded: a click from where the owner would come from. | The click |
 | reconnect | In place. Every socket is dropped and the network is taken away until the app shows the drop, then the network is given back. | The browser's `online` event |
 
-An action (send, steer, interrupt, allow/deny, answer, spawn, resume) runs warm. With `cohort: 'reconnect'` it acts the
-instant the network comes back, which prices a send or an RPC made right after a return.
+An action (send, steer, interrupt, allow/deny, answer, spawn, resume) runs warm. With `cohort: 'reconnect'` it acts as
+soon as the network is back and its control is usable again (the desk disables Interrupt while disconnected, and a
+disabled button takes no click), which prices a send or an RPC made right after a return. That wait is reported as
+`actionable`, in ms from the `online`; the action's own start is still its input event.
 
 **Useful** is the content drawn and the controls that act on it usable, in the frame that paints both:
 
 - **Grid:** tiles and the hub's word "Live".
 - **Project:** the channels listed and the socket open.
 - **Session:** its transcript rows, an enabled Send, and the socket open. Mid-turn it also needs Interrupt; ended, it needs Resume or the retired line.
+
+After a return the DOM alone is not enough. The desk keeps its old tiles and rows through a drop, and its "Live" and
+open socket show at the socket's open, before the welcome, the backlog or the snapshot, with Send enabled throughout.
+So a reconnect's `useful` is the later of two marks, both kept:
+
+- **`controls`:** the DOM's useful, as above.
+- **`fresh`:** the proof of fresh content after the `online`.
+  - On the desk, its own sample: `grid.socket` (grid), `online.caught-up` or `socket.gap` (project, caught up and verified), `resume.gap` (session, a fresh snapshot merged). A drawn sample's time is the frame that paints it.
+  - On RC, its frames: a socket opened after the `online` and then its `initialize` reply, or the tail `GET …/events` finished, whichever comes first.
 
 ## The method, per load
 
@@ -41,28 +53,43 @@ log lines and transcript rows (`machine.mjs`). Ids join these sources, never tim
 - the request id;
 - the repetition's token (`lat<rep><4>`), which the prompt asks the reply to carry and the transcripts show.
 
+A load's frames chain the same way, each hop found by the ids the one before it gave (`hops` in `lib/surfaces.mjs`):
+
+- **A desk send:** the `human` frame (its nonce) → its `human-ack` (that nonce; the event's writer and seq) → the delivery naming that event, in the repetition's session → that session's first chunk.
+- **A desk RPC:** sent → its states, by nonce.
+- **A desk open:** the subscribe for the session → the snapshot with its `sub`. A frame over the bound (a large snapshot) is joined from its parts and timed at the last of them.
+- **RC:** the POST's `uuid` → the `user` frame with it (the echo, or a steer's replay consumed), a control's `request_id` → its `control_response` or `control_cancel_request`, and the POST's own end by its request id. Stream deltas carry no id: the first after the echo.
+
 | Load | Cohort | Start | End (visible effect) | Hops that explain it | RC counterpart |
 |---|---|---|---|---|---|
 | app (grid with live presence) | cold, warm, reconnect | nav start / click "Projects" / `online` | tiles + "Live" painted | `app.me`, `app.key`, `grid.socket`, `app.grid`; resources (HTML, JS, `/api/me`) | `/code` list rows painted, no offline banner; list GET, watch SSE. No warm move (the list is always on screen). |
 | project open | cold, warm, reconnect | nav to `/p/<id>` / tile click / `online` | channels listed + socket open | `app.me`, `app.key`, chunk loads, `project.caught-up`, `socket.gap`, `online.caught-up` | none: claude.ai/code has no project |
 | session open (idle, mid-turn, ended) | cold, warm (switch between opened sessions), reconnect | nav to `/p/<id>/s/<sid>` / sidebar click / `online` | rows + Send enabled + socket open (mid-turn: + Interrupt; ended: + Resume) | timeline: me → key → project start → caught up → subscribed → snapshot → rows; the machine's open line by `sub` (arrival, N, emitted) | `/code/<session>` rows + composer; history GET, WS open, `initialize` reply. Warm: a sidebar row clicked in-page, which skips the hover prefetch (P:93). |
 | older history page | warm | the wheel that reaches the top | the list grew, painted | `view.older-page` (rows asked → in) | the same wheel; `GET …/events?cursor=` |
-| send → echo, delivered, first token | warm, reconnect | Enter | `echo` (local on both), `row`/`delivered` (desk: the delivery outcome, or the framed row in the transcript), `firstToken`, `reply` | frames: `human`, `human-ack`, delivery, first chunk; `owner.ack`, `owner.delivered`; daemon `delivered` line; transcript rows by token | POST `/events` start and end, the echo frame (same `uuid`), `delivery_update` or `system/status requesting`, first `stream_event` delta, `result`; RC debug `Ingress … uuid` |
-| steer | warm | Enter while a turn runs | `echo` (local on both), `steered` | `rpc.steer`; the RPC frames | `steered` (the row read: calibrate), else the frame of it consumed (`user` with `isReplay`) |
+| send → echo, delivered, first token | warm, reconnect | Enter | `echo` (local on both), `row`/`delivered` (desk: the delivery outcome, or the framed row in the transcript), `firstToken` (the answer's first text; `firstActivity` any streaming row, a thinking label included), `reply` | frames: `human`, `human-ack`, delivery, first chunk; `owner.ack`, `owner.delivered`; transcript rows by token (`m:row`, the machine's delivery) | POST `/events` start and end, the echo frame (same `uuid`), `delivery_update` or `system/status requesting`, first `stream_event` delta, `result`; RC debug `Ingress … uuid` |
+| steer | warm | Enter while a turn runs | `echo` (local on both), `steered`; the repetition waits for the delivery, not the echo | `rpc.steer`; the RPC frames | `steered` (the row read: calibrate), else the frame of it consumed (`user` with `isReplay`), whichever comes first |
 | interrupt | warm, reconnect | click Interrupt | `stopped` (button gone), `idle` (at rest) | `rpc.interrupt`; RPC frames | Stop; `control_response` for its `request_id`, `result` |
 | permission raised → card | warm | the tool call's row on the machine (transcript `timestamp`) | card painted | `request.row`, `request.drawn`; `session:raised` frame | the same anchor in the RC session's transcript; `control_request can_use_tool` frame |
 | allow / deny | warm | click Allow (Deny with `decision`) | card gone | `rpc.decide` | "Allow once" / "Deny"; `control_response`, then `control_cancel_request` |
 | answer | warm | click Submit | card gone | `rpc.answer` | option, then submit (calibrate) |
 | spawn → first row | warm | click Start | `rpc` ("Open it"), `listed`, then (after "Open it", clicked at once) `row`, `firstToken`, `reply` | `rpc.spawn` | new-session composer, Enter → `firstToken`, `reply`; create POST, `system/init` |
 | resume to live | warm | click Resume | listed live + header offers Retire | `rpc.resume`; the next open line | none from the web: RC resumes from the terminal (`claude remote-control --session-id`) |
-| tab wake | reconnect | `visibilitychange` → visible | the session view current (`changed`) and useful | `wake.caught-up`, `socket.gap`, `resume.gap`, `socket.reconnects` | the same marks (RC refetches its tail on visible, P:215) |
-| network change | reconnect (`app`/`project`/`session` in that cohort) | `online` | useful again | `online.caught-up`, `socket.gap`, `resume.gap` | the same (RC redials on `online`, P:192) |
+| tab wake | reconnect | `visibilitychange` → visible | `current` and `useful`, each taken from the page as it is shown (a change while hidden does not count) | `wake.caught-up`, `socket.gap`, `resume.gap`, `socket.reconnects` | the same marks (RC refetches its tail on visible, P:215) |
+| network change | reconnect (`app`/`project`/`session` in that cohort) | `online` | useful again: `controls` and `fresh` | `online.caught-up`, `socket.gap`, `resume.gap` | the same (RC redials on `online`, P:192) |
 | hub stream recycle | watch | — | every drop the app shows until useful again | daemon.log recycles (`machine.mjs`), `resume.gap` | none in the page until its 25 s banner |
 | deploy | watch | — | the same | `socket.gap`, `resume.gap` | none |
 
-The end mark the tables compare is `useful` for an open, `grew` for an older page, `firstToken` for a send or a spawn,
-`steered` for a steer, `stopped` for an interrupt, `decide.gone` / `answer.gone`, and `current` for a wake. The machine-anchored
-raise is `raise.machine`: the card's paint less the tool call's row. The others are kept alongside them.
+The end mark the tables compare is `useful` for an open (after a return, with fresh content), `grew` for an older page,
+`firstToken` for a send or a spawn, `steered` for a steer, `stopped` for an interrupt, `decide.gone` / `answer.gone`,
+and `current` for a wake. A wake's `current` is the first change after the page is shown. Where the wake needed a
+reconnect, it is the later of that change (kept as `changed`) and the proof of fresh content (`fresh`: the desk's
+`wake.caught-up`, RC's frames as above). The machine-anchored raise is `raise.machine`: the card's paint less the tool
+call's row, both wall times. It and `raise.card` (Enter → card) stay out of the decision's timeline. The others are
+kept alongside them.
+
+The desk is measured in its session view's Transcript view: an action's setup switches to it, so an answer streams
+visibly as it does on RC. The default Report view folds a turn's unmarked text into a collapsed working record, where
+it may never be drawn.
 
 ### Clocks
 
@@ -90,6 +117,7 @@ raise is `raise.machine`: the card's paint less the tool call's row. The others 
 | File | What it is |
 |---|---|
 | `build.mjs` | Builds one self-contained run-code script per (target, load), with its configuration baked in |
+| `pass.mjs` | One run of one load in a pass: builds it, runs it through playwright-cli, and writes its JSON only once the run returned whole, to the next numbered file for that load |
 | `lib/probe.mjs` | The in-page marks; also wraps `WebSocket` so a reconnect can drop the page's sockets |
 | `lib/net.mjs` | The frames, through CDP (Playwright page events if CDP is refused) |
 | `lib/runner.mjs` | The repetition loop and its helpers |
@@ -103,15 +131,16 @@ raise is `raise.machine`: the card's paint less the tool call's row. The others 
 | `standin/rc-mock.mjs` | A page built to the RC guesses, for the dry run of the RC loads only |
 | `test/harness.test.mjs` | `node --test spikes/desk-latency/test/*.test.mjs` |
 
-Run one load:
+Run one load (`pass.mjs` takes build.mjs's arguments, plus the playwright-cli session and the directory):
 
 ```sh
-node spikes/desk-latency/build.mjs --target desk --load session --cohort cold --variant idle \
-  --url https://desk-hub.opencognita-platform.workers.dev --project <id> --session <id> --reps 30 --out /tmp/lat/desk-session-cold.js
-playwright-cli -s=chrome --raw run-code --filename=/tmp/lat/desk-session-cold.js > /tmp/lat/desk-session-cold.json
-node spikes/desk-latency/build.mjs --target rc --load session --cohort cold --variant idle --session session_… --reps 30 --out /tmp/lat/rc-session-cold.js
-playwright-cli -s=chrome --raw run-code --filename=/tmp/lat/rc-session-cold.js > /tmp/lat/rc-session-cold.json
+node spikes/desk-latency/pass.mjs --pw chrome --dir /tmp/lat --target desk --load session --cohort cold --variant idle \
+  --url https://desk-hub.opencognita-platform.workers.dev --project <id> --session <id> --reps 30
+# → /tmp/lat/desk-session-cold-idle-1.json (-2, -3… on the next runs of that load), and a line in /tmp/lat/done.txt
 ```
+
+Underneath it is `build.mjs … --out x.js`, then `playwright-cli -s=chrome --raw run-code --filename=x.js`, whose output
+is the run's JSON. A run on a hidden page refuses to start: nothing would paint.
 
 **Configuration.** Pass any key as `--set key=value` (JSON where it parses), or `--config file.json`:
 
@@ -138,8 +167,11 @@ node spikes/desk-latency/machine.mjs --since <first rep ISO> --until <last rep I
   [--transcript ~/.claude/projects/<dir>/<session>.jsonl]… [--rc-debug /tmp/rc-lat/debug.txt] > /tmp/lat/machine-macbook.json
 ssh mini 'cat ~/.claude/sminos/daemon.log' > /tmp/lat/mini-daemon.log    # a mini session's window
 node spikes/desk-latency/machine.mjs --log /tmp/lat/mini-daemon.log --machine mini --skew-ms <mini−macbook> --since … --until … > /tmp/lat/machine-mini.json
-node spikes/desk-latency/join.mjs /tmp/lat/*-*.json --machine /tmp/lat/machine-macbook.json --json /tmp/lat/joined.json > /tmp/lat/baseline.md
+node spikes/desk-latency/join.mjs /tmp/lat/desk-*.json /tmp/lat/rc-*.json --machine /tmp/lat/machine-macbook.json --json /tmp/lat/joined.json > /tmp/lat/baseline.md
 ```
+
+join.mjs pools every run of a load, by cohort, load, variant and target, whatever file each came in: a load run in
+three windows is one group.
 
 **What machine.mjs reads.** It reads daemon.log by default. It reads the daemon's RPC ledger (`--rpcs ~/.claude/sminos/daemon/rpcs.json`: an RPC's claim and outcome times, which daemon.log does not carry) only when the operator passes it, because it sits beside credential-bearing files and only daemon.log is cleared for reading.
 
@@ -147,8 +179,8 @@ node spikes/desk-latency/join.mjs /tmp/lat/*-*.json --machine /tmp/lat/machine-m
 
 - Per cohort, a table: each load's end mark on both apps (n, p50, p95; `*` where n < 20), Δp50 and Δp95, and the desk's costliest hop. The costliest hop is the widest gap between consecutive milestones, in median order, up to the end mark.
 - The offenders, worst Δp95 first, each with both apps' timelines.
-- A raise table, from the tool call's row on the machine to the card painted.
-- The machine's recycles and opens.
+- A raise table: from the tool call's row on the machine to the card painted, and from the prompt's Enter to it.
+- The machine's recycles and opens, and its deliveries counted for the window. daemon.log's `delivered` line names only the project and the recipient, so it is never joined to a repetition: a send's machine-side delivery is its transcript row by token (`m:row`).
 
 ## The instrument's additions (`apps/desk-web/src/latency/latency.ts`)
 
@@ -158,41 +190,99 @@ around it.
 - **`window.deskLatency.samples(since)`.** The last 1000 raw samples, each with its wall time and the id that names its item: the send's or the RPC's nonce, the request, the subscription. The machine's per-open line names the subscription too, so `view.*` joins it exactly.
 - **`app.me`, `app.key`, `app.grid`.** From the navigation's start to `/api/me` answered, to the device's org key held (the gate before any project draws), and to the grid drawn.
 - **`grid.socket`.** The registry socket, from connecting until its whole grid is in.
-- **`project.caught-up`.** From the project's log read and its socket started until the hub's backlog is in and drawn.
-- **`socket.gap`, `wake.caught-up`, `online.caught-up`.** The project socket caught up again after a drop, after the tab was shown again, or after the browser came back online. A return that needed no reconnect gives no sample.
+- **`project.caught-up`.** From the project's log read and its socket started until the hub's backlog is in, verified and drawn. The view draws only verified entries, so the sample waits until no entry up to the catch-up is pending. A newer welcome or a drop drops a catch-up still waiting, and the next one is timed from the same start.
+- **`socket.gap`, `wake.caught-up`, `online.caught-up`.** The project socket caught up and verified again after a drop, after the tab was shown again, or after the browser came back online. A return that needed no reconnect gives no sample.
 - **`view.older-page`.** An older page, from asked until its rows are in.
 - **`rpc.steer`, `rpc.interrupt`, `rpc.decide`, `rpc.answer`, `rpc.spawn`, `rpc.resume`.** From sent until its result is in. A failure gives no sample.
 - **The overlay.** It lists only the paths measured so far, so it stays small enough to read a phone around.
 
-## The live pass
+## The live passes, in idle windows
 
-### Before it
+The passes drive the owner's Chrome, so they run only while the owner is away from the Mac. An orchestrator runs them
+unattended, in as many idle windows as it takes: it stops when a window ends and resumes in the next one, from what is
+still owed. Nothing in a pass needs the owner at the Mac. What does (the phone, a real network change, a deploy) is
+done separately, with them (below).
 
-1. The owner attaches the Chrome profile (`playwright-cli attach --extension=chrome`, session `chrome`) and keeps the tab in front. A hidden tab paints nothing, and RC commits every 200 ms while hidden.
-2. The throwaway sessions exist (below). Both apps run the same model and effort.
-3. **Calibration, about 40 minutes, once.** It settles everything the dry run could not see:
-   - **The extension's reach.** Run `--load probe-page --target desk` on the desk. Its `net.mode` should be `cdp` and `anchored` true. If it says `playwright`, frame times carry the relay's delay. Then run `app` cold with `--reps 1`: its marks need the init script (`addInitScript`). If the extension refuses it, the desk's cold rows rest on its own `app.*` and `view.*` samples, which count from the navigation's start, and RC's cold rows have no DOM mark until another way in is found.
-   - **The RC DOM.** On claude.ai/code, with a session open, run `--load probe-page --target rc --set observeMs=60000` while the operator sends a prompt, steers, stops a turn, allows a permission and answers a question by hand. From its `dom` outline and `net.kinds`, rewrite `lib/rc-selectors.mjs`:
-     - `sessionRow`;
-     - `userMessage`, `assistantMessage`, `anyMessage`, `scroller`;
-     - `composer`, `stopButton`;
-     - `allowOnce`, `deny`, `permissionCard`;
-     - `questionOption`, `questionSubmit`;
-     - `steerRead`, `disconnected`, `olderButton`.
-   - **The RC wire.**
-     - The API host and the WS URL; the id spelling in the WS path.
-     - Whether frames arrive in an envelope (`created_at`, `sequence_num`).
-     - Whether the page's own `user` event comes back once or twice, and whether `delivery_update` rides the WebSocket.
-     - Whether the watch is fetch-streamed (then pass `--set streamUrls=watch` for chunk timing).
-   - **The browser's limits.**
-     - Whether `page.context().newPage()` works through the extension (wake).
-     - Whether the RC socket lives in the page, not in a worker (reconnect drops only the page's).
-     - RC's retention windows, for the warm switches (P:219).
-   - **The RC environment id** for spawn: the `environment` in the new-session URL.
+### Before each window
 
-### The passes
+1. Message the owner that the window starts: the Mac's Chrome is about to be driven, and is to be left unlocked, its
+   window as it is. A locked screen or a sleeping display hides Chrome's tabs, which then paint nothing (a run on a
+   hidden page refuses to start), and RC commits every 200 ms while hidden.
+2. Keep the display awake for the window: `caffeinate -dimsu -t <seconds> &`.
+3. Attach: `playwright-cli attach --extension=chrome` (session `chrome`), the tab in front.
+4. Check the throwaway sessions are in shape (below): `lat-busy` still in its turn, the ended ones still ended.
 
-Run each load on the desk and then on RC back to back, so both meet the same network. Time per load:
+### After each window
+
+1. Detach (`playwright-cli -s=chrome detach`) and stop `caffeinate`.
+2. Read the machine's side of the window: `machine.mjs --since <window start> --until <window end>` into
+   `/tmp/lat/machine-<machine>-<window>.json` (below).
+3. Message the owner that the window is over and the Mac is theirs again, with what is done and what is still owed.
+
+### Calibration, in the first window (about 40 minutes)
+
+It settles everything the dry run could not see, before the first load. Both apps run the same model and effort.
+
+- **The extension's reach.** Run `--load probe-page --target desk` on the desk. Its `net.mode` should be `cdp` and `anchored` true. If it says `playwright`, frame times carry the relay's delay. Then run `app` cold with `--reps 1`: its marks need the init script (`addInitScript`). If the extension refuses it, the desk's cold rows rest on its own `app.*` and `view.*` samples, which count from the navigation's start, and RC's cold rows have no DOM mark until another way in is found.
+- **The RC DOM.** On claude.ai/code, with a session open, bring the page through playwright-cli (`type`, `press Enter`, `click`) to each state: a prompt sent, a turn running, a steer sent, a turn stopped, a permission card, a question card. In each, run `--load probe-page --target rc --set observeMs=1000` for its `dom` outline. For the frames, run each action load once (`--reps 1`): its run's `net.kinds` lists every frame type seen, whether its marks came or not. From those, rewrite `lib/rc-selectors.mjs`:
+  - `sessionRow`;
+  - `userMessage`, `assistantMessage`, `anyMessage`, `scroller`;
+  - `composer`, `stopButton`;
+  - `allowOnce`, `deny`, `permissionCard`;
+  - `questionOption`, `questionSubmit`;
+  - `steerRead`, `disconnected`, `olderButton`.
+- **The RC wire.**
+  - The API host and the WS URL; the id spelling in the WS path.
+  - Whether frames arrive in an envelope (`created_at`, `sequence_num`).
+  - Whether the page's own `user` event comes back once or twice, and whether `delivery_update` rides the WebSocket.
+  - Whether the watch is fetch-streamed (then pass `--set streamUrls=watch` for chunk timing).
+- **The browser's limits.**
+  - Whether `page.context().newPage()` works through the extension (wake).
+  - Whether the RC socket lives in the page, not in a worker (reconnect drops only the page's).
+  - RC's retention windows, for the warm switches (P:219).
+- **The RC environment id** for spawn: the `environment` in the new-session URL.
+
+### The loads: a checklist to stop and resume
+
+Each row is one command, run from the MAWS checkout in zsh after:
+
+```sh
+L=/tmp/lat
+p() { node spikes/desk-latency/pass.mjs --pw chrome --dir $L "$@" }
+DESK=(--target desk --url https://desk-hub.opencognita-platform.workers.dev --project $PROJECT)
+RC=(--target rc)
+# The throwaway sessions' ids (below): IDLE IDLE2 BUSY ASK LONG END1…END10 ENDED; RC_IDLE RC_IDLE2 RC_BUSY RC_ASK RC_LONG RC_ENDED RC_ENV
+```
+
+Each run writes `$L/<target>-<load>-<cohort>[-<variant>]-<n>.json`, `n` the next number free for that load, and adds a
+line to `$L/done.txt` (the file, its repetitions, how many met their marks). A run writes only once it returned whole,
+so a window that ends mid-run loses that run alone: run a long load in chunks of 10 (`--reps 10`), each its own file,
+and join.mjs pools them. **What is still owed** is each row's repetitions less the `ok` ones in `done.txt` for its file
+stem (`ls $L/*.json` shows which stems have any). Run a load on the desk and then on RC back to back, so both meet the
+same network.
+
+| File stem (`desk-…`, `rc-…`) | Reps per app | Command: `p $DESK …` / `p $RC …` |
+|---|---|---|
+| `app-cold` | 30 | `--load app --cohort cold` |
+| `app-warm` (desk) | 30 | `--load app --cohort warm` |
+| `app-reconnect` | 20 | `--load app --cohort reconnect` |
+| `project-cold`, `-warm`, `-reconnect` (desk) | 30, 30, 20 | `--load project --cohort cold` (`warm`, `reconnect`) |
+| `session-cold-idle` | 30 | `--load session --cohort cold --variant idle --session $IDLE` / `$RC_IDLE` |
+| `session-cold-mid-turn` | 30 | `--load session --cohort cold --variant mid-turn --session $BUSY` / `$RC_BUSY` |
+| `session-cold-ended` | 30 | `--load session --cohort cold --variant ended --session $ENDED` / `$RC_ENDED` |
+| `session-warm-idle` | 30 | `--load session --cohort warm --variant idle --sessions $IDLE,$IDLE2` / `$RC_IDLE,$RC_IDLE2` |
+| `session-reconnect-idle` | 20 | `--load session --cohort reconnect --variant idle --session $IDLE` / `$RC_IDLE` |
+| `older-page-warm` | 10–20 | `--load older-page --session $LONG` / `$RC_LONG` |
+| `send-warm`, `send-reconnect` | 20, 10 | `--load send --session $IDLE` (`--cohort reconnect`) / `$RC_IDLE` |
+| `steer-warm` | 15 | `--load steer --session $IDLE` / `$RC_IDLE` |
+| `interrupt-warm` | 20 | `--load interrupt --session $IDLE` / `$RC_IDLE` |
+| `permission-warm` | 20 | `--load permission --session $ASK` / `$RC_ASK` |
+| `question-warm` | 20 | `--load question --session $ASK` / `$RC_ASK` |
+| `spawn-warm` | 10 | `--load spawn --set model=<the RC side's>` / `--load spawn --set environment=$RC_ENV` |
+| `resume-warm` (desk) | 5–10 | `--load resume --sessions $END1,…,$END10` |
+| `wake-reconnect` | 10 | `--load wake --session $BUSY --set hiddenMs=30000` / `$RC_BUSY`; one more with `--set hiddenMs=300000 --reps 1` |
+
+Time per load:
 
 | Load | Reps per app | Per rep | Time, both apps |
 |---|---|---|---|
@@ -210,27 +300,31 @@ Run each load on the desk and then on RC back to back, so both meet the same net
 | spawn → first token | 10 | 30 s, plus the retire | 10 min |
 | resume (desk) | 5–10 | 20 s, plus preparing ended sessions | 5 min |
 | wake, desktop (`hiddenMs` 30000, then 300000 for one rep) | 10 | 35 s | 12 min |
-| watch: a deploy (desk) | the deploy | about 5 min | 5 min |
-| watch: hub stream recycles | passive, beside the rest | — | the window |
+| hub stream recycles | passive: daemon.log over every window | — | — |
 
-That is about 2 h 15 of driving for both apps, plus the calibration. It splits naturally into two windows:
+That is about 2 h 10 of driving for both apps, plus the calibration: the opens and history (app, project, session,
+older page) take about 50 min, the actions and returns (send through wake) about 80. Because n < 20 makes p95 within
+a sample or two of the max, the expensive loads (steer, spawn, resume) carry the `*`.
 
-1. **Opens and history:** app, project, session, older page, about 50 min.
-2. **Actions and returns:** send through wake, about 85 min.
+### After the last window
 
-`machine.mjs` reads each window afterwards. Because n < 20 makes p95 within a sample or two of the max, the expensive
-loads (steer, spawn, resume) carry the `*`.
+1. Join every run and every window's machine file (the command under "The harness" above, with each
+   `--machine $L/machine-*.json`).
+2. Retire the throwaway sessions (Cleanup, below).
+3. Message the owner that the baseline is in and the sessions are retired.
 
-### What needs the owner's hands
+### What needs the owner's hands, done separately
+
+None of these is part of an idle-window pass; each is done with the owner, at a time they choose.
 
 - **Tab wake on the phone.** The desk with `?latency` on, a session busy in another app, the phone locked for 1 and for 5 minutes, then woken. The overlay shows `wake.caught-up`, `resume.gap` and `socket.reconnects`. A 60 fps screen recording, timed from the unlock to the content, gives the visible figure on both apps (Claude's app or mobile Safari for RC). About 10 repetitions per app, 20 min.
 - **A real network change.** Wi-Fi to the phone's hotspot and back, on the phone, and on the MacBook if wanted. On the MacBook the machine's daemon moves with it. The overlay gives `online.caught-up` and `socket.gap`, the recording gives the visible figure, and daemon.log gives the machine's recycle. About 10 per app.
-- **A deploy.** The orchestrator deploys during a `watch` window.
-- **Answering prompts in the terminal**, if a load is set to race the terminal. None is by default.
+- **A deploy.** The orchestrator deploys while a desk `watch` run (`--load watch --session $BUSY --set durationMs=300000`) watches every drop until useful again.
 
 ## Throwaway sessions
 
-All of them run on the MacBook, whose clock is the browser's, in a scratch repository made for the pass:
+The orchestrator makes them before the first window (the RC ones, which need the browser, in it) and retires them after
+the last. All of them run on the MacBook, whose clock is the browser's, in a scratch repository made for the pass:
 
 ```sh
 mkdir -p ~/Developer/scratch/desk-latency && cd ~/Developer/scratch/desk-latency && git init -q && git commit -q --allow-empty -m scratch
@@ -254,13 +348,13 @@ permission mode. Use the same model as the RC side; haiku keeps cost and the mod
 
 **On RC, in the same directory:**
 
-- `claude remote-control --debug-file /tmp/rc-lat/debug.txt` registers the directory as an environment, and claude.ai/code spawns sessions into it. Create each counterpart from the web: the idle one, the busy one, and the asking one in the default mode, chosen in the new-session view (calibrate where it is).
+- `claude remote-control --debug-file /tmp/rc-lat/debug.txt`, left running in the background, registers the directory as an environment, and claude.ai/code spawns sessions into it. Create each counterpart from the web: the idle ones, the busy one, the long one, the asking one in the default mode (chosen in the new-session view: calibrate where it is), and one ended.
 - For a session started in a terminal, use `/remote-control` instead.
 
-**Cleanup:**
+**Cleanup, after the last window:**
 
 - **Desk:** `sminos retire <alias>` for each seat (the spawn load retires its own after each repetition), then `rm -rf ~/Developer/scratch/desk-latency /tmp/desk-lat`.
-- **RC:** archive the sessions in claude.ai/code, stop `claude remote-control` (Ctrl-C), and remove `/tmp/rc-lat`.
+- **RC:** archive the sessions in claude.ai/code, stop `claude remote-control`, and remove `/tmp/rc-lat`.
 - **Tabs:** close the extra tabs `wake` opened (it closes its own).
 
 ## The dry run on the local stand-in

@@ -11,11 +11,15 @@
 //
 // A spec: { selector, within?, text?, textMatch?, attr?: [name, value], minText?, count? } met when at least `count`
 // (default 1) elements match; with `gone: true`, when none does; with `fresh: true`, when one matches that did not when
-// armed; with `changed: true`, when the matches' text differs from what it was when armed. A spec already met when
+// armed (with `freshBy: '<attribute>'`, one whose item did not: the attribute's value on it or its nearest ancestor that
+// has it, so a row the app draws again, its element replaced, is not fresh); with `changed: true`, when the matches'
+// text differs from what it was when armed. A spec already met when
 // armed is marked `already` (its mark means nothing); with `grows: true`, when the first match's scrollHeight is greater
 // than when armed (a list that took rows in above or below). `{ all: [spec, …] }` is met when every one of its specs is,
-// `{ any: [spec, …] }` when one is (each plain, `gone`, or another all/any): content and the controls that make it
-// usable, say. A load that starts with a navigation hands its specs over
+// `{ any: [spec, …] }` when one is (each plain, `gone`, `fresh`, or another all/any): content and the controls that make
+// it usable, say. With `afterVisible: true` (a wake), the watch sleeps until the page is next shown: then it is armed
+// again where the page stands, so nothing that happened while it was hidden, or before, meets it, and a condition that
+// holds as it is shown is met at that moment. A load that starts with a navigation hands its specs over
 // sessionStorage['deskLat.cold'] (JSON array), which the init script arms before the page's own scripts run.
 export function deskLatProbe() {
   if (window.top !== window) return 'frame'; // an init script runs in every frame; the marks are the top page's
@@ -38,20 +42,42 @@ export function deskLatProbe() {
     return els;
   };
   const textSum = (els) => els.map(textOf).join('\u0000');
-  const holds = (s) => (s.all ? s.all.every(holds) : s.any ? s.any.some(holds) : s.gone ? matches(s).length === 0 : matches(s).length >= (s.count || 1));
+  /** What a `fresh` spec tells its matches apart by: the element, or with `freshBy`, its item's id. */
+  const itemOf = (s, el) => (s.freshBy ? (el.closest(`[${s.freshBy}]`)?.getAttribute(s.freshBy) ?? el) : el);
+  // `befores` holds, for each `fresh` spec in a watch's tree, the items it matched when armed, by its path in the tree
+  // ('' the spec itself, '.0.2' the third spec of its first); without them (a query) a `fresh` spec is a plain one.
+  const holds = (s, befores = null, path = '') => {
+    if (s.all) return s.all.every((c, i) => holds(c, befores, `${path}.${i}`));
+    if (s.any) return s.any.some((c, i) => holds(c, befores, `${path}.${i}`));
+    const els = matches(s);
+    if (s.gone) return els.length === 0;
+    const before = befores?.get(path);
+    if (before) return els.some((el) => !before.has(itemOf(s, el)));
+    return els.length >= (s.count || 1);
+  };
   const met = (w) => {
-    if (w.spec.all || w.spec.any) return holds(w.spec);
-    const els = matches(w.spec);
-    if (w.spec.gone) return els.length === 0;
-    if (w.spec.fresh) return els.some((el) => !w.before.has(el));
-    if (w.spec.changed) return textSum(els) !== w.text;
-    if (w.spec.grows) return els.length > 0 && els[0].scrollHeight > w.height;
-    return els.length >= (w.spec.count || 1);
+    if (w.spec.changed) return textSum(matches(w.spec)) !== w.text;
+    if (w.spec.grows) {
+      const els = matches(w.spec);
+      return els.length > 0 && els[0].scrollHeight > w.height;
+    }
+    return holds(w.spec, w.befores);
+  };
+  /** What a watch compares with, taken from the page as it stands: each `fresh` spec's items, the text, the height. */
+  const baseline = (w) => {
+    const walk = (s, path) => {
+      if (s.all || s.any) (s.all ?? s.any).forEach((c, i) => walk(c, `${path}.${i}`));
+      else if (s.fresh) w.befores.set(path, new Set(matches(s).map((el) => itemOf(s, el))));
+    };
+    w.befores = new Map();
+    walk(w.spec, '');
+    if (w.spec.changed) w.text = textSum(matches(w.spec));
+    if (w.spec.grows) w.height = matches(w.spec)[0]?.scrollHeight ?? 0;
   };
   const scan = () => {
     const t = performance.now();
     for (const w of waits.values()) {
-      if (w.seen !== null) continue;
+      if (w.seen !== null || w.asleep) continue;
       let ok = false;
       try {
         ok = met(w);
@@ -92,7 +118,25 @@ export function deskLatProbe() {
       { capture: true, passive: true },
     );
   }
-  document.addEventListener('visibilitychange', (e) => inputs.push({ type: `visibility:${document.visibilityState}`, t: e.timeStamp, key: null, trusted: e.isTrusted, tag: null }), { capture: true });
+  document.addEventListener(
+    'visibilitychange',
+    (e) => {
+      inputs.push({ type: `visibility:${document.visibilityState}`, t: e.timeStamp, key: null, trusted: e.isTrusted, tag: null });
+      if (document.visibilityState !== 'visible') return;
+      // Shown: each watch asleep until now is armed where the page stands, and met at once if it holds.
+      for (const w of waits.values()) {
+        if (!w.asleep) continue;
+        w.asleep = false;
+        try {
+          baseline(w);
+        } catch (error) {
+          w.error = String(error);
+        }
+      }
+      scan();
+    },
+    { capture: true },
+  );
   addEventListener('online', (e) => inputs.push({ type: 'online', t: e.timeStamp, key: null, trusted: e.isTrusted, tag: null }), { capture: true });
   addEventListener('offline', (e) => inputs.push({ type: 'offline', t: e.timeStamp, key: null, trusted: e.isTrusted, tag: null }), { capture: true });
   const api = {
@@ -101,12 +145,11 @@ export function deskLatProbe() {
     now: () => performance.now(),
     arm(spec) {
       const id = ++seq;
-      const w = { id, spec, armed: performance.now(), seen: null, paint: null, already: false, before: new WeakSet(), text: '', height: 0, error: null };
+      const w = { id, spec, armed: performance.now(), seen: null, paint: null, already: false, asleep: spec.afterVisible === true, befores: new Map(), text: '', height: 0, error: null };
       try {
-        if (spec.fresh) for (const el of matches(spec)) w.before.add(el);
-        else if (spec.changed) w.text = textSum(matches(spec));
-        else if (spec.grows) w.height = matches(spec)[0]?.scrollHeight ?? 0;
-        else if (met(w)) {
+        baseline(w);
+        // Met as armed (a fresh, changed or growing spec never is: it compares with this very moment).
+        if (!w.asleep && met(w)) {
           w.already = true;
           w.seen = w.armed;
           w.paint = w.armed;

@@ -5,6 +5,11 @@ import { test } from 'node:test';
 import { cohortOf, join, milestones, readRun, render, summarizeGroup } from '../join.mjs';
 import { parseDaemonLog, parseRcDebug, parseTranscript } from '../machine.mjs';
 import { describe, percentile } from '../lib/stats.mjs';
+import { classifyDesk, DESK } from '../lib/desk-selectors.mjs';
+import { deskSurface } from '../lib/surfaces.mjs';
+
+// build.mjs inlines every lib module into one scope, where the surfaces read the selectors as free names.
+globalThis.DESK = DESK;
 
 test('percentiles by nearest rank, as the instrument takes them', () => {
   const sorted = Array.from({ length: 20 }, (_, i) => i + 1);
@@ -68,23 +73,33 @@ test('a Remote Control debug log and a transcript, by the ids and tokens a repet
   ]);
 });
 
-test('a repetition becomes milestones: its marks, frames, samples, and the machine by subscription and token', () => {
-  const start = Date.parse('2026-10-21T15:00:00.000Z');
-  const rep = {
+/** A permission repetition: the prompt's Enter at `enter`, its card painted `cardMs` after it, the decision `dwellMs` later. */
+function permissionRep(enter, cardMs, dwellMs) {
+  const start = enter + cardMs + dwellMs;
+  return {
     ok: true,
     token: 'lat3abcd',
-    start: { type: 'keydown', wall: start },
-    marks: { 'raise.card': { ms: 1500, wall: start + 1500 }, 'decide.gone': { ms: 80 }, early: { ms: 0, already: true } },
-    net: { sent: 3, done: null },
-    inApp: [
-      { path: 'view.snapshot', ms: 50, at: start + 400, ref: 'subA' },
-      { path: 'view.first-rows', ms: 120, at: start + 470, ref: 'subA' },
-      { path: 'stream.chunk', ms: 9, at: start + 10 },
-    ],
+    start: { type: 'click', wall: start },
+    marks: { 'raise.card': { ms: cardMs, wall: enter + cardMs }, 'decide.gone': { ms: 80, wall: start + 80 }, early: { ms: 0, already: true } },
+    raise: { start: { type: 'keydown', wall: enter } },
   };
+}
+const toolCall = (at) => ({ at, type: 'assistant', tokens: ['lat3abcd'], toolUses: [{ id: 't', name: 'Bash' }], toolResults: [] });
+
+test('a repetition becomes milestones: its marks, frames, samples, and the machine by subscription and token', () => {
+  const enter = Date.parse('2026-10-21T15:00:00.000Z');
+  const rep = permissionRep(enter, 1500, 450);
+  const start = rep.start.wall;
+  rep.net = { sent: 3, done: null };
+  rep.inApp = [
+    { path: 'view.snapshot', ms: 50, at: start + 400, ref: 'subA' },
+    { path: 'view.first-rows', ms: 120, at: start + 470, ref: 'subA' },
+    { path: 'stream.chunk', ms: 9, at: start + 10 },
+  ];
+  rep.marks.actionable = { ms: 40, wall: start - 900, from: 'online' }; // counted from the network back: not a milestone
   const machine = {
     daemon: { opens: [{ sub: 'subA', arrival: start + 300, at: start + 340 }], delivered: [] },
-    transcripts: { s: [{ at: start + 1000, type: 'assistant', tokens: ['lat3abcd'], toolUses: [{ id: 't', name: 'Bash' }], toolResults: [] }] },
+    transcripts: { s: [toolCall(enter + 1000)] },
   };
   const ms = milestones(rep, { load: 'permission' }, [machine]);
   assert.deepEqual(ms, {
@@ -96,9 +111,75 @@ test('a repetition becomes milestones: its marks, frames, samples, and the machi
     'app:subscribed': 350,
     'm:arrival': 300,
     'm:snapshot': 340,
-    'm:tool_use': 1000,
+    'm:tool_use': -950,
     'raise.machine': 500,
   });
+});
+
+test("the raise is the card's paint less the tool call's row, both wall times, however long the decision waited", () => {
+  const enter = Date.parse('2026-10-21T15:00:00.000Z');
+  // The call's row 700 ms after the Enter, its card 500 ms later, the decision 2.5 s after that.
+  const rep = permissionRep(enter, 1200, 2500);
+  const ms = milestones(rep, { load: 'permission' }, [{ transcripts: { s: [toolCall(enter + 700)] } }]);
+  assert.equal(ms['raise.machine'], 500);
+  assert.equal(ms['m:tool_use'], -3000);
+  // The decision's timeline holds no raise mark, whose origins are the Enter and the machine's row.
+  const g = summarizeGroup([ms], 'decide.gone');
+  assert.deepEqual(g.timeline, [['decide.gone', 80]]);
+});
+
+test("daemon.log's delivery lines name no item: counted per window, never a repetition's milestone", () => {
+  const d = parseDaemonLog(LOG, 0, Date.parse('2026-10-22T00:00:00Z'));
+  const start = Date.parse('2026-10-21T14:50:59.900Z'); // 100 ms before the delivered line
+  const runs = [{ target: 'desk', load: 'send', config: {}, reps: [{ ok: true, token: 'lat0abcd', start: { type: 'keydown', wall: start }, marks: { echo: { ms: 4 } } }] }];
+  const machines = [{ machine: 'macbook', daemon: d }];
+  assert.deepEqual(milestones(runs[0].reps[0], runs[0], machines), { echo: 4 });
+  assert.match(render(join(runs, machines), machines, runs), /- deliveries .*: 1 lines, 1 events/);
+});
+
+/** A frame list as the network half keeps it: each desk frame labelled by the classifier, at its time. */
+const deskNet = (frames) => {
+  const events = frames.flatMap(([at, dir, frame]) => {
+    const label = classifyDesk(dir, 'wss://hub/api/projects/p/socket', typeof frame === 'string' ? frame : JSON.stringify(frame));
+    return label ? [{ dir, at, ...label }] : [];
+  });
+  return { first: (since, match) => events.find((e) => e.at >= since && match(e)) ?? null };
+};
+
+test("a send's hops chain by its ids: its ack by nonce, the delivery by the event the ack named, in the rep's session", () => {
+  const session = 's-1';
+  const mac = (nonce) => ({ event: { mac: { nonce } } });
+  const delivery = (writer, seq, s) => ({ t: 'session', message: { kind: 'delivery', session: s, sub: null, n: null, machine: 'm', body: { event: { writer, seq }, session: s, outcome: 'delivered' } } });
+  const chunk = (s) => ({ t: 'session', message: { kind: 'chunk', session: s, sub: 'x', n: 3, machine: 'm', body: { t: 1 } } });
+  const net = deskNet([
+    [10, 'out', { t: 'human', ...mac('A') }], // the repetition's send
+    [12, 'out', { t: 'human', ...mac('B') }], // an outbox resend
+    [15, 'in', { t: 'human-ack', nonce: 'B', offset: 7, writer: 'web/o', seq: 2 }],
+    [20, 'in', { t: 'human-ack', nonce: 'A', offset: 8, writer: 'web/o', seq: 3 }],
+    [25, 'in', delivery('web/o', 2, session)],
+    [26, 'in', chunk('s-2')],
+    [30, 'in', delivery('web/o', 3, session)],
+    [35, 'in', chunk(session)],
+  ]);
+  const hops = deskSurface({ url: 'http://x', project: 'p' }).hops(net, 0, 'send', session);
+  assert.deepEqual(hops.times, { sent: 10, ack: 20, delivery: 30, firstChunk: 35 });
+  assert.deepEqual(hops.ids, { nonce: 'A', writer: 'web/o', seq: 3, session });
+});
+
+test("a frame over the bound is labelled once its parts are joined, at the last part's time, and the open's snapshot matched by its sub", () => {
+  const snapshot = JSON.stringify({ t: 'session', message: { kind: 'snapshot', session: 's-1', sub: 'sub-1', n: 0, machine: 'm', body: { rows: ['x'.repeat(90)] } } });
+  const third = Math.ceil(snapshot.length / 3);
+  const part = (index) => JSON.stringify({ t: 'part', id: 'p-1', index, count: 3, data: snapshot.slice(index * third, (index + 1) * third) });
+  const net = deskNet([
+    [10, 'out', { t: 'subscribe', machine: 'm', session: 's-2', agentId: null, sub: 'sub-2' }],
+    [11, 'out', { t: 'subscribe', machine: 'm', session: 's-1', agentId: null, sub: 'sub-1' }],
+    [20, 'in', part(2)], // the parts come in any order
+    [21, 'in', part(0)],
+    [27, 'in', part(1)],
+  ]);
+  const hops = deskSurface({ url: 'http://x', project: 'p' }).hops(net, 0, 'open', 's-1');
+  assert.deepEqual(hops.times, { subscribe: 11, snapshot: 27 });
+  assert.deepEqual(hops.ids, { sub: 'sub-1', session: 's-1' });
 });
 
 test("a group's timeline in median order, and its costliest hop up to the end mark", () => {
@@ -117,4 +198,10 @@ test('runs join per cohort and target, and render with both apps side by side', 
   assert.match(md, /## cold/);
   assert.match(md, /\| session \| useful \| 3 \| 1200 \| 3000\* \| 3 \| 500 \| 600\* \| 700 \| 2400 \|/);
   assert.match(md, /### cold session: Δp95 2400, Δp50 700/);
+});
+
+test("a load's partial runs (a pass stopped and resumed) pool into one group", () => {
+  const run = (ms) => ({ target: 'desk', load: 'session', variant: 'idle', config: { cohort: 'cold' }, reps: ms.map((v) => ({ ok: true, start: { wall: 0 }, marks: { useful: { ms: v } } })) });
+  const groups = join([run([100, 200]), run([300]), { ...run([900]), variant: 'ended' }], []);
+  assert.deepEqual(groups.map((g) => [g.variant, g.n, g.stats.useful.p50]), [['idle', 3, 200], ['ended', 1, 900]]);
 });

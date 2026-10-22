@@ -1,6 +1,6 @@
 // What one project's connection times for `latency/latency.ts` against the DX3 double: the project from its start until
-// its backlog is caught up, the socket from a drop until caught up again, the tab shown again until caught up after the
-// reconnect that followed, and an RPC until its result.
+// its backlog is caught up and verified, the socket from a drop until caught up again, the tab shown again until caught
+// up after the reconnect that followed, and an RPC until its result.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { importOrgKey } from 'desk-hub/protocol';
 import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
@@ -8,6 +8,19 @@ import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { latency, type LatencyPath } from '../latency/latency';
 import { memoryLogRecord } from '../log/record';
 import { ProjectConnection } from './connection';
+
+// The log's verification, held back while `gate.held` is unresolved: a backlog caught up but not yet verified.
+const gate = vi.hoisted(() => ({ held: Promise.resolve() }));
+vi.mock('../log/verify', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../log/verify')>();
+  return {
+    ...real,
+    verifyLogEvent: async (...args: Parameters<typeof real.verifyLogEvent>) => {
+      await gate.held;
+      return real.verifyLogEvent(...args);
+    },
+  };
+});
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const until = async (check: () => boolean, ms = 5000) => {
@@ -27,6 +40,7 @@ beforeEach(async () => {
 afterEach(async () => {
   connection?.stop();
   connection = null;
+  gate.held = Promise.resolve();
   vi.unstubAllGlobals();
   await hub.close();
 });
@@ -49,6 +63,22 @@ it('times the project until caught up once, then the socket from a drop until ca
   await until(() => count('socket.gap') === before.gap + 1);
   expect(c.live.getState().caughtUp).toBe(true);
   expect(count('project.caught-up')).toBe(before.open + 1); // the project's open is timed once
+});
+
+it('times the catch-up only once the backlog it brought is verified, the only entries a view draws', async () => {
+  await hub.append(PROJECT, { writer: `mini/${S1}`, kind: 'message', from: 'maws-45', to: 'host', text: 'in the backlog', src: 'backlog' });
+  let release!: () => void;
+  gate.held = new Promise((resolve) => (release = resolve));
+  const before = count('project.caught-up');
+  const c = await connect();
+  await until(() => c.live.getState().caughtUp);
+  await new Promise((r) => setTimeout(r, 100));
+  expect(c.log.store.getState().entries.map((e) => e.verdict)).toEqual(['pending']);
+  expect(count('project.caught-up')).toBe(before); // caught up, not yet drawable
+
+  release();
+  await until(() => count('project.caught-up') === before + 1);
+  expect(c.log.drawable()).toHaveLength(1);
 });
 
 it('times the tab shown again until caught up after the reconnect that followed, and not a return that needed none', async () => {

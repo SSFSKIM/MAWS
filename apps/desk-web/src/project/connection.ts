@@ -4,8 +4,8 @@
 // record is read, so its first resume is after the last offset the record holds. What the web issues — a `human`, an
 // RPC — is sealed here with the org key (DX1, DX6) and never leaves unsealed. A session's message or question arriving
 // live is timed from its `ts` until it is verified and drawn (`latency/latency.ts`), and so are an RPC until its
-// result, the project from its start until its backlog is caught up, and the socket from a drop, from the tab shown
-// again, or from the browser back online, until it is caught up after the reconnect.
+// result, the project from its start until its backlog is caught up and verified, and the socket from a drop, from the
+// tab shown again, or from the browser back online, until it is caught up and verified after the reconnect.
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   inputSha256,
@@ -85,6 +85,12 @@ export class ProjectConnection {
   private droppedAt: number | null = null;
   /** The tab shown again or the browser back online (`latency.ts`): when, and whether a reconnect after it was welcomed. */
   private returned: { kind: 'wake' | 'online'; at: number; welcomed: boolean } | null = null;
+  /**
+   * The offset the latest catch-up reached, while its backlog awaits verification: the catch-up's samples are drawn once
+   * no entry up to it is pending (a view draws only verified entries). A newer welcome, a drop or a stop clears it, so a
+   * catch-up of a superseded connection is never drawn; its starts stay for the next one.
+   */
+  private caughtUpTo: number | null = null;
 
   constructor(
     readonly project: string,
@@ -99,6 +105,7 @@ export class ProjectConnection {
       handlers: {
         held: () => this.log.held(),
         welcome: (frame) => {
+          this.caughtUpTo = null;
           const back = this.returned;
           if (back) this.returned = performance.now() - back.at <= RETURN_WINDOW_MS ? { ...back, welcomed: true } : null;
           const replaced = this.log.welcome(frame.head);
@@ -122,7 +129,8 @@ export class ProjectConnection {
         },
         caughtUp: () => {
           this.live.setState({ caughtUp: true });
-          this.caughtUp();
+          this.caughtUpTo = this.log.held();
+          this.verifiedUp(this.log.store.getState());
         },
         session: (message) => this.session(message),
         machines: (machines) => this.live.setState({ machines: Object.fromEntries(machines.map(({ machine, ...presence }) => [machine, presence])) }),
@@ -141,6 +149,7 @@ export class ProjectConnection {
         refused: (entry) => this.record({ kind: 'refused', entry }),
         rejected: (entry) => this.record({ kind: 'rejected', entry }),
         status: (status) => {
+          if (status === 'connecting') this.caughtUpTo = null;
           if (status === 'connecting' && this.live.getState().connected) this.droppedAt ??= performance.now();
           this.live.setState(status === 'connecting' ? { status, connected: false } : { status });
         },
@@ -150,7 +159,10 @@ export class ProjectConnection {
       latency.rpcState(frame.nonce, frame.state);
       this.conversation.rpcState(frame.nonce, frame.state, frame.outcome);
     });
-    this.log.store.subscribe((state) => this.told(state));
+    this.log.store.subscribe((state) => {
+      this.told(state);
+      this.verifiedUp(state);
+    });
   }
 
   /** The session events awaited that the log now has a verdict on: each verified one is drawn at the next frame. */
@@ -182,6 +194,7 @@ export class ProjectConnection {
 
   stop(): void {
     this.stopped = true;
+    this.caughtUpTo = null;
     this.client.stop();
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.shown);
@@ -199,8 +212,14 @@ export class ProjectConnection {
     this.returned = { kind: 'online', at: performance.now(), welcomed: false };
   };
 
-  /** The hub's backlog is in: the project's first catch-up, a dropped socket's, and a return's, each drawn at the next frame. */
-  private caughtUp(): void {
+  /**
+   * The hub's backlog is in and every entry up to it verified: the project's first catch-up, a dropped socket's, and a
+   * return's, each drawn at the next frame.
+   */
+  private verifiedUp(state: ProjectLogState): void {
+    const upTo = this.caughtUpTo;
+    if (upTo === null || state.entries.some((e) => e.offset <= upTo && e.verdict === 'pending')) return;
+    this.caughtUpTo = null;
     if (this.startedAt !== null) latency.drawn('project.caught-up', this.startedAt, false, this.project);
     if (this.droppedAt !== null) latency.drawn('socket.gap', this.droppedAt, false, this.project);
     if (this.returned?.welcomed) latency.drawn(this.returned.kind === 'wake' ? 'wake.caught-up' : 'online.caught-up', this.returned.at, false, this.project);

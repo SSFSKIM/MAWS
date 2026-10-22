@@ -8,9 +8,10 @@
 //              navigation's start; the timeline of its gates comes along (resources, the desk's app.* and view.* marks)
 //   warm       an in-app move to it, the app already loaded: a click from where the owner would come from
 //   reconnect  in place: the network taken away until the app shows it lost the hub (or `offlineMs` passes), then given
-//              back; timed from the browser's `online` until useful again
+//              back; timed from the browser's `online` until useful again, which a return is only once its content is
+//              fresh too (`untilFresh`)
 // An action (send, steer, interrupt, permission, question, spawn, resume) runs warm; `cohort: 'reconnect'` makes it
-// act at the moment the network comes back instead.
+// act the moment the network is back and its control usable again.
 const S_TIMEOUT = 60_000;
 
 export function makeLoads(S) {
@@ -65,12 +66,12 @@ export function makeLoads(S) {
     await ctx.probe();
   }
 
-  /** The desk's raw samples and the frames' hops since `startWall`, joined to a result. */
-  async function extras(ctx, result, kind, startWall) {
+  /** The desk's raw samples and the frames' hops since `startWall` (in `session`, where frames name one), joined to a result. */
+  async function extras(ctx, result, kind, startWall, session = ctx.config.session) {
     if (startWall == null) return result;
     const samples = await ctx.deskSamples(startWall - 1);
     if (samples) result.inApp = samples;
-    const hops = S.hops(ctx.net, startWall - 5, kind);
+    const hops = S.hops(ctx.net, startWall - 5, kind, session);
     if (hops) {
       result.net = msFrom(hops.times, startWall);
       result.ids = hops.ids;
@@ -79,7 +80,7 @@ export function makeLoads(S) {
   }
 
   /** A cold open: the navigation to `url`, the specs armed by the init script before any of the page's own code runs. */
-  async function coldOpen(ctx, url, specs, need) {
+  async function coldOpen(ctx, url, specs, need, session) {
     const { page, config } = ctx;
     const names = Object.keys(specs);
     // The specs go over the origin's sessionStorage: be on that origin first.
@@ -110,7 +111,7 @@ export function makeLoads(S) {
         result.inApp = samples;
         result.timeline = coldTimeline(samples, clock.origin);
       }
-      const hops = S.hops(ctx.net, clock.origin - 5, 'open');
+      const hops = S.hops(ctx.net, clock.origin - 5, 'open', session);
       if (hops) {
         result.net = msFrom(hops.times, clock.origin);
         result.ids = hops.ids;
@@ -127,49 +128,91 @@ export function makeLoads(S) {
   }
 
   /** A warm open: an in-app click (no pointer move, no hover prefetch) on `target`, until the specs paint. */
-  async function warmOpen(ctx, target, specs, need) {
+  async function warmOpen(ctx, target, specs, need, session) {
     const armed = await ctx.arm(specs);
     const clock = await ctx.clock();
     const start = await click(ctx, target);
     const marks = await ctx.wait(armed, { need });
-    return extras(ctx, ctx.result(start, marks, clock, need), 'open', clock.origin + start.t);
+    return extras(ctx, ctx.result(start, marks, clock, need), 'open', clock.origin + start.t, session);
   }
 
-  /** A reconnect: the drop shown, then the network back, until the specs paint again. */
-  async function reconnectOpen(ctx, view, need) {
+  /**
+   * A reconnect: the drop shown, then the network back, until the specs paint again and the view is fresh. Its `useful`
+   * is the later of the DOM's (kept as `controls`) and the proof of fresh content (`fresh`).
+   */
+  async function reconnectOpen(ctx, view, need, session) {
     const drop = await dropAndReturn(ctx, view.down);
     const specs = { useful: view.useful, content: view.content, ...(ctx.config.busy && { current: S.changed }) };
     const armed = await ctx.arm(specs);
     const clock = await ctx.clock();
     const start = await drop.back();
-    const marks = await ctx.wait(armed, { need });
-    const result = ctx.result(start, marks, clock, need);
+    const startWall = clock.origin + start.t;
+    const { marks, freshWall } = await untilFresh(ctx, view, armed, need, startWall);
+    const result = ctx.result(start, freshEnd(marks, 'useful', 'controls', freshWall, clock), clock, need);
     result.dropShown = drop.shown;
     result.socketsClosed = drop.closed;
     if (!drop.shown) ctx.note('the app did not show the drop before the network came back');
-    return extras(ctx, result, 'open', clock.origin + start.t);
+    return extras(ctx, result, 'open', startWall, session);
   }
 
-  /** Runs one open in the configured cohort. `view` is the surface's { content, useful, down, extra }. */
-  async function open(ctx, view, url, warm, i) {
+  /**
+   * Waits for `armed` as `ctx.wait` does, and for the surface's proof that the view's content is fresh after
+   * `startWall` (`S.freshAt`: the desk's own sample of the return, claude.ai/code's frames). A drop leaves the old rows
+   * and tiles in place and a socket shows open before its backlog is in, so the DOM alone is met on stale content.
+   */
+  async function untilFresh(ctx, view, armed, need, startWall) {
+    let freshWall = null;
+    const marks = await ctx.wait(armed, { need, done: async () => (freshWall ??= await S.freshAt(ctx, view.fresh, startWall)) !== null });
+    return { marks, freshWall };
+  }
+
+  /**
+   * `marks` with its mark `name` made to need fresh content too: the DOM's mark kept as `dom`, the proof of fresh
+   * content at `freshWall` (wall ms) as `fresh`, and `name` the later of the two (missing while either is).
+   */
+  function freshEnd(marks, name, dom, freshWall, clock) {
+    const shown = marks[name];
+    const fresh = { armed: shown.armed, seen: null, paint: null, already: false, error: null };
+    if (freshWall !== null) fresh.seen = fresh.paint = freshWall - clock.origin;
+    const end = shown.paint == null || fresh.paint == null ? { ...shown, seen: null, paint: null } : fresh.paint > shown.paint ? fresh : shown;
+    return { ...marks, [dom]: shown, fresh, [name]: end };
+  }
+
+  /** Runs one open in the configured cohort. `view` is the surface's { content, useful, down, extra, fresh }. */
+  async function open(ctx, view, url, warm, i, session = null) {
     const cohort = ctx.config.cohort ?? 'cold';
     const need = ctx.config.need ?? ['useful'];
     const specs = { content: view.content, useful: view.useful, ...view.extra };
-    if (cohort === 'cold') return { cohort, ...(await coldOpen(ctx, url, specs, need)) };
+    if (cohort === 'cold') return { cohort, ...(await coldOpen(ctx, url, specs, need, session)) };
     if (cohort === 'warm') {
       await warm.before(ctx, i);
-      return { cohort, ...(await warmOpen(ctx, warm.target(i), specs, need)) };
+      return { cohort, ...(await warmOpen(ctx, warm.target(i), specs, need, session)) };
     }
-    if (cohort === 'reconnect') return { cohort, ...(await reconnectOpen(ctx, view, need)) };
+    if (cohort === 'reconnect') return { cohort, ...(await reconnectOpen(ctx, view, need, session)) };
     throw new Error(`no cohort "${cohort}" (cold, warm or reconnect)`);
   }
 
-  /** Before a reconnect-cohort action: the drop, so the action is taken the moment the network is back. */
-  async function maybeDrop(ctx, down) {
+  /**
+   * Before a reconnect-cohort action: the drop, then the network back (`online`, its start), and a wait until the
+   * action's control is usable again (`ready`: a disabled button takes no click), so the action is taken the moment it
+   * can be. `readyMs` is from the network back until then (0 when the control stayed usable; null with no control to
+   * wait for, or one that never came back).
+   */
+  async function maybeDrop(ctx, down, ready) {
     if (ctx.config.cohort !== 'reconnect') return null;
     const drop = await dropAndReturn(ctx, down);
-    await ctx.page.context().setOffline(false);
-    return drop.shown;
+    const armed = ready ? await ctx.arm({ ready }) : null;
+    const clock = await ctx.clock();
+    const online = await drop.back();
+    const at = armed ? (await ctx.wait(armed, { timeoutMs: ctx.config.timeoutMs ?? S_TIMEOUT })).ready?.paint : null;
+    return { shown: drop.shown, online: round(clock.origin + online.t), readyMs: at == null ? null : round(Math.max(0, at - online.t)) };
+  }
+
+  /** An action's result with its reconnect: whether the drop showed, the network back, and `actionable` (ms after it). */
+  function withDrop(result, drop) {
+    if (!drop) return result;
+    const actionable = drop.readyMs === null ? {} : { actionable: { ms: drop.readyMs, wall: round(drop.online + drop.readyMs), from: 'online' } };
+    return { ...result, dropShown: drop.shown, online: drop.online, marks: { ...result.marks, ...actionable } };
   }
 
   const sessionOf = (ctx) => {
@@ -249,7 +292,7 @@ export function makeLoads(S) {
         // Setup left the last of them open: each switch is to another, already opened once.
         const target = cohort === 'warm' ? sessions[i % sessions.length] : sessionOf(ctx);
         const view = S.session(target, ctx.config.variant, cohort);
-        return open(ctx, view, S.urls.session(target), { before: async () => {}, target: () => S.toSession(target) }, i).then((r) => ({ session: target, ...r }));
+        return open(ctx, view, S.urls.session(target), { before: async () => {}, target: () => S.toSession(target) }, i, target).then((r) => ({ session: target, ...r }));
       },
     },
 
@@ -294,15 +337,15 @@ export function makeLoads(S) {
         await idleFirst(ctx, session);
         const tk = token(i);
         await prompt(ctx, (ctx.config.prompt ?? 'Reply with exactly {token} and nothing else.').replaceAll('{token}', tk));
-        const dropShown = await maybeDrop(ctx, S.session(session).down);
-        const specs = { echo: S.echo(tk), row: S.row(tk), firstToken: S.firstToken, reply: S.reply(tk), ...(S.delivered && { delivered: S.delivered(tk) }) };
+        const drop = await maybeDrop(ctx, S.session(session).down, S.sendReady);
+        const specs = { echo: S.echo(tk), row: S.row(tk), firstToken: S.firstToken, ...(S.firstActivity && { firstActivity: S.firstActivity }), reply: S.reply(tk), ...(S.delivered && { delivered: S.delivered(tk) }) };
         const armed = await ctx.arm(specs);
         const clock = await ctx.clock();
         const start = await pressEnter(ctx);
         const need = ctx.config.need ?? ['echo', 'reply'];
         const marks = await ctx.wait(armed, { need });
         const result = await extras(ctx, ctx.result(start, marks, clock, need), 'send', clock.origin + start.t);
-        return { token: tk, ...(dropShown !== null && { dropShown }), ...result };
+        return { token: tk, ...withDrop(result, drop) };
       },
     },
 
@@ -320,13 +363,15 @@ export function makeLoads(S) {
         await prompt(ctx, `steer ${tk}: when the sleep ends, reply with exactly ${tk}-steered instead.`);
         // Both apps echo a steer at once; `steered` is it delivered: on the desk its row in the transcript, which the
         // session's bridge appended (a machine round trip), on claude.ai/code its row read (calibrate), or else the frame
-        // of the steer consumed (`net.consumed`).
+        // of the steer consumed (`net.consumed`). The wait ends at the delivery, whichever shows it first, not the echo.
         const armed = await ctx.arm({ echo: S.echo(`steer ${tk}`), steered: S.steered(`steer ${tk}`) });
         const clock = await ctx.clock();
         const start = await pressEnter(ctx);
-        const need = ctx.config.need ?? ['echo'];
-        const marks = await ctx.wait(armed, { need });
-        const result = await extras(ctx, ctx.result(start, marks, clock, need), 'steer', clock.origin + start.t);
+        const startWall = clock.origin + start.t;
+        const need = ctx.config.need ?? (S.name === 'desk' ? ['echo', 'steered'] : ['echo']);
+        const delivered = (marks) => marks.steered?.paint != null || S.hops(ctx.net, startWall - 5, 'steer')?.times.consumed != null;
+        const marks = await ctx.wait(armed, { need, done: delivered });
+        const result = await extras(ctx, ctx.result(start, marks, clock, need), 'steer', startWall);
         await idleFirst(ctx, session);
         return { token: tk, ...result };
       },
@@ -343,14 +388,14 @@ export function makeLoads(S) {
         await idleFirst(ctx, session);
         const tk = token(i);
         await longTurn(ctx, tk);
-        const dropShown = await maybeDrop(ctx, S.session(session).down);
+        const drop = await maybeDrop(ctx, S.session(session).down, S.stopReady);
         const armed = await ctx.arm({ stopped: S.stopped, idle: S.idle(session) });
         const clock = await ctx.clock();
         const start = await click(ctx, S.stop);
         const need = ctx.config.need ?? ['stopped'];
         const marks = await ctx.wait(armed, { need });
         const result = await extras(ctx, ctx.result(start, marks, clock, need), 'rpc', clock.origin + start.t);
-        return { token: tk, ...(dropShown !== null && { dropShown }), ...result };
+        return { token: tk, ...withDrop(result, drop) };
       },
     },
 
@@ -431,7 +476,9 @@ export function makeLoads(S) {
         const session = sessionOf(ctx);
         const view = S.session(session, ctx.config.variant);
         // Hidden behind another tab of the same window, as the owner leaves it; the session goes on working meanwhile.
-        const armed = await ctx.arm({ current: S.changed, useful: view.useful });
+        // Both marks wait for the page shown again and take the page as it is then: a change while hidden is not
+        // `current`, and controls usable as it is shown are `useful` at that moment.
+        const armed = await ctx.arm({ current: { ...S.changed, afterVisible: true }, useful: { ...view.useful, afterVisible: true } });
         const clock = await ctx.clock();
         let other;
         try {
@@ -450,9 +497,14 @@ export function makeLoads(S) {
         } catch {
           throw new Error('the page never went hidden and back (a headless browser keeps every tab visible): wake runs in a headed browser, or by hand');
         }
-        const need = ctx.config.need ?? ['current'];
+        const need = ctx.config.need ?? ['current', 'useful'];
         const marks = await ctx.wait(armed, { need, timeoutMs: ctx.config.timeoutMs ?? 30_000 });
-        return extras(ctx, ctx.result(start, marks, clock, need), 'open', clock.origin + start.t);
+        // A wake that needed a reconnect is current only once caught up after it (the old rows stay in place until
+        // then): where the app says so, `current` is the later of the DOM's change (kept as `changed`) and that.
+        const startWall = clock.origin + start.t;
+        const freshWall = await S.freshAt(ctx, S.wakeFresh, startWall);
+        const final = freshWall === null ? marks : freshEnd(marks, 'current', 'changed', freshWall, clock);
+        return extras(ctx, ctx.result(start, final, clock, need), 'open', startWall);
       },
     },
 
@@ -552,6 +604,20 @@ export function makeLoads(S) {
     const session = sessionOf(ctx);
     await navigate(ctx, S.urls.session(session));
     if (!(await ctx.until(S.session(session).content, 60_000))) throw new Error(`session ${session} drew nothing`);
+    if (!(await fullTranscript(ctx, 10_000))) throw new Error('the session view offers no Transcript view');
+  }
+
+  /**
+   * The desk's session view switched to its whole transcript, where an answer streams visibly as it does on
+   * claude.ai/code (its Report view may fold it unseen); false when the view offers none within `timeoutMs`. The
+   * choice holds for the session for the page's life.
+   */
+  async function fullTranscript(ctx, timeoutMs) {
+    if (!S.fullView) return true;
+    if (!(await ctx.until(S.fullView, timeoutMs))) return false;
+    await ctx.domClick(S.fullView);
+    if (!(await ctx.until(S.fullViewShown, 5_000))) throw new Error('the session view did not switch to its transcript');
+    return true;
   }
 
   /** Starts a turn that keeps working for `sleepS` seconds (a Bash sleep), and waits until the app shows it running. */
@@ -580,14 +646,16 @@ export function makeLoads(S) {
     let opened = null;
     let session = null;
     if (first.rpc?.paint != null) {
-      // "Open it", as the owner would the moment it shows: the session's first row and its reply.
-      const view = await ctx.arm({ row: { selector: DESK.row, fresh: true }, firstToken: S.firstToken, reply: S.reply(tk) });
+      // "Open it", as the owner would the moment it shows, the view switched to its transcript as soon as it offers it
+      // (a session just spawned serves its transcript a moment later): the session's first row and its reply.
+      const view = await ctx.arm({ row: { selector: DESK.row, fresh: true }, firstActivity: S.firstActivity, firstToken: S.firstToken, reply: S.reply(tk) });
       await ctx.domClick('[role="dialog"] button', 'Open it');
+      if (!(await fullTranscript(ctx, config.timeoutMs ?? 90_000))) ctx.note('the spawned session view never offered its Transcript view');
       opened = await ctx.wait(view, { need: ctx.config.need ?? ['row', 'reply'], timeoutMs: config.timeoutMs ?? 90_000 });
       session = (await ctx.query({ selector: '[data-testid="session-view"]' })).attrs?.['data-session'] ?? null;
     }
     const result = ctx.result(start, { ...first, ...(opened ?? {}) }, clock, ctx.config.need ?? ['rpc', 'row', 'reply']);
-    const out = await extras(ctx, result, 'rpc', clock.origin + start.t);
+    const out = await extras(ctx, result, 'rpc', clock.origin + start.t, session);
     if (config.retire !== false && session) await retireOpen(ctx);
     if (first.rpc?.paint == null) await ctx.page.keyboard.press('Escape').catch(() => null);
     return { token: tk, session, ...out };
@@ -624,7 +692,7 @@ export function makeLoads(S) {
 
 /** The raise's frames, from the send that asked for it: when the request reached the page. */
 function raiseHops(ctx, start) {
-  const hops = ctx.S?.hops?.(ctx.net, start.wall - 5, 'raise') ?? null;
+  const hops = ctx.S?.hops?.(ctx.net, start.wall - 5, 'raise', ctx.config.session) ?? null;
   return hops ? { start, net: msFrom(hops.times, start.wall), ids: hops.ids } : { start };
 }
 

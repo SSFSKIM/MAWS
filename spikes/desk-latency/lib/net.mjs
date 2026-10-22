@@ -23,7 +23,8 @@ export async function startNet(page, classify, options = {}) {
     }
     events.push(event);
   };
-  const lines = (direction, url, text, at, clock) => {
+  // `rid`: an HTTP request's id, the same on its `req` and its `done`, so a load can tell its own request's end.
+  const lines = (direction, url, text, at, clock, rid) => {
     let labels = null;
     try {
       labels = classify(direction, url, String(text ?? ''));
@@ -31,7 +32,7 @@ export async function startNet(page, classify, options = {}) {
       labels = [{ error: String(error) }];
     }
     if (!labels) return;
-    for (const label of Array.isArray(labels) ? labels : [labels]) push({ dir: direction, url: shortUrl(url), [clock]: at, ...label });
+    for (const label of Array.isArray(labels) ? labels : [labels]) push({ dir: direction, url: shortUrl(url), [clock]: at, ...(rid !== undefined && { rid }), ...label });
   };
   try {
     cdp = await page.context().newCDPSession(page);
@@ -43,7 +44,7 @@ export async function startNet(page, classify, options = {}) {
     cdp.on('Network.requestWillBeSent', (e) => {
       anchor(e);
       requests.set(e.requestId, { url: e.request.url, method: e.request.method, sent: e.timestamp * 1000 });
-      lines('req', e.request.url, `${e.request.method} ${e.request.postData ?? ''}`, e.timestamp * 1000, 'mono');
+      lines('req', e.request.url, `${e.request.method} ${e.request.postData ?? ''}`, e.timestamp * 1000, 'mono', e.requestId);
     });
     cdp.on('Network.responseReceived', (e) => {
       const r = requests.get(e.requestId);
@@ -53,13 +54,12 @@ export async function startNet(page, classify, options = {}) {
       const r = requests.get(e.requestId);
       if (!r) return;
       r.finished = e.timestamp * 1000;
-      lines('done', r.url, `${r.method}`, e.timestamp * 1000, 'mono');
+      lines('done', r.url, `${r.method}`, e.timestamp * 1000, 'mono', e.requestId);
     });
     cdp.on('Network.webSocketWillSendHandshakeRequest', anchor);
-    cdp.on('Network.webSocketCreated', (e) => {
-      sockets.set(e.requestId, e.url);
-      push({ dir: 'ws-open', url: shortUrl(e.url), mono: null, socket: e.requestId });
-    });
+    // A socket's url by its id from its creation, which carries no time; it is open at its handshake's response.
+    cdp.on('Network.webSocketCreated', (e) => sockets.set(e.requestId, e.url));
+    cdp.on('Network.webSocketHandshakeResponseReceived', (e) => push({ dir: 'ws-open', url: shortUrl(sockets.get(e.requestId) ?? ''), mono: e.timestamp * 1000, socket: e.requestId }));
     cdp.on('Network.webSocketClosed', (e) => push({ dir: 'ws-close', url: shortUrl(sockets.get(e.requestId) ?? ''), mono: e.timestamp * 1000, socket: e.requestId }));
     cdp.on('Network.webSocketFrameReceived', (e) => lines('in', sockets.get(e.requestId) ?? '', e.response?.payloadData, e.timestamp * 1000, 'mono'));
     cdp.on('Network.webSocketFrameSent', (e) => lines('out', sockets.get(e.requestId) ?? '', e.response?.payloadData, e.timestamp * 1000, 'mono'));
