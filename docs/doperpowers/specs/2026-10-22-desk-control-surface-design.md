@@ -69,10 +69,10 @@ allows today.
   condition tracks task ids, the mode is published from the bridge's own decisions and
   the frequent classic hooks, the catalog re-lists at every heartbeat, the readback rule
   applies to built-in `run` rows alone.
-- [ ] The owner's calls on §15's forks (each has a recommendation; M0–M5 need none of
-  them to start, M6 needs the first).
-- [ ] sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries `updatedInput`) lands;
-  M3 treats it as its floor.
+- [x] (2026-10-22) The owner's calls on §15's forks: F1, F5 and F6 as recommended, F2
+  and F3 not in this run, F4 and F7 the recommendations (Decision Log, entry 4).
+- [x] (2026-10-22) sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries
+  `updatedInput`) landed (doperpowers #338, `2920e494`); M3 treats it as its floor.
 - [ ] M0 — foundation: capabilities, the `read` relay, the op-outcome pattern, the
   `command` op's dispatch with five measured rows (doperpowers; MAWS).
 - [ ] M1 — the command spine: the route table whole, the typeahead.
@@ -81,9 +81,10 @@ allows today.
 - [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
   "allow and switch", the mode chip.
 - [ ] M4 — agents, fork, following an id change (three reviewed increments).
-- [ ] M5 — composer parity: attachments, `@` files, history (`!` shell on the owner's
-  yes).
-- [ ] M6 — the attach key driver for `--bg` seats (a stub until the owner answers).
+- [ ] M5 — composer parity: attachments, `@` files, history (`!` shell not in this run:
+  F3).
+- [-] M6 — the attach key driver for `--bg` seats: not in this run (F2, the owner,
+  2026-10-22).
 - [ ] The latency table on #52 against the baseline, and the acceptance walk on both
   Macs.
 
@@ -385,7 +386,7 @@ carry `confirm: true`, which makes the web confirm before sending. The classes:
 
 | class | meaning | examples (2.1.307) |
 | --- | --- | --- |
-| `run` | an argument form measured to print one line and open nothing | `rename <name>`, `color <c>`, `reload-plugins`, `reload-skills`, `mcp enable\|disable\|reconnect <server>`, `cd <path>` (limited to the project's known checkouts), `goal clear`, `exit` (with `confirm`, pending fork F6) |
+| `run` | an argument form measured to print one line and open nothing | `rename <name>`, `color <c>`, `reload-plugins`, `reload-skills`, `mcp enable\|disable\|reconnect <server>`, `cd <path>` (limited to the project's known checkouts), `goal clear`, `exit` (with `confirm`, F6) |
 | `run-prompt` | a command that starts a turn, and the turn is its outcome: the built-in prompt-type commands, `goal <condition>` (S4), `plan <description>`, and every `source` other than `builtin` — skills, plugin and MCP commands, named exactly as listed (`<server>:<prompt> (MCP)`), which resolve at turn start with no panel (S5) | `init`, `security-review`, `insights`, `team-onboarding`, every skill |
 | `routed` | never run: a dedicated op, read or RPC does it, named in `to` | `model`, `effort` → `model`; `compact` → `compact`; `btw` → `btw`; `context`, `usage` → `read usage`; `plan` (bare) → the mode control, which runs `command plan`; `fork` → the `fork` RPC |
 | `follow` | changes the session id (H-sid); refused until M4, then run with following | `clear`, `branch [name]`, `resume <id>`, `background` (with `confirm` and its own condition, §8) |
@@ -1057,6 +1058,9 @@ document's own:
 ### 15. The owner's calls: open forks, each with a recommendation
 
 None of M0–M5 waits on these; each is the edge a milestone stops at until answered.
+**Ruled by the owner, 2026-10-22** (Decision Log, entry 4): F1, F5 and F6 as
+recommended; F2 and F3 not in this run; F4 and F7 the recommendations. The text below
+keeps each fork as it was put.
 
 - **F1 — Controls whose effect outlives the session.** `/model` and `/effort` save a
   default for new sessions; `/autocompact`, `/output-style`, `/config k=v` write
@@ -1255,8 +1259,9 @@ answer.
   (`words.ts` gains `command`'s result and the op's phases). `depth/view/SessionInfo.tsx`:
   the engine's version, base, root, repository, surfaces from `read status`, or *not
   available from this plugin (needs sminos ≥ <M0's>)*. `latency.ts`: `read.status`,
-  `op.queued`, `op.ran`, `op.readback`, and the app-start paths (`app.cold`, `app.warm`,
-  `app.reconnect`, `app.me`, `app.chunk`, `app.state`, `app.key`), each with its label.
+  `op.queued`, `op.ran`, `op.readback`, each with its label; the app-start paths
+  (`app.cold`, `app.warm`, `app.reconnect`, `app.me`, `app.chunk`, `app.state`,
+  `app.key`) are the `desk-latency-baseline` branch's (Decision Log, entry 4).
   `docs/doperpowers/specs/2026-10-15-desk-design.md`: a dated line under DX4, DX5 and
   DX6 pointing here.
 - Tests: hub unit (`session-plane.test.ts`: `read` carried and `op` relayed; the shape
@@ -1541,7 +1546,8 @@ the engine's queue).
 
 ### M6 — The attach key driver for `--bg` seats (stub)
 
-Waits on fork F2. If the owner says yes: a daemon key driver that attaches to a `--bg`
+Not in this run: the owner ruled F2 no (2026-10-22). Kept as the shape a later run
+would take: a daemon key driver that attaches to a `--bg`
 job under a pty, sends a key sequence, detaches, and reads the result back from rows,
 never the screen; the rows it would reach are the inventory's §3.6 (Shift+Tab ×N, Enter
 or `4` on a prompt the hooks never saw, the rewind picker by position, Esc on a panel);
@@ -1722,7 +1728,7 @@ milestone that enables it; `—` means the same as the bare route):
 | `branch` | `follow` | `follow`, optional | — | M4 |
 | `resume` | `panel` (the picker) | `follow`, required (a session id) | — | M4 (args) |
 | `background` | `follow`, confirm, under §8.3's condition | `bad-args` | the confirm names the loss (§8.3) | M4 |
-| `exit` | `run`, confirm | `bad-args` | pending fork F6; the confirm names the shells and monitors it kills | disabled |
+| `exit` | `run`, confirm | `bad-args` | F6: the confirm names the machine, that it closes the terminal session, and the shells and monitors it kills | M1 |
 | `config` | `panel` | `drop` (*saves a default on <machine>; terminal only*, F1) | — | — |
 | `autocompact` | `panel` | `drop` (F1) | — | — |
 | `output-style` | `panel` | `drop` (F1) | — | — |
@@ -2076,6 +2082,35 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   own behavior, measured or read from code; the re-check found them before M0 starts.
   Date/Author: 2026-10-22, the spec session (b4948247), from 2-1-300-9a's re-check of
   §14 and its answers to the design reviewer's three questions.
+
+- Decision: The owner's rulings on §15, and M0's execution start. The owner ruled
+  (relayed by the orchestrator session, 2026-10-22): **F1** — of the controls that
+  outlive the session only `mcp enable|disable` is offered, labelled; the defaults
+  (model, effort, `config`, `autocompact`, `output-style`, `projectSettings`,
+  `userSettings`) stay terminal-only, as the table and §11 already have them. **F5** — a
+  rule suggestion's destinations are `session` and, labelled and only as the engine
+  itself suggests it, `localSettings` (M3, as §7 and §11 have it). **F6** — `/exit` is
+  offered behind a confirm naming the machine, that it closes the terminal session, and
+  the shells and monitors it kills: the `exit` row is enabled in M1, where the
+  typeahead draws a route's `confirm` (M0 enables its five rows alone; `exit` carries
+  `enabled: false`, *comes with M1*, until then). **F2** and **F3** — neither M6 (the
+  attach key driver) nor `!` shell (A5) is in this run. **F4** and **F7** — the
+  recommendations (§11's cut; fork with M4's agents and following). Two execution
+  calls for M0: (1) the app-start latency paths (`app.cold`, `app.warm`,
+  `app.reconnect`, `app.me`, `app.chunk`, `app.state`, `app.key`) are left to the
+  `desk-latency-baseline` branch, which is adding them now with its harness under
+  `spikes/desk-latency/`; M0 adds only its own paths (`read.status`, `op.*`), and
+  whichever of the two lands second merges master in. (2) M0 is built as two tasks in
+  parallel, one per repository, each proving its half against the stand-in the other
+  repository keeps; the route fixture is written first, in doperpowers, and vendored to
+  MAWS before either half consumes it. The refresh pass found one change at the
+  doperpowers base since the spec's pin (`646cb02c` → `a49fb156`): sminos 1.6.3
+  (`bridge-plan-allow`, `bridge-requests.tsx`), which M0 does not consume; MAWS master is
+  the spec's own merge (`6f7f38ae1`).
+  Rationale: the rulings settle every fork the run would have stopped at; the
+  latency split keeps two branches from writing the same marks; the two halves meet
+  only at the wire shapes Interfaces fixes and the one fixture.
+  Date/Author: 2026-10-22, the M0 plan-executor for the orchestrator session (b4948247).
 
 ## Outcomes & Retrospective
 
