@@ -690,6 +690,30 @@
   border-radius: var(--radius-sm);
   padding: 0 var(--space);
 }
+/* a dashboard's dataset being rebound (G2's G-R7): each chart bound to it labelled at its top left, the presence
+   outline naming the agent at the opposite corner; drawn over the page, so no line moves as it comes and goes */
+.ds-doc .doc-provisional-dataset {
+  position: relative;
+}
+.ds-doc .doc-provisional-dataset::before {
+  content: attr(data-provisional-label);
+  position: absolute;
+  top: -1.6em;
+  left: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--bg-raised);
+  background: var(--doc-presence);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space);
+  pointer-events: none;
+}
 
 /* ── version history (M5): the preview's change marks, in each author's colour (--doc-author is an author colour) ── */
 .ds-doc y-del {
