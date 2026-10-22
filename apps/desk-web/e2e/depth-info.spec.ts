@@ -91,9 +91,9 @@ test('session info: where it runs, its model, and context and cost from usage â€
   await expect(info('kind')).toHaveText('Running, bridged');
   const model = (recording.session.findLast((row) => row.type === 'assistant')!.message as { model: string }).model;
   await expect(info('model')).toHaveText(model);
-  // No usage yet (the snapshot's is null): unavailable, said why.
-  await expect(info('context')).toHaveText('unavailable (no bridge)');
-  await expect(info('cost')).toHaveText('unavailable (no bridge)');
+  // Bridged, but no usage has been reported yet (the snapshot has null usage).
+  await expect(info('context')).toHaveText('not reported yet');
+  await expect(info('cost')).toHaveText('not reported yet');
 
   player.sendUsage(FIRST); // after a main turn
   await expect(info('context')).toHaveText('36.8K of 1M (4%)');
