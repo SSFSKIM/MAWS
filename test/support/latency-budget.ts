@@ -7,10 +7,14 @@
 // A job on one of ci-kit's shared Mac runner instances (CI_KIT_SHARED_DESKTOP=1 in its environment; ci-kit's mac-lane
 // concurrency spec, M2) counts as loaded whatever the load reads when it starts: the job beside it may start its build or
 // its flood at any moment after that read. So does a job in ci-kit's macOS guest (CI_KIT_VM_GUEST=1, set in the guest's
-// runner environment alone; the spec's VM lane, V3), which runs at 1.3-1.7x the host's time whatever its own load reads,
-// and a job on a host where that guest may run (CI_KIT_VM_LANE=1, set in the host instances' runner environment on a Mac
-// with ci-kit's VM lane installed): a guest may boot beside it after the read, and gate.yml's VM contract lets it.
+// runner environment alone; the spec's VM lane, V3), which runs at 1.3-1.7x the host's time whatever its own load reads.
+// A host runner's CI_KIT_VM_RESERVATION names the lane's vm-reserved file, present from before clone until after delete.
+// At the verdict, a reservation still present or a sibling vm-released epoch second >= floor(test start / 1000) means
+// a guest was beside the test. ci-kit writes vm-released before removing the reservation. Merely installing the lane
+// does not loosen a bound; read errors other than not-found do, while a missing or unparsable release means none seen.
+import { readFileSync, statSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
+import { dirname, join } from 'node:path';
 
 export const QUIET_LOAD_PER_CORE = 1;
 export const LOADED_CEILING = 5;
@@ -20,7 +24,6 @@ export interface MachineLoad {
   cores: number;
   shared?: boolean; // on a desktop ci-kit shares with another job
   guest?: boolean; // in ci-kit's macOS guest
-  lane?: boolean; // on a host where ci-kit's guest may run beside
 }
 
 export const machineLoad = (env: Record<string, string | undefined> = process.env): MachineLoad => ({
@@ -28,8 +31,25 @@ export const machineLoad = (env: Record<string, string | undefined> = process.en
   cores: cpus().length,
   shared: env.CI_KIT_SHARED_DESKTOP === '1',
   guest: env.CI_KIT_VM_GUEST === '1',
-  lane: env.CI_KIT_VM_LANE === '1',
 });
+
+function guestBeside(started: number, reservation: string | undefined): string | null {
+  if (!reservation) return null;
+  try {
+    statSync(reservation);
+    return 'beside a guest reserved now';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return 'guest reservation unreadable (assumed loaded)';
+  }
+  try {
+    const released = readFileSync(join(dirname(reservation), 'vm-released'), 'utf8').trim();
+    const epoch = Number(released);
+    return /^\d+$/.test(released) && Number.isSafeInteger(epoch) && epoch >= Math.floor(started / 1000)
+      ? 'beside a guest released since the test started' : null;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : 'guest release unreadable (assumed loaded)';
+  }
+}
 
 // The ceiling to assert, and why it is not the bound itself (null when it is).
 export interface BudgetVerdict {
@@ -38,14 +58,14 @@ export interface BudgetVerdict {
 }
 
 // Where a bound is loosened, the machine that makes it so ("at load 74.3 on 10 cores"); null where it holds as named.
-export function loosenedOn(machine: MachineLoad): string | null {
-  if (!machine.shared && !machine.guest && !machine.lane && machine.load < machine.cores * QUIET_LOAD_PER_CORE) return null;
+export function loosenedOn(machine: MachineLoad, beside: string | null = null): string | null {
+  if (!machine.shared && !machine.guest && beside === null && machine.load < machine.cores * QUIET_LOAD_PER_CORE) return null;
   const load = Math.round(machine.load * 10) / 10;
-  return `${machine.shared ? 'on a shared desktop (CI_KIT_SHARED_DESKTOP=1), ' : ''}${machine.guest ? 'in a VM guest (CI_KIT_VM_GUEST=1), ' : ''}${machine.lane ? 'beside ci-kit\'s VM lane (CI_KIT_VM_LANE=1), ' : ''}at load ${load} on ${machine.cores} cores`;
+  return `${machine.shared ? 'on a shared desktop (CI_KIT_SHARED_DESKTOP=1), ' : ''}${machine.guest ? 'in a VM guest (CI_KIT_VM_GUEST=1), ' : ''}${beside === null ? '' : `${beside}, `}at load ${load} on ${machine.cores} cores`;
 }
 
-export function budgetVerdict(label: string, ms: number, budget: number, machine: MachineLoad): BudgetVerdict {
-  const where = loosenedOn(machine);
+export function budgetVerdict(label: string, ms: number, budget: number, machine: MachineLoad, started: number = Date.now(), env: Record<string, string | undefined> = process.env): BudgetVerdict {
+  const where = loosenedOn(machine, guestBeside(started, env.CI_KIT_VM_RESERVATION));
   if (where === null) return { ceiling: budget, reason: null };
   const ceiling = budget * LOADED_CEILING;
   return { ceiling, reason: `${label}: ${ms} ms against ${budget} ms, held to ${ceiling} ms ${where}` };
