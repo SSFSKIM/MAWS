@@ -20,12 +20,15 @@ import {
   type LogEvent,
   type Delivery,
   type MachinePresence,
+  type JsonObject,
+  type JsonValue,
+  type ReadAnswer,
   isTaskId,
   OUTPUT_TAIL_MAX,
   SUBSCRIPTION_KINDS,
 } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
-import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../shell/session-plane';
+import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionListener, type SubscriptionMessage } from '../shell/session-plane';
 import { backoff, HubSocket, type ConnectionStatus } from './socket';
 
 /** How often a visible tab says so again: a third of the 90 s the hub counts a socket as visible after the last. */
@@ -95,6 +98,8 @@ export type ProjectClientOptions = {
    * take a snapshot yet), by how many came in a row from 0; the socket's backoff by default.
    */
   resubscribeDelay?: (attempt: number) => number;
+  /** How long a read waits for its answer (`READ_TIMEOUT_MS` by default). */
+  readTimeoutMs?: number;
 };
 
 type OpenSubscription = {
@@ -105,7 +110,14 @@ type OpenSubscription = {
   /** Discontinuities at `n` 0 in a row: the backoff's attempt. A snapshot resets it. */
   failedStarts: number;
   retry: ReturnType<typeof setTimeout> | null;
+  /** The reads asked on the sub open now, by id, until each is answered, times out, or the sub is lost. */
+  reads: Map<string, PendingRead>;
 };
+
+type PendingRead = { what: string; sent: number; resolve: (result: JsonValue) => void; reject: (error: ReadError) => void; timer: ReturnType<typeof setTimeout> };
+
+/** How long a read waits for its answer: the machine's own 10 s (`COMMAND_WAIT_MS`) and the hops (the spec, §5). */
+const READ_TIMEOUT_MS = 15_000;
 
 const IN_SUB = new Set<string>(SUBSCRIPTION_KINDS);
 
@@ -219,7 +231,7 @@ export class ProjectClient implements SessionPlane {
   }
 
   subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription {
-    const open: OpenSubscription = { target, listener, sub: null, next: 0, failedStarts: 0, retry: null };
+    const open: OpenSubscription = { target, listener, sub: null, next: 0, failedStarts: 0, retry: null, reads: new Map() };
     this.subs.add(open);
     if (this.welcomed) this.sendSubscribe(open);
     return {
@@ -232,13 +244,50 @@ export class ProjectClient implements SessionPlane {
       output: (taskId, tail) => {
         if (open.sub && this.subs.has(open) && isTaskId(taskId)) this.socket.send({ t: 'output', sub: open.sub, taskId, tail: outputTail(tail) });
       },
+      read: (what, args) => this.read(open, what, args),
       close: () => {
         if (open.retry) clearTimeout(open.retry);
         open.retry = null;
+        this.lostReads(open);
         if (!this.subs.delete(open)) return;
         if (open.sub && this.welcomed) this.socket.send({ t: 'unsubscribe', sub: open.sub });
       },
     };
+  }
+
+  /** One read on the sub open now, settled by its answer's id; see `Subscription.read`. */
+  private read(open: OpenSubscription, what: string, args?: JsonObject): Promise<JsonValue> {
+    if (open.target.agentId !== null) return Promise.reject(new ReadError('unsupported', `${what} is the main transcript's`));
+    if (!open.sub || !this.subs.has(open) || !this.welcomed) return Promise.reject(new ReadError('interrupted', 'the subscription is not live: ask again once it is'));
+    const id = newNonce();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        open.reads.delete(id);
+        reject(new ReadError('timeout', `no answer within ${(this.options.readTimeoutMs ?? READ_TIMEOUT_MS) / 1000} s`));
+      }, this.options.readTimeoutMs ?? READ_TIMEOUT_MS);
+      open.reads.set(id, { what, sent: performance.now(), resolve, reject, timer });
+      this.socket.send({ t: 'read', sub: open.sub!, id, what, ...(args && { args }) });
+    });
+  }
+
+  /** The answer to a read: its promise settles, and the instrument times it. A late or unknown id is passed over. */
+  private readAnswered(open: OpenSubscription, answer: ReadAnswer): void {
+    const pending = open.reads.get(answer.id);
+    if (!pending) return;
+    open.reads.delete(answer.id);
+    clearTimeout(pending.timer);
+    latency.readAnswered(pending.what, performance.now() - pending.sent);
+    if (answer.error) pending.reject(new ReadError(answer.error.code, answer.error.message));
+    else pending.resolve(answer.result ?? null);
+  }
+
+  /** The sub the reads were asked on is gone: none of them will be answered on it. */
+  private lostReads(open: OpenSubscription): void {
+    for (const pending of open.reads.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new ReadError('interrupted', 'the subscription was interrupted before the answer: ask again'));
+    }
+    open.reads.clear();
   }
 
   private humanSettled(): void {
@@ -256,6 +305,7 @@ export class ProjectClient implements SessionPlane {
       open.retry = null;
       if (open.sub === null) continue;
       open.sub = null;
+      this.lostReads(open);
       open.listener.interrupted();
     }
   }
@@ -361,13 +411,16 @@ export class ProjectClient implements SessionPlane {
     if (message.n !== open.next) {
       // A gap: give this sub up and take a fresh snapshot under a new one.
       this.socket.send({ t: 'unsubscribe', sub: open.sub! });
+      this.lostReads(open);
       open.listener.interrupted();
       this.sendSubscribe(open);
       return;
     }
     open.next++;
     if (message.kind === 'snapshot') open.failedStarts = 0;
+    if (message.kind === 'read') return this.readAnswered(open, message.body as ReadAnswer);
     if (message.kind === 'end') {
+      this.lostReads(open);
       // An `end` may come first, at n 0, when the sub ended before a snapshot could be taken (DX4, composite cd2667d8).
       const body = message.body as SessionBodies['end'];
       if (body.reason === 'discontinuity') {

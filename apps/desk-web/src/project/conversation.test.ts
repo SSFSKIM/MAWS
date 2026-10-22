@@ -8,6 +8,7 @@ import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { cardState } from '../conversation/card-state';
 import { memoryLogRecord } from '../log/record';
+import { latency } from '../latency/latency';
 import { ProjectConnection } from './connection';
 import { Conversation, requestKey } from './conversation';
 
@@ -433,6 +434,53 @@ describe('compaction', () => {
     await until(() => welcomedAgain && c.live.getState().caughtUp);
     stop();
     expect(conv(c).compactions[S1]).toBeUndefined();
+  });
+});
+
+describe("a command and its op (the desk control surface's M0)", () => {
+  const op = (body: Record<string, unknown>) => hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S1, kind: 'op', sub: null, n: null, body: body as never });
+
+  it('sends the command RPC, keeps each op by its RPC nonce with its latest phase, and times it', async () => {
+    const c = await connect();
+    const before = latency.report().paths;
+    const nonce = await c.command(M, 'mini', S1, 'rename', 'desk-m0', false);
+    await until(() => conv(c).rpcs[nonce]?.state === 'forwarded');
+    expect(hub.rpcs(PROJECT)[0]).toMatchObject({ rpc: 'command', machine: 'mini', nonce, args: { session: S1, name: 'rename', args: 'desk-m0' } });
+    // A bare command carries no args.
+    const bare = await c.command(M, 'mini', S1, 'reload-plugins', '', false);
+    await until(() => hub.rpcs(PROJECT).length === 2);
+    expect(hub.rpcs(PROJECT)[1].args).toEqual({ session: S1, name: 'reload-plugins' });
+
+    hub.answerRpc(PROJECT, nonce, { state: 'done', result: { queued: true, route: 'run', id: 'c1' } });
+    await until(() => conv(c).rpcs[nonce].state === 'done');
+    op({ rpc: nonce, op: 'command', phase: 'start', id: 'c1', name: 'rename', args: 'desk-m0' });
+    await until(() => conv(c).ops[nonce]?.phase === 'start');
+    op({ rpc: nonce, op: 'command', phase: 'end', id: 'c1', name: 'rename', args: 'desk-m0', settled: { ok: true }, readback: { how: 'row', text: 'Session renamed to: desk-m0', uuid: 'u1' } });
+    await until(() => conv(c).ops[nonce]?.phase === 'end');
+    expect(conv(c).ops[nonce]).toEqual({ op: 'command', phase: 'end', session: S1, body: expect.objectContaining({ readback: { how: 'row', text: 'Session renamed to: desk-m0', uuid: 'u1' } }) });
+    // A start the daemon republishes after its end (a restart owed it again) never takes the end back.
+    op({ rpc: nonce, op: 'command', phase: 'start', id: 'c1', name: 'rename', args: 'desk-m0' });
+    // An op another client started (the CLI: no nonce) is not this tab's to draw.
+    op({ rpc: null, op: 'command', phase: 'end', id: 'c9', readback: { how: 'none' } });
+    op({ rpc: bare, op: 'command', phase: 'start', id: 'c2', name: 'reload-plugins', args: '' });
+    await until(() => conv(c).ops[bare] !== undefined);
+    expect(conv(c).ops[nonce].phase).toBe('end');
+    expect(Object.keys(conv(c).ops).sort()).toEqual([nonce, bare].sort());
+    const after = latency.report().paths;
+    expect(after['op.queued']?.n).toBe((before['op.queued']?.n ?? 0) + 1);
+    expect(after['op.ran']?.n).toBe((before['op.ran']?.n ?? 0) + 1);
+  });
+
+  it("keeps the ops through a reconnect: an op's end owed to a nonce is drawn when it comes", async () => {
+    const c = await connect();
+    op({ rpc: 'BQUFBQUFBQUFBQUFBQUFBQ', op: 'command', phase: 'start', id: 'c1', name: 'color', args: 'red' });
+    await until(() => conv(c).ops.BQUFBQUFBQUFBQUFBQUFBQ !== undefined);
+    let welcomedAgain = false;
+    const stop = c.live.subscribe((s) => (welcomedAgain ||= !s.caughtUp));
+    hub.dropConnections();
+    await until(() => welcomedAgain && c.live.getState().caughtUp);
+    stop();
+    expect(conv(c).ops.BQUFBQUFBQUFBQUFBQUFBQ?.phase).toBe('start');
   });
 });
 

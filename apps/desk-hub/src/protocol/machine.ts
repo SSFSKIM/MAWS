@@ -3,6 +3,7 @@
 // JSON frame per line), each addressed to a project and routed by the Worker to that `Project` object.
 import type { MachineSummary } from './browser';
 import type { ProjectKind } from './identity';
+import type { JsonObject } from './json';
 import type { LogEvent, Vector } from './log';
 import type { Part } from './parts';
 import type { Rpc, RpcOutcome } from './rpc';
@@ -65,8 +66,13 @@ export type PostAnswer = { ok: true; frames: number; refused: RefusedFrame[] };
 
 /** Hub → machine, one per SSE event (`event: <t>`, `data: <the frame's JSON>`). */
 export type DownFrame =
-  /** First on every stream. `generation` counts this machine's streams; a newer one supersedes every older one. */
-  | { t: 'welcome'; org: string; machine: string; generation: number; heartbeat_ms: number }
+  /**
+   * First on every stream. `generation` counts this machine's streams; a newer one supersedes every older one. `kinds`:
+   * every DX4 session kind this hub lists (`SESSION_KINDS`); a daemon sends a kind the desk control surface adds
+   * (`read`, `op`, `catalog`) only when it is listed, and a welcome without `kinds` is a hub older than that, to which
+   * none is sent.
+   */
+  | { t: 'welcome'; org: string; machine: string; generation: number; heartbeat_ms: number; kinds?: string[] }
   | { t: 'hb'; at: string }
   /** The answer to `hello`: the hub's vector for the project, and whether this machine writes its archive. */
   | { t: 'have'; project: string; have: Vector; archive: boolean }
@@ -93,6 +99,12 @@ export type DownFrame =
    * bytes of the task's output file, under DX4's containment rule. A daemon older than DC8 passes it by.
    */
   | { t: 'output'; project: string; session: string; agentId: string | null; sub: string; taskId: string; tail: number }
+  /**
+   * The browser's `read` (DX3), carried with the sub's route: answer DX4 `read {id, what, result | error}` on the sub,
+   * from the session's bridge (or, for a kind the plane serves itself, the plane). A daemon older than the desk control
+   * surface's M0 passes it by.
+   */
+  | { t: 'read'; project: string; session: string; agentId: string | null; sub: string; id: string; what: string; args?: JsonObject }
   | OrgFrame
   | Part;
 

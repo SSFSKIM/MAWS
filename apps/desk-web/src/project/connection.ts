@@ -1,6 +1,6 @@
 // One open project: its log (kept and verified by `ProjectLog`), its live state from the session plane — presence per
 // session, machines, the pending set, the hub's refusals — the conversation's state (`Conversation`: requests,
-// deliveries, RPCs, the outbox, compactions), and the socket that feeds them. The socket starts only once the browser's
+// deliveries, RPCs, the outbox, compactions, a command's op), and the socket that feeds them. The socket starts only once the browser's
 // record is read, so its first resume is after the last offset the record holds. What the web issues — a `human`, an
 // RPC — is sealed here with the org key (DX1, DX6) and never leaves unsealed. A session's message or question arriving
 // live is timed from its `ts` until it is verified and drawn (`latency/latency.ts`), and so are an RPC until its
@@ -270,6 +270,17 @@ export class ProjectConnection {
     return rpc.nonce;
   }
 
+  /**
+   * Runs a slash command in a bridged session (the desk control surface's DX6 `command`): `name` as typed after the
+   * slash, `args` the rest (none when blank). `busy`: a turn runs, so the outcome waits for it, and its time is kept
+   * apart (`latency.ts`'s `op.ran.busy`).
+   */
+  async command(member: string, machine: string, session: string, name: string, args: string, busy: boolean): Promise<string> {
+    const nonce = await this.rpc(member, machine, 'command', { session, name, ...(args.trim() && { args: args.trim() }) });
+    latency.commandSent(nonce, busy);
+    return nonce;
+  }
+
   /** Allow or deny a pending permission prompt, with the digest of exactly the request as drawn. */
   async decide(member: string, request: RequestRecord, decision: 'allow' | 'deny', message?: string): Promise<string> {
     const digest = await digestOf(request.raised);
@@ -324,6 +335,9 @@ export class ProjectConnection {
         return;
       case 'compact':
         this.conversation.compact(message.session, message.body);
+        return;
+      case 'op':
+        this.conversation.op(message.session, message.body);
         return;
       default:
         return;

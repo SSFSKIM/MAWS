@@ -1,6 +1,7 @@
 // The conversation's live state for one open project, beside its log: the requests (permission prompts and questions)
 // the hub reports, with their settlements; each event's delivery per recipient; the RPCs this tab issued and the state
-// the hub reports for each; the web `human`s on their way to the log; each session's latest compaction. Requests,
+// the hub reports for each; the web `human`s on their way to the log; each session's latest compaction; the op each
+// command this tab sent started, its outcome reported under the RPC's nonce (the desk control surface's M0). Requests,
 // settlements, and deliveries carry codes (DX1, DX4) and are drawn only once they verify under the org key; one that
 // fails is kept out and reported. Every verdict holds only under the key it was reached with.
 //
@@ -15,10 +16,16 @@
 // tab took; and a decision the hub replays after `caught-up` was recorded before the connection's own pending set, or
 // was sent to this socket live after its `settled` (MAWS #71).
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { verify, type Decision, type Delivery, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
+import { verify, type Decision, type Delivery, type OpBody, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
 
 export type CompactBody = SessionBodies['compact'];
+
+/**
+ * An async op this tab asked for (the desk control surface spec, §3), by its RPC's nonce: its latest phase and the
+ * body of the `op` message that carried it (a command's `end` holds `settled` and `readback`).
+ */
+export type OpEntry = { op: OpBody['op']; phase: OpBody['phase']; session: string; body: OpBody };
 
 export type RequestRef = { machine: string; session: string; request: string };
 
@@ -66,6 +73,12 @@ export type ConversationState = {
   rpcs: Record<string, RpcEntry>;
   outbox: Record<string, OutboxItem>;
   compactions: Record<string, CompactBody>;
+  /**
+   * The ops the RPCs of this tab started, by nonce (`OpEntry`). Unlike a compaction they are kept through a reconnect:
+   * the daemon owes an op's outcome under its nonce until the hub takes it, so an end missed while the socket was down
+   * may still come; one that does not leaves its command drawn as queued.
+   */
+  ops: Record<string, OpEntry>;
   /** What failed verification and is not drawn. */
   unverified: Unverified[];
   /**
@@ -85,7 +98,7 @@ type Seen = { machine: string; at: number; payloads: Raised[] };
 const sameRaised = (a: Raised, b: Raised) => a === b || JSON.stringify(a) === JSON.stringify(b);
 
 export class Conversation {
-  readonly store: StoreApi<ConversationState> = createStore<ConversationState>(() => ({ requests: {}, deliveries: {}, rpcs: {}, outbox: {}, compactions: {}, unverified: [], checked: false }));
+  readonly store: StoreApi<ConversationState> = createStore<ConversationState>(() => ({ requests: {}, deliveries: {}, rpcs: {}, outbox: {}, compactions: {}, ops: {}, unverified: [], checked: false }));
   /** Whether this connection has had the hub's pending set yet (it comes on every connect, DX3). */
   private pendingReceived = false;
   private key: OrgKey | null = null;
@@ -194,7 +207,22 @@ export class Conversation {
     this.store.setState((s) => ({ compactions: { ...s.compactions, [session]: body } }));
   }
 
+  /**
+   * An op's start or end (DX4 `op`), kept by its RPC's nonce — an op with no nonce (the CLI's) is passed over — its end
+   * never replaced by a start the daemon sends again.
+   */
+  op(session: string, body: OpBody): void {
+    const nonce = body.rpc;
+    if (typeof nonce !== 'string') return;
+    const known = this.store.getState().ops[nonce];
+    if (known?.phase === 'end' && body.phase !== 'end') return;
+    this.store.setState((s) => ({ ops: { ...s.ops, [nonce]: { op: body.op, phase: body.phase, session, body } } }));
+    if (body.phase === 'end' && known?.phase !== 'end') latency.commandEnded(nonce);
+  }
+
   rpcState(nonce: string, state: 'forwarded' | 'done' | 'failed' | 'uncertain', outcome?: RpcOutcome): void {
+    const entry = this.store.getState().rpcs[nonce];
+    if (entry?.rpc.rpc === 'command' && state === 'done') latency.commandQueued(nonce);
     this.store.setState((s) => {
       const entry = s.rpcs[nonce];
       return entry ? { rpcs: { ...s.rpcs, [nonce]: { ...entry, state, ...(outcome && { outcome }) } } } : s;

@@ -1,7 +1,7 @@
 // The §5 table, as the web reads it to draw what a session cannot do and why — bridged, a `--bg` seat without the
 // bridge, a terminal session without it, a machine offline — instead of failing when a button is pressed.
 import { describe, expect, it } from 'vitest';
-import { capabilities, kindOf, retiredBy, type CapabilityInput } from './capabilities';
+import { capabilities, kindOf, NEEDS, retiredBy, VERBS, type CapabilityInput } from './capabilities';
 
 const base: CapabilityInput = { alias: 'maws-45', machine: 'mini', member: true, group: 'working', seat: '', machineOnline: true, presence: { record: { status: 'busy' }, bridge: true } };
 const at = (over: Partial<CapabilityInput>) => capabilities({ ...base, ...over });
@@ -134,5 +134,66 @@ describe('while the project socket is not connected', () => {
     const c = capabilities(base, false);
     for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop'] as const) expect(c[verb], verb).toEqual({ can: false, reason: 'not connected to the hub' });
     expect(c.send).toEqual({ can: true, reason: null, note: 'sent once the desk reconnects' });
+  });
+});
+
+// The desk control surface's verbs (its spec, 2026-10-22, §4): read from both presences — the bridge's capabilities in
+// the session's, the daemon's `desk` in the machine's — with three fallbacks told apart so the reason sends the owner
+// to the right place: a stale session, an older machine, and a session without a bridge at all.
+describe('the desk control surface (M0): command and status', () => {
+  const caps = { sminos: '1.7.0', protocol: 2, engine: '2.1.307', ops: ['ping', 'read', 'command'], reads: ['status'], routes: { measured: '2.1.307' } };
+  const desk = { sminos: '1.7.0', rpcs: ['steer', 'command'], reads: [] };
+  const bridged = (over: Partial<CapabilityInput> = {}) => capabilities({ ...base, presence: { record: { status: 'idle' }, bridge: true, capabilities: caps }, machineDesk: desk, ...over });
+
+  it('a bridge and a daemon at M0: both offered; a command mid-turn waits for the turn', () => {
+    expect(bridged().command).toEqual({ can: true, reason: null });
+    expect(bridged().status).toEqual({ can: true, reason: null });
+    expect(bridged({ presence: { record: { status: 'busy' }, bridge: true, capabilities: caps } }).command).toEqual({ can: true, reason: null, note: 'queued until maws-45 is idle' });
+    // A newer plugin than the control needs offers it too.
+    expect(bridged({ presence: { record: { status: 'idle' }, bridge: true, capabilities: { ...caps, sminos: '1.10.0' } }, machineDesk: { ...desk, sminos: '1.10.0' } }).command.can).toBe(true);
+  });
+
+  it('a stale session — the machine updated, the mod loaded before it — is told to reload, not to update the machine', () => {
+    const stale = bridged({ presence: { record: { status: 'idle' }, bridge: true } });
+    const reason = "this session's plugin loaded before the update: run /reload-plugins in it, or restart it";
+    expect(stale.command).toEqual({ can: false, reason });
+    expect(stale.status).toEqual({ can: false, reason });
+  });
+
+  it("an older machine names itself and its plugin's version when its daemon says it, and asks for the update", () => {
+    const older = bridged({ presence: { record: { status: 'idle' }, bridge: true }, machineDesk: null });
+    expect(older.command).toEqual({ can: false, reason: "mini's plugin is older than the desk's controls: update doperpowers on mini" });
+    expect(older.status.reason).toBe("mini's plugin is older than the desk's controls: update doperpowers on mini");
+    const known = bridged({ presence: { record: { status: 'idle' }, bridge: true }, machineDesk: { sminos: '1.6.9', rpcs: [], reads: [] } });
+    expect(known.command.reason).toBe("mini's plugin (1.6.9) is older than the desk's controls: update doperpowers on mini");
+    // A bridge at M0 on a daemon that is not (the daemon not restarted since): the command needs both.
+    expect(bridged({ machineDesk: undefined }).command.reason).toBe("mini's plugin is older than the desk's controls: update doperpowers on mini");
+    expect(bridged({ machineDesk: undefined }).status).toEqual({ can: true, reason: null });
+  });
+
+  it("a bridge whose capabilities lack the op or the read is not offered it, by the capability's own version", () => {
+    const old = { ...caps, sminos: '1.6.3', ops: ['ping'], reads: [] };
+    expect(bridged({ presence: { record: { status: 'idle' }, bridge: true, capabilities: old } }).command.reason).toBe("this session's plugin loaded before the update: run /reload-plugins in it, or restart it");
+    expect(bridged({ presence: { record: { status: 'idle' }, bridge: true, capabilities: { ...caps, reads: [] } } }).status.can).toBe(false);
+  });
+
+  it("without a bridge, offline, not running, read-only or disconnected: each kind's own reason", () => {
+    expect(bridged({ seat: 'maws-45', presence: { record: { status: 'idle' }, bridge: false } }).command).toEqual({ can: false, reason: 'maws-45 runs without the bridge' });
+    expect(bridged({ presence: { record: { status: 'idle' }, bridge: false } }).status).toEqual({ can: false, reason: 'maws-45 runs without the bridge' });
+    expect(bridged({ machineOnline: false }).command).toEqual({ can: false, reason: 'mini is offline' });
+    expect(bridged({ presence: { record: null, bridge: false } }).status).toEqual({ can: false, reason: 'maws-45 is not running' });
+    expect(bridged({ presence: null }).command).toEqual({ can: false, reason: "waiting for maws-45's presence" });
+    // A command is X class: a read-only machine refuses it; a read changes nothing, and is still offered.
+    expect(bridged({ machineReadOnly: true }).command).toEqual({ can: false, reason: 'mini is read-only: it runs nothing sent from outside it' });
+    expect(bridged({ machineReadOnly: true }).status).toEqual({ can: true, reason: null });
+    const off = capabilities({ ...base, presence: { record: { status: 'idle' }, bridge: true, capabilities: caps }, machineDesk: desk }, false);
+    expect(off.command).toEqual({ can: false, reason: 'not connected to the hub' });
+    expect(off.status).toEqual({ can: false, reason: 'not connected to the hub' });
+  });
+
+  it('names the version each verb needs', () => {
+    expect(NEEDS.command).toEqual({ op: 'command', rpc: 'command', sminos: '1.7.0' });
+    expect(NEEDS.status).toEqual({ read: 'status', sminos: '1.7.0' });
+    expect(VERBS).toEqual(expect.arrayContaining(['command', 'status']));
   });
 });

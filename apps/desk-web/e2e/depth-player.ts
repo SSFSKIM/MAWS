@@ -6,8 +6,9 @@
 // (`sendSub`). The main transcript's snapshot carries the session's last `usage`, and `sendUsage` plays one after a turn. Each subagent's transcript is a track of
 // its own (`agent(id)`), with its own script, playhead, and subscriptions, as DX3 scopes a subscription by `agentId`.
 // The double itself is used as it stands: the player reads the frames it records (`hub.up`) and sends through
-// `hub.sendSession`.
-import type { JsonObject, SessionBodies, SessionMessage, SubagentMeta } from 'desk-hub/protocol';
+// `hub.sendSession`. A `read` on the main transcript's subscription is answered with `status` as an M0 bridge answers
+// `read status`, every other kind `unsupported`; with `status` null the player passes reads by, as an older machine does.
+import type { JsonObject, SessionBodies, SessionMessage, StatusRead, SubagentMeta } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, withTextAnswer, type LiveItem, type ScriptOptions } from '../test/double/session-stream';
 
@@ -44,6 +45,9 @@ export class DepthPlayer {
   usage: SessionBodies['usage'] | null = null;
   /** How many `diff` requests the browser sent. */
   diffsAsked = 0;
+  /** What a `read status` is answered with (null: passed by); how many reads the browser sent. */
+  status: StatusRead | null = null;
+  readsAsked = 0;
   private held: Array<() => void> = [];
   private readonly open: Open[] = [];
   private cursor = 0;
@@ -121,7 +125,14 @@ export class DepthPlayer {
         for (const track of this.agents.values()) track.closeSub(frame.sub);
       } else if (frame.t === 'rows') this.rows(frame.sub, frame.before, frame.limit);
       else if (frame.t === 'diff') this.diffsAsked += 1;
+      else if (frame.t === 'read' && this.open.some((open) => open.sub === frame.sub)) this.read(frame.sub, frame.id, frame.what);
     }
+  }
+
+  private read(sub: string, id: string, what: string): void {
+    this.readsAsked += 1;
+    if (this.status === null) return;
+    this.hub.sendSub(this.options.project, sub, 'read', what === 'status' ? { id, what, result: this.status as unknown as JsonObject } : { id, what, error: { code: 'unsupported', message: `no read ${what}` } });
   }
 
   /** Releases the subscriptions held so far (`holdSubscriptions`), each answered with its snapshot now. */

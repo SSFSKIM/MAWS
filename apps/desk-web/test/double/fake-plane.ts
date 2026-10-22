@@ -2,7 +2,7 @@
 // plays each transcript's script to its own subscription (the main thread's and each subagent's are apart, as DX3
 // scopes them), interrupts or ends one without touching another, and sees what each asked for. Beside it, what MAWS's view
 // does with a controller's source: keeps it attached to the store under its key.
-import type { SessionBodies, SubagentMeta } from 'desk-hub/protocol';
+import type { JsonObject, JsonValue, SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import type { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';
 import type { DeskTranscript } from '../../src/depth/source/desk-transcript';
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../../src/shell/session-plane';
@@ -17,6 +17,8 @@ export class HeldSubscription {
   diffs = 0;
   /** Each task output the view asked for, in order. */
   readonly outputs: Array<{ taskId: string; tail: number }> = [];
+  /** Each read the view made, in order, held for the suite to answer or refuse. */
+  readonly reads: Array<{ what: string; args?: JsonObject; resolve(answer: JsonValue): void; reject(error: Error): void }> = [];
   closed = false;
   n = 0;
 
@@ -58,6 +60,7 @@ export class FakePlane implements SessionPlane {
       rows: (before, limit) => void held.asked.push({ before, limit }),
       diff: () => void (held.diffs += 1),
       output: (taskId, tail) => void held.outputs.push({ taskId, tail }),
+      read: (what, args) => new Promise<JsonValue>((resolve, reject) => void held.reads.push({ what, args, resolve, reject })),
       close: () => void (held.closed = true),
     };
   }

@@ -51,6 +51,12 @@ export const PATHS = {
   'rpc.answer': 'answer: sent → its result in (web→hub→machine→session, and back)',
   'rpc.spawn': 'spawn: sent → its result in (web→hub→machine, and back)',
   'rpc.resume': 'resume: sent → its result in (web→hub→machine, and back)',
+  // The desk control surface (its spec, §12): budgets B.read, B.op, B.ran, B.readback.
+  'read.status': 'status read: read sent → its answer in (web↔hub↔machine↔bridge)',
+  'op.queued': 'command: RPC sent → queued (web↔hub↔machine↔bridge)',
+  'op.ran': 'command: RPC sent → its op end in, the session idle when sent',
+  'op.ran.busy': 'command: RPC sent → its op end in, sent mid-turn: it waited for the turn (kept apart from op.ran)',
+  'op.readback': 'command: RPC sent → its readback drawn',
 } as const;
 export type LatencyPath = keyof typeof PATHS;
 const PATH_NAMES = Object.keys(PATHS) as LatencyPath[];
@@ -142,6 +148,11 @@ export class LatencyRecorder {
   private readonly calls = new Map<string, number>();
   /** The RPCs sent and not answered yet, by nonce: the path each is timed on and when it was sent. */
   private readonly rpcs = new Map<string, { path: LatencyPath; sent: number }>();
+  /**
+   * The commands sent from this tab, by their RPC's nonce: when, whether the session was mid-turn then, and which of
+   * their moments (queued, ended, drawn) are timed already — they may come in any order.
+   */
+  private readonly commands = new Map<string, { sent: number; busy: boolean; queued: boolean; ended: boolean; drawn: boolean }>();
 
   constructor(private readonly log: (line: string) => void = (line) => console.info(line)) {}
 
@@ -245,6 +256,54 @@ export class LatencyRecorder {
     if (!rpc || (state !== 'done' && state !== 'failed')) return;
     this.rpcs.delete(nonce);
     if (state === 'done') this.record(rpc.path, now() - rpc.sent, nonce);
+  }
+
+  // A read's answer, and a command's three moments.
+
+  /** A read answered after `ms`: its kind's path, when the instrument has one (`read.status`). */
+  readAnswered(what: string, ms: number): void {
+    const path = `read.${what}`;
+    if (path in PATHS) this.record(path as LatencyPath, ms);
+  }
+
+  /** A command RPC sent, by its nonce; `busy`: a turn was running, so its end waits for the turn. */
+  commandSent(nonce: string, busy: boolean): void {
+    this.commands.set(nonce, { sent: now(), busy, queued: false, ended: false, drawn: false });
+    this.forgetOldest(this.commands);
+  }
+
+  /** Its RPC answered `queued` (the hub's `rpc-state` done), which may come after its `op` end: each moment once. */
+  commandQueued(nonce: string): void {
+    const command = this.commands.get(nonce);
+    if (!command || command.queued) return;
+    command.queued = true;
+    this.record('op.queued', now() - command.sent, nonce);
+    this.settleCommand(nonce, command);
+  }
+
+  /** Its `op` end came in: ran, kept apart when sent mid-turn. */
+  commandEnded(nonce: string): void {
+    const command = this.commands.get(nonce);
+    if (!command || command.ended) return;
+    command.ended = true;
+    this.record(command.busy ? 'op.ran.busy' : 'op.ran', now() - command.sent, nonce);
+  }
+
+  /**
+   * Its outcome was committed to the page (`CommandStatus`): the readback is timed at the next frame. An outcome no
+   * view draws (its status line taken by a later command, the session left) gives no sample.
+   */
+  commandDrawn(nonce: string): void {
+    const command = this.commands.get(nonce);
+    if (!command || command.drawn) return;
+    command.drawn = true;
+    this.drawn('op.readback', command.sent, false, nonce);
+    this.settleCommand(nonce, command);
+  }
+
+  /** A command whose every moment is timed is forgotten; one never drawn ages out with the oldest. */
+  private settleCommand(nonce: string, command: { queued: boolean; drawn: boolean }): void {
+    if (command.queued && command.drawn) this.commands.delete(nonce);
   }
 
   // A raised request's anchor.

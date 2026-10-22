@@ -5,7 +5,12 @@
 // RPC and delivers nothing sent from outside it, whatever the kind. An ended session is resumed only once its machine
 // is known to serve its transcript (`shell/transcript-served.ts`): resuming one it holds none of starts an empty
 // session. `note` says how an action that can be taken will land.
-import type { SessionPresence } from 'desk-hub/protocol';
+//
+// The desk control surface's verbs (its spec, 2026-10-22, §4) exist on some machines and not others while doperpowers
+// rolls out, and a session keeps the mod it loaded until a reload: each is offered only when what it needs (`NEEDS`) is
+// advertised — a bridge op or read in the session's `presence.capabilities`, a daemon RPC in the machine's `desk` — and
+// otherwise names the stale session or the older machine, so the owner is sent to the right place.
+import type { DeskCapabilities, SessionPresence } from 'desk-hub/protocol';
 import { sessionName, type SessionGroup } from '../log/projection';
 import type { TranscriptServed } from '../shell/transcript-served';
 
@@ -21,6 +26,8 @@ export type CapabilityInput = {
   machineOnline: boolean | null;
   /** The machine's policy says read-only (DX4 `machine` presence); absent or false until it says so. */
   machineReadOnly?: boolean;
+  /** What the machine's daemon can do itself (DX4 `machine` presence's `desk`); absent from an older daemon or hub. */
+  machineDesk?: DeskCapabilities | null;
   presence: SessionPresence | null;
   /** The log's latest `retired`, while it stands (DX8's `DeskSession.ended`). */
   ended?: { by: string; reason: string } | null;
@@ -40,9 +47,36 @@ export function retiredBy(s: Pick<CapabilityInput, 'member' | 'ended'>): string 
 export type SessionKind = 'bridged' | 'seat' | 'terminal' | 'not-running' | 'unknown' | 'offline';
 
 // `stop` is a background job's Stop (DC10): whether the session can stop a job at all; whether a job runs is the jobs
-// view's to say.
-export const VERBS = ['send', 'steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop'] as const;
+// view's to say. `command` runs a slash command in the session; `status` is a read's capability, which the Info tab
+// draws (not a button).
+const KIND_VERBS = ['send', 'steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop'] as const;
+const DESK_VERBS = ['command', 'status'] as const;
+export const VERBS = [...KIND_VERBS, ...DESK_VERBS] as const;
 export type Verb = (typeof VERBS)[number];
+type KindVerb = (typeof KIND_VERBS)[number];
+type DeskVerb = (typeof DESK_VERBS)[number];
+
+/** The sminos version of the desk control surface's M0, whose bridge and daemon first advertise what they can do. */
+export const M0_SMINOS = '1.7.0';
+
+/**
+ * What each desk-control verb needs: a bridge op (in `presence.capabilities.ops`), a read (in its `reads`), a daemon
+ * RPC (in `machine.desk.rpcs`), and the sminos version that added it, which a fallback names.
+ */
+export const NEEDS: Record<DeskVerb, { op?: string; rpc?: string; read?: string; sminos: string }> = {
+  command: { op: 'command', rpc: 'command', sminos: M0_SMINOS },
+  status: { read: 'status', sminos: M0_SMINOS },
+};
+
+/** Whether dotted version `have` is at or above `need` (`1.10.0` above `1.9.2`); a part that is not a number counts 0. */
+export function versionAtLeast(have: string, need: string): boolean {
+  const a = have.split('.').map((p) => Number.parseInt(p, 10) || 0);
+  const b = need.split('.').map((p) => Number.parseInt(p, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return true;
+}
 
 /** `path: 'send'`: the verb is carried by a log `human` (the send path), not by its RPC. */
 export type Capability = { can: boolean; reason: string | null; note?: string; path?: 'send' };
@@ -73,13 +107,45 @@ export function capabilities(s: CapabilityInput, connected = true): Record<Verb,
   const byKind = capabilitiesByKind(s);
   // A send to a retired session is only recorded, whatever its process or its machine is doing: sminos delivers nothing
   // to a session that is not a member.
-  const can = retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') };
+  const can = { ...(retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') }), command: deskCapability(s, 'command'), status: deskCapability(s, 'status') };
   if (connected) return can;
   const off = no('not connected to the hub');
-  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off, stop: off };
+  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off, stop: off, command: off, status: off };
 }
 
-function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
+/**
+ * A desk-control verb: the kind's reason where the session cannot take one at all (no bridge, not running, offline),
+ * read-only for one that executes (an RPC), else what both presences advertise (§4): the bridge its op or read, the
+ * daemon its RPC. Where they do not, the machine's `desk.sminos` tells a stale session (the machine is updated, the
+ * session's mod loaded before) from an older machine, and names its version when the daemon says it.
+ */
+function deskCapability(s: CapabilityInput, verb: DeskVerb): Capability {
+  const name = sessionName(s);
+  switch (kindOf(s)) {
+    case 'offline':
+      return no(`${s.machine} is offline`);
+    case 'not-running':
+      return no(`${name} is not running`);
+    case 'unknown':
+      return no(`waiting for ${name}'s presence`);
+    case 'seat':
+    case 'terminal':
+      return no(`${name} runs without the bridge`);
+    case 'bridged':
+      break;
+  }
+  const need = NEEDS[verb];
+  if (need.rpc && s.machineReadOnly === true) return no(`${s.machine} is read-only: it runs nothing sent from outside it`);
+  const caps = s.presence?.capabilities;
+  const desk = s.machineDesk ?? null;
+  const bridgeHas = caps !== undefined && versionAtLeast(caps.sminos, need.sminos) && (!need.op || caps.ops.includes(need.op)) && (!need.read || caps.reads.includes(need.read));
+  const daemonHas = !need.rpc || (desk?.rpcs.includes(need.rpc) ?? false);
+  if (bridgeHas && daemonHas) return verb === 'command' && turnRunning(s) ? yes(`queued until ${name} is idle`) : yes();
+  if (!bridgeHas && desk !== null && versionAtLeast(desk.sminos, need.sminos)) return no("this session's plugin loaded before the update: run /reload-plugins in it, or restart it");
+  return no(`${s.machine}'s plugin${desk ? ` (${desk.sminos})` : ''} is older than the desk's controls: update doperpowers on ${s.machine}`);
+}
+
+function capabilitiesByKind(s: CapabilityInput): Record<KindVerb, Capability> {
   const kind = kindOf(s);
   if (s.machineReadOnly === true && kind !== 'offline') {
     const ro = no(`${s.machine} is read-only: it runs nothing sent from outside it`);

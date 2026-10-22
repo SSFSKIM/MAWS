@@ -69,21 +69,27 @@ allows today.
   condition tracks task ids, the mode is published from the bridge's own decisions and
   the frequent classic hooks, the catalog re-lists at every heartbeat, the readback rule
   applies to built-in `run` rows alone.
-- [ ] The owner's calls on §15's forks (each has a recommendation; M0–M5 need none of
-  them to start, M6 needs the first).
-- [ ] sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries `updatedInput`) lands;
-  M3 treats it as its floor.
-- [ ] M0 — foundation: capabilities, the `read` relay, the op-outcome pattern, the
-  `command` op's dispatch with five measured rows (doperpowers; MAWS).
+- [x] (2026-10-22) The owner's calls on §15's forks: F1 and F5 as recommended, F6 yes
+  under spike 14's condition, F2 and F3 not in this run, F4 and F7 the recommendations
+  (Decision Log, entries 4 and 6).
+- [x] (2026-10-22) sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries
+  `updatedInput`) landed (doperpowers #338, `2920e494`); M3 treats it as its floor.
+- [x] (2026-10-22 09:30Z) M0 — foundation: capabilities, the `read` relay, the op-outcome
+  pattern, the `command` op's dispatch with five measured rows; built, task-reviewed clean
+  and branch-reviewed at `high` in both repositories (doperpowers `desk-ctl-m0`, sminos
+  1.7.0; MAWS `desk-ctl-m0`), one late-restart reload edge deferred (Decision Log, entry
+  10). Its acceptance walk on both Macs (A1–A9, A33's paths) is the orchestrator's, after
+  the rollout of §13.
 - [ ] M1 — the command spine: the route table whole, the typeahead.
 - [ ] M2 — native panels from reads: side question, context and usage, model and effort,
   MCP, compact with instructions, status, permissions and hooks.
 - [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
   "allow and switch", the mode chip.
 - [ ] M4 — agents, fork, following an id change (three reviewed increments).
-- [ ] M5 — composer parity: attachments, `@` files, history (`!` shell on the owner's
-  yes).
-- [ ] M6 — the attach key driver for `--bg` seats (a stub until the owner answers).
+- [ ] M5 — composer parity: attachments, `@` files, history (`!` shell not in this run:
+  F3).
+- [-] M6 — the attach key driver for `--bg` seats: out of this run (F2, the owner's
+  choice, 2026-10-22; Decision Log, entry 6).
 - [ ] The latency table on #52 against the baseline, and the acceptance walk on both
   Macs.
 
@@ -385,7 +391,7 @@ carry `confirm: true`, which makes the web confirm before sending. The classes:
 
 | class | meaning | examples (2.1.307) |
 | --- | --- | --- |
-| `run` | an argument form measured to print one line and open nothing | `rename <name>`, `color <c>`, `reload-plugins`, `reload-skills`, `mcp enable\|disable\|reconnect <server>`, `cd <path>` (limited to the project's known checkouts), `goal clear`, `exit` (with `confirm`, pending fork F6) |
+| `run` | an argument form measured to print one line and open nothing | `rename <name>`, `color <c>`, `reload-plugins`, `reload-skills`, `mcp enable\|disable\|reconnect <server>`, `cd <path>` (limited to the project's known checkouts), `goal clear`, `exit` (with `confirm`, F6) |
 | `run-prompt` | a command that starts a turn, and the turn is its outcome: the built-in prompt-type commands, `goal <condition>` (S4), `plan <description>`, and every `source` other than `builtin` — skills, plugin and MCP commands, named exactly as listed (`<server>:<prompt> (MCP)`), which resolve at turn start with no panel (S5) | `init`, `security-review`, `insights`, `team-onboarding`, every skill |
 | `routed` | never run: a dedicated op, read or RPC does it, named in `to` | `model`, `effort` → `model`; `compact` → `compact`; `btw` → `btw`; `context`, `usage` → `read usage`; `plan` (bare) → the mode control, which runs `command plan`; `fork` → the `fork` RPC |
 | `follow` | changes the session id (H-sid); refused until M4, then run with following | `clear`, `branch [name]`, `resume <id>`, `background` (with `confirm` and its own condition, §8) |
@@ -1057,6 +1063,10 @@ document's own:
 ### 15. The owner's calls: open forks, each with a recommendation
 
 None of M0–M5 waits on these; each is the edge a milestone stops at until answered.
+**Ruled by the owner, 2026-10-22** (Decision Log, entry 4): F1 and F5 as recommended;
+F6 yes, narrowed by spike 14 (the `exit` row); F2 and F3 not in this run (F2 settled
+by the owner's choice between two answers, entry 6); F4 and F7 the recommendations. The text below keeps
+each fork as it was put.
 
 - **F1 — Controls whose effect outlives the session.** `/model` and `/effort` save a
   default for new sessions; `/autocompact`, `/output-style`, `/config k=v` write
@@ -1155,7 +1165,9 @@ answer.
 
 **Machine half (doperpowers).**
 
-- `sminos/hooks/mods/bridge-commands.tsx` (new): the route table for 2.1.307 from the
+- `sminos/hooks/mods/bridge-commands.tsx` (new; as built, the rule, with the table's data
+  in `bridge-routes.tsx`, generated from the fixture by `routes_check.py --write` and
+  checked against it: Decision Log, entry 7): the route table for 2.1.307 from the
   fixture (Interfaces, "The route table"), loaded as data; at M0 the `run` class is
   **enabled** for the five names above, every other `run` and every `run-prompt` row
   carrying `enabled: false` with *comes with M1* — the table is whole from M0 so that
@@ -1255,8 +1267,9 @@ answer.
   (`words.ts` gains `command`'s result and the op's phases). `depth/view/SessionInfo.tsx`:
   the engine's version, base, root, repository, surfaces from `read status`, or *not
   available from this plugin (needs sminos ≥ <M0's>)*. `latency.ts`: `read.status`,
-  `op.queued`, `op.ran`, `op.readback`, and the app-start paths (`app.cold`, `app.warm`,
-  `app.reconnect`, `app.me`, `app.chunk`, `app.state`, `app.key`), each with its label.
+  `op.queued`, `op.ran`, `op.readback`, each with its label; the app-start paths
+  (`app.cold`, `app.warm`, `app.reconnect`, `app.me`, `app.chunk`, `app.state`,
+  `app.key`) are the `desk-latency-baseline` branch's (Decision Log, entry 4).
   `docs/doperpowers/specs/2026-10-15-desk-design.md`: a dated line under DX4, DX5 and
   DX6 pointing here.
 - Tests: hub unit (`session-plane.test.ts`: `read` carried and `op` relayed; the shape
@@ -1541,7 +1554,8 @@ the engine's queue).
 
 ### M6 — The attach key driver for `--bg` seats (stub)
 
-Waits on fork F2. If the owner says yes: a daemon key driver that attaches to a `--bg`
+Out of this run: the owner chose *not in this run* for F2 (Decision Log, entry 6).
+Kept as the shape a later run would take: a daemon key driver that attaches to a `--bg`
 job under a pty, sends a key sequence, detaches, and reads the result back from rows,
 never the screen; the rows it would reach are the inventory's §3.6 (Shift+Tab ×N, Enter
 or `4` on a prompt the hooks never saw, the rewind picker by position, Esc on a panel);
@@ -1668,7 +1682,7 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 
 | type / phase | fields |
 | --- | --- |
-| `run` / `start` | `id, name, args, t` — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
+| `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; never emitted by the module a `reload-plugins` run replaces (the daemon finishes that op) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
 | `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
@@ -1688,10 +1702,15 @@ sminos 1.6.3).
 ### The route table (owner: doperpowers `sminos/tests/routes-2.1.307.json`, loaded by `bridge-commands.tsx`; vendored to MAWS `apps/desk-hub/fake-machine/dx4/`)
 
 ```ts
-Route = {class: Class, to?: string, reason?: string, forms?: Forms, outlives?: string, confirm?: true, enabled: boolean, measured: "M" | "I"}
+Route = {class: Class, to?: string, reason?: string, forms?: Forms, outlives?: string, confirm?: true, enabled: boolean, measured: "M" | "I", otherwise?: Route}
 Class = "run" | "run-prompt" | "routed" | "follow" | "panel" | "local" | "drop"
 Forms = {args: "none" | "required" | "optional", pattern?: string /* a JS RegExp source matched whole against the trimmed args */, hint?: string}
 Entry = {name: string, bare: Route, withArgs?: Route}   // `withArgs` applies when the trimmed args are non-empty; else `bare`
+// `bad-args` is no class: it is derived. With no `withArgs`, `bare` applies to both forms; args that its
+// `forms.args` forbids or requires, or that miss its `forms.pattern`, are `bad-args`. `otherwise` is the
+// route taken when `forms.pattern` misses (only `goal`: `clear` is `run`, any other text `run-prompt`);
+// without it a miss is `bad-args`. `enabled` gates a route's own action: a `panel`, `local`, `drop` or
+// `routed` route is `enabled: true` from M0, since its refusal or its routing is in force from M0.
 ```
 
 A non-built-in (`source` ≠ `builtin`) has no entry: it is `run-prompt` (enabled from M1)
@@ -1722,7 +1741,7 @@ milestone that enables it; `—` means the same as the bare route):
 | `branch` | `follow` | `follow`, optional | — | M4 |
 | `resume` | `panel` (the picker) | `follow`, required (a session id) | — | M4 (args) |
 | `background` | `follow`, confirm, under §8.3's condition | `bad-args` | the confirm names the loss (§8.3) | M4 |
-| `exit` | `run`, confirm | `bad-args` | pending fork F6; the confirm names the shells and monitors it kills | disabled |
+| `exit` | `run`, confirm, only while the bridge sees no running task (shell, monitor, agent, workflow, MCP task) and no worktree the session created; otherwise refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome is the session's `session.end`, never the settled `{}` | M1 |
 | `config` | `panel` | `drop` (*saves a default on <machine>; terminal only*, F1) | — | — |
 | `autocompact` | `panel` | `drop` (F1) | — | — |
 | `output-style` | `panel` | `drop` (F1) | — | — |
@@ -1782,7 +1801,7 @@ malformed one is `bad-shape`.
 
 | `rpc` | `args` | result (`done`) | milestone |
 | --- | --- | --- | --- |
-| `command` | `{session, name, args?}` — `name` 1–128 characters without control characters, exactly as `$.command.list()` spells it; `args` text ≤ 4,096 | `{queued: true, route, id}`; the outcome follows as `op`; a bridge refusal is `failed` with the bridge's code as the message's first word and its reason after | M0 |
+| `command` | `{session, name, args?}` — `name` 1–128 characters without control characters, exactly as `$.command.list()` spells it; `args` text ≤ 4,096 | `{queued: true, route, id}`; the outcome follows as `op`; a bridge refusal is `failed` with the message `<code>: <reason>` (the bridge's code, a colon, its reason) | M0 |
 | `compact` | gains `instructions?` (text ≤ 4,096) | unchanged | M2 |
 | `btw` | `{session, prompt}` (≤ 8,192) | `{started: true, id}`; the answer follows as `op` | M2 |
 | `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` and `mode?: PermissionMode`; at most one of the two, on an allow only | unchanged | M3 |
@@ -1988,6 +2007,16 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Evidence: the citation check of 2026-10-22 (a subagent's read of every B/, S/, W/,
   H/ cite; all 63 R/ paths exist).
 
+- Observation: A browser socket that is down when an `op end` is relayed misses it: the
+  hub does not replay session-wide messages to a browser that reconnects, so the
+  command's status line can stay *queued*. §3's "owed until the hub takes it" covers
+  the daemon → hub leg only.
+  Evidence: task 2's report, concerns; `apps/desk-hub/src/objects/project.ts` relays
+  session-wide kinds unread with no per-browser replay (under review, task 2).
+- Observation: A plugin's mod cannot import JSON and `claude plugin test` gives it no
+  filesystem, so a data table reaches a mod only as a TS module.
+  Evidence: task 1's report, decision 2.
+
 ## Decision Log
 
 - Decision: Verification. One independent spec review of the design (a
@@ -2077,6 +2106,186 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Date/Author: 2026-10-22, the spec session (b4948247), from 2-1-300-9a's re-check of
   §14 and its answers to the design reviewer's three questions.
 
+- Decision: The owner's rulings on §15, and M0's execution start. The owner ruled
+  (relayed by the orchestrator session, 2026-10-22): **F1** — of the controls that
+  outlive the session only `mcp enable|disable` is offered, labelled; the defaults
+  (model, effort, `config`, `autocompact`, `output-style`, `projectSettings`,
+  `userSettings`) stay terminal-only, as the table and §11 already have them. **F5** — a
+  rule suggestion's destinations are `session` and, labelled and only as the engine
+  itself suggests it, `localSettings` (M3, as §7 and §11 have it). **F6** — `/exit` is
+  offered behind a confirm naming the machine and that it closes the terminal session,
+  narrowed by spike 14 (2.1.307, `desk-mod-run-spikes.md` §14): with one background
+  shell running, `/exit` opened the terminal's *Background work is running … Exit and
+  stop tasks / Move to background and exit / Stay* dialog, its promise pending past
+  12 s with a queued `/color` waiting behind it (a panel, H-panel), and *Stay* resolved
+  `{}`, the same as success; from code (cli 2.1.307:209156, 616826) the dialog opens
+  whenever a task that does not stop on exit runs (shells, monitors, agents, workflows,
+  MCP tasks) or the session is in a worktree it created (*Exiting worktree session*),
+  and otherwise `/exit` exits at once. So the bridge runs `exit` only while it sees no
+  running task and no worktree of the session's own, and refuses it otherwise with *the
+  terminal would ask what to do with the running work: exit there*; the confirm
+  promises no stop of shells (with work running, nothing stops until someone answers at
+  the terminal); the outcome is the session's `session.end`, never the settled `{}`.
+  The `exit` row is enabled in M1, where the typeahead draws a route's `confirm` (M0
+  enables its five rows alone; `exit` carries `enabled: false`, *comes with M1*, until
+  then). **F3** — `!` shell (A5) is not in this run. **F2** — open: the owner answered
+  *not in this run* to the orchestrator and *include it as the run's last milestone* to
+  the research session's own question on a web terminal for `--bg` jobs; the research
+  session is asking which stands. Nothing before the run's last milestone depends on
+  it. **F4** and **F7** — the recommendations (§11's cut; fork with M4's agents and
+  following). Two execution
+  calls for M0: (1) the app-start latency paths (`app.cold`, `app.warm`,
+  `app.reconnect`, `app.me`, `app.chunk`, `app.state`, `app.key`) are left to the
+  `desk-latency-baseline` branch, which is adding them now with its harness under
+  `spikes/desk-latency/`; M0 adds only its own paths (`read.status`, `op.*`), and
+  whichever of the two lands second merges master in. (2) M0 is built as two tasks in
+  parallel, one per repository, each proving its half against the stand-in the other
+  repository keeps; the route fixture is written first, in doperpowers, and vendored to
+  MAWS before either half consumes it. The refresh pass found one change at the
+  doperpowers base since the spec's pin (`646cb02c` → `a49fb156`): sminos 1.6.3
+  (`bridge-plan-allow`, `bridge-requests.tsx`), which M0 does not consume; MAWS master is
+  the spec's own merge (`6f7f38ae1`).
+  Rationale: the rulings settle every fork the run would have stopped at; the
+  latency split keeps two branches from writing the same marks; the two halves meet
+  only at the wire shapes Interfaces fixes and the one fixture.
+  Date/Author: 2026-10-22, the M0 plan-executor for the orchestrator session (b4948247).
+
+- Decision: The route fixture's shape, from writing it (doperpowers `9cdd2a2b`,
+  `sminos/tests/routes-2.1.307.json`, 72 built-ins and the `diff` exception). The
+  table's `bad-args` cells are derived from `forms` rather than being a class; `goal`'s
+  two with-args routes need `Route.otherwise` (the route on a pattern miss); `enabled`
+  is `true` for every refusing or routing class, `false` for `plan` bare (*comes with
+  M3*) and every `follow` row (*comes with M4*); `usage` is `panel` to `read usage` (A4
+  needs the panel refusal) while `context` is `routed` to it; each route's `measured`
+  mark is derived from the inventory's appendix, the probe and the spikes, the table
+  having none per row; `outlives` is stored as plain text. Interfaces gains the
+  derivation and `otherwise`.
+  Rationale: the table's prose cells did not map onto the declared shape one to one;
+  both halves read the fixture, so its shape is fixed before either half is built.
+  Date/Author: 2026-10-22, the M0 plan-executor, from the fixture task's report.
+
+- Decision: F2 closed — M6 (the attach key driver, and a web terminal for `--bg`
+  jobs) is out of this run. Asked by the research session to choose between their two
+  answers (entry 4), the owner chose *not in this run*, the answer they gave the
+  orchestrator.
+  Rationale: the owner's call; it supersedes entry 4's "F2 open".
+  Date/Author: 2026-10-22, the M0 plan-executor, relayed by the orchestrator session
+  (b4948247).
+
+- Decision: The machine half of M0 as built (doperpowers `fcf9c5a2`, task 1), the
+  calls a later reader needs. (1) The route table reaches the mod as a TS module,
+  `bridge-routes.tsx`, generated from the fixture (`routes_check.py --write`, a check
+  failing on drift), since mods import only TS and `claude plugin test` has no
+  filesystem; `bridge-commands.tsx` keeps the rule. (2) A bridge refusal fails the
+  `command` RPC with the message `<code>: <reason>`, the convention the MAWS half
+  parses (DX6 revised). (3) The child keeps a run's `end` beside the answer it keeps
+  under the nonce (`rpcs[nonce].end`), and the daemon's `recover_ops()` sends, once a
+  second per outstanding op, an end no stream brought: without it A8 fails whenever the
+  turn ends while the daemon is down, since the requests reader never sees the event
+  (§3's "owed" covers the daemon → hub leg; this closes the child → daemon one). (4) A
+  `reload-plugins` op is finished by effect when the answering child's (socket inode,
+  pid) changes, not the inode alone, since an unlinked inode can be reused. (5) `op` and
+  `read` go up only when `welcome.kinds` lists them (owed `op` messages are dropped and
+  logged otherwise); `presence.capabilities` and `machine.desk` are not gated, the
+  deployed hub passing the first and rebuilding the body that holds the second. (6) The
+  route check refused by class before the form check (reversed in the fix wave: entry
+  9); a disabled `run` row answers
+  `disabled` with its reason; an engine older than every table measures `none` and
+  refuses every built-in as not measured. (7) The Esc refusal is caught as the answer
+  (`stopped`) when the engine rejects within 250 ms; a queued run that meets it later
+  ends `settled {ok: false, error, code: "stopped"}`. (8) The `status` read omits
+  `repo.branch`, which `$.session.repo()` does not give. (9) The fixture's `effort`
+  reason names `/effort`.
+  Rationale: each is the spec's intent met where its text did not reach the code
+  (mods cannot read JSON; a restart can swallow an end; inodes recur).
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from task 1's report.
+- Decision: The hub-and-web half of M0 as built (MAWS `7ce3584e3`..`e2e13cf11`, task 2).
+  (1) The web keeps `ops` by nonce across a reconnect (the daemon owes the outcome
+  under it); an `op` with a null `rpc` (CLI-started) is not drawn; an `end` is never
+  replaced by a repeated `start`. (2) `op.ran.busy` is its own latency path, §12's
+  "kept apart, labelled". (3) At M0 the `mcp enable|disable` label is the web's own
+  (A9's words); from M1 the catalog's `outlives` replaces it. (4) A read-only machine
+  does not withhold the `status` read: a read is no RPC. (5) A malformed `machine.desk`
+  refuses the machine frame `bad-shape`, its lists bounded at 64 names of 64
+  characters. (6) `welcome.kinds` lists every session kind the hub knows. (7) `M0_SMINOS`
+  is `1.7.0` in the web and the fake machine. (8) The Info tab reads `status` on mount,
+  on *Refresh*, and once per subscription open after the first; never on a presence.
+  (9) The fixture is imported as JSON in the fake machine, its CLI running bundled. (10)
+  Master merged in (`e2e13cf11`, desk-latency-baseline #120): the `latency.ts` PATHS
+  union; command samples pass the nonce as the recorder's `ref`.
+  Rationale: as task 2's report argues each; recorded so M1's executor reads them.
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from task 2's report.
+
+- Decision: The fix waves after M0's task reviews (doperpowers `a2f4a444`, `f7cfaa3d`;
+  MAWS `b28519272`, `26c988573`, `9afee68ae`). Machine half: (1) a route's `forms` are
+  checked before its class, so `/clear extra` is `bad-args`, not `follow` (the fake
+  machine already did; entry 7's item 6 reversed). (2) A reload is the module's last act:
+  its `queued` answer and `run start` reach the child before `$.command.run` is called
+  (the start's acknowledgement awaited at most 10 s, `RELOAD_TAKEN_WAIT_MS`; a start not
+  taken is not run and ends `{ok: false}`); a desk command arriving while a reload is
+  queued or running is refused with *the plugins are reloading: send it again once the
+  session answers from its reloaded bridge*, carrying no code (none in the DX5 list
+  fits; the web draws it as a plain failure with the reason); a module that outlives its
+  reload holds the desk 60 s (`RELOAD_HOLD_MS`); an Esc refusal of a queued reload ends
+  the run `settled {ok: false, error, code: "stopped"}`, which the web draws with the
+  terminal's guidance. (3) A reload's `run start` names the child it left from (`child:
+  [inode, pid]`, DX5 revised), so a reload from the CLI, which carries no nonce, is
+  finished by effect from the start alone; a start naming no child fails at 60 s, since
+  without it no successor can be told from the predecessor. (4) A command claim keeps
+  `op_name` and `op_args` before dispatch; reconcile re-arms a claim it answers `done`
+  by writing its `op_id` to the still-open claim before the outcome, so a stop between
+  the two writes leaves a claim the next restart re-arms; a failed id write leaves the
+  claim unanswered until a later pass. Web: `op.queued` survives an early `op end`, each
+  mark taken once; `op.readback` is marked where `CommandStatus` commits that nonce's
+  outcome, and an outcome nobody draws gives no sample; a failed *Refresh* draws its
+  error beside the kept answer; the fake machine lists a plugin exception by its bare
+  name.
+  Rationale: the task reviews found A8's outcome lost in two restart windows and a
+  reload that could swallow its own acknowledgement; each fix keeps §3's guarantee
+  that an issued command's outcome reaches the desk.
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from the fix waves' reports
+  and both task reviews.
+
+- Decision: The fixes after the doperpowers branch review (`4cab5c44`), and the one
+  finding left. (1) The plane numbers its probes as they begin, and a reload counts as
+  done only on a different child seen by a probe begun after the daemon first looked at
+  the op (ordinals, since the plane's clock is monotonic and the daemon's is wall time);
+  a cached predecessor is no evidence. (2) `recover_ops()` reads a reload's kept end like
+  any op's, so a reload the engine refused while the daemon was down ends as the child
+  kept it; only a reload that ran (module gone, nothing kept) is left to the effect
+  check. (3) A respawned child rebuilds its id → nonce map from its kept `command`
+  answers that have no end. Left, recorded as an unresolved review finding on the
+  doperpowers PR: the probe fence can turn a reload that succeeded while the daemon was
+  down into a false 60 s timeout when the daemon returns within a probe of the claim's
+  deadline, since the deadline still runs from the claim; the fix is to run the
+  deadline from the daemon's first look (or grant one fresh probe before failing).
+  Rationale: the three fixes close the ways an outcome could be lost or falsely
+  confirmed; the one left needs a daemon outage ending within ~2 s of a reload's 60 s
+  deadline, reports a failure the transcript contradicts rather than a false success,
+  and the third review round on the same path is where the loop stops.
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from the reviewer-high
+  rounds on doperpowers.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**M0 (2026-10-22).** Built in both repositories as two parallel tasks against the
+Interfaces and one route fixture, each proved against the other repository's stand-in:
+doperpowers `desk-ctl-m0` (sminos 1.7.0: the route table and its check, the `read` and
+`command` ops, the child's capabilities and nonce keeping, the daemon's `command` RPC,
+`op` outcomes owed and recovered across restart and reload, the `read` relay, `sminos
+command` and `sminos read`), MAWS `desk-ctl-m0` (the protocol's new fields, kinds and
+frame, the hub's shape checks and `welcome.kinds`, the fake machine's M0 producer, the
+web's capabilities from both presences with the three fallbacks, the composer's slash
+path and `CommandStatus`, the Info tab's status read, M0's latency paths). What the
+reviews found was concentrated where the spec said the risk was: the op-outcome
+guarantee. The task reviews and the doperpowers branch review found five ways an
+outcome could be lost or falsely confirmed across a daemon restart, a reload or a child
+respawn — none visible to a happy-path test — and each became a red test first; the
+MAWS reviews found latency marks that measured receipt rather than the draw §12 names.
+Not yet shown: the acceptance on the owner's Macs (A1–A9, A33's paths), which needs the
+deployed hub and the rollout; the fake machine does not model A8, which rests on the
+machine half's tests and the walk. For M1: the route fixture's reading (entries 5, 9)
+is the one source both halves read; the web's `outlives` label is local until the
+catalog carries it; a browser that misses an `op end` while its socket is down shows
+*queued* (Surprises) — a replay or a resync of owed outcomes to a reconnecting browser
+is the open design question, not settled by M0.

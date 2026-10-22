@@ -42,7 +42,9 @@
 // snapshot and after each main turn) and answers `diff()` with the working tree's diff against its base branch: both
 // are kept in the state for the column's Info and Diff tabs. The diff is asked for only when the view says so (its tab
 // opening, the reader's refresh), never polled; a request lost to an interruption or an end is asked again once the fresh
-// snapshot is in.
+// snapshot is in. The engine's status (`read status`, the desk control surface spec's M0) is read when the Info tab says
+// so and again once per subscription open after that — a reload in the session can change it — never on a presence; a
+// Refresh's answer is the one kept, the answer before it drawn until it comes.
 //
 // Disruptions (DX8). An interruption (a gap, a dropped socket, a hub restart, the bridge's own discontinuity) keeps what
 // is drawn — the held rows and their marks, the tree, the jobs, the usage, the streaming layer's blocks — while the
@@ -75,13 +77,13 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
-import type { Job, JsonObject, McpServer, SessionBodies, SubagentMeta, Usage } from 'desk-hub/protocol';
+import type { Job, JsonObject, McpServer, SessionBodies, StatusRead, SubagentMeta, Usage } from 'desk-hub/protocol';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { createBackfillContext, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../../../src/engine-host/fs/backfill';
 import type { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import { emptyGraph, type TaskGraph } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import type { TranscriptSource } from '../../../../../src/renderer/src/transcript/source/types';
-import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage } from '../../shell/session-plane';
+import { ReadError, transcriptKey, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage } from '../../shell/session-plane';
 import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
 import { OutputRequests } from '../jobs/output-requests';
@@ -134,6 +136,11 @@ export type DepthTranscriptState = {
   usage: Usage | null | undefined;
   /** The working tree's diff: null until asked for; `pending` while an answer is awaited, the last answer kept meanwhile. */
   diff: { pending: boolean; answer: SessionBodies['diff'] | null } | null;
+  /**
+   * The engine's status (`read status`), a main-thread subscription's only: null until asked for; `pending` while an
+   * answer is awaited, the last answer kept meanwhile; `error` the read's refusal when the latest ask was refused.
+   */
+  status: { pending: boolean; answer: StatusRead | null; error: string | null } | null;
   /** The model of the transcript's latest response among the held rows (DX8: the model comes from the transcript). */
   model: string | null;
 };
@@ -350,6 +357,8 @@ export class DeskTranscript {
   private olderAsked: number | null = null;
   /** The id of the subscription whose snapshot is held (`latency.ts` names its samples by it). */
   private sub: string | undefined = undefined;
+  /** The asks of `read status` made so far: an answer is taken only for the latest. */
+  private statusAsks = 0;
   /** The jobs view's open outputs, asked for on this subscription (a main-thread one's). */
   readonly outputs = new OutputRequests((taskId, tail) => {
     if (!this.serving || this.subscription === null) return false;
@@ -378,6 +387,7 @@ export class DeskTranscript {
       mcp: null,
       usage: undefined,
       diff: null,
+      status: null,
       model: null,
     }));
   }
@@ -429,6 +439,33 @@ export class DeskTranscript {
     if (this.target.agentId !== null) return;
     this.state.setState((s) => ({ diff: { pending: true, answer: s.diff?.answer ?? null } }));
     if (this.serving) this.subscription?.diff();
+  }
+
+  /**
+   * Reads the engine's status (a main-thread subscription's only), and again on each fresh subscription after this. While
+   * the subscription is down the read waits for the fresh snapshot.
+   */
+  requestStatus(): void {
+    if (this.target.agentId !== null) return;
+    this.state.setState((s) => ({ status: { pending: true, answer: s.status?.answer ?? null, error: null } }));
+    if (this.serving) this.readStatus();
+  }
+
+  private readStatus(): void {
+    const subscription = this.subscription;
+    if (subscription === null) return;
+    const ask = ++this.statusAsks;
+    this.state.setState((s) => ({ status: { pending: true, answer: s.status?.answer ?? null, error: null } }));
+    subscription.read('status').then(
+      (answer) => {
+        if (ask === this.statusAsks) this.state.setState({ status: { pending: false, answer: answer as StatusRead, error: null } });
+      },
+      (error: unknown) => {
+        // Cut by a disruption: the fresh subscription asks again.
+        if (ask !== this.statusAsks || (error instanceof ReadError && error.code === 'interrupted')) return;
+        this.state.setState((s) => ({ status: { pending: false, answer: s.status?.answer ?? null, error: error instanceof Error ? error.message : String(error) } }));
+      },
+    );
   }
 
   /** One agent's blocks still streaming on this subscription (the main one carries every agent's). */
@@ -524,6 +561,7 @@ export class DeskTranscript {
     this.state.setState({ phase: 'live', ended: null, more, loadingOlder: false, usage: this.target.agentId === null ? (body.usage ?? null) : undefined });
     this.setJobs(body);
     if (this.state.getState().diff?.pending) this.subscription?.diff(); // a request the disruption lost
+    if (this.state.getState().status !== null) this.readStatus(); // once per subscription open, once the tab has asked
     this.outputs.resend(); // the outputs the disruption lost
     this.publish();
   }

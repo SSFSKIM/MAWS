@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DownFrame } from '../src/protocol/machine';
+import { SESSION_KINDS } from '../src/protocol/session';
 import { ADMIN, DEPLOY_VARS, ORG, startHub, type Hub } from './support/hub';
 
 const PROJECT = '6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f';
@@ -114,9 +115,11 @@ describe("a machine's stream, held by its Machine object", () => {
     return { stub, next, cancel: () => reader.cancel() };
   }
 
-  it("opens with a welcome naming the machine and its connection generation, then the org's directory, and a newer stream ends the older", async () => {
+  it("opens with a welcome naming the machine, its connection generation and the session kinds the hub lists, then the org's directory, and a newer stream ends the older", async () => {
     const first = await open('mini');
-    expect(await first.next()).toEqual({ event: 'welcome', frame: { t: 'welcome', org: ORG, machine: 'mini', generation: 1, heartbeat_ms: 15_000 } });
+    expect(await first.next()).toEqual({ event: 'welcome', frame: { t: 'welcome', org: ORG, machine: 'mini', generation: 1, heartbeat_ms: 15_000, kinds: [...SESSION_KINDS] } });
+    // The kinds the desk control surface adds are listed, so a daemon sends them to this hub (the spec's §13.3).
+    expect(SESSION_KINDS).toEqual(expect.arrayContaining(['read', 'op', 'catalog']));
     expect(await first.next()).toMatchObject({ event: 'org', frame: { t: 'org', projects: expect.any(Array), machines: expect.any(Array) } });
     const second = await open('mini');
     expect(await second.next()).toMatchObject({ frame: { t: 'welcome', generation: 2 } });

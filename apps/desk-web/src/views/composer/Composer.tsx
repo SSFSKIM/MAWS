@@ -5,19 +5,24 @@
 // session cannot do is drawn disabled with §5's reason; how what it can do will land is said under it. On a phone,
 // model and compact sit behind More, so the verbs that move a turn keep the row, and Return makes a new line — posting
 // is the button (mockups/desk/05-phone.html, 4–5); a desk keeps Return to post. Typing an @ among the tags that open a
-// group post lists the project's live members to pick from (4c).
+// group post lists the project's live members to pick from (4c). A `/name args` typed in a direct channel is a command
+// (the desk control surface spec, 2026-10-22, §3): run on Send or on Enter, mid-turn too — the session queues it until
+// the turn ends — or, when the session cannot take it, refused in place with the capability's reason and sent as words
+// only when asked.
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { useStore } from 'zustand';
 import { formatCount } from '@shared/app/date-format';
 import { address } from '../../conversation/address';
 import { complete, completionAt, insertTag, type Completion } from '../../conversation/completion';
 import { turnRunning, type Capability } from '../../conversation/capabilities';
+import { parseCommand } from '../../conversation/command';
 import { sessionName } from '../../log/projection';
 import { useNarrow } from '../../shell/viewport';
 import type { DeskSession } from '../../shell/sessions';
 import { useProjectModels } from '../../state/models';
 import { useCapabilities, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
+import { CommandStatus } from './CommandStatus';
 
 const BOX = 'w-full resize-none rounded-md border border-border-strong bg-bg px-3 py-2 text-ui text-fg outline-accent focus-visible:outline-2';
 const BUTTON = 'rounded-sm border border-border-strong px-2.5 py-1 text-ui-sm text-fg hover:bg-bg-hover disabled:cursor-not-allowed disabled:text-fg-faint disabled:hover:bg-transparent';
@@ -133,35 +138,58 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 export function SessionComposer({ session }: { session: DeskSession }) {
   const { connection, member } = useDesk();
   const [text, setText] = useState('');
-  const [rpc, setRpc] = useState<string | null>(null);
+  const [rpc, setRpc] = useState<{ nonce: string; command: boolean } | null>(null);
+  const [refusal, setRefusal] = useState<{ text: string; reason: string } | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const narrow = useNarrow();
   const [more, setMore] = useState(false);
   const can = useCapabilities(session);
   const running = turnRunning(session) && session.machineOnline !== false;
   const target = { session: session.session, alias: session.alias };
-  const issue = async (promise: Promise<string>) => setRpc(await promise);
+  const issue = async (promise: Promise<string>, command = false) => setRpc({ nonce: await promise, command });
+  const typed = parseCommand(text);
+
+  /** A typed command runs, or is refused in place; true when the text was one. */
+  const commanded = (): boolean => {
+    if (!typed) return false;
+    if (can.command.can) {
+      void issue(connection.command(member, session.machine, session.session, typed.name, typed.args, running), true);
+      setRefusal(null);
+      setText('');
+    } else setRefusal({ text, reason: can.command.reason ?? 'this session takes no commands' });
+    return true;
+  };
+  const sendAsText = () => {
+    if (!refusal) return;
+    void connection.say(member, [target], refusal.text, false);
+    setRefusal(null);
+    setText('');
+  };
+  const edit = (value: string) => {
+    setText(value);
+    setRefusal(null);
+  };
 
   const send = () => {
-    if (!text.trim() || !can.send.can) return;
+    if (!text.trim() || commanded() || !can.send.can) return;
     void connection.say(member, [target], text, false);
     setText('');
   };
   const steer = () => {
-    if (!text.trim() || !can.steer.can) return;
+    if (!text.trim() || commanded() || !can.steer.can) return;
     // §5: a terminal session without the bridge takes a steer as a send (a log `human`), read at its next tool round.
     if (can.steer.path === 'send') void connection.say(member, [target], text, false);
     else void issue(connection.rpc(member, session.machine, 'steer', { session: session.session, text }));
     setText('');
   };
-  const reasons = [can.send.note, !running ? null : can.steer.can ? (can.steer.path === 'send' ? `Steer is ${can.steer.note}` : null) : can.steer.reason].filter(Boolean);
+  const reasons = [can.send.note, !running ? null : can.steer.can ? (can.steer.path === 'send' ? `Steer is ${can.steer.note}` : null) : can.steer.reason, typed && can.command.can && can.command.note ? `a command is ${can.command.note}` : null].filter(Boolean);
   return (
     <div className="shrink-0 border-t border-border px-4 py-3" data-testid="composer">
       <textarea
         aria-label={`Message ${sessionName(session)}`}
         rows={2}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => edit(e.target.value)}
         onKeyDown={submitOnEnter(running && can.steer.can ? steer : send, narrow)}
         className={BOX}
         placeholder={running && can.steer.can ? `Steer ${sessionName(session)}${narrow ? '' : ' (Enter)'}, or Send to queue it` : `Message ${sessionName(session)}`}
@@ -185,8 +213,18 @@ export function SessionComposer({ session }: { session: DeskSession }) {
           </>
         )}
         <Compaction session={session.session} />
-        <RpcStatus nonce={rpc} className="ml-auto" />
+        {rpc?.command ? <CommandStatus nonce={rpc.nonce} session={session} className="ml-auto" /> : <RpcStatus nonce={rpc?.nonce ?? null} className="ml-auto" />}
       </div>
+      {refusal && (
+        <p className="m-0 mt-1 text-ui-sm text-danger" role="alert" data-testid="command-refused">
+          {refusal.reason}{' '}
+          {can.send.can && (
+            <button type="button" className="underline hover:text-fg" onClick={sendAsText}>
+              Send as text anyway
+            </button>
+          )}
+        </p>
+      )}
       {modelOpen && can.model.can && (
         <ModelForm
           onApply={(model, effort) => {

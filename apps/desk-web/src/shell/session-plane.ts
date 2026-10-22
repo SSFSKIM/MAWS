@@ -1,17 +1,17 @@
 // DX8 — the session plane as the shell hands it to the depth panel (DC6): one DX4 subscription per transcript, kept
 // whole by the hub client. A consumer never sees a gap in `n`, a frame of a subscription it gave up, or a dropped
 // socket: the client turns each discontinuity into `interrupted` and subscribes again, and a fresh snapshot follows.
-import type { SessionBodies, SessionMessage, SubscriptionKind } from 'desk-hub/protocol';
+import type { JsonObject, JsonValue, ReadErrorCode, SessionBodies, SessionMessage, SubscriptionKind } from 'desk-hub/protocol';
 
 /** One transcript: a session's main thread (`agentId` null) or one of its subagents. */
 export type SessionTarget = { machine: string; session: string; agentId: string | null };
 
 /**
- * The messages a subscription delivers to its listener: everything of DX4's subscription kinds but `end` — `usage`
- * (context use and cost, main-transcript subscriptions only) and `output` (a task's output tail, answering `output()`)
- * passed through like the rest.
+ * The messages a subscription delivers to its listener: everything of DX4's subscription kinds but `end` and `read` —
+ * `usage` (context use and cost, main-transcript subscriptions only) and `output` (a task's output tail, answering
+ * `output()`) passed through like the rest; a `read`'s answer settles the promise `read()` returned instead.
  */
-export type SubscriptionMessage = SessionMessage<Exclude<SubscriptionKind, 'end'>>;
+export type SubscriptionMessage = SessionMessage<Exclude<SubscriptionKind, 'end' | 'read'>>;
 
 export interface SubscriptionListener {
   /** In order: `snapshot` (n 0) first, then n = 1, 2, … with no gap. */
@@ -42,8 +42,27 @@ export interface Subscription {
    * `tail` is brought within 1 to 524288 bytes; a `taskId` the engine never spells (`isTaskId`) is not asked for.
    */
   output(taskId: string, tail: number): void;
+  /**
+   * A read of the session (the desk control surface spec, §5): one DX3 `read` on the subscription, and its DX4 answer
+   * correlated by id, which never reaches the listener. Resolves with the answer's `result`; rejects with a `ReadError`
+   * carrying the answer's `error`, `timeout` past 15 s (the machine's own 10 s and the hops), `interrupted` when the
+   * subscription dropped or closed before the answer (ask again once a fresh snapshot is in), and `unsupported` at once
+   * on a subagent's subscription (every M0 kind is the main transcript's).
+   */
+  read(what: string, args?: JsonObject): Promise<JsonValue>;
   /** Ends the subscription; the listener hears nothing more. */
   close(): void;
+}
+
+/** Why a read was not answered: the machine's codes (DX4 `read`'s `error`), or `interrupted`, this browser's own. */
+export class ReadError extends Error {
+  override readonly name = 'ReadError';
+  constructor(
+    readonly code: ReadErrorCode | 'interrupted',
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 export interface SessionPlane {

@@ -1,7 +1,7 @@
 // DX4 — session-plane messages: the envelope (DC3's) and the three shapes the hub interprets. Everything inside a
 // body that comes from the engine (transcript rows, `turn.step` chunks, session records, subagent meta) passes through
 // verbatim and is typed as an open object.
-import type { JsonObject } from './json';
+import type { JsonObject, JsonValue } from './json';
 import type { Mac } from './log';
 
 /** A pending permission prompt or question, as the bridge reports it. */
@@ -140,7 +140,89 @@ export type SessionPresence = {
   /** `status`, `waitingFor`, and `needs` of `~/.claude/sessions/<pid>.json` verbatim; null when no process is live. */
   record: JsonObject | null;
   bridge: boolean;
+  /**
+   * What the session's bridge can do, from its `GET /status` (the desk control surface spec, 2026-10-22, §4): absent
+   * from a daemon older than that spec's M0, and from a session whose mod loaded before its machine's update (a stale
+   * session, until `/reload-plugins` or a restart). A sibling of `bridge`, never under it: the hub refuses a non-boolean
+   * `bridge`, and passes this field through unread.
+   */
+  capabilities?: Capabilities;
+  /** The bridge's reading of the session's permission mode and when it was read (M3); absent before any reading. */
+  mode?: ModeReading;
 };
+
+/**
+ * A bridge's capabilities (DX5 `GET /status`): the loaded mod's own plugin version, its protocol, the engine's release
+ * base, the ops it answers, the read kinds it serves, and the engine base its route table was measured on (behind
+ * `engine` when the engine is newer than every table it carries).
+ */
+export type Capabilities = { sminos: string; protocol: number; engine: string; ops: string[]; reads: string[]; routes: { measured: string } };
+
+/** A permission mode as the bridge last read it, `at` epoch ms on the machine's clock. */
+export type ModeReading = { mode: string; at: number };
+
+/**
+ * What a machine's daemon can do itself (the machine presence's `desk`): the plugin's version on the machine, the RPC
+ * names it executes, the read kinds the plane answers without a bridge. A hub older than the desk control surface's M0
+ * rebuilds the machine body without it; the web then names an older plugin without its number.
+ */
+export type DeskCapabilities = { sminos: string; rpcs: string[]; reads: string[] };
+
+/** Why a read was not answered: no bridge to ask, a kind it does not serve, the machine's wait ran out, too many in
+ * flight on the sub, or the call failed. */
+export type ReadErrorCode = 'no-bridge' | 'unsupported' | 'timeout' | 'busy' | 'failed';
+
+/** The answer to a browser's DX3 `read`, on the sub that asked: `result` or `error`, never both. */
+export type ReadAnswer = { id: string; what: string; result?: JsonValue; error?: { code: ReadErrorCode; message: string } };
+
+/** `read status`'s result: the engine and where the session runs, from the bridge's `$` (the repository's remote
+ * stripped of any userinfo). */
+export type StatusRead = {
+  version: { version: string; base?: string; builtAt?: string };
+  model: string | null;
+  cwd: string;
+  root: string;
+  repo: { remote?: string; branch?: string } | null;
+  surfaces: string[];
+  override: { model: string | null; effort: string | null } | null;
+  mode?: ModeReading;
+};
+
+/** A command's class in the bridge's route table (the desk control surface spec, §2). */
+export type RouteClass = 'run' | 'run-prompt' | 'routed' | 'follow' | 'panel' | 'local' | 'drop';
+
+/** One route of the table (Interfaces, "The route table"): `otherwise` is the route taken when `forms.pattern` misses. */
+export type Route = {
+  class: RouteClass;
+  to?: string;
+  reason?: string;
+  forms?: { args: 'none' | 'required' | 'optional'; pattern?: string; hint?: string };
+  outlives?: string;
+  confirm?: true;
+  enabled: boolean;
+  measured: 'M' | 'I';
+  otherwise?: Route;
+};
+
+/** A session's command catalog (M1): every command `$.command.list()` lists, with the route each gets, and its models. */
+export type Catalog = {
+  fingerprint: string;
+  commands: Array<{ name: string; description: string; source: string; plugin?: string; route: Route }>;
+  models: { options: string[]; aliases: Record<string, string | null> };
+  measured: string;
+};
+
+/** What a command's run reports back about its effect (§6): the settled text, the linked transcript row, the effect the
+ * daemon checked, or nothing linkable (*ran, unconfirmed*). */
+export type Readback = { how: 'text' | 'row' | 'effect' | 'none'; text?: string; uuid?: string };
+
+/**
+ * An async op's outcome, outside any subscription, to every browser of the project (§3): `rpc` the nonce of the DX6 RPC
+ * that asked, or null for an op started elsewhere (the CLI). A `command`'s `start` carries `name` and `args`; its `end`
+ * adds `settled` (the engine's promise: `{ok: true, text?}` or `{ok: false, error}`) and `readback`. The hub relays it
+ * without reading it.
+ */
+export type OpBody = { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue };
 
 /**
  * A session's context use and cost: the bridge's `usage` event (DX5) verbatim, after each main turn, from the engine's
@@ -157,6 +239,9 @@ export type MachinePresence = {
   online: boolean;
   policy: { read_only: boolean; ceiling: string };
   checkouts: Array<{ path: string; branch: string }>;
+  /** What the daemon itself can do (`DeskCapabilities`); absent from a daemon or a hub older than the desk control
+   * surface's M0. */
+  desk?: DeskCapabilities;
 };
 
 export type SessionBodies = {
@@ -212,6 +297,10 @@ export type SessionBodies = {
   output: TaskOutput;
   /** After each main turn, on main-scope subs only: the one source of a session's context use and cost on the web. */
   usage: Usage;
+  /** The answer to a browser's `read` (DX3), on the sub that asked, by its `id`: relayed unread. */
+  read: ReadAnswer;
+  /** The session's command catalog when it changes (M1), on main subs only: relayed unread. */
+  catalog: Catalog;
   /**
    * The subscription is over; the browser subscribes again for a fresh snapshot when it wants one. `discontinuity`:
    * the bridge's own stream lost events (DX5's `gap`), so the live part no longer follows the snapshot.
@@ -232,6 +321,8 @@ export type SessionBodies = {
     skip?: string;
     error?: string;
   };
+  /** An async op's start and end (`OpBody`), keyed by its RPC's nonce, as `compact` is: relayed unread. */
+  op: OpBody;
   machine: MachinePresence;
   raised: Raised;
   settled: Settled;
@@ -354,7 +445,7 @@ export type TaskOutput =
 export type SessionKind = keyof SessionBodies;
 
 /** The kinds that belong to a subscription (`sub` and `n` set); the rest are published to every browser of the project. */
-export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'step-end', 'rows', 'subagents', 'diff', 'usage', 'output', 'end'] as const satisfies readonly SessionKind[];
+export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'step-end', 'rows', 'subagents', 'diff', 'usage', 'output', 'read', 'catalog', 'end'] as const satisfies readonly SessionKind[];
 export type SubscriptionKind = (typeof SUBSCRIPTION_KINDS)[number];
 
 /** The kinds the hub interprets; it relays every other kind without reading its body. */
@@ -371,13 +462,20 @@ type Envelope<K extends SessionKind, Session extends string | null, Sub extends 
 };
 
 /** The kinds published to every browser of the project, outside any subscription, naming a session. */
-export const SESSION_WIDE_KINDS = ['presence', 'compact', 'raised', 'settled', 'delivery'] as const satisfies readonly SessionKind[];
+export const SESSION_WIDE_KINDS = ['presence', 'compact', 'op', 'raised', 'settled', 'delivery'] as const satisfies readonly SessionKind[];
+
+/**
+ * Every session kind this hub lists, as its `welcome` names them to a machine (DX2 `welcome.kinds`): a daemon sends a
+ * kind the desk control surface adds (`read`, `op`, `catalog`) only to a hub whose welcome lists it, since an older hub
+ * refuses an unlisted kind `bad-shape`.
+ */
+export const SESSION_KINDS: readonly SessionKind[] = [...SUBSCRIPTION_KINDS, ...SESSION_WIDE_KINDS, 'machine'];
 
 /**
  * The envelope, discriminated by `kind`. A subscription's kinds carry `session`, `sub`, and `n`: 0 for the snapshot,
  * then n = 1, 2, … (`end` may come first, at n 0: a subscription ended before its snapshot could be taken, with the
- * reason it would carry later); a gap makes the browser subscribe again. `presence`, `compact`, `raised`, `settled`, and
- * `delivery` carry `session` with `sub` and `n` null; `machine` carries all three null.
+ * reason it would carry later); a gap makes the browser subscribe again. `presence`, `compact`, `op`, `raised`,
+ * `settled`, and `delivery` carry `session` with `sub` and `n` null; `machine` carries all three null.
  */
 export type SessionMessage<K extends SessionKind = SessionKind> = {
   [P in K]: P extends 'snapshot'

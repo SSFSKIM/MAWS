@@ -31,6 +31,7 @@ import { readLimited } from '../drain';
 import { CLIENT_HEADER, heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
 import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type OrgFrame, type PostAnswer, type RefusedFrame, type UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
+import { SESSION_KINDS } from '../protocol/session';
 import { described, PROJECT_ID, type MachineContext } from './project';
 
 /** Why a stream ended, as its log line says. */
@@ -241,7 +242,9 @@ export class Machine extends DurableObject<Env> {
     note({ event: 'open', machine, generation, instance: this.life });
     // The client's close reaches the object as the request's abort (compatibility flag enable_request_signal).
     request.signal.addEventListener('abort', () => this.end(stream, 'client-closed'));
-    void this.write(stream, { t: 'welcome', org, machine, generation, heartbeat_ms: heartbeatMs }, false);
+    // `kinds`: every session kind the project objects list, so a daemon sends a kind added since its hub's deploy (the
+    // desk control surface's `read`, `op`, `catalog`) only to a hub that relays it.
+    void this.write(stream, { t: 'welcome', org, machine, generation, heartbeat_ms: heartbeatMs, kinds: [...SESSION_KINDS] }, false);
     // A stream the Registry could not give its directory ends before anything else is written on it: the daemon
     // reconnects, and its next stream asks again. Nothing waits for a change that may never come.
     stream.ready = this.env.REGISTRY.get(this.env.REGISTRY.idFromName(org))

@@ -2,11 +2,12 @@
 // backoff and a fresh resume after every discontinuity, nothing assumed delivered that the hub did not acknowledge, and
 // the session plane's subscriptions (DX8) kept whole across gaps and dropped sockets.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BROWSER_SET_LIMIT, newNonce, seal, importOrgKey, type HumanDraft, type LogEvent, type SessionMessage } from 'desk-hub/protocol';
+import { BROWSER_SET_LIMIT, newNonce, seal, importOrgKey, type HumanDraft, type LogEvent, type SessionBodies, type SessionMessage } from 'desk-hub/protocol';
 import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { ProjectClient, type ConnectionStatus, type RpcStateFrame } from './project-client';
 import type { SubscriptionListener } from '../shell/session-plane';
+import { latency } from '../latency/latency';
 
 const until = async (check: () => boolean, ms = 3000) => {
   const start = Date.now();
@@ -30,7 +31,7 @@ afterEach(async () => {
   await double.close();
 });
 
-function client(options: { held?: () => number; frameLimit?: number; resubscribeDelay?: (attempt: number) => number } = {}) {
+function client(options: { held?: () => number; frameLimit?: number; resubscribeDelay?: (attempt: number) => number; readTimeoutMs?: number } = {}) {
   const got: Array<{ offset: number; event: LogEvent }> = [];
   const statuses: ConnectionStatus[] = [];
   const caughtUp: number[] = [];
@@ -43,6 +44,7 @@ function client(options: { held?: () => number; frameLimit?: number; resubscribe
     delay: () => 20,
     frameLimit: options.frameLimit,
     resubscribeDelay: options.resubscribeDelay,
+    readTimeoutMs: options.readTimeoutMs,
     handlers: {
       held,
       log: (entries) => got.push(...entries),
@@ -372,6 +374,64 @@ describe('the session plane', () => {
     await until(() => answers.length === 2);
     expect(answers[1]).toMatchObject({ kind: 'output', sub, n: 1, body: answer });
     expect(refusals).toEqual([]);
+  });
+
+  // The desk control surface's reads (its spec, §5): one frame each way on the sub, correlated by id.
+  describe('read', () => {
+    const answered = (sub: string) => double.up.filter((u) => u.frame.t === 'read' && u.frame.sub === sub).map((u) => u.frame as { id: string; what: string; args?: object });
+
+    it('sends a read on its sub and resolves with the answer carrying its id, the rest of the sub flowing on', async () => {
+      const { c, caughtUp, refusals } = client();
+      await until(() => caughtUp.length === 1);
+      const { log, listener } = recorder();
+      const main = c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, listener);
+      await until(() => double.subscriptions(PROJECT).length === 1);
+      const { sub } = double.subscriptions(PROJECT)[0];
+      double.sendSub(PROJECT, sub, 'snapshot', snapshot(sub).body as SessionBodies['snapshot']);
+      await until(() => log.length === 1);
+      const before = latency.report().paths['read.status']?.n ?? 0;
+      const first = main.read('status');
+      const second = main.read('usage', { breakdown: 'full' });
+      await until(() => answered(sub).length === 2);
+      const [a, b] = answered(sub);
+      expect(a).toEqual({ t: 'read', sub, id: a.id, what: 'status' });
+      expect(b).toEqual({ t: 'read', sub, id: b.id, what: 'usage', args: { breakdown: 'full' } });
+      expect(a.id).not.toBe(b.id);
+      // Answered out of order, each to its own read; a diff between is the listener's as ever.
+      double.sendSub(PROJECT, sub, 'read', { id: b.id, what: 'usage', error: { code: 'unsupported', message: 'no read usage' } });
+      double.sendSub(PROJECT, sub, 'diff', { base: 'main', text: '' });
+      double.sendSub(PROJECT, sub, 'read', { id: a.id, what: 'status', result: { surfaces: ['cli'] } });
+      await expect(first).resolves.toEqual({ surfaces: ['cli'] });
+      await expect(second).rejects.toMatchObject({ name: 'ReadError', code: 'unsupported', message: 'no read usage' });
+      expect(log).toEqual(['snapshot', 'diff:2']);
+      expect(latency.report().paths['read.status']?.n).toBe(before + 1);
+      expect(refusals).toEqual([]);
+    });
+
+    it('rejects a read nobody answers within its time, one the socket dropped, one on a closed sub, and one on an agent sub before sending', async () => {
+      const { c, caughtUp } = client({ readTimeoutMs: 100 });
+      await until(() => caughtUp.length === 1);
+      const main = c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, recorder().listener);
+      const agent = c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a1' }, recorder().listener);
+      await until(() => double.subscriptions(PROJECT).length === 2);
+      const { sub } = double.subscriptions(PROJECT).find((s) => s.agentId === null)!;
+      await expect(main.read('status')).rejects.toMatchObject({ code: 'timeout' });
+      // A late answer to a read that timed out is dropped quietly.
+      double.sendSub(PROJECT, sub, 'read', { id: answered(sub)[0].id, what: 'status', result: {} });
+      await expect(agent.read('status')).rejects.toMatchObject({ code: 'unsupported', message: "status is the main transcript's" });
+      expect(double.up.filter((u) => u.frame.t === 'read')).toHaveLength(1);
+
+      const lost = main.read('status');
+      await until(() => answered(sub).length === 2);
+      double.dropConnections();
+      await expect(lost).rejects.toMatchObject({ code: 'interrupted' });
+
+      await until(() => double.subscriptions(PROJECT).length === 2);
+      const closing = main.read('status');
+      main.close();
+      await expect(closing).rejects.toMatchObject({ code: 'interrupted' });
+      await expect(main.read('status')).rejects.toMatchObject({ code: 'interrupted' });
+    });
   });
 
   it('subscribes again after a gap in n, under a fresh sub', async () => {

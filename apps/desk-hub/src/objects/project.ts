@@ -19,9 +19,10 @@
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
-import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
+import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, readShapeError, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
+import type { JsonObject } from '../protocol/json';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, questionEffect, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, RefusedFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
@@ -176,6 +177,8 @@ export class Project extends DurableObject<Env> {
         return this.diff(socket, frame.sub);
       case 'output':
         return this.output(socket, frame);
+      case 'read':
+        return this.read(socket, frame);
       case 'visibility':
         if (typeof frame.visible !== 'boolean') return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'visibility is {visible: boolean}' });
         return this.attach(socket, (a) => ({ ...a, visibleAt: frame.visible ? Date.now() : null }));
@@ -488,10 +491,15 @@ export class Project extends DurableObject<Env> {
     this.reportSummary();
   }
 
-  /** The machine's own presence (DX4 `machine`): its policy and checkouts; `online` is the hub's, from the lease. */
+  /**
+   * The machine's own presence (DX4 `machine`): its policy, its checkouts, and what its daemon can do itself (`desk`,
+   * from the desk control surface's M0 on); `online` is the hub's, from the lease. The body is rebuilt from these
+   * fields alone.
+   */
   private machinePresence(ctx: MachineContext, m: Record<string, unknown>): Refusal | void {
     const body = m.body as Record<string, unknown>;
     const policy = isObject(body) ? (body.policy as Record<string, unknown>) : undefined;
+    const desk = isObject(body) ? body.desk : undefined;
     const valid =
       m.session === null &&
       m.sub === null &&
@@ -500,9 +508,15 @@ export class Project extends DurableObject<Env> {
       typeof policy.read_only === 'boolean' &&
       typeof policy.ceiling === 'string' &&
       Array.isArray(body.checkouts) &&
-      body.checkouts.every((c) => isObject(c) && typeof c.path === 'string' && typeof c.branch === 'string');
-    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'machine is {online, policy: {read_only, ceiling}, checkouts: [{path, branch}]} with session, sub, and n null' });
-    this.plane.putMachinePresence(ctx.machine, { online: true, policy: { read_only: policy.read_only as boolean, ceiling: policy.ceiling as string }, checkouts: body.checkouts as MachinePresence['checkouts'] });
+      body.checkouts.every((c) => isObject(c) && typeof c.path === 'string' && typeof c.branch === 'string') &&
+      (desk === undefined || isDesk(desk));
+    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'machine is {online, policy: {read_only, ceiling}, checkouts: [{path, branch}], desk?: {sminos, rpcs: [name], reads: [name]}} with session, sub, and n null' });
+    this.plane.putMachinePresence(ctx.machine, {
+      online: true,
+      policy: { read_only: policy.read_only as boolean, ceiling: policy.ceiling as string },
+      checkouts: body.checkouts as MachinePresence['checkouts'],
+      ...(isDesk(desk) ? { desk: { sminos: desk.sminos, rpcs: [...desk.rpcs], reads: [...desk.reads] } } : {}),
+    });
     this.machinesChanged();
   }
 
@@ -755,6 +769,19 @@ export class Project extends DurableObject<Env> {
     const route = this.ownRoute(socket, frame.sub);
     if (!route || !this.leaseServes(route)) return;
     this.toMachine(route.machine, route.generation, { t: 'output', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub, taskId, tail }, 'control');
+  }
+
+  /**
+   * A read of the session (the desk control surface spec, §5), carried to the sub's machine with its route; the answer
+   * comes back as DX4 `read` on the sub and is relayed unread. Which kinds a scope serves is the machine's to say.
+   */
+  private read(socket: WebSocket, frame: Record<string, unknown>): void {
+    const problem = readShapeError(frame);
+    if (problem) return this.refuseBrowser(socket, { reason: 'bad-shape', message: `read is {sub, id, what, args?}: ${problem}` });
+    const route = this.ownRoute(socket, frame.sub);
+    if (!route || !this.leaseServes(route)) return;
+    const { id, what, args } = frame as { id: string; what: string; args?: JsonObject };
+    this.toMachine(route.machine, route.generation, { t: 'read', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub, id, what, ...(args === undefined ? {} : { args }) }, 'control');
   }
 
   /** The route of a sub this socket holds; a sub it does not (one that just ended, say) is passed over quietly. */
@@ -1344,6 +1371,13 @@ function batched(deliveries: Delivery[]): Delivery[][] {
 function positionOf(event: unknown): { writer?: string; seq?: number } {
   const e = (typeof event === 'object' && event !== null ? event : {}) as { writer?: unknown; seq?: unknown };
   return { ...(typeof e.writer === 'string' ? { writer: e.writer } : {}), ...(typeof e.seq === 'number' ? { seq: e.seq } : {}) };
+}
+
+/** A machine presence's `desk` (DX4): the plugin's version and the names of the RPCs and reads the daemon serves, each
+ * list at most 64 names of at most 64 characters, so what the hub keeps of it stays small. */
+function isDesk(desk: unknown): desk is { sminos: string; rpcs: string[]; reads: string[] } {
+  const names = (v: unknown) => Array.isArray(v) && v.length <= 64 && v.every((n) => isName(n, 64));
+  return isObject(desk) && isName(desk.sminos, 64) && names(desk.rpcs) && names(desk.reads);
 }
 
 /** Why a `raised` is not one the hub can keep (DX4), or null. Its code is the bridge's: the hub keeps it as received. */
