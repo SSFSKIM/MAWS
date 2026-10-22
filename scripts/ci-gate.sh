@@ -2,8 +2,8 @@
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
 #   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
-#                      [--class1a linux|macos|pool] [--default-beside <groups>] [--evidence] [--live] [--affected]
-#                      [--label <name>] [--keep]
+#                      [--class1a linux|macos|pool] [--lane vm|vm-trial] [--default-beside <groups>] [--evidence]
+#                      [--live] [--affected] [--label <name>] [--keep]
 #
 #   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
 #   scripts/ci-gate.sh <worktree> --gates all                    the whole set (on a macOS e2e lane, every Mac job)
@@ -31,6 +31,12 @@
 #   --class1a          class 1a's runner (static, unit, probes): linux, macos or pool, ci-kit's pool (default: the
 #                      repository's variable GATE_RUNNER, else linux). With pool, the POOL_E2E groups (desk-web)
 #                      run on the pool too, on either lane; otherwise they run on the hosted Linux runner, never a Mac
+#   --lane             where the run's MAC_VM_E2E groups (gate.yml) go on a Mac: vm, ci-kit's macOS guest alone
+#                      ([ci-kit-mac-vm]: a group's trial, a re-measurement, a host you know is held), or vm-trial, the
+#                      guest's trial slot ([ci-kit-mac-vm-trial], which only a candidate image's trial clone carries: the
+#                      commit for an image trial, and nothing else). A MEASURED_E2E group keeps the exclusive instance
+#                      whatever this says (ci-kit's mac-lane concurrency spec, The VM lane). Default: none, the listed
+#                      groups on [ci-kit-mac-solo], whichever of the exclusive instance and the guest is free
 #   --default-beside   e2e groups, a comma list (side,library,…), that e2e:default subtracts the specs of as if they ran
 #                      beside it: a relaunch of part of a set names the whole set's other groups, so its default runs the
 #                      specs the whole set's default ran. A name with no script, or a script the derivation cannot read,
@@ -56,7 +62,7 @@
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:` (none for `all`, the plan's
-# default set), `Runner:`, `Class1a:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
+# default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
 # The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
 # The pool takes class 1a and the POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the
@@ -88,6 +94,7 @@ target=''
 gates=''
 runner=${MAWS_GATE_RUNNER:-}
 class1a=''
+lane=''
 default_beside=''
 evidence=''
 live=''
@@ -99,6 +106,7 @@ while (($# > 0)); do
     --gates) gates=${2?--gates needs a list}; shift 2 ;;
     --runner) runner=${2:?--runner needs linux or macos}; shift 2 ;;
     --class1a) class1a=${2:?--class1a needs linux, macos or pool}; shift 2 ;;
+    --lane) lane=${2:?--lane needs vm or vm-trial}; shift 2 ;;
     --default-beside) default_beside=${2:?--default-beside needs a list of e2e groups}; shift 2 ;;
     --evidence) evidence=yes; shift ;;
     --live) live=yes; shift ;;
@@ -113,6 +121,7 @@ done
 [[ -n $target ]] || usage
 case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or macos, not $runner" >&2; exit 2 ;; esac
 case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
+case $lane in '' | vm | vm-trial) ;; *) echo "ci-gate: --lane is vm or vm-trial, not $lane" >&2; exit 2 ;; esac
 # The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
 case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
 # The whole set is asked for by name: left implicit, it was queued by calls that meant class 1a alone. A value of commas
@@ -196,6 +205,7 @@ trailers="Nonce: $(date +%s)-$$"
 [[ -n $gates_trailer ]] && trailers+=$'\n'"Gates: $gates_trailer"
 [[ -n $runner ]] && trailers+=$'\n'"Runner: $runner"
 [[ -n $class1a ]] && trailers+=$'\n'"Class1a: $class1a"
+[[ -n $lane ]] && trailers+=$'\n'"Lane: $lane"
 [[ -n $default_beside ]] && trailers+=$'\n'"DefaultBeside: $default_beside"
 [[ -n $evidence ]] && trailers+=$'\n'"Evidence: $evidence"
 [[ -n $live ]] && trailers+=$'\n'"Live: $live"
@@ -226,7 +236,7 @@ interrupted() {
 }
 trap interrupted INT TERM
 
-echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}${affected:+ (Selection: affected)}"
+echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${lane:+ (Lane: $lane)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}${affected:+ (Selection: affected)}"
 # The ref is this invocation's own and the commit fixed, so a forced re-push is idempotent: a transient rejection
 # (a remote index-pack race while another gate pushes, a "[remote rejected] (failed)") is retried twice; an
 # authentication failure is not (Decision Log 54).

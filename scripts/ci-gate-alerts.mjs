@@ -16,7 +16,11 @@ import { parseArgs } from 'node:util';
 const REPO = 'SSFSKIM/MAWS';
 const ALERTS = 'SSFSKIM/ci-kit-sandbox';
 const ALERT = /^ci-kit alert: ([a-z0-9-]+): (\S+) since (\S+)(?: \((.*)\))?/;
-const MAC_RUNNER = /^ci-kit-mac-(.+)$/;
+// A runner's machine (ci-kit's mac-lane concurrency spec): a shared instance, `ci-kit-mac-<machine>-<n>`, shares its
+// machine's desktop, so its machine's alert holds it too (ci-kit refuses a machine name ending in `-<n>`); ci-kit's
+// macOS guest, `ci-kit-mac-<machine>-vm` (`-vm-trial` its trial slot), has a desktop of its own, so it is a machine of
+// its own, `<machine>-vm`, and opens no alert.
+const MAC_RUNNER = /^ci-kit-mac-(.+?)(?:-\d+)?$/;
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
 const list = (items) => items.join(', ');
 
@@ -57,10 +61,14 @@ export function macJobs({ gates = '', runner = '', class1a = '', variables = {},
 export function decide({ jobs, alerts, runners }) {
   if (jobs.length === 0 || alerts.length === 0) return { stop: false, lines: [] };
   const blocked = [...new Set(alerts.map((alert) => alert.machine))];
-  const free = runners
-    .filter((runner) => runner.status === 'online')
-    .map((runner) => MAC_RUNNER.exec(runner.name)?.[1])
-    .filter((machine) => machine !== undefined && !blocked.includes(machine));
+  const free = [
+    ...new Set(
+      runners
+        .filter((runner) => runner.status === 'online')
+        .map((runner) => MAC_RUNNER.exec(runner.name)?.[1])
+        .filter((machine) => machine !== undefined && !blocked.includes(machine)),
+    ),
+  ];
   if (free.length > 0) return { stop: false, lines: [`ci-gate: ci-kit alert open on ${list(blocked)}; going ahead on ${list(free)}`] };
   return {
     stop: true,
