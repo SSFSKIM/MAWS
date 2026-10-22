@@ -68,8 +68,9 @@ interface Seam {
 type DeckSeam = Seam['__maws_presentations'];
 // The cold open's bound is presentations-scale's row 1, measured there settled and calibrated (MEASURED_E2E). Here, in a
 // functional group a neighbour or ci-kit's guest may run beside, its figure is printed and the bound asserted only under
-// MAWS_PRESENTATIONS_SCALE=1, a run on purpose (gate.yml's VM contract).
-const MEASURED = process.env.MAWS_PRESENTATIONS_SCALE === '1';
+// MAWS_PRESENTATIONS_PERF=1, the presentations group's switch for its measured bounds (presentations-drag.spec.ts reads
+// it too), a run on purpose (gate.yml's VM contract).
+const MEASURED = process.env.MAWS_PRESENTATIONS_PERF === '1';
 const order = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_presentations.order(a), id);
 const seed = (page: Page, id: string, files: Record<string, string>) => page.evaluate(([a, f]) => (window as unknown as Seam).__maws_presentations.seed(a, f), [id, files] as const);
 const editDeck = (page: Page, id: string, edit: Parameters<DeckSeam['edit']>[1]) => page.evaluate(([a, e]) => (window as unknown as Seam).__maws_presentations.edit(a, e), [id, edit] as const);

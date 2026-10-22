@@ -27,8 +27,9 @@ import { newChatIn, openProject } from './support/sidebar';
 
 // The heavy deck's preview bound is presentations-scale's row 5, measured there settled and calibrated (MEASURED_E2E);
 // here, in a functional group a neighbour or ci-kit's guest may run beside, the median is printed and the bound asserted
-// only under MAWS_PRESENTATIONS_SCALE=1, a run on purpose (gate.yml's VM contract).
-const MEASURED = process.env.MAWS_PRESENTATIONS_SCALE === '1';
+// only under MAWS_PRESENTATIONS_PERF=1, the presentations group's switch for its measured bounds, a run on purpose
+// (gate.yml's VM contract).
+const MEASURED = process.env.MAWS_PRESENTATIONS_PERF === '1';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
