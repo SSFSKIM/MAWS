@@ -34,11 +34,11 @@ function recording(): Recording {
 let replay: FakeMachineReplay | null = null;
 test.afterEach(() => { replay?.stop(); replay = null; });
 
-async function open(page: Page, hub: HubDouble, send = true) {
+async function open(page: Page, hub: HubDouble, { send = true, pausedAt = 425 } = {}) {
   await page.setViewportSize({ width: 390, height: 844 });
   await stageProject(hub);
   const fm = replay = new FakeMachineReplay(hub, { project: PROJECT, machine: MACHINE }, { recording: recording(), producer: 'm1' });
-  fm.playThrough((s) => s.k === 'chunk' && s.chunkIndex === 425);
+  fm.playThrough((s) => s.k === 'chunk' && s.chunkIndex === pausedAt);
   hub.setMachines(PROJECT, [{ machine: MACHINE, online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [{ path: '/fixture', branch: 'main' }], ...fm.machineDesk }]);
   await hub.append(PROJECT, { writer: `${MACHINE}/${SID}`, kind: 'joined', session: SID, alias: ALIAS, name_source: 'user', machine: MACHINE, cwd: '/fixture', worktree: '', role: '', seat: '', by: '' });
   fm.sendPresence();
@@ -111,7 +111,7 @@ test('@layout a killed page whose command was refused before running reaches an 
       socket.send(message);
     });
   });
-  await open(page, hub, false);
+  await open(page, hub, { send: false });
   const composer = page.getByTestId('composer');
   await composer.getByRole('textbox').fill('/color orange');
   await composer.getByRole('button', { name: 'Send', exact: true }).click();
@@ -133,14 +133,17 @@ test('@layout a killed page whose command was refused before running reaches an 
 });
 
 test('@layout a fresh page keeps an old replayed command start pending until its real end', async ({ page, hub, context }) => {
-  const fm = await open(page, hub);
+  // Leave only the terminal row/turn-end after reopening: this tests the receipt, not a bulk live-chunk flood.
+  const fm = await open(page, hub, { pausedAt: 999 });
   await page.close();
+  fm.drop(); // Closing the page also ends this generation's fake-machine subscriptions, not its queued command.
   const fresh = await context.newPage();
   await fresh.setViewportSize({ width: 390, height: 844 });
   await ageOwnership(fresh, hub);
   await fresh.goto(`${hub.url}/p/${PROJECT}/s/${SID}`);
   await expect(fresh.getByTestId('command-status')).toHaveText('Queued until m1-busy is idle');
   expect(await fresh.evaluate(() => JSON.parse(localStorage.getItem('desk.pending-commands') ?? '[]').length)).toBe(1);
+  await expect(fresh.getByTestId('session-view')).toContainText('Sentence 1000:');
   fm.playThrough();
   await expect(fresh.getByTestId('command-status')).toHaveText(RAN);
   await expect.poll(() => fresh.evaluate(() => JSON.parse(localStorage.getItem('desk.pending-commands') ?? '[]').length)).toBe(0);
