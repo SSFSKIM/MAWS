@@ -29,13 +29,25 @@ const NEW_ENTRY = { x: 2100, y: 40, w: 800, h: 600, title: 'Pricing' };
 type Rect = [left: number, top: number, width: number, height: number];
 const boxes = { live: new Map<string, Rect>(), ghost: new Map<string, Rect>() };
 
+const LABEL: Rect = [8, 8, 160, 20]; // the label's box in its own px, at its board's top left
+
 beforeEach(() => {
-  // the layer reads boxes from each canvas's origin: an element's box is given here by its canvas and key (zero else)
+  // the layer reads boxes on screen: an element's box is given here in its board's px by its canvas and key (zero else)
+  // and drawn at the world's zoom as the layer's transform says it now; the label's own box at its counter-scale too
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    const root = this.closest('section.maws-slide');
-    const table = root?.hasAttribute('data-provisional-ghost') ? boxes.ghost : boxes.live;
-    const board = this.closest<HTMLElement>('[data-board-id]')?.dataset.boardId;
-    const [left, top, width, height] = (this.dataset.eid && table.get(`${board}/${this.dataset.eid}`)) || [0, 0, 0, 0];
+    const transform = this.closest<HTMLElement>('[data-design-layer]')?.style.transform ?? '';
+    const zoom = Number(/scale\(([^)]+)\)/.exec(transform)?.[1] ?? 1);
+    let rect: Rect;
+    if (this.hasAttribute('data-provisional-label')) {
+      const own = Number(this.parentElement!.style.getPropertyValue('--provisional-label-scale') || 1);
+      rect = [LABEL[0] * own, LABEL[1] * own, LABEL[2] * own, LABEL[3] * own];
+    } else {
+      const root = this.closest('section.maws-slide');
+      const table = root?.hasAttribute('data-provisional-ghost') ? boxes.ghost : boxes.live;
+      const board = this.closest<HTMLElement>('[data-board-id]')?.dataset.boardId;
+      rect = (this.dataset.eid && table.get(`${board}/${this.dataset.eid}`)) || [0, 0, 0, 0];
+    }
+    const [left, top, width, height] = rect.map((v) => v * zoom) as Rect;
     return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
   });
 });
@@ -54,11 +66,13 @@ function designWorld() {
   return {
     doc,
     file: (id: string) => designFiles(doc)[boardPath(id)]!,
-    /** canvas.json as read, with `b3`'s entry added (and named last in the order). */
-    manifest(): string {
+    /** canvas.json as read, with new boards' entries added (named last in the order); `b3`'s by default. */
+    manifest(entries: Record<string, unknown> = { b3: NEW_ENTRY }): string {
       const read = JSON.parse(designFiles(doc)[CANVAS_PATH]!) as { boards: Record<string, unknown>; order: string[] };
-      read.boards.b3 = NEW_ENTRY;
-      read.order.push('b3');
+      for (const [id, entry] of Object.entries(entries)) {
+        read.boards[id] = entry;
+        read.order.push(id);
+      }
       return JSON.stringify(read);
     },
     /** The agent's files written on the host; the update the replica will be sent. */
@@ -147,6 +161,19 @@ describe('the design’s provisional layer on its boards', () => {
     act(() => w.view.setViewport({ zoom: 2, x: 10, y: 10 }));
     expect(layer.style.getPropertyValue('--provisional-label-scale')).toBe('0.5');
     expect(layer.style.getPropertyValue('--provisional-outline')).toBe('1px');
+  });
+
+  it('holds the label once a zoom brings it over the human’s text box, judged after the world’s transform and the label’s counter-scale both change', async () => {
+    const w = mount();
+    boxes.live.set('b1/title', [0, 64, 390, 60]); // clear of the label at zoom 1; under it at 0.25 (screen y 16)
+    act(() => w.session.editText('title'));
+    w.stream({ [boardPath('b1')]: edit(w.file('b1'), ['Body of b1', 'Monthly']) });
+    const label = () => w.q('[data-board-id="b1"] [data-provisional-label]')!;
+    expect(label().hasAttribute('data-provisional-held'), 'clear of the text box').toBe(false);
+    await act(async () => w.view.setViewport({ zoom: 0.25, x: 0, y: 0 }));
+    expect(label().hasAttribute('data-provisional-held'), 'over it after zooming out, with no other change').toBe(true);
+    await act(async () => w.view.setViewport({ zoom: 1, x: 40, y: 0 }));
+    expect(label().hasAttribute('data-provisional-held'), 'clear again').toBe(false);
   });
 
   it('protects the human’s elements on the active board alone, and follows the active board', () => {
@@ -261,6 +288,22 @@ describe('a board new to the design', () => {
     expect(w.all('[data-board-id="b3"]'), 'one board, the real one').toHaveLength(1);
     expect(w.q('[data-board-id="b3"] .design-board-canvas [data-eid="t3"]')!.textContent).toBe('Pricing');
     expect(w.q('[data-board-id="b3"] [data-provisional-layer]')).toBeNull();
+  });
+
+  it('places each call’s new board by its own canvas.json while two publishes stream at once', () => {
+    const w = mount();
+    const b4 = NEW.replaceAll('b3', 'b4').replace('t3', 't4').replace('Pricing', 'Team');
+    w.stream({ [boardPath('b3')]: NEW, [CANVAS_PATH]: w.manifest() }, 'callA');
+    expect(ghost(w)!.dataset.provisionalFrame).toBe('2100 40 800 600');
+    w.stream({ [boardPath('b4')]: b4, [CANVAS_PATH]: w.manifest({ b4: { x: 3000, y: 40, w: 400, h: 300 } }) }, 'callB');
+    const b4Ghost = () => w.q('[data-provisional-new-board="b4"]');
+    expect(ghost(w)?.dataset.provisionalFrame, 'call A’s board kept at its own place').toBe('2100 40 800 600');
+    expect(ghost(w)!.dataset.provisionalWriting).toBe('callA');
+    expect(b4Ghost()?.dataset.provisionalFrame).toBe('3000 40 400 300');
+    expect(b4Ghost()!.dataset.provisionalWriting).toBe('callB');
+    act(() => w.live.frame(publishFrame('callB', 'dropped')));
+    expect(ghost(w)?.dataset.provisionalFrame).toBe('2100 40 800 600');
+    expect(b4Ghost()).toBeNull();
   });
 
   it('leaves no trace at a refusal, on the boards or in the world', () => {

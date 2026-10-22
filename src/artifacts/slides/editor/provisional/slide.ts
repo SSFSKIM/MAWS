@@ -69,6 +69,11 @@ export interface SlideLayerOptions {
   faces?: FaceAliases;
   /** The label's words: "<name> is writing…". */
   label: (name: string) => string;
+  /**
+   * P4-A2 G2.4: told when the layer's screen transform changes with no layout pass of either canvas (a design world's
+   * zoom: its transform and the label's counter-scale, written by their own listeners of the same change).
+   */
+  onTransform?: (listener: () => void) => () => void;
 }
 
 type Shown = 'changed' | 'added' | 'moved';
@@ -84,6 +89,7 @@ export class SlideProvisional {
   private moved: ReadonlySet<string> = NONE;
   private readonly marked = { ghost: new Set<HTMLElement>(), live: new Set<HTMLElement>() };
   private readonly stops: (() => void)[] = [];
+  private disposed = false; // a transform's deferred check finds nothing to do after
 
   constructor(private readonly o: SlideLayerOptions) {
     this.stops.push(
@@ -93,10 +99,14 @@ export class SlideProvisional {
       o.live.onLayout(() => this.measure()),
     );
     if (o.protection) this.stops.push(o.protection.subscribe(() => this.draw()));
+    // the label's box against the protected boxes once every listener of the change has written its part (G-R4)
+    if (o.onTransform) this.stops.push(o.onTransform(() => queueMicrotask(() => !this.disposed && this.draw())));
     this.draw();
   }
 
+
   dispose(): void {
+    this.disposed = true;
     for (const stop of this.stops.splice(0)) stop();
     this.clear();
   }

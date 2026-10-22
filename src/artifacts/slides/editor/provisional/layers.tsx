@@ -65,6 +65,19 @@ export function useProvisionalZoom(host: RefObject<HTMLElement | null>, scale: n
   }, [host, scale, zoom]);
 }
 
+/** A zoom's changes alone (a pan, which moves the layer and its protected boxes together, is not one). */
+function zoomChanges(zoom: ScreenZoom): (listener: () => void) => () => void {
+  return (listener) => {
+    let shown = zoom.get();
+    return zoom.subscribe(() => {
+      const z = zoom.get();
+      if (z === shown) return;
+      shown = z;
+      listener();
+    });
+  };
+}
+
 /**
  * A slide's layer over its live canvas, between the canvas and the overlay (G-R3): positioned over the slide's frame,
  * taking no pointer, no focus and no name. `session` protects the human's elements on its current slide (G-R4).
@@ -87,9 +100,10 @@ export function SlideLayer(props: {
   const scaler = useRef<HTMLDivElement>(null);
   useProvisionalZoom(host, scale, zoom);
   useLayoutEffect(() => {
-    const layer = new SlideProvisional({ deck, slideId, live: canvas, host: host.current!, scaler: scaler.current!, protection: session ? sessionProtection(session, slideId) : null, assetUrl, ...(faces && { faces }), label: C.writing });
+    const onTransform = zoom ? zoomChanges(zoom) : undefined;
+    const layer = new SlideProvisional({ deck, slideId, live: canvas, host: host.current!, scaler: scaler.current!, protection: session ? sessionProtection(session, slideId) : null, assetUrl, ...(faces && { faces }), label: C.writing, ...(onTransform && { onTransform }) });
     return () => layer.dispose();
-  }, [deck, canvas, slideId, session, assetUrl, faces]);
+  }, [deck, canvas, slideId, session, assetUrl, faces, zoom]);
   const [w, h] = size ? [size.w, size.h] : [SLIDE_W, SLIDE_H];
   const style: CSSProperties = { width: w * scale, height: h * scale };
   return (

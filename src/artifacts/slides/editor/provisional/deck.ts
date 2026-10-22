@@ -122,25 +122,27 @@ export class DeckProvisional {
   };
 
   private recompute(): void {
-    const files: { id: string; layer: ArtifactProvisional; text: string; drawn: ProvisionalSlide | null }[] = [];
-    let index: DeckProvisionalSnapshot['index'] = null;
+    type Index = DeckProvisionalSnapshot['index'];
+    const files: { id: string; layer: ArtifactProvisional; text: string; drawn: ProvisionalSlide | null; own: { index: Index } }[] = [];
+    let index: Index = null;
     for (const layer of this.layers.get().values()) {
       const open = openFile(layer);
+      const own: { index: Index } = { index: null }; // this call's index, which may stream before or after its files
       for (const op of layer.ops) {
         if (op.op !== 'file') continue;
         if (op.path === this.files.indexPath) {
-          index = { text: op.text, open: op.path === open };
+          index = own.index = { text: op.text, open: op.path === open };
           continue;
         }
         const id = this.files.slideOf(op.path);
-        if (id !== null) files.push({ id, layer, text: op.text, drawn: this.draw(id, op, op.path === open) });
+        if (id !== null) files.push({ id, layer, text: op.text, drawn: this.draw(id, op, op.path === open), own });
       }
     }
-    // a new slide's place from the index, which may stream before or after its file
+    // a new slide's place from its own call's index (another call streaming at once names other new slides, not this one)
     const slides = new Map<string, WrittenSlide>();
-    for (const { id, layer, text, drawn } of files) {
+    for (const { id, layer, text, drawn, own } of files) {
       const isNew = !Y.hasSlide(this.live, id);
-      const frame = isNew && index && this.files.frameOf ? this.files.frameOf(this.live, id, index, text) : null;
+      const frame = isNew && own.index && this.files.frameOf ? this.files.frameOf(this.live, id, own.index, text) : null;
       const slide: WrittenSlide = { toolUseId: layer.toolUseId, name: layer.name, color: layer.color, isNew, drawn, frame };
       const was = this.current.slides.get(id);
       slides.set(id, was && sameSlide(was, slide) ? was : slide);
