@@ -1724,7 +1724,8 @@ consumer selects `withArgs ?? route`, then applies that form's validation and
 From sminos 1.8.1, `Catalog.skills?: string[]` carries the names in
 `$.session.usage({breakdown: "summary"}).context.breakdown?.skills?.skillFrontmatter`,
 verbatim and fully qualified for plugin skills. A current producer sends `[]` when
-none are listed; an older producer omits the field. Names participate in the catalog
+none are listed or the optional summary is unavailable/shapeless; commands, models
+and aliases still publish when that enrichment fails; an older producer omits the field. Names participate in the catalog
 fingerprint. This is the engine's model-context listing, not a complete filesystem
 skill inventory: a `disable-model-invocation: true` skill is absent and keeps the
 previous provenance grouping. No context text or token counts cross the wire.
@@ -2504,27 +2505,51 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   zero count-token calls. The types say summary estimates locally, unlike full.
   Smaller startup probes took 43 and 13 ms including command.list. The summary runs
   alongside the existing catalog reads, adding no serial read or network dependency
-  to catalog arrival or the snapshot. No full token count is requested.
+  to catalog arrival or the snapshot. No full token count is requested. A failed or
+  shapeless summary is isolated to an empty skills list, not a failed catalog. The
+  child and session-plane catalog allowlists carry the field on changes as well as
+  resync snapshots; transport tests cover both and older producers that omit it.
   Rejected for now: waiting for a richer engine skill-list API that also exposes
   manual-only skills; it would leave the observed Skills group empty. Also rejected:
   inferring skills from command source or a colon, which the live probe disproves.
   The orchestrator accepted the bounded listing and its documented manual-only gap.
   Date/Author: 2026-10-22, the M1 live-walk fix executor and orchestrator.
 
-- Decision: Lazy desk chunks recover from a lost build by reloading the current URL
-  once. A tab-scoped sessionStorage guard survives navigation and is cleared only
-  when the specific failed import succeeds, never on page startup or an unrelated
-  chunk's success. Without writable storage no automatic reload is attempted.
-  Persistent failure leaves a visible manual reload action; application errors are
-  not treated as missing chunks. All lazy surfaces, including depth and diff, use
-  this path. A14's minimum-version prefix belongs only to the older-machine
-  capability branch; an updated machine with a stale session gets reload guidance
-  alone, and the plugin to update is sminos.
+- Decision: Every rejected lazy import, and Vite's `vite:preloadError` event
+  (including CSS and imports outside the lazy views), triggers a guarded reload of
+  the current URL. Browser error text is not an interface: a WebKit run rejected
+  HTML with a MIME-type message unlike Chromium's import message. A tab-scoped
+  sessionStorage marker is keyed by the page's hashed module-entry URL. Each build
+  gets at most one automatic reload, and markers are retained, so another chunk's
+  success or alternating old indexes cannot restart a loop. Without writable
+  storage no automatic reload is attempted. Persistent failure leaves a visible
+  manual reload action. All lazy surfaces, including depth and diff, use this path.
+  Navigation freshness: the production notification worker has no fetch handler or
+  Cache API and caches no shell. `desk-hub/wrangler.jsonc` sends SPA assets through
+  Cloudflare's asset service, not worker.ts (worker-first is `/api/*`, `/machine/*`),
+  with no `_headers` override. Cloudflare documents its default as `Cache-Control:
+  public, max-age=0, must-revalidate`, requiring network revalidation before reuse
+  (https://developers.cloudflare.com/workers/static-assets/headers/). The WebKit
+  and Chromium fixture serves an obsolete hashed entry for the first index and
+  the current index for recovery under that cache policy; it must fetch the new
+  document, retain the route and load the current module. A persistently missing
+  module must stop after one reload. The production hub was not contacted for
+  this check; source, provider documentation and the controlled browsers are the
+  evidence. The fixture serves actual files from an isolated build directory,
+  waits for the production notification worker to claim the tab, then replaces
+  index.html. Both Chromium and WebKit fetch the current entry on recovery with
+  that worker enabled. The local static double mirrors Cloudflare's revalidation
+  header; production asset and service-worker behavior is unchanged.
+  A14's minimum-version prefix belongs only to the older-machine capability
+  branch; an updated machine with a stale session gets reload guidance alone,
+  and the plugin to update is sminos.
   Rationale: the owner's home-screen app remains open across deploys, whose removed
-  hashed modules get the SPA HTML fallback. An unconditional reload catch loops
-  when assets remain unavailable. Tests cover the real built import receiving HTML,
-  the one-reload guard, Safari/Chromium/Firefox failure messages and the two guidance
-  branches. Date/Author: 2026-10-22, the M1 live-walk fix executor.
+  hashed modules get the SPA HTML fallback. Rejected: matching particular error
+  strings, which already missed WebKit's MIME refusal; unconditional reloads,
+  which loop on persistent failures; and clearing a guard on chunk success, which
+  can rearm it while another chunk is still broken.
+  Date/Author: 2026-10-22, the M1 live-walk fix executor, incorporating the
+  orchestrator's event-based recovery and navigation-cache checks.
 
 ## Outcomes & Retrospective
 

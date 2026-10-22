@@ -726,7 +726,7 @@ export class HubDouble {
     const target = inside ? file : join(dir, 'index.html');
     const type = CONTENT_TYPES[extname(target)] ?? 'application/octet-stream';
     const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? '')) && !type.startsWith('image/png');
-    res.writeHead(200, { 'Content-Type': type, ...(gzip && { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }) });
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=0, must-revalidate', ...(gzip && { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }) });
     const body = createReadStream(target);
     if (gzip) body.pipe(createGzip()).pipe(res);
     else body.pipe(res);

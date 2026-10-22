@@ -5,7 +5,7 @@ import { createElement, lazy, Suspense } from 'react';
 import { loadChunk } from '../pwa/load-chunk';
 import { registerSlot, type Slots } from '../shell/slots';
 
-const LazyDepth = lazy(() => loadChunk('DepthColumn', () => import('./view/DepthColumn')));
+const LazyDepth = lazy(() => loadChunk(() => import('./view/DepthColumn')));
 
 const Depth: Slots['depth'] = (props) => createElement(Suspense, { fallback: null }, createElement(LazyDepth, props));
 

@@ -25,12 +25,12 @@ import { GridView } from './views/grid/GridView';
 import { useSecondMethodPrompt } from './views/key/second-method';
 import { latency } from './latency/latency';
 
-const ProjectView = lazy(() => loadChunk('ProjectView', () => import('./views/project/ProjectView').then((m) => ({ default: m.ProjectView }))));
-const OrgView = lazy(() => loadChunk('OrgView', () => import('./views/org/OrgView').then((m) => ({ default: m.OrgView }))));
-const LatencyOverlay = lazy(() => loadChunk('LatencyOverlay', () => import('./latency/LatencyOverlay').then((m) => ({ default: m.LatencyOverlay }))));
-const KeyDialog = lazy(() => loadChunk('KeyDialog', () => import('./views/key/KeyDialog').then((m) => ({ default: m.KeyDialog }))));
-const MachinesDialog = lazy(() => loadChunk('MachinesDialog', () => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog }))));
-const NotificationsDialog = lazy(() => loadChunk('NotificationsDialog', () => import('./views/notifications/NotificationsDialog').then((m) => ({ default: m.NotificationsDialog }))));
+const ProjectView = lazy(() => loadChunk(() => import('./views/project/ProjectView').then((m) => ({ default: m.ProjectView }))));
+const OrgView = lazy(() => loadChunk(() => import('./views/org/OrgView').then((m) => ({ default: m.OrgView }))));
+const LatencyOverlay = lazy(() => loadChunk(() => import('./latency/LatencyOverlay').then((m) => ({ default: m.LatencyOverlay }))));
+const KeyDialog = lazy(() => loadChunk(() => import('./views/key/KeyDialog').then((m) => ({ default: m.KeyDialog }))));
+const MachinesDialog = lazy(() => loadChunk(() => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog }))));
+const NotificationsDialog = lazy(() => loadChunk(() => import('./views/notifications/NotificationsDialog').then((m) => ({ default: m.NotificationsDialog }))));
 
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 
