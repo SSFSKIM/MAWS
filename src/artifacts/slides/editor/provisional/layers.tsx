@@ -2,7 +2,7 @@
 // mounts. React renders the layers' elements and nothing inside them: each mount hands its element to the imperative
 // controller (slide.ts), which draws from the store's and the session's listeners in the task they fire in. Shared by
 // the deck's stage and filmstrip and (G2.4) a design's boards.
-import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
 import type { ProvisionalLayers } from '../../../provisional';
 import type { Doc } from '../../../yjs';
 import type { AssetUrl, SlideCanvas } from '../../canvas';
@@ -78,6 +78,18 @@ function zoomChanges(zoom: ScreenZoom): (listener: () => void) => () => void {
   };
 }
 
+/** A plain change signal: what a layer's own `scale` prop tells its controller once React has applied it. */
+function signal(): { tell(): void; subscribe(listener: () => void): () => void } {
+  const listeners = new Set<() => void>();
+  return {
+    tell: () => listeners.forEach((listener) => listener()),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
 /**
  * A slide's layer over its live canvas, between the canvas and the overlay (G-R3): positioned over the slide's frame,
  * taking no pointer, no focus and no name. `session` protects the human's elements on its current slide (G-R4).
@@ -99,11 +111,30 @@ export function SlideLayer(props: {
   const host = useRef<HTMLDivElement>(null);
   const scaler = useRef<HTMLDivElement>(null);
   useProvisionalZoom(host, scale, zoom);
+  // The layer's screen transform changes with no layout pass of either canvas when the zoom changes (a design world's)
+  // or the scale does (the stage's Fit as its pane resizes, a step of the zoom): either way the protection is judged
+  // again once the new transform is on the page (G-R4: a screen-sized label clear of a box may meet it once the slide
+  // is drawn smaller). The scale reaches the controller from a layout effect, after React has written the transforms.
+  const [scaled] = useState(signal);
   useLayoutEffect(() => {
-    const onTransform = zoom ? zoomChanges(zoom) : undefined;
-    const layer = new SlideProvisional({ deck, slideId, live: canvas, host: host.current!, scaler: scaler.current!, protection: session ? sessionProtection(session, slideId) : null, assetUrl, ...(faces && { faces }), label: C.writing, ...(onTransform && { onTransform }) });
+    const zoomed = zoom ? zoomChanges(zoom) : null;
+    const onTransform = (listener: () => void) => {
+      const offScale = scaled.subscribe(listener);
+      const offZoom = zoomed?.(listener);
+      return () => {
+        offScale();
+        offZoom?.();
+      };
+    };
+    const layer = new SlideProvisional({ deck, slideId, live: canvas, host: host.current!, scaler: scaler.current!, protection: session ? sessionProtection(session, slideId) : null, assetUrl, ...(faces && { faces }), label: C.writing, onTransform });
     return () => layer.dispose();
-  }, [deck, canvas, slideId, session, assetUrl, faces, zoom]);
+  }, [deck, canvas, slideId, session, assetUrl, faces, zoom, scaled]);
+  const drawnScale = useRef(scale);
+  useLayoutEffect(() => {
+    if (drawnScale.current === scale) return;
+    drawnScale.current = scale;
+    scaled.tell();
+  }, [scale, scaled]);
   const [w, h] = size ? [size.w, size.h] : [SLIDE_W, SLIDE_H];
   const style: CSSProperties = { width: w * scale, height: h * scale };
   return (

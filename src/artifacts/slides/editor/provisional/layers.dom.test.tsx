@@ -14,6 +14,9 @@ import { DECK_PATH, slidePath } from '../../deck';
 import { slideOrder } from '../../model';
 import { DeckEditor } from '../DeckEditor';
 import { DeckSession } from '../session';
+import { SlideCanvas } from '../../canvas';
+import { DeckProvisional } from './deck';
+import { SlideLayer } from './layers';
 import { deckWorld, publishFrame, replica } from './testing';
 
 const ONE = `<section id="s1" style="background:#ffffff; padding:96px; display:flex; flex-direction:column; gap:24px">
@@ -315,5 +318,37 @@ describe('the deck’s provisional layer in the filmstrip', () => {
     expect(entries(), 'one entry, the real one').toEqual(['s1', 's3', 's2']);
     expect(w.q('[data-provisional-new-slide]')).toBeNull();
     expect(w.q('[data-slide-thumb="s3"] [data-provisional-thumb]')!.hasAttribute('data-provisional-writing')).toBe(false);
+  });
+});
+
+describe('the stage layer’s scale', () => {
+  it('checks the label against the protected boxes again when the stage’s scale changes with nothing else (Fit as the pane resizes)', async () => {
+    const world = deckWorld({ s1: ONE, s2: TWO });
+    const live = replica(world.doc);
+    const stopLayers = live.layers.attach();
+    const deck = new DeckProvisional(live.layers, world.doc);
+    const stopDeck = deck.attach();
+    const session = new DeckSession(world.doc, 0);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const canvas = new SlideCanvas(world.doc, 's1', host);
+    const assetUrl = () => null; // stable, as the editor's is: only the scale changes below
+    const layer = (scale: number) => <SlideLayer deck={deck} canvas={canvas} slideId="s1" scale={scale} session={session} assetUrl={assetUrl} />;
+    const { container, rerender } = render(layer(0.5));
+    boxes.live.set('title', [96, 48, 864, 44]); // the human's title, below the screen-sized label at this scale
+    boxes.label = [8, 8, 160, 20];
+    act(() => session.editText('title'));
+    act(() => live.frame(publishFrame('call1', 'streaming', { [slidePath('s1')]: edit(world.file('s1'), ['Friday, 24 October', 'Monday']) })));
+    act(() => flushLayout()); // every layout pass the canvases scheduled is done: what follows changes no layout
+    const label = () => container.querySelector<HTMLElement>('[data-provisional-label]')!;
+    expect(label().hasAttribute('data-provisional-held')).toBe(false);
+    // the pane narrows: Fit draws the slide smaller, the label keeps its size, and now meets the title
+    boxes.live.set('title', [24, 12, 216, 11]);
+    rerender(layer(0.125));
+    await act(async () => {});
+    expect(label().hasAttribute('data-provisional-held'), 'held once the new transform is applied').toBe(true);
+    stopDeck();
+    stopLayers();
+    canvas.dispose();
   });
 });
