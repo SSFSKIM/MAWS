@@ -108,7 +108,7 @@ test('a relaunch without default carries no --default-beside', () => {
 });
 
 test('a refused plan relaunches the whole run with its own flags, --gates included; a run nothing was refused in says nothing', () => {
-  const planRefused = ['skipped\te2e:${{ matrix.group }}', 'skipped\tpackaged', 'failure\tplan', 'skipped\tprobes', 'skipped\tstatic', 'skipped\tunit', 'skipped\tunit:darwin'];
+  const planRefused = ['skipped\te2e-build', 'skipped\te2e:${{ matrix.group }}', 'skipped\te2e:${{ matrix.group }}', 'skipped\tpackaged', 'failure\tplan', 'skipped\tprobes', 'skipped\tstatic', 'skipped\tunit', 'skipped\tunit:darwin'];
   assert.equal(
     refusals(planRefused, [refusal('plan')], { gates: 'e2e:default,e2e:side', default_beside: 'library,tools' }),
     `ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: scripts/ci-gate.sh ${sha} --runner macos --class1a pool --gates e2e:default,e2e:side --default-beside library,tools --label f1-landing --evidence\n`,
@@ -116,6 +116,43 @@ test('a refused plan relaunches the whole run with its own flags, --gates includ
   // A whole-set run relaunches as one: ci-gate.sh refuses a call that names no gates.
   assert.equal(refusals(planRefused, [refusal('plan')], { gates: 'all', runner: '', class1a: '' }), `ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: scripts/ci-gate.sh ${sha} --gates all --label f1-landing --evidence\n`);
   assert.equal(refusals(run(), [red('e2e:library')]), '');
+});
+
+// A failed build skips the whole guest matrix: GitHub exposes its expression, not the groups the plan selected.
+for (const conclusion of ['failure', 'cancelled']) {
+  for (const gates of ['all', 'e2e:default,e2e:widgets,e2e:library']) {
+    test(`a ${conclusion} e2e build relaunches the requested ${gates} set, including unnamed skipped guest groups`, () => {
+      const jobs = [
+        `${conclusion}\te2e-build (harness)`,
+        'success\te2e-build (plain)',
+        'skipped\te2e:${{ matrix.group }}',
+        'failure\te2e:library',
+        'success\tplan',
+      ];
+      const line = refusals(jobs, [red('e2e-build (harness)'), refusal('e2e:library')], { gates, lane: 'vm', default_beside: 'side,tools' });
+      assert.match(line, /e2e-build.*guest groups.*relaunch the run:/);
+      assert.equal(
+        line.slice(line.indexOf('scripts/ci-gate.sh')),
+        `scripts/ci-gate.sh ${sha} --runner macos --class1a pool --lane vm --gates ${gates} --default-beside library,side,tools --label f1-landing --evidence\n`,
+      );
+    });
+  }
+}
+
+test('a green build relaunches only the refused guest gate, ignoring the unexpanded skipped host matrix', () => {
+  const jobs = [
+    'success\te2e-build (harness)',
+    'success\te2e-build (plain)',
+    'skipped\te2e:${{ matrix.group }}',
+    'failure\te2e:document-app',
+    'success\te2e:widgets',
+    'success\tplan',
+  ];
+  const line = refusals(jobs, [refusal('e2e:document-app')], { lane: 'vm', default_beside: 'side' });
+  assert.equal(
+    line.slice(line.indexOf('scripts/ci-gate.sh')),
+    `scripts/ci-gate.sh ${sha} --runner macos --class1a pool --lane vm --gates e2e:document-app --label f1-landing --evidence\n`,
+  );
 });
 
 test('a live run relaunches live, its refused groups and a refused plan alike', () => {
