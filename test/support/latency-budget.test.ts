@@ -1,10 +1,14 @@
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { budgetVerdict, LOADED_CEILING, machineLoad, QUIET_LOAD_PER_CORE } from './latency-budget';
 
 describe('a latency bound is asserted as named only on a quiet machine', () => {
+  // Never consult the runner's real reservation, including in the original load/shared/guest cases.
+  beforeEach(() => vi.stubEnv('CI_KIT_VM_RESERVATION', undefined));
+  afterEach(() => vi.unstubAllEnvs());
+
   it('holds the bound under one runnable thread per core, and five times it with the reason at or past it', () => {
     expect(QUIET_LOAD_PER_CORE).toBe(1);
     expect(LOADED_CEILING).toBe(5);
