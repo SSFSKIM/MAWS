@@ -70,7 +70,8 @@
 //
 // Latency (desk ticket #57). The hops this transcript sees are timed for `latency/latency.ts`: a main thread's first rows
 // (subscribe, snapshot, drawn), each live row that draws and each of its own chunks from the machine's stamp until
-// drawn, the owner's own send until its row, each tool call's time (a raised request's anchor), and each resume's gap.
+// drawn, the owner's own send until its row, each tool call's time (a raised request's anchor), each resume's gap, and
+// each older page. A subscription's samples name it by its id (`sub`), which the machine's per-open log line names too.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
@@ -345,6 +346,10 @@ export class DeskTranscript {
   private firstRows: { subscribed: number; snapshot: number | null } | null = null;
   /** When the disruption the next snapshot resumes from began (`latency.ts`'s resume gap). */
   private disruptedAt: number | null = null;
+  /** When the older page on its way was asked for (`latency.ts`'s older page). */
+  private olderAsked: number | null = null;
+  /** The id of the subscription whose snapshot is held (`latency.ts` names its samples by it). */
+  private sub: string | undefined = undefined;
   /** The jobs view's open outputs, asked for on this subscription (a main-thread one's). */
   readonly outputs = new OutputRequests((taskId, tail) => {
     if (!this.serving || this.subscription === null) return false;
@@ -412,6 +417,7 @@ export class DeskTranscript {
     const oldest = this.rows[0];
     if (!more || loadingOlder || !this.serving || !this.subscription || !oldest) return;
     this.state.setState({ loadingOlder: true });
+    this.olderAsked = performance.now();
     this.subscription.rows(oldest.uuid, this.page);
   }
 
@@ -458,19 +464,21 @@ export class DeskTranscript {
 
   private subscribe(): void {
     this.subscription = this.plane.subscribe(this.target, {
-      message: (message) => (message.kind === 'snapshot' ? this.snapshot(message.body) : this.receive(message)),
+      message: (message) => (message.kind === 'snapshot' ? this.snapshot(message.body, message.sub) : this.receive(message)),
       interrupted: () => this.interrupted(),
       end: (body) => {
         this.subscription = null;
         this.serving = false;
         this.disruptedAt ??= performance.now();
+        this.olderAsked = null;
         this.outputs.lost();
         this.state.setState({ phase: 'ended', ended: body, loadingOlder: false });
       },
     });
   }
 
-  private snapshot(body: SessionBodies['snapshot']): void {
+  private snapshot(body: SessionBodies['snapshot'], sub: string): void {
+    this.sub = sub;
     this.metas = body.subagents;
     this.subagents = subagentLookupOf(body.subagents);
     this.unresolved.clear();
@@ -500,13 +508,13 @@ export class DeskTranscript {
       this.layer.load(body.streaming);
       if (this.firstRows !== null) {
         this.firstRows.snapshot = performance.now();
-        latency.record('view.snapshot', this.firstRows.snapshot - this.firstRows.subscribed);
+        latency.record('view.snapshot', this.firstRows.snapshot - this.firstRows.subscribed, sub);
         if (fresh.length === 0) this.firstRows = null; // nothing to draw: no first rows to time
       }
     }
     for (const row of fresh) noteCalls(row);
     if (this.held && this.disruptedAt !== null) {
-      latency.record('resume.gap', performance.now() - this.disruptedAt);
+      latency.record('resume.gap', performance.now() - this.disruptedAt, sub);
       latency.count('subscription.resumes');
     }
     this.disruptedAt = null;
@@ -609,6 +617,8 @@ export class DeskTranscript {
   }
 
   private older(body: SessionBodies['rows']): void {
+    if (this.olderAsked !== null) latency.record('view.older-page', performance.now() - this.olderAsked, this.sub);
+    this.olderAsked = null;
     const older = oldestFirst(body.rows).filter((row) => !this.uuids.has(row.uuid));
     // The rebuilt source first: whoever reads the page answered (loadingOlder false) reads the source that holds it.
     if (older.length > 0) {
@@ -626,6 +636,7 @@ export class DeskTranscript {
   private interrupted(): void {
     this.serving = false;
     this.disruptedAt ??= performance.now();
+    this.olderAsked = null;
     this.outputs.lost();
     this.state.setState({ phase: 'reconnecting', ended: null, loadingOlder: false });
   }
@@ -652,8 +663,8 @@ export class DeskTranscript {
     const entry = this.store.getState().entries[this.key];
     if (entry?.phase !== 'live' || entry.rows.length === 0) return;
     this.firstRows = null;
-    latency.drawn('view.drawn', first.snapshot);
-    latency.drawn('view.first-rows', first.subscribed);
+    latency.drawn('view.drawn', first.snapshot, false, this.sub);
+    latency.drawn('view.first-rows', first.subscribed, false, this.sub);
   }
 
   /**
