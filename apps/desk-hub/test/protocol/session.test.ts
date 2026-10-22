@@ -75,6 +75,14 @@ export const admitted: SessionMessage[] = [
   { ...base, session: 's', kind: 'output', sub: 'x', n: 14, body: { taskId: 'm3n8p1r5t', result: 'missing', path: null } },
   { ...base, session: 's', kind: 'output', sub: 'x', n: 15, body: { taskId: 'b7k2m9q4x', result: 'refused', path: '/etc/passwd', reason: 'the path is outside the session’s tasks directory' } },
   { ...base, session: 's', kind: 'output', sub: 'x', n: 16, body: { taskId: 'zzzz', result: 'unknown-task' } },
+  // The desk control surface (M0): a presence with the bridge's capabilities beside `bridge`, a machine's desk, a read's
+  // answer or its error on the sub that asked, and an op's start and end to every browser.
+  { ...base, session: 's', kind: 'presence', sub: null, n: null, body: { ...presence, capabilities: { sminos: '1.7.0', protocol: 2, engine: '2.1.307', ops: ['read', 'command'], reads: ['status'], routes: { measured: '2.1.307' } } } },
+  { ...base, session: null, kind: 'machine', sub: null, n: null, body: { ...machine, desk: { sminos: '1.7.0', rpcs: ['command'], reads: [] } } },
+  { ...base, session: 's', kind: 'read', sub: 'x', n: 17, body: { id: 'r1', what: 'status', result: { surfaces: ['cli'] } } },
+  { ...base, session: 's', kind: 'read', sub: 'x', n: 18, body: { id: 'r2', what: 'usage', error: { code: 'unsupported', message: 'no read usage' } } },
+  { ...base, session: 's', kind: 'op', sub: null, n: null, body: { rpc: 'BQUFBQUFBQUFBQUFBQUFBQ', op: 'command', phase: 'start', id: 'c1', name: 'rename', args: 'x' } },
+  { ...base, session: 's', kind: 'op', sub: null, n: null, body: { rpc: null, op: 'command', phase: 'end', id: 'c1', readback: { how: 'none' } } },
 ];
 
 export const refused: SessionMessage[] = [
@@ -132,6 +140,14 @@ export const refused: SessionMessage[] = [
   { ...base, session: 's', kind: 'output', sub: 'x', n: 3, body: { taskId: 't', result: 'missing', path: '/p', text: '' } },
   // @ts-expect-error the answers are ok, missing, refused, and unknown-task
   { ...base, session: 's', kind: 'output', sub: 'x', n: 3, body: { taskId: 't', result: 'gone' } },
+  // @ts-expect-error a read answers within its subscription
+  { ...base, session: 's', kind: 'read', sub: null, n: null, body: { id: 'r1', what: 'status' } },
+  // @ts-expect-error a read's error has a code from the set
+  { ...base, session: 's', kind: 'read', sub: 'x', n: 3, body: { id: 'r1', what: 'status', error: { code: 'nope', message: '' } } },
+  // @ts-expect-error an op goes to every browser, outside any subscription
+  { ...base, session: 's', kind: 'op', sub: 'x', n: 3, body: { rpc: null, op: 'command', phase: 'start', id: 'c1' } },
+  // @ts-expect-error capabilities name the bridge's own plugin version
+  { ...base, session: 's', kind: 'presence', sub: null, n: null, body: { ...presence, capabilities: { protocol: 2, engine: '2.1.307', ops: [], reads: [], routes: { measured: '2.1.307' } } } },
 ];
 
 describe('the DX4 envelope', () => {
@@ -142,7 +158,10 @@ describe('the DX4 envelope', () => {
     expect(SUBSCRIPTION_KINDS).toContain('usage');
     expect(SUBSCRIPTION_KINDS).toContain('output');
     expect(SESSION_WIDE_KINDS.filter((kind) => (SUBSCRIPTION_KINDS as readonly string[]).includes(kind))).toEqual([]);
-    expect(admitted).toHaveLength(23);
-    expect(refused).toHaveLength(27);
+    // The desk control surface's kinds: a read's answer and the catalog on a sub, an op to every browser.
+    expect(SUBSCRIPTION_KINDS).toEqual(expect.arrayContaining(['read', 'catalog']));
+    expect(SESSION_WIDE_KINDS).toContain('op');
+    expect(admitted).toHaveLength(29);
+    expect(refused).toHaveLength(31);
   });
 });

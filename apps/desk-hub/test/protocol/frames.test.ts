@@ -43,6 +43,14 @@ export const down: DownFrame[] = [
   { t: 'output', project, session: 's', agentId: 'a1', sub: 'y', taskId: 'b7k2m9q4x', tail: 1 },
   // @ts-expect-error output names the sub's scope, agentId included
   { t: 'output', project, session: 's', sub: 'x', taskId: 'b7k2m9q4x', tail: 1 },
+  // A read, carried with the sub's whole route; its args only when the browser sent some.
+  { t: 'read', project, session: 's', agentId: null, sub: 'x', id: 'r1', what: 'status' },
+  { t: 'read', project, session: 's', agentId: null, sub: 'x', id: 'r2', what: 'usage', args: { breakdown: 'full' } },
+  // @ts-expect-error a read names the sub's scope, agentId included
+  { t: 'read', project, session: 's', sub: 'x', id: 'r3', what: 'status' },
+  // The welcome lists the session kinds the hub relays; an older hub's lists none.
+  { t: 'welcome', org: 'o', machine: 'mini', generation: 1, heartbeat_ms: 15000, kinds: ['read', 'op'] },
+  { t: 'welcome', org: 'o', machine: 'mini', generation: 1, heartbeat_ms: 15000 },
 ];
 
 export const browserUp: ProjectUp[] = [
@@ -55,6 +63,12 @@ export const browserUp: ProjectUp[] = [
   { t: 'output', sub: 'x', taskId: 'b7k2m9q4x', tail: '64k' },
   // @ts-expect-error output names its task
   { t: 'output', sub: 'x', tail: 1024 },
+  { t: 'read', sub: 'x', id: 'r1', what: 'status' },
+  { t: 'read', sub: 'x', id: 'r2', what: 'usage', args: { breakdown: 'summary' } },
+  // @ts-expect-error a read's id correlates its answer
+  { t: 'read', sub: 'x', what: 'status' },
+  // @ts-expect-error a read's args are an object
+  { t: 'read', sub: 'x', id: 'r3', what: 'usage', args: 'full' },
 ];
 
 export const results: { [N in keyof RpcResults]: RpcResults[N] } = {
@@ -68,6 +82,8 @@ export const results: { [N in keyof RpcResults]: RpcResults[N] } = {
   retire: {},
   resume: { session: 's' },
   stop: { taskId: 'b7k2m9q4x' },
+  // Answered at once; the outcome follows as `op`.
+  command: { queued: true, route: 'run', id: 'cmd-1' },
 };
 
 export const outcomes: RpcOutcome<'interrupt' | 'steer'>[] = [
@@ -101,8 +117,8 @@ export const browserDown: ProjectDown[] = [
 
 describe("DX2's and DX3's frames", () => {
   it('are pinned by their types', () => {
-    expect(up.length + down.length + browserUp.length + browserDown.length).toBe(29);
-    expect(Object.keys(results)).toHaveLength(10);
+    expect(up.length + down.length + browserUp.length + browserDown.length).toBe(38);
+    expect(Object.keys(results)).toHaveLength(11);
     expect(outcomes).toHaveLength(8);
   });
 });

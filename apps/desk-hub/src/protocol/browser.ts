@@ -2,9 +2,10 @@
 // (`/api/projects/<id>/socket`), one to the org's `Registry` for the grid (`/api/registry/socket`). Browsers see project
 // offsets, never writer vectors.
 import type { ProjectKind } from './identity';
+import type { JsonObject } from './json';
 import type { HumanEvent, LogEvent } from './log';
 import type { Refusal, Rejection } from './machine';
-import { FRAME_LIMIT, type Part } from './parts';
+import { FRAME_LIMIT, utf8Length, type Part } from './parts';
 import type { Rpc, RpcOutcome, RpcState } from './rpc';
 import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from './session';
 
@@ -33,6 +34,14 @@ export type ProjectUp =
    * or refused comes back as the answer's own variant, never as a hub refusal.
    */
   | { t: 'output'; sub: string; taskId: string; tail: number }
+  /**
+   * A read of the session (the desk control surface spec, §5): nothing on the machine changes, and the answer comes as
+   * DX4 `read` on that sub with this `id`. `id` the browser's own, 1 to 64 characters; `what` a read kind,
+   * `[a-z-]{1,32}`; `args` absent or an object of at most 4 KiB as JSON (`readShapeError`), else `bad-shape`. A sub the
+   * socket does not hold is passed over quietly, as `diff` is; a kind or a bridge the machine lacks comes back as the
+   * answer's `error`, never as a hub refusal.
+   */
+  | { t: 'read'; sub: string; id: string; what: string; args?: JsonObject }
   /** Whether this tab shows the project; a visible tab of a member holds back that member's pushes. */
   | { t: 'visibility'; visible: boolean }
   | Part;
@@ -60,6 +69,20 @@ export const isTaskId = (value: unknown): value is string => typeof value === 's
 
 /** A tail an `output` may ask for: a whole number of bytes from 1 to `OUTPUT_TAIL_MAX`. */
 export const isOutputTail = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= OUTPUT_TAIL_MAX;
+
+/** The most bytes (UTF-8 of its JSON text) a `read`'s `args` take. */
+export const READ_ARGS_MAX = 4096;
+
+/** Why a `read` frame is not one the hub carries (DX3), or null: its `id`, its `what`, and its `args`. */
+export function readShapeError(frame: { id?: unknown; what?: unknown; args?: unknown }): string | null {
+  const { id, what, args } = frame;
+  if (typeof id !== 'string' || id.length < 1 || id.length > 64) return 'a read names its id, 1 to 64 characters';
+  if (typeof what !== 'string' || !/^[a-z-]{1,32}$/.test(what)) return 'a read names its kind, [a-z-]{1,32}';
+  if (args === undefined) return null;
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return "a read's args are an object";
+  if (utf8Length(JSON.stringify(args)) > READ_ARGS_MAX) return `a read's args are at most ${READ_ARGS_MAX} bytes`;
+  return null;
+}
 
 /** Hub → browser over a project socket. */
 export type ProjectDown =

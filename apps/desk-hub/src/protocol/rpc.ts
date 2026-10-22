@@ -33,11 +33,18 @@ export type RpcArgs = {
    * engine spells it, `[A-Za-z0-9_-]{1,64}`.
    */
   stop: { session: string; taskId: string };
+  /**
+   * Run one slash command in a bridged session (the desk control surface spec, §2–§3): `name` exactly as
+   * `$.command.list()` spells it, 1 to 128 characters without a control character (an MCP prompt's ` (MCP)` suffix
+   * included); `args` the text after it, at most 4,096 characters. The bridge's route table decides whether it runs;
+   * the web never asserts a class.
+   */
+  command: { session: string; name: string; args?: string };
 };
 
 export type RpcName = keyof RpcArgs;
 
-export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop'] as const satisfies readonly RpcName[];
+export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop', 'command'] as const satisfies readonly RpcName[];
 
 export type RpcResults = {
   /**
@@ -61,6 +68,12 @@ export type RpcResults = {
   resume: { session: string };
   /** The task asked to stop. Its `stopped` arrives on the session's DX4 body (the `TaskStop` row), not here. */
   stop: { taskId: string };
+  /**
+   * Answered at once, whether or not a turn runs (a command waits for the turn's end, H-queue): `route` the class the
+   * bridge's table gave it, `id` the op's own, which its DX4 `op` start and end name. Its outcome follows as `op`; a
+   * refusal of the bridge's is `failed`, the bridge's code the message's first word and its reason after.
+   */
+  command: { queued: true; route: string; id: string };
 };
 
 /**

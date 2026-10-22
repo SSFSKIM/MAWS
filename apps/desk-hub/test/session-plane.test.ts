@@ -537,6 +537,125 @@ describe('subscriptions', () => {
   });
 });
 
+describe('the desk control surface (M0): reads, ops, capabilities, command', () => {
+  it("carries a read to the machine with the sub's route, refuses one out of form, and relays its answer to the sub's socket alone", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const other = await browser(project);
+    const sub = newNonce();
+    const agentSub = newNonce();
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
+    await m.next((f) => f.t === 'subscribe' && f.sub === sub, 'subscribe');
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: 'a1', sub: agentSub });
+    await m.next((f) => f.t === 'subscribe' && f.sub === agentSub, 'the agent sub');
+
+    b.send({ t: 'read', sub, id: 'r1', what: 'status' });
+    expect(await m.next((f) => f.t === 'read' && f.id === 'r1', 'read')).toEqual({ t: 'read', project, session: SESSION, agentId: null, sub, id: 'r1', what: 'status' });
+    b.send({ t: 'read', sub, id: 'r2', what: 'usage', args: { breakdown: 'full' } });
+    expect(await m.next((f) => f.t === 'read' && f.id === 'r2', 'read with args')).toEqual({ t: 'read', project, session: SESSION, agentId: null, sub, id: 'r2', what: 'usage', args: { breakdown: 'full' } });
+    // Which kinds an agent's scope serves is the machine's to say: the hub carries the route whole.
+    b.send({ t: 'read', sub: agentSub, id: 'r3', what: 'status' });
+    expect(await m.next((f) => f.t === 'read' && f.id === 'r3', 'the agent read')).toMatchObject({ agentId: 'a1', sub: agentSub });
+
+    // Out of form: refused, never carried.
+    const fromM = m.frames.length;
+    const fromB = b.frames.length;
+    const malformed = [
+      { id: '', what: 'status' },
+      { id: 'x'.repeat(65), what: 'status' },
+      { id: 7, what: 'status' },
+      { what: 'status' },
+      { id: 'a', what: 'Status' },
+      { id: 'a', what: '' },
+      { id: 'a', what: 'x'.repeat(33) },
+      { id: 'a', what: 'status/../x' },
+      { id: 'a', what: 'status', args: [] },
+      { id: 'a', what: 'status', args: 'full' },
+      { id: 'a', what: 'status', args: null },
+      { id: 'a', what: 'status', args: { q: 'x'.repeat(4096) } },
+    ];
+    for (const fields of malformed) b.send({ t: 'read', sub, ...fields } as unknown as ProjectUp);
+    const refusals = await waitFor(() => {
+      const got = ofType(b, 'refused', fromB);
+      return got.length >= malformed.length ? got : undefined;
+    });
+    expect(refusals.map((f) => f.refusal.reason)).toEqual(malformed.map(() => 'bad-shape'));
+    // A sub the socket does not hold is passed over quietly, as diff is.
+    other.send({ t: 'read', sub, id: 'theirs', what: 'status' });
+    b.send({ t: 'read', sub, id: 'after', what: 'status' });
+    await m.next((f) => f.t === 'read' && f.id === 'after', 'the read after the refusals', fromM);
+    expect(m.frames.slice(fromM).filter((f) => f.t === 'read').map((f) => (f as { id: string }).id)).toEqual(['after']);
+    // Every browser of the project sees the hub's refusals (the audit record), and none for the read passed over.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(ofType(other, 'refused')).toHaveLength(malformed.length);
+
+    // The answers go to the socket holding the sub, numbered as the machine numbered them, bodies unread.
+    const fromOther = other.frames.length;
+    const snapshot = envelope(m, project, 'snapshot', { rows: [], more: false, subagents: [], presence: presence('idle'), streaming: [] }, SESSION, sub, 0);
+    const answer = envelope(m, project, 'read', { id: 'r1', what: 'status', result: { version: { version: '2.1.307', base: '2.1.307' }, surfaces: ['cli'] } }, SESSION, sub, 1);
+    const failed = envelope(m, project, 'read', { id: 'r2', what: 'usage', error: { code: 'unsupported', message: 'no read usage' } }, SESSION, sub, 2);
+    await m.postOk([{ t: 'session', message: snapshot }, { t: 'session', message: answer }, { t: 'session', message: failed }]);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'read' && f.message.n === 2, 'the answers');
+    expect(sessionKinds(b).filter((x) => x.kind === 'read')).toEqual([answer, failed]);
+    expect(sessionKinds(other, fromOther).filter((x) => x.sub !== null)).toEqual([]);
+    b.close();
+    other.close();
+    await m.close();
+  });
+
+  it("relays an op to every browser unread, as compact; keeps a presence's capabilities and the machine's desk; forwards command", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const other = await browser(project);
+
+    // A presence carrying the bridge's capabilities (a sibling of `bridge`) is kept whole and shown to each browser,
+    // and to a browser that connects later.
+    const capabilities = { sminos: '1.7.0', protocol: 2, engine: '2.1.307', ops: ['ping', 'read', 'command'], reads: ['status'], routes: { measured: '2.1.307' } };
+    const live = envelope(m, project, 'presence', { ...presence('idle'), capabilities });
+    await m.postOk([{ t: 'session', message: live }]);
+    expect((await other.next((f) => f.t === 'session' && f.message.kind === 'presence', 'presence')) as { message: SessionMessage }).toMatchObject({ message: { body: { capabilities } } });
+    const later = await browser(project);
+    expect((await later.next((f) => f.t === 'session' && f.message.kind === 'presence', 'kept presence')) as { message: SessionMessage }).toMatchObject({ message: live });
+
+    // The machine's desk is admitted and kept with the body the hub rebuilds; a malformed one is refused whole.
+    const desk = { sminos: '1.7.0', rpcs: ['steer', 'command'], reads: [] };
+    const fromB = b.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'machine', { ...machinePresence, desk, extra: 'dropped' }, null) }]);
+    const machines = await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.desk !== undefined), 'machines', fromB);
+    expect((machines as Extract<ProjectDown, { t: 'machines' }>).machines.find((x) => x.machine === m.name)).toEqual({ machine: m.name, ...machinePresence, desk });
+    const fromRefused = ofType(b, 'machines').length;
+    for (const bad of [{ sminos: 1, rpcs: [], reads: [] }, { sminos: '1.7.0', rpcs: 'command', reads: [] }, { sminos: '1.7.0', rpcs: [], reads: [''] }, { sminos: '1.7.0', rpcs: [] }]) {
+      const answer = await m.post([{ t: 'session', message: envelope(m, project, 'machine', { ...machinePresence, desk: bad }, null) }]);
+      expect((await answer.json()) as { refused: unknown[] }).toMatchObject({ refused: [{ index: 0, reason: 'bad-shape' }] });
+    }
+    expect(ofType(b, 'machines').length).toBe(fromRefused);
+    const reconnected = await browser(project);
+    expect((await reconnected.next((f) => f.t === 'machines', 'machines on connect')) as Extract<ProjectDown, { t: 'machines' }>).toMatchObject({ machines: [{ machine: m.name, desk }] });
+
+    // An op goes to every browser of the project, its body unread; sub and n are null.
+    const start = envelope(m, project, 'op', { rpc: null, op: 'command', phase: 'start', id: 'c1', name: 'rename', args: 'desk-m0' });
+    const end = envelope(m, project, 'op', { rpc: null, op: 'command', phase: 'end', id: 'c1', name: 'rename', args: 'desk-m0', settled: { ok: true }, readback: { how: 'row', text: 'Session renamed to: desk-m0', uuid: 'u1' } });
+    await m.postOk([{ t: 'session', message: start }, { t: 'session', message: end }]);
+    for (const x of [b, other]) {
+      await x.next((f) => f.t === 'session' && f.message.kind === 'op' && (f.message.body as { phase: string }).phase === 'end', 'op end');
+      expect(sessionKinds(x).filter((s) => s.kind === 'op')).toEqual([start, end]);
+    }
+    const inSub = await m.post([{ t: 'session', message: envelope(m, project, 'op', { rpc: null, op: 'command', phase: 'end', id: 'c2' }, SESSION, 's', 1) }]);
+    expect((await inSub.json()) as { refused: unknown[] }).toMatchObject({ refused: [{ index: 0, reason: 'bad-shape' }] });
+
+    // command is an RPC the hub forwards as sealed, and its result relayed as the machine sent it.
+    const call = await rpc(project, m.name, 'command', { session: SESSION, name: 'rename', args: 'desk-m0' });
+    b.send({ t: 'rpc', rpc: call });
+    expect(((await m.next((f) => f.t === 'rpc', 'the command')) as Extract<DownFrame, { t: 'rpc' }>).rpc).toEqual(call);
+    await m.postOk([{ t: 'rpc-result', project, nonce: call.nonce, outcome: { state: 'done', result: { queued: true, route: 'run', id: 'c3' } } }]);
+    expect(await b.next((f) => f.t === 'rpc-state' && f.state === 'done', 'queued')).toMatchObject({ outcome: { result: { queued: true, route: 'run', id: 'c3' } } });
+    for (const x of [b, other, later, reconnected]) x.close();
+    await m.close();
+  });
+});
+
 describe('the pending set, decisions, and deliveries', () => {
   it('a raise reaches every browser, a settlement removes it and the audit record holds the side that won', async () => {
     const project = newProject();
