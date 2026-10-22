@@ -2592,6 +2592,15 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   frozen→active could not resume even an empty page on this MacBook, so it supplies
   no app evidence (friction tracker #92); real-WebSocket unit tests separately pin
   iOS wall-clock gaps, buffered-frame-first and heartbeat-first orderings.
+  Scope of that proof: both the real bridge/plane and fake producer capture the
+  reply-so-far as aggregated streaming blocks plus watermarks, not chunk history.
+  Post-capture live deltas can still accumulate in the real plane while transcript
+  construction waits and drain individually afterward. A synthetic synchronous
+  574-chunk post-join burst delayed receipt visibility past five seconds in a
+  focused test; this does not measure production latency or prove its cause, but
+  is not grounds to dismiss real backlog exposure. Measuring/bounding that live
+  backlog is a separate latency follow-up; this change replaces stale generations
+  with current state, not a live-delta coalescing policy.
   Date/Author: 2026-10-22, the phone-fix executor, from the owner's m1-busy walk.
 
 - Decision: Pending command receipts belong to the project conversation, not a
