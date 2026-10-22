@@ -4,6 +4,7 @@ The research behind #52's protocol phase. Start with the synthesis, which states
 
 | file | what |
 |---|---|
+| [article/remote-architectures.html](article/remote-architectures.html) | **Start here for the picture.** A Korean explainer, one HTML file with diagrams: today's desk (the bridge mod), Claude's own protocols (Remote Control, the SDK stdio protocol, Desktop SSH mode, the `--bg` supervisor), and the session-holder design, drawn on the same three lanes and compared |
 | [web-maws-remote-research.ko.md](web-maws-remote-research.ko.md) | **The synthesis.** The target (MAWS's features, Remote-Control-grade connectivity, many machines and viewers), what crosses the network, the machine endpoint, the trust design, the connection contract, the gaps in today's desk, the decisions with recommendations (including the owner's two-lane decision, §3.7), and the spikes |
 | [maws-web-porting-surface.md](maws-web-porting-surface.md) | The X2 registry (365 commands, 77 events), classified for remoting; the main-process residue; the E10 supervisor as a network endpoint; how it sits beside the desk's daemon and mod |
 | [desktop-ssh-helper-protocol.md](desktop-ssh-helper-protocol.md) | Claude Desktop's SSH mode: the Desktop↔`claude-ssh` protocol, checkpoint replay, adoption, held sends, liveness constants, mapped against #52's four diagnosed failures |
