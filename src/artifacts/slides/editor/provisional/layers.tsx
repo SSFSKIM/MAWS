@@ -24,7 +24,7 @@ export function useDeckProvisional(layers: ProvisionalLayers | null, doc: Doc, f
   return deck;
 }
 
-const NO_SNAPSHOT: DeckProvisionalSnapshot = { slides: new Map(), index: null };
+const NO_SNAPSHOT: DeckProvisionalSnapshot = { slides: new Map() };
 const noSubscribe = () => () => {};
 const noSnapshot = () => NO_SNAPSHOT;
 

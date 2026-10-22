@@ -51,21 +51,41 @@ export interface WrittenSlide {
   drawn: ProvisionalSlide | null;
   /** A new slide's place once the index gives it (`ProvisionalFiles.frameOf`); null otherwise. */
   frame: ProvisionalFrame | null;
+  /**
+   * A new slide's own call's index (`deck.json`, `canvas.json`) as far as it streamed, if the call sends one; null for a
+   * slide the live deck holds. Another call streaming at once names its own new slides, never this one.
+   */
+  index: StreamedIndex | null;
+}
+
+/** A publish's index file as far as it streamed. */
+export interface StreamedIndex {
+  text: string;
+  open: boolean;
 }
 
 export interface DeckProvisionalSnapshot {
   /** The slides being written, in the order their files arrived. */
   slides: ReadonlyMap<string, WrittenSlide>;
-  /** The publish's index (`deck.json`, `canvas.json`) as far as it streamed, if it sends one. */
-  index: { text: string; open: boolean } | null;
 }
 
-const EMPTY: DeckProvisionalSnapshot = Object.freeze({ slides: new Map(), index: null });
+const EMPTY: DeckProvisionalSnapshot = Object.freeze({ slides: new Map() });
 
-/** The deck's order with each new slide being written at its place in the streamed index (G-R5). */
+/**
+ * The deck's order with each new slide being written at its place in its own call's streamed index (G-R5): each call's
+ * new slides placed in turn, in the order the calls began, so one call's index never unplaces another call's slide.
+ */
 export function writtenOrder(snapshot: DeckProvisionalSnapshot, liveOrder: readonly string[]): readonly string[] {
-  const added = [...snapshot.slides].filter(([, slide]) => slide.isNew && slide.drawn !== null).map(([id]) => id);
-  return added.length === 0 ? liveOrder : provisionalOrder(liveOrder, added, snapshot.index?.text, snapshot.index?.open ?? false);
+  const calls = new Map<string, { index: StreamedIndex | null; added: string[] }>();
+  for (const [id, slide] of snapshot.slides) {
+    if (!slide.isNew || slide.drawn === null) continue;
+    const call = calls.get(slide.toolUseId) ?? { index: slide.index, added: [] };
+    call.added.push(id);
+    calls.set(slide.toolUseId, call);
+  }
+  let order = liveOrder;
+  for (const { index, added } of calls.values()) order = provisionalOrder(order, added, index?.text, index?.open ?? false);
+  return order;
 }
 
 interface Computed {
@@ -122,16 +142,14 @@ export class DeckProvisional {
   };
 
   private recompute(): void {
-    type Index = DeckProvisionalSnapshot['index'];
-    const files: { id: string; layer: ArtifactProvisional; text: string; drawn: ProvisionalSlide | null; own: { index: Index } }[] = [];
-    let index: Index = null;
+    const files: { id: string; layer: ArtifactProvisional; text: string; drawn: ProvisionalSlide | null; own: { index: StreamedIndex | null } }[] = [];
     for (const layer of this.layers.get().values()) {
       const open = openFile(layer);
-      const own: { index: Index } = { index: null }; // this call's index, which may stream before or after its files
+      const own: { index: StreamedIndex | null } = { index: null }; // this call's index, which may stream before or after its files
       for (const op of layer.ops) {
         if (op.op !== 'file') continue;
         if (op.path === this.files.indexPath) {
-          index = own.index = { text: op.text, open: op.path === open };
+          own.index = { text: op.text, open: op.path === open };
           continue;
         }
         const id = this.files.slideOf(op.path);
@@ -143,7 +161,7 @@ export class DeckProvisional {
     for (const { id, layer, text, drawn, own } of files) {
       const isNew = !Y.hasSlide(this.live, id);
       const frame = isNew && own.index && this.files.frameOf ? this.files.frameOf(this.live, id, own.index, text) : null;
-      const slide: WrittenSlide = { toolUseId: layer.toolUseId, name: layer.name, color: layer.color, isNew, drawn, frame };
+      const slide: WrittenSlide = { toolUseId: layer.toolUseId, name: layer.name, color: layer.color, isNew, drawn, frame, index: isNew ? own.index : null };
       const was = this.current.slides.get(id);
       slides.set(id, was && sameSlide(was, slide) ? was : slide);
     }
@@ -152,8 +170,8 @@ export class DeckProvisional {
     this.forget([...this.written.keys()].filter((id) => !slides.has(id)));
     this.fit(slides);
     this.observe(slides);
-    const same = slides.size === this.current.slides.size && [...slides].every(([id, slide]) => this.current.slides.get(id) === slide) && sameIndex(index, this.current.index);
-    if (!same) this.commit(slides.size === 0 && index === null ? EMPTY : { slides, index });
+    const same = slides.size === this.current.slides.size && [...slides].every(([id, slide]) => this.current.slides.get(id) === slide);
+    if (!same) this.commit(slides.size === 0 ? EMPTY : { slides });
   }
 
   // The slide's drawing for the file so far, merged again only when the file grew, the live slide changed or came.
@@ -235,5 +253,5 @@ export class DeckProvisional {
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((key) => b.has(key));
 const sameDrawn = (a: ProvisionalSlide, b: ProvisionalSlide) => a.file === b.file && sameSet(a.changed, b.changed) && sameSet(a.added, b.added) && sameSet(a.removed, b.removed);
 const sameFrame = (a: ProvisionalFrame | null, b: ProvisionalFrame | null) => a === b || (a !== null && b !== null && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
-const sameSlide = (a: WrittenSlide, b: WrittenSlide) => a.toolUseId === b.toolUseId && a.name === b.name && a.color === b.color && a.isNew === b.isNew && a.drawn === b.drawn && sameFrame(a.frame, b.frame);
-const sameIndex = (a: DeckProvisionalSnapshot['index'], b: DeckProvisionalSnapshot['index']) => a === b || (a !== null && b !== null && a.text === b.text && a.open === b.open);
+const sameSlide = (a: WrittenSlide, b: WrittenSlide) => a.toolUseId === b.toolUseId && a.name === b.name && a.color === b.color && a.isNew === b.isNew && a.drawn === b.drawn && sameFrame(a.frame, b.frame) && sameIndex(a.index, b.index);
+const sameIndex = (a: StreamedIndex | null, b: StreamedIndex | null) => a === b || (a !== null && b !== null && a.text === b.text && a.open === b.open);

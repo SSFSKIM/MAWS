@@ -123,6 +123,18 @@ describe('the deck’s provisional model', () => {
     expect(Y.slideIds(w.provisional.scratch), 'the scratch slide goes with it').toEqual([]);
   });
 
+  it('places each call’s new slide by its own call’s index: two publishes streaming at once never move each other’s', () => {
+    const w = world();
+    const slide = (id: string) => `<section id="${id}"><h2 id="h${id}" style="font-size:64px">New ${id}</h2></section>`;
+    // call A inserts sA between the slides; call B appends sB
+    w.live.frame(publishFrame('callA', 'streaming', { [DECK_PATH]: w.index().replace('"s2"', '"sA", "s2"'), [slidePath('sA')]: slide('sA') }));
+    expect(writtenOrder(w.provisional.snapshot(), ['s1', 's2'])).toEqual(['s1', 'sA', 's2']);
+    w.live.frame(publishFrame('callB', 'streaming', { [DECK_PATH]: w.index().replace('"s2"', '"s2", "sB"'), [slidePath('sB')]: slide('sB') }));
+    expect(writtenOrder(w.provisional.snapshot(), ['s1', 's2']), 'B’s index does not unplace A’s slide').toEqual(['s1', 'sA', 's2', 'sB']);
+    w.live.frame(publishFrame('callA', 'streaming', { [slidePath('sA')]: slide('sA').replace('New', 'Newer') }));
+    expect(writtenOrder(w.provisional.snapshot(), ['s1', 's2']), 'nor A’s next tick B’s').toEqual(['s1', 'sA', 's2', 'sB']);
+  });
+
   it('withdraws every trace at a refusal, the live doc untouched throughout', () => {
     const w = world();
     const before = stateVector(w.doc);
