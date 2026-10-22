@@ -29,7 +29,9 @@ export const ProvisionalOpSchema = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('set_cell'), table: BlockId, row: z.number().int().nonnegative(), col: z.number().int().nonnegative(), text: Text }),
   z.strictObject({ op: z.literal('delete'), block: BlockId }),
   z.strictObject({ op: z.literal('move'), block: BlockId }),
-  z.strictObject({ op: z.literal('file'), path: z.string().min(1), text: Text }), // G2: a publish's file (the slide or board), as far as it parses
+  // G2 (G-R1): a publish's file (the slide or board) as far as it parses; a publish's frame carries only the files whose
+  // text changed since its last, so a layer keeps its files by path, a later text replacing the earlier
+  z.strictObject({ op: z.literal('file'), path: z.string().min(1), text: Text }),
   z.strictObject({ op: z.literal('dataset'), dataset: z.string().min(1), text: Text }), // the dashboard view's dataset, as far as it parses
 ]);
 export type ProvisionalOp = z.infer<typeof ProvisionalOpSchema>;
