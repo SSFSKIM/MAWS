@@ -13,9 +13,9 @@
 //
 // The DOM hooks an e2e recorder reads (stable): the layer `[data-provisional-layer="<slide>"]` (`data-provisional-writing`
 // with the call's tool use id while a layer writes the slide, `data-provisional-held` the keys held back), its label
-// `[data-provisional-label]`, the ghost canvas `section[data-provisional-ghost]` whose drawn nodes carry
-// `data-provisional-shown="changed|added|moved"` and `data-provisional-key` (the element's key: its id, or a cell's
-// `<rowId>#<column>`), the live canvas's veiled nodes `[data-provisional-veiled="<key>"]`; a thumbnail's
+// `[data-provisional-label]` (`data-provisional-held` while it would meet a protected element), the ghost canvas
+// `section[data-provisional-ghost]` whose drawn nodes carry `data-provisional-shown="changed|added|moved"` and
+// `data-provisional-key` (the element's key: its id, or a cell's `<rowId>#<column>`), the live canvas's veiled nodes `[data-provisional-veiled="<key>"]`; a thumbnail's
 // `[data-provisional-thumb="<slide>"]` (ringed with `data-provisional-writing`, the whole provisional slide drawn inside).
 import { cssColor } from '../../../document/editor/host-types';
 import { onUpdate, type Doc } from '../../../yjs';
@@ -111,7 +111,9 @@ export class SlideProvisional {
     const { host } = this.o;
     host.dataset.provisionalWriting = entry.toolUseId;
     host.style.setProperty('--provisional-color', cssColor(entry.color));
-    this.showLabel(entry.name);
+    const liveNodes = keyedNodes(this.o.live.root);
+    const guarded = this.guarded(liveNodes);
+    this.showLabel(entry.name, guarded);
     const drawn = entry.drawn;
     if (!drawn) {
       this.moved = NONE;
@@ -121,13 +123,12 @@ export class SlideProvisional {
     }
     const ghost = this.ensureGhost();
     const ghostNodes = keyedNodes(ghost.root);
-    const liveNodes = keyedNodes(this.o.live.root);
     const shown = new Map<string, Shown>();
     for (const key of drawn.changed) shown.set(key, 'changed');
     for (const key of drawn.added) shown.set(key, 'added');
     for (const key of this.moved) if (!shown.has(key) && ghostNodes.has(key) && liveNodes.has(key)) shown.set(key, 'moved');
     const veiled = new Set([...drawn.removed, ...[...shown].filter(([, kind]) => kind !== 'added').map(([key]) => key)]);
-    const held = this.held(shown, veiled, ghostNodes, liveNodes, ghost.root);
+    const held = this.held(guarded, shown, veiled, ghostNodes, liveNodes, ghost.root);
     const ghostMarks = new Map<HTMLElement, [string, Shown]>();
     for (const [key, kind] of shown) {
       const node = ghostNodes.get(key);
@@ -141,12 +142,16 @@ export class SlideProvisional {
     this.mark(ghostMarks, liveMarks, held);
   }
 
-  // The keys held back (G-R4): a protected element itself, an element whose live subtree or ghost subtree holds one, and
-  // a ghost whose box meets a protected element's; the removed ones only for the first two (a veil covers nothing).
-  private held(shown: ReadonlyMap<string, Shown>, veiled: ReadonlySet<string>, ghostNodes: Map<string, HTMLElement>, liveNodes: Map<string, HTMLElement>, ghostRoot: HTMLElement): ReadonlySet<string> {
+  // The protected elements' live nodes, by key (G-R4); none without a protection or a protected element on this slide.
+  private guarded(liveNodes: Map<string, HTMLElement>): [string, HTMLElement][] {
     const ids = this.o.protection?.ids() ?? NONE;
-    if (ids.size === 0) return NONE;
-    const guarded = [...liveNodes].filter(([, node]) => ids.has(node.dataset.eid!));
+    return ids.size === 0 ? [] : [...liveNodes].filter(([, node]) => ids.has(node.dataset.eid!));
+  }
+
+  // The keys held back (G-R4): a protected element itself, an element whose live subtree or ghost subtree holds one, and
+  // a ghost whose box, or any drawn descendant's (a pinned child reaching out of its container, which a shown container
+  // shows with it), meets a protected element's; the removed ones only for the first two (a veil covers nothing).
+  private held(guarded: [string, HTMLElement][], shown: ReadonlyMap<string, Shown>, veiled: ReadonlySet<string>, ghostNodes: Map<string, HTMLElement>, liveNodes: Map<string, HTMLElement>, ghostRoot: HTMLElement): ReadonlySet<string> {
     if (guarded.length === 0) return NONE;
     const liveRoot = this.o.live.root;
     const boxes = guarded.map(([, node]) => box(node, liveRoot));
@@ -158,16 +163,21 @@ export class SlideProvisional {
     const out = new Set<string>();
     for (const key of shown.keys()) {
       const ghost = ghostNodes.get(key);
-      if (holds(key) || (ghost && boxes.some((b) => meets(box(ghost, ghostRoot), b)))) out.add(key);
+      const drawn = ghost ? [ghost, ...Array.from(ghost.querySelectorAll('[data-eid]'))] : [];
+      if (holds(key) || drawn.some((node) => boxes.some((b) => meets(box(node, ghostRoot), b)))) out.add(key);
     }
     for (const key of veiled) if (!shown.has(key) && holds(key)) out.add(key);
     return out;
   }
 
-  // After a layout pass of either canvas: the elements whose box the provisional layout moves (G-R3).
+  // After a layout pass of either canvas: the elements whose box the provisional layout moves (G-R3), then the drawing
+  // again, its protection checked against the boxes as laid out now (a fit pass or a face arriving grows a drawn element
+  // with no write of the deck's).
   private measure(): void {
-    const drawn = this.entry()?.drawn;
-    if (!drawn || !this.ghost) return;
+    const entry = this.entry();
+    if (!entry) return;
+    const drawn = entry.drawn;
+    if (!drawn || !this.ghost) return this.draw(); // the label alone, checked again
     const ghostNodes = keyedNodes(this.ghost.root);
     const liveNodes = keyedNodes(this.o.live.root);
     const [ghostRoot, liveRoot] = [this.ghost.root, this.o.live.root];
@@ -178,8 +188,7 @@ export class SlideProvisional {
       const [a, b] = [box(node, ghostRoot), box(live, liveRoot)];
       if (Math.abs(a.left - b.left) > MOVED_PX || Math.abs(a.top - b.top) > MOVED_PX || Math.abs(a.width - b.width) > MOVED_PX || Math.abs(a.height - b.height) > MOVED_PX) moved.add(key);
     }
-    if (moved.size === this.moved.size && [...moved].every((key) => this.moved.has(key))) return;
-    this.moved = moved.size === 0 ? NONE : moved;
+    if (moved.size !== this.moved.size || [...moved].some((key) => !this.moved.has(key))) this.moved = moved.size === 0 ? NONE : moved;
     this.draw();
   }
 
@@ -206,7 +215,9 @@ export class SlideProvisional {
     this.marked.ghost.clear();
   }
 
-  private showLabel(name: string): void {
+  // The label at the slide's top left, held (hidden, its box kept so it is measured again) while it meets a protected
+  // element (G-R4: nothing the layer draws covers the human's text box).
+  private showLabel(name: string, guarded: [string, HTMLElement][]): void {
     if (!this.label) {
       this.label = this.o.host.ownerDocument.createElement('div');
       this.label.className = 'deck-provisional-label';
@@ -215,6 +226,9 @@ export class SlideProvisional {
     }
     const text = this.o.label(name);
     if (this.label.textContent !== text) this.label.textContent = text;
+    const label = guarded.length > 0 ? this.label.getBoundingClientRect() : null;
+    const held = label !== null && guarded.some(([, node]) => meets(label, node.getBoundingClientRect()));
+    if (held !== this.label.hasAttribute('data-provisional-held')) this.label.toggleAttribute('data-provisional-held', held);
   }
 
   // The marks as drawn now, each attribute written only where it changes.
