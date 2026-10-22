@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS rpcs (
   nonce TEXT PRIMARY KEY, machine TEXT NOT NULL, member TEXT NOT NULL, rpc TEXT NOT NULL, state TEXT NOT NULL,
   outcome TEXT, generation INTEGER NOT NULL, updated INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS rpcs_by_machine ON rpcs (machine, state);
+CREATE TABLE IF NOT EXISTS op_outcomes (
+  machine TEXT NOT NULL, session TEXT NOT NULL, rpc TEXT NOT NULL, phase TEXT NOT NULL,
+  message TEXT NOT NULL, bytes INTEGER NOT NULL, updated INTEGER NOT NULL,
+  PRIMARY KEY (machine, session, rpc));
 CREATE TABLE IF NOT EXISTS settled (
   machine TEXT NOT NULL, session TEXT NOT NULL, request TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (machine, session, request));
 CREATE TABLE IF NOT EXISTS asked (
@@ -265,6 +269,46 @@ export class SessionStore {
       .exec<{ nonce: string }>("SELECT nonce FROM rpcs WHERE machine = ? AND state = 'forwarded' AND generation <= ?", machine, generation)
       .toArray()
       .map((row) => this.rpc(row.nonce)!);
+  }
+
+  /** Bounded command receipts, not transcript rows. End wins even if an owed start arrives later. */
+  putOp(message: SessionMessage<'op'>, now: number): void {
+    const b = message.body;
+    if (b.op !== 'command' || typeof b.rpc !== 'string' || !b.rpc || (b.phase !== 'start' && b.phase !== 'end')) return;
+    // Only the command envelope and its confirmation belong here. Future op payloads need their own approval.
+    const body: Record<string, unknown> = Object.fromEntries(['rpc', 'op', 'phase', 'id', 'name', 'args', 'route']
+      .filter((key) => typeof b[key] === 'string').map((key) => [key, b[key]]));
+    if (typeof b.t === 'number') body.t = b.t;
+    for (const [key, fields] of [['settled', ['ok', 'text', 'error', 'code']], ['readback', ['how', 'text', 'uuid']]] as const) {
+      const value = b[key];
+      if (value && typeof value === 'object' && !Array.isArray(value)) body[key] = Object.fromEntries(fields
+        .filter((field) => typeof value[field] === 'string' || (field === 'ok' && typeof value[field] === 'boolean'))
+        .map((field) => [field, value[field]]));
+    }
+    const json = JSON.stringify({ ...message, body });
+    const bytes = new TextEncoder().encode(json).byteLength;
+    this.trimOps(now);
+    this.sql.exec(`INSERT INTO op_outcomes (machine, session, rpc, phase, message, bytes, updated) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(machine, session, rpc) DO UPDATE SET phase=excluded.phase, message=excluded.message, bytes=excluded.bytes, updated=excluded.updated
+      WHERE op_outcomes.phase != 'end'`, message.machine, message.session, b.rpc, b.phase, json, bytes, now);
+    this.trimOps(now);
+  }
+
+  ops(now: number): SessionMessage<'op'>[] {
+    this.trimOps(now);
+    return this.sql.exec<{ message: string }>('SELECT message FROM op_outcomes ORDER BY updated, rowid').toArray()
+      .map((row) => JSON.parse(row.message) as SessionMessage<'op'>);
+  }
+
+  private trimOps(now: number): void {
+    this.sql.exec('DELETE FROM op_outcomes WHERE updated <= ?', now - RPC_RECORD_MS);
+    // Both limits apply to the newest suffix, including UTF-8 bytes (not JS string length).
+    const rows = this.sql.exec<{ rowid: number; bytes: number }>('SELECT rowid, bytes FROM op_outcomes ORDER BY updated DESC, rowid DESC').toArray();
+    let bytes = 0;
+    for (const [index, row] of rows.entries()) {
+      bytes += row.bytes;
+      if (index >= 256 || bytes > 4 * 1024 * 1024) this.sql.exec('DELETE FROM op_outcomes WHERE rowid = ?', row.rowid);
+    }
   }
 
   // Subscriptions: which socket each sub's messages go to.

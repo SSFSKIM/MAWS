@@ -36,8 +36,8 @@ export function SessionInfo({ session, state, controller }: { session: DeskSessi
       <Item label="Worktree" value={session.worktree || 'none'} id="worktree" mono />
       <Item label="Session" value={KIND[kindOf(session)]} id="kind" />
       <Item label="Model" value={state.model ?? 'unknown'} id="model" />
-      <Item label="Context" value={contextLine(state.usage)} id="context" />
-      <Item label="Cost" value={costLine(state.usage)} id="cost" />
+      <Item label="Context" value={contextLine(state.usage, session.presence?.bridge === true)} id="context" />
+      <Item label="Cost" value={costLine(state.usage, session.presence?.bridge === true)} id="cost" />
       <Item label="Engine" value={lines.engine} id="engine" />
       <Item label="Root" value={lines.root} id="root" mono />
       <Item label="Repository" value={lines.repo} id="repo" mono />

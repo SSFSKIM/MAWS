@@ -18,6 +18,12 @@ describe('context use and cost, as session info draws them', () => {
     expect(contextLine({ context: { tokens: 50_000, window: 200_000 }, cost: null })).toBe('50K of 200K (25%)');
   });
 
+  it('does not infer no bridge from missing usage when the session is bridged', () => {
+    expect(contextLine(null, true)).toBe('not reported yet');
+    expect(costLine(null, true)).toBe('not reported yet');
+    expect(contextLine(null, false)).toBe('unavailable (no bridge)');
+  });
+
   it('says nothing yet before the snapshot', () => {
     expect(contextLine(undefined)).toBe('…');
     expect(costLine(undefined)).toBe('…');

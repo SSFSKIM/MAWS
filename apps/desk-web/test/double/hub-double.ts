@@ -81,6 +81,7 @@ type ProjectState = {
   deliveries: Delivery[];
   /** Each session's latest presence, sent to a socket when it connects (an assumption about DX3; see sendSession). */
   presence: Map<string, SessionMessage>;
+  ops: Map<string, { at: number; message: SessionMessage<'op'> }>;
   /** The hub's record per RPC nonce: the RPC, its state, and its outcome once one came. */
   rpcs: Map<string, { rpc: Rpc; state: RpcState; outcome?: RpcOutcome }>;
   /** Each open subscription's machine and the `n` of its next message. */
@@ -221,6 +222,19 @@ export class HubDouble {
     if (message.kind === 'presence') {
       this.project(project).presence.set(message.session, message);
       if (!this.online(project, message.machine)) return;
+    }
+    if (message.kind === 'op') {
+      const op = message as SessionMessage<'op'>;
+      if (op.body.op === 'command' && typeof op.body.rpc === 'string') {
+        const ops = this.project(project).ops;
+        const key = `${op.machine}/${op.session}/${op.body.rpc}`;
+        if (ops.get(key)?.message.body.phase !== 'end') { ops.delete(key); ops.set(key, { at: Date.now(), message: op }); }
+        let bytes = 0;
+        for (const [index, [id, held]] of [...ops].reverse().entries()) {
+          bytes += Buffer.byteLength(JSON.stringify(held.message));
+          if (index >= 256 || bytes > 4 * 1024 * 1024 || Date.now() - held.at >= 86400000) ops.delete(id);
+        }
+      }
     }
     this.broadcast(project, { t: 'session', message });
   }
@@ -442,7 +456,7 @@ export class HubDouble {
   private project(id: string): ProjectState {
     let state = this.projects.get(id);
     if (!state) {
-      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map(), rpcs: new Map(), subs: new Map(), audit: [] };
+      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map(), ops: new Map(), rpcs: new Map(), subs: new Map(), audit: [] };
       this.projects.set(id, state);
     }
     return state;
@@ -527,6 +541,7 @@ export class HubDouble {
     this.sendRaw(ws, { t: 'machines', machines: state.machines });
     for (const message of state.presence.values()) if (this.online(project, message.machine)) this.sendRaw(ws, { t: 'session', message });
     this.sendRaw(ws, { t: 'pending', requests: state.pending });
+    for (const held of state.ops.values()) if (Date.now() - held.at < 86400000) this.sendRaw(ws, { t: 'session', message: held.message });
     this.sendRaw(ws, { t: 'deliveries', deliveries: state.deliveries });
   }
 

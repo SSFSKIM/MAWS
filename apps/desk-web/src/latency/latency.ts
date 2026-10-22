@@ -52,6 +52,9 @@ export const PATHS = {
   'rpc.spawn': 'spawn: sent → its result in (web→hub→machine, and back)',
   'rpc.resume': 'resume: sent → its result in (web→hub→machine, and back)',
   // The desk control surface (its spec, §12): budgets B.read, B.op, B.ran, B.readback.
+  'palette.open': 'slash keystroke → palette drawn (local, budget 50 ms)',
+  'catalog.ready': 'subscribe sent → catalog usable, cache or snapshot (B.catalog)',
+  'read.catalog': 'catalog read: sent → answer in (B.read)',
   'read.status': 'status read: read sent → its answer in (web↔hub↔machine↔bridge)',
   'op.queued': 'command: RPC sent → queued (web↔hub↔machine↔bridge)',
   'op.ran': 'command: RPC sent → its op end in, the session idle when sent',

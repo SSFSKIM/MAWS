@@ -50,7 +50,7 @@ export type SessionKind = 'bridged' | 'seat' | 'terminal' | 'not-running' | 'unk
 // view's to say. `command` runs a slash command in the session; `status` is a read's capability, which the Info tab
 // draws (not a button).
 const KIND_VERBS = ['send', 'steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop'] as const;
-const DESK_VERBS = ['command', 'status'] as const;
+const DESK_VERBS = ['command', 'status', 'catalog'] as const;
 export const VERBS = [...KIND_VERBS, ...DESK_VERBS] as const;
 export type Verb = (typeof VERBS)[number];
 type KindVerb = (typeof KIND_VERBS)[number];
@@ -58,6 +58,7 @@ type DeskVerb = (typeof DESK_VERBS)[number];
 
 /** The sminos version of the desk control surface's M0, whose bridge and daemon first advertise what they can do. */
 export const M0_SMINOS = '1.7.0';
+export const M1_SMINOS = '1.8.0';
 
 /**
  * What each desk-control verb needs: a bridge op (in `presence.capabilities.ops`), a read (in its `reads`), a daemon
@@ -66,6 +67,7 @@ export const M0_SMINOS = '1.7.0';
 export const NEEDS: Record<DeskVerb, { op?: string; rpc?: string; read?: string; sminos: string }> = {
   command: { op: 'command', rpc: 'command', sminos: M0_SMINOS },
   status: { read: 'status', sminos: M0_SMINOS },
+  catalog: { read: 'catalog', sminos: M1_SMINOS },
 };
 
 /** Whether dotted version `have` is at or above `need` (`1.10.0` above `1.9.2`); a part that is not a number counts 0. */
@@ -107,10 +109,10 @@ export function capabilities(s: CapabilityInput, connected = true): Record<Verb,
   const byKind = capabilitiesByKind(s);
   // A send to a retired session is only recorded, whatever its process or its machine is doing: sminos delivers nothing
   // to a session that is not a member.
-  const can = { ...(retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') }), command: deskCapability(s, 'command'), status: deskCapability(s, 'status') };
+  const can = { ...(retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') }), command: deskCapability(s, 'command'), status: deskCapability(s, 'status'), catalog: deskCapability(s, 'catalog') };
   if (connected) return can;
   const off = no('not connected to the hub');
-  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off, stop: off, command: off, status: off };
+  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off, stop: off, command: off, status: off, catalog: off };
 }
 
 /**

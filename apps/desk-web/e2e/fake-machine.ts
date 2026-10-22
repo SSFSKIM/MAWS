@@ -29,7 +29,7 @@
 // table) refuses it `failed` with its reason, else `queued`, its `op` start and end after it, the end at the turn's end
 // when one runs (H-queue), and a rename written to the log as `titled`. A `stale` session (its mod loaded before the
 // update) carries no capabilities until `reload`, and `stale` again withdraws them (a presence whose capabilities shrink).
-import { Commands, loadRecording, M0_SMINOS, opMessages, producerAtLeast, refusalMessage, SessionDepth, TWO_SUBAGENTS, type CommandPlan, type CommandScript, type Producer, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
+import { Commands, loadRecording, M0_SMINOS, M1_SMINOS, opMessages, producerAtLeast, refusalMessage, SessionDepth, TWO_SUBAGENTS, type CommandPlan, type CommandScript, type Producer, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
 import { RPC_NAMES, type DeskCapabilities, type JsonObject, type Raised, type Rpc, type RpcOutcome, type SessionMessage, type TaskOutput } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 
@@ -73,7 +73,7 @@ export class FakeMachineReplay {
     this.producer = options.producer ?? 'dc3';
     this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where, true, 'main', this.producer);
     this.depth.stale = options.stale ?? false;
-    this.commands = new Commands(options.commands);
+    this.commands = new Commands(options.commands, undefined, producerAtLeast(this.producer, 'm1'));
     this.hub.diffs.set(this.recording.session, { base: 'main', text: this.depth.diffText });
     this.timer = setInterval(() => this.poll(), 5);
   }
@@ -94,7 +94,7 @@ export class FakeMachineReplay {
 
   /** What the machine's own presence carries of the desk's controls (an M0 producer's), for the suite's `setMachines`. */
   get machineDesk(): { desk?: DeskCapabilities } {
-    return producerAtLeast(this.producer, 'm0') ? { desk: { sminos: M0_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
+    return producerAtLeast(this.producer, 'm0') ? { desk: { sminos: producerAtLeast(this.producer, 'm1') ? M1_SMINOS : M0_SMINOS, M1_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
   }
 
   /**
@@ -103,6 +103,7 @@ export class FakeMachineReplay {
    */
   reload(stale = false): void {
     this.depth.stale = stale;
+    if (!stale) this.depth.commandCatalog('reload-plugins');
     this.sendPresence();
   }
 
@@ -219,7 +220,7 @@ export class FakeMachineReplay {
     if (!producerAtLeast(this.producer, 'm0')) outcome = failed('bad-shape', 'no RPC "command"');
     else if (!this.depth.capabilities?.ops.includes('command')) outcome = failed('unsupported', "the session's bridge takes no commands: its plugin loaded before the update");
     else {
-      plan = this.commands.plan(rpc.args.name, rpc.args.args ?? '', this.session, machine);
+      plan = this.commands.plan(rpc.args.name, rpc.args.args ?? '', this.session, machine, this.depth.catalog);
       outcome = plan.ok ? { state: 'done', result: { queued: true, route: plan.route, id: plan.id } } : failed('failed', refusalMessage(plan));
     }
     this.ledger.set(rpc.nonce, outcome);
@@ -233,6 +234,7 @@ export class FakeMachineReplay {
   private async finishCommand(nonce: string, plan: Extract<CommandPlan, { ok: true }>): Promise<void> {
     const { project, machine } = this.where;
     this.hub.sendSession(project, opMessages(this.where, this.session, nonce, plan).end);
+    this.depth.commandCatalog(plan.name);
     const { title } = plan.outcome;
     if (title !== undefined) await this.hub.append(project, { writer: `${machine}/${this.session}`, kind: 'titled', session: this.session, title });
   }

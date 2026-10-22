@@ -28,7 +28,7 @@ import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
 import { Commands, opMessages, refusalMessage, type CommandPlan, type CommandScript } from './commands';
-import { M0_SMINOS, producerAtLeast, SessionDepth, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
+import { M0_SMINOS, M1_SMINOS, producerAtLeast, SessionDepth, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -172,7 +172,7 @@ export class FakeMachine {
       () => this.closed(),
       (error) => this.refused(error),
     );
-    this.commands = new Commands(options.commands);
+    this.commands = new Commands(options.commands, undefined, producerAtLeast(this.producer, 'm1'));
     const where = { project: this.project, machine: this.name };
     for (const recording of options.recordings ?? []) {
       const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session), this.producer, this.plugin);
@@ -272,7 +272,7 @@ export class FakeMachine {
   /** The machine's DX4 `machine` presence. */
   presence(): MachinePresence {
     const checkouts = this.options.checkouts ?? [...new Set([...this.sessions.values()].map((s) => s.cwd).filter((c): c is string => c !== null))].map((path) => ({ path, branch: 'main' }));
-    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: M0_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
+    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: producerAtLeast(this.producer, 'm1') ? M1_SMINOS : M0_SMINOS, M1_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
     return { online: true, policy: { read_only: this.options.readOnly === true, ceiling: this.options.ceiling ?? 'default' }, checkouts, ...desk };
   }
 
@@ -874,7 +874,8 @@ export class FakeMachine {
       case 'command': {
         // The bridge's route check, then the op answered at once; its start and end follow as `op` notices.
         const depth = this.sessions.get(rpc.args.session)!;
-        const plan = this.commands.plan(rpc.args.name, rpc.args.args ?? '', depth.id, this.name);
+        if (rpc.args.name === 'cd' && !this.presence().checkouts.some((checkout) => checkout.path === rpc.args.args?.trim())) return fail('unknown-checkout', 'use an absolute path of a known checkout of this project');
+        const plan = this.commands.plan(rpc.args.name, rpc.args.args ?? '', depth.id, this.name, depth.catalog);
         if (!plan.ok) return fail('failed', refusalMessage(plan));
         notices.push(() => this.runCommand(depth, rpc.nonce, plan));
         return this.traced(rpc, record, depth.id, { queued: true, route: plan.route, id: plan.id });
@@ -895,6 +896,7 @@ export class FakeMachine {
 
   private async finishCommand(session: string, nonce: string, plan: Extract<CommandPlan, { ok: true }>): Promise<void> {
     this.sendSessionWide(opMessages({ project: this.project, machine: this.name }, session, nonce, plan).end);
+    this.sessions.get(session)?.commandCatalog(plan.name);
     const { title } = plan.outcome;
     if (title !== undefined) await this.write(`rpc:${nonce}:titled`, `${this.name}/${session}`, { kind: 'titled', session, title });
     await this.flush();

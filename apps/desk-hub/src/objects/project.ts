@@ -129,6 +129,8 @@ export class Project extends DurableObject<Env> {
     // Each session's latest presence, but never a lapsed machine's as current: its sessions' presence is unknown.
     for (const { machine, message } of this.plane.presence()) if (this.isOnline(machine)) this.toSocket(server, { t: 'session', message });
     this.toSocket(server, this.pendingFrame());
+    // Outcomes stay useful when their machine is offline. They are receipts, not fresh presence.
+    for (const message of this.plane.ops(Date.now())) this.toSocket(server, { t: 'session', message });
     for (const deliveries of batched(this.plane.deliveries())) this.toSocket(server, { t: 'deliveries', deliveries });
     if (this.plane.deliveries().length === 0) this.toSocket(server, { t: 'deliveries', deliveries: [] });
     return new Response(null, { status: 101, webSocket: client });
@@ -474,6 +476,7 @@ export class Project extends DurableObject<Env> {
     if (kind === 'settled') return this.settled(ctx, kept as SessionMessage<'settled'>);
     if (kind === 'delivery') return this.delivery(ctx, kept as SessionMessage<'delivery'>);
     if (!isObject(m.body)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: `${kind}'s body is an object` });
+    if (kind === 'op') this.plane.putOp(kept as SessionMessage<'op'>, Date.now());
     this.broadcast({ t: 'session', message: kept });
   }
 

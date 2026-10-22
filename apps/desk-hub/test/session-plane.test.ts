@@ -1604,3 +1604,28 @@ async function gridReached(grid: GridClient, project: string, from: number, coun
     throw new Error(`no ${what}; got ${JSON.stringify(grid.frames.slice(from))}`);
   });
 }
+
+
+describe('op reconnect replay', () => {
+  it('replays the end missed while a browser was away, once, despite duplicate ends and late starts; isolates sessions and machines', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const other = await machine(project);
+    const old = await browser(project);
+    old.close();
+    const body = { rpc: 'nonce-replay', op: 'command', phase: 'end', id: 'c1', name: 'color', args: 'red', settled: { ok: true }, readback: { how: 'row', text: 'Session color set to: red', uuid: 'r1' } };
+    const end = envelope(m, project, 'op', body);
+    await m.postOk([{ t: 'session', message: end }, { t: 'session', message: end }, { t: 'session', message: envelope(m, project, 'op', { ...body, phase: 'start' }) }, { t: 'session', message: envelope(m, project, 'op', { ...body, id: 'c2' }, SECOND) }, { t: 'session', message: envelope(m, project, 'op', { ...body, rpc: null }) }]);
+    await other.postOk([{ t: 'session', message: envelope(other, project, 'op', { ...body, id: 'c3' }) }]);
+    const b = await browser(project);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'op', 'replayed op');
+    await b.next((f) => f.t === 'deliveries', 'join complete');
+    const ops = sessionKinds(b).filter((s): s is SessionMessage<'op'> => s.kind === 'op');
+    expect(ops).toHaveLength(3);
+    expect(ops.find((s) => s.machine === m.name && s.session === SESSION)).toEqual(end);
+    expect(ops.every((s) => s.body.phase === 'end')).toBe(true);
+    b.close();
+    await m.close();
+    await other.close();
+  });
+});

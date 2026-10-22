@@ -22,7 +22,8 @@ import { randomUUID } from 'node:crypto';
 import { join, posix } from 'node:path';
 import { isOutputTail, isTaskId } from '../src/protocol/browser';
 import type { JsonObject } from '../src/protocol/json';
-import type { Capabilities, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+import { loadRoutes } from './routes';
+import type { Catalog, Capabilities, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
@@ -36,15 +37,16 @@ import type { Recording, Row, Step } from './recording';
  * `desk`, a `read status` is answered on the sub, and a `command` RPC runs (`commands.ts`); an older producer sends
  * neither field and passes `read` by.
  */
-export type Producer = 'dc3' | 'dc8' | 'm0';
+export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1';
 
-const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2 };
+const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3 };
 
 /** Whether `producer` does what `level` added. */
 export const producerAtLeast = (producer: Producer, level: Producer): boolean => LEVEL[producer] >= LEVEL[level];
 
 /** The sminos version of the desk control surface's M0 (one minor past 1.6.3, the spec's Plan of Work). */
 export const M0_SMINOS = '1.7.0';
+export const M1_SMINOS = '1.8.0';
 
 /** An M0 bridge's capabilities (DX5 `GET /status`), as the plane forwards them in presence. */
 export const M0_CAPABILITIES: Capabilities = {
@@ -55,6 +57,8 @@ export const M0_CAPABILITIES: Capabilities = {
   reads: ['status'],
   routes: { measured: '2.1.307' },
 };
+
+export const M1_CAPABILITIES: Capabilities = { ...M0_CAPABILITIES, sminos: M1_SMINOS, reads: ['status', 'catalog'] };
 
 /** The per-uid temporary root the recordings' engine wrote task outputs under (macOS, uid 501): `<resolved tmp>/claude-<uid>`. */
 export const ENGINE_TMP = '/private/tmp/claude-501';
@@ -174,7 +178,7 @@ export class SessionDepth {
    * and while the session is `stale` (its mod loaded before its machine's update, until a reload).
    */
   get capabilities(): Capabilities | null {
-    return this.bridge && producerAtLeast(this.producer, 'm0') && !this.stale ? M0_CAPABILITIES : null;
+    return this.bridge && producerAtLeast(this.producer, 'm0') && !this.stale ? (producerAtLeast(this.producer, 'm1') ? M1_CAPABILITIES : M0_CAPABILITIES) : null;
   }
 
   /** The session's DX4 presence body: its record, whether it is bridged, and its bridge's capabilities when held. */
@@ -203,6 +207,7 @@ export class SessionDepth {
     if (!s || !producerAtLeast(this.producer, 'm0')) return;
     const answer = (body: Omit<ReadAnswer, 'id' | 'what'>) => this.deliver(sub, s, { kind: 'read', body: { id, what, ...body } });
     if (!this.bridge || this.record === null) return answer({ error: { code: 'no-bridge', message: 'the session has no bridge, or has ended' } });
+    if (what === 'catalog' && s.agentId === null && this.catalog) return answer({ result: this.catalog as unknown as JsonObject });
     if (what !== 'status' || !this.capabilities) return answer({ error: { code: 'unsupported', message: `no read ${what}` } });
     if (s.agentId !== null) return answer({ error: { code: 'unsupported', message: "status is the main transcript's" } });
     const cwd = this.recording?.cwd ?? '';
@@ -212,6 +217,20 @@ export class SessionDepth {
 
   /** The session's mod loaded before its machine's update: its presence carries no capabilities until a reload. */
   stale = false;
+  private catalogValue: Catalog = loadRoutes().catalog!;
+  get catalog(): Catalog | null { return this.capabilities?.reads.includes('catalog') ? this.catalogValue : null; }
+  updateCatalog(catalog: Catalog): void {
+    if (catalog.fingerprint === this.catalogValue.fingerprint) return;
+    this.catalogValue = catalog;
+    if (this.catalog) this.fanOut(null, { kind: 'catalog', body: catalog }, false);
+  }
+  /** A scripted reload discovers a changed catalog, as the bridge's next list does. */
+  commandCatalog(name: string): void {
+    if (!this.catalog || !['reload-skills', 'reload-plugins', 'mcp'].includes(name)) return;
+    const number = this.catalog.commands.filter((c) => c.name.startsWith('reloaded-skill-')).length + 1;
+    this.updateCatalog({ ...this.catalog, fingerprint: `${this.catalog.fingerprint}-${number}`,
+      commands: [...this.catalog.commands, { name: `reloaded-skill-${number}`, description: 'A skill discovered after reload', source: 'skill', route: { class: 'run-prompt', enabled: true, measured: 'M' } }] });
+  }
 
   /** The session's subagent tree: each started subagent's `meta.json`, with its status as a DC8 producer. */
   subagents(): SubagentMeta[] {
@@ -508,6 +527,7 @@ export class SessionDepth {
       presence: this.presenceBody(),
       streaming,
       ...(agentId === null && { usage: this.bridge ? this.usage : null }),
+      ...(agentId === null && this.catalog && { catalog: this.catalog }),
       ...(widened && { jobs: widened.jobs, mcp: widened.mcp }),
     };
     this.send({ project: this.where.project, machine: this.where.machine, session: this.id, kind: 'snapshot', sub, n: 0, body });
