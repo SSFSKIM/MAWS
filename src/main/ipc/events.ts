@@ -18,6 +18,20 @@ export function emit<N extends EventName>(name: N, payload: EventPayload<N>): bo
   return true;
 }
 
+// P4-B2 K6: to one app page only, validated as `emit` validates (the Edit menu's Undo and Redo go to the page holding the
+// focus, since another window's page would answer from its own focused element); false, and nothing sent, otherwise.
+export function emitTo<N extends EventName>(page: { send(channel: string, payload: unknown): void; isDestroyed(): boolean }, name: N, payload: EventPayload<N>): boolean {
+  const checked = validateEventPayload(name, payload);
+  if (!checked.ok) {
+    console.error(`[ipc] refused to emit invalid ${name}`, checked.issues);
+    return false;
+  }
+  if (page.isDestroyed()) return false;
+  page.send(eventChannel(name), checked.value);
+  for (const tap of taps.get(name) ?? []) tap(checked.value);
+  return true;
+}
+
 // ---- C5: onEmitted ----------------------------------------------------------------------------------------------------
 // A main-side tap on what main tells the renderer: called with every payload `emit` validated, whether or not a window
 // is open. The read model sees `attention.changed` this way, from whichever service emits it (C3's attention service

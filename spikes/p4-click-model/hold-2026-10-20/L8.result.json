@@ -1,0 +1,356 @@
+{
+ "case": "L8",
+ "mode": "clear",
+ "checks": {
+  "a keeps Hello": [
+   "Hello",
+   "Hello"
+  ],
+  "⌘Z undid one nudge, in the box": [
+   "201px",
+   "201px"
+  ],
+  "the pastes are copies of a, at 200 and at 201": [
+   [
+    "224px",
+    "225px"
+   ],
+   [
+    "224px",
+    "225px"
+   ]
+  ],
+  "Q3: the menu saw ⌘C and ⌘V, not ⌘Z, then the mouse": [
+   [
+    "copy",
+    "paste",
+    "undo",
+    "copy",
+    "paste",
+    "undo"
+   ],
+   [
+    "copy",
+    "paste",
+    "undo",
+    "copy",
+    "paste",
+    "undo"
+   ]
+  ],
+  "the Edit menu’s Undo left both pastes (today’s gap)": [
+   [
+    5,
+    0
+   ],
+   [
+    5,
+    0
+   ]
+  ]
+ },
+ "facts": {
+  "a": "Hello",
+  "b": "World",
+  "elements": 5,
+  "left": "201px",
+  "state": {
+   "surface": "main",
+   "selection": [
+    "e2-db8h"
+   ],
+   "editingText": null
+  },
+  "firstKey": {
+   "key": "Escape",
+   "keyCode": 27,
+   "isComposing": false
+  },
+  "pressToFirstKeyMs": -15961.4,
+  "focusChanges": [
+   "focusout stage @58192.3",
+   "focusin textbox:a @58192.7",
+   "focusout textbox:a @75243.3",
+   "focusin textbox:e1-db8h @75246.2",
+   "focusout textbox:e1-db8h @98367.9",
+   "focusin stage @98369.7",
+   "focusout stage @98638.4",
+   "focusin textbox:a @98638.8",
+   "focusout textbox:a @114048",
+   "focusin textbox:e2-db8h @114052"
+  ],
+  "menu": [
+   "copy",
+   "paste",
+   "undo",
+   "copy",
+   "paste",
+   "undo"
+  ],
+  "historyUndo": 0,
+  "clipboard": [
+   "copy textbox:a prevented=true",
+   "paste textbox:a prevented=true",
+   "copy textbox:a prevented=true",
+   "paste textbox:a prevented=true"
+  ],
+  "pasted": [
+   "224px",
+   "225px"
+  ]
+ },
+ "events": [
+  {
+   "t": 42181,
+   "type": "keydown",
+   "target": "stage",
+   "key": "Escape",
+   "code": "Escape",
+   "keyCode": 27,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 42181,
+   "type": "keyup",
+   "target": "stage",
+   "key": "Escape",
+   "code": "Escape",
+   "keyCode": 27,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 58142.4,
+   "type": "pointerdown",
+   "target": "node:a",
+   "slide": {
+    "x": 261,
+    "y": 250
+   },
+   "defaultPrevented": true,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 58192.3,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 58192.7,
+   "type": "focusin",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 72940.6,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "c",
+   "code": "KeyC",
+   "keyCode": 67,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 72968.5,
+   "type": "copy",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 73260,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ArrowRight",
+   "code": "ArrowRight",
+   "keyCode": 39,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 73260.1,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ArrowRight",
+   "code": "ArrowRight",
+   "keyCode": 39,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 74571.4,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ArrowRight",
+   "code": "ArrowRight",
+   "keyCode": 39,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 74571.5,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ArrowRight",
+   "code": "ArrowRight",
+   "keyCode": 39,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 74894.3,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "z",
+   "code": "KeyZ",
+   "keyCode": 90,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": true,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 75214.3,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "v",
+   "code": "KeyV",
+   "keyCode": 86,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 75223.6,
+   "type": "paste",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 75243.3,
+   "type": "focusout",
+   "target": "textbox:a",
+   "defaultPrevented": false
+  },
+  {
+   "t": 75246.2,
+   "type": "focusin",
+   "target": "textbox:e1-db8h",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 98351.4,
+   "type": "keydown",
+   "target": "textbox:e1-db8h",
+   "key": "Escape",
+   "code": "Escape",
+   "keyCode": 27,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 98367.9,
+   "type": "focusout",
+   "target": "textbox:e1-db8h",
+   "defaultPrevented": false
+  },
+  {
+   "t": 98369.7,
+   "type": "focusin",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 98351.4,
+   "type": "keyup",
+   "target": "stage",
+   "key": "Escape",
+   "code": "Escape",
+   "keyCode": 27,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 98617.5,
+   "type": "keydown",
+   "target": "stage",
+   "key": "Tab",
+   "code": "Tab",
+   "keyCode": 9,
+   "isComposing": false,
+   "defaultPrevented": true
+  },
+  {
+   "t": 98638.4,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 98638.8,
+   "type": "focusin",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 98617.5,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "Tab",
+   "code": "Tab",
+   "keyCode": 9,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 112366,
+   "type": "copy",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 114031.5,
+   "type": "paste",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": true
+  },
+  {
+   "t": 114048,
+   "type": "focusout",
+   "target": "textbox:a",
+   "defaultPrevented": false
+  },
+  {
+   "t": 114052,
+   "type": "focusin",
+   "target": "textbox:e2-db8h",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  }
+ ]
+}

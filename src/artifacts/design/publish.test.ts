@@ -490,3 +490,24 @@ describe('design-workbench fix wave', () => {
     expect(designFiles(doc)[boardPath('later')]).toBeDefined();
   });
 });
+
+// P4-B2 D19: a design's faces are a deck's, and so is the host's record of a Google Fonts face's fetch: compared without
+// it, carried forward under the agent's edit of the face while it answers the face's request.
+describe('the host’s record of a Google Fonts face', () => {
+  const LORA = 'https://fonts.googleapis.com/css2?family=Lora';
+  const record = { request: LORA, licence: 'OFL', licenceSrc: 'assets/gf-lora-OFL.txt', files: [{ src: 'assets/gf-lora-400.woff2', weight: '400', style: 'normal' }] };
+  it('lets an agent who read before the fetch edit the face, and one who read after it neither forge nor drop it', () => {
+    const doc = design();
+    transact(doc, () => Y.setDeckEntry(doc, 'faces', 'lora', { family: 'Lora', href: LORA } as unknown as Y.Json));
+    const before = designFiles(doc);
+    transact(doc, () => Y.setDeckEntry(doc, 'faces', 'lora', { family: 'Lora', href: LORA, google: record } as unknown as Y.Json)); // the host's write
+    const after = designFiles(doc);
+    expect(manifest(after).faces).toEqual({ lora: { family: 'Lora', href: LORA } }); // the loader drops it from the agent's base
+    expect(JSON.parse(after[CANVAS_PATH]!).faces.lora.google).toEqual(record); // the read shows it
+    const forged = sentWith(after, (c) => void (c.faces!.lora = { family: 'Lora', href: LORA, google: { ...record, files: [] } }));
+    expect(publish(doc, after, forged).out).toMatchObject({ changed: [], conflicts: [] });
+    const edit = publish(doc, before, sentWith(before, (c) => void (c.faces!.lora = { family: 'Lora', href: `${LORA}&display=swap` }))).out;
+    expect(edit.conflicts).toEqual([]);
+    expect(readCanvas(doc).faces!.lora).toEqual({ family: 'Lora', href: `${LORA}&display=swap`, google: record });
+  });
+});

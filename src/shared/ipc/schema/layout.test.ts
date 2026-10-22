@@ -350,6 +350,7 @@ describe('layout value shapes', () => {
       'layout.unsavedFiles': 'main', // E5: a window's dirty file tabs, for the quit question
       'layout.saveAllDone': 'main', // E5: a window's answer to the quit question's Save all
       'layout.captureRegion': 'main', // P3-G: Mark-up's still of a region the window draws
+      'layout.nativeEdit': 'main', // P4-B2 K6: the Edit menu's Undo or Redo no editor in the page claimed, run natively
     });
   });
 
@@ -357,6 +358,17 @@ describe('layout value shapes', () => {
   it('carries the menu’s Select All to the page with an empty payload', () => {
     expect(events['layout.selectAll'].safeParse({}).success).toBe(true);
     expect(events['layout.selectAll'].safeParse({ target: 'terminal' }).success).toBe(false);
+  });
+
+  // P4-B2 K6 (D10): the Edit menu's Undo and Redo, to the page and, unclaimed, back to main; nothing but the op
+  it('carries the Edit menu’s undo or redo to the page and back to main as one op, nothing else', () => {
+    for (const op of ['undo', 'redo']) {
+      expect(events['layout.edit'].safeParse({ op }).success).toBe(true);
+      expect(commands['layout.nativeEdit'].input.safeParse({ op }).success).toBe(true);
+    }
+    expect(events['layout.edit'].safeParse({ op: 'cut' }).success).toBe(false);
+    expect(events['layout.edit'].safeParse({}).success).toBe(false);
+    expect(commands['layout.nativeEdit'].input.safeParse({ op: 'undo', target: 'page' }).success).toBe(false);
   });
 
   // C12 start: Quit when idle (C12 execution document, Interfaces "The quit question")

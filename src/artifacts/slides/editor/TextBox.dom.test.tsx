@@ -12,8 +12,10 @@ import * as Y from '../../yjs/slides';
 import { SlideCanvas } from '../canvas';
 import { importSlide, slideFile, writeDeckKeys } from '../model';
 import { loadSlide } from '../parse';
+import { armedBox } from './armed';
 import { DeckSession } from './session';
-import { TextBox } from './TextBox';
+import { TEXTBOX_COPY, TextBox } from './TextBox';
+import { cellGrid, isTextTarget, slideTree } from './transform/selection';
 
 const SLIDE = `<section id="s1">
   <h2 id="title" style="font-size:64px">Plan <b>now</b>.</h2>
@@ -325,60 +327,175 @@ describe('fix wave 1: the text box stays within the slide’s text budget', () =
   });
 });
 
-// P3-F wave S, F9 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c43, obs 5a): a key the owner typed
-// on the selected element (the stage hands it over with the edit, `editText(id, { typed })`) is typed into the box once
-// it binds, over the text it opens with selected, as a key typed on a selection replaces it; nothing typed is dropped.
-describe('P3-F F9: the keys typed on the selected element before the box took the focus', () => {
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D1, D6, D7): the box mounted ARMED on a selected
+// text element before any edit, and the flip to EDIT on the same mounted box. The stage's part (the overlay) is played by
+// a harness that mounts the box as the overlay does: for the edit, or for the one selected text element while the stage
+// owns the keyboard. Its keys are the overlay's (transform.dom.test.tsx); here, what the box does with them.
+describe('P4-B2: the armed box and its flip to the edit', () => {
   const plain = (doc: Doc, id: string) => text(doc, id).map((b) => b.inline.map((r) => ('text' in r ? r.text : '\n')).join('')).join('\n');
-  function canvasOf(doc: Doc): SlideCanvas {
+  function ArmedHarness({ session, canvas, slideId = 's1' }: { session: DeckSession; canvas: SlideCanvas; slideId?: string }) {
+    const state = useSyncExternalStore(session.subscribe, session.snapshot);
+    const one = state.selection.length === 1 ? state.selection[0]! : null;
+    const id = state.editingText ?? (state.keyboard === 'stage' && one !== null && isTextTarget(slideTree(session.doc, slideId), one) ? one : null);
+    return <div className="deck-stage-overlay">{id && <TextBox key={id} session={session} canvas={canvas} slideId={slideId} elementId={id} armed={state.editingText === null} />}</div>;
+  }
+  function armed(id: string, doc: Doc = deck(), slideId = 's1') {
+    const session = new DeckSession(doc, 0);
     const host = document.createElement('div');
     document.body.appendChild(host);
-    const canvas = new SlideCanvas(doc, 's1', host);
+    const canvas = new SlideCanvas(doc, slideId, host);
     canvases.push(canvas);
-    return canvas;
+    act(() => {
+      session.select([id]);
+      session.setKeyboard('stage');
+    });
+    render(<ArmedHarness session={session} canvas={canvas} slideId={slideId} />);
+    const root = () => canvas.node(id)?.querySelector('.deck-textbox') as (HTMLElement & { editor: Editor }) | null;
+    return { doc, session, canvas, root: root()!, editor: root()!.editor, rootNow: root };
   }
 
-  it('are typed over the text the box opens with selected, the caret after them, one undo step with the typing after', () => {
+  it('mounts focused with its caret at the start and no mark bar, writing nothing; the keyboard away unmounts it', () => {
     const doc = deck();
-    const session = new DeckSession(doc, 0);
-    const canvas = canvasOf(doc);
-    act(() => {
-      session.select(['title']);
-      session.editText('title', { typed: 'Q' });
-      session.editText('title', { typed: '3' }); // a second key before the box mounted: kept, in order
-    });
-    render(<Harness session={session} canvas={canvas} />);
-    const root = canvas.node('title')!.querySelector('.deck-textbox') as HTMLElement & { editor: Editor };
-    expect(root.textContent).toBe('Q3');
-    expect(plain(doc, 'title')).toBe('Q3');
+    let updates = 0;
+    const off = onUpdate(doc, () => updates++);
+    const { session, canvas, root, editor } = armed('title', doc);
+    off();
+    expect(updates).toBe(0);
     expect(document.activeElement).toBe(root);
-    expect([root.editor.state.selection.from, root.editor.state.selection.to]).toEqual([3, 3]);
-    act(() => void root.editor.commands.insertContent(' review'));
-    expect(plain(doc, 'title')).toBe('Q3 review');
+    expect(editor.state.selection.empty).toBe(true);
+    expect(editor.state.selection.from).toBe(1);
+    expect(armedBox(session)?.elementId).toBe('title');
+    expect(screen.queryByRole('toolbar', { name: TEXTBOX_COPY.bar })).toBeNull();
+    act(() => session.setKeyboard('away'));
+    expect(canvas.node('title')!.querySelector('.deck-textbox')).toBeNull();
+    expect(armedBox(session)).toBeNull();
+    expect(session.snapshot().selection).toEqual(['title']); // the selection kept
+  });
+
+  it('T10: a printable key replaces the text, its one marked run kept, the edit beginning on the same box; one undo step with the typing after', () => {
+    const { doc, session, root, editor } = armed('title');
+    act(() => armedBox(session)!.replace('Q'));
+    expect(plain(doc, 'title')).toBe('Q');
+    expect(session.snapshot().editingText).toBe('title');
+    expect(armedBox(session)).toBeNull();
+    expect(editor.isDestroyed).toBe(false); // no remount
+    expect(document.activeElement).toBe(root);
+    expect(editor.state.selection.from).toBe(2);
+    act(() => void editor.commands.insertContent('3'));
+    expect(plain(doc, 'title')).toBe('Q3');
+    expect(screen.getByRole('toolbar', { name: TEXTBOX_COPY.bar })).not.toBeNull();
     act(() => session.undoStep());
     expect(plain(doc, 'title')).toBe('Plan now.');
     expect(session.snapshot().canUndo).toBe(false);
-  });
 
-  it('a key that reaches the stage while the box is already open goes in at its selection, typed once', () => {
-    const { doc, session, editor } = mount('list');
-    act(() => session.editText('list', { typed: 'x' }));
-    expect(plain(doc, 'list')).toBe('x');
-    expect(editor.state.doc.textContent).toBe('x');
-    act(() => session.editText('list', {})); // no key: nothing more typed
-    expect(plain(doc, 'list')).toBe('x');
-  });
-
-  it('keys typed for an edit that ended before its box bound are not typed into a later one', () => {
-    const doc = deck();
-    const session = new DeckSession(doc, 0);
-    act(() => {
-      session.editText('title', { typed: 'Q' });
-      session.editText(null);
-      session.editText('title'); // Enter: the box opens with nothing pending
+    const bold = newDoc();
+    const l = loadSlide(`<section id="s1"><h2 id="title" style="font-size:64px"><b>All bold</b></h2></section>`);
+    if (!l.ok) throw new Error('fixture');
+    transact(bold, () => {
+      writeDeckKeys(bold, { v: 4, title: 'T', order: ['s1'] });
+      importSlide(bold, l.slide, 'a0');
     });
-    render(<Harness session={session} canvas={canvasOf(doc)} />);
-    expect(plain(doc, 'title')).toBe('Plan now.');
-    expect(session.takeTyped('title')).toBeNull();
+    cleanup();
+    const second = armed('title', bold);
+    act(() => armedBox(second.session)!.replace('N'));
+    expect(text(bold, 'title')[0]!.inline).toEqual([{ text: 'N', marks: { b: {} } }]);
+  });
+
+  it('T11: an input method’s first key clears the text and leaves the composition to the box, which then holds remote frames', () => {
+    const { doc, session, root, editor } = armed('title');
+    act(() => armedBox(session)!.replace());
+    expect(plain(doc, 'title')).toBe('');
+    expect(session.snapshot().editingText).toBe('title');
+    expect(document.activeElement).toBe(root);
+    fireEvent.compositionStart(root);
+    expect(session.snapshot().composing).toBe(true);
+    expect(editor.view.composing).toBe(true);
+  });
+
+  it('T12: Enter edits with everything selected; ⌘B on ARMED marks the whole text and stays armed', () => {
+    const { doc, session, editor } = armed('title');
+    act(() => armedBox(session)!.markAll('i'));
+    expect(text(doc, 'title')[0]!.inline.every((r) => 'text' in r && 'i' in r.marks)).toBe(true);
+    expect(armedBox(session)?.elementId).toBe('title');
+    expect(editor.state.selection.empty).toBe(true);
+    act(() => armedBox(session)!.editAll());
+    expect(session.snapshot().editingText).toBe('title');
+    expect([editor.state.selection.from, editor.state.selection.to]).toEqual([1, end(editor)]);
+  });
+
+  it('T17: Escape commits and goes back to ARMED on the same box, its caret hidden at the start', () => {
+    const { session, root, editor } = armed('title');
+    act(() => armedBox(session)!.editAll());
+    act(() => void fireEvent.keyDown(root, { key: 'Escape' }));
+    expect(session.snapshot().editingText).toBeNull();
+    expect(session.snapshot().selection).toEqual(['title']);
+    expect(editor.isDestroyed).toBe(false);
+    expect(armedBox(session)?.root).toBe(root);
+    expect(editor.state.selection.from).toBe(1);
+    expect(editor.state.selection.empty).toBe(true);
+  });
+
+  it('D5: a placement of the word at a point selects the whole word by the platform’s segmentation, a Hangul word as one', () => {
+    const doc = newDoc();
+    const l = loadSlide(`<section id="s1"><p id="ko" style="font-size:32px">한글 입력기</p></section>`);
+    if (!l.ok) throw new Error('fixture');
+    transact(doc, () => {
+      writeDeckKeys(doc, { v: 4, title: 'T', order: ['s1'] });
+      importSlide(doc, l.slide, 'a0');
+    });
+    const { session, editor } = armed('ko', doc);
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue({ pos: 6, inside: -1 }); // inside 입력기
+    act(() => session.editText('ko', { at: { kind: 'word', x: 1, y: 1 } }));
+    const { from, to } = editor.state.selection;
+    expect(editor.state.doc.textBetween(from, to)).toBe('입력기');
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue({ pos: 2, inside: -1 });
+    act(() => session.editText('ko', { at: { kind: 'point', x: 1, y: 1 } }));
+    expect([editor.state.selection.from, editor.state.selection.to]).toEqual([2, 2]);
+  });
+
+  it('a placement is taken once, and dropped with an edit that ended before its box took it; an edit begun elsewhere takes the focus back', () => {
+    const { session, root, editor } = armed('title');
+    const elsewhere = document.createElement('input');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    act(() => session.editText('title', { at: { kind: 'end' } }));
+    expect(document.activeElement).toBe(root);
+    expect([editor.state.selection.from, editor.state.selection.to]).toEqual([end(editor), end(editor)]);
+    expect(session.takePlacement('title')).toBeNull();
+    act(() => {
+      session.editText(null);
+      session.editText('list', { at: { kind: 'end' } });
+      session.editText(null);
+    });
+    expect(session.takePlacement('list')).toBeNull();
+  });
+
+  it('T16 and T17 in a table: Tab to the next cell with its content selected, past the last a new row, Escape to the table', () => {
+    const doc = newDoc();
+    const l = loadSlide(`<section id="s1"><table id="t" style="font-size:24px"><tr id="r1"><th>A</th><th>B</th></tr><tr id="r2"><td>1</td><td>2</td></tr></table></section>`);
+    if (!l.ok) throw new Error('fixture');
+    transact(doc, () => {
+      writeDeckKeys(doc, { v: 4, title: 'T', order: ['s1'] });
+      importSlide(doc, l.slide, 'a0');
+    });
+    const grid = () => cellGrid(slideTree(doc, 's1'), 't');
+    const [[a1, b1], [, b2]] = grid() as [string[], string[]];
+    const { session, canvas } = armed(a1!, doc);
+    const box = (id: string) => canvas.node(id)!.querySelector('.deck-textbox') as HTMLElement & { editor: Editor };
+    act(() => armedBox(session)!.editAll());
+    act(() => void fireEvent.keyDown(box(a1!), { key: 'Tab' }));
+    expect(session.snapshot().editingText).toBe(b1);
+    expect(box(b1!).editor.state.doc.textBetween(box(b1!).editor.state.selection.from, box(b1!).editor.state.selection.to)).toBe('B');
+    act(() => void fireEvent.keyDown(box(b1!), { key: 'Tab', shiftKey: true }));
+    expect(session.snapshot().editingText).toBe(a1);
+    act(() => session.editText(b2!));
+    act(() => void fireEvent.keyDown(box(b2!), { key: 'Tab' }));
+    const rows = grid();
+    expect(rows).toHaveLength(3);
+    expect(session.snapshot().editingText).toBe(rows[2]![0]);
+    act(() => void fireEvent.keyDown(box(rows[2]![0]!), { key: 'Escape' }));
+    expect(session.snapshot().editingText).toBeNull();
+    expect(session.snapshot().selection).toEqual(['t']);
+    expect(canvas.root.querySelector('.deck-textbox')).toBeNull();
   });
 });

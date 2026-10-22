@@ -16,7 +16,7 @@
 // keeps its frame, no HTML is invented) until its file is published; a board the sent manifest leaves out keeps its
 // frame. A board is removed by sending its file as null.
 import { FilesError, type FileProblem, type PublishOutcome, type PublishWarning } from '../files';
-import { DECK_LIMITS, DECK_PATH, slideIdOf, slidePath } from '../slides/deck';
+import { carryRecord, DECK_LIMITS, DECK_PATH, slideIdOf, slidePath, withoutRecord } from '../slides/deck';
 import { parseHtml } from '../slides/html';
 import { deleteSlide, slideFile } from '../slides/model';
 import { publishDeck, type DeckPublishOutcome } from '../slides/publish';
@@ -217,8 +217,11 @@ function plan(doc: Doc, input: Input, force: boolean): Plan {
     for (const name of DECK_MAPS) {
       const [mb, ma, ml] = [own(B, name), own(A, name), own(L, name)] as (Record<string, unknown> | undefined)[];
       for (const entry of new Set([...Object.keys(mb ?? {}), ...Object.keys(ma ?? {})])) {
-        const value = own(ma, entry);
-        if (!compare(own(mb, entry), value, own(ml, entry), () => conflict(`canvas.json key ${name}.${entry}: changed since your read`))) continue;
+        // P4-B2 D19: a face compared without the host's record, which a face the agent writes carries forward (C's rule)
+        const isFace = name === 'faces';
+        const sentValue = own(ma, entry);
+        if (!compare(own(mb, entry), sentValue, isFace ? withoutRecord(own(ml, entry)) : own(ml, entry), () => conflict(`canvas.json key ${name}.${entry}: changed since your read`))) continue;
+        const value = isFace ? carryRecord(sentValue, own(ml, entry)) : sentValue;
         if (name === 'faces') faces += (value === undefined ? 0 : 1) - (own(ml, entry) === undefined ? 0 : 1);
         writes.push(() => (value === undefined ? Y.deleteDeckEntry(doc, name, entry) : Y.setDeckEntry(doc, name, entry, value as Y.Json), true));
       }

@@ -12,7 +12,9 @@
 // shows (its bar for the toolbar, the version's slides read-only with their changes), "See N new changes", the restore
 // banner, and Show editors on a right-click over the selected element.
 // P4-B4: a place asked from outside (a link's `#slide=` and `#v<id>`, `show_pane`'s `at`) through `useDeckReveal`.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D14; tracker row 253): F6 and ⇧F6 cycle the editor's
+// regions (a11y.ts), keeping the selection, so a middle element's selection reaches the inspector by keyboard.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import { DECK_LIMITS } from '../deck';
@@ -47,6 +49,8 @@ import { ZOOM_STEPS, type DeckSession, type Zoom } from './session';
 import { SLIDE_H, SLIDE_W } from './SlideView';
 import { Stage } from './Stage';
 import { useDeckReveal, type DeckRevealProps } from './reveal'; // P4-B4
+import { useEditClaim, type RegisterEditClaimant } from './edit-claim'; // P4-B2 K6
+import { DECK_REGIONS, RegionRing, regionKey } from './a11y';
 import './chrome.css';
 import './deck.css';
 
@@ -83,6 +87,10 @@ export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked
   assetUrlAt?: (ref: string, revision: number) => string | null;
   /** M8: once a version's preview has drawn its slide and its marks: ms since it was asked for (the e2e seam's). */
   onPreviewDrawn?: (ms: number) => void;
+  /** P4-B2 K6: the host's registration of the Edit menu's Undo and Redo claimant; without it the menu stays native. */
+  registerEditClaimant?: RegisterEditClaimant;
+  /** P4-B2 (D14): whether the owner's keymap binds a key (the shell's): the editor's own F6 then steps aside. */
+  bindsKey?: (event: KeyboardEvent) => boolean;
 }
 
 const NOTICE_MS = 6_000;
@@ -90,7 +98,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -196,7 +204,9 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const requestedAt = preview?.requestedAt ?? 0;
   const previewDrawn = useCallback(() => onPreviewDrawn?.(performance.now() - requestedAt), [onPreviewDrawn, requestedAt]);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const [regions] = useState(() => new RegionRing(DECK_REGIONS)); // P4-B2 (D14)
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (regionKey(event, regions, session, bindsKey)) return; // P4-B2 (D14): F6 and ⇧F6
     const mod = event.metaKey || event.ctrlKey;
     if (!mod || readOnly || preview) return; // M8: no undo in history (the live deck is not shown)
     const target = event.target as HTMLElement;
@@ -212,6 +222,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       session.redoStep();
     }
   };
+  const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
+  useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
   // M5: what the slide's limits refused, an upload in progress: shown in the toolbar for a while
   const [notice, setNotice] = useState('');
@@ -321,7 +333,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     </>
   );
   const editor = (
-    <div className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
+    <div ref={root /* P4-B2 K6 */} className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown} onFocus={(event) => regions.note(event.currentTarget, event.target)}>
       {faces && <style data-deck-faces>{faces}</style>}
       {!preview &&
         historySnapshot?.banner && (
@@ -361,7 +373,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
         {!preview &&
           inspectorOpen &&
           slide &&
-          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} />)}
+          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} />)}
       </div>
     </div>
   );

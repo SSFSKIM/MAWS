@@ -18,6 +18,9 @@
 // - rotate: the handle's angle, Shift by 15°, composed into the element's transform.
 // - endpoint: a pinned connector's end.
 // - marquee: the slide's children the rectangle touches (with Shift, added at the selection's level).
+//
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a move, a resize, a rotation and an endpoint
+// hold the replica's remote frames from their start to their drop, and the drop writes again what a held write moved.
 import {
   angleFromPointer,
   apply,
@@ -51,8 +54,11 @@ import {
   type Pt,
   type SnapContext,
 } from '../../geometry';
+import type { Doc } from '../../../yjs';
+import * as Y from '../../../yjs/slides';
+import { isMissingSource } from '../../../design/model';
 import { isPinned, TEXT_TAGS } from '../../ir';
-import { reorderFlow, ROOT } from '../../model';
+import { heldOf, reorderFlow, ROOT } from '../../model';
 import { checkStyle } from '../../css';
 import { siteOf, writeElements, type ElementWrites } from '../../writers-elements';
 import { DECK_COPY as C } from '../copy';
@@ -129,20 +135,54 @@ function siblingBounds(ctx: GestureContext, tree: SlideTree, ids: readonly strin
   return [...measureAll(ctx.canvas, others, ctx.scale).values()].map((m) => m.bounds);
 }
 
-/** A drag's writes, one transaction a frame, its frames one undo step. */
+/**
+ * A drag's writes, one transaction a frame, its frames one undo step. P4-B2 (D17): the replica's remote frames wait
+ * from its start (the session's gesture hold), and its drop re-asserts every key it wrote, at its last value.
+ */
 function dragWriter(ctx: GestureContext) {
   ctx.session.beginDrag();
+  const last = new Map<string, Required<ElementWrites>>(); // every key written, at its last value
   let wrote = false;
   return {
     write(writes: Record<string, ElementWrites>) {
       writeElements(ctx.session.doc, ctx.slideId, writes, ctx.session.origin);
+      for (const [id, w] of Object.entries(writes)) {
+        let kept = last.get(id);
+        if (!kept) last.set(id, (kept = { style: {}, attrs: {} }));
+        Object.assign(kept.style, w.style);
+        Object.assign(kept.attrs, w.attrs);
+      }
       wrote = true;
     },
     end() {
-      ctx.session.endDrag();
+      ctx.session.endDrag(() => reassert(ctx, last));
       return wrote;
     },
   };
+}
+
+/** P4-B2 (D17): a slide or board the drop may still write: there, neither held nor a board whose file never arrived. */
+const takesWrites = (doc: Doc, slideId: string): boolean => Y.hasSlide(doc, slideId) && heldOf(doc, slideId) === null && !isMissingSource(doc, slideId);
+
+/**
+ * P4-B2 (D17): the drop's re-assert, run by the session after the hold's flush while it takes writes. A key the gesture
+ * wrote whose value a held remote write moved gets the gesture's last value again, so the owner's drop wins whatever the
+ * clientIDs (a concurrent write of the higher clientID would otherwise win the key). Nothing on a slide or board the
+ * flush held, emptied or removed, nor on an element it deleted.
+ */
+function reassert(ctx: GestureContext, last: ReadonlyMap<string, Required<ElementWrites>>): void {
+  const { doc } = ctx.session;
+  if (!takesWrites(doc, ctx.slideId)) return;
+  const writes: Record<string, ElementWrites> = {};
+  for (const [id, wrote] of last) {
+    if (!Y.hasElement(doc, ctx.slideId, id)) continue;
+    const now = Y.elementScalars(doc, ctx.slideId, id);
+    const moved = (prefix: string, values: Record<string, string | null>) => Object.entries(values).filter(([k, v]) => (now[prefix + k] ?? null) !== v);
+    const style = moved('style:', wrote.style);
+    const attrs = moved('attr:', wrote.attrs);
+    if (style.length + attrs.length > 0) writes[id] = { style: Object.fromEntries(style), attrs: Object.fromEntries(attrs) };
+  }
+  if (Object.keys(writes).length > 0) writeElements(doc, ctx.slideId, writes, ctx.session.origin);
 }
 
 // ---------------------------------------------------------------- move

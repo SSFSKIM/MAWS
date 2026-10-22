@@ -26,7 +26,8 @@
 // awareness and acks pass. `holdRemote(false)` applies the buffer in order, each run of consecutive updates merged and
 // applied once (a held Korean word buffers 7 to 9 frames: singly 63 to 103 ms, merged 21 to 27 ms; parent Decision
 // Log 35); a step 2 or `restored` keeps its place between runs. The hold clears itself after 5 s, and says so in the
-// log; a disconnect discards the buffer, since the next step 2 re-delivers everything.
+// log; a disconnect discards the buffer, since the next step 2 re-delivers everything. P4-B2 (D17): a deck session also
+// holds through a drag; the reasons are the session's, and this hold stays one flag.
 //
 // Awareness throttle (M4, Decision Log 31c; parent 37's advisory). With `awarenessThrottleMs` (a renderer's replica:
 // 50 ms), outbound awareness goes out at most once per window: the first change at once, the rest of the window as one
@@ -89,6 +90,9 @@ export class PortProvider {
   private held = false;
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private buffered: Frame[] = []; // inbound frames waiting out a hold, in arrival order
+  private received = 0; // P4-B2 (row 256): the remote content frames received, held or not
+  private capped = 0; // P4-B2 (D17): the times the 5 s cap cleared a hold
+  private released = 0; // P4-B2 (D17): the buffered frames a hold's clearing (its end or its cap) released to apply
   private readonly awarenessThrottleMs: number;
   private awarenessTimer: ReturnType<typeof setTimeout> | null = null; // the open throttle window
   private awarenessPending = new Set<number>(); // clients whose awareness changed inside it
@@ -114,6 +118,16 @@ export class PortProvider {
 
   get state(): SaveState {
     return { phase: this.phase, synced: this.synced, unsaved: this.carried + this.unacked.length, revision: this.revision, integrated: this.integrated };
+  }
+
+  /**
+   * P4-B2 (tracker row 256): the remote content frames (step 2, update, restored) this replica has received since it was
+   * made, and how many the composition hold buffers now, so an e2e can see a frame arrive and wait out the hold. D17:
+   * and how many times the 5 s cap has cleared a hold, counted before the flush it causes, and how many buffered frames
+   * the clearings released (a cap or an end over an empty buffer releases none), so the e2e sees frames held and let go.
+   */
+  counts(): { received: number; held: number; capped: number; released: number } {
+    return { received: this.received, held: this.buffered.length, capped: this.capped, released: this.released };
   }
 
   subscribe(listener: (state: SaveState) => void): () => void {
@@ -191,12 +205,14 @@ export class PortProvider {
     if (on) {
       this.holdTimer = setTimeout(() => {
         this.log(`the composition hold reached its ${HOLD_LIMIT_MS / 1000} s cap and was cleared, applying ${this.buffered.length} buffered frame(s)`);
+        this.capped += 1;
         this.holdRemote(false);
       }, HOLD_LIMIT_MS);
       return;
     }
     const frames = this.buffered;
     this.buffered = [];
+    this.released += frames.length;
     if (frames.length > 0) this.process(frames);
   }
 
@@ -264,6 +280,7 @@ export class PortProvider {
     } catch (error) {
       return this.broken(error);
     }
+    if (frame.type === 'step2' || frame.type === 'update' || frame.type === 'restored') this.received += 1;
     const remoteContent = frame.type === 'step2' || frame.type === 'update' || (frame.type === 'restored' && this.buffered.length > 0);
     if (this.held && remoteContent) {
       this.buffered.push(frame);

@@ -25,6 +25,8 @@ import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { sendToSubject, useSendToAction } from '../../delivery/header'; // P4-B5
 import { useEditorHost } from '../../panel/editor-host';
+import { registerEditClaimant } from '../../keymap/edit-claimants'; // P4-B2 K6
+import { keymapBinds } from '../../keymap/dispatcher'; // P4-B2 (D14)
 import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F1
 import { useDocumentComments } from '../document/comments'; // M7: B's surface
@@ -90,7 +92,9 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   // M7: comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown,
   // to the deck's own context; not offered only while that is unread
   const target = useArtifactCommentTarget(artifactId);
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'presentation' });
+  // P4-B2 (D16): X36's draft rule, as the document's (Comment asks draft() first, the tab's close guard reads it), the host
+  // id the tab state's, so the guard knows its card
+  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'presentation', draftRule: true, hostId: state.commentHostId });
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement);
@@ -161,6 +165,8 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         onPreviewDrawn={onPreviewDrawn}
         reveal={reveal} /* P4-B4 */
         onRevealed={takeOpenRequest}
+        registerEditClaimant={registerEditClaimant} /* P4-B2 K6: the Edit menu's Undo and Redo on the deck's stack */
+        bindsKey={keymapBinds} /* P4-B2 (D14): the editor's F6 steps aside for a key the owner bound */
       />
     </div>
   );

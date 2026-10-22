@@ -22,7 +22,7 @@ A deck is files under `project/`, in the shape of Claude's Slides type, so decks
 | `cover` | The cover slide's id |
 | `order` | The slide ids in deck order; a slide file it leaves out shows last |
 | `sections` | Your outline: any key → `{"description": "<one sentence>", "start": "<its first slide's id>"}`, or `"before"` in place of `"start"` for a section with no slides yet |
-| `faces` | At most 4 typefaces the slides name, keyed by the family lowercased with spaces as `-`: `{"family", "href"}` with a `https://fonts.googleapis.com/css2?…` link (named, never fetched: the face draws when the Mac has it, else its generic) or `{"family", "src"}` with an uploaded font (`assets/<name>`) |
+| `faces` | At most 4 typefaces the slides name, keyed by the family lowercased with spaces as `-`: `{"family", "href"}` with a `https://fonts.googleapis.com/css2?family=…` link naming that family alone (its axes kept, no `text=`, `display` and other parameters ignored), which MAWS fetches once into the deck's assets when its licence is OFL and refuses by name otherwise (the face then draws as its fallback), or `{"family", "src"}` with an uploaded font (`assets/<name>`). MAWS records the fetch in the face's `google` key: leave it alone (one you send is ignored) |
 | `designSystems` | Claude's design-system install records, at most 4, kept as they are |
 | `dsOverrides` | MAWS's: the deck's design-system overrides, `--ds-*` name → CSS value; the Theme menu writes it |
 

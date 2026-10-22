@@ -11,12 +11,18 @@
 // the deck is first on screen, as B's tab does.
 // Final fix wave (B4): the close guard waits for the session's awaited edits too (an upload, an asset copy, whose write
 // has not happened yet), and the session reads the replica's read-only state before such an edit writes.
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; X36's draft rule, as the document's tab): the
+// comment card host's id is this state's, the same for every body over it, and the close guard asks first about an
+// unsent comment typed in this tab's compose card.
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DeckSession } from '@artifacts/slides/editor/session';
 import { observeThreads, openThreadCount } from '@artifacts/slides/threads';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
+import type { CloseAsk } from '../../panel/editor-host'; // P4-B2
+import { commentDraftEntry } from '../document/comment-drafts'; // P4-B2
+import { forgetCardActivation } from '../document/comments'; // P4-B2
 import { createHistoryApi } from '../document/history-api'; // M8: B's, reused
 
 const SAVE_WAIT_MS = 3_000; // how long the close guard waits for edits in flight before it asks (B's rule)
@@ -27,8 +33,8 @@ const SAVING_SHOWN_MS = 500;
 export interface DeckTabDeps {
   host: ArtifactHost;
   log(line: string): void;
-  /** Asks the owner whether to close with edits the host has not acknowledged. */
-  confirmDiscard(title: string): Promise<boolean>;
+  /** Asks the owner whether to close with edits the host has not acknowledged; P4-B2: or (`comment`) with an unsent comment. */
+  confirmDiscard(title: string, about?: 'comment'): Promise<boolean>;
   savingShownMs?: number;
   /** How long the close guard waits for edits in flight before it asks (3 s). */
   saveWaitMs?: number;
@@ -54,6 +60,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
 // Every open deck tab, for the e2e seam's timings.
 const open = new Set<DeckTabState>();
 export const openDeckTabs = (): readonly DeckTabState[] => [...open];
+let commentHosts = 0; // P4-B2
 
 export class DeckTabState {
   readonly artifactId: string;
@@ -64,6 +71,8 @@ export class DeckTabState {
   readonly history: HistoryApi | null;
   /** M8: a session's title for the history's author chips. */
   readonly sessionTitle: ((appSessionId: string) => string | undefined) | undefined;
+  /** P4-B2: the comment card host's id, the same for every body over this state (its draft is this tab's). */
+  readonly commentHostId = `deck:tab-${++commentHosts}`;
   private viewedBefore: number | null = null; // M8: the owner's last view before this showing
   private resolveShown: () => void = () => {};
   private readonly whenShown = new Promise<void>((resolve) => (this.resolveShown = resolve));
@@ -179,6 +188,7 @@ export class DeckTabState {
   /** P4-B3: a move handed this state to a tab on another surface (the registry's `moved`). */
   moveTo(surface: ArtifactEditorTarget['surface']): void {
     this.surface = surface;
+    forgetCardActivation(this.commentHostId); // P4-B2: the editor the move gives draws the card's thread active again
   }
 
   /** The content is on screen: true the first time (the surface records the owner's view then), false after. */
@@ -194,8 +204,12 @@ export class DeckTabState {
    * is still to write; those in flight are waited for, then asked about. P3-F (L203): speaker notes the session keeps
    * unwritten (refused for their length, or within it only since a change made elsewhere) go with the tab, read-only or
    * not: only the owner writes them, so waiting cannot save them; once what is in flight settled, they are asked about.
+   * P4-B2 (X36's draft rule): an unsent comment typed in this tab's compose card is asked about first; not on a move,
+   * whose card goes with the state to the view the move keeps.
    */
-  closeGuard = async (): Promise<boolean> => {
+  closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
+    const draft = ask?.moving ? null : commentDraftEntry(this.artifactId); // P4-B2
+    if (draft?.hostId === this.commentHostId && draft.text.trim() && !(await this.deps.confirmDiscard(this.title, 'comment'))) return false;
     const handle = this.current.handle;
     if (!handle) return true;
     const session = this.current.session;
@@ -239,8 +253,11 @@ export class DeckTabState {
     open.delete(this);
     for (const stop of this.stops.splice(0)) stop();
     this.listeners.clear();
-    this.current.session?.dispose();
-    if (this.holders === 0) this.closeWhenSaved(); // M7: else the last release closes it
+    try {
+      this.current.session?.dispose(); // P4-B2 (D17): it releases a standing hold, whose flush's listeners may throw
+    } finally {
+      if (this.holders === 0) this.closeWhenSaved(); // M7: else the last release closes it
+    }
   }
 
   private closeWhenSaved(): void {

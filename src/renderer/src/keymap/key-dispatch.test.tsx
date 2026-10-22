@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionId, KeymapOverrides } from '@shared/keymap/actions';
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { connectKeys, releaseHold } from './dispatcher';
+import { connectKeys, keymapBinds, releaseHold } from './dispatcher';
 import { useKeyChord } from './useKeyChord';
 import { currentSet } from '../stores/layout-model';
 
@@ -238,6 +238,19 @@ describe('composer chords', () => {
 
 // C11 start: the Settings tab's chord capture takes every key while it records (C11 M5 fix wave, item 1): an app-scoped
 // chord pressed there is what is being recorded, not a command to run.
+// P4-B2 (D14): the deck and design editors' F6 steps aside for a key the owner's keymap binds, whichever sink
+describe('keymapBinds', () => {
+  const press = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
+  it('answers the effective keymap: an override of either sink, the menu’s numbered tab items; F6 unbound by default', () => {
+    expect(keymapBinds(press({ key: 'F6' }), {})).toBe(false);
+    expect(keymapBinds(press({ key: 'F6' }), { 'palette.open': 'F6' })).toBe(true); // a menu accelerator
+    expect(keymapBinds(press({ key: 'F6', shiftKey: true }), { 'tab.next': 'Shift+F6' })).toBe(true); // a renderer chord
+    expect(keymapBinds(press({ key: 'F6', shiftKey: true }), { 'palette.open': 'F6' })).toBe(false);
+    expect(keymapBinds(press({ key: '7', code: 'Digit7', metaKey: true }), {})).toBe(true); // Select Tab 7
+    expect(keymapBinds(press({ key: 'n', code: 'KeyN', metaKey: true }), { 'session.new': null })).toBe(false); // unbound
+  });
+});
+
 describe('the chord capture', () => {
   function AppChord({ spy }: { spy: () => void }) {
     useKeyChord('composer.stop', spy);

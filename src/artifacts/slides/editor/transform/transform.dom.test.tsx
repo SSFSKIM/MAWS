@@ -4,22 +4,29 @@
 // each element's own px style); the real layout, paint and pointer are the e2e's.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
-import { newDoc, onUpdate, transact, type Doc } from '../../../yjs';
+import { EditorView } from '@tiptap/pm/view';
+import { useRef } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { adoptClientId, applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
 import { DesignWorkbench } from '../../../design/editor/DesignWorkbench';
 import { DesignView } from '../../../design/editor/viewport';
-import { design } from '../../../design/fixtures/support';
+import { design, heldPeer } from '../../../design/fixtures/support';
+import { MISSING_SOURCE_KEY } from '../../../design/model';
 import { SlideCanvas } from '../../canvas';
-import { childLists, importSlide, readFlat, ROOT, slideFile, writeDeckKeys } from '../../model';
+import { childLists, deleteElementTree, importSlide, readFlat, ROOT, setStyle, slideFile, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { DeckEditor } from '../DeckEditor';
-import { DeckSession } from '../session';
+import { DeckSession, type DeckSessionOptions } from '../session';
 import { startFlowMove, startMarquee, startMove, startResize, startRotate, type GestureContext } from './gestures';
 import { CLIPBOARD_TYPE, copySelection, pasteClipboard } from './clipboard';
 import { apply, applyLinear } from '../../geometry';
 import { selectionCommands } from './commands';
 import { hitIds, measure } from './measure';
+import { armedBox } from '../armed';
+import { TextBox } from '../TextBox';
+import { Overlay } from './Overlay';
+import { cellGrid, slideTree } from './selection';
 
 const SLIDE = `<section id="s" style="background:#ffffff">
 <h2 id="title" style="font-size:64px">Title</h2>
@@ -74,13 +81,13 @@ function layoutRoot(root: HTMLElement, flow: Record<string, [number, number, num
 }
 
 const canvases: SlideCanvas[] = [];
-function gestureContext(doc: Doc, flow?: Record<string, [number, number, number, number]>): GestureContext & { session: DeckSession } {
+function gestureContext(doc: Doc, flow?: Record<string, [number, number, number, number]>, options?: DeckSessionOptions): GestureContext & { session: DeckSession } {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const canvas = new SlideCanvas(doc, 's', host);
   canvases.push(canvas);
   fakeLayout(canvas, flow);
-  return { session: new DeckSession(doc, 0), slideId: 's', canvas, scale: 0.5 };
+  return { session: new DeckSession(doc, 0, options), slideId: 's', canvas, scale: 0.5 };
 }
 afterEach(() => {
   cleanup();
@@ -458,20 +465,23 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     return { session, stage, notes: screen.getByRole('textbox', { name: 'Speaker notes' }), user: userEvent.setup() };
   }
 
+  // P4-B2 (D1, D15 A3): a text element selected is ARMED, its box holding the focus; any other, its own node
+  const focusOf = (stage: HTMLElement, id: string) => (id === 'title' || id === 'body' ? stage.querySelector(`[data-eid="${id}"] .deck-textbox`) : stage.querySelector(`[data-eid="${id}"]`));
+
   it('Tab walks the slide’s elements, then leaves for the next control; Shift+Tab walks back and leaves before the first', async () => {
     const { session, stage, notes, user } = mount(deck());
     for (const id of ['title', 'body', 'a', 'b']) {
       await user.tab();
-      expect([session.snapshot().selection, document.activeElement]).toEqual([[id], stage]);
+      expect([session.snapshot().selection, document.activeElement]).toEqual([[id], focusOf(stage, id)]);
     }
     await user.tab();
     expect(document.activeElement).toBe(notes);
     expect(session.snapshot().selection).toEqual(['b']); // leaving changes nothing on the slide
     await user.tab({ shift: true });
-    expect(document.activeElement).toBe(stage);
+    expect(document.activeElement).toBe(focusOf(stage, 'b')); // P4-B2 (A3): back on the stage, the focus is the selection's
     for (const id of ['a', 'body', 'title']) {
       await user.tab({ shift: true });
-      expect([session.snapshot().selection, document.activeElement]).toEqual([[id], stage]);
+      expect([session.snapshot().selection, document.activeElement]).toEqual([[id], focusOf(stage, id)]);
     }
     await user.tab({ shift: true });
     expect(document.activeElement).not.toBe(stage);
@@ -501,96 +511,405 @@ describe('P3-F: a flow text element’s width only, Shift or not (scalpel-1#2)',
   });
 });
 
-// P3-F wave S, F9 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c43, obs 5a): with one text element
-// selected, a printable key enters its edit carrying the key, typed over the text as a key typed on a selection
-// replaces it (Slides, Canva, Keynote, PowerPoint); the typed words were dropped. ⌫ and Delete still delete the element
-// (the executor's ruling: the triage row's Backspace clause not taken, as ⌫ on a selected object deletes it in those
-// apps); a group, a non-text element, several elements, a read-only stage, ⌘ or Ctrl, a composing IME, a named key and
-// a Hangul key (review 3: an input method's output, which the stage does not compose) type nothing and enter nothing
-// (level picking unchanged).
-describe('P3-F F9: a key typed on the one selected text element', () => {
-  const SLIDE_WITH_GROUP = `<section id="s" style="background:#ffffff">
-<h2 id="title" style="font-size:64px">Title</h2>
-<div id="a" style="position:absolute; left:300px; top:300px; width:200px; height:100px; background:#ff0000"></div>
-<div id="g" data-group="" style="position:absolute; left:800px; top:300px; width:400px; height:200px"><h2 id="inner" style="position:absolute; left:0px; top:0px; width:400px; height:100px; font-size:48px">Grouped</h2></div>
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D1 to D9; the prior art's P1 to P12 and K1 to K5):
+// the click model and the armed keys on the overlay, with constructed events. happy-dom has no hit test: the press's
+// stack is the pressed node and its ancestors (as `elementsFromPoint` answers over a node), and no layout: a caret's
+// place at a point is given to ProseMirror (`posAtCoords`). Real clicks with their counts are the e2e's.
+describe('P4-B2: the click model (P1 to P12) and the armed keys (K1 to K5)', () => {
+  const SLIDE_B2 = `<section id="s" style="background:#ffffff">
+<h2 id="title" style="position:absolute; left:100px; top:100px; width:800px; height:100px; font-size:64px">Hello world</h2>
+<p id="body" style="position:absolute; left:100px; top:250px; width:800px; height:60px; font-size:32px">Body</p>
+<div id="a" style="position:absolute; left:1000px; top:100px; width:200px; height:100px; background:#ff0000"></div>
+<div id="g" data-group="" style="position:absolute; left:100px; top:400px; width:800px; height:300px"><h2 id="gh" style="position:absolute; left:0px; top:0px; width:800px; height:100px; font-size:48px">Grouped</h2><div id="g2" data-group="" style="position:absolute; left:0px; top:150px; width:800px; height:100px"><p id="deep" style="position:absolute; left:0px; top:0px; width:800px; height:100px; font-size:32px">Deep text</p></div></div>
+<table id="t" style="position:absolute; left:1000px; top:400px; width:600px; font-size:24px"><tr id="r1"><th>A</th><th>B</th></tr><tr id="r2"><td>1</td><td>2</td></tr></table>
 </section>`;
   const plain = (doc: Doc, id: string) =>
     Y.readText(doc, 's', id)
       .map((b) => b.inline.map((r) => ('text' in r ? r.text : '\n')).join(''))
       .join('\n');
-  function mount(readOnly = false) {
-    const doc = deck(SLIDE_WITH_GROUP);
-    const session = new DeckSession(doc, 0);
-    const utils = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={readOnly} />);
-    const stage = utils.container.querySelector('[data-stage-surface]') as HTMLElement;
-    stage.focus();
-    return { doc, session, stage, ...utils };
-  }
-  const key = (target: HTMLElement, init: KeyboardEventInit) => target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
 
-  it('enters the edit with the key typed over the text, the box focused; Escape returns to the element selected', () => {
-    const { doc, session, stage, container } = mount();
-    act(() => session.select(['title']));
-    let typedOn = true;
-    act(() => void (typedOn = key(stage, { key: 'N' })));
-    expect(typedOn, 'the key is the edit’s, not the page’s').toBe(false);
-    expect(session.snapshot().editingText).toBe('title');
-    expect(plain(doc, 'title')).toBe('N');
-    const box = container.querySelector<HTMLElement>('[data-eid="title"] .deck-textbox')!;
-    expect(document.activeElement).toBe(box);
-    act(() => void fireEvent.keyDown(box, { key: 'Escape' }));
-    expect(session.snapshot()).toMatchObject({ editingText: null, selection: ['title'] });
-    act(() => session.undoStep());
-    expect(plain(doc, 'title')).toBe('Title');
-  });
-
-  it('keys pressed before the box takes the focus all land, in order; a heading reached inside a group is typed on too', () => {
-    const { doc, session, stage } = mount();
-    act(() => session.select(['title']));
-    act(() => {
-      for (const k of ['H', 'i', ' ', '!']) key(stage, { key: k, shiftKey: k === 'H' || k === '!' });
+  // the press's stack: the node under the pointer and its ancestors
+  let under: Element | null = null;
+  beforeEach(() => {
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: () => {
+        const out: Element[] = [];
+        for (let n = under; n; n = n.parentElement) out.push(n);
+        return out;
+      },
     });
-    expect(plain(doc, 'title')).toBe('Hi !');
-    act(() => session.editText(null));
-    act(() => session.select(['inner'])); // where a double-click on the group drills
-    act(() => void key(stage, { key: 'O', shiftKey: true }));
-    expect(session.snapshot().editingText).toBe('inner');
-    expect(plain(doc, 'inner')).toBe('O');
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'elementsFromPoint');
+    under = null;
+    vi.restoreAllMocks();
+  });
+  /** ProseMirror's position at any point: `pos` (happy-dom lays nothing out). */
+  const caretAt = (pos: number) => vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue({ pos, inside: -1 });
+
+  function mount(readOnly = false) {
+    const doc = deck(SLIDE_B2);
+    const session = new DeckSession(doc, 0);
+    const host = document.createElement('div');
+    const canvas = new SlideCanvas(doc, 's', host);
+    canvases.push(canvas);
+    fakeLayout(canvas);
+    const adopt = (n: HTMLDivElement | null) => {
+      if (n && host.parentElement !== n) n.appendChild(host);
+    };
+    function Stage() {
+      const surface = useRef<HTMLDivElement>(null);
+      const frame = useRef<HTMLDivElement>(null);
+      return (
+        <div ref={surface} tabIndex={0} data-stage-surface="">
+          <div ref={adopt} />
+          <div ref={frame}>
+            <Overlay
+              session={session}
+              canvas={canvas}
+              slideId="s"
+              scale={0.5}
+              readOnly={readOnly}
+              surface={surface}
+              frame={frame}
+              renderText={(id, c, armed) => <TextBox session={session} canvas={c} slideId="s" elementId={id} readOnly={readOnly} armed={armed} />}
+            />
+          </div>
+        </div>
+      );
+    }
+    const { container } = render(<Stage />);
+    const stage = container.querySelector<HTMLElement>('[data-stage-surface]')!;
+    const node = (id: string) => canvas.node(id)!;
+    const box = (id: string) => node(id).querySelector<HTMLElement & { editor: import('@tiptap/core').Editor }>('.deck-textbox');
+    const [[a1, b1], [a2, b2]] = cellGrid(slideTree(doc, 's'), 't') as [string[], string[]];
+    return { doc, session, canvas, stage, node, box, cells: { a1: a1!, b1: b1!, a2: a2!, b2: b2! } };
+  }
+
+  const pointer = (type: string, target: Element, x: number, y: number, init: PointerEventInit = {}) =>
+    act(() => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: x, clientY: y, ...init })));
+  const mouse = (type: 'click' | 'dblclick', target: Element, detail: number, x = 10, y = 10, init: MouseEventInit = {}) =>
+    act(() => void target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail, clientX: x, clientY: y, ...init })));
+  /** One click on `target`: its press, its release and the click with count `detail`, each with `init`'s modifiers. */
+  const click = (target: Element, detail = 1, init: PointerEventInit = {}) => {
+    under = target;
+    pointer('pointerdown', target, 10, 10, init);
+    pointer('pointerup', target, 10, 10, init);
+    mouse('click', target, detail, 10, 10, init);
+  };
+  const doubleClick = (target: Element) => {
+    click(target, 1);
+    click(target, 2);
+    mouse('dblclick', target, 2);
+  };
+  /** A press on `target`, a move of `dx` screen px with the pointer over `over`, and the release. */
+  const drag = (target: Element, dx: number, over: Element = target) => {
+    under = target;
+    pointer('pointerdown', target, 10, 10);
+    under = over;
+    pointer('pointermove', target, 10 + dx, 10, { metaKey: true }); // ⌘: no snapping
+    pointer('pointerup', target, 10 + dx, 10);
+    mouse('click', target, 1, 10 + dx, 10);
+  };
+  /** A keydown on the focused element; true unless the page took it. */
+  const key = (init: KeyboardEventInit) => {
+    let passed = true;
+    act(() => void (passed = (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))));
+    return passed;
+  };
+  const editing = (session: DeckSession) => session.snapshot().editingText;
+  const selectionText = (box: HTMLElement & { editor: import('@tiptap/core').Editor }) => {
+    const { from, to } = box.editor.state.selection;
+    return box.editor.state.doc.textBetween(from, to);
+  };
+
+  it('P1: a first click selects a text element ARMED: its box focused with the caret hidden, no edit', () => {
+    const { session, stage, node, box } = mount();
+    click(node('title'));
+    expect(session.snapshot()).toMatchObject({ selection: ['title'], editingText: null, keyboard: 'stage' });
+    expect(document.activeElement).toBe(box('title'));
+    expect(stage.hasAttribute('data-armed')).toBe(true);
+    expect(armedBox(session)?.elementId).toBe('title');
+    click(node('a')); // a non-text element: the stage holds the focus
+    expect(document.activeElement).toBe(stage);
+    expect(stage.hasAttribute('data-armed')).toBe(false);
   });
 
-  it('types nothing and enters nothing on a group, a non-text element, two elements, with ⌘ or Ctrl, while composing, for a named key or a Hangul key', () => {
-    const { doc, session, stage } = mount();
-    const unchanged = (why: string) => {
-      expect(session.snapshot().editingText, why).toBeNull();
-      expect([plain(doc, 'title'), plain(doc, 'inner')], why).toEqual(['Title', 'Grouped']);
-    };
+  it('P2 and D3: a second click edits with the caret at the point, on the same box, the focus never moving', () => {
+    const { session, node, box } = mount();
+    click(node('title'));
+    const root = box('title')!;
+    let moved = 0;
+    root.addEventListener('focusout', () => moved++);
+    caretAt(4);
+    click(node('title'));
+    expect(editing(session)).toBe('title');
+    expect(box('title')).toBe(root);
+    expect(document.activeElement).toBe(root);
+    expect(moved).toBe(0);
+    expect([root.editor.state.selection.from, root.editor.state.selection.to]).toEqual([4, 4]);
+  });
+
+  it('P3: a 3 px drag of the armed element moves it, its text unchanged and still armed; a 2 px one is a click', () => {
+    const { doc, session, node, box } = mount();
+    click(node('title'));
+    drag(node('title'), 4);
+    expect(styleOf(doc, 'title').left).toBe('108px'); // 4 screen px at scale 0.5
+    expect(plain(doc, 'title')).toBe('Hello world');
+    expect(editing(session)).toBeNull();
+    expect(document.activeElement).toBe(box('title'));
+    drag(node('title'), 2);
+    expect(styleOf(doc, 'title').left).toBe('108px');
+    expect(editing(session)).toBe('title');
+  });
+
+  it('P4 and P12: a double-click on an unselected element edits once, with the word selected and no caret before it', () => {
+    const { session, stage, node, box } = mount();
+    const edits: (string | null)[] = [];
+    session.subscribe(() => {
+      const now = editing(session);
+      if (now !== edits.at(-1)) edits.push(now);
+    });
+    caretAt(8); // inside "world"
+    click(node('title'), 1);
+    expect([editing(session), stage.hasAttribute('data-armed')]).toEqual([null, true]); // armed: the caret transparent
+    click(node('title'), 2);
+    mouse('dblclick', node('title'), 2);
+    expect(edits.filter((e) => e !== null)).toEqual(['title']);
+    expect(selectionText(box('title')!)).toBe('world');
+  });
+
+  it('P5 and P6: a double-click edits the deepest text whatever the scope: a heading two groups down, a table’s cell', () => {
+    const { session, node, box, cells } = mount();
+    caretAt(2);
+    doubleClick(node('deep'));
+    expect(session.snapshot()).toMatchObject({ selection: ['deep'], editingText: 'deep' });
+    expect(selectionText(box('deep')!)).toBe('Deep');
+    click(node('a'));
+    doubleClick(node(cells.b2));
+    expect(session.snapshot()).toMatchObject({ selection: [cells.b2], editingText: cells.b2 });
+  });
+
+  it('P7: single clicks on a grouped heading: the group (a drag moves it), then the heading armed, then a caret', () => {
+    const { doc, session, node, box } = mount();
+    click(node('gh'));
+    expect(session.snapshot().selection).toEqual(['g']);
+    drag(node('gh'), 4);
+    expect(styleOf(doc, 'g').left).toBe('108px');
+    expect(styleOf(doc, 'gh').left).toBe('0px');
+    click(node('gh'));
+    expect(session.snapshot()).toMatchObject({ selection: ['gh'], editingText: null });
+    expect(document.activeElement).toBe(box('gh'));
+    click(node('gh'));
+    expect(editing(session)).toBe('gh');
+  });
+
+  it('P8 and D8: a click selects the table, a second edits the cell there; a drag across cells selects their range, the table unmoved', () => {
+    const { doc, session, node, stage, cells } = mount();
+    click(node(cells.a1));
+    expect(session.snapshot().selection).toEqual(['t']);
+    click(node(cells.b1));
+    expect(session.snapshot()).toMatchObject({ selection: [cells.b1], editingText: cells.b1 });
+    click(node('a'));
+    click(node(cells.a1));
+    drag(node(cells.a1), 6, node(cells.b2));
+    expect(session.snapshot().selection).toEqual([cells.a1, cells.b1, cells.a2, cells.b2]);
+    expect(styleOf(doc, 't').left).toBe('1000px');
+    expect(document.activeElement).toBe(stage);
+    expect(key({ key: 'Backspace' })).toBe(false); // the cells' text cleared, one step; the table kept
+    expect([cells.a1, cells.b1, cells.a2, cells.b2].map((id) => plain(doc, id))).toEqual(['', '', '', '']);
+    act(() => session.undoStep());
+    expect([cells.a1, cells.b2].map((id) => plain(doc, id))).toEqual(['A', '2']);
+    key({ key: 'Escape' });
+    expect(session.snapshot().selection).toEqual(['t']);
+  });
+
+  it('T21: a ⌘-click or Ctrl-click on the selected text target or cell is a deep select, never T3’s edit; the element keys stay the element’s', () => {
+    const { doc, session, node, box, cells } = mount();
+    click(node('title'));
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      click(node('title'), 1, mod);
+      expect(session.snapshot(), JSON.stringify(mod)).toMatchObject({ selection: ['title'], editingText: null });
+      expect(armedBox(session)?.elementId).toBe('title');
+      expect(document.activeElement).toBe(box('title'));
+    }
+    expect(key({ key: 'ArrowRight' })).toBe(false); // a nudge, not a caret move
+    expect(styleOf(doc, 'title').left).toBe('101px');
+    expect(plain(doc, 'title')).toBe('Hello world');
+    click(node(cells.a1)); // the table
+    click(node(cells.b1), 1, { metaKey: true }); // T21: the cell itself
+    expect(session.snapshot()).toMatchObject({ selection: [cells.b1], editingText: null });
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      click(node(cells.b1), 1, mod);
+      expect(session.snapshot(), JSON.stringify(mod)).toMatchObject({ selection: [cells.b1], editingText: null });
+      expect(armedBox(session)?.elementId).toBe(cells.b1);
+    }
+    expect(plain(doc, cells.b1)).toBe('B');
+  });
+
+  it('P10 and P11: in an edit a drag in the text moves nothing; a click on another element commits and selects it, unedited', () => {
+    const { doc, session, node, box } = mount();
+    click(node('title'));
+    click(node('title'));
+    act(() => void box('title')!.editor.commands.insertContent('!'));
+    drag(box('title')!.firstElementChild!, 20);
+    expect(styleOf(doc, 'title').left).toBe('100px');
+    expect(editing(session)).toBe('title');
+    click(node('body'));
+    expect(session.snapshot()).toMatchObject({ selection: ['body'], editingText: null });
+    expect(armedBox(session)?.elementId).toBe('body');
+    expect(plain(doc, 'title')).toContain('!');
+  });
+
+  it('K1 and T10: on ARMED a key replaces the text, typed by the box; one ⌘Z restores it, the element still selected', () => {
+    const { doc, session, node, box } = mount();
+    click(node('title'));
+    expect(key({ key: 'x' })).toBe(false);
+    expect(plain(doc, 'title')).toBe('x');
+    expect(editing(session)).toBe('title');
+    expect(document.activeElement).toBe(box('title'));
+    key({ key: 'z', ...(/Mac|iP(hone|[oa]d)/.test(navigator.platform) ? { metaKey: true } : { ctrlKey: true }) });
+    expect(plain(doc, 'title')).toBe('Hello world');
+    expect(session.snapshot().selection).toEqual(['title']);
+  });
+
+  it('T11: an input method’s first key (keyCode 229) clears the text and is left to the input method, in place', () => {
+    const { doc, session, node, box } = mount();
+    click(node('title'));
+    const root = box('title');
+    expect(key({ key: 'Process', keyCode: 229 })).toBe(true);
+    expect(plain(doc, 'title')).toBe('');
+    expect(editing(session)).toBe('title');
+    expect(box('title')).toBe(root);
+  });
+
+  it('K2, K3 and the element keys on ARMED: Enter selects all, changing nothing; arrows nudge; ⌘B marks it all; ⌫ removes it', () => {
+    const { doc, session, node, box } = mount();
+    click(node('title'));
+    expect(key({ key: 'ArrowRight' })).toBe(false);
+    key({ key: 'ArrowDown', shiftKey: true });
+    expect(styleOf(doc, 'title')).toMatchObject({ left: '101px', top: '110px' });
+    expect(armedBox(session)?.elementId).toBe('title');
+    key({ key: 'b', metaKey: true });
+    expect(Y.readText(doc, 's', 'title')[0]!.inline).toEqual([{ text: 'Hello world', marks: { b: {} } }]);
+    expect(editing(session)).toBeNull();
+    key({ key: 'Enter' });
+    expect(editing(session)).toBe('title');
+    expect(selectionText(box('title')!)).toBe('Hello world');
+    expect(plain(doc, 'title')).toBe('Hello world');
+    act(() => session.editText(null));
+    click(node('body'));
+    key({ key: 'Backspace' });
+    expect(readFlat(doc, 's', false).some((e) => e.id === 'body')).toBe(false);
+  });
+
+  it('K4 and T17: Escape from an edit is ARMED again, the text kept; a second Escape selects the group, or nothing at the top', () => {
+    const { doc, session, node, box } = mount();
+    click(node('title'));
+    click(node('title'));
+    act(() => void box('title')!.editor.commands.insertContent('!'));
+    key({ key: 'Escape' });
+    expect(session.snapshot()).toMatchObject({ selection: ['title'], editingText: null });
+    expect(armedBox(session)?.elementId).toBe('title');
+    expect(plain(doc, 'title')).toContain('!');
+    key({ key: 'Escape' });
+    expect(session.snapshot().selection).toEqual([]);
+    doubleClick(node('gh'));
+    key({ key: 'Escape' });
+    key({ key: 'Escape' });
+    expect(session.snapshot().selection).toEqual(['g']);
+  });
+
+  it('K5 and T16: in an edited cell Tab and Shift-Tab move between cells with their content selected', () => {
+    const { session, node, box, cells } = mount();
+    doubleClick(node(cells.a1));
+    key({ key: 'Tab' });
+    expect(editing(session)).toBe(cells.b1);
+    expect(selectionText(box(cells.b1)!)).toBe('B');
+    key({ key: 'Tab', shiftKey: true });
+    expect(editing(session)).toBe(cells.a1);
+    key({ key: 'Escape' });
+    expect(session.snapshot()).toMatchObject({ selection: ['t'], editingText: null });
+  });
+
+  it('D1: the keyboard away (a focus outside the stage) unmounts the armed box, the selection kept; back on the stage it arms again', () => {
+    const { session, stage, node, box } = mount();
+    click(node('title'));
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    act(() => outside.focus());
+    expect(session.snapshot()).toMatchObject({ selection: ['title'], keyboard: 'away' });
+    expect(box('title')).toBeNull();
+    expect(document.activeElement).toBe(outside);
+    act(() => stage.focus());
+    expect(session.snapshot().keyboard).toBe('stage');
+    expect(document.activeElement).toBe(box('title'));
+  });
+
+  it('D9: a key reaching the stage with a text target selected goes to its armed box (T10); none on other selections, with ⌘, composing or a named key', () => {
+    const { doc, session, stage, node } = mount();
+    click(node('title'));
+    act(() => stage.focus());
+    expect(key({ key: 'N' })).toBe(false);
+    expect(plain(doc, 'title')).toBe('N');
+    act(() => session.editText(null));
+    act(() => session.undoStep());
     for (const [selection, init] of [
       [['g'], { key: 'z' }],
       [['a'], { key: 'z' }],
       [['title', 'a'], { key: 'z' }],
-      [['title'], { key: 'b', metaKey: true }],
-      [['title'], { key: 'b', ctrlKey: true }],
-      [['title'], { key: 'z', isComposing: true }],
-      [['title'], { key: 'Process' }],
-      [['title'], { key: 'Dead' }],
-      [['title'], { key: 'F5' }],
-      [['title'], { key: 'Shift', shiftKey: true }],
-      // review 3: with a Korean input source the non-editable stage engages no input method, so a key arrives as the
-      // layout's jamo (or a syllable): typed raw it would garble the word the box then composes ("ㅎㅏㄴ글" for "한글")
-      [['title'], { key: 'ㅎ' }], // U+314E, compatibility jamo
-      [['title'], { key: 'ᄒ' }], // U+1112, a leading jamo
-      [['title'], { key: 'ꥠ' }], // U+A960, jamo extended-A
-      [['title'], { key: 'ힰ' }], // U+D7B0, jamo extended-B
-      [['title'], { key: '한' }], // U+D55C, a composed syllable
+      [['body'], { key: 'b', metaKey: true }],
+      [['body'], { key: 'z', isComposing: true }],
+      [['body'], { key: 'z', keyCode: 229 }],
+      [['body'], { key: 'Process' }],
+      [['body'], { key: 'F5' }],
     ] as const) {
       act(() => session.select(selection));
-      act(() => void key(stage, init));
-      unchanged(`${selection.join(', ')}: ${JSON.stringify(init)}`);
-      expect(session.snapshot().selection).toEqual(selection);
+      act(() => stage.focus());
+      key(init);
+      const why = `${selection.join(', ')}: ${JSON.stringify(init)}`;
+      expect(editing(session), why).toBeNull();
+      expect([plain(doc, 'title'), plain(doc, 'body'), plain(doc, 'gh')], why).toEqual(['Hello world', 'Body', 'Grouped']);
     }
   });
 
-  it('on a design board the same overlay types the key into the selected heading (the world’s own keys pass it on)', () => {
+  it('T20: the armed element deleted by another replica leaves the selection and unmounts its box', () => {
+    const { doc, session, canvas, node } = mount();
+    click(node('title'));
+    const remote = newDoc();
+    applyV1(remote, diffV1(doc));
+    deleteElementTree(remote, 's', 'title');
+    act(() => applyV1(doc, diffV1(remote, stateVector(doc)), 'remote'));
+    expect(session.snapshot().selection).toEqual([]);
+    expect(armedBox(session)).toBeNull();
+    expect(canvas.root.querySelector('.deck-textbox')).toBeNull();
+  });
+
+  it('a read-only stage arms nothing and edits nothing: a click selects, a double-click and a key do nothing', () => {
+    const { doc, session, stage, node } = mount(true);
+    click(node('title'));
+    expect(session.snapshot().selection).toEqual(['title']);
+    expect(armedBox(session)).toBeNull();
+    expect(document.activeElement).toBe(stage);
+    doubleClick(node('title'));
+    key({ key: 'z' });
+    expect(editing(session)).toBeNull();
+    expect(plain(doc, 'title')).toBe('Hello world');
+  });
+
+  it('D13: the overlay going mid-drag ends the session’s drag, which the inspector’s settled version reads', () => {
+    const { session, node } = mount();
+    click(node('a'));
+    under = node('a');
+    pointer('pointerdown', node('a'), 10, 10);
+    pointer('pointermove', node('a'), 20, 10, { metaKey: true });
+    expect(session.snapshot().dragging).toBe(true);
+    cleanup();
+    expect(session.snapshot().dragging).toBe(false);
+  });
+
+  it('T22 on a design board: a key on the world reaches the selected heading’s armed box; a double-click on an inactive board’s heading edits it in one gesture', () => {
     const doc = design();
     const session = new DeckSession(doc, 0);
     const view = new DesignView();
@@ -598,30 +917,177 @@ describe('P3-F F9: a key typed on the one selected text element', () => {
     view.setViewport({ zoom: 1, x: 0, y: 0 });
     const { container } = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} />);
     const world = container.querySelector<HTMLElement>('[data-design-world]')!;
+    const heading = (board: string) => container.querySelector<HTMLElement>(`[data-board-id="${board}"] [data-eid="title"]`)!;
     act(() => {
       session.show('b1');
       session.select(['title']);
     });
-    world.focus();
-    act(() => void key(world, { key: 'W' }));
+    act(() => world.focus());
+    expect(document.activeElement).toBe(heading('b1').querySelector('.deck-textbox'));
+    act(() => world.focus());
+    key({ key: 'W' });
     expect(session.snapshot().editingText).toBe('title');
     expect(Y.readText(doc, 'b1', 'title')[0]!.inline).toEqual([{ text: 'W', marks: {} }]);
-    expect(document.activeElement).toBe(container.querySelector('[data-board-id="b1"] [data-eid="title"] .deck-textbox'));
+    act(() => session.editText(null));
+    caretAt(2);
+    doubleClick(heading('b2'));
+    expect(session.snapshot()).toMatchObject({ currentSlide: 'b2', selection: ['title'], editingText: 'title' });
+    const box = heading('b2').querySelector<HTMLElement & { editor: import('@tiptap/core').Editor }>('.deck-textbox')!;
+    expect(document.activeElement).toBe(box);
+    expect(selectionText(box)).toBe('Title');
+  });
+});
+
+// ---------------------------------------------------------------- P4-B2 M6: the gesture hold
+
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md D17): a drag holds the replica's remote frames (the
+// session's gesture reason; session.test.ts), and its drop writes the gesture's last values again wherever a write it
+// held moved them, so the owner's drop wins whatever the clientIDs; it writes nothing into a slide the flush held,
+// emptied of its file or removed, nor onto an element the flush deleted. The agent is the fixtures' `heldPeer`: its
+// writes reach the owner as the provider delivers them, buffered while held and applied merged at the release.
+describe('P4-B2: the gesture hold and the drop’s re-assert (D17)', () => {
+  const OWNER = 0x100;
+  const HIGHER = 0x7fff0000;
+  const LOWER = 0x10;
+
+  function heldDeck(clientId = HIGHER) {
+    const doc = deck();
+    adoptClientId(doc, OWNER);
+    const channel = heldPeer(doc, clientId);
+    return { doc, ctx: gestureContext(doc, undefined, { holdRemote: channel.holdRemote }), ...channel };
+  }
+  /** How many updates of the owner's own `run` made. */
+  const ownWrites = (doc: Doc, session: DeckSession, run: () => void): number => {
+    let n = 0;
+    const off = onUpdate(doc, (_update, origin) => {
+      if (origin === session.origin) n += 1;
+    });
+    try {
+      run();
+    } finally {
+      off();
+    }
+    return n;
+  };
+
+  it('holds the agent’s writes from the drag’s start; its drop applies them and the owner’s last values win, whatever the clientIDs, in the drag’s one step', () => {
+    for (const clientId of [HIGHER, LOWER]) {
+      const { doc, ctx, agent, holds, buffered, write } = heldDeck(clientId);
+      const g = startMove(ctx, ['a'], { x: 400, y: 350 });
+      expect(holds).toEqual([true]);
+      g.frame({ x: 410, y: 350 }, NO);
+      write((a) => setStyle(a, 's', 'a', { left: '900px', top: '20px' })); // the agent moves the dragged element
+      expect(buffered()).toBe(1);
+      g.frame({ x: 437, y: 371 }, NO);
+      expect(styleOf(doc, 'a')).toMatchObject({ left: '337px', top: '321px' });
+      g.end();
+      expect(holds, `agent ${clientId}`).toEqual([true, false]);
+      expect(buffered()).toBe(0);
+      expect(styleOf(doc, 'a'), `agent ${clientId}`).toMatchObject({ left: '337px', top: '321px' });
+      applyV1(agent, diffV1(doc, stateVector(agent)));
+      expect(styleOf(agent, 'a'), `the agent’s replica, agent ${clientId}`).toMatchObject({ left: '337px', top: '321px' });
+      // the re-assert is the drag's own: one undo takes the whole gesture back
+      ctx.session.undoStep();
+      expect(ctx.session.undo.canUndo(), `agent ${clientId}`).toBe(false);
+    }
   });
 
-  it('a read-only stage types nothing; ⌫ on the selected heading still deletes it, one undo step', () => {
-    const ro = mount(true);
-    act(() => ro.session.select(['title']));
-    act(() => void key(ro.stage, { key: 'z' }));
-    expect(ro.session.snapshot().editingText).toBeNull();
-    expect(plain(ro.doc, 'title')).toBe('Title');
-    cleanup();
-    const { doc, session, stage } = mount();
-    act(() => session.select(['title']));
-    act(() => void key(stage, { key: 'Backspace' }));
-    expect(session.snapshot().editingText).toBeNull();
-    expect(readFlat(doc, 's', false).some((e) => e.id === 'title')).toBe(false);
-    act(() => session.undoStep());
-    expect(plain(doc, 'title')).toBe('Title');
+  it('re-asserts every key the gesture wrote at its last value: a pin only its first frame removed, set again under the hold, is removed again', () => {
+    const { doc, ctx, write } = heldDeck();
+    const g = startMove(ctx, ['b'], { x: 0, y: 0 });
+    g.frame({ x: 30, y: 0 }, { ...NO, meta: true }); // b's right/bottom pin becomes left/top
+    write((a) => setStyle(a, 's', 'b', { right: '50px' }));
+    g.frame({ x: 40, y: 0 }, { ...NO, meta: true });
+    g.end();
+    expect(styleOf(doc, 'b')).toMatchObject({ left: '1732px', top: '852px' });
+    expect(styleOf(doc, 'b').right).toBeUndefined();
+  });
+
+  it('writes nothing into a slide the flush held, emptied of its file or removed: the agent’s move and that arriving under the drag', () => {
+    for (const turn of ['held', 'missing', 'removed'] as const) {
+      const { doc, ctx, holds, write } = heldDeck();
+      const g = startMove(ctx, ['a'], { x: 400, y: 350 });
+      g.frame({ x: 410, y: 350 }, NO);
+      write((a) => setStyle(a, 's', 'a', { left: '900px' }));
+      write((a) => {
+        if (turn === 'held') Y.setSlideKey(a, 's', 'held', { source: '<section id="s"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+        else if (turn === 'missing') Y.setSlideKey(a, 's', MISSING_SOURCE_KEY, true);
+        else Y.deleteSlide(a, 's');
+      });
+      g.frame({ x: 437, y: 371 }, NO);
+      expect(ownWrites(doc, ctx.session, () => g.end()), turn).toBe(0);
+      expect(holds, turn).toEqual([true, false]);
+      if (turn === 'removed') expect(Y.hasSlide(doc, 's'), turn).toBe(false);
+      else expect(styleOf(doc, 'a').left, turn).toBe('900px'); // the agent's, its clientID the higher
+      expect(ctx.session.snapshot().dragging, turn).toBe(false);
+    }
+  });
+
+  it('the dragged element deleted under the hold: the drop applies the deletion, writes nothing and ends clean', () => {
+    const { doc, ctx, holds, write } = heldDeck();
+    const g = startMove(ctx, ['a', 'b'], { x: 400, y: 350 });
+    g.frame({ x: 410, y: 350 }, { ...NO, meta: true });
+    write((a) => deleteElementTree(a, 's', 'a'));
+    write((a) => setStyle(a, 's', 'b', { top: '10px' }));
+    g.frame({ x: 437, y: 371 }, { ...NO, meta: true });
+    expect(Y.hasElement(doc, 's', 'a')).toBe(true); // held
+    g.end();
+    expect(Y.hasElement(doc, 's', 'a')).toBe(false);
+    expect(styleOf(doc, 'b').top).toBe('873px'); // the other element the drag moved: re-asserted
+    expect(holds).toEqual([true, false]);
+    expect(ctx.session.snapshot().dragging).toBe(false);
+  });
+
+  /** The overlay alone over the deck's slide, its session holding through `holdRemote`, `a` selected. */
+  function overlaid(holdRemote: (on: boolean) => void) {
+    const doc = deck();
+    const session = new DeckSession(doc, 0, { holdRemote });
+    const canvas = new SlideCanvas(doc, 's', document.createElement('div'));
+    canvases.push(canvas);
+    fakeLayout(canvas);
+    function Stage() {
+      const surface = useRef<HTMLDivElement>(null);
+      const frame = useRef<HTMLDivElement>(null);
+      return (
+        <div ref={surface} tabIndex={0} data-stage-surface="">
+          <div ref={frame}>
+            <Overlay session={session} canvas={canvas} slideId="s" scale={0.5} readOnly={false} surface={surface} frame={frame} />
+          </div>
+        </div>
+      );
+    }
+    const utils = render(<Stage />);
+    act(() => session.select(['a']));
+    return { doc, session, utils, stage: utils.container.querySelector<HTMLElement>('[data-stage-surface]')!, handle: utils.container.querySelector('[data-handle="se"]')! };
+  }
+
+  it('a gesture the overlay unmounts in ends as a cancel does: the hold released, the drag over', () => {
+    const holds: boolean[] = [];
+    const { session, utils, handle } = overlaid((on) => holds.push(on));
+    fireEvent.pointerDown(handle, { button: 0, buttons: 1, clientX: 10, clientY: 10, pointerId: 1 });
+    expect(holds).toEqual([true]);
+    expect(session.snapshot().dragging).toBe(true);
+    utils.unmount();
+    expect(holds).toEqual([true, false]);
+    expect(session.snapshot().dragging).toBe(false);
+  });
+
+  it('a cancel whose drop throws (a listener of the flush) leaves no gesture behind: a later move writes nothing', () => {
+    const { doc, session, stage, handle } = overlaid((on) => {
+      if (!on) throw new Error('a listener of the flush');
+    });
+    // the move and the cancel on the stage itself: the handle is drawn again as the frame re-measures
+    fireEvent.pointerDown(handle, { button: 0, buttons: 1, clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(stage, { buttons: 1, clientX: 60, clientY: 10, pointerId: 1 });
+    const width = styleOf(doc, 'a').width;
+    expect(width).not.toBe('200px');
+    try {
+      fireEvent.pointerCancel(stage, { pointerId: 1 });
+    } catch {
+      // the flush's error, as the listener's caller sees it
+    }
+    expect(session.snapshot().dragging).toBe(false);
+    fireEvent.pointerMove(stage, { buttons: 0, clientX: 110, clientY: 10, pointerId: 1 });
+    expect(styleOf(doc, 'a').width).toBe(width);
   });
 });

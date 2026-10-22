@@ -19,7 +19,7 @@ A design is files under `project/`:
 | `title` | The design's name |
 | `boards` | Board id → `{"x", "y", "w", "h", "title"?}`: the board's top-left corner on the canvas and its size, in CSS px, and the name the board list shows |
 | `order` | The board ids back to front (the board list's order); a board it leaves out keeps its place, with a warning |
-| `faces` | At most 4 typefaces, as a deck's (`{"family", "href"}` or `{"family", "src": "assets/<name>"}`) |
+| `faces` | At most 4 typefaces, as a deck's (`{"family", "href"}` with a Google Fonts link MAWS fetches once when its licence is OFL, or `{"family", "src": "assets/<name>"}`); MAWS's `google` key on a face is its record of the fetch: leave it alone |
 | `designSystems` | Claude's design-system install records, kept as they are |
 | `dsOverrides` | The design's design-system overrides, `--ds-*` name → CSS value; the Theme menu writes it |
 

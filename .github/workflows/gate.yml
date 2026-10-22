@@ -89,7 +89,9 @@ env:
   # dashboard-scale and design-scale admit any trial started below a load of 10, looser than their bounds hold:
   # dashboard-scale's replace row read 432 ms against its 500 at a load under 3, and beside foreign load at 5 to 6 its
   # replace read 510 and its cold open 1,299 against 1,000 (p4-r6-func, 2026-10-21; 634 relaunched quiet).
-  MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat presentations-scale tool-time-heavy-live
+  # presentations-drag (P4-B2 M0) is the deck drag's fast group: no-agent control trials alternating with agent trials
+  # that republish through the host, the class-1 drag case under MAWS_PRESENTATIONS_PERF=1.
+  MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac

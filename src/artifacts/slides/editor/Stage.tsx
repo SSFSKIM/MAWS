@@ -7,6 +7,7 @@ import { useCallback, useRef, type ReactNode, type RefObject } from 'react';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import type { FaceAliases } from '../canvas/faces';
 import type { SlideEntry } from './deck-view';
+import { describeElement } from './a11y';
 import { DECK_COPY as C } from './copy';
 import type { DeckSession } from './session';
 import { SlideView } from './SlideView';
@@ -58,11 +59,11 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
           </ul>
         </div>
       )}
-      <div ref={viewport} className="deck-stage" aria-label={C.stage} role="region" tabIndex={0} data-stage-surface>
+      <div ref={viewport} className="deck-stage" aria-label={C.stage} role="region" tabIndex={0} data-stage-surface aria-keyshortcuts="F6" /* P4-B2 (D14): its keyboard exit */>
         {slide ? (
           <div className="deck-stage-center">
             <div ref={setFrame} className="deck-stage-frame" data-stage-slide={slide.id} data-held={slide.held ? '' : undefined}>
-              {scope(<SlideView doc={session.doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} size={slide.size ?? null} /* P3-E: a board's size */ />)}
+              {scope(<SlideView doc={session.doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} size={slide.size ?? null} /* P3-E: a board's size */ describe={describeElement} /* P4-B2 (D15, A1) */ />)}
               <div className="deck-stage-overlay">
                 {scope(
                   <Overlay
@@ -76,7 +77,7 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
                     onNotice={onNotice}
                     artifactId={artifactId}
                     importAsset={importAsset}
-                    renderText={(elementId, stageCanvas) => <TextBox session={session} canvas={stageCanvas} slideId={slide.id} elementId={elementId} readOnly={readOnly || slide.held !== null} />}
+                    renderText={(elementId, stageCanvas, armed) => <TextBox session={session} canvas={stageCanvas} slideId={slide.id} elementId={elementId} readOnly={readOnly || slide.held !== null} armed={armed} />}
                   />,
                 )}
               </div>

@@ -36,6 +36,37 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+/* P4-B2 (D16): the pin whose popover is open */
+.deck-comment-pin[aria-expanded='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* P4-B2: the compose card's host under an open popover, kept mounted */
+.deck-comment-card-slot[data-card-slot='hidden'] {
+  visibility: hidden;
+}
+/* P4-B2 (V10): a thumbnail's open comments, in the pin's colour, at its top-left (the menu is at its top-right) */
+.deck-thumb-comments {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px 8px 8px 2px;
+  background: var(--warning);
+  color: var(--bg-raised);
+  font: 600 10px/16px var(--font-ui);
+  text-align: center;
+}
+/* P4-B2 (V15): a design's pins merged on a zoomed-out world, at their centroid */
+.deck-comment-pin[data-pin-cluster] {
+  margin: -12px 0 0 -12px;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 12px;
+}
 
 /* the rail */
 .deck-comments-header {

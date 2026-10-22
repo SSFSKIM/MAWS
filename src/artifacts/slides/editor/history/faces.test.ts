@@ -6,12 +6,14 @@
 import { describe, expect, it } from 'vitest';
 import { newDoc, transact } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
+import type { DeckFace } from '../../deck';
+import { LORA_FILES, LORA_LICENCE, loraFace } from '../../export/faces.test-support';
 import { aliasFaces, aliasFamilyList, aliasOverrides, previewFaces } from './faces';
 
-function deckWithFaces(faces: Record<string, { family: string; src: string }>) {
+function deckWithFaces(faces: Record<string, DeckFace>) {
   const doc = newDoc();
   transact(doc, () => {
-    for (const [key, face] of Object.entries(faces)) Y.setDeckEntry(doc, 'faces', key, face);
+    for (const [key, face] of Object.entries(faces)) Y.setDeckEntry(doc, 'faces', key, face as Y.Json);
   });
   return doc;
 }
@@ -31,6 +33,21 @@ describe('the preview’s faces (R2)', () => {
     expect(faces.css).toContain(`font-family: "${earlierBrand}"; src: url("maws-artifact://deck/7/assets/brand-0.woff2")`);
     expect(faces.css).toContain(`url("maws-artifact://deck/7/assets/old.woff2")`);
     expect(faces.css).not.toMatch(/font-family: "Brand"/); // the authored name stays the live editor's
+  });
+
+  // P4-B2 D19: a Google Fonts face the host fetched draws from the state's assets, every file, with its weight and style
+  it('declares a fetched face’s every file at the state’s own assets, under one private name per state', () => {
+    const shown = deckWithFaces({ lora: loraFace() });
+    const earlier = deckWithFaces({ lora: loraFace() });
+    const faces = previewFaces({ shown, earlier }, { shown: at(12), earlier: at(7) });
+    const [shownLora, earlierLora] = [faces.shown.get('lora')!, faces.earlier.get('lora')!];
+    expect(shownLora).toMatch(/^deck-face-/);
+    expect(shownLora).not.toBe(earlierLora);
+    for (const file of LORA_FILES) {
+      expect(faces.css).toContain(`font-family: "${shownLora}"; src: url("maws-artifact://deck/12/${file.src}"); font-weight: ${file.weight}; font-style: ${file.style};`);
+      expect(faces.css).toContain(`font-family: "${earlierLora}"; src: url("maws-artifact://deck/7/${file.src}"); font-weight: ${file.weight}; font-style: ${file.style};`);
+    }
+    expect(faces.css).not.toContain(LORA_LICENCE); // the licence is kept beside the files, never drawn
   });
 
   it('rewrites a drawn slide’s font-family values to the state’s private names, leaving other families', () => {

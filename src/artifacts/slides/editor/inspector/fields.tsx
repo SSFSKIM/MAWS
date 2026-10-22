@@ -3,6 +3,9 @@
 // refuses it, which the field shows inline (`role="alert"`, `aria-invalid`) while it keeps what was typed until fixed or
 // left. Number fields commit on Enter, on leaving and on arrow steps (Shift ×10); colour fields write as typed whenever
 // the text is a value the dialect takes, and carry the design system's swatch row.
+// P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D13; tracker row 280): a number field may show its
+// value as a whole number (position and size), while the model keeps the fraction: Enter on a field nobody typed in
+// writes nothing (so a rounded display is never written back), and an arrow steps from the model's value.
 import { createContext, useContext, useId, useState, type ReactNode } from 'react';
 import type { DeckFace } from '../../deck';
 import type { DeckSession } from '../session';
@@ -83,14 +86,16 @@ export interface NumberFieldProps {
   onCommit: (n: number | null, how: Write) => readonly string[];
   /** Held off for what the selection cannot show (fix wave 1). */
   disabled?: boolean;
+  /** P4-B2 (D13): shown as a whole number (position and size in px); the model keeps its fraction. */
+  whole?: boolean;
 }
 
-export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false }: NumberFieldProps) {
+export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false, whole = false }: NumberFieldProps) {
   const readOnly = useInspector().readOnly || disabled;
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const shown = draft ?? fmt(value);
+  const shown = draft ?? (whole && value !== null ? String(Math.round(value)) : fmt(value));
   const how: Write = { typing: label };
   const token = hint.startsWith('--ds-') ? hint : null;
 
@@ -129,10 +134,11 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
-              commit(shown, true);
+              if (draft !== null) commit(draft, true); // P4-B2 (D13): a field nobody typed in writes nothing
             } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
               event.preventDefault();
-              const base = Number.isFinite(Number(shown)) && shown.trim() !== '' ? Number(shown) : (value ?? 0);
+              // P4-B2 (D13): from what was typed, else from the model's value (never the rounded one shown)
+              const base = draft !== null && Number.isFinite(Number(draft)) && draft.trim() !== '' ? Number(draft) : (value ?? 0);
               const next = round2(base + (event.key === 'ArrowUp' ? 1 : -1) * step * (event.shiftKey ? 10 : 1));
               commit(String(next), true);
             } else if (event.key === 'Escape' && draft !== null) {
@@ -257,7 +263,8 @@ export function SelectField({ label, value, mixed = false, choices, groups, onCh
   onChange: (value: string) => void;
 }) {
   const { readOnly } = useInspector();
-  const option = (c: Choice) => (
+  // named apart from the <option> tag it draws: the React Compiler read the tag as this binding, used before it was made
+  const renderOption = (c: Choice) => (
     <option key={c.value} value={c.value} title={c.title}>
       {c.label}
     </option>
@@ -269,10 +276,10 @@ export function SelectField({ label, value, mixed = false, choices, groups, onCh
           {C.mixed}
         </option>
       )}
-      {choices?.map(option)}
+      {choices?.map(renderOption)}
       {groups?.map((g) => (
         <optgroup key={g.label} label={g.label}>
-          {g.choices.map(option)}
+          {g.choices.map(renderOption)}
         </optgroup>
       ))}
     </select>

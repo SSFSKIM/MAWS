@@ -156,7 +156,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(thread).toHaveAttribute('data-status', 'resolved');
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-status', 'open');
-  await expect(panel.getByRole('button', { name: '1 open comment' })).toBeVisible(); // the header's count
+  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible(); // the header's count
 
   // the pin at the element's top-right
   await expect.poll(() => pinOffset(deck, 'body'), { message: 'the pin on the element’s corner' }).toBeLessThan(4);
@@ -183,16 +183,23 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   // element's last text, stored by the host from the text just before the deletion; no pin; still counted open
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(rail).toHaveCount(0);
+  // the drag left the body selected, and a click on the element selected alone edits it at the click (P4-B2's T3), so the
+  // Delete would take a character: a press on the empty slide first selects nothing, then the click selects it ARMED,
+  // where Delete removes it (T14)
+  const empty = (await stageAt(deck)).at(1800, 1000);
+  await page.mouse.click(empty.x, empty.y);
+  await expect(deck.locator('[data-overlay] [data-selected]')).toHaveCount(0);
   const box = (await deck.locator('[data-stage-slide] [data-eid="body"]').boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
+  await expect(deck.locator('[data-stage-surface][data-armed]')).toHaveCount(1);
   await page.keyboard.press('Delete');
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(thread).toHaveAttribute('data-orphan', '');
   await expect(thread).toContainText('The commented element was deleted.');
   await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths');
   await expect(deck.locator('[data-comment-pin]')).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: '1 open comment' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible();
 
   // Resolve and Reopen in the rail; the count follows
   await thread.getByRole('button', { name: 'Resolve' }).click();
@@ -200,11 +207,116 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(panel.getByRole('button', { name: /open comment/ })).toHaveCount(0);
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-orphan', '');
-  await expect(panel.getByRole('button', { name: '1 open comment' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible();
   // an undo brings the element back: the thread is no orphan any more, its pin is back
   await deck.getByRole('button', { name: 'Undo' }).click();
   await expect(thread).not.toHaveAttribute('data-orphan', '');
   await expect.poll(() => pinOffset(deck, 'body')).toBeLessThan(4);
+
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; the P4 spec's §2 item 2; the prior art's V2, V4,
+// V5, V8, V10): the pin popover. The deck in the panel beside a chat as above (a comment goes to the shown session), the
+// panel at its widest so the stage takes presses. A kept thread's pin opens its popover at the pin with the reply field
+// focused and no rail; Escape keeps a typed reply and gives the keyboard to the pin, the pin's press restores it; a press
+// on the empty stage closes it and selects nothing; the reply posts; the last resolve removes the popover, the pin and
+// the filmstrip's badge.
+test('the pin popover: at the pin with its reply field focused, Escape keeps the draft, an empty-stage press selects nothing, the last resolve removes the pin and the badge', async () => {
+  test.setTimeout(180_000);
+  repo = await ScratchRepo.create({ sentinels: false });
+  const page = await ready();
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Q3 review' });
+  const id = artifact.id;
+  await seam(page, 'seed', id, FILES);
+
+  const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  const panel = page.locator('[data-region="panel"]');
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  const deck = panel.locator(`[data-deck-artifact="${id}"]`);
+  await expect(deck.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  const toolbar = deck.getByRole('toolbar', { name: 'Deck' });
+  const divider = panel.getByRole('separator', { name: 'Resize right panel' });
+  const room = Number(await divider.getAttribute('aria-valuemax')) - Number(await divider.getAttribute('aria-valuenow'));
+  const grip = (await divider.boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 - room, grip.y + grip.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await panel.boundingBox())!.width).toBeGreaterThanOrEqual(600);
+  const { at } = await settledStage(deck);
+
+  // a thread kept on the body (Comment, then Resolve on the card and Reopen in the rail: the card's own thread is the
+  // card's view while nothing is sent in it; reopened, it is the pin's)
+  await page.mouse.click(at(550, 560).x, at(550, 560).y);
+  await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
+  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+  const card = page.locator('[data-comment-card]');
+  await expect(card).toBeVisible();
+  await card.getByRole('button', { name: 'Resolve' }).click();
+  await expect(card).toHaveCount(0);
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
+  const rail = deck.getByRole('complementary', { name: 'Comments' });
+  await rail.locator('article[data-element="body"]').getByRole('button', { name: 'Reopen' }).click();
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
+  await expect(rail).toHaveCount(0);
+
+  // the filmstrip's badge, in the thumbnail's name (V10)
+  const badge = deck.locator('[data-slide-thumb="s1"] [data-comments-badge]');
+  await expect(badge).toHaveText('1');
+  await expect(deck.getByRole('button', { name: 'Slide 1, 1 open comment' })).toBeVisible();
+
+  // the pin's press: its popover at the pin, the reply field focused, no rail (V2)
+  const pin = deck.locator('[data-comment-pin="body"]');
+  await expect.poll(() => pinOffset(deck, 'body')).toBeLessThan(4);
+  await pin.click();
+  const popover = page.getByRole('dialog', { name: 'Comments on “One path”' });
+  await expect(popover).toBeVisible();
+  const reply = popover.getByRole('textbox', { name: 'Reply' });
+  await expect(reply).toBeFocused();
+  await expect(pin).toHaveAttribute('aria-expanded', 'true');
+  await expect(rail).toHaveCount(0);
+  // at the pin, clamped inside the frame (D16: the card's placement): its left at the pin's unless the card would then
+  // cross the frame's right edge less its 8 px inset, where it stops, still under the pin (at the panel's widest the
+  // stage's frame beside the filmstrip is narrow enough that this pin's 300 px card stops there)
+  const [p, q, f] = [(await pin.boundingBox())!, (await popover.boundingBox())!, (await deck.locator('.deck-comment-frame').boundingBox())!];
+  const right = f.x + f.width - 8;
+  expect(Math.abs(q.x - Math.min(p.x, right - q.width)), 'its left at the pin’s, clamped inside the frame').toBeLessThan(2);
+  expect(q.x + q.width, 'its right inside the frame').toBeLessThan(right + 2);
+  expect(q.x, 'under the pin').toBeLessThanOrEqual(p.x + 1);
+  expect(q.x + q.width, 'under the pin').toBeGreaterThanOrEqual(p.x + p.width - 1);
+  expect(q.y - (p.y + p.height), 'its top just under the pin').toBeGreaterThanOrEqual(0);
+  expect(q.y - (p.y + p.height)).toBeLessThan(8);
+
+  // a reply typed, Escape: closed, the keyboard on the pin; the pin again: the draft is there (V4, V5)
+  await page.keyboard.type('Shorter?');
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(pin).toBeFocused();
+  await pin.click();
+  await expect(reply).toHaveValue('Shorter?');
+
+  // a press on the empty stage: closed, and nothing selected anew (the body stays selected; no marquee) (V4)
+  await page.mouse.click(at(1800, 1000).x, at(1800, 1000).y);
+  await expect(popover).toHaveCount(0);
+  await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
+  await expect(deck.locator('[data-marquee]')).toHaveCount(0);
+  await expect(pin).toBeFocused();
+
+  // the reply posted from the popover; the last resolve: the popover, the pin and the badge go (V8)
+  await pin.click();
+  await reply.press('Enter');
+  await expect(popover.locator('.thread-card-body')).toHaveText(['Shorter?']);
+  await popover.getByRole('button', { name: 'Resolve' }).click();
+  await expect(popover).toHaveCount(0);
+  await expect(pin).toHaveCount(0);
+  await expect(badge).toHaveCount(0);
+  await expect(deck.getByRole('button', { name: 'Slide 1', exact: true })).toBeVisible();
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

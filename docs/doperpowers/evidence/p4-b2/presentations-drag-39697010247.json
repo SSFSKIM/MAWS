@@ -1,0 +1,772 @@
+{
+ "source": {
+  "run": 39697010247,
+  "commit": "4974ab3940dd1cfd2f47746750585af004592339",
+  "group": "e2e:presentations-drag",
+  "runner": "the Mac mini (ci-kit-mac), measured and alone",
+  "note": "the spec record line of the job log, as printed"
+ },
+ "run": "2026-10-22T00:07:14.731Z",
+ "mode": "measured: no-agent control trials alternating with agent trials",
+ "deck": "benchDeckFiles(100): S6’s seven bench shapes cycled, S7b’s 100-slide deck; the cover’s pinned picture dragged",
+ "workload": {
+  "moves": 200,
+  "moveEveryMs": 16,
+  "stepPx": 0.8,
+  "publishEveryMs": 700,
+  "publish": "one slide (the second on, in turn), its first font size stepped, through artifact_publish in the host (e2e/support/deck-agent.ts)"
+ },
+ "judging": {
+  "boundMs": 24,
+  "targetMs": 16,
+  "rule": "Decision Log 24 over the agent trials’ best (the parent’s Decision Log 54): marginal under a 20 % miss at load ≥ 10, failed otherwise; the control trials recorded, no bound"
+ },
+ "loads": {
+  "start": 3.57,
+  "end": 2.65
+ },
+ "quiet": {
+  "rule": "the 1-minute load under 5 on two consecutive reads 30 s apart, waited for at most 180 s (gate-offload Decision Log 75, ci-kit's mac/settle)",
+  "quiet": true,
+  "waitedMs": 30001,
+  "budgetMs": 180000,
+  "startedAt": "2026-10-22T00:07:14.731Z",
+  "startLoad": 4.09,
+  "endLoad": 4.31,
+  "reads": [
+   {
+    "atMs": 0,
+    "load": 4.09
+   },
+   {
+    "atMs": 30001,
+    "load": 4.31
+   }
+  ],
+  "summary": "quiet after 30 s (loads 4.09, 4.31)"
+ },
+ "trials": [
+  {
+   "kind": "control",
+   "order": 0,
+   "direction": -1,
+   "load": 4.31,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 189,
+    "inputToTxMs": {
+     "p50": 9.6,
+     "p95": 18.2,
+     "max": 20.7
+    },
+    "inputToFrameMs": {
+     "p50": 10.9,
+     "p95": 19.1,
+     "max": 21.9
+    },
+    "queueMs": {
+     "p50": 7.9,
+     "p95": 16.6,
+     "max": 19.2
+    },
+    "handlerMs": {
+     "p50": 1.6,
+     "p95": 2.3,
+     "max": 4
+    },
+    "paintMs": {
+     "p50": 1.2,
+     "p95": 2.1,
+     "max": 4.1
+    },
+    "remote": {
+     "duringMoves": 0,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0
+     }
+    },
+    "touched": 0,
+    "untouchedToFrameMs": {
+     "p50": 10.9,
+     "p95": 19.1,
+     "max": 21.9
+    },
+    "durationMs": 6559.6,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5061.4
+     ],
+     "released": 0
+    }
+   },
+   "publishes": [],
+   "problems": []
+  },
+  {
+   "kind": "agent",
+   "order": 1,
+   "direction": -1,
+   "load": 4.19,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 189,
+    "inputToTxMs": {
+     "p50": 10.4,
+     "p95": 18.4,
+     "max": 21.2
+    },
+    "inputToFrameMs": {
+     "p50": 11.4,
+     "p95": 19.4,
+     "max": 22.1
+    },
+    "queueMs": {
+     "p50": 9,
+     "p95": 16.3,
+     "max": 19.9
+    },
+    "handlerMs": {
+     "p50": 1.4,
+     "p95": 1.9,
+     "max": 2.6
+    },
+    "paintMs": {
+     "p50": 1,
+     "p95": 1.7,
+     "max": 2.7
+    },
+    "remote": {
+     "duringMoves": 3,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 1.5,
+      "p95": 1.7,
+      "max": 1.7
+     }
+    },
+    "touched": 3,
+    "untouchedToFrameMs": {
+     "p50": 11.5,
+     "p95": 19.4,
+     "max": 22.1
+    },
+    "durationMs": 6495.3,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5052.3
+     ],
+     "released": 6
+    }
+   },
+   "publishes": [
+    {
+     "revision": 218,
+     "busyMs": 56.3,
+     "wallMs": 53.5
+    },
+    {
+     "revision": 242,
+     "busyMs": 48.9,
+     "wallMs": 46.4
+    },
+    {
+     "revision": 266,
+     "busyMs": 48.3,
+     "wallMs": 45.2
+    },
+    {
+     "revision": 291,
+     "busyMs": 48,
+     "wallMs": 41.6
+    },
+    {
+     "revision": 315,
+     "busyMs": 53.1,
+     "wallMs": 50.3
+    },
+    {
+     "revision": 339,
+     "busyMs": 47.2,
+     "wallMs": 43.4
+    },
+    {
+     "revision": 363,
+     "busyMs": 44,
+     "wallMs": 41.1
+    },
+    {
+     "revision": 387,
+     "busyMs": 45.8,
+     "wallMs": 43.1
+    }
+   ],
+   "problems": []
+  },
+  {
+   "kind": "control",
+   "order": 2,
+   "direction": 1,
+   "load": 3.94,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 148,
+    "inputToTxMs": {
+     "p50": 9.5,
+     "p95": 17.4,
+     "max": 18.8
+    },
+    "inputToFrameMs": {
+     "p50": 10.7,
+     "p95": 18.8,
+     "max": 22.6
+    },
+    "queueMs": {
+     "p50": 7.8,
+     "p95": 15.7,
+     "max": 18.1
+    },
+    "handlerMs": {
+     "p50": 1.7,
+     "p95": 2.4,
+     "max": 3.1
+    },
+    "paintMs": {
+     "p50": 1.3,
+     "p95": 2.1,
+     "max": 4.4
+    },
+    "remote": {
+     "duringMoves": 0,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0
+     }
+    },
+    "touched": 0,
+    "untouchedToFrameMs": {
+     "p50": 10.7,
+     "p95": 18.8,
+     "max": 22.6
+    },
+    "durationMs": 6182.6,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5066.2
+     ],
+     "released": 0
+    }
+   },
+   "publishes": [],
+   "problems": []
+  },
+  {
+   "kind": "agent",
+   "order": 3,
+   "direction": 1,
+   "load": 3.53,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 148,
+    "inputToTxMs": {
+     "p50": 10.1,
+     "p95": 17.6,
+     "max": 20
+    },
+    "inputToFrameMs": {
+     "p50": 11,
+     "p95": 18.7,
+     "max": 21.3
+    },
+    "queueMs": {
+     "p50": 8.5,
+     "p95": 16.3,
+     "max": 19.1
+    },
+    "handlerMs": {
+     "p50": 1.5,
+     "p95": 1.9,
+     "max": 3.3
+    },
+    "paintMs": {
+     "p50": 1,
+     "p95": 1.6,
+     "max": 2.7
+    },
+    "remote": {
+     "duringMoves": 2,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 1.6,
+      "p95": 1.6,
+      "max": 1.6
+     }
+    },
+    "touched": 1,
+    "untouchedToFrameMs": {
+     "p50": 11,
+     "p95": 18.7,
+     "max": 21.3
+    },
+    "durationMs": 5992.1,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5060.6
+     ],
+     "released": 6
+    }
+   },
+   "publishes": [
+    {
+     "revision": 559,
+     "busyMs": 49.8,
+     "wallMs": 45.2
+    },
+    {
+     "revision": 572,
+     "busyMs": 54.7,
+     "wallMs": 52.3
+    },
+    {
+     "revision": 596,
+     "busyMs": 48.1,
+     "wallMs": 44.9
+    },
+    {
+     "revision": 620,
+     "busyMs": 55.2,
+     "wallMs": 52
+    },
+    {
+     "revision": 645,
+     "busyMs": 52,
+     "wallMs": 48.6
+    },
+    {
+     "revision": 668,
+     "busyMs": 47.4,
+     "wallMs": 45.4
+    },
+    {
+     "revision": 682,
+     "busyMs": 47.5,
+     "wallMs": 44.6
+    }
+   ],
+   "problems": []
+  },
+  {
+   "kind": "control",
+   "order": 4,
+   "direction": -1,
+   "load": 3.53,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 189,
+    "inputToTxMs": {
+     "p50": 9.3,
+     "p95": 17.2,
+     "max": 19.8
+    },
+    "inputToFrameMs": {
+     "p50": 10.6,
+     "p95": 18.9,
+     "max": 22.5
+    },
+    "queueMs": {
+     "p50": 7.7,
+     "p95": 15.4,
+     "max": 17.9
+    },
+    "handlerMs": {
+     "p50": 1.7,
+     "p95": 2.2,
+     "max": 2.8
+    },
+    "paintMs": {
+     "p50": 1.2,
+     "p95": 1.9,
+     "max": 2.8
+    },
+    "remote": {
+     "duringMoves": 0,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0
+     }
+    },
+    "touched": 0,
+    "untouchedToFrameMs": {
+     "p50": 10.6,
+     "p95": 18.9,
+     "max": 22.5
+    },
+    "durationMs": 6544.1,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5050.6
+     ],
+     "released": 0
+    }
+   },
+   "publishes": [],
+   "problems": []
+  },
+  {
+   "kind": "agent",
+   "order": 5,
+   "direction": -1,
+   "load": 3.14,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 189,
+    "inputToTxMs": {
+     "p50": 10.3,
+     "p95": 17.8,
+     "max": 21.8
+    },
+    "inputToFrameMs": {
+     "p50": 11.4,
+     "p95": 18.8,
+     "max": 22.5
+    },
+    "queueMs": {
+     "p50": 8.7,
+     "p95": 16.4,
+     "max": 21
+    },
+    "handlerMs": {
+     "p50": 1.5,
+     "p95": 2,
+     "max": 2.7
+    },
+    "paintMs": {
+     "p50": 1.1,
+     "p95": 1.8,
+     "max": 3.8
+    },
+    "remote": {
+     "duringMoves": 3,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 1.5,
+      "p95": 1.6,
+      "max": 1.6
+     }
+    },
+    "touched": 3,
+    "untouchedToFrameMs": {
+     "p50": 11.5,
+     "p95": 18.7,
+     "max": 22.5
+    },
+    "durationMs": 6583.5,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5063.8
+     ],
+     "released": 6
+    }
+   },
+   "publishes": [
+    {
+     "revision": 902,
+     "busyMs": 43.5,
+     "wallMs": 40.1
+    },
+    {
+     "revision": 926,
+     "busyMs": 48.7,
+     "wallMs": 45.2
+    },
+    {
+     "revision": 950,
+     "busyMs": 45.5,
+     "wallMs": 42.9
+    },
+    {
+     "revision": 975,
+     "busyMs": 48.3,
+     "wallMs": 44.9
+    },
+    {
+     "revision": 999,
+     "busyMs": 60.4,
+     "wallMs": 48
+    },
+    {
+     "revision": 1023,
+     "busyMs": 47.1,
+     "wallMs": 43.6
+    },
+    {
+     "revision": 1048,
+     "busyMs": 35.3,
+     "wallMs": 32.6
+    },
+    {
+     "revision": 1072,
+     "busyMs": 43.7,
+     "wallMs": 40.8
+    }
+   ],
+   "problems": []
+  },
+  {
+   "kind": "control",
+   "order": 6,
+   "direction": 1,
+   "load": 3.13,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 148,
+    "inputToTxMs": {
+     "p50": 9.5,
+     "p95": 18.2,
+     "max": 19.6
+    },
+    "inputToFrameMs": {
+     "p50": 10.8,
+     "p95": 19.2,
+     "max": 21.8
+    },
+    "queueMs": {
+     "p50": 8,
+     "p95": 16.5,
+     "max": 17.9
+    },
+    "handlerMs": {
+     "p50": 1.7,
+     "p95": 2.1,
+     "max": 2.7
+    },
+    "paintMs": {
+     "p50": 1.2,
+     "p95": 2,
+     "max": 3.1
+    },
+    "remote": {
+     "duringMoves": 0,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0
+     }
+    },
+    "touched": 0,
+    "untouchedToFrameMs": {
+     "p50": 10.8,
+     "p95": 19.2,
+     "max": 21.8
+    },
+    "durationMs": 6179,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5061.8
+     ],
+     "released": 0
+    }
+   },
+   "publishes": [],
+   "problems": []
+  },
+  {
+   "kind": "agent",
+   "order": 7,
+   "direction": 1,
+   "load": 2.8,
+   "drag": {
+    "moves": 200,
+    "withTransaction": 148,
+    "inputToTxMs": {
+     "p50": 10.1,
+     "p95": 17.5,
+     "max": 21.1
+    },
+    "inputToFrameMs": {
+     "p50": 11.3,
+     "p95": 19.1,
+     "max": 21.7
+    },
+    "queueMs": {
+     "p50": 8.8,
+     "p95": 16.4,
+     "max": 20.3
+    },
+    "handlerMs": {
+     "p50": 1.4,
+     "p95": 2.1,
+     "max": 2.7
+    },
+    "paintMs": {
+     "p50": 1,
+     "p95": 1.9,
+     "max": 3.1
+    },
+    "remote": {
+     "duringMoves": 2,
+     "afterDrop": 0,
+     "applyMs": {
+      "p50": 2.5,
+      "p95": 2.5,
+      "max": 2.5
+     }
+    },
+    "touched": 1,
+    "untouchedToFrameMs": {
+     "p50": 11.3,
+     "p95": 19.1,
+     "max": 21.7
+    },
+    "durationMs": 6083.5,
+    "longTasks": 0,
+    "hold": {
+     "heldAtDrop": 0,
+     "capsMs": [
+      5056.5
+     ],
+     "released": 6
+    }
+   },
+   "publishes": [
+    {
+     "revision": 1247,
+     "busyMs": 58.4,
+     "wallMs": 54.7
+    },
+    {
+     "revision": 1259,
+     "busyMs": 48.8,
+     "wallMs": 46.2
+    },
+    {
+     "revision": 1283,
+     "busyMs": 54.8,
+     "wallMs": 50.2
+    },
+    {
+     "revision": 1307,
+     "busyMs": 55.7,
+     "wallMs": 51.8
+    },
+    {
+     "revision": 1332,
+     "busyMs": 50.7,
+     "wallMs": 46.4
+    },
+    {
+     "revision": 1355,
+     "busyMs": 46.1,
+     "wallMs": 44.2
+    },
+    {
+     "revision": 1368,
+     "busyMs": 43.3,
+     "wallMs": 40.6
+    }
+   ],
+   "problems": []
+  }
+ ],
+ "summary": {
+  "control": {
+   "trials": 4,
+   "load": 4.31,
+   "toFrameP95": [
+    19.1,
+    18.8,
+    18.9,
+    19.2
+   ],
+   "best": 18.8,
+   "median": 19,
+   "medianP95": {
+    "toTx": 17.8,
+    "queue": 16.1,
+    "handler": 2.25,
+    "paint": 2.05,
+    "untouchedToFrame": 19
+   },
+   "touched": 0,
+   "remote": {
+    "duringMoves": 0,
+    "afterDrop": 0
+   },
+   "hold": {
+    "heldAtDrop": 0,
+    "capped": 4,
+    "released": 0
+   },
+   "publishes": 0
+  },
+  "agent": {
+   "trials": 4,
+   "load": 4.19,
+   "toFrameP95": [
+    19.4,
+    18.7,
+    18.8,
+    19.1
+   ],
+   "best": 18.7,
+   "median": 18.95,
+   "medianP95": {
+    "toTx": 17.7,
+    "queue": 16.35,
+    "handler": 1.95,
+    "paint": 1.75,
+    "untouchedToFrame": 18.9
+   },
+   "touched": 8,
+   "remote": {
+    "duringMoves": 10,
+    "afterDrop": 0
+   },
+   "hold": {
+    "heldAtDrop": 0,
+    "capped": 4,
+    "released": 24
+   },
+   "publishes": 30
+  },
+  "bound": {
+   "ms": 24,
+   "on": "the agent trials’ best move → frame p95 (the parent’s Decision Log 54)",
+   "value": 18.7,
+   "load": 4.19,
+   "verdict": "met"
+  },
+  "target": {
+   "ms": 16,
+   "agent": {
+    "best": 18.7,
+    "met": false
+   },
+   "control": {
+    "best": 18.8,
+    "met": false
+   }
+  }
+ }
+}

@@ -147,7 +147,7 @@ const KNOWN = new Set<string>(['boards', 'order', ...DECK_SHARED]);
 /** The manifest's key order, then every other key sorted; a board's frame, its title, then its other keys sorted. */
 const CANVAS_KEYS = ['v', 'title', 'boards', 'order', 'faces', 'designSystems', 'dsOverrides'];
 const BOARD_KEYS = [...FRAME_KEYS, 'title'];
-const FACE_KEYS = ['family', 'href', 'src'];
+const FACE_KEYS = ['family', 'href', 'src', 'google']; // P4-B2 D19: the host's record last, as deck.json writes it
 const rank = (key: string, order: readonly string[]) => (order.includes(key) ? order.indexOf(key) : order.length);
 const byRank = (order: readonly string[]) => (a: string, b: string) => rank(a, order) - rank(b, order) || (a < b ? -1 : a > b ? 1 : 0);
 function ordered<T>(value: Record<string, T>, keys: string[]): Record<string, T> {

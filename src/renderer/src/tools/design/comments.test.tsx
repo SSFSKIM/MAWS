@@ -3,17 +3,19 @@
 // board or an element, so the agent's lead says which; a deck's and a document's anchors stay as they were written.
 // P3-F (L230): a design opened as its own main tab with no chat shown offers a new comment as the document and the deck do.
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Awareness } from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { design } from '@artifacts/design/fixtures/support';
 import type { CommentedPassage } from '@artifacts/document/editor/comments/surface';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import { threadStates } from '@artifacts/slides/threads';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
+import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { NO_SESSION_CONTEXT } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -24,6 +26,7 @@ import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
+import { commentDraftOf } from '../document/comment-drafts';
 import { artifactCommentAnchor, useDocumentComments } from '../document/comments';
 import { registerDesignEditor } from './index';
 import type { DesignTabState } from './tab-state';
@@ -148,5 +151,89 @@ describe('a design opened as its own tab', () => {
     const notice = document.querySelector<HTMLElement>('[data-comment-context]');
     expect(notice?.dataset.commentContext).toBe('none');
     expect(notice?.textContent).toContain(NO_SESSION_CONTEXT);
+  });
+});
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; X36's draft rule, as B1's document and the deck):
+// the design's body opts into the draft rule: Escape on a typed comment keeps the card and its text, Comment refocuses it
+// instead of anchoring a second thread, and the tab's close guard asks before the draft is lost (not on a move).
+describe('a design’s compose card keeps its draft', () => {
+  const DESIGN = '66666666-6666-4666-8666-666666666666';
+  const scope: EditorHostScope = { surface: 'main', tabId: 'main-tab-1' };
+  let off = () => {};
+  beforeEach(() => {
+    resetLibrary();
+    resetEditorHosts();
+    resetMarkupSurfaces();
+    resetArtifactEditors();
+  });
+  afterEach(() => {
+    cleanup();
+    releaseArtifactEditorState(scope);
+    off();
+    delete (window as { maws?: unknown }).maws;
+  });
+
+  async function mount() {
+    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: null } }).client;
+    const doc = design([{ id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 }, title: 'Phone' }]);
+    const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
+    const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
+    const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
+    const confirmDiscard = vi.fn<(title: string, about?: 'comment') => Promise<boolean>>(async () => false);
+    act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it
+    off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard }));
+    const editor = artifactEditorFor('design')!;
+    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, 'design', editor as never);
+    const Main = editor.Main;
+    render(
+      <EditorHostScopeContext.Provider value={scope}>
+        <Main artifactId={DESIGN} state={hold.state} scope={scope} visible onShown={() => {}} />
+      </EditorHostScopeContext.Provider>,
+    );
+    await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy());
+    const comment = async () => {
+      const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Design' })).getByRole('button', { name: 'Comment' }));
+      act(() => button.click());
+      await act(async () => {});
+    };
+    return { doc, state: hold.state, confirmDiscard, comment };
+  }
+  const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
+
+  it('Escape on a typed comment keeps the card and its text; Comment refocuses it rather than anchoring another thread', async () => {
+    const { doc, comment } = await mount();
+    await comment();
+    expect(useCommentCard.getState().open).toMatchObject({ hostId: expect.stringMatching(/^deck:tab-/), anchor: { artifactKind: 'design', artifactTarget: 'board' } });
+    await userEvent.type(field(), 'Taller?');
+    await userEvent.keyboard('{Escape}');
+    expect(useCommentCard.getState().open).not.toBeNull();
+    expect(field().value).toBe('Taller?');
+    await comment();
+    expect(threadStates(doc)).toHaveLength(1);
+    expect(document.activeElement).toBe(field());
+  });
+
+  // the review's P1: an activate-existing move hands the card and its comment to the view it keeps
+  it('a move onto a view already showing the design hands the card and its typed comment to that view', async () => {
+    const { state, comment } = await mount();
+    await comment();
+    await userEvent.type(field(), 'Taller?');
+    const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
+    const kept = holdArtifactEditorState<DesignTabState>(panelScope, DESIGN, 'design', artifactEditorFor('design')! as never);
+    expect(await state.closeGuard({ moving: true })).toBe(true);
+    expect(handArtifactViewOver(scope, panelScope)).toBe(true);
+    expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);
+    expect(commentDraftOf(DESIGN)?.text).toBe('Taller?');
+    releaseArtifactEditorState(panelScope);
+  });
+
+  it('the tab’s close guard asks before an unsent comment is lost, and lets a move go', async () => {
+    const { state, confirmDiscard, comment } = await mount();
+    await comment();
+    await userEvent.type(field(), 'Taller?');
+    expect(await state.closeGuard()).toBe(false);
+    expect(confirmDiscard).toHaveBeenCalledWith('Design', 'comment');
+    expect(await state.closeGuard({ moving: true })).toBe(true);
   });
 });

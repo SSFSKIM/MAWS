@@ -10,7 +10,7 @@ import { DECK_PATH, slidePath } from './deck';
 import { claudeExamples } from './fixtures/s6';
 import { deckFiles, deleteElementTree, groupOf, moveInto, moveSlide, readDeckJson, readFlat, readSlide, reorderFlow, resolveAnchor, setNotes, setStyle, setText, slideOrder, zOrder } from './model';
 import { loadSlide } from './parse';
-import { GOOGLE_FONTS_WARNING, publishDeck, type DeckPublishOutcome } from './publish';
+import { publishDeck, type DeckPublishOutcome } from './publish';
 
 const P = (id: string) => slidePath(id);
 const DECK = JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: '2026-10-12T18:00:00Z' }, lists: 'css', title: 'Q3', cover: 'plan', order: ['plan', 'kpis', 'map'], sections: { s1: { description: 'Numbers', start: 'plan' } }, faces: {}, designSystems: [], xUnknown: { keep: true } });
@@ -397,12 +397,57 @@ describe('publishDeck: what the loader dropped and held, the index, tables', () 
     expect(slideOrder(doc)).toEqual(['s1', 's2']);
   });
 
-  it('warns once that Google Fonts faces are named, never fetched, and drops order ids with no slide', () => {
+  it('names Google Fonts faces without a warning of its own (the answer says each face’s state, D19), and drops order ids with no slide', () => {
     const doc = created({ [P('s1')]: '<section id="s1"></section>' });
     const out = publish(doc, deckFiles(doc), { [DECK_PATH]: JSON.stringify({ v: 4, order: ['s1', 'ghost'], faces: { lora: { family: 'Lora', href: 'https://fonts.googleapis.com/css2?family=Lora' }, inter: { family: 'Inter', href: 'https://fonts.googleapis.com/css2?family=Inter' } } }) });
-    expect(out.warnings.filter((w) => w.message === GOOGLE_FONTS_WARNING)).toEqual([{ path: DECK_PATH, property: 'faces', message: GOOGLE_FONTS_WARNING }]);
-    expect(out.warnings).toContainEqual({ path: DECK_PATH, property: 'order', message: 'order lists slide ghost, which has no file; dropped' });
+    expect(out.warnings).toEqual([{ path: DECK_PATH, property: 'order', message: 'order lists slide ghost, which has no file; dropped' }]);
     expect(JSON.parse(deckFiles(doc)[DECK_PATH]!).order).toEqual(['s1']);
+    expect(Object.keys(readDeckJson(doc).faces ?? {})).toEqual(['lora', 'inter']);
+  });
+
+  // P4-B2 D19: the host's record of a face's fetch is the host's alone. The agent's read shows it; the loader drops it
+  // from what the agent sends and from its base, and the faces merge compares without it and carries it forward.
+  describe('the host’s record of a Google Fonts face', () => {
+    const LORA = 'https://fonts.googleapis.com/css2?family=Lora';
+    const record = { request: LORA, licence: 'OFL', licenceSrc: 'assets/gf-lora-OFL.txt', files: [{ src: 'assets/gf-lora-400.woff2', weight: '400', style: 'normal' }] };
+    const faceOf = (doc: Doc) => readDeckJson(doc).faces!.lora as Record<string, unknown>;
+    function fetched(): { doc: Doc; before: Record<string, string> } {
+      const doc = created({ [DECK_PATH]: JSON.stringify({ v: 4, order: ['s1'], faces: { lora: { family: 'Lora', href: LORA } } }), [P('s1')]: '<section id="s1"></section>' });
+      const before = deckFiles(doc); // the agent's read, before the host's write
+      transact(doc, () => Y.setDeckEntry(doc, 'faces', 'lora', { family: 'Lora', href: LORA, google: record } as unknown as Y.Json)); // the host's write
+      return { doc, before };
+    }
+    const sentWith = (base: Record<string, string>, face: unknown) => ({ [DECK_PATH]: JSON.stringify({ ...JSON.parse(base[DECK_PATH]!), faces: { lora: face } }) });
+
+    it('lets an agent who read before the fetch edit the face with no conflict, the record carried forward', () => {
+      const { doc, before } = fetched();
+      const out = publish(doc, before, sentWith(before, { family: 'Lora', href: `${LORA}&display=swap`, note: 'body' }));
+      expect(out.conflicts).toEqual([]);
+      expect(faceOf(doc)).toEqual({ family: 'Lora', href: `${LORA}&display=swap`, note: 'body', google: record });
+    });
+
+    it('lets an agent who read the record neither forge it nor drop it', () => {
+      const { doc } = fetched();
+      const read = deckFiles(doc);
+      expect(JSON.parse(read[DECK_PATH]!).faces.lora.google).toEqual(record); // the read shows it
+      const forged = { ...record, files: [{ src: 'assets/evil.woff2', weight: '400', style: 'normal' }] };
+      expect(publish(doc, read, sentWith(read, { family: 'Lora', href: LORA, google: forged }))).toMatchObject({ changed: [], conflicts: [] });
+      expect(publish(doc, read, sentWith(read, { family: 'Lora', href: LORA }))).toMatchObject({ changed: [], conflicts: [] });
+      expect(faceOf(doc).google).toEqual(record);
+    });
+
+    it('drops the record when the agent changes the face’s request, so the host fetches the new one', () => {
+      const { doc } = fetched();
+      const read = deckFiles(doc);
+      expect(publish(doc, read, sentWith(read, { family: 'Lora', href: `${LORA}:wght@700` })).conflicts).toEqual([]);
+      expect(faceOf(doc)).toEqual({ family: 'Lora', href: `${LORA}:wght@700` });
+    });
+
+    it('still conflicts on a face someone else changed since the read', () => {
+      const { doc, before } = fetched();
+      transact(doc, () => Y.setDeckEntry(doc, 'faces', 'lora', { family: 'Lora', href: `${LORA}:wght@700` } as unknown as Y.Json));
+      expect(publish(doc, before, sentWith(before, { family: 'Lora', href: `${LORA}&display=swap` })).conflicts).toEqual([{ path: DECK_PATH, detail: 'deck.json key faces.lora: changed since your read' }]);
+    });
   });
 
   it('appends a new slide the sent order leaves out after the last slide, and keeps a slide created since the read in its place', () => {

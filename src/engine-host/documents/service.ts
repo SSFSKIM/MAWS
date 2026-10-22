@@ -203,6 +203,7 @@ export class DocumentService {
   private readonly committedListeners = new Set<(change: Committed) => void>();
   private readonly beforeCommitListeners = new Set<(artifactIds: string[]) => void>();
   private readonly unloadListeners = new Set<(artifactId: string) => void>();
+  private readonly loadListeners = new Set<(artifactId: string) => void>(); // P4-B2 D19
   private readonly agentReplicas = new Map<string, AgentReplica>(); // by `${appSessionId}\0${artifactId}`
   private readonly heldPresence = new WeakMap<AgentReplica, { turnEnded: boolean }>(); // P3-F (F19): outlines inside their hold
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -258,6 +259,13 @@ export class DocumentService {
   onUnload(listener: (artifactId: string) => void): () => void {
     this.unloadListeners.add(listener);
     return () => this.unloadListeners.delete(listener);
+  }
+
+  // P4-B2 D19: runs after a doc enters memory (its first attach, read or write since it was last unloaded), synchronously
+  // inside whatever opened it, so a listener only notes the key and defers its work. A throw is logged.
+  onLoad(listener: (artifactId: string) => void): () => void {
+    this.loadListeners.add(listener);
+    return () => this.loadListeners.delete(listener);
   }
 
   adapterFor(kind: ArtifactKind): KindAdapter | undefined {
@@ -635,6 +643,13 @@ export class DocumentService {
       for (const conn of hostDoc.conns) if (conn !== from) this.queue(conn, frame);
     });
     this.docs.set(artifactId, hostDoc);
+    for (const listener of this.loadListeners) {
+      try {
+        listener(artifactId);
+      } catch (error) {
+        this.log(`an onLoad listener threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     return hostDoc;
   }
 

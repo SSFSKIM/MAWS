@@ -5,8 +5,9 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { newDoc, transact, type Doc } from '../../../yjs';
-import { importSlide, setNotes, writeDeckKeys } from '../../model';
+import { importSlide, ROOT, setNotes, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
+import { addThread } from '../../threads';
 import { removeSlide } from '../../writers';
 import { Presentation, type PresentRole } from './Presentation';
 
@@ -193,5 +194,21 @@ describe('two windows of one show', () => {
     await settle();
     expect(presenter.onEnd).toHaveBeenCalledTimes(1);
     expect(audience.onEnd).toHaveBeenCalledTimes(1);
+  });
+});
+
+// P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; the prior art's V14): presenting shows no pins and
+// no popover, in the audience's window and the presenter's, whatever threads the deck holds.
+describe('comments while presenting (V14)', () => {
+  it('draws no pin and no popover for a slide with open threads', () => {
+    const doc = deck();
+    addThread(doc, { threadId: 'tt', slideId: 'one', elementId: 't1', quote: 'One', by: { kind: 'human' }, at: 1, body: 'Bigger?' });
+    addThread(doc, { threadId: 'ts', slideId: 'one', elementId: ROOT, quote: '', by: { kind: 'human' }, at: 2, body: 'Whole slide.' });
+    for (const role of ['audience', 'presenter'] as const) {
+      const { container, unmount } = show(doc, role, { start: 'one' });
+      expect(container.querySelector('[data-present-role]')).not.toBeNull();
+      expect(container.querySelectorAll('.deck-comment-pin, [data-comment-pin], [data-pin-popover], [data-comments-badge]')).toHaveLength(0);
+      unmount();
+    }
   });
 });
