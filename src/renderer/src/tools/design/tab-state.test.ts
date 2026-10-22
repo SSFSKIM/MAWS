@@ -4,6 +4,7 @@
 import { Awareness } from '@y/protocols/awareness';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import type { ArtifactProvisional } from '@shared/artifacts/provisional';
 import { newDoc, transact } from '@artifacts/yjs';
 import { writeBoardEntry, writeCanvasKeys } from '@artifacts/design/model';
 import { importSlide } from '@artifacts/slides/model';
@@ -30,21 +31,27 @@ function designDoc() {
   return doc;
 }
 
-function handleOf(doc = designDoc()): DocumentHandle & { closed: boolean } {
+function handleOf(doc = designDoc()): DocumentHandle & { closed: boolean; frames: Set<(frame: ArtifactProvisional) => void> } {
   const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
+  const frames = new Set<(frame: ArtifactProvisional) => void>();
   const handle = {
     doc,
     awareness: new Awareness(doc),
     closed: false,
+    frames,
     state: () => state,
     subscribe: () => () => {},
     onRestored: () => () => {},
+    onProvisional: (listener: (frame: ArtifactProvisional) => void) => {
+      frames.add(listener);
+      return () => frames.delete(listener);
+    },
     holdRemote() {},
     close() {
       handle.closed = true;
     },
   };
-  return handle as unknown as DocumentHandle & { closed: boolean };
+  return handle as unknown as DocumentHandle & { closed: boolean; frames: Set<(frame: ArtifactProvisional) => void> };
 }
 
 async function opened() {
@@ -77,6 +84,18 @@ describe('a design tab’s state', () => {
     state.dispose();
     expect(openDesignTabs()).not.toContain(state);
     expect(handle.closed).toBe(true);
+  });
+
+  it('P4-A2 G2.4: holds the replica’s provisional layers while it holds the replica, for every body over it', async () => {
+    const { state, handle } = await opened();
+    const layers = state.snapshot().provisional!;
+    expect(handle.frames.size, 'listening from the open').toBe(1);
+    const frame = { toolUseId: 'call1', appSessionId: 's1', artifactId: 'design-1', kind: 'design', state: 'streaming', at: 0, name: 'Agent', color: '--author-3', ops: [{ op: 'file', path: 'project/boards/phone.html', text: '<section id="phone">' }] } as unknown as ArtifactProvisional;
+    handle.frames.forEach((listener) => listener(frame));
+    expect([...layers.get().keys()]).toEqual(['call1']);
+    state.dispose();
+    expect(handle.frames.size, 'stopped with the tab').toBe(0);
+    expect(layers.get().size).toBe(0);
   });
 
   it('M5 (Decision Log 31): answers what its Export exports now: live, the selected frame else the active board, named as now; a previewed version, its own board and name', async () => {

@@ -47,7 +47,7 @@ async function mount(): Promise<DesignTabState> {
     { id: 'b2', at: { x: 500, y: 0, w: 1280, h: 800 }, title: 'Desktop' },
   ]);
   const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
-  const handle = { doc, awareness: new Awareness(doc), state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
+  const handle = { doc, awareness: new Awareness(doc), state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
   const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
   off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard: async () => true }));
   const editor = artifactEditorFor('design')!;
