@@ -14,7 +14,7 @@ import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION } from '../model/copy';
-import { withQueueTail } from '../model/derive';
+import { restingRows, withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
@@ -289,6 +289,9 @@ export interface TranscriptProps {
   startAt?: (rows: readonly Row[], loaded: boolean) => number | null;
   presentation?: 'local';
   ownerLane?: boolean; // P2-C, additive: the session's owner-channel lane as main reports it; absent, the store's stays
+  // DC9, additive (the desk): the host's word that the session runs no turn (its machine reports it idle, or no
+  // process) though no row ended its turn: the turn draws closed (`restingRows`), and the jump control its arrow
+  atRest?: boolean;
 }
 
 const NO_ROWS: Row[] = [];
@@ -318,9 +321,13 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
-  const derived = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
+  const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
+  const derived = useMemo(() => {
+    const state = atRest ? useTranscriptStore.getState().entries[storeKey]?.state : undefined; // read when the rows change, as the rows are
+    return state ? restingRows(state, stored) : stored;
+  }, [stored, atRest, storeKey]);
   // E13: a session's browser activity as rows, under the `js` call each happened in or at its time (a child's transcript
   // shows none: the session's rows carry them); what main kept is listed on mount, so a reload shows them again
   const activitySession = variant === 'session' && source.key ? (source.key as AppSessionId) : null;
@@ -352,7 +359,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const start = startAt(merged, loaded);
     return start === null ? NO_ROWS : start === 0 ? merged : merged.slice(start);
   }, [merged, startAt, loaded]);
-  const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
+  const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
   const [following, setFollowing] = useState(true);

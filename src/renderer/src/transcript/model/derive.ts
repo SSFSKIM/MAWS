@@ -24,6 +24,7 @@ import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
+import { closedByUnseenExit } from './reduce'; // DC9
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { previewHidesBody } from './rows'; // E7
 import { needsSeparator, separatorLabel } from './time';
@@ -158,6 +159,28 @@ export function askAnsweredHere(state: TranscriptState, askId: string): boolean 
 export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[]): Row[] {
   const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && row.messageUuid !== null && withdrawn.has(row.messageUuid) && (row.dropped || row.pending !== undefined)));
   return tail.length === 0 ? kept : [...kept, ...tail];
+}
+
+// The desk (DC9): the flat rows with each turn the engine was running drawn as an exit nobody saw closes it, at the
+// turn's last event (`closedByUnseenExit`: what MAWS's disk follower writes for a transcript nobody is writing whose last
+// turn never ended), the state untouched. For a host that knows the session runs no turn though no row ended one: the
+// store keeps the turn open, so the drawing follows the host's word both ways. The turn's work area stays as the reader
+// has it, which is what the store's toggle reads; a row an earlier turn shows is not drawn twice (flatten's rule).
+export function restingRows(state: TranscriptState, rows: Row[]): Row[] {
+  let out = rows;
+  for (const id of state.order) {
+    const turn = state.turns.get(id)!;
+    if (turn.state !== 'open' || !turn.accepted) continue;
+    const first = out.findIndex((row) => row.turnId === id && row.kind !== 'time');
+    if (first < 0) continue;
+    let end = first + 1;
+    while (end < out.length && out[end].turnId === id) end += 1;
+    const ui = state.ui.expandedTurns.has(id) || state.ui.collapsedTurns.has(id) ? state.ui : { ...state.ui, expandedTurns: new Set([...state.ui.expandedTurns, id]) };
+    const shown = new Set(out.slice(0, first).map((row) => row.id));
+    const closed = deriveTurn(closedByUnseenExit(turn, turn.events.at(-1)?.at ?? turn.startedAt), { ...state, ui }).rows;
+    out = [...out.slice(0, first), ...overlay(state.ui, closed).filter((row) => !shown.has(row.id)), ...out.slice(end)];
+  }
+  return out;
 }
 
 // `messageTools`, here and in `turnPhrases`: the host's (its state's `messageTools`), MAWS's own when absent.

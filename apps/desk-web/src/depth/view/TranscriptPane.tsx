@@ -87,13 +87,15 @@ type PaneProps = {
   renderRequest?: TranscriptProps['renderRequest'];
   /** Given a row's id, its index among the rows the list draws now (-1 for none): what the list's `scrollToIndex` takes. */
   rowIndex?: Ref<RowIndex>;
+  /** The session runs no turn, as its machine reports it: MAWS draws the turn its rows left open closed (the session view). */
+  atRest?: boolean;
 };
 
 /** A row's index among the rows MAWS's list draws, by its id; -1 when it draws none by that id. */
 export type RowIndex = (id: string) => number;
 
 /** The transcript's rows and stream, and what its subscription's disruptions say. */
-export function TranscriptPane({ controller, state, variant, actions, list, ownerLane, extraTail = NO_ROWS, renderRequest, rowIndex }: PaneProps) {
+export function TranscriptPane({ controller, state, variant, actions, list, ownerLane, extraTail = NO_ROWS, renderRequest, rowIndex, atRest = false }: PaneProps) {
   const rows = useTranscriptStore((s) => s.entries[controller.key]?.rows ?? NO_ROWS);
   const lapsed = useAccess((s) => s.lapsed);
   const since = useSince();
@@ -107,13 +109,13 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
   useLayoutEffect(() => {
     drawnTail.current = tail;
   }, [tail]);
-  const indexOf = useCallback<RowIndex>((id) => drawnRows(controller.key, drawnTail.current).findIndex((row) => row.id === id), [controller.key]);
+  const indexOf = useCallback<RowIndex>((id) => drawnRows(controller.key, drawnTail.current, atRest).findIndex((row) => row.id === id), [controller.key, atRest]);
   useImperativeHandle(rowIndex, () => indexOf, [indexOf]);
 
   // Older rows when the reader scrolls to the top, while the rows drawn do not fill the pane, and after a page that drew
   // nothing new (`older-pages.ts`); the reader's place kept through each (`keep-place.ts`).
   useKeepPlaceThroughOlderRows(list, rows, state.loadingOlder, indexOf);
-  useOlderPages(controller, list, state);
+  useOlderPages(controller, list, state, atRest);
 
   return (
     <>
@@ -130,7 +132,7 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
           {state.retryIn != null ? ` Trying again in ${Math.round(state.retryIn / 1000)} s.` : ''}
         </p>
       )}
-      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} renderRequest={renderRequest} />
+      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} renderRequest={renderRequest} atRest={atRest} />
     </>
   );
 }

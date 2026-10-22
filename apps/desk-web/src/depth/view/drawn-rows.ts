@@ -5,10 +5,11 @@
 // the store's raw rows are neither the list's indices nor its height. This is the same composition, from the same
 // exported functions, read off the store when asked. The desk adds no browser activity (MAWS's attachment of it is fed
 // by its own app alone), and passes no withdrawn prompts and no start index, so those parts of the composition are none.
+// While the session is at rest, the turn it was running draws closed (`restingRows`), here as there.
 import { useMemo } from 'react';
 import { liveMarkedRowIds, reportRows, reportViewOf } from '../../../../../src/renderer/src/owner/report/project';
 import { useTranscriptStore, type TranscriptEntry } from '../../../../../src/renderer/src/stores/transcript';
-import { withQueueTail } from '../../../../../src/renderer/src/transcript/model/derive';
+import { restingRows, withQueueTail } from '../../../../../src/renderer/src/transcript/model/derive';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 
 const NO_ROWS: Row[] = [];
@@ -20,15 +21,15 @@ type OpenRecords = TranscriptEntry['state']['ui']['reportOpenTurns'];
 /** The store's entry for the key as it is now: what the projection reads of the turns it folds. */
 const entryOf = (key: string): TranscriptEntry | undefined => useTranscriptStore.getState().entries[key];
 
-function project(entry: TranscriptEntry | undefined, rows: Row[], tail: readonly Row[], openRecords: OpenRecords, liveMarked: string): Row[] {
-  const queued = withQueueTail(rows, NONE_WITHDRAWN, tail);
+function project(entry: TranscriptEntry | undefined, rows: Row[], tail: readonly Row[], openRecords: OpenRecords, liveMarked: string, atRest: boolean): Row[] {
+  const queued = withQueueTail(atRest && entry ? restingRows(entry.state, rows) : rows, NONE_WITHDRAWN, tail);
   return entry && reportViewOf(entry.state.ui) ? reportRows(queued, entry.state, { reportOpenTurns: openRecords }, liveMarked) : queued;
 }
 
-/** The rows the list draws now for the store key, its `tail` after the store's. */
-export function drawnRows(key: string, tail: readonly Row[]): Row[] {
+/** The rows the list draws now for the store key, its `tail` after the store's; `atRest` as the view is told it. */
+export function drawnRows(key: string, tail: readonly Row[], atRest = false): Row[] {
   const entry = entryOf(key);
-  return project(entry, entry?.rows ?? NO_ROWS, tail, entry?.state.ui.reportOpenTurns, reportViewOf(entry?.state.ui) ? liveMarkedRowIds(entry?.state) : '');
+  return project(entry, entry?.rows ?? NO_ROWS, tail, entry?.state.ui.reportOpenTurns, reportViewOf(entry?.state.ui) ? liveMarkedRowIds(entry?.state) : '', atRest);
 }
 
 /**
@@ -37,13 +38,13 @@ export function drawnRows(key: string, tail: readonly Row[]): Row[] {
  * opened, a mark streaming in; the turns the projection folds are read off the entry when those change, as MAWS's view
  * reads them.
  */
-export function useDrawnRowCount(key: string): number {
+export function useDrawnRowCount(key: string, atRest = false): number {
   const rows = useTranscriptStore((s) => s.entries[key]?.rows ?? NO_ROWS);
   const report = useTranscriptStore((s) => reportViewOf(s.entries[key]?.state.ui));
   const openRecords = useTranscriptStore((s) => s.entries[key]?.state.ui.reportOpenTurns);
   const liveMarked = useTranscriptStore((s) => (report ? liveMarkedRowIds(s.entries[key]?.state) : ''));
   return useMemo(
-    () => (report ? project(entryOf(key), rows, NO_ROWS, openRecords, liveMarked).length : rows.length),
-    [key, rows, report, openRecords, liveMarked],
+    () => (report || atRest ? project(entryOf(key), rows, NO_ROWS, openRecords, liveMarked, atRest).length : rows.length),
+    [key, rows, report, openRecords, liveMarked, atRest],
   );
 }

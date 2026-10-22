@@ -731,8 +731,8 @@ function apply(batch: Batch, event: SessionEvent): void {
         for (const id of state.order) {
           const turn = state.turns.get(id)!;
           if (turn.state !== 'open' || !turn.accepted) continue;
-          const interrupted = wasInterrupted(turn);
-          batch.closeUnended(batch.touch(id), event.reason !== 'unknown' || interrupted ? 'stopped' : 'completed', event.at, event.reason === 'crash' && !interrupted ? 'crash' : null);
+          const { outcome, cause } = exitClosing(turn, event.reason);
+          batch.closeUnended(batch.touch(id), outcome, event.at, cause);
         }
       }
       return batch.loose(event);
@@ -829,6 +829,22 @@ function applySideThread(batch: Batch, event: Event<'side.thread.opened'> | Even
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>
   turn.events.some((event) => (event.kind === 'user.message' && isInterruptionMarker(event.origin, event.content)) || (event.kind === 'tool.result' && event.denial === 'user-rejected'));
+
+// How a session's process exiting closes a turn it was running: stopped, unless the exit is no evidence of a stop
+// (reason unknown) and the turn retains none of its own; in the engine's words when the process crashed unasked.
+function exitClosing(turn: TurnState, reason: Event<'process.exited'>['reason']): { outcome: 'completed' | 'stopped'; cause: 'crash' | null } {
+  const interrupted = wasInterrupted(turn);
+  return { outcome: reason !== 'unknown' || interrupted ? 'stopped' : 'completed', cause: reason === 'crash' && !interrupted ? 'crash' : null };
+}
+
+// The desk (DC9): a running turn as an exit of its process nobody saw would close it (`process.exited` of reason
+// unknown at `at`), on a copy, the state untouched: for a host that knows the session runs no turn though no row ended
+// this one (the desk's presence).
+export function closedByUnseenExit(turn: TurnState, at: string): TurnState {
+  const { outcome, cause } = exitClosing(turn, 'unknown');
+  const live = new Map([...turn.live].map(([id, block]) => [id, block.completed ? block : { ...block, completed: true, completedAt: at }]));
+  return { ...turn, state: 'closed', closedBy: outcome, closedCause: cause, endedAt: at, live };
+}
 
 // *Streaming*: a complete pairs with the live entry of its identity when that entry is compatible and uncompleted,
 // else with the earliest uncompleted entry of the same message and block type (the split-envelope case, where each
