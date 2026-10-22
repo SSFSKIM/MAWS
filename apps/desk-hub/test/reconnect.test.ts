@@ -68,6 +68,20 @@ const onlineStates = (b: BrowserClient, name: string, from = 0) =>
     .flatMap((f) => (f.t === 'machines' ? f.machines.filter((x) => x.machine === name).map((x) => x.online) : []));
 const isEnd = (sub: string) => (f: ProjectDown) => f.t === 'session' && f.message.kind === 'end' && f.message.sub === sub;
 
+/**
+ * Closes the machine's stream and returns once the close has reached the project, which ends what the stream carried at
+ * once: a subscription made on it, ended at the browser. A subscribe or an RPC sent before then would still be carried
+ * to the closed stream, and end there.
+ */
+async function closeStream(m: MachineClient, b: BrowserClient): Promise<void> {
+  const carried = newNonce();
+  b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub: carried });
+  await m.next((f) => f.t === 'subscribe' && f.sub === carried, 'the carried subscribe');
+  const from = b.frames.length;
+  await m.close();
+  await b.next(isEnd(carried), 'the carried subscription ended with its stream', from);
+}
+
 describe('a machine whose object was replaced under its stream', () => {
   it("the probe of a live object reaches that object itself, so no stream is ended for nothing", async () => {
     const project = newProject();
@@ -149,15 +163,15 @@ describe("a closed stream's grace", () => {
     const from = b.frames.length;
     m.autoAck = false;
     const closedAt = Date.now();
-    await m.close();
-    // The close reaches the object as its request's abort, and the project from it: a subscribe that came first would
-    // still be carried to the closed stream, and end there.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await closeStream(m, b);
     const waiting = newNonce();
     b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub: waiting });
     const call = await interrupt(project, m.name);
     b.send({ t: 'rpc', rpc: call });
-    await new Promise((resolve) => setTimeout(resolve, GRACE_MS / 2 - 300));
+    // The RPC, sent after the subscribe, is answered after anything the hub answered the subscribe with at once; a while
+    // longer leaves room for an end that would come later.
+    await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce, 'the RPC recorded', from);
+    await new Promise((resolve) => setTimeout(resolve, GRACE_MS / 4));
     expect(onlineStates(b, m.name, from)).not.toContain(false);
     expect(b.frames.slice(from).some(isEnd(waiting))).toBe(false);
     // The RPC is recorded as forwarded, and waits: nothing has failed it.
@@ -181,8 +195,7 @@ describe("a closed stream's grace", () => {
     const b = await BrowserClient.open(hub, ADMIN, project);
     await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && x.online), 'online');
     const from = b.frames.length;
-    await m.close();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await closeStream(m, b);
     const call = await interrupt(project, m.name);
     b.send({ t: 'rpc', rpc: call });
     await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state === 'forwarded', 'the RPC forwarded', from);

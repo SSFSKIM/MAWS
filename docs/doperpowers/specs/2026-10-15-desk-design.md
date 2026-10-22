@@ -2520,7 +2520,13 @@ sets are bounded, one assembler per machine stream and per browser socket: at mo
 its sets, at most 64 sets open, an `id` of at most 128 characters (the hub's own are 22, a 128-bit nonce), and a set
 waiting more than 60 s for its other parts is dropped (a late part of it starts a set of its own). A part that would
 pass the byte budget or open a 65th set is refused `too-large` (a machine's POST `413`, a browser's `refused`) and its
-set dropped; a longer `id` is `bad-shape` [2026-10-15, DC3's panel wave].
+set dropped; a longer `id` is `bad-shape` [2026-10-15, DC3's panel wave]. One browser set is bounded too: it joins to
+at most 4 MiB (`BROWSER_SET_LIMIT`: four times the largest frame a browser sends, a `human` or an RPC, each at most
+1 MiB) in at most 9 parts (`BROWSER_SET_PARTS`: what a frame of 4 MiB takes cut at 1 MiB, a slice at most doubling as a
+part escapes it). A part whose `count` is larger is refused `too-large` before anything of its set is held, and one
+past which its set would join to more is refused `too-large` and its set dropped. Such a refusal names no request,
+since the frame was never read, so a browser sends no frame past the bound: the web ends a `human` or an RPC that large
+itself, as the hub ends one too large [2026-10-21, before the org admits members other than its owner].
 
 **Measured (M1's probe on the owner's account, 2026-10-15):** an SSE stream held by a Durable Object for 11 minutes
 with 15-second heartbeats, never evicted; a second stream idle 150 seconds between heartbeats also held, so the
@@ -3547,7 +3553,8 @@ daemon's digest check finds the request already settled (the common case). The h
 (written to the machine's stream, no result yet) and `uncertain` (the machine's lease lapsed, or its stream closed,
 after forwarding and before a result).
 
-**The hub's record** (built at M3; DX3 says what the browser sees). The hub checks an RPC's shape, its `member`
+**The hub's record** (built at M3; DX3 says what the browser sees). The hub checks an RPC's shape (at most 1 MiB as
+canonical JSON, as a DX1 event is, else `bad-shape` [2026-10-21]), its `member`
 against the signed-in member, its age (60 seconds by the hub's clock), and its machine's lease, in that order, and
 fails it at once on the first that does not hold, with no record and nothing queued. An RPC that passes is recorded
 by its nonce (`forwarded`, with the stream generation it went to) and written to that stream. It becomes `done` or
@@ -6285,6 +6292,19 @@ a hub that connects into machines (§2).
   the same lookup), `smns-enroll-v1.` with a flag (an older sminos would read `machine` for a meaning it lacks), and a
   browserless admin revoke (a member credential outside Access; deferred with its future shape).
   Date/Author: 2026-10-21, the owner (design approved) and the spec's author.
+- Decision: DX3's frame bound and DX6's hub check bound what a browser sends, before the org admits members other
+  than its owner (the tracker's 2026-10-15 DC3 row). A browser's part set joins to at most 4 MiB in at most 9 parts
+  (DX3's frame bound has the derivation); a part past either is refused `too-large`, the first before anything of its
+  set is held. The hub fails an RPC over 1 MiB as canonical JSON `bad-shape` (DX6), as DX1 bounds an event: before, an
+  RPC was bounded only by the part sets, and one past the storage's row limit failed inside the object, its request left
+  waiting. A set's refusal names no request, the frame never read, so the web ends a `human` or an RPC whose frame
+  would join past the bound itself (`ProjectClient`, through `HumanRefused` and a `failed` `rpc-state`). Consumers
+  flagged: DC5 (the web's sends, changed in the same branch); DC7 (nothing: such an RPC never reaches a daemon).
+  Rejected: one per-set bound for every assembler (a machine's stream, and the web's receiving side, carry frames up
+  to the 16 MiB a set may hold there: a snapshot, a grid of many projects); a refusal naming the part set's `id` (no
+  browser keeps which request went under which id). Left to the org phase (tracker): a bound across a project's
+  sockets, each of which still holds up to 16 MiB of unfinished sets.
+  Date/Author: 2026-10-21, the desk's debt worker (branch `desk-hub-bounds`).
 
 ## Outcomes & Retrospective
 

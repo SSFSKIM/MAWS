@@ -19,7 +19,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
-import { isOutputTail, isTaskId, OUTPUT_TAIL_MAX, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
+import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, questionEffect, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
@@ -134,7 +134,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** A frame on the wire: at most 1 MiB, measured before it is read; a part joins its set, and a whole set is one
-   * logical frame, which may be larger. */
+   * logical frame, which may be larger, up to BROWSER_SET_LIMIT in BROWSER_SET_PARTS parts. */
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const bytes = typeof message === 'string' ? (message.length > FRAME_LIMIT ? message.length : encoder.encode(message).length) : message.byteLength;
     if (bytes > FRAME_LIMIT) return this.refuseBrowser(socket, { reason: 'too-large', message: 'a frame is at most 1 MiB on the wire; send a larger one as parts' });
@@ -146,7 +146,7 @@ export class Project extends DurableObject<Env> {
     }
     if (frame?.t !== 'part') return this.dispatch(socket, frame);
     let assembler = this.parts.get(socket);
-    if (!assembler) this.parts.set(socket, (assembler = new PartAssembler()));
+    if (!assembler) this.parts.set(socket, (assembler = new PartAssembler({ maxSetBytes: BROWSER_SET_LIMIT, maxSetParts: BROWSER_SET_PARTS })));
     let whole: unknown;
     try {
       whole = assembler.add(frame as unknown as Part);
@@ -1367,11 +1367,14 @@ function rpcShapeError(rpc: Record<string, unknown>, project: string): string | 
   if (!isName(rpc.machine, 63) || typeof rpc.member !== 'string' || !isIsoMillis(rpc.created)) return 'an RPC names its machine, member, and created time';
   if (!isObject(rpc.args)) return "an RPC's args are an object";
   if (!isBase64urlOf(rpc.mac, 32)) return "an RPC's mac is 32 bytes in canonical base64url";
+  let canonical: string;
   try {
-    canonicalize(rpc);
+    canonical = canonicalize(rpc);
   } catch (error) {
     return `not canonical JSON: ${(error as Error).message}`;
   }
+  // As an event is (DX1): what a person sends, and a record the object's storage must hold.
+  if (encoder.encode(canonical).length > FRAME_LIMIT) return 'an RPC is at most 1 MiB';
   return null;
 }
 

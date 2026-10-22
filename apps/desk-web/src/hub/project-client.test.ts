@@ -2,10 +2,10 @@
 // backoff and a fresh resume after every discontinuity, nothing assumed delivered that the hub did not acknowledge, and
 // the session plane's subscriptions (DX8) kept whole across gaps and dropped sockets.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newNonce, seal, importOrgKey, type HumanDraft, type LogEvent, type SessionMessage } from 'desk-hub/protocol';
+import { BROWSER_SET_LIMIT, newNonce, seal, importOrgKey, type HumanDraft, type LogEvent, type SessionMessage } from 'desk-hub/protocol';
 import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
-import { ProjectClient, type ConnectionStatus } from './project-client';
+import { ProjectClient, type ConnectionStatus, type RpcStateFrame } from './project-client';
 import type { SubscriptionListener } from '../shell/session-plane';
 
 const until = async (check: () => boolean, ms = 3000) => {
@@ -200,6 +200,24 @@ describe('what goes up', () => {
     await until(() => caughtUp.length === 2);
     await new Promise((r) => setTimeout(r, 50));
     expect(double.up.filter((u) => u.frame.t === 'rpc')).toHaveLength(0);
+  });
+
+  it('ends a human or an RPC the hub would refuse unread, its frame joining past the bound, as the hub ends one too large, sending nothing', async () => {
+    const key = await importOrgKey(VECTOR_KEY);
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const text = 'y'.repeat(BROWSER_SET_LIMIT);
+    await expect(c.sendHuman(await seal(key, 'log', PROJECT, draft(text)))).rejects.toMatchObject({ refusal: { reason: 'too-large' } });
+    expect(c.holdsHumans()).toBe(false);
+    const states: RpcStateFrame[] = [];
+    c.onRpcState((frame) => states.push(frame));
+    const rpc = { ...rpcTo(), rpc: 'steer' as const, args: { session: 's', text } };
+    expect(c.sendRpc(rpc)).toBe(true);
+    expect(states).toMatchObject([{ nonce: rpc.nonce, state: 'failed', outcome: { state: 'failed', error: { code: 'bad-shape' } } }]);
+    double.dropConnections(); // neither is kept to be sent again
+    await until(() => caughtUp.length === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(double.up.filter((u) => u.frame.t === 'human' || u.frame.t === 'rpc')).toHaveLength(0);
   });
 
   it('holds a retry of an RPC it already sent while disconnected, and sends it on the next welcome', async () => {

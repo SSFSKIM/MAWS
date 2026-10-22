@@ -4,7 +4,7 @@
 import type { ProjectKind } from './identity';
 import type { HumanEvent, LogEvent } from './log';
 import type { Refusal, Rejection } from './machine';
-import type { Part } from './parts';
+import { FRAME_LIMIT, type Part } from './parts';
 import type { Rpc, RpcOutcome, RpcState } from './rpc';
 import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from './session';
 
@@ -36,6 +36,21 @@ export type ProjectUp =
   /** Whether this tab shows the project; a visible tab of a member holds back that member's pushes. */
   | { t: 'visibility'; visible: boolean }
   | Part;
+
+/**
+ * The most bytes (UTF-8 of its JSON text) a frame a browser sends as parts joins to. The largest a browser sends is a
+ * `human` or an RPC, each at most 1 MiB (DX1's event bound, and DX6's), and a few bytes of frame around it: this is
+ * four times that, and holds what one set costs the object to join, parse and check to a few times it. The hub refuses
+ * a set past it `too-large`, unread, so it can name no request the frame carried: a browser sends none.
+ */
+export const BROWSER_SET_LIMIT = 4 * FRAME_LIMIT;
+
+/**
+ * The most parts a browser's set is: a frame of BROWSER_SET_LIMIT cut at FRAME_LIMIT takes at most 9, since a slice of
+ * its text at most doubles as a part carries it (a quote or a backslash escaped). A set of more is refused at its
+ * first part, before any of it is held: a set's slots cost the object whatever their data.
+ */
+export const BROWSER_SET_PARTS = (2 * BROWSER_SET_LIMIT) / FRAME_LIMIT + 1;
 
 /** The most bytes an `output` asks for, so its answer fits one frame. */
 export const OUTPUT_TAIL_MAX = 524_288;

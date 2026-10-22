@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS } from '../../src/protocol/browser';
 import { FRAME_LIMIT, PART_ID_LIMIT, PartAssembler, PARTS_MAX_SETS, PartsBudgetError, toWire } from '../../src/protocol/parts';
 
 const utf8 = (s: string) => new TextEncoder().encode(s).length;
@@ -81,5 +82,43 @@ describe("an assembler's unfinished sets are bounded (panel finding scalpel-5#2)
     // Expired sets free their places.
     now = 60_001;
     expect(() => assembler.add(part('one-more', 0, 2, 0))).not.toThrow();
+  });
+});
+
+describe("a browser's part set is bounded in its parts and in what it joins to", () => {
+  const browser = () => new PartAssembler({ maxSetBytes: BROWSER_SET_LIMIT, maxSetParts: BROWSER_SET_PARTS });
+  /** A frame whose JSON text is `bytes` long, all backslashes but its shell: each doubles as a part carries it, so the
+   * frame takes the most parts a frame of its size can. */
+  const escaping = (bytes: number) => ({ t: 'x', s: '\\'.repeat((bytes - JSON.stringify({ t: 'x', s: '' }).length) / 2) });
+
+  it('joins a frame of the bound cut at the wire bound, however its text escapes, and refuses one a byte larger', () => {
+    const frame = escaping(BROWSER_SET_LIMIT);
+    expect(utf8(JSON.stringify(frame))).toBe(BROWSER_SET_LIMIT);
+    const wire = toWire(frame);
+    expect(wire.length).toBe(BROWSER_SET_PARTS);
+    const assembler = browser();
+    expect(wire.map((line) => assembler.add(JSON.parse(line))).at(-1)).toEqual(frame);
+
+    const parts = toWire({ ...frame, s: `${frame.s}x` }).map((line) => JSON.parse(line));
+    const refusing = browser();
+    expect(() => parts.forEach((p) => refusing.add(p))).toThrow(PartsBudgetError);
+    // The refused set is dropped: its last part alone starts a set of its own, which never finishes the frame.
+    expect(refusing.add(parts.at(-1))).toBeUndefined();
+  });
+
+  it('refuses a set of more parts at its first, whatever its data, and joins one of as many', () => {
+    expect(() => browser().add({ t: 'part', id: 'p', index: 0, count: BROWSER_SET_PARTS + 1, data: '' })).toThrow(PartsBudgetError);
+    expect(() => browser().add({ t: 'part', id: 'p', index: 0, count: 2 ** 32, data: '' })).toThrow(PartsBudgetError);
+    const last = BROWSER_SET_PARTS - 1;
+    const parts = Array.from({ length: BROWSER_SET_PARTS }, (_, index) => ({ t: 'part' as const, id: 'p', index, count: BROWSER_SET_PARTS, data: index === 0 || index === last ? '"' : 'y' }));
+    const assembler = browser();
+    expect(parts.map((p) => assembler.add(p)).at(-1)).toBe('y'.repeat(BROWSER_SET_PARTS - 2));
+  });
+
+  it('leaves an assembler not given them as it was: a set of any count, joined past the browser bound', () => {
+    const frame = escaping(BROWSER_SET_LIMIT + 2);
+    const assembler = new PartAssembler();
+    expect(toWire(frame).map((line) => assembler.add(JSON.parse(line))).at(-1)).toEqual(frame);
+    expect(() => new PartAssembler().add({ t: 'part', id: 'p', index: 0, count: 1000, data: '' })).not.toThrow();
   });
 });

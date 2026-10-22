@@ -73,4 +73,20 @@ describe("redeploy-check's browser", () => {
     expect(late.closed).toBe(true);
     expect(follower.socket).toBeUndefined();
   });
+
+  it('waits for an open no longer than the first stop’s deadline, and closes the socket when it opens after', async () => {
+    const late = fakeSocket();
+    let release!: () => void;
+    const owner = { socket: () => new Promise<Socket>((resolve) => (release = () => resolve(late as unknown as Socket))) } as unknown as Person;
+    const follower = new LogFollower(owner, '/api/projects/p/socket', () => {}, 20);
+    const opening = follower.open();
+    await follower.stop(30); // the open still pending: abandoned at the deadline
+    expect(late.closed).toBe(false);
+    // A later stop, as cleanup's own step makes, waits no longer: the deadline is the first stop's.
+    expect(await Promise.race([follower.stop().then(() => 'returned'), sleep(1000).then(() => 'waiting')])).toBe('returned');
+    release();
+    await opening;
+    expect(late.closed).toBe(true);
+    expect(follower.socket).toBeUndefined();
+  });
 });

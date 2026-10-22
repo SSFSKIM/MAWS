@@ -100,14 +100,21 @@ export class Socket {
   }
 }
 
+/** How long a stop waits for a pending open, from the first stop: the bound redeploy-check's cleanup holds its steps to. */
+export const STOP_WAIT_MS = 15_000;
+
 /**
  * A browser's project socket that reopens after a cut until it is stopped. `open` tries until a socket opens or `stop`
- * is called; `stop` ends the loop, waits for it to settle, and closes the socket, closing one that opens too late.
+ * is called; `stop` ends the loop, waits for it to settle, and closes the socket, closing one that opens too late. A
+ * connection still opening is waited for until `waitMs` after the first stop, and no longer by any later stop: past
+ * that, the stopped loop closes its socket when it opens.
  */
 export class LogFollower {
   socket: Socket | undefined;
   private stopped = false;
   private opening: Promise<void> | null = null;
+  /** When the stops stop waiting for a pending open: set by the first. */
+  private abandonAt: number | undefined;
 
   constructor(
     private readonly person: Pick<Person, 'socket'>,
@@ -121,9 +128,10 @@ export class LogFollower {
     return (this.opening ??= this.loop().finally(() => (this.opening = null)));
   }
 
-  async stop(): Promise<void> {
+  async stop(waitMs = STOP_WAIT_MS): Promise<void> {
     this.stopped = true;
-    await this.opening;
+    this.abandonAt ??= Date.now() + waitMs;
+    if (this.opening) await settledWithin(this.opening, this.abandonAt - Date.now());
     this.socket?.close();
     this.socket = undefined;
   }
@@ -206,3 +214,15 @@ export async function until<T>(read: () => T | undefined, what: string, ms = 15_
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Waits for `promise` to settle, at most `ms`, leaving no timer behind. */
+async function settledWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+  if (ms <= 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = promise.then(
+    () => undefined,
+    () => undefined,
+  );
+  await Promise.race([settled, new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)))]);
+  clearTimeout(timer);
+}

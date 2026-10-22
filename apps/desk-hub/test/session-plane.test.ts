@@ -196,6 +196,28 @@ describe('RPCs', () => {
     b.close();
   });
 
+  it('fail at once as bad-shape over 1 MiB, as an event is bounded, and are not forwarded; one within it is', async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const b = await browser(project);
+    const send = (call: Rpc) => {
+      for (const line of toWire({ t: 'rpc', rpc: call })) b.send(JSON.parse(line));
+    };
+    const large = await rpc(project, m.name, 'steer', { session: SESSION, text: 'x'.repeat(FRAME_LIMIT) });
+    send(large);
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === large.nonce, 'the large RPC failed')).toMatchObject({
+      state: 'failed',
+      outcome: { state: 'failed', error: { code: 'bad-shape', message: 'an RPC is at most 1 MiB' } },
+    });
+    const within = await rpc(project, m.name, 'steer', { session: SESSION, text: 'x'.repeat(FRAME_LIMIT - 1024) });
+    send(within);
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === within.nonce, 'the RPC within the bound')).toMatchObject({ state: 'forwarded' });
+    await m.next((f) => f.t === 'rpc' && f.rpc.nonce === within.nonce, 'the RPC within the bound, forwarded');
+    expect(m.frames.filter((f) => f.t === 'rpc' && f.rpc.nonce === large.nonce)).toEqual([]);
+    b.close();
+    await m.close();
+  });
+
   it('become uncertain when the machine drops after forwarding, and resolve from the result republished after it reconnects', async () => {
     const project = newProject();
     const m = await machine(project, CLOSES);
