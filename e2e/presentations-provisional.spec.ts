@@ -33,7 +33,7 @@ interface Seam {
     files(artifactId: string): Promise<Record<string, string>>;
     slide(artifactId: string, slideId: string): Promise<{ children: { id: string; style: Record<string, string> }[] }>;
     editorState(artifactId: string): { surface: string; selection: string[]; editingText: string | null; keyboard: 'stage' | 'away' }[];
-    frames(artifactId: string): { surface: string; received: number; held: number }[];
+    frames(artifactId: string): { surface: string; received: number; held: number; capped: number; released: number }[];
   };
 }
 const seamOf = (page: Page) => page.evaluate(() => typeof (window as unknown as Partial<Seam>).__maws_presentations);
@@ -43,7 +43,9 @@ const filesOf = (page: Page, id: string) => page.evaluate((a) => (window as unkn
 const elementOf = async (page: Page, id: string, slideId: string, eid: string) => (await page.evaluate(([a, s]) => (window as unknown as Seam).__maws_presentations.slide(a!, s!), [id, slideId] as const)).children.find((c) => c.id === eid);
 const editorState = async (page: Page, id: string) => (await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.editorState(a), id))[0]!;
 /** the remote content frames the tab's replica holds now (its hold's buffer) */
-const held = async (page: Page, id: string) => (await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.frames(a), id))[0]?.held ?? 0;
+const held = async (page: Page, id: string) => (await framesOf(page, id)).held;
+/** the tab's replica's hold: what it holds now, the times its 5 s cap cleared it, and the frames it released (B2's counts) */
+const framesOf = async (page: Page, id: string) => (await page.evaluate((a) => (window as unknown as Seam).__maws_presentations.frames(a), id))[0] ?? { surface: '', received: 0, held: 0, capped: 0, released: 0 };
 
 let app: SeamApp | null = null;
 test.afterEach(async () => {
@@ -258,9 +260,14 @@ test('a deck opened mid-stream draws every file streamed so far, a new slide’s
     const b = slideSwapOffenders(samples, 's1', 'b', 'b', NEW);
     expect(b.gaps.map((s) => brief(s, t0))).toEqual([]);
     expect(b.doubles.map((s) => brief(s, t0))).toEqual([]);
-    const entry = entrySwapOffenders(samples, (s) => s.newSlides.includes('s5'), (s) => s.entries.includes('s5'));
-    expect(entry.gaps.map((s) => ({ at: s.at - t0, entries: s.entries, newSlides: s.newSlides })), 'a gap: s5 had no entry').toEqual([]);
-    expect(entry.doubles.map((s) => ({ at: s.at - t0, entries: s.entries, newSlides: s.newSlides })), 'a double: s5 had two entries').toEqual([]);
+    // judged on what each entry draws, not on its markers: a ghost entry whose provisional slide is gone, or a real entry
+    // whose canvas has not drawn yet, shows nothing
+    const ghostDrawn = (s: SlideSample) => (s.newSlideText.s5 ?? '').includes('Next steps');
+    const realDrawn = (s: SlideSample) => (s.entryText.s5 ?? '').includes('Next steps');
+    const entry = entrySwapOffenders(samples, ghostDrawn, realDrawn);
+    const where = (s: SlideSample) => ({ at: s.at - t0, entries: s.entries, newSlides: s.newSlides, entryText: s.entryText.s5 ?? null, newSlideText: s.newSlideText.s5 ?? null });
+    expect(entry.gaps.map(where), 'a gap: s5’s entry drew no slide').toEqual([]);
+    expect(entry.doubles.map(where), 'a double: s5 drawn in two entries').toEqual([]);
     expect(samples.at(-1)!.entries).toEqual(['s1', 's2', 's3', 's4', 's5']);
   });
   const deck = await filesOf(page, id);
@@ -375,29 +382,47 @@ test('a drag in progress keeps the committed layer until the drop, then swaps wi
   await expect.poll(async () => (await editorState(page, id)).selection).toEqual(['s']);
   const shape = (await page.locator(`${ROOT(id)} ${LIVE_NODE('s')}`).boundingBox())!;
   const from = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
+  const before = await framesOf(page, id);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   const downAt = Date.now();
   for (let i = 1; i <= 6; i++) await page.mouse.move(from.x + i * 8, from.y);
   const answer = await seam.call<{ revision: number }>(AGENT, 'artifact_publish', { ...args, toolUseId });
   expect(answer.isError, answer.text).toBe(false);
-  await expect.poll(() => held(page, id), { timeout: 5_000, message: 'the commit’s update held by the drag' }).toBeGreaterThan(0);
+  await expect.poll(() => held(page, id), { timeout: 3_000, message: 'the commit’s update held by the drag' }).toBeGreaterThan(0);
   const during = await last(seen);
-  expect(Date.now() - downAt, 'the commit reached the tab inside the hold’s cap').toBeLessThan(4_500);
   await test.step('while the drag holds the commit: the layer stays, the live element still the old text beneath it', () => {
     expect(layerOf(during, 's1')?.writing, JSON.stringify(brief(during, t0))).toBe(toolUseId);
     expect(shownOf(during, 's1', 'b')?.text).toBe(NEW);
     expect(isVeiled(during, 's1', 'b')).toBe(true);
     expect(during.live.b).toBe(OLD);
   });
-  for (let i = 7; i <= 12; i++) await page.mouse.move(from.x + i * 8, from.y);
+  // two more moves, then the drop, its moment taken in the page as the pointer comes up
+  for (let i = 7; i <= 8; i++) await page.mouse.move(from.x + i * 8, from.y);
+  await page.evaluate(() => {
+    const w = window as unknown as { __pointerUpAt: number | null };
+    w.__pointerUpAt = null;
+    window.addEventListener('pointerup', () => (w.__pointerUpAt ??= Date.now()), { capture: true, once: true });
+  });
+  expect(Date.now() - downAt, 'the commit reached the tab inside the hold’s cap').toBeLessThan(4_500);
   await page.mouse.up();
+  const upAt = await page.evaluate(() => (window as unknown as { __pointerUpAt: number | null }).__pointerUpAt);
+  expect(upAt, 'the page saw the pointer come up').not.toBeNull();
   await expect(page.locator(`${ROOT(id)} ${LIVE.b}`)).toHaveText(NEW, { timeout: 10_000 });
   await expect.poll(async () => nothingDrawn(await last(seen)), { timeout: 5_000, message: 'the layer withdrawn at the drop' }).toBe(true);
   await expect.poll(() => held(page, id)).toBe(0);
-  const { gaps, doubles } = slideSwapOffenders(await seen(), 's1', 'b', 'b', NEW);
-  expect(gaps.map((s) => brief(s, t0)), 'no gap across the drop').toEqual([]);
-  expect(doubles.map((s) => brief(s, t0)), 'no double across the drop').toEqual([]);
+  const after = await framesOf(page, id);
+  const samples = await seen();
+  await test.step('the swap is the drop’s: the gesture released the hold (no cap cleared it), and nothing swapped before the pointer came up', () => {
+    expect(after.capped, 'the hold’s 5 s cap never cleared it').toBe(before.capped);
+    expect(after.released, 'the drop released the held commit').toBeGreaterThan(before.released);
+    const whole = samples.findIndex((s) => shownOf(s, 's1', 'b')?.text === NEW);
+    const early = samples.slice(whole).filter((s) => s.at < upAt! && (!layerOf(s, 's1') || !shownOf(s, 's1', 'b') || (s.live.b ?? '').includes(NEW)));
+    expect(early.map((s) => brief(s, t0)), 'the layer withdrawn or the write integrated before the drop').toEqual([]);
+    const { gaps, doubles } = slideSwapOffenders(samples, 's1', 'b', 'b', NEW);
+    expect(gaps.map((s) => brief(s, t0)), 'no gap across the drop').toEqual([]);
+    expect(doubles.map((s) => brief(s, t0)), 'no double across the drop').toEqual([]);
+  });
   // the drag itself landed: the shape moved
   const moved = (await elementOf(page, id, 's1', 's'))?.style.left;
   expect(moved, 'the shape is still on the slide').toBeDefined();

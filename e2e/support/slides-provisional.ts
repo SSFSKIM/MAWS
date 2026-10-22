@@ -30,6 +30,10 @@ export interface SlideSample {
   thumbs: { slide: string; writing: string; drawn: boolean; isNew: boolean }[];
   entries: string[];
   newSlides: string[];
+  // what each filmstrip entry draws, by slide: a real entry's own thumbnail canvas, a new slide's ghost entry's
+  // provisional canvas ('' while the entry holds no drawn slide)
+  entryText: Record<string, string>;
+  newSlideText: Record<string, string>;
   // a design's new boards being written (G2.4): the board, its call, its frame in world px and whether it is drawn
   newBoards: { board: string; writing: string; frame: string; drawn: boolean }[];
   // the live text of the elements the recorder was given, by name (null while absent)
@@ -107,6 +111,13 @@ export async function recordSlides(page: Page, rootSelector: string, live: Recor
             .filter((thumb) => thumb.writing !== '' || thumb.drawn),
           entries: all('[data-slide-thumb]').map((node) => node.getAttribute('data-slide-thumb') ?? ''),
           newSlides: all('li[data-provisional-new-slide]').map((node) => node.getAttribute('data-provisional-new-slide') ?? ''),
+          entryText: Object.fromEntries(
+            all('[data-slide-thumb]').map((node) => {
+              const own = Array.from(node.querySelectorAll('section.maws-slide')).find((section) => section.closest('[data-provisional-thumb]') === null);
+              return [node.getAttribute('data-slide-thumb') ?? '', own?.textContent ?? ''];
+            }),
+          ),
+          newSlideText: Object.fromEntries(all('li[data-provisional-new-slide]').map((node) => [node.getAttribute('data-provisional-new-slide') ?? '', node.querySelector('[data-provisional-thumb] section.maws-slide')?.textContent ?? ''])),
           newBoards: all('[data-provisional-new-board]').map((node) => ({
             board: node.getAttribute('data-provisional-new-board') ?? '',
             writing: node.getAttribute('data-provisional-writing') ?? '',
