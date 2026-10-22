@@ -9,6 +9,7 @@ import type { Editor, JSONContent } from '@tiptap/core';
 import { cleanup, render } from '@testing-library/react';
 import type { ArtifactProvisional, ProvisionalOp } from '@shared/artifacts/provisional';
 import { afterEach, describe, expect, it } from 'vitest';
+import { setDataset } from '../../dashboard/datasets';
 import { ProvisionalLayers } from '../../provisional';
 import { stateVector } from '../../yjs';
 import { applyEdit } from '../patch-writer';
@@ -55,8 +56,8 @@ const frame = (toolUseId: string, state: ArtifactProvisional['state'], ops: Prov
 });
 
 // P4-B1: `commentsView` 'hide' keeps the margin off, so the comment overlay is drawn over the frame
-async function mount(comments?: { overlay(props: CommentOverlayProps): null }, commentsView?: 'expand' | 'hide') {
-  world = new World(content());
+async function mount(comments?: { overlay(props: CommentOverlayProps): null }, commentsView?: 'expand' | 'hide', initial: JSONContent = content()) {
+  world = new World(initial);
   const handle = openMemoryHandle(world.host, { log: () => {} });
   handles.push(handle);
   await whenSynced(handle);
@@ -340,5 +341,78 @@ describe('the provisional layer’s growth', () => {
     world.host.announce(frame('tu1', 'dropped', []));
     await until(() => shown().length === 0, 'the withdrawal');
     expect(grown).toBe(3);
+  });
+});
+
+// G2.5 (G-R7): a dashboard's `artifact_dataset` streams its id alone; the layer labels every chart block whose source
+// names that dataset (the plain editor draws a chart as its placeholder atom, which the label rides as on a drawn view)
+describe('the provisional layer on a dashboard’s charts', () => {
+  const chart = (id: string, source: string): JSONContent => ({ type: 'chart', attrs: { id, source, spec: null } });
+  const dashboard = () =>
+    doc(
+      para('p1', 'Quarterly sales.'),
+      chart('c1', 'sales'),
+      chart('c2', '\n  sales \n'), // an imported fence's padding: bound all the same, as the views read it
+      chart('c3', 'costs'),
+      { type: 'callout', attrs: { id: 'k1' }, content: [para('kp', 'A note beside the chart.'), chart('c4', 'sales')] },
+      para('p4', 'The end.'),
+    );
+  const dataset = (toolUseId: string, state: ArtifactProvisional['state'], id: string, commitSeq?: number): ArtifactProvisional => ({ ...frame(toolUseId, state, state === 'dropped' ? [] : [{ op: 'dataset', dataset: id, text: '' }], commitSeq), kind: 'dashboard' });
+  // the chart blocks in document order, and which of them carry a dataset label
+  const charts = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>('[data-node="chart"]')];
+  const labelled = (root: ParentNode) => charts(root).map((el, index) => (el.dataset.provisionalOp === 'dataset' ? `c${index + 1}` : null)).filter(Boolean);
+  const DESCRIPTOR = {
+    title: 'Sales',
+    source: { kind: 'file', ref: 'assets/sales.csv', name: 'sales.csv', format: 'csv', sha256: 'a'.repeat(64), size: 42 },
+    columns: [{ name: 'region', type: 'string' }],
+    rows: 2,
+    updated: { at: 1_760_000_000_000, by: AGENT },
+    state: { status: 'ok', at: 1_760_000_000_000 },
+  } as const;
+
+  it('labels every chart bound to the dataset with the agent’s name and colour, and nothing else', async () => {
+    const { container, editor } = await mount(undefined, undefined, dashboard());
+    const before = blocks(editor());
+    world!.host.announce(dataset('tu1', 'streaming', 'sales'));
+    await until(() => labelled(container).length > 0, 'the labels');
+    expect(labelled(container), 'the charts whose source names it').toEqual(['c1', 'c2', 'c4']);
+    for (const el of charts(container).filter((c) => c.dataset.provisionalOp === 'dataset')) {
+      expect(el.dataset.provisionalLabel, 'the label the page shows').toBe('Fix the build is updating sales…');
+      expect([el.dataset.provisional, el.dataset.provisionalBy, el.dataset.provisionalDataset]).toEqual(['tu1', 'Fix the build', 'sales']);
+      expect(el.classList.contains('doc-provisional-dataset')).toBe(true);
+      expect(el.style.getPropertyValue('--doc-presence')).toBe('var(--author-3)');
+      expect(el.hasAttribute('tabindex')).toBe(false);
+    }
+    expect(container.querySelectorAll('.doc-provisional-block, .doc-provisional-text'), 'a label, not a block of text').toHaveLength(0);
+    expect(blocks(editor()), 'the document as it was').toEqual(before);
+  });
+
+  it('keeps the labels until the dataset’s write is integrated, and withdraws a dropped call’s at once', async () => {
+    const { container } = await mount(undefined, undefined, dashboard());
+    world!.host.announce(dataset('tu1', 'streaming', 'sales'));
+    await until(() => labelled(container).length === 3, 'the labels');
+    world!.host.announce(dataset('tu1', 'committed', 'sales', world!.host.nextRevision));
+    await ticks();
+    expect(labelled(container), 'the labels wait for the write').toEqual(['c1', 'c2', 'c4']);
+    world!.host.write((d) => setDataset(d, 'sales', DESCRIPTOR as never), AGENT);
+    await until(() => labelled(container).length === 0, 'the withdrawal at integration');
+
+    world!.host.announce(dataset('tu2', 'streaming', 'costs'));
+    await until(() => labelled(container).length === 1, 'the next call’s label');
+    expect([labelled(container), charts(container)[2].dataset.provisionalLabel]).toEqual([['c3'], 'Fix the build is updating costs…']);
+    world!.host.announce(dataset('tu2', 'dropped', 'costs'));
+    await until(() => labelled(container).length === 0, 'the dropped call withdrawn');
+  });
+
+  it('labels no chart inside the block the person composes in until the composition ends', async () => {
+    const { container, editor } = await mount(undefined, undefined, dashboard());
+    editor().commands.setTextSelection(endOf(editor(), 'kp'));
+    editor().view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    world!.host.announce(dataset('tu1', 'streaming', 'sales'));
+    await until(() => labelled(container).length > 0, 'the labels outside the composition');
+    await ticks();
+    expect(labelled(container), 'the callout’s chart waits').toEqual(['c1', 'c2']);
+    editor().view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    await until(() => labelled(container).length === 3, 'the callout’s chart once the composition ended');
   });
 });
