@@ -680,7 +680,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
   });
 
   test('a second edit to an already-dirty file updates the change line', async ({ maws }) => {
-    // Each edit's change line within a second, the wait's own timeout, loosened on a loaded or shared machine (latency.ts).
+    // Each edit's change line within a second; a configured VM lane waits to the ceiling then checks actual guest overlap.
     const changeLineWait = latencyWait('change line latency', 1_000);
     await withRepository(async (repo) => {
       const panel = await PanelPage.open(maws);
@@ -692,8 +692,10 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       for (const lines of [2, 3]) {
         const written = Date.now();
         repo.append(`edit ${lines}`);
-        await expect(panel.changeLine).toHaveText(`+${lines} −0 across 2 files · 1 untracked`, { timeout: changeLineWait });
-        latencies.push(Date.now() - written);
+        await expect(panel.changeLine).toHaveText(`+${lines} −0 across 2 files · 1 untracked`, { timeout: changeLineWait.timeout });
+        const elapsed = Date.now() - written;
+        changeLineWait.assertElapsed?.(elapsed);
+        latencies.push(elapsed);
       }
       test.info().annotations.push({ type: 'change line latency (ms)', description: latencies.join(', ') });
       panel.expectQuietConsole();
