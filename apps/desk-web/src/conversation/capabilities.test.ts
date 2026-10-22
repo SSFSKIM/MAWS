@@ -162,12 +162,12 @@ describe('the desk control surface (M0): command and status', () => {
 
   it("an older machine names itself and its plugin's version when its daemon says it, and asks for the update", () => {
     const older = bridged({ presence: { record: { status: 'idle' }, bridge: true }, machineDesk: null });
-    expect(older.command).toEqual({ can: false, reason: "mini's plugin is older than the desk's controls: update doperpowers on mini" });
-    expect(older.status.reason).toBe("mini's plugin is older than the desk's controls: update doperpowers on mini");
+    expect(older.command).toEqual({ can: false, reason: "mini's plugin is older than the desk's controls: update sminos on mini" });
+    expect(older.status.reason).toBe("mini's plugin is older than the desk's controls: update sminos on mini");
     const known = bridged({ presence: { record: { status: 'idle' }, bridge: true }, machineDesk: { sminos: '1.6.9', rpcs: [], reads: [] } });
-    expect(known.command.reason).toBe("mini's plugin (1.6.9) is older than the desk's controls: update doperpowers on mini");
+    expect(known.command.reason).toBe("mini's plugin (1.6.9) is older than the desk's controls: update sminos on mini");
     // A bridge at M0 on a daemon that is not (the daemon not restarted since): the command needs both.
-    expect(bridged({ machineDesk: undefined }).command.reason).toBe("mini's plugin is older than the desk's controls: update doperpowers on mini");
+    expect(bridged({ machineDesk: undefined }).command.reason).toBe("mini's plugin is older than the desk's controls: update sminos on mini");
     expect(bridged({ machineDesk: undefined }).status).toEqual({ can: true, reason: null });
   });
 

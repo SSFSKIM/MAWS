@@ -7,6 +7,7 @@
 // readout, drawn only when asked for (`latency/latency.ts`).
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { loadChunk } from './pwa/load-chunk';
 import { fetchMe, SignInError, type Me } from './hub/me';
 import { useAccess, watchAccess } from './hub/access';
 import { loadDeviceKey, useKeyHolder } from './key/holder';
@@ -24,12 +25,12 @@ import { GridView } from './views/grid/GridView';
 import { useSecondMethodPrompt } from './views/key/second-method';
 import { latency } from './latency/latency';
 
-const ProjectView = lazy(() => import('./views/project/ProjectView').then((m) => ({ default: m.ProjectView })));
-const OrgView = lazy(() => import('./views/org/OrgView').then((m) => ({ default: m.OrgView })));
-const LatencyOverlay = lazy(() => import('./latency/LatencyOverlay').then((m) => ({ default: m.LatencyOverlay })));
-const KeyDialog = lazy(() => import('./views/key/KeyDialog').then((m) => ({ default: m.KeyDialog })));
-const MachinesDialog = lazy(() => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog })));
-const NotificationsDialog = lazy(() => import('./views/notifications/NotificationsDialog').then((m) => ({ default: m.NotificationsDialog })));
+const ProjectView = lazy(() => loadChunk('ProjectView', () => import('./views/project/ProjectView').then((m) => ({ default: m.ProjectView }))));
+const OrgView = lazy(() => loadChunk('OrgView', () => import('./views/org/OrgView').then((m) => ({ default: m.OrgView }))));
+const LatencyOverlay = lazy(() => loadChunk('LatencyOverlay', () => import('./latency/LatencyOverlay').then((m) => ({ default: m.LatencyOverlay }))));
+const KeyDialog = lazy(() => loadChunk('KeyDialog', () => import('./views/key/KeyDialog').then((m) => ({ default: m.KeyDialog }))));
+const MachinesDialog = lazy(() => loadChunk('MachinesDialog', () => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog }))));
+const NotificationsDialog = lazy(() => loadChunk('NotificationsDialog', () => import('./views/notifications/NotificationsDialog').then((m) => ({ default: m.NotificationsDialog }))));
 
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 

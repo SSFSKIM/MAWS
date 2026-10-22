@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { LoadBoundary } from './pwa/LoadBoundary';
 import { connectDepth } from './depth/connect';
 import { installLatency } from './latency/latency';
 import { followLandings, registerServiceWorker } from './pwa/service-worker';
@@ -19,6 +20,8 @@ installLatency(); // desk ticket #57: every hop measured always; the readout dra
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <LoadBoundary>
+      <App />
+    </LoadBoundary>
   </StrictMode>,
 );

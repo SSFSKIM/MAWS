@@ -144,7 +144,7 @@ test("the engine's status: read when Info opens and on Refresh, never on a prese
   const info = (id: string) => depth.getByTestId(`depth-info-${id}`);
   // The scene's mini runs a plugin older than the desk's controls: the fields say so, not a spinner, and nothing is read.
   for (const id of ['engine', 'root', 'repo', 'surfaces']) await expect(info(id)).toHaveText('not available from this plugin (needs sminos ≥ 1.7.0)');
-  await expect(info('status-reason')).toHaveText("mini's plugin is older than the desk's controls: update doperpowers on mini");
+  await expect(info('status-reason')).toHaveText("mini's plugin is older than the desk's controls: update sminos on mini");
   await page.waitForTimeout(300);
   expect(player.readsAsked).toBe(0);
 

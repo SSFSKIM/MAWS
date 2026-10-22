@@ -38,6 +38,7 @@ export class CatalogCache {
 function validCatalog(value: unknown): value is Catalog {
   if (!value || typeof value !== 'object') return false;
   const c = value as Catalog;
+  if (c.skills !== undefined && (!Array.isArray(c.skills) || !c.skills.every((name) => typeof name === 'string'))) return false;
   return typeof c.fingerprint === 'string' && typeof c.measured === 'string' && Array.isArray(c.commands) && c.commands.every((entry) => typeof entry.name === 'string' && typeof entry.description === 'string' && typeof entry.source === 'string' && entry.route && typeof entry.route.class === 'string' && typeof entry.route.enabled === 'boolean') && !!c.models && Array.isArray(c.models.options) && !!c.models.aliases;
 }
 function storage(): StorageLike | undefined { try { return globalThis.localStorage; } catch { return undefined; } }

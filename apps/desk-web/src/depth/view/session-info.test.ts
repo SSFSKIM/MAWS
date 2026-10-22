@@ -56,7 +56,7 @@ describe("the engine's status lines, from `read status`", () => {
   });
 
   it("says a bridged session's plugin lacks it and the version it would need, never a spinner; any other session's reason", () => {
-    const older = { can: false, reason: "mini's plugin is older than the desk's controls: update doperpowers on mini" };
+    const older = { can: false, reason: "mini's plugin is older than the desk's controls: update sminos on mini" };
     expect(statusLines(null, older, true)).toEqual(Object.fromEntries(['engine', 'root', 'repo', 'surfaces'].map((k) => [k, 'not available from this plugin (needs sminos ≥ 1.7.0)'])));
     expect(statusLines(null, { can: false, reason: 'maws-45 runs without the bridge' }, false).engine).toBe('unavailable (maws-45 runs without the bridge)');
   });

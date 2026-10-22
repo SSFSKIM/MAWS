@@ -4,6 +4,19 @@ import type { Catalog } from 'desk-hub/protocol';
 import { CatalogCache } from './catalog';
 const value = (fingerprint: string): Catalog => ({ fingerprint, commands: [], models: { options: ['default'], aliases: {} }, measured: '2.1.307' });
 describe('session catalogs', () => {
+  it('keeps skill names across cache reloads and refuses malformed membership from disk or the wire', () => {
+    localStorage.clear();
+    const cache = new CatalogCache(localStorage);
+    cache.accept('p/a', { ...value('skills'), skills: ['playwright-cli', 'doperpowers:progress-report'] });
+    expect(new CatalogCache(localStorage).get('p/a').catalog?.skills).toEqual(['playwright-cli', 'doperpowers:progress-report']);
+    for (const skills of [null, {}, 42, ['ok', 1]]) {
+      const bad = { ...value('bad'), skills } as Catalog;
+      cache.accept('p/b', bad);
+      expect(cache.get('p/b').catalog).toBeNull();
+      localStorage.setItem('desk.catalogs', JSON.stringify([['p/b', { catalog: bad, asOf: 1 }]]));
+      expect(new CatalogCache(localStorage).get('p/b').catalog).toBeNull();
+    }
+  });
   it('loads only that session, stale until confirmed, and replaces a changed fingerprint', () => {
     localStorage.clear();
     const cache = new CatalogCache(localStorage);

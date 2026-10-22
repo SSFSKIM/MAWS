@@ -17,7 +17,6 @@ import { complete, completionAt, insertTag, type Completion } from '../../conver
 import { turnRunning, type Capability } from '../../conversation/capabilities';
 import { commandRoute, slashItems, type SlashItem } from '../../conversation/catalog';
 import { catalogKey, useCatalog } from '../../state/catalog';
-import { M1_SMINOS } from '../../conversation/capabilities';
 import { SlashPalette, groupedItems } from './SlashPalette';
 import { rankItems, rememberChosen } from './rank';
 import { parseCommand } from '../../conversation/command';
@@ -234,7 +233,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
     <div className="relative shrink-0 border-t border-border px-4 py-3" data-testid="composer">
       {paletteOpen && <SlashPalette id={paletteId} rows={rows} active={bounded} setActive={setActive} pick={choose} opened={opened}
         stamp={cached.catalog && (cached.stale || !can.catalog.can) ? `as of ${formatClock(cached.asOf!)}` : null}
-        note={!can.catalog.can ? `commands need sminos ≥ ${M1_SMINOS} on ${session.machine} · ${can.catalog.reason}` : !cached.catalog ? 'Waiting for this session’s command catalog' : null} />}
+        note={!can.catalog.can ? can.catalog.reason : !cached.catalog ? 'Waiting for this session’s command catalog' : null} />}
       <textarea
         ref={box}
         aria-controls={paletteOpen ? paletteId : undefined}

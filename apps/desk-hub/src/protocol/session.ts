@@ -207,6 +207,8 @@ export type Route = {
 /** A session's command catalog (M1): every command `$.command.list()` lists, with the route each gets, and its models. */
 export type Catalog = {
   fingerprint: string;
+  /** Engine-listed skill names, fully qualified; absent from bridges before sminos 1.8.1. */
+  skills?: string[];
   commands: Array<{ name: string; description: string; source: string; plugin?: string; route: Route; withArgs?: Route }>;
   models: { options: string[]; aliases: Record<string, string | null> };
   measured: string;

@@ -7,6 +7,7 @@
 // session's directory is no git working tree. The body (the diff library, its stylesheet, and the highlighter) loads on
 // first use.
 import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { loadChunk } from '../../pwa/load-chunk';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { REVIEW_COPY } from '../../../../../src/renderer/src/tools/code/copy';
@@ -16,7 +17,7 @@ import { createReviewUi, selectFile, type ReviewUi } from '../../../../../src/re
 import { diffFiles, diffTotals, type DiffFile } from '../diff/files';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 
-const ReviewView = lazy(() => import('../../../../../src/renderer/src/tools/code/review/ReviewView'));
+const ReviewView = lazy(() => loadChunk('ReviewView', () => import('../../../../../src/renderer/src/tools/code/review/ReviewView')));
 
 const quiet = 'rounded-sm px-1.5 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
 const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg';

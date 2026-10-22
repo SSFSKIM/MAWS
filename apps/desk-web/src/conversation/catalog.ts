@@ -46,6 +46,7 @@ export function commandRoute(catalog: Catalog | null, name: string, args: string
   return action(route, machine);
 }
 export function slashItems(catalog: Catalog | null, machine: string, unavailable: string | null): SlashItem[] {
+  const skills = new Set(catalog?.skills ?? []);
   const items = (catalog?.commands ?? []).map((entry): SlashItem => {
     // Offer the usable argument form, not a bare panel (mcp, goal, rename).
     const route = entry.withArgs && ['run', 'run-prompt'].includes(entry.withArgs.class) ? entry.withArgs : entry.route;
@@ -53,7 +54,7 @@ export function slashItems(catalog: Catalog | null, machine: string, unavailable
     if (entry.name === 'model' || entry.name === 'effort') pick = { kind: 'widget', name: 'model' };
     if (entry.name === 'compact') pick = { kind: 'widget', name: 'compact' };
     if (pick.kind === 'command' && unavailable) pick = { kind: 'unavailable', reason: unavailable };
-    const origin: SlashOrigin = entry.source === 'builtin' ? 'engine' : entry.source === 'skill' || entry.source === 'skills' ? 'skills' : entry.plugin || entry.name.includes(':') || entry.source === 'mcp' ? 'plugins' : 'custom';
+    const origin: SlashOrigin = entry.source === 'builtin' ? 'engine' : skills.has(entry.name) || entry.source === 'skill' || entry.source === 'skills' ? 'skills' : entry.plugin || entry.name.includes(':') || entry.source === 'mcp' ? 'plugins' : 'custom';
     return { name: entry.name, title: `/${entry.name}`, description: entry.description, origin,
       argumentHint: route.forms?.hint ?? (route.forms?.args === 'required' ? '<arguments>' : null),
       note: route.outlives ? words(route.outlives, machine) : undefined,

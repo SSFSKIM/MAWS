@@ -122,7 +122,7 @@ test("A5: an older machine's plugin is refused in the composer with its reason, 
   await box.fill('/rename x');
   await composer.getByRole('button', { name: 'Send', exact: true }).click();
   const refusal = composer.getByTestId('command-refused');
-  await expect(refusal).toContainText(`${MACHINE}'s plugin is older than the desk's controls: update doperpowers on ${MACHINE}`);
+  await expect(refusal).toContainText(`${MACHINE}'s plugin is older than the desk's controls: update sminos on ${MACHINE}`);
   expect(commandsSent(hub)).toBe(0);
   await refusal.getByRole('button', { name: 'Send as text anyway' }).click();
   await expect.poll(() => wordsSent(hub)).toEqual(['/rename x']);
