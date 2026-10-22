@@ -144,15 +144,18 @@ export function SlideLayer(props: {
   );
 }
 
-/** A filmstrip entry's layer over its thumbnail (G-R5): the ring, and the whole provisional slide once it differs. */
-export function ThumbnailLayer(props: { deck: DeckProvisional; slideId: string; scale: number; assetUrl: AssetUrl; faces?: FaceAliases }) {
-  const { deck, slideId, scale, assetUrl, faces } = props;
+/**
+ * A filmstrip entry's layer over its thumbnail (G-R5): the ring, and the whole provisional slide once it differs;
+ * `keepLast` for a new slide's or board's ghost entry, which keeps its last drawing until it unmounts.
+ */
+export function ThumbnailLayer(props: { deck: DeckProvisional; slideId: string; scale: number; assetUrl: AssetUrl; faces?: FaceAliases; keepLast?: boolean }) {
+  const { deck, slideId, scale, assetUrl, faces, keepLast } = props;
   const host = useRef<HTMLDivElement>(null);
   const scaler = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    const layer = new ThumbnailProvisional({ deck, slideId, host: host.current!, scaler: scaler.current!, assetUrl, ...(faces && { faces }) });
+    const layer = new ThumbnailProvisional({ deck, slideId, host: host.current!, scaler: scaler.current!, assetUrl, ...(faces && { faces }), ...(keepLast && { keepLast }) });
     return () => layer.dispose();
-  }, [deck, slideId, assetUrl, faces]);
+  }, [deck, slideId, assetUrl, faces, keepLast]);
   return (
     <div ref={host} className="deck-provisional-thumb" data-provisional-thumb={slideId} aria-hidden="true" inert>
       <div ref={scaler} className="deck-slide-scaler" style={{ transform: `scale(${scale})` }} />
@@ -171,7 +174,7 @@ export function NewSlideEntry(props: { deck: DeckProvisional; slideId: string; s
       <div className="deck-thumb">
         <span className="deck-thumb-number" />
         <div className="deck-provisional-entry" style={{ width: SLIDE_W * scale, height: SLIDE_H * scale }}>
-          <ThumbnailLayer deck={deck} slideId={slideId} scale={scale} assetUrl={assetUrl} faces={faces} />
+          <ThumbnailLayer deck={deck} slideId={slideId} scale={scale} assetUrl={assetUrl} faces={faces} keepLast />
         </div>
       </div>
     </li>

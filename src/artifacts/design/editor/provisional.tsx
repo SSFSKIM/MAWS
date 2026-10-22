@@ -153,7 +153,7 @@ const NewBoard = memo(function NewBoard(props: {
   const style = { left: x, top: y, width: w, height: h, '--provisional-color': cssColor(color) } as CSSProperties;
   return (
     <div ref={host} className="design-board design-provisional-board" data-provisional-new-board={boardId} data-provisional-writing={toolUseId} data-provisional-frame={`${x} ${y} ${w} ${h}`} aria-hidden="true" inert style={style}>
-      <ThumbnailLayer deck={deck} slideId={boardId} scale={1} assetUrl={assetUrl} faces={faces} />
+      <ThumbnailLayer deck={deck} slideId={boardId} scale={1} assetUrl={assetUrl} faces={faces} keepLast />
       <div className="deck-provisional-label" data-provisional-label>
         {DECK_COPY.writing(name)}
       </div>

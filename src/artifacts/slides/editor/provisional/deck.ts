@@ -167,11 +167,12 @@ export class DeckProvisional {
     }
     this.dirty.clear();
     for (const id of [...this.computed.keys()]) if (!slides.has(id)) this.computed.delete(id);
-    this.forget([...this.written.keys()].filter((id) => !slides.has(id)));
     this.fit(slides);
     this.observe(slides);
     const same = slides.size === this.current.slides.size && [...slides].every(([id, slide]) => this.current.slides.get(id) === slide);
     if (!same) this.commit(slides.size === 0 ? EMPTY : { slides });
+    // after the commit: a withdrawn ghost entry keeps the drawing it froze on it, not one the scratch already dropped
+    this.forget([...this.written.keys()].filter((id) => !slides.has(id)));
   }
 
   // The slide's drawing for the file so far, merged again only when the file grew, the live slide changed or came.

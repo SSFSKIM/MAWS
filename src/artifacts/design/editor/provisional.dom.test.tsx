@@ -298,6 +298,8 @@ describe('a board new to the design', () => {
     act(() => {
       w.live.frame(publishFrame('call1', 'committed', {}, 7));
       w.live.update(w.publish({ [boardPath('b3')]: NEW, [CANVAS_PATH]: manifest }), 7);
+      // withdrawn in this call, swapped for the real board in React's next render: until then the ghost still paints
+      expect(ghost(w)?.querySelector('[data-provisional-thumb="b3"] section.maws-slide [data-eid="t3"]')?.textContent, 'the new board keeps its drawing until React unmounts it').toBe('Pricing');
     });
     expect(boardOrder(w.doc)).toEqual(['b1', 'b2', 'b3']);
     expect(boardFrame(w.doc, 'b3'), 'where the ghost stood').toEqual({ x: 2100, y: 40, w: 800, h: 600 });

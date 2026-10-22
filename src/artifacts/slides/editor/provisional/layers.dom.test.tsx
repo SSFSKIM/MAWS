@@ -302,7 +302,10 @@ describe('the deck’s provisional layer on the stage', () => {
     w.stream({ [slidePath('s1')]: edit(w.file('s1'), ['Friday, 24 October', 'Monday'], [/<p id="body"[^>]*>Scope is frozen<\/p>/.exec(w.file('s1'))![0], '']), [slidePath('s3')]: three });
     expect(w.stage.veiled()).toEqual(['body', 'date']);
     expect(w.q('[data-provisional-new-slide="s3"]')).not.toBeNull();
-    act(() => w.live.frame(publishFrame('call1', 'dropped')));
+    act(() => {
+      w.live.frame(publishFrame('call1', 'dropped'));
+      expect(w.stage.ghost(), 'the stage withdraws in the call').toBeNull();
+    });
     expect(w.stage.layer()!.childElementCount, 'the layer holds its empty scaler alone').toBe(1);
     expect(w.stage.layer()!.querySelector('.maws-slide')).toBeNull();
     expect(w.stage.layer()!.hasAttribute('data-provisional-writing')).toBe(false);
@@ -342,7 +345,11 @@ describe('the deck’s provisional layer in the filmstrip', () => {
     act(() => {
       w.live.frame(publishFrame('call1', 'committed', {}, 4));
       w.live.update(w.publish({ [DECK_PATH]: index, [slidePath('s3')]: three }), 4);
+      // the layer is withdrawn in this call; React swaps the entries in the render after it: until then the ghost entry
+      // still paints its slide (no paint shows neither)
+      expect(w.q('[data-provisional-new-slide="s3"] [data-provisional-thumb] .maws-slide [data-eid="t3"]')?.textContent, 'the ghost entry keeps its last drawing until React unmounts it').toBe('Ri');
     });
+    expect(w.q('[data-slide-thumb="s3"] .deck-slide-frame .maws-slide [data-eid="t3"]')?.textContent, 'the real entry paints in the render that removes the ghost').toBe('Risks');
     expect(slideOrder(w.doc)).toEqual(['s1', 's3', 's2']);
     expect(entries(), 'one entry, the real one').toEqual(['s1', 's3', 's2']);
     expect(w.q('[data-provisional-new-slide]')).toBeNull();

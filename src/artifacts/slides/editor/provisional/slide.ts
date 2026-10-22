@@ -303,6 +303,11 @@ export interface ThumbnailLayerOptions {
   scaler: HTMLElement;
   assetUrl: AssetUrl;
   faces?: FaceAliases;
+  /**
+   * A new slide's or board's ghost entry: when its call is withdrawn the slide keeps its last drawing, still, until the
+   * entry unmounts, since the real entry replaces it on React's next render, not in the store's call (no blank between).
+   */
+  keepLast?: boolean;
 }
 
 /**
@@ -313,6 +318,8 @@ export interface ThumbnailLayerOptions {
 export class ThumbnailProvisional {
   private canvas: SlideCanvas | null = null;
   private token: object | null = null;
+  /** The last drawing a withdrawn `keepLast` entry holds, observing nothing. */
+  private kept: HTMLElement | null = null;
   private readonly stop: () => void;
 
   constructor(private readonly o: ThumbnailLayerOptions) {
@@ -322,14 +329,14 @@ export class ThumbnailProvisional {
 
   dispose(): void {
     this.stop();
-    this.drawSlide(false);
+    this.drawSlide(false, false);
     this.ring(null);
   }
 
   private draw(): void {
     const entry = this.o.deck.snapshot().slides.get(this.o.slideId);
     this.ring(entry ?? null);
-    this.drawSlide(entry?.drawn != null);
+    this.drawSlide(entry?.drawn != null, this.o.keepLast ?? false);
   }
 
   private ring(entry: WrittenSlide | null): void {
@@ -343,13 +350,18 @@ export class ThumbnailProvisional {
     }
   }
 
-  private drawSlide(on: boolean): void {
+  private drawSlide(on: boolean, keep: boolean): void {
     const { deck, slideId } = this.o;
     const token = on ? slideToken(deck.scratch, slideId) : null;
     if (this.canvas && this.token === token) return;
-    this.canvas?.dispose();
+    const last = this.canvas;
+    last?.dispose();
     this.canvas = null;
     this.token = token;
+    if (token || !keep) {
+      this.kept?.remove();
+      this.kept = null;
+    } else if (last) this.kept = this.o.scaler.appendChild(last.root);
     if (token) this.canvas = new SlideCanvas(deck.scratch, slideId, this.o.scaler, { assetUrl: this.o.assetUrl, thumbnail: true, ...(this.o.faces && { faces: this.o.faces }) });
   }
 }
