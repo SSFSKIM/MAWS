@@ -7,6 +7,7 @@
 // written (rule 1). A slide's drawing follows the live slide as it changes (a change made meanwhile is drawn under the
 // agent's), and goes when the layer goes: at a refusal at once, at the commit in the call that integrates the write
 // (the store's rule 2), so the canvases' own patch of the write and the layer's withdrawal land in one task.
+import type { ArtifactProvisional } from '@shared/artifacts/provisional';
 import { openFile, type ProvisionalLayers } from '../../../provisional';
 import { newDoc, onUpdate, transact, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
@@ -17,10 +18,23 @@ import { loadSlide } from '../../parse';
 import { provisionalOrder, provisionalSlide, type ProvisionalSlide } from '../../provisional';
 import { publishDeck } from '../../publish';
 
+/** Where a slide stands in a world of slides (a design's board: its frame), in its own px. */
+export interface ProvisionalFrame {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** Which of a publish's files are slides (and which one is the index) for the artifact's kind. */
 export interface ProvisionalFiles {
   slideOf(path: string): string | null;
   indexPath: string;
+  /**
+   * P4-A2 G2.4 (G-R6): where a slide new to the artifact will stand, from the streamed index and its file so far; null
+   * until the index places it. Absent for a deck, whose slides have no place but their order.
+   */
+  frameOf?(live: Doc, slideId: string, index: { text: string; open: boolean }, file: string): ProvisionalFrame | null;
 }
 /** A deck's files: `project/slides/<id>.html` and `project/deck.json`. */
 export const DECK_FILES: ProvisionalFiles = { slideOf: slideIdOf, indexPath: DECK_PATH };
@@ -35,6 +49,8 @@ export interface WrittenSlide {
   isNew: boolean;
   /** What differs from the live slide, the file drawn into the scratch doc; null while nothing does (or it is held). */
   drawn: ProvisionalSlide | null;
+  /** A new slide's place once the index gives it (`ProvisionalFiles.frameOf`); null otherwise. */
+  frame: ProvisionalFrame | null;
 }
 
 export interface DeckProvisionalSnapshot {
@@ -106,7 +122,7 @@ export class DeckProvisional {
   };
 
   private recompute(): void {
-    const slides = new Map<string, WrittenSlide>();
+    const files: { id: string; layer: ArtifactProvisional; text: string; drawn: ProvisionalSlide | null }[] = [];
     let index: DeckProvisionalSnapshot['index'] = null;
     for (const layer of this.layers.get().values()) {
       const open = openFile(layer);
@@ -117,16 +133,22 @@ export class DeckProvisional {
           continue;
         }
         const id = this.files.slideOf(op.path);
-        if (id === null) continue;
-        const drawn = this.draw(id, op, op.path === open);
-        const slide: WrittenSlide = { toolUseId: layer.toolUseId, name: layer.name, color: layer.color, isNew: !Y.hasSlide(this.live, id), drawn };
-        const was = this.current.slides.get(id);
-        slides.set(id, was && sameSlide(was, slide) ? was : slide);
+        if (id !== null) files.push({ id, layer, text: op.text, drawn: this.draw(id, op, op.path === open) });
       }
+    }
+    // a new slide's place from the index, which may stream before or after its file
+    const slides = new Map<string, WrittenSlide>();
+    for (const { id, layer, text, drawn } of files) {
+      const isNew = !Y.hasSlide(this.live, id);
+      const frame = isNew && index && this.files.frameOf ? this.files.frameOf(this.live, id, index, text) : null;
+      const slide: WrittenSlide = { toolUseId: layer.toolUseId, name: layer.name, color: layer.color, isNew, drawn, frame };
+      const was = this.current.slides.get(id);
+      slides.set(id, was && sameSlide(was, slide) ? was : slide);
     }
     this.dirty.clear();
     for (const id of [...this.computed.keys()]) if (!slides.has(id)) this.computed.delete(id);
     this.forget([...this.written.keys()].filter((id) => !slides.has(id)));
+    this.fit(slides);
     this.observe(slides);
     const same = slides.size === this.current.slides.size && [...slides].every(([id, slide]) => this.current.slides.get(id) === slide) && sameIndex(index, this.current.index);
     if (!same) this.commit(slides.size === 0 && index === null ? EMPTY : { slides, index });
@@ -145,7 +167,7 @@ export class DeckProvisional {
   }
 
   // The provisional file into the scratch doc, by the deck's own publish (property by property, so the canvas over it
-  // patches only what changed); the first time, the slide made from it, with a board's size as the live node holds it.
+  // patches only what changed); the first time, the slide made from it (its size is `fit`'s).
   private write(id: string, file: string): boolean {
     try {
       if (Y.hasSlide(this.scratch, id)) {
@@ -154,22 +176,33 @@ export class DeckProvisional {
       } else {
         const loaded = loadSlide(file, { fileId: id });
         if (!loaded.ok) return false;
-        transact(this.scratch, () => {
-          insertSlide(this.scratch, loaded.slide, null);
-          if (Y.hasSlide(this.live, id)) {
-            const { w, h } = Y.slideScalars(this.live, id);
-            if (typeof w === 'number' && typeof h === 'number') {
-              Y.setSlideKey(this.scratch, id, 'w', w);
-              Y.setSlideKey(this.scratch, id, 'h', h);
-            }
-          }
-        });
+        transact(this.scratch, () => insertSlide(this.scratch, loaded.slide, null));
       }
     } catch {
       return false; // a merge the publish refuses (a limit the merged slide passes) is not drawn
     }
     this.written.set(id, file);
     return true;
+  }
+
+  // A board's size on its scratch slide (its section's, which the canvas draws at): the live board's as it is now (a
+  // resize meanwhile followed), a new board's from its frame once placed; a deck's slide has none.
+  private fit(slides: ReadonlyMap<string, WrittenSlide>): void {
+    const writes: [string, number, number][] = [];
+    for (const [id, slide] of slides) {
+      if (!this.written.has(id)) continue;
+      const size = slide.isNew ? slide.frame : Y.slideScalars(this.live, id);
+      if (typeof size?.w !== 'number' || typeof size.h !== 'number') continue;
+      const now = Y.slideScalars(this.scratch, id);
+      if (now.w !== size.w || now.h !== size.h) writes.push([id, size.w, size.h]);
+    }
+    if (writes.length === 0) return;
+    transact(this.scratch, () => {
+      for (const [id, w, h] of writes) {
+        Y.setSlideKey(this.scratch, id, 'w', w);
+        Y.setSlideKey(this.scratch, id, 'h', h);
+      }
+    });
   }
 
   private forget(ids: readonly string[]): void {
@@ -199,5 +232,6 @@ export class DeckProvisional {
 
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((key) => b.has(key));
 const sameDrawn = (a: ProvisionalSlide, b: ProvisionalSlide) => a.file === b.file && sameSet(a.changed, b.changed) && sameSet(a.added, b.added) && sameSet(a.removed, b.removed);
-const sameSlide = (a: WrittenSlide, b: WrittenSlide) => a.toolUseId === b.toolUseId && a.name === b.name && a.color === b.color && a.isNew === b.isNew && a.drawn === b.drawn;
+const sameFrame = (a: ProvisionalFrame | null, b: ProvisionalFrame | null) => a === b || (a !== null && b !== null && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
+const sameSlide = (a: WrittenSlide, b: WrittenSlide) => a.toolUseId === b.toolUseId && a.name === b.name && a.color === b.color && a.isNew === b.isNew && a.drawn === b.drawn && sameFrame(a.frame, b.frame);
 const sameIndex = (a: DeckProvisionalSnapshot['index'], b: DeckProvisionalSnapshot['index']) => a === b || (a !== null && b !== null && a.text === b.text && a.open === b.open);

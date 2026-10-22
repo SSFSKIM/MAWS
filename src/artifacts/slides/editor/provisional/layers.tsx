@@ -2,7 +2,7 @@
 // mounts. React renders the layers' elements and nothing inside them: each mount hands its element to the imperative
 // controller (slide.ts), which draws from the store's and the session's listeners in the task they fire in. Shared by
 // the deck's stage and filmstrip and (G2.4) a design's boards.
-import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
 import type { ProvisionalLayers } from '../../../provisional';
 import type { Doc } from '../../../yjs';
 import type { AssetUrl, SlideCanvas } from '../../canvas';
@@ -35,6 +35,37 @@ export function useWrittenOrder(deck: DeckProvisional | null, liveOrder: readonl
 }
 
 /**
+ * P4-A2 G2.4: the zoom a layer is shown at beyond its own scale (a design's world, whose one transform scales every
+ * board), read and followed without a React render, as the world's pan and zoom are.
+ */
+export interface ScreenZoom {
+  get(): number;
+  subscribe(listener: () => void): () => void;
+}
+
+/**
+ * A layer's screen-sized marks at its scale times the zoom: the outline's width (`--provisional-outline`, in the slide's
+ * px) and the label's counter-scale (`--provisional-label-scale`), so both read the same at every zoom. Written on the
+ * layer's element alone, so a zoom restyles no live canvas.
+ */
+export function useProvisionalZoom(host: RefObject<HTMLElement | null>, scale: number, zoom?: ScreenZoom | null): void {
+  useLayoutEffect(() => {
+    const el = host.current;
+    if (!el) return;
+    let shown = Number.NaN;
+    const apply = () => {
+      const z = zoom?.get() ?? 1;
+      if (z === shown) return; // a pan
+      shown = z;
+      el.style.setProperty('--provisional-outline', `${2 / (scale * z)}px`);
+      el.style.setProperty('--provisional-label-scale', String(1 / z));
+    };
+    apply();
+    return zoom?.subscribe(apply);
+  }, [host, scale, zoom]);
+}
+
+/**
  * A slide's layer over its live canvas, between the canvas and the overlay (G-R3): positioned over the slide's frame,
  * taking no pointer, no focus and no name. `session` protects the human's elements on its current slide (G-R4).
  */
@@ -48,16 +79,19 @@ export function SlideLayer(props: {
   session?: DeckSession | null;
   assetUrl: AssetUrl;
   faces?: FaceAliases;
+  /** P4-A2 G2.4: the zoom the layer is shown at beyond `scale` (a design's world); none on the deck's stage. */
+  zoom?: ScreenZoom | null;
 }) {
-  const { deck, canvas, slideId, scale, size, session, assetUrl, faces } = props;
+  const { deck, canvas, slideId, scale, size, session, assetUrl, faces, zoom } = props;
   const host = useRef<HTMLDivElement>(null);
   const scaler = useRef<HTMLDivElement>(null);
+  useProvisionalZoom(host, scale, zoom);
   useLayoutEffect(() => {
     const layer = new SlideProvisional({ deck, slideId, live: canvas, host: host.current!, scaler: scaler.current!, protection: session ? sessionProtection(session, slideId) : null, assetUrl, ...(faces && { faces }), label: C.writing });
     return () => layer.dispose();
   }, [deck, canvas, slideId, session, assetUrl, faces]);
   const [w, h] = size ? [size.w, size.h] : [SLIDE_W, SLIDE_H];
-  const style = { width: w * scale, height: h * scale, '--provisional-outline': `${2 / scale}px` } as CSSProperties;
+  const style: CSSProperties = { width: w * scale, height: h * scale };
   return (
     <div ref={host} className="deck-provisional" data-provisional-layer={slideId} aria-hidden="true" inert style={style}>
       <div ref={scaler} className="deck-slide-scaler" style={{ transform: `scale(${scale})`, ...(size && { width: w, height: h }) }} />

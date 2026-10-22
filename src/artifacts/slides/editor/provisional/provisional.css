@@ -35,12 +35,15 @@
   opacity: 0 !important;
 }
 
-/* "<name> is writing…" at the slide's top left, as the document's layer names its author. */
+/* "<name> is writing…" at the slide's top left, as the document's layer names its author; in screen px under a design's
+   zoom (--provisional-label-scale, the zoom's inverse, written on the layer). */
 .deck-provisional-label {
   position: absolute;
-  left: 8px;
-  top: 8px;
-  max-width: calc(100% - 16px);
+  left: calc(8px * var(--provisional-label-scale, 1));
+  top: calc(8px * var(--provisional-label-scale, 1));
+  max-width: calc(100% / var(--provisional-label-scale, 1) - 16px);
+  transform: scale(var(--provisional-label-scale, 1));
+  transform-origin: 0 0;
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 2px 8px;
@@ -63,7 +66,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  box-shadow: inset 0 0 0 2px var(--provisional-color);
+  box-shadow: inset 0 0 0 var(--provisional-outline, 2px) var(--provisional-color);
 }
 .deck-provisional-entry {
   position: relative;
