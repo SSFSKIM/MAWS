@@ -16,7 +16,7 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { pieces } from './support/document-provisional';
 import { boardOf, filesOf, plain, seamInstalled, seed, editDesign, tabsOf } from './support/design';
-import { brief, entrySwapOffenders, isVeiled, layerOf, nothingDrawn, ok, openFromLibrary, recordSlides, revisionOf, shownOf, slideSwapOffenders, startWithSeam, type SeamApp, type SlideSample } from './support/slides-provisional';
+import { boxDisturbed, brief, entrySwapOffenders, isVeiled, layerOf, nothingDrawn, ok, openFromLibrary, recordSlides, revisionOf, shownOf, slideSwapOffenders, startWithSeam, type SeamApp, type SlideSample } from './support/slides-provisional';
 
 let app: SeamApp | null = null;
 test.afterEach(async () => {
@@ -42,9 +42,13 @@ const WATCH = { x: 1424, y: 0, w: 396, h: 484, title: 'Watch' }; // the new boar
 const WATCH_FILE = `<section id="watch" style="${ground}; padding:24px"><h2 id="steps" style="position:absolute; left:24px; top:24px; width:348px; font-size:32px">Steps</h2></section>`;
 
 const ROOT = (id: string) => `[data-region="main"] [data-artifact-tab="${id}"]`;
-const LIVE_NODE = (board: string, eid: string) => `[data-board-id="${board}"] section.maws-slide:not([data-provisional-ghost]) [data-eid="${eid}"]`;
+// a board's live canvas (G2.4: a bare `[data-board-id] [data-eid]` also finds the board's ghost nodes)
+const LIVE_NODE = (board: string, eid: string) => `[data-board-id="${board}"] .design-board-canvas .maws-slide [data-eid="${eid}"]`;
 // the live text the recorder keeps; `watch` is the real new board's canvas, absent until the commit
-const LIVE = { title: LIVE_NODE('phone', 'title'), lede: LIVE_NODE('phone', 'lede'), head: LIVE_NODE('tablet', 'head'), watch: '[data-board-id="watch"] section.maws-slide:not([data-provisional-ghost])' };
+const LIVE = { title: LIVE_NODE('phone', 'title'), lede: LIVE_NODE('phone', 'lede'), head: LIVE_NODE('tablet', 'head'), watch: '[data-board-id="watch"] .design-board-canvas .maws-slide' };
+/** The new board's ghost drawn at its frame (G2.4's `[data-provisional-new-board]`, the whole board inside). */
+const NEW_BOARD = '[data-design-layer] [data-provisional-new-board="watch"]';
+const watchDrawn = (s: SlideSample) => s.newBoards.some((b) => b.board === 'watch' && b.drawn);
 
 interface Read {
   revision: number;
@@ -92,14 +96,20 @@ test('a publish drawn on the board it writes and a new board at its frame, as th
   const t0 = Date.now();
   await seam.stream(AGENT, toolUseId, 'artifact_publish', pieces(text.slice(0, cut)), 15);
   await expect.poll(async () => layerOf(await last(seen), 'phone')?.label, { timeout: 10_000, message: 'the phone’s label from the frame that names its file' }).toBe(LABEL);
-  await expect.poll(async () => (await last(seen)).ghosts.includes('watch'), { timeout: 10_000, message: 'the new board drawn as a ghost at its frame' }).toBe(true);
+  await expect.poll(async () => watchDrawn(await last(seen)), { timeout: 10_000, message: 'the new board drawn as a ghost at its frame' }).toBe(true);
   const named = await last(seen);
   await test.step('the phone’s file named, nothing in it differing yet; the new board drawn whole, no real board for it', async () => {
     expect(named.shown.filter((n) => n.slide === 'phone'), JSON.stringify(brief(named, t0))).toEqual([]);
     expect(named.veiled).toEqual([]);
     expect(named.live.watch, 'no real board for the new one before the commit').toBeNull();
     expect(layerOf(named, 'tablet'), 'a board the publish leaves alone has no layer').toBeUndefined();
-    await expect(page.locator(`${ROOT(id)} section[data-provisional-ghost][data-slide="watch"]`)).toContainText('Steps');
+    const ghost = page.locator(`${ROOT(id)} ${NEW_BOARD}`);
+    await expect(ghost).toHaveAttribute('data-provisional-writing', toolUseId);
+    await expect(ghost).toHaveAttribute('data-provisional-frame', `${WATCH.x} ${WATCH.y} ${WATCH.w} ${WATCH.h}`);
+    await expect(ghost.locator('[data-provisional-thumb="watch"] section.maws-slide')).toContainText('Steps');
+    await expect(ghost.locator('[data-provisional-label]')).toHaveText(LABEL);
+    await expect(page.locator(ROOT(id)).getByRole('button', { name: /^Watch, / }), 'the board list shows nothing new').toHaveCount(0);
+    await expect(page.locator(`${ROOT(id)} [data-board-title="watch"]`), 'the ghost is no board of the world').toHaveCount(0);
   });
   await seam.stream(AGENT, toolUseId, 'artifact_publish', pieces(text.slice(cut)), 25);
   await expect.poll(async () => shownOf(await last(seen), 'phone', 'lede')?.text, { timeout: 10_000, message: 'the whole new text drawn on its board before the call' }).toBe(LEDE_NEW);
@@ -124,9 +134,9 @@ test('a publish drawn on the board it writes and a new board at its frame, as th
     const lede = slideSwapOffenders(samples, 'phone', 'lede', 'lede', LEDE_NEW);
     expect(lede.gaps.map((s) => brief(s, t0))).toEqual([]);
     expect(lede.doubles.map((s) => brief(s, t0))).toEqual([]);
-    const board = entrySwapOffenders(samples, (s) => s.ghosts.includes('watch'), (s) => s.live.watch !== null);
-    expect(board.gaps.map((s) => ({ at: s.at - t0, ghosts: s.ghosts, watch: s.live.watch })), 'a gap: the new board was not drawn').toEqual([]);
-    expect(board.doubles.map((s) => ({ at: s.at - t0, ghosts: s.ghosts, watch: s.live.watch })), 'a double: the new board drawn twice').toEqual([]);
+    const board = entrySwapOffenders(samples, watchDrawn, (s) => s.live.watch !== null);
+    expect(board.gaps.map((s) => ({ at: s.at - t0, newBoards: s.newBoards, watch: s.live.watch })), 'a gap: the new board was not drawn').toEqual([]);
+    expect(board.doubles.map((s) => ({ at: s.at - t0, newBoards: s.newBoards, watch: s.live.watch })), 'a double: the new board drawn twice').toEqual([]);
   });
 
   // the owner edits the phone; the agent then publishes from its first read: seen, refused, withdrawn whole
@@ -177,7 +187,7 @@ test('on the active board an ARMED element is never covered while the agent stre
   await expect.poll(async () => shownOf(await last(seen), 'tablet', 'head')?.text, { timeout: 10_000, message: 'the inactive board’s element drawn' }).toBe('Dashboard, live');
   await test.step('the armed element held back with its box, focus and text exact; the neighbour and the other board drawn', async () => {
     const samples = await seen();
-    const covered = samples.filter((s) => shownOf(s, 'phone', 'title') || isVeiled(s, 'phone', 'title') || s.boxes.length !== 1 || s.boxes[0]!.eid !== 'title' || s.boxes[0]!.text !== 'Launch');
+    const covered = samples.filter((s) => boxDisturbed(s, 'phone', 'title', 'Launch')); // the box alone, its text exact, nothing of the layer over it
     expect(covered.map((s) => brief(s, t0)), 'the armed element covered or its box disturbed').toEqual([]);
     expect(layerOf(samples.at(-1)!, 'phone')?.held).toContain('title');
     expect(layerOf(samples.at(-1)!, 'tablet')?.held ?? [], 'nothing held on an inactive board').toEqual([]);

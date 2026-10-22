@@ -16,8 +16,9 @@ import { launchMaws, type MawsLaunch } from './launch';
 /** One change of what the deck's (or the design's) surfaces under the recorder's root draw. */
 export interface SlideSample {
   at: number; // Date.now() in the page
-  // each slide's layer: the call writing it ('' when none), the keys it holds back, its label and the label's colour
-  layers: { slide: string; writing: string; held: string[]; label: string; color: string }[];
+  // each slide's layer: the call writing it ('' when none), the keys it holds back, its label, the label's colour and
+  // where it is drawn on the page (null while it is not shown)
+  layers: { slide: string; writing: string; held: string[]; label: string; color: string; labelBox: Box | null }[];
   // the ghost canvases present, by slide (a new board's whole ghost among them)
   ghosts: string[];
   // each element a ghost canvas draws: its slide, its key, why it is drawn (changed, added, moved) and its text
@@ -29,13 +30,22 @@ export interface SlideSample {
   thumbs: { slide: string; writing: string; drawn: boolean; isNew: boolean }[];
   entries: string[];
   newSlides: string[];
+  // a design's new boards being written (G2.4): the board, its call, its frame in world px and whether it is drawn
+  newBoards: { board: string; writing: string; frame: string; drawn: boolean }[];
   // the live text of the elements the recorder was given, by name (null while absent)
   live: Record<string, string | null>;
-  // the text boxes mounted (ARMED or EDIT): the element each is in, and its text
-  boxes: { eid: string; text: string }[];
+  // the text boxes mounted (ARMED or EDIT): the element each is in, its text, and where it is on the page
+  boxes: { eid: string; text: string; box: Box }[];
+}
+/** A rectangle on the page, in CSS px. */
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
-const ATTRIBUTES = ['data-provisional-layer', 'data-provisional-writing', 'data-provisional-held', 'data-provisional-shown', 'data-provisional-key', 'data-provisional-veiled', 'data-provisional-thumb', 'data-provisional-new-slide', 'data-slide-thumb', 'class'];
+const ATTRIBUTES = ['data-provisional-layer', 'data-provisional-writing', 'data-provisional-held', 'data-provisional-shown', 'data-provisional-key', 'data-provisional-veiled', 'data-provisional-thumb', 'data-provisional-new-slide', 'data-provisional-new-board', 'data-slide-thumb', 'class', 'hidden'];
 
 /**
  * Records, from now on, every change of what the surfaces at `rootSelector` draw of the provisional layer; answers the
@@ -61,6 +71,17 @@ export async function recordSlides(page: Page, rootSelector: string, live: Recor
         const el = root;
         if (!el) return;
         const all = (css: string) => Array.from(el.querySelectorAll<HTMLElement>(css));
+        const rect = (node: Element): Box => {
+          const r = node.getBoundingClientRect();
+          return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+        };
+        // where a node is drawn, or null while it is not shown (no box, hidden, transparent)
+        const shownBox = (node: HTMLElement | null): Box | null => {
+          if (!node) return null;
+          const style = getComputedStyle(node);
+          const box = rect(node);
+          return box.w > 0 && box.h > 0 && style.visibility !== 'hidden' && style.opacity !== '0' && style.display !== 'none' ? box : null;
+        };
         const drawn: Omit<SlideSample, 'at'> = {
           layers: all('[data-provisional-layer]').map((node) => {
             const label = node.querySelector<HTMLElement>('[data-provisional-label]');
@@ -70,6 +91,7 @@ export async function recordSlides(page: Page, rootSelector: string, live: Recor
               held: (node.getAttribute('data-provisional-held') ?? '').split(' ').filter(Boolean),
               label: label?.textContent ?? '',
               color: label ? getComputedStyle(label).backgroundColor : '',
+              labelBox: shownBox(label),
             };
           }),
           ghosts: all('section[data-provisional-ghost]').map((node) => node.getAttribute('data-slide') ?? ''),
@@ -85,8 +107,14 @@ export async function recordSlides(page: Page, rootSelector: string, live: Recor
             .filter((thumb) => thumb.writing !== '' || thumb.drawn),
           entries: all('[data-slide-thumb]').map((node) => node.getAttribute('data-slide-thumb') ?? ''),
           newSlides: all('li[data-provisional-new-slide]').map((node) => node.getAttribute('data-provisional-new-slide') ?? ''),
+          newBoards: all('[data-provisional-new-board]').map((node) => ({
+            board: node.getAttribute('data-provisional-new-board') ?? '',
+            writing: node.getAttribute('data-provisional-writing') ?? '',
+            frame: node.getAttribute('data-provisional-frame') ?? '',
+            drawn: node.querySelector('[data-provisional-thumb] section.maws-slide') !== null,
+          })),
           live: Object.fromEntries(Object.entries(named).map(([name, css]) => [name, el.querySelector(css)?.textContent ?? null])),
-          boxes: all('.deck-textbox').map((node) => ({ eid: node.closest('[data-eid]')?.getAttribute('data-eid') ?? '', text: node.textContent ?? '' })),
+          boxes: all('.deck-textbox').map((node) => ({ eid: node.closest('[data-eid]')?.getAttribute('data-eid') ?? '', text: node.textContent ?? '', box: rect(node) })),
         };
         const key = JSON.stringify(drawn);
         if (key === last) return;
@@ -109,9 +137,27 @@ export const layerOf = (sample: SlideSample, slide: string) => sample.layers.fin
 /** The ghost's drawing of element `key` of `slide` in a sample. */
 export const shownOf = (sample: SlideSample, slide: string, key: string) => sample.shown.find((node) => node.slide === slide && node.key === key);
 export const isVeiled = (sample: SlideSample, slide: string, key: string) => sample.veiled.some((node) => node.slide === slide && node.key === key);
-/** Nothing of any call's layer is drawn: no layer writing, no ghost, no veil, no ringed thumbnail, no new slide's entry. */
+/** Nothing of any call's layer is drawn: no layer writing, no ghost, no veil, no ringed thumbnail, no new slide or board. */
 export const nothingDrawn = (sample: SlideSample) =>
-  sample.layers.every((layer) => layer.writing === '') && sample.ghosts.length === 0 && sample.shown.length === 0 && sample.veiled.length === 0 && sample.thumbs.length === 0 && sample.newSlides.length === 0;
+  sample.layers.every((layer) => layer.writing === '') &&
+  sample.ghosts.length === 0 &&
+  sample.shown.length === 0 &&
+  sample.veiled.length === 0 &&
+  sample.thumbs.length === 0 &&
+  sample.newSlides.length === 0 &&
+  sample.newBoards.length === 0;
+
+const meets = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+/**
+ * Rule 4 on the canvas: whether anything of the layer covers a text box in a sample (an element of `slide`'s the box is
+ * in drawn or veiled, or a shown label over the box), or the boxes differ from the one expected (`eid` holding `text`).
+ */
+export function boxDisturbed(sample: SlideSample, slide: string, eid: string, text: string): boolean {
+  if (sample.boxes.length !== 1 || sample.boxes[0]!.eid !== eid || sample.boxes[0]!.text !== text) return true;
+  if (shownOf(sample, slide, eid) || isVeiled(sample, slide, eid)) return true;
+  const box = sample.boxes[0]!.box;
+  return sample.layers.some((layer) => layer.labelBox !== null && meets(layer.labelBox, box));
+}
 
 /**
  * The swap of element `key` of `slide` judged over the samples from the first that drew it in the ghost: no sample in
@@ -139,7 +185,7 @@ export function entrySwapOffenders(samples: SlideSample[], ghost: (s: SlideSampl
 }
 
 /** A sample cut to what a failure message needs. */
-export const brief = (s: SlideSample, t0: number) => ({ at: s.at - t0, layers: s.layers, shown: s.shown, veiled: s.veiled, live: s.live, boxes: s.boxes });
+export const brief = (s: SlideSample, t0: number) => ({ at: s.at - t0, layers: s.layers, shown: s.shown, veiled: s.veiled, newBoards: s.newBoards, live: s.live, boxes: s.boxes });
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 export async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {

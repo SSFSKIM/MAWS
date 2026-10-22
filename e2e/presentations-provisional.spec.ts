@@ -24,7 +24,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { pieces } from './support/document-provisional';
 import { HANGEUL, Ime, startTrace, stopTrace } from './support/ime';
-import { brief, collapseChrome, isVeiled, layerOf, nothingDrawn, ok, openFromLibrary, recordSlides, revisionOf, shownOf, slideSwapOffenders, startWithSeam, entrySwapOffenders, type SeamApp, type SlideSample } from './support/slides-provisional';
+import { boxDisturbed, brief, collapseChrome, isVeiled, layerOf, nothingDrawn, ok, openFromLibrary, recordSlides, revisionOf, shownOf, slideSwapOffenders, startWithSeam, entrySwapOffenders, type SeamApp, type SlideSample } from './support/slides-provisional';
 
 interface Seam {
   __maws_presentations: {
@@ -278,8 +278,8 @@ test('an ARMED box and an EDIT composition are never covered while the agent str
   const { tab, at } = await openDeck(app, id);
   const seen = await recordSlides(page, ROOT(id), LIVE);
   const box = tab.locator(`${LIVE_NODE('a')} .deck-textbox`);
-  const untouched = (samples: SlideSample[], text: string) =>
-    samples.filter((s) => shownOf(s, 's1', 'a') || isVeiled(s, 's1', 'a') || s.boxes.length !== 1 || s.boxes[0]!.eid !== 'a' || s.boxes[0]!.text !== text);
+  // rule 4: the box alone, holding the human's text, with nothing of the layer over it (its element, or the label)
+  const untouched = (samples: SlideSample[], text: string) => samples.filter((s) => boxDisturbed(s, 's1', 'a', text));
 
   // ARMED: one text element selected on the stage, its box mounted and focused
   await press(page, id, 'a');
