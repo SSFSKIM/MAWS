@@ -9,7 +9,6 @@
     "allowImportingTsExtensions": true
   },
   "include": ["test/**/*.ts", "local/**/*.ts", "fake-machine/**/*.ts", "deploy/**/*.ts","vitest.config.ts", "src/protocol/**/*.ts", "src/identity/access.ts", "src/push/**/*.ts", "src/drain.ts"],
-  // The suites' Worker entry runs in workerd, not Node, and machine-end.test.ts runs the Worker's own `Machine` object
-  // under Node: tsconfig.json types both with the Worker.
-  "exclude": ["test/support/worker-under-test.ts", "test/machine-end.test.ts"]
+  // The workerd entry and Node suites importing Worker objects/storage need the Worker types in tsconfig.json.
+  "exclude": ["test/support/worker-under-test.ts", "test/machine-end.test.ts", "test/op-store.test.ts"]
 }

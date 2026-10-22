@@ -1607,6 +1607,23 @@ async function gridReached(grid: GridClient, project: string, from: number, coun
 
 
 describe('op reconnect replay', () => {
+  it('expires idle receipts from SQLite on the alarm alone and schedules their earliest expiry after leases close', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const body = { rpc: 'idle-receipt', op: 'command', phase: 'end', id: 'c', name: 'color', args: 'red', readback: { how: 'row', text: 'Session color set to: red' } };
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'op', body) }]);
+    await hub.lease(project, { op: 'closed', machine: m.name, generation: m.generation });
+    const idle = await hub.receiptAlarm(project);
+    expect(idle.before).toBe(1);
+    expect(idle.rows).toHaveLength(1);
+    expect(idle.alarm).toBe(idle.rows[0].updated + 24 * 3600 * 1000);
+    const elapsed = await hub.receiptAlarm(project, 24 * 3600 * 1000 + 1);
+    expect(elapsed.before).toBe(1);
+    expect(elapsed.rows).toEqual([]); // raw SQL, not ops(), proves the alarm purged it
+    expect(elapsed.alarm).toBeNull();
+    await m.close();
+  });
+
   it('replays the end missed while a browser was away, once, despite duplicate ends and late starts; isolates sessions and machines', async () => {
     const project = newProject();
     const m = await machine(project);

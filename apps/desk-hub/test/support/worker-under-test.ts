@@ -68,6 +68,7 @@ import {
   PROJECT_QUEUES_PATH,
   PROJECT_SEND_PATH,
   PROJECT_VISIBLE_PATH,
+  PROJECT_RECEIPTS_PATH,
   PROJECTS_PATH,
   REVOKE_FAULT_PATH,
   REVOKE_HELD_PATH,
@@ -398,6 +399,15 @@ export class Project extends DeployedProject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === PROJECT_RECEIPTS_PATH) {
+      const { ageByMs } = await request.json() as { ageByMs: number };
+      const before = this.ctx.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM op_outcomes').one().count;
+      // Model the elapsed day without any browser/machine message or ops() read that could lazy-clean the table.
+      this.ctx.storage.sql.exec('UPDATE op_outcomes SET updated = updated - ?', ageByMs);
+      await this.ctx.storage.deleteAlarm();
+      await this.alarm();
+      return Response.json({ before, rows: this.ctx.storage.sql.exec('SELECT rpc, updated FROM op_outcomes').toArray(), alarm: await this.ctx.storage.getAlarm() });
+    }
     if (url.pathname === PROJECT_VISIBLE_PATH) {
       this.ctx.storage.kv.put('visible-window', ((await request.json()) as { ms: number }).ms);
       return new Response('windowed');

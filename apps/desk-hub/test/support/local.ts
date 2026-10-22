@@ -39,6 +39,7 @@ import {
   PROJECT_QUEUES_PATH,
   PROJECT_SEND_PATH,
   PROJECT_VISIBLE_PATH,
+  PROJECT_RECEIPTS_PATH,
   PROJECTS_PATH,
   SEND_FAULT_PATH,
   REVOKE_FAULT_PATH,
@@ -243,6 +244,10 @@ export async function startLocalHub() {
     /** Rewrites the org's stored record, as an object still on a deploy's previous version would have made it. */
     async rewriteOrgRow(row: { id: string; name: string }) {
       await seam('REGISTRY', ORG, ORG_ROW_PATH, row);
+    },
+    /** Consume an alarm as workerd does, optionally ageing receipts to model time passing; inspect SQL directly. */
+    async receiptAlarm(project: string, ageByMs = 0): Promise<{ before: number; rows: Array<{ rpc: string; updated: number }>; alarm: number | null }> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_RECEIPTS_PATH, { ageByMs }));
     },
     /** How many calls machines made to a project's object, and how many frames they carried. */
     async projectCalls(project: string): Promise<{ calls: number; frames: number }> {

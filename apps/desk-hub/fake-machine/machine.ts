@@ -272,7 +272,7 @@ export class FakeMachine {
   /** The machine's DX4 `machine` presence. */
   presence(): MachinePresence {
     const checkouts = this.options.checkouts ?? [...new Set([...this.sessions.values()].map((s) => s.cwd).filter((c): c is string => c !== null))].map((path) => ({ path, branch: 'main' }));
-    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: producerAtLeast(this.producer, 'm1') ? M1_SMINOS : M0_SMINOS, M1_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
+    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: producerAtLeast(this.producer, 'm1') ? M1_SMINOS : M0_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
     return { online: true, policy: { read_only: this.options.readOnly === true, ceiling: this.options.ceiling ?? 'default' }, checkouts, ...desk };
   }
 

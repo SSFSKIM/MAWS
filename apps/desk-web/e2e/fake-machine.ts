@@ -94,7 +94,7 @@ export class FakeMachineReplay {
 
   /** What the machine's own presence carries of the desk's controls (an M0 producer's), for the suite's `setMachines`. */
   get machineDesk(): { desk?: DeskCapabilities } {
-    return producerAtLeast(this.producer, 'm0') ? { desk: { sminos: producerAtLeast(this.producer, 'm1') ? M1_SMINOS : M0_SMINOS, M1_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
+    return producerAtLeast(this.producer, 'm0') ? { desk: { sminos: producerAtLeast(this.producer, 'm1') ? M1_SMINOS : M0_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
   }
 
   /**

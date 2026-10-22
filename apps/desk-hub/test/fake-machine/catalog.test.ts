@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { Commands, loadRecording, loadRoutes, SessionDepth, SESSION_VIEW } from '../../fake-machine';
+import { FakeMachine, Commands, loadRecording, loadRoutes, SessionDepth, SESSION_VIEW } from '../../fake-machine';
 import type { Catalog, SessionMessage } from '../../src/protocol/session';
 import fixture from '../../fake-machine/dx4/routes-2.1.307.json';
 const where = { project: 'p', machine: 'mini' };
 describe('M1 catalog producer', () => {
+  it('advertises only the declared machine desk capability fields', () => {
+    const machine = new FakeMachine({ ...where, hub: 'http://unused', credentials: { clientId: 'fake', clientSecret: 'fake' }, orgKey: new Uint8Array(32), producer: 'm1' });
+    expect(Object.keys(machine.presence().desk!).sort()).toEqual(['reads', 'rpcs', 'sminos']);
+    expect(machine.presence().desk?.sminos).toBe('1.8.0');
+    expect(machine.presence().desk?.rpcs).toContain('command');
+  });
+
   it('pushes its recorded catalog only on main snapshots, updates on changes and answers read catalog', async () => {
     const frames: SessionMessage[] = [];
     const recording = loadRecording(SESSION_VIEW);

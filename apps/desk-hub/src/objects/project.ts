@@ -326,10 +326,11 @@ export class Project extends DurableObject<Env> {
     this.reportSummary();
   }
 
-  /** Leases that lapsed with no close, and background requests whose window closed. */
+  /** Leases that lapsed, request windows that closed, and command receipts past retention, without new traffic. */
   async alarm(): Promise<void> {
     this.sweepLeases();
     if (this.plane.flipDeadlines(Date.now()) > 0) this.pendingChanged();
+    this.plane.expireOps(Date.now());
     await this.schedule();
   }
 
@@ -476,7 +477,10 @@ export class Project extends DurableObject<Env> {
     if (kind === 'settled') return this.settled(ctx, kept as SessionMessage<'settled'>);
     if (kind === 'delivery') return this.delivery(ctx, kept as SessionMessage<'delivery'>);
     if (!isObject(m.body)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: `${kind}'s body is an object` });
-    if (kind === 'op') this.plane.putOp(kept as SessionMessage<'op'>, Date.now());
+    if (kind === 'op') {
+      this.plane.putOp(kept as SessionMessage<'op'>, Date.now());
+      void this.schedule();
+    }
     this.broadcast({ t: 'session', message: kept });
   }
 
@@ -902,10 +906,10 @@ export class Project extends DurableObject<Env> {
     return lease !== undefined && lease.generation === route.generation && this.isFresh(lease);
   }
 
-  /** The alarm at the next lease expiry or request deadline. */
+  /** The earliest lease expiry, request deadline or command receipt expiry. */
   private async schedule(): Promise<void> {
     const now = Date.now();
-    const next = [...this.plane.leases().filter((l) => l.online).map((l) => l.expires), this.plane.nextDeadline(now) ?? Infinity];
+    const next = [...this.plane.leases().filter((l) => l.online).map((l) => l.expires), this.plane.nextDeadline(now) ?? Infinity, this.plane.nextOpExpiry() ?? Infinity];
     const at = Math.max(Math.min(...next), now + 50);
     if (at === Infinity) return;
     const current = await this.ctx.storage.getAlarm();

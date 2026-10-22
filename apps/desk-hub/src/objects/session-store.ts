@@ -300,8 +300,18 @@ export class SessionStore {
       .map((row) => JSON.parse(row.message) as SessionMessage<'op'>);
   }
 
-  private trimOps(now: number): void {
+  /** The alarm owns no-traffic expiry; reads/writes also prune as a recovery path. */
+  expireOps(now: number): void {
     this.sql.exec('DELETE FROM op_outcomes WHERE updated <= ?', now - RPC_RECORD_MS);
+  }
+
+  nextOpExpiry(): number | null {
+    const oldest = this.sql.exec<{ oldest: number | null }>('SELECT MIN(updated) AS oldest FROM op_outcomes').one().oldest;
+    return oldest === null ? null : oldest + RPC_RECORD_MS;
+  }
+
+  private trimOps(now: number): void {
+    this.expireOps(now);
     // Both limits apply to the newest suffix, including UTF-8 bytes (not JS string length).
     const rows = this.sql.exec<{ rowid: number; bytes: number }>('SELECT rowid, bytes FROM op_outcomes ORDER BY updated DESC, rowid DESC').toArray();
     let bytes = 0;
