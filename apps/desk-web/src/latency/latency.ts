@@ -148,8 +148,11 @@ export class LatencyRecorder {
   private readonly calls = new Map<string, number>();
   /** The RPCs sent and not answered yet, by nonce: the path each is timed on and when it was sent. */
   private readonly rpcs = new Map<string, { path: LatencyPath; sent: number }>();
-  /** The commands sent from this tab, by their RPC's nonce: when, and whether the session was mid-turn then. */
-  private readonly commands = new Map<string, { sent: number; busy: boolean; queued: boolean }>();
+  /**
+   * The commands sent from this tab, by their RPC's nonce: when, whether the session was mid-turn then, and which of
+   * their moments (queued, ended, drawn) are timed already — they may come in any order.
+   */
+  private readonly commands = new Map<string, { sent: number; busy: boolean; queued: boolean; ended: boolean; drawn: boolean }>();
 
   constructor(private readonly log: (line: string) => void = (line) => console.info(line)) {}
 
@@ -265,25 +268,42 @@ export class LatencyRecorder {
 
   /** A command RPC sent, by its nonce; `busy`: a turn was running, so its end waits for the turn. */
   commandSent(nonce: string, busy: boolean): void {
-    this.commands.set(nonce, { sent: now(), busy, queued: false });
+    this.commands.set(nonce, { sent: now(), busy, queued: false, ended: false, drawn: false });
     this.forgetOldest(this.commands);
   }
 
-  /** Its RPC answered `queued` (the hub's `rpc-state` done). */
+  /** Its RPC answered `queued` (the hub's `rpc-state` done), which may come after its `op` end: each moment once. */
   commandQueued(nonce: string): void {
     const command = this.commands.get(nonce);
     if (!command || command.queued) return;
     command.queued = true;
     this.record('op.queued', now() - command.sent, nonce);
+    this.settleCommand(nonce, command);
   }
 
-  /** Its `op` end came in: ran (kept apart when sent mid-turn), and its readback drawn at the next frame. */
+  /** Its `op` end came in: ran, kept apart when sent mid-turn. */
   commandEnded(nonce: string): void {
     const command = this.commands.get(nonce);
-    if (!command) return;
-    this.commands.delete(nonce);
+    if (!command || command.ended) return;
+    command.ended = true;
     this.record(command.busy ? 'op.ran.busy' : 'op.ran', now() - command.sent, nonce);
+  }
+
+  /**
+   * Its outcome was committed to the page (`CommandStatus`): the readback is timed at the next frame. An outcome no
+   * view draws (its status line taken by a later command, the session left) gives no sample.
+   */
+  commandDrawn(nonce: string): void {
+    const command = this.commands.get(nonce);
+    if (!command || command.drawn) return;
+    command.drawn = true;
     this.drawn('op.readback', command.sent, false, nonce);
+    this.settleCommand(nonce, command);
+  }
+
+  /** A command whose every moment is timed is forgotten; one never drawn ages out with the oldest. */
+  private settleCommand(nonce: string, command: { queued: boolean; drawn: boolean }): void {
+    if (command.queued && command.drawn) this.commands.delete(nonce);
   }
 
   // A raised request's anchor.

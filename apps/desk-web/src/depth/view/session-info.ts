@@ -42,3 +42,8 @@ export function statusLines(status: DepthTranscriptState['status'], can: Capabil
   const repo = answer.repo ? [answer.repo.remote, answer.repo.branch].filter(Boolean).join(' · ') : '';
   return { engine: base ? `${version} (base ${base})` : version, root: answer.root, repo: repo || 'none', surfaces: answer.surfaces.join(', ') || 'none' };
 }
+
+/** A Refresh that failed while an earlier answer is kept: said beside the lines, which stay that answer's. */
+export function refreshError(status: DepthTranscriptState['status']): string | null {
+  return status?.answer && status.error ? `Refresh failed (${status.error}): showing the last answer` : null;
+}

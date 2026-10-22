@@ -2,14 +2,15 @@
 // (DC5's session kind), the model of its latest response (the transcript's), its context use and cost (DX4 `usage`
 // on the main subscription; `session-info.ts`), and the engine's version, release base, repository root and remote, and
 // surfaces from `read status` (the desk control surface spec's M0) — read when the tab opens and on Refresh, where the
-// session's plugin can answer it; where it cannot, the tab says so and what it would need.
+// session's plugin can answer it; where it cannot, the tab says so and what it would need. A Refresh that fails keeps
+// the last answer drawn and says so beside the button.
 import { useEffect, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import { capabilities, kindOf, type SessionKind } from '../../conversation/capabilities';
 import type { DeskSession } from '../../shell/sessions';
 import { useConnected } from '../../views/conversation/desk-context';
 import type { DepthTranscriptState, DeskTranscript } from '../source/desk-transcript';
-import { contextLine, costLine, statusLines } from './session-info';
+import { contextLine, costLine, refreshError, statusLines } from './session-info';
 
 const KIND: Record<SessionKind, string> = {
   bridged: 'Running, bridged',
@@ -27,6 +28,7 @@ export function SessionInfo({ session, state, controller }: { session: DeskSessi
     if (can.can) controller.requestStatus();
   }, [controller, can.can]);
   const lines = statusLines(status, can, kindOf(session) === 'bridged');
+  const failed = refreshError(status);
   return (
     <dl data-testid="depth-info" className="m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 px-4 py-3 text-ui-sm">
       <Item label="Machine" value={session.machineOnline === false ? `${session.machine} (offline)` : session.machine} id="machine" />
@@ -41,10 +43,15 @@ export function SessionInfo({ session, state, controller }: { session: DeskSessi
       <Item label="Repository" value={lines.repo} id="repo" mono />
       <Item label="Surfaces" value={lines.surfaces} id="surfaces" />
       {can.can ? (
-        <dd className="col-start-2 m-0">
+        <dd className="col-start-2 m-0 flex flex-wrap items-center gap-2">
           <button type="button" className="rounded-sm border border-border-strong px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover disabled:cursor-not-allowed disabled:text-fg-faint" data-testid="depth-info-refresh" disabled={status?.pending} onClick={() => controller.requestStatus()}>
             Refresh
           </button>
+          {failed && (
+            <span className="text-warning" role="status" data-testid="depth-info-status-error">
+              {failed}
+            </span>
+          )}
         </dd>
       ) : (
         can.reason && (

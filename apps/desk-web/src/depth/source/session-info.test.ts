@@ -153,6 +153,22 @@ describe("the engine's status, read on the main subscription (the control surfac
     expect(status()).toEqual({ pending: false, answer: null, error: 'no read status' });
   });
 
+  it('keeps the last answer when a Refresh fails, with the failure beside it, until a read succeeds', async () => {
+    plane.send('snapshot', snapshotAt(script, 4));
+    controller.requestStatus();
+    plane.current.reads[0].resolve(STATUS);
+    await settle();
+    controller.requestStatus();
+    plane.current.reads[1].reject(new ReadError('timeout', 'no answer within 15 s'));
+    await settle();
+    expect(status()).toEqual({ pending: false, answer: STATUS, error: 'no answer within 15 s' });
+    controller.requestStatus();
+    expect(status()).toEqual({ pending: true, answer: STATUS, error: null });
+    plane.current.reads[2].resolve(STATUS);
+    await settle();
+    expect(status()).toEqual({ pending: false, answer: STATUS, error: null });
+  });
+
   it('takes only the latest request’s answer (a Refresh over one on its way)', async () => {
     plane.send('snapshot', snapshotAt(script, 4));
     controller.requestStatus();

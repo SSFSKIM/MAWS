@@ -1,6 +1,6 @@
 import type { StatusRead } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
-import { contextLine, costLine, statusLines } from './session-info';
+import { contextLine, costLine, refreshError, statusLines } from './session-info';
 
 describe('context use and cost, as session info draws them', () => {
   it('reads a full usage', () => {
@@ -38,6 +38,15 @@ describe("the engine's status lines, from `read status`", () => {
     expect(statusLines(null, can, true).engine).toBe('…');
     expect(statusLines({ pending: true, answer: null, error: null }, can, true).root).toBe('…');
     expect(statusLines({ pending: false, answer: null, error: 'no read status' }, can, true).surfaces).toBe('unavailable (no read status)');
+    expect(refreshError({ pending: false, answer: null, error: 'no read status' })).toBeNull(); // said in the fields
+  });
+
+  it('keeps the last answer through a failed Refresh, and says beside it that it is the last one', () => {
+    const failed = { pending: false, answer: STATUS, error: 'no answer within 15 s' };
+    expect(statusLines(failed, can, true).engine).toBe('2.1.307 (base 2.1.300)');
+    expect(refreshError(failed)).toBe('Refresh failed (no answer within 15 s): showing the last answer');
+    expect(refreshError({ pending: false, answer: STATUS, error: null })).toBeNull();
+    expect(refreshError(null)).toBeNull();
   });
 
   it("says a bridged session's plugin lacks it and the version it would need, never a spinner; any other session's reason", () => {

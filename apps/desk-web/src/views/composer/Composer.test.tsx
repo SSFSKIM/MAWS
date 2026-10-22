@@ -4,6 +4,7 @@
 // session's composer is a command where the session can take one (the desk control surface's M0), and its status.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { latency } from '../../latency/latency';
 import type { ProjectConnection } from '../../project/connection';
 import type { DeskSession } from '../../shell/sessions';
 import { noteModel } from '../../state/models';
@@ -210,6 +211,17 @@ describe('CommandStatus', () => {
     const refused = draw({ rpcs: { n1: { nonce: 'n1', rpc: rpc({ name: 'usage' }), state: 'failed', outcome: { state: 'failed', error: { code: 'failed', message: "panel: opens a panel in the terminal; it would hold the session's queue" } } } } });
     expect(refused.getAttribute('data-command-state')).toBe('refused');
     expect(refused.textContent).toBe("/usage: opens a panel in the terminal; it would hold the session's queue");
+  });
+
+  it("marks its readback drawn (latency's op.readback) once it draws the op's end, and not before", () => {
+    const drawn = vi.spyOn(latency, 'commandDrawn');
+    draw({ rpcs: { n1: { ...queued, nonce: 'n1', rpc: rpc({ name: 'rename', args: 'x' }) } }, ops: { n1: { op: 'command', phase: 'start', session: S1, body: {} } } });
+    expect(drawn).not.toHaveBeenCalled();
+    cleanup();
+    const end = { op: 'command', phase: 'end', session: S1, body: { rpc: 'n1', op: 'command', phase: 'end', id: 'c1', name: 'rename', args: 'x', settled: { ok: true }, readback: { how: 'row', text: 'Session renamed to: x' } } };
+    draw({ rpcs: { n1: { ...queued, nonce: 'n1', rpc: rpc({ name: 'rename', args: 'x' }) } }, ops: { n1: end } });
+    expect(drawn).toHaveBeenCalledExactlyOnceWith('n1');
+    drawn.mockRestore();
   });
 
   it("leaves the RPC's own states to RpcStatus while it is on its way", () => {
