@@ -6,12 +6,15 @@
 // re-subscribed after any discontinuity. The hops of #57's instrument it sees (`latency/latency.ts`: a `human` to its
 // acknowledgement and its delivery, the reconnects) are recorded as their frames arrive.
 import {
+  BROWSER_SET_LIMIT,
   newNonce,
+  utf8Length,
   type HumanEvent,
   type PendingRequest,
   type ProjectDown,
   type ProjectUp,
   type Rpc,
+  type RpcOutcome,
   type SessionBodies,
   type SessionMessage,
   type LogEvent,
@@ -34,6 +37,14 @@ const rowsLimit = (limit: number) => Math.min(1000, Math.max(1, Math.trunc(limit
 /** DX3's `output` takes a `tail` from 1 to 524288 bytes, refused `bad-shape` otherwise, as `rows`'s `limit` is. */
 const outputTail = (tail: number) => Math.min(OUTPUT_TAIL_MAX, Math.max(1, Math.trunc(tail) || 1));
 
+/**
+ * A frame the hub would refuse unread: its parts would join past BROWSER_SET_LIMIT (DX3), so the refusal could name no
+ * request the frame carried, and the request would wait on. This client ends such a request itself instead, as the hub
+ * ends one too large.
+ */
+const unread = (frame: ProjectUp) => utf8Length(JSON.stringify(frame)) > BROWSER_SET_LIMIT;
+const UNREAD_MESSAGE = `not sent: past the ${BROWSER_SET_LIMIT / 2 ** 20} MiB the hub reads from a browser`;
+
 export type { ConnectionStatus } from './socket';
 
 export type Welcome = Extract<ProjectDown, { t: 'welcome' }>;
@@ -41,10 +52,13 @@ export type RpcStateFrame = Extract<ProjectDown, { t: 'rpc-state' }>;
 export type HumanAck = { offset: number; writer: string; seq: number };
 export type HubRefusal = Extract<ProjectDown, { t: 'refused' }>['refusal'];
 
-/** A web `human` the hub refused (its `refused` named the send's nonce): it is not stored and is never sent again. */
+/**
+ * A web `human` the hub refused (its `refused` named the send's nonce), or one too large to send (`too-large`, refused
+ * here): it is not stored and is never sent again.
+ */
 export class HumanRefused extends Error {
-  constructor(readonly refusal: HubRefusal) {
-    super(`the hub refused the message: ${refusal.reason}${refusal.message ? `, ${refusal.message}` : ''}`);
+  constructor(readonly refusal: Pick<HubRefusal, 'reason' | 'message'>) {
+    super(`the message was refused: ${refusal.reason}${refusal.message ? `, ${refusal.message}` : ''}`);
   }
 }
 
@@ -135,9 +149,11 @@ export class ProjectClient implements SessionPlane {
 
   /**
    * Sends a sealed web `human`. Resolves when the hub has stored it (`human-ack`), sending it again after each reconnect
-   * until then; rejects with `HumanRefused` when the hub refuses it, after which it is never sent again.
+   * until then; rejects with `HumanRefused` when the hub refuses it, after which it is never sent again, and at once,
+   * sending nothing, when the hub would refuse it unread.
    */
   sendHuman(event: HumanEvent): Promise<HumanAck> {
+    if (unread({ t: 'human', event })) return Promise.reject(new HumanRefused({ reason: 'too-large', message: UNREAD_MESSAGE }));
     return new Promise((resolve, reject) => {
       this.humans.set(event.mac.nonce, { event, resolve, reject });
       latency.humanSent(event.mac.nonce, event.wake === true);
@@ -161,9 +177,16 @@ export class ProjectClient implements SessionPlane {
    * and nothing kept, when the socket is not welcomed: the hub queues nothing for an absent party (it fails an offline
    * machine's at once), and an RPC is a decision for the moment it was made — an Interrupt held until a later welcome
    * could stop a later turn. Kept only once the socket took it: a connection already closing (its close not yet
-   * handled, so the welcome still stands) takes nothing, and the RPC is refused like any other.
+   * handled, so the welcome still stands) takes nothing, and the RPC is refused like any other. One the hub would refuse
+   * unread is not sent and fails at once, as the hub fails a malformed one (`rpc-state` `failed` `bad-shape`): true, the
+   * RPC settled.
    */
   sendRpc(rpc: Rpc): boolean {
+    if (unread({ t: 'rpc', rpc })) {
+      const outcome: RpcOutcome = { state: 'failed', error: { code: 'bad-shape', message: UNREAD_MESSAGE } };
+      for (const listener of this.rpcListeners) listener({ t: 'rpc-state', nonce: rpc.nonce, state: 'failed', outcome });
+      return true;
+    }
     if (!this.welcomed || !this.socket.send({ t: 'rpc', rpc })) return false;
     this.rpcs.set(rpc.nonce, rpc);
     return true;
