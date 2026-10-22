@@ -80,6 +80,38 @@ describe('the frame work in a marked window', () => {
     expect(frameWork(events, 'start', 'end').frames.map((f) => [f.workMs, f.active])).toEqual([[40, true], [0, false], [0, false]]);
   });
 
+  it('reads a task’s activity over its whole length, past the end mark', () => {
+    // 8 ms frames; a 20 ms task at 9–29 ms whose only paint (26–27 ms) lies after the end mark at 25 ms
+    const events = [
+      mark('start', 0),
+      begin(0),
+      begin(8_000),
+      begin(16_000),
+      begin(24_000),
+      task(1_000, 1_000),
+      slice('EventDispatch', 1_100, 500, 'wheel'),
+      task(9_000, 20_000),
+      slice('Paint', 26_000, 1_000),
+      mark('end', 25_000),
+    ];
+    const work = frameWork(events, 'start', 'end');
+    expect(work.frames.map((f) => [f.workMs, f.active])).toEqual([[1, true], [20, true], [0, false]]);
+    expect(work.active).toMatchObject({ n: 2, p95: 20, max: 20 });
+  });
+
+  it('reads a task’s activity over its whole length, before the start mark', () => {
+    // a task begun at 1 ms, before the start mark at 5 ms, running into the first frame; its only wheel dispatch ends before the mark
+    const events = [mark('start', 5_000), task(1_000, 10_000), slice('EventDispatch', 2_000, 1_000, 'wheel'), begin(6_000), begin(14_000), begin(22_000), mark('end', 22_000)];
+    const work = frameWork(events, 'start', 'end');
+    expect(work.frames.map((f) => [f.workMs, f.active])).toEqual([[10, true], [0, false]]);
+    expect(work.inputs).toBe(0); // inputs stay those dispatched in the window
+  });
+
+  it('keeps a task that begins the instant the previous one ends apart from it', () => {
+    const events = [mark('start', 0), begin(0), begin(16_000), begin(32_000), task(10_000, 6_000), slice('Paint', 10_500, 500), task(16_000, 3_000), slice('Paint', 16_500, 500), mark('end', 32_000)];
+    expect(frameWork(events, 'start', 'end').frames.map((f) => [f.workMs, f.active])).toEqual([[6, true], [3, true]]);
+  });
+
   it('gives a task begun before the first frame and running into it to that frame, and none to a task outside the frames', () => {
     const events = [
       mark('start', 0),
