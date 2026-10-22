@@ -1,0 +1,1 @@
+{"name": "holder-probe", "owner": {"name": "Probe"}, "plugins": [{"name": "cmdprobe", "source": "./cmdprobe", "description": "Isolated measurement plugin"}]}

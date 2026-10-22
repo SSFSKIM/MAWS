@@ -24,6 +24,8 @@
 | [bridge-perf-bench.md](bridge-perf-bench.md) | bridge mod 구간과 세션 열기 경로의 측정(sminos 1.1.1, Claude Code 2.1.304). 스크립트는 `bridge-bench/` |
 | [mod-command-run-probe.md](mod-command-run-probe.md) | slash 명령을 mod(`$.command.run`), `control.sock` `reply`, PTY 키로 돌린 결과(2.1.307) |
 | [background-work-handoff.md](background-work-handoff.md) | 세션을 옮길 때 백그라운드 셸·서브에이전트·Monitor·MCP 작업·cron이 어떻게 되는가, headless가 인계를 받는가(2.1.307) |
+| [holder-tui-spike.md](holder-tui-spike.md) | 우리 PTY holder 아래의 plain Claude: 관리자 SIGKILL 생존, 다시 그리기, 두 클라이언트, Ctrl+Z, 엔진 PTY host 설계 발췌(2.1.307–2.1.308) |
+| [session-holder-design.ko.md](session-holder-design.ko.md) | 설계 초안: 터미널 세션을 holder가 쥐는 구조와 SDK 경로, "full-control 모드로 이어 가기" |
 
 desk 설계 문서(spec)는 MAWS `48fec4bd1`의 `docs/doperpowers/specs/2026-10-15-desk-design.md`다.
 
@@ -427,6 +429,12 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
     `adopt.json`을 직접 쓰는 것은 권하지 않는다.
   - **경로 B 세션은 프로세스를 holder가 쥐고 있는 한 이 문제가 없다.** 일은 같은 프로세스 안에서 계속된다.
     그래서 Query를 재시작해도 프로세스는 건드리지 않는 holder 분리가 중요하다.
+  - **옮기지 않는 길 (설계 초안, 2026-10-22).** 사람이 치는 `claude`가 처음부터 우리 PTY holder 안에서 돌면
+    옮길 일이 없다. 사람의 터미널은 그 PTY에 붙은 클라이언트이고, 웹은 같은 프로세스에 bridge mod와 터미널
+    창으로 붙는다. 백그라운드 일은 프로세스가 그대로이므로 모두 남는다. 설계는
+    [session-holder-design.ko.md](session-holder-design.ko.md),
+    사실 근거는 [holder-tui-spike.md](holder-tui-spike.md)다.
+    `/background` 절차는 holder 밖에서 시작된 세션에만 남는다.
 - **웹에서 새로 띄우는 세션 (권고).** MAWS 데몬이 도는 기계에서는 경로 B로 띄운다. MAWS가 기능의 기준이고,
   그 기능을 GUI로 다 주는 것은 경로 B뿐이다. MAWS 데몬이 없는 기계(Linux, devcloud)나 사람이 "터미널에서
   쥘 세션"을 고른 경우에는 경로 A(`claude --bg`)로 띄운다.
