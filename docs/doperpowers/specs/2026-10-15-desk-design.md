@@ -2520,7 +2520,13 @@ sets are bounded, one assembler per machine stream and per browser socket: at mo
 its sets, at most 64 sets open, an `id` of at most 128 characters (the hub's own are 22, a 128-bit nonce), and a set
 waiting more than 60 s for its other parts is dropped (a late part of it starts a set of its own). A part that would
 pass the byte budget or open a 65th set is refused `too-large` (a machine's POST `413`, a browser's `refused`) and its
-set dropped; a longer `id` is `bad-shape` [2026-10-15, DC3's panel wave].
+set dropped; a longer `id` is `bad-shape` [2026-10-15, DC3's panel wave]. One browser set is bounded too: it joins to
+at most 4 MiB (`BROWSER_SET_LIMIT`: four times the largest frame a browser sends, a `human` or an RPC, each at most
+1 MiB) in at most 9 parts (`BROWSER_SET_PARTS`: what a frame of 4 MiB takes cut at 1 MiB, a slice at most doubling as a
+part escapes it). A part whose `count` is larger is refused `too-large` before anything of its set is held, and one
+past which its set would join to more is refused `too-large` and its set dropped. Such a refusal names no request,
+since the frame was never read, so a browser sends no frame past the bound: the web ends a `human` or an RPC that large
+itself, as the hub ends one too large [2026-10-21, before the org admits members other than its owner].
 
 **Measured (M1's probe on the owner's account, 2026-10-15):** an SSE stream held by a Durable Object for 11 minutes
 with 15-second heartbeats, never evicted; a second stream idle 150 seconds between heartbeats also held, so the
@@ -3547,7 +3553,8 @@ daemon's digest check finds the request already settled (the common case). The h
 (written to the machine's stream, no result yet) and `uncertain` (the machine's lease lapsed, or its stream closed,
 after forwarding and before a result).
 
-**The hub's record** (built at M3; DX3 says what the browser sees). The hub checks an RPC's shape, its `member`
+**The hub's record** (built at M3; DX3 says what the browser sees). The hub checks an RPC's shape (at most 1 MiB as
+canonical JSON, as a DX1 event is, else `bad-shape` [2026-10-21]), its `member`
 against the signed-in member, its age (60 seconds by the hub's clock), and its machine's lease, in that order, and
 fails it at once on the first that does not hold, with no record and nothing queued. An RPC that passes is recorded
 by its nonce (`forwarded`, with the stream generation it went to) and written to that stream. It becomes `done` or

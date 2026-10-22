@@ -49,7 +49,8 @@ function split(text: string, budget: number): string[] {
   return slices;
 }
 
-function utf8Length(text: string): number {
+/** The bytes `text` takes as UTF-8, counted without encoding it. */
+export function utf8Length(text: string): number {
   let n = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
@@ -73,7 +74,7 @@ export const PARTS_MAX_SETS = 64;
 /** The longest part id, in characters (the hub's own are 22: a 128-bit nonce in base64url). */
 export const PART_ID_LIMIT = 128;
 
-/** A part refused because the assembler's unfinished sets would hold more than its budget; its set is dropped. */
+/** A part refused because its set, or the assembler's unfinished sets, would pass a bound; its set is dropped. */
 export class PartsBudgetError extends RangeError {}
 
 type PartSet = { count: number; slices: Array<string | undefined>; have: number; bytes: number; started: number };
@@ -83,18 +84,24 @@ type PartSet = { count: number; slices: Array<string | undefined>; have: number;
  * unfinished sets is bounded: in bytes, all sets together (a part past the budget is refused, `PartsBudgetError`, and
  * its set dropped); in number (a part that would open a set past PARTS_MAX_SETS is refused, and an id longer than
  * PART_ID_LIMIT is malformed); and in time (a set older than `maxAgeMs` is dropped, and a late part of it starts a set
- * of its own).
+ * of its own). One set may be bounded too, when its sender's frames are (a browser's, DX3): `maxSetParts` refuses a
+ * part whose `count` is larger, before anything of its set is held, and `maxSetBytes` a part past which its set would
+ * join to more bytes, dropping the set.
  */
 export class PartAssembler {
   private readonly sets = new Map<string, PartSet>();
   private held = 0;
   private readonly maxBytes: number;
   private readonly maxAgeMs: number;
+  private readonly maxSetParts: number;
+  private readonly maxSetBytes: number;
   private readonly now: () => number;
 
-  constructor(options: { maxBytes?: number; maxAgeMs?: number; now?: () => number } = {}) {
+  constructor(options: { maxBytes?: number; maxAgeMs?: number; maxSetParts?: number; maxSetBytes?: number; now?: () => number } = {}) {
     this.maxBytes = options.maxBytes ?? PARTS_HELD_LIMIT;
     this.maxAgeMs = options.maxAgeMs ?? PARTS_MAX_AGE_MS;
+    this.maxSetParts = options.maxSetParts ?? Infinity;
+    this.maxSetBytes = options.maxSetBytes ?? Infinity;
     this.now = options.now ?? Date.now;
   }
 
@@ -103,6 +110,7 @@ export class PartAssembler {
     if (typeof id !== 'string' || id.length > PART_ID_LIMIT || typeof data !== 'string' || !Number.isInteger(count) || count < 1 || !Number.isInteger(index) || index < 0 || index >= count) {
       throw new TypeError('part: malformed');
     }
+    if (count > this.maxSetParts) throw new PartsBudgetError(`part: a set is at most ${this.maxSetParts} parts`);
     const now = this.now();
     for (const [other, set] of this.sets) if (now - set.started > this.maxAgeMs) this.drop(other, set);
     let set = this.sets.get(id);
@@ -115,6 +123,10 @@ export class PartAssembler {
     const bytes = utf8Length(data);
     const previous = set.slices[index];
     const growth = bytes - (previous === undefined ? 0 : utf8Length(previous));
+    if (set.bytes + growth > this.maxSetBytes) {
+      this.drop(id, set);
+      throw new PartsBudgetError(`part: a frame sent as parts joins to at most ${this.maxSetBytes} bytes`);
+    }
     if (this.held + growth > this.maxBytes) {
       this.drop(id, set);
       throw new PartsBudgetError(`part: unfinished sets would hold more than ${this.maxBytes} bytes`);

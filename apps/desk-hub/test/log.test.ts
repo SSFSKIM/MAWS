@@ -4,7 +4,7 @@
 // canonically (DX1), so the machines' codes here are random 32 bytes in canonical base64url.
 import { get as httpGet, request as httpRequest } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { ProjectDown } from '../src/protocol/browser';
+import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, type ProjectDown } from '../src/protocol/browser';
 import { base64urlEncode } from '../src/protocol/base64url';
 import { importOrgKey, newNonce, seal, verify } from '../src/protocol/codes';
 import { isHubPosition, withoutPosition, type HumanDraft, type LogEvent } from '../src/protocol/log';
@@ -692,6 +692,25 @@ describe('browsers', () => {
     expect(await browser.next((f) => f.t === 'refused', 'refused')).toMatchObject({ refusal: { reason: 'too-large', member: memberId } });
     expect(browser.frames.some((f) => f.t === 'caught-up')).toBe(false);
     for (const line of toWire(large)) browser.send(JSON.parse(line));
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    browser.close();
+    await a.close();
+  });
+  it("refuses a browser's part set of too many parts, or joining past its bound, as too-large and unread; one of the bound is read", async () => {
+    const project = newProject();
+    const a = await machine('bounded-set');
+    await a.sync(project);
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    browser.send({ t: 'part', id: 'many', index: 0, count: BROWSER_SET_PARTS + 1, data: '' });
+    expect(await browser.next((f) => f.t === 'refused', 'refused')).toMatchObject({ refusal: { reason: 'too-large', member: memberId } });
+    // A resume padded one byte past the bound, and then to it: only the second is read.
+    const shell = JSON.stringify({ t: 'resume', after: 0, padding: '' }).length;
+    const over = { t: 'resume', after: 0, padding: 'x'.repeat(BROWSER_SET_LIMIT - shell + 1) };
+    const from = browser.frames.length;
+    for (const line of toWire(over)) browser.send(JSON.parse(line));
+    expect(await browser.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'too-large' } });
+    expect(browser.frames.some((f) => f.t === 'caught-up')).toBe(false);
+    for (const line of toWire({ ...over, padding: over.padding.slice(1) })) browser.send(JSON.parse(line));
     await browser.next((f) => f.t === 'caught-up', 'caught-up');
     browser.close();
     await a.close();
