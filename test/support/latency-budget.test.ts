@@ -93,9 +93,10 @@ describe('a latency bound is asserted as named only on a quiet machine', () => {
       expect(verdict()).toEqual({ ceiling: 150, reason: null });
     });
 
-    it.each(['', 'not an epoch', '1700000002junk', '1700000002\n1700000003', 'Infinity'])('ignores an unparsable release (%j)', (contents) => {
+    it.each(['', 'not an epoch', '1700000002junk', '1700000002\n1700000003', '1700000002\n\n', 'Infinity', '1.7e9', '+1700000002', '-1', ' 1700000002 ', '9007199254740992'])('treats a malformed release as loaded (%j)', (contents) => {
       writeFileSync(released, contents);
-      expect(verdict()).toEqual({ ceiling: 150, reason: null });
+      expect(verdict().ceiling).toBe(750);
+      expect(verdict().reason).toContain('guest release malformed');
     });
 
     it('treats a reservation path that cannot be read as loaded', () => {

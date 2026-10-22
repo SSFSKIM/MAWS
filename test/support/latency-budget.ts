@@ -11,7 +11,8 @@
 // A host runner's CI_KIT_VM_RESERVATION names the lane's vm-reserved file, present from before clone until after delete.
 // At the verdict, a reservation still present or a sibling vm-released epoch second >= floor(test start / 1000) means
 // a guest was beside the test. ci-kit writes vm-released before removing the reservation. Merely installing the lane
-// does not loosen a bound; read errors other than not-found do, while a missing or unparsable release means none seen.
+// does not loosen a bound; read errors other than not-found and malformed release stamps do. Only a missing release
+// means none seen: ci-kit writes the stamp atomically, so malformed contents mean something went wrong.
 import { readFileSync, statSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,6 +36,8 @@ export const machineLoad = (env: Record<string, string | undefined> = process.en
 
 function guestBeside(started: number, reservation: string | undefined): string | null {
   if (!reservation) return null;
+  // Read the reservation first, then the release stamp: a release between these reads cannot be missed, because
+  // ci-kit writes the stamp before removing the reservation. Reversing the reads could miss both.
   try {
     statSync(reservation);
     return 'beside a guest reserved now';
@@ -42,10 +45,10 @@ function guestBeside(started: number, reservation: string | undefined): string |
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return 'guest reservation unreadable (assumed loaded)';
   }
   try {
-    const released = readFileSync(join(dirname(reservation), 'vm-released'), 'utf8').trim();
+    const released = readFileSync(join(dirname(reservation), 'vm-released'), 'utf8');
     const epoch = Number(released);
-    return /^\d+$/.test(released) && Number.isSafeInteger(epoch) && epoch >= Math.floor(started / 1000)
-      ? 'beside a guest released since the test started' : null;
+    if (/^\d+\n?$/.exec(released)?.[0] !== released || !Number.isSafeInteger(epoch)) return 'guest release malformed (assumed loaded)';
+    return epoch >= Math.floor(started / 1000) ? 'beside a guest released since the test started' : null;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : 'guest release unreadable (assumed loaded)';
   }
