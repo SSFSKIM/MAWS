@@ -99,6 +99,16 @@ export class ProvisionalLayers {
 }
 
 /**
+ * The path of the layer's file still streaming, or null (G-R1): a JSON object's members stream one after another, so
+ * while the layer streams every file but the last is whole and the last is open; at the commit all are whole.
+ */
+export function openFile(layer: ArtifactProvisional): string | null {
+  if (layer.state !== 'streaming') return null;
+  const files = layer.ops.filter((op) => op.op === 'file');
+  return files[files.length - 1]?.path ?? null;
+}
+
+/**
  * The frame as the call's layer (G2, G-R1): a publish's frame lists only the files that grew or appeared since the frame
  * before, so its `file` ops merge into the layer's by path, a later text replacing the earlier in its place and a new
  * path appended; a file no frame touched keeps its op object, so a reader can tell an unchanged file by identity. Every

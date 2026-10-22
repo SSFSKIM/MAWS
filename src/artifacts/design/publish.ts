@@ -72,7 +72,7 @@ interface Input {
 
 const DATA_SIZE_RE = /^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/;
 /** A board file's `data-size` (`<w>x<h>` in px): null when absent, else the size or why it is not one the model holds. */
-function dataSize(id: string, source: string): { w: number; h: number } | { problem: string } | null {
+export function dataSize(id: string, source: string): { w: number; h: number } | { problem: string } | null {
   const top = parseHtml(source).find((n) => n.kind === 'element');
   const value = top && top.kind === 'element' && top.tag === 'section' ? new Map(top.attrs).get('data-size') : undefined;
   if (value === undefined) return null;
