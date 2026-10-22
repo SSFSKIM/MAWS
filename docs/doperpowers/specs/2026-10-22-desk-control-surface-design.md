@@ -64,6 +64,11 @@ allows today.
 - [x] (2026-10-22 04:50Z) The ten spikes, the handoff note, the buildability review and
   the design review folded in one revision (Decision Log, entry 2); the self-review
   re-run.
+- [x] (2026-10-22 06:00Z) Merged on master (MAWS #118, `ed06afbe2`). The research
+  session's re-check of §14 folded (Decision Log, entry 3): the `/background` workflow
+  condition tracks task ids, the mode is published from the bridge's own decisions and
+  the frequent classic hooks, the catalog re-lists at every heartbeat, the readback rule
+  applies to built-in `run` rows alone.
 - [ ] The owner's calls on §15's forks (each has a recommendation; M0–M5 need none of
   them to start, M6 needs the first).
 - [ ] sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries `updatedInput`) lands;
@@ -215,8 +220,9 @@ milestone's walk includes one.
 - A13. After the owner presses Esc in the terminal to stop a turn, a desk command is
   refused *stopped at the terminal: commands resume after input is typed there* (S6:
   no mod call clears it, the desk's Send included). After the desk's own Interrupt, a
-  desk command is not refused (the mod's `$.turn.abort` does not set the refusal; read
-  from code, S6 — this item proves it).
+  desk command is not refused (the mod's `$.turn.abort` does not set the refusal:
+  measured, spike 11 — this item checks the built path, the bridge's interrupt and its
+  note row).
 - A14. On the older-plugin machine the typeahead opens (A10) with the desk's own panels
   (Model, Compact, and whatever M2 has added) and one line, *commands need sminos ≥
   <M1's> on mini*; a session whose catalog the desk cached before its machine fell
@@ -267,8 +273,11 @@ milestone's walk includes one.
   Implementing in `acceptEdits` closes the terminal's *Exit plan mode?* dialog and
   leaves the session in that mode (S1: the allow carries `updatedInput` and `setMode`;
   the chosen mode beats the mode the session was in before plan).
-- A24. The mode chip shows the session's current mode (from the bridge's reading of the
-  hooks' `permission_mode`, else from rows), and its menu offers *plan* (runs `/plan`)
+- A24. The mode chip shows the session's current mode stamped *as of <time>* (the
+  bridge's own decision the moment it hands one out — A22's switch shows on the chip
+  before the terminal's footer is read — else the latest classic hook's reading; a
+  Shift+Tab at the terminal on an idle session leaves the chip on the old mode, with
+  its stamp, until the next hook fires), and its menu offers *plan* (runs `/plan`)
   and names every other switch *Shift+Tab in the terminal; or allow a request into it*
   (on a `--bg` seat also *M6*). Nothing is "armed": in auto mode and in plan mode
   harmless calls raise no request (S1), so a change waiting for one could wait forever.
@@ -289,7 +298,9 @@ milestone's walk includes one.
   before the clear shows its outcome under the old session, unchanged (never re-sealed).
   `/branch <name>` and `/resume <id>` likewise.
 - A28. `/background` is offered only while `$.agent.list()` names no running agent and
-  no `Workflow` call the bridge saw is unfinished (S10: a running subagent opens
+  no workflow the bridge saw launched is still running — a `Workflow` launched from the
+  desk's session hides the control until its `<task-notification>` arrives — (S10: a
+  running subagent opens
   *Background this session?*, which holds the queue; a background shell carries over
   with no dialog); its confirm names what the move keeps and loses (§8.3: the running
   shells by id, carried but their exit codes lost; the running monitors by id, lost; an
@@ -407,7 +418,8 @@ Four more rules bind the table:
   one plugin loaded says every loaded plugin reloads, the sminos mod included: the old
   module instance's posts are fenced off (DX5's nonce, 409), its child is replaced, and
   its `run end` never reaches the stream (S4's own `reload-plugins` run that never
-  resolved, S11). So the bridge never awaits its own reload: the op answers `queued`,
+  resolved, the spikes file's contradiction 11). So the bridge never awaits its own
+  reload: the op answers `queued`,
   and the **daemon finishes the outcome by effect** (§6): when the session's bridge
   answers again from a new socket within 60 s of the claim, `op end` with `readback
   {how: "effect"}`; otherwise `op end` with `settled {ok: false, error: "the bridge did
@@ -423,9 +435,13 @@ stopped and nobody has sent input since* until the person types at the terminal.
 bridge's inbox wake starts a turn but does not clear it (S6); nothing a mod can send
 counts as the human's input. The bridge answers a `command` with that refusal verbatim,
 code `stopped`, and the web says *stopped at the terminal: commands resume after input is
-typed there* — never *Send to wake*. From code (S6, not run): the mod's own `$.turn.abort`
-does not set the refusal, while the terminal's Esc and Remote Control's interrupt do; so
-the desk's Interrupt leaves commands usable, and A13 proves it. On a `--bg` seat a
+typed there* — never *Send to wake*. Measured (spike 11, 2.1.307): the mod's own
+`$.turn.abort({turnId})` 2 s into a turn ended it 0.24 s later, and right after it
+`$.command.run` and `$.prompt.submit({asUser: true})` both ran; in the same session an
+Esc keyed into the PTY set the refusal (the run rejected, the submit dropped) and a
+prompt typed there cleared it. So the desk's Interrupt leaves commands usable, and the
+refusal follows only the terminal's Esc or Remote Control's interrupt; A13 checks the
+built path (the bridge's interrupt and its note row). On a `--bg` seat a
 supervisor `reply` clears it, which this run does not use: a `reply` is a channel where
 text can act as a keystroke (H-reply).
 
@@ -550,9 +566,15 @@ and replace entries, and aliases resolve through that session's environment — 
 are **live catalogs**, cached by session plus a fingerprint and invalidated by push; only
 the built-in routing rules are fixed per engine version (the brief's caching amendment).
 The bridge emits a DX5 `catalog` event at `session.start` and whenever its content
-changes: it re-lists after any command row (door `command`, whoever typed it) naming
-`reload-plugins`, `reload-skills` or `mcp`, and at each heartbeat when `$.tool.list()`'s
-set of MCP servers changed (a server connecting late), comparing by fingerprint. The
+changes: it re-lists `$.command.list()` **at every heartbeat** (5 s) and after any
+command row (door `command`, whoever typed it) naming `reload-plugins`, `reload-skills`
+or `mcp`, and emits only when the fingerprint changed. The list is cheap (1 ms for 92
+entries in the probe's one sample, run1 bus 0004) and the start-time list is incomplete
+by construction: plugin markdown commands and skills load with their plugin, a mod's
+`register()` adds entries when it runs, and an MCP server's prompts exist only once it
+connects, often after `session.start` (from the API; when each kind appears was not
+measured). A trigger on `$.tool.list()`'s server set, considered first, would miss a
+server that offers prompts but no tools, a mod registering late, and a skill change. The
 catalog is the commands (`$.command.list()` joined with the route each gets, names
 verbatim), the models (`$.config.list()`'s `model` row's options, and which family
 aliases this session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` maps), and the fingerprint. The
@@ -588,9 +610,15 @@ transcript row (H-noout). S7 measured where that row is and how it can be linked
   after the previous run's readback settled or timed out (2 s after its settle, to
   `none`); the engine queues them anyway, so this costs no latency, and it makes the
   attribution of two desk commands exact.
-- **The rule.** After the op's promise settles, take the first command row of the main
-  loop whose name and args match the run; then the output row that follows it within
-  100 ms. A command row that is not this run's between the two — a terminal-typed
+- **Which runs the rule applies to: built-in `run` rows alone.** A `run-prompt`
+  command's outcome is the turn it starts, and its command row need not carry the
+  listed name (the MCP prompt listed as `probe:probe-prompt (MCP)` wrote
+  `/mcp__probe__probe-prompt`, S5); a command another plugin serves settles `{text}`
+  and leaves `<command-args>` empty in its row (S5), so it reads back by `text`. The
+  name-and-args link is never applied to either.
+- **The rule.** For a built-in `run` row, after the op's promise settles, take the
+  first command row of the main loop whose name and args match the run; then the output
+  row that follows it within 100 ms. A command row that is not this run's between the two — a terminal-typed
   command — makes it *ran, unconfirmed*; so does a second matching command row within
   the window (the person typed the same command with the same arguments during the turn
   the desk's run waited on, whose rows the engine writes at the turn's end, the same
@@ -664,18 +692,36 @@ request's tool is `ExitPlanMode` and within the ceiling); *Keep planning* is a d
 with the feedback as `message`; *Clear and implement* is M4's following plus a Send
 (A29), offered once M4 exists.
 
-**The mode (reading it).** The transcript's `permission-mode` rows trail a change and can
-skip one (S1); each classic hook input carries `permission_mode` (read from the types,
-not measured). So the bridge keeps the latest `permission_mode` any classic hook handed
-it, and the mode `/plan` sets when it ran one, emits a DX5 `mode {mode}` event when it
-changes, and the child keeps it: `GET /status` gains `mode`, which the plane forwards in
-`presence.mode` (§4). The web draws MAWS's `ModeChip` from `presence.mode`, falling back
-to the rows (the latest `permission-mode` row or user row's `permissionMode` on the live
-chain) with *as of its last prompt*, and to *unknown*. The menu (`ModeMenu`, with
+**The mode (reading it).** Three sources, in order of trust, each stamped with when it
+was read:
+
+1. **The bridge's own decisions, published at once.** The bridge knows every mode it
+   sets itself — an allow it handed out carrying `setMode` (a scoped allow, a plan's
+   approval), and `/plan` when it ran one — so it publishes the new mode the moment the
+   decision is handed to the engine, without waiting for a hook.
+2. **The classic hooks' input.** Every classic hook input carries `permission_mode`
+   (read from code: the classic base input sets it on every fire, cli 2.1.307 ~1084852;
+   not traced to every caller, not measured). The bridge registers
+   `classic.PermissionRequest` and `classic.SubagentStop` today; in auto mode requests
+   are rare, so a reading fed by those alone goes stale for long stretches. M3 adds a
+   pass-through on a frequent classic hook — `classic.PostToolUse`, which fires on every
+   tool result; and `classic.UserPromptSubmit`, on every prompt — that reads
+   `permission_mode` and calls `next(e)` with nothing else (no `$` call, so it holds the
+   turn for nothing). A reading from a hook never overrides a decision of the bridge's
+   own that is newer.
+3. **Not the rows.** The transcript's `permission-mode` rows appear at flush points and
+   skip changes: an allow's `setMode` wrote none; `auto` first showed at the next
+   prompt, `acceptEdits` never got a row (S1). They are not read.
+
+**The gap, labelled.** A Shift+Tab at the terminal fires no hook, so an idle session shows
+the old mode until its next classic hook fires. The bridge emits DX5 `mode {mode, at}`
+when its reading changes, the child keeps it, `GET /status` carries it and the plane
+forwards it in `presence.mode` (§4); the web draws MAWS's `ModeChip` stamped *as of
+<time>* from `at`, and *unknown* before any reading. The menu (`ModeMenu`, with
 `MODE_REFUSAL_WORDS`'s pattern): *plan* runs `/plan` (measured: `Enabled plan mode`);
-every other switch is named *Shift+Tab in the terminal; or allow a request into it*,
-and *M6* on a `--bg` seat. `/config permissionMode=X` is never used: it sets only the
-default for new sessions.
+every other switch is named *Shift+Tab in the terminal; or allow a request into it*, and
+*M6* on a `--bg` seat. `/config permissionMode=X` is never used: it sets only the default
+for new sessions.
 
 ### 8. Following an id change
 
@@ -719,14 +765,22 @@ RPC `args.session` (H-sid). The desk follows rather than avoids (the brief's dec
    *Background this session?* in the terminal when a task would be abandoned or a
    workflow agent runs (cli 2.1.307:239626); a background shell carries over with no
    dialog, a running subagent raises it, and it holds the queue; *Stay* resolves `{}`,
-   the same as success (S10). A web confirm does not answer it. So the bridge offers
-   `background` (the route's condition) only while `$.agent.list()` names no running
-   agent and no `Workflow` tool call it saw is unfinished (`$.agent.list()` leaves
-   workflow agents out; the bridge counts the calls it saw settle, and a module loaded
-   mid-session may miss one — the dialog then opens in the terminal and the web, seeing
-   no job within 60 s, says *the terminal is asking: answer it there*). Otherwise the
-   command is terminal-only with *terminal only while an agent runs: the engine would
-   ask about it*. **The confirm names what the move keeps and loses** (HN, measured on
+   the same as success (S10). A web confirm does not answer it. The engine's own
+   condition counts abandonable tasks and running workflow agents (`abandonable.count
+   === 0 && workflowAgents.running === 0`, cli 2.1.307:239626), not tool calls. So the
+   bridge offers `background` (the route's condition) only while `$.agent.list()` names
+   no running agent and **no workflow it saw launched is still running**. `$.agent.list()`
+   leaves workflow agents out, and a `Workflow` tool call settles at once — the tool
+   returns a task id and the workflow runs on (cli 2.1.307:793338: "this tool returns
+   immediately with a task ID, and a `<task-notification>` arrives when the workflow
+   completes") — so a settled call proves nothing. The bridge takes the task id from the
+   `Workflow` tool's result (its `tool.call` hook sees every call and result) and holds
+   it as running until the `<task-notification>` row naming that task id reaches its
+   `session.append` hook with a terminal status (`completed`, `failed`, `killed`). A
+   module loaded mid-session still misses a workflow launched before it: the dialog then
+   opens in the terminal, and the web, seeing no job within 60 s, says *the terminal is
+   asking: answer it there*. Otherwise the command is terminal-only with *terminal only
+   while an agent or a workflow runs: the engine would ask about it*. **The confirm names what the move keeps and loses** (HN, measured on
    2.1.307): the running background shells, listed by id from the Jobs tab's ledger,
    carried with the same pid but their exit codes lost (each completes as *exit code
    -1*); the running monitors, listed by id, lost (never fire again); an MCP call in
@@ -947,26 +1001,35 @@ document's own:
    apart from an older machine.
 2. **The catalogs are pushed in the snapshot and as a `catalog` kind; `read catalog` is
    the refresh** (§5): the inventory had `commands` and `models` as reads only. Cached
-   per session and fingerprint (the brief's amendment), never shared across sessions.
+   per session and fingerprint (the brief's amendment), never shared across sessions;
+   re-listed at every heartbeat, since the start-time list is incomplete (the research
+   session's Q1).
 3. **One DX4 kind `op` carries every async outcome** (§3); DX5 keeps per-op events, named
    `run` for a command (the child already emits a `command` event of its own for every
    relayed op, DX5 Events).
-4. **Readback reads the hook and links by the command row's name and arguments, with
-   desk commands run one at a time** (§6, S7); the inventory's §3.2 took the hook's view
-   of these rows as read (C), and the probe's "read it in `$.session.messages()`" does
-   not hold for `system` rows. **`/reload-plugins` is confirmed by the daemon, by
-   effect**, since it reloads the bridge (§2).
+4. **Readback reads the hook and links by the command row's name and arguments, for
+   built-in `run` rows alone, with desk commands run one at a time** (§6, S7); the
+   inventory's §3.2 took the hook's view of these rows as read (C), and the probe's
+   "read it in `$.session.messages()`" does not hold for `system` rows; a `run-prompt`'s
+   outcome is its turn and a mod's command reads back by `text` (the MCP prompt's row
+   carries another name, a mod's row empty args, S5). **`/reload-plugins` is confirmed
+   by the daemon, by effect**, since it reloads the bridge (§2).
 5. **The `settings` read is cut** to permissions and hooks' shape; hook commands and
    `env` never leave the bridge; `mcp` carries no configuration; `status` strips a
    remote's userinfo (§11).
-6. **The mode is the bridge's reading of the hooks' `permission_mode`, forwarded in
-   presence**, with the rows as the fallback (§7, S1: the rows trail and skip).
+6. **The mode is the bridge's own decision when it set it, else the classic hooks'
+   `permission_mode`, forwarded in presence stamped with its time**; the rows are not
+   read (§7, S1: an allow's `setMode` writes no `permission-mode` row; the rows trail
+   and skip). A Shift+Tab at the terminal is the labelled gap.
 7. **No armed mode** (§7, S1): a mode changes only on a live request or by `/plan`.
 8. **A scoped allow carries an index, a hash and a destination**, and the daemon applies
    MAWS's one transformation (§7): the inventory's "`suggestion: <index>`" alone could
    not say *this session* for a `localSettings` suggestion, nor refuse a changed list.
-9. **`/background` is offered only while no agent runs and no workflow the bridge saw is
-   unfinished** (§8, S10; a shell carries over), **its confirm names what is lost** (HN),
+9. **`/background` is offered only while no agent runs and no workflow the bridge saw
+   launched is still running — tracked by the task id the `Workflow` tool returns at
+   once, until its `<task-notification>`, since the call itself settles immediately**
+   (§8, S10, cli 2.1.307:793338; a shell carries over), **its confirm names what is lost**
+   (HN),
    and its lineage has three sources in order (the bridge's `continuing` notice, the
    `continued-in` record, the job's directory and time), the last `unconfirmed`.
 10. **Two kinds of following; issued RPCs stay put** (§8, the brief's amendment).
@@ -1233,9 +1296,8 @@ S7: the readback rule of §6, as M0 built it.
 enabled; the catalog (§5): `catalogNow($)` joins `$.command.list()` with the route each
 entry gets, reads `$.config.list()`'s `model` row's options and resolves each family
 alias through the session's environment, fingerprints the two, and emits DX5 `catalog`
-at `session.start`, after any command row naming `reload-plugins`, `reload-skills` or
-`mcp`, and at a heartbeat whose `$.tool.list()` server set changed, when the
-fingerprint changed. `sminos_bridge.py`: keeps the latest `catalog` and puts it in the
+at `session.start`, at every heartbeat, and after any command row naming
+`reload-plugins`, `reload-skills` or `mcp`, when the fingerprint changed (§5). `sminos_bridge.py`: keeps the latest `catalog` and puts it in the
 snapshot. `sminos_plane.py`: the DX4 snapshot gains `catalog` from the child's; a
 `catalog` event is relayed as DX4 `catalog` on main subs when the hub lists it; `read
 catalog` answers the same body. `sminos_rpc.py`: `cd <path>` is checked against the
@@ -1338,8 +1400,12 @@ Interfaces); `bridge-requests.tsx` `engineDecision` passes `updatedPermissions` 
 decision's resolved suggestion or `mode`, beside the `updatedInput` 1.6.3 added;
 `sminos_bridge.py` `_check_decision` admits `updatedPermissions` (an array of at most 8
 objects) on a permission and refuses it on a question. The mode (§7): `bridge.tsx`
-keeps `permission_mode` from each classic hook input and the mode a `/plan` run set,
-emits DX5 `mode {mode}` on change; the child keeps it and answers it in `status()`.
+publishes the mode from its own decisions at once (an allow it hands out carrying
+`setMode`; a `/plan` it ran), reads `permission_mode` from every classic hook input it
+registers, adds pass-through `classic.PostToolUse` and `classic.UserPromptSubmit`
+hooks that read it and call `next(e)` with no `$` call, never lets a hook's reading
+override a newer decision of its own, and emits DX5 `mode {mode, at}` on change; the
+child keeps it and answers it in `status()`.
 `sminos_requests.py` `raised_draft` passes `suggestions`; `sminos_rpc.py` `shape()` and
 `check_digest`: `scope.suggestion` an integer within the re-read list, `scope.sha256`
 equal to that suggestion's canonical hash (else `not-pending`, *the suggestions
@@ -1388,7 +1454,10 @@ running subagent, not for a shell; no job record names the old id; the `continue
 record is best-effort. HN: what `/background` carries and loses (§8.3's confirm).
 
 **Machine half.** (a) `bridge.tsx`: ops `stop-agent` and `tell` (§9) with the note's
-text; `bridge-agents.tsx`: the `Workflow` calls it saw, for (c). `sminos_rpc.py`:
+text; `bridge-agents.tsx`: the workflows it saw launched, each held as running from the
+task id in the `Workflow` tool's result until the `<task-notification>` row naming it
+reaches `session.append` with `completed`, `failed` or `killed`, for (c)'s `background`
+condition (§8.3). `sminos_rpc.py`:
 `stop-agent` (the agent in the plane's tree, `unknown-agent` otherwise), `tell`;
 `RPC_NAMES`. (b) `sminos_rpc.py`: `fork` (the spawn path with `--resume <id>
 --fork-session`, around the copy guard, `fork_of` on the `joined` event). (c)
@@ -1534,13 +1603,15 @@ wire and absent from an older producer; a consumer treats absence as "the older 
   "reads": ["status"],
   "routes": {"measured": "2.1.307"}
 },
-"mode": "default"
+"mode": {"mode": "default", "at": 1760000000000}
 ```
 `sminos` is the loaded mod's own plugin version. `ops` and `reads` grow by milestone (M1
 adds read `catalog`; M2 op `btw`, reads `usage`, `mcp`, `settings`; M4 ops
-`stop-agent`, `tell`; M5 nothing of the bridge's). `mode` (M3) is the bridge's latest
-reading, absent before M3 or before any hook ran. The bridge posts both to the child in
-`resync` (`capabilities`, `mode`); the child answers `status()` with the latest.
+`stop-agent`, `tell`; M5 nothing of the bridge's). `mode` (M3) is the bridge's current
+reading — its own decision's mode, else the latest classic hook input's — with `at`,
+when it was read (epoch ms, the machine's clock); absent before M3 or before any
+reading. The bridge posts both to the child in `resync` (`capabilities`, `mode`); the
+child answers `status()` with the latest.
 
 **Ops** (the child's stdout lines; the mod's `result` events). The child's HTTP answer
 to `POST /command?wait=` and the answer it keeps under an RPC nonce carry `code` beside
@@ -1562,7 +1633,7 @@ Read results:
 
 ```ts
 status:   {version: {version, base?, builtAt?}, model, cwd, root, repo: {remote?, branch?} | null,   // remote without userinfo
-           surfaces: string[], override: {model, effort} | null, mode?: string}
+           surfaces: string[], override: {model, effort} | null, mode?: {mode: string, at: number}}
 catalog:  Catalog                                                   // below
 usage:    SessionUsage & {context: {breakdown?: ContextBreakdown}}  // the engine's shape, `$.session.usage(args)`
 mcp:      {servers: [{name, status: "connected" | "disabled" | "unknown", tools: number}]}
@@ -1584,7 +1655,7 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; never emitted by the module a `reload-plugins` run replaces (the daemon finishes that op) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
 | `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
-| `mode` (M3) | `{mode}` — the bridge's latest `permission_mode`, when it changes |
+| `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
 | `session` / `start` (M4) | gains `previous?: {session, reason: "clear" \| "resume" \| "branch" \| "unknown"}` |
 | `raised` (M3) | gains `suggestions?: PermissionUpdate[]` (at most 8; each rule string at most 512 characters; the list is the engine's `permission_suggestions` verbatim within those bounds, or absent) |
@@ -1660,7 +1731,7 @@ rows by data.
 ### DX4 (owner: MAWS `apps/desk-hub/src/protocol/session.ts`; producers: the plane and the fake machine)
 
 ```ts
-SessionPresence = { record: JsonObject | null; bridge: boolean; capabilities?: Capabilities; mode?: string };
+SessionPresence = { record: JsonObject | null; bridge: boolean; capabilities?: Capabilities; mode?: { mode: string; at: number } };
 Capabilities = { sminos: string; protocol: number; engine: string; ops: string[]; reads: string[]; routes: { measured: string } };
 MachinePresence = { online; policy; checkouts; desk?: { sminos: string; rpcs: string[]; reads: string[] } };
 
@@ -1765,7 +1836,8 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
 - Observation: `/reload-plugins` from the desk reloads the bridge itself, so the module
   that ran it never posts its `end`; the daemon confirms it by the bridge answering
   again (the design review; S4's own run that never resolved).
-  Evidence: the probe's `Reloaded: 1 plugin` with one plugin loaded; S11; DX5's nonce
+  Evidence: the probe's `Reloaded: 1 plugin` with one plugin loaded; the spikes file's
+  contradiction 11; DX5's nonce
   fence.
 - Observation: The plane never POSTs the bridge's `/command`; it reads the child only
   through `GET /events` and `GET /status` probes, and throws the status body away. The
@@ -1810,6 +1882,39 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   MCP tasks (silently), and re-runs the turn in flight; a plain terminal exit kills
   every shell and monitor. Nothing headless adopts a job's carried work.
   Evidence: HN §1–§2, measured on 2.1.307 (runs A–H).
+- Observation: A `Workflow` tool call settles the moment the workflow starts, so "no
+  `Workflow` call the bridge saw is unfinished" was always true and guarded nothing; the
+  engine's own dialog counts running workflow agents, and a workflow's end is the
+  `<task-notification>` naming its task id (the research session's re-check,
+  2026-10-22).
+  Evidence: cli 2.1.307:793338, the tool's description: "this tool returns immediately
+  with a task ID, and a `<task-notification>` arrives when the workflow completes";
+  cli 2.1.307:239626 `Bo.count === 0 && xo.running === 0` with `xo` the dialog's
+  `workflowAgents`. Whether a workflow agent's own calls reach `tool.call` hooks is
+  unmeasured, and nothing here depends on it now.
+- Observation: An allow's `setMode` writes no `permission-mode` row; the rows appear at
+  flush points, `auto` first showing at the next prompt and `acceptEdits` never getting
+  one. The transcript is no source for the mode; the bridge's own decisions and the
+  classic hooks' `permission_mode` are, and a Shift+Tab at the terminal is the one
+  change neither sees until the next hook.
+  Evidence: S1, "Transcript rows lag"; the classic base input setting
+  `permission_mode: r` on every fire (cli 2.1.307 ~1084852, read from code, not traced
+  to every caller, not measured).
+- Observation: `$.command.list()` is cheap enough to re-list every heartbeat — 1 ms for
+  92 entries in one sample — and the start-time list is incomplete: MCP prompts exist
+  only once their server connects, a mod's entries once its `register()` ran (from the
+  API; when each kind appears was not measured).
+  Evidence: probe run1 bus 0004 (`t0` 1792633725947, `t1` 1792633725948, 92 entries).
+- Observation: The MCP prompt listed as `probe:probe-prompt (MCP)` wrote its command
+  row as `/mcp__probe__probe-prompt`, and a command another plugin serves left
+  `<command-args>` empty: the name-and-args link holds for built-in `run` rows only.
+  Evidence: S5's table (the MCP prompt's row; `probe-reg beta`'s empty args).
+- Observation: The desk's own Interrupt does not set the Esc refusal, now measured: a
+  mod's `$.turn.abort({turnId})` 2 s into a turn ended it 0.24 s later and
+  `$.command.run` and `$.prompt.submit({asUser: true})` ran right after; an Esc keyed
+  into the same session's PTY set the refusal and a typed prompt cleared it. What §2
+  had from code is a fact.
+  Evidence: spike 11 (`desk-mod-run-spikes.md` §11, 2.1.307, isolated).
 - Observation: `FIRST_WAIT_S` is 8 s, not 5; it is the CLI verbs' wait for a first
   snapshot. The 5 s the brief and the inventory cite is the child's
   `SMINOS_BRIDGE_READY_WAIT` (`_ready_wait()`), and the plane's own bound on a bridge
@@ -1905,6 +2010,36 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   rollout; all belong in the document before an executor reads it.
   Date/Author: 2026-10-22, the spec session (b4948247), from 2-1-300-9a's spikes, MAWS
   PR #79's handoff note, the adversarial reviewer's and the design reviewer's reports.
+- Decision: The research session's re-check of §14 folded, after the first merge
+  (MAWS #118, `ed06afbe2`). Fourteen departures hold; two change. (1) `/background`'s
+  workflow condition tracks the task id the `Workflow` tool returns at once, held as
+  running until its `<task-notification>` arrives in `session.append` with a terminal
+  status; the "no unfinished `Workflow` call" test is dropped, since the call settles
+  as the workflow starts and the test was always true. The "the terminal is asking"
+  fallback stays for a module that loaded after a workflow was launched. (2) The mode
+  is published from the bridge's own decisions the moment it hands one out, then from
+  the classic hooks' `permission_mode`, fed by pass-through `classic.PostToolUse` and
+  `classic.UserPromptSubmit` hooks beside the two the bridge registers, since
+  `PermissionRequest` alone goes stale for long stretches in auto mode; the rows are
+  not read (an allow's `setMode` writes none), the reading carries its time and the
+  chip is stamped *as of <time>*, and a Shift+Tab at the terminal is the labelled gap.
+  DX5 `mode` and `presence.mode` become `{mode, at}` (M3's shapes; M0's are untouched).
+  Also from the re-check: the catalog re-lists `$.command.list()` at every heartbeat and
+  compares fingerprints, in place of a trigger on `$.tool.list()`'s server set, which
+  would miss prompt-only servers, late mod registrations and skill changes (Q1); and
+  the readback's name-and-args link applies to built-in `run` rows alone — a
+  `run-prompt`'s outcome is its turn, a mod's command reads back by `text` — since an
+  MCP prompt's row carries another name and a mod's row empty args (the minor). Spike
+  11, measured after the merge, turns §2's "from code" on the desk's Interrupt into a
+  fact; A13 keeps checking the built path.
+  Rejected: keeping the rows as the mode's fallback (S1 shows an allow's `setMode`
+  writes none, so the fallback would show a mode the engine left); reading the mode
+  from `PermissionRequest` alone (stale in auto mode); the server-set trigger for the
+  catalog (misses three cases the heartbeat catches for 1 ms).
+  Rationale: two conditions in the design were vacuous or stale against the engine's
+  own behavior, measured or read from code; the re-check found them before M0 starts.
+  Date/Author: 2026-10-22, the spec session (b4948247), from 2-1-300-9a's re-check of
+  §14 and its answers to the design reviewer's three questions.
 
 ## Outcomes & Retrospective
 
