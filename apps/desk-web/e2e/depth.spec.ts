@@ -5,7 +5,7 @@
 // chunk the snapshot already held each end with no gap and no duplicated text, what was drawn kept drawn meanwhile;
 // older rows page in at the top with the reader kept in place; an end keeps what was drawn and says why, and the view
 // subscribes again once the session is reachable; a reconnect that outlasts the quiet window (desk ticket #57, under a
-// fast-forwarded clock) is said, and says nothing again once the fresh snapshot is in (`reconnect.spec.ts` pins the
+// controlled clock) is said, and says nothing again once the fresh snapshot is in (`reconnect.spec.ts` pins the
 // quiet one against the fake machine); a row's script, raw HTML, and `javascript:` link draw inert.
 import type { Locator, Page } from '@playwright/test';
 import type { JsonObject } from 'desk-hub/protocol';
@@ -241,7 +241,8 @@ for (const [disruption, disrupt, line] of disruptions) {
     await expect(status(page)).toHaveText(''); // quiet so far
     await expect(depth.getByTestId('depth-unavailable')).toHaveCount(0);
 
-    await page.clock.fastForward(16_000); // past the quiet window
+    // This is an active page waiting for a snapshot, not suspended JavaScript (fastForward skips heartbeat ticks).
+    await page.clock.runFor(16_000); // past the quiet window, firing every timer normally
     await expect(status(page)).toHaveText('Reconnecting…');
     if (line) await expect(depth.getByTestId('depth-unavailable')).toContainText(line);
     else await expect(depth.getByTestId('depth-unavailable')).toHaveCount(0);
