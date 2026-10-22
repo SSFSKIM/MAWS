@@ -9,14 +9,15 @@ import { failureOf } from '../../conversation/outcome';
 import { commandFailureText, commandOutcomeText } from '../../conversation/words';
 import { latency } from '../../latency/latency';
 import { sessionName } from '../../log/projection';
+import type { ProjectConnection } from '../../project/connection';
 import { pendingCommands } from '../../state/pending-commands';
 import type { DeskSession } from '../../shell/sessions';
 import { RpcStatus } from '../conversation/RpcStatus';
 import { useDesk } from '../conversation/desk-context';
 
 const cap = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-// One extra read-only join per page, shared by recovered receipts (not one rotation per nonce).
-let recheckedReceipts = false;
+// One extra read-only join per recovered batch/connection, shared by its nonces; newer batches remain eligible.
+const recheckedThrough = new WeakMap<ProjectConnection, number>();
 
 export function CommandStatus({ nonce, session, sentAt, outlives: advertised, className = '' }: { nonce: string | null; session: DeskSession; sentAt?: number; outlives?: string; className?: string }) {
   const { connection } = useDesk();
@@ -30,19 +31,20 @@ export function CommandStatus({ nonce, session, sentAt, outlives: advertised, cl
     // Join writes every retained op before handling our resume, so caught-up follows their synchronous reduction.
     // A recent nonce can still be in flight: hub and daemon refuse new RPCs past RPC_FRESHNESS_MS (60s). Wait past
     // that bound, then rejoin to apply any ops published during the grace before declaring a missing outcome.
-    if (recheckedReceipts || (replayedAt != null && replayedAt > sentAt + RPC_FRESHNESS_MS)) return;
+    if (replayedAt != null && replayedAt > sentAt + RPC_FRESHNESS_MS) return;
     const current = connection.conversation.store.getState();
-    // Spend the one extra join after every saved, unresolved nonce in the project has aged, not just the first one.
+    // Rejoin after every saved, unresolved nonce in this batch has aged, not just the first one.
     const latest = pendingCommands.pending(connection.project).filter((row) => !current.rpcs[row.nonce] && !current.ops[row.nonce]).reduce((at, row) => Math.max(at, row.at), sentAt);
+    if ((recheckedThrough.get(connection) ?? -Infinity) >= latest) return;
     const after = latest + RPC_FRESHNESS_MS;
     const remaining = Math.max(0, after + 1 - Date.now());
     const recheck = () => {
-      if (recheckedReceipts || document.visibilityState !== 'visible' || Date.now() <= after) return;
+      if ((recheckedThrough.get(connection) ?? -Infinity) >= latest || document.visibilityState !== 'visible' || Date.now() <= after) return;
       const live = connection.live.getState();
       if (!live.connected || !live.caughtUp) return; // A wake or another receipt already started a join.
       const known = connection.conversation.store.getState();
       if (nonce && (known.rpcs[nonce] || known.ops[nonce])) return;
-      recheckedReceipts = true;
+      recheckedThrough.set(connection, latest);
       connection.client.reconnect(); // No saved RPC/arguments: this observes, never re-executes.
     };
     const timer = setTimeout(recheck, remaining);

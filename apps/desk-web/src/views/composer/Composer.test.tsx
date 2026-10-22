@@ -44,16 +44,18 @@ const session = (id: string, alias: string, group: DeskSession['group'] = 'idle'
 
 let say: ReturnType<typeof vi.fn>;
 let command: ReturnType<typeof vi.fn>;
-function mount(ui: React.ReactNode, conversation: Record<string, unknown> = {}, live: Record<string, unknown> = {}) {
+function mount(ui: React.ReactNode, conversation: Record<string, unknown> = {}, live: Record<string, unknown> = {}, project = 'p1') {
   say = vi.fn(async () => 'nonce');
   command = vi.fn(async () => 'cmd-nonce');
   const store = <T,>(state: T) => createStore(() => state);
-  const connection = { project: 'p1', say, command, rpc: vi.fn(async () => 'nonce'), client: { reconnect: vi.fn() }, conversation: { store: store({ compactions: {}, rpcs: {}, ops: {}, ...conversation }) }, live: store({ connected: true, caughtUp: true, caughtUpAt: Date.now(), ...live }) } as unknown as ProjectConnection;
+  const connection = { project, say, command, rpc: vi.fn(async () => 'nonce'), client: { reconnect: vi.fn() }, conversation: { store: store({ compactions: {}, rpcs: {}, ops: {}, ...conversation }) }, live: store({ connected: true, caughtUp: true, caughtUpAt: Date.now(), ...live }) } as unknown as ProjectConnection;
   const sessions = new Map([
     [S1, session(S1, 'maws-45')],
     [S2, session(S2, 'maws-fe', 'working')],
   ]);
-  return { ...render(<DeskContext.Provider value={{ connection, member: 'm1', sessions }}>{ui}</DeskContext.Provider>), connection };
+  const wrap = (child: React.ReactNode) => <DeskContext.Provider value={{ connection, member: 'm1', sessions }}>{child}</DeskContext.Provider>;
+  const view = render(wrap(ui));
+  return { ...view, connection, redraw: (child: React.ReactNode) => view.rerender(wrap(child)) };
 }
 
 const phone = (narrow: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches: narrow && query.includes('max-width'), addEventListener() {}, removeEventListener() {} }));
@@ -392,7 +394,7 @@ describe('unseen receipts across a reopened session or fresh page', () => {
       vi.advanceTimersByTime(1000);
       pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'second-op', name: 'color' });
       const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
-      const { connection } = mount(<SessionComposer session={session(S1, 'maws-45')} />);
+      const { connection, redraw } = mount(<SessionComposer session={session(S1, 'maws-45')} />);
       const reconnect = vi.mocked(connection.client.reconnect).mockImplementation(() => connection.live.setState({ connected: false }));
       expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['checking', 'checking']);
       await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS - 999));
@@ -414,6 +416,26 @@ describe('unseen receipts across a reopened session or fresh page', () => {
       await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
       expect(reconnect).toHaveBeenCalledTimes(1);
       expect(command).not.toHaveBeenCalled();
+
+      // Another restored batch in this same connection still gets its own one-shot post-expiry replay.
+      pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'later-op', name: 'color' });
+      redraw(<SessionComposer key="later-batch" session={session(S1, 'maws-45')} />);
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(reconnect).toHaveBeenCalledTimes(2);
+      act(() => connection.live.setState({ connected: true, caughtUp: true, caughtUpAt: Date.now() }));
+      expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('unknown');
+      cleanup();
+
+      // Nor can this project's replay suppress another project's recovered receipt.
+      pendingCommands.remember({ project: 'p2', machine: 'mini', session: S1, nonce: 'other-project-op', name: 'color' });
+      const other = mount(<SessionComposer session={{ ...session(S1, 'other-project'), project: 'p2' }} />, {}, {}, 'p2').connection;
+      vi.mocked(other.client.reconnect).mockImplementation(() => other.live.setState({ connected: false }));
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(other.client.reconnect).toHaveBeenCalledTimes(1);
+      act(() => other.live.setState({ connected: true, caughtUp: true, caughtUpAt: Date.now() }));
+      expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('unknown');
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(other.client.reconnect).toHaveBeenCalledTimes(1);
     } finally { cleanup(); vi.useRealTimers(); }
   });
 
