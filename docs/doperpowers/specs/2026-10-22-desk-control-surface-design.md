@@ -2266,6 +2266,23 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from the reviewer-high
   rounds on doperpowers.
 
+- Decision: A `/reload-plugins` outcome has two confirmation paths. If the bridge
+  module survives (engine 2.1.308 keeps a module whose declaration, linked source,
+  options and metadata are deeply equal: "hooks modules unchanged, kept as loaded"),
+  the bridge emits the engine's returned text as `run end` with `readback {how:
+  "text", text}` and frees its desk queue at once, as `/reload-skills` does. If the
+  module is replaced, the daemon keeps the fresh-probe check for a different
+  (socket inode, pid) and ends by effect. The first accepted end wins, keyed by
+  session and op id even for nonce-free CLI runs; later ends and replayed starts
+  cannot re-arm it. The daemon logs each accepted reload end with its op id and path
+  (text, effect, timeout). Supersedes the assumption (M0, entries 7–10) that every
+  successful reload replaces the bridge. No wire or web change.
+  Rationale: found by the M0 machine-side live walk (child unchanged 2+ min after
+  "Reloaded: 10 plugins"); doperpowers #351, sminos 1.7.1. Rejected: confirming by
+  effect only with a forced module replacement (would make every reload restart the
+  bridge child and drop its live state).
+  Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's M0 live walk.
+
 ## Outcomes & Retrospective
 
 **M0 (2026-10-22).** Built in both repositories as two parallel tasks against the
