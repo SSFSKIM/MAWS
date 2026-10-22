@@ -402,8 +402,12 @@ describe('unseen receipts across a reopened session or fresh page', () => {
       visibility.mockReturnValue('visible');
       act(() => fireEvent(document, new Event('visibilitychange')));
       expect(reconnect).not.toHaveBeenCalled(); // One join must wait for the newer nonce's freshness too.
+      visibility.mockReturnValue('hidden');
       await act(() => vi.advanceTimersByTimeAsync(1000));
-      expect(reconnect).toHaveBeenCalledTimes(1); // The page rotates once, not once per missing nonce.
+      expect(reconnect).not.toHaveBeenCalled(); // Expiry alone never rotates a hidden page.
+      visibility.mockReturnValue('visible');
+      act(() => fireEvent(document, new Event('visibilitychange')));
+      expect(reconnect).toHaveBeenCalledTimes(1); // The batch rotates once, not once per missing nonce.
       expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['checking', 'checking']);
       act(() => {
         connection.conversation.store.setState({ ops: { 'own-op': { ...end, phase: 'start', body: { ...end.body, phase: 'start' } } } });
