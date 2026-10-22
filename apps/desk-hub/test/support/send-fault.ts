@@ -83,6 +83,19 @@ export const LEAVE_HOLD_PATH = '/__test/leave-hold';
 /** Where the suites' `Registry` takes how long an unfinished offline revocation waits before it is tried again
  * (`{ms}`, or `{ms: null}` for the deployed minute), and wakes its alarm. */
 export const OFFLINE_RETRY_PATH = '/__test/offline-retry';
+/** Where the suites' `Machine` is armed (`{times}`) to throw from its next `times` calls of `directory`, as the
+ * Registry's push to an object a code update reset fails (0 disarms); every request there (`{}` arms nothing) answers
+ * `{remaining, calls}`: the throws still armed, and the calls taken since it was last armed. */
+export const DIRECTORY_FAULT_PATH = '/__test/directory-fault';
+/** Where the suites' `Registry` is armed (`{project, times}`) to throw from its next `times` summary reports of the
+ * project, as a project's report to a Registry a code update reset fails (0 disarms); every request there answers
+ * `{remaining, calls}` for the project. */
+export const SUMMARY_FAULT_PATH = '/__test/summary-fault';
+/** Where the suites' `Registry` or `Project` takes how long the first retry of a failed push or report waits (`{ms}`),
+ * over the deployed second. */
+export const RETRY_BASE_PATH = '/__test/retry-base';
+/** Where the suites' `Project` says whether a retry of a failed summary report waits for its time (`{waiting}`). */
+export const REPORT_RETRY_PATH = '/__test/report-retry';
 /** Where the suites' `Registry` says whether a `leave` is held: `held` or `none`. */
 export const LEAVE_HELD_PATH = '/__test/leave-held';
 /** Where the suites' `Registry` releases a held `leave`: answers `released`, or `none` while none is held. */

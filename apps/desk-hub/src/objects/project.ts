@@ -29,6 +29,7 @@ import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutco
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import { BATCH_BYTES, eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
 import type { SummaryReport } from './registry';
+import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
 import { pendingKey, SessionStore, type Lease, type Route, type RpcRecord } from './session-store';
 
 /** A `.smns` project id (a lowercase uuid). */
@@ -91,6 +92,9 @@ export class Project extends DurableObject<Env> {
   private readonly routes = new Map<string, Route>();
   /** When this instance was constructed: the suites tell a woken object from the one before it by this. */
   protected readonly life = `${Date.now()}-${Math.random()}`;
+  /** The retry of a summary report the Registry did not acknowledge, waiting for its time: one at most, any report sent
+   * meanwhile superseding it (`reportFailed`; an object restart forgets it). */
+  private reportRetry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -911,7 +915,7 @@ export class Project extends DurableObject<Env> {
    * `live` counts sessions with a process on every holder, a lapsed lease's too: a machine asleep keeps its sessions,
    * and one gone for good is revoked.
    */
-  private reportSummary(): void {
+  private reportSummary(attempt = 1): void {
     // A revoked machine is no machine of the project, unless its name was enrolled anew and opened the project since.
     const leased = this.plane.leases().filter((l) => !this.isRevoked(l.machine, l.generation));
     const revoked = (machine: string) => this.isRevoked(machine, this.plane.lease(machine)?.generation ?? 0);
@@ -937,17 +941,51 @@ export class Project extends DurableObject<Env> {
     const text = JSON.stringify(summary);
     if (this.ctx.storage.kv.get('summary') === text) return;
     this.ctx.storage.kv.put('summary', text);
-    // Reports travel asynchronously: the Registry takes one only when it is newer than the last it took. One it does not
-    // acknowledge (the call failed, or a Registry still on the previous version dropped `live`) leaves no copy, so the
-    // next report goes out though its counts are the same.
+    if (this.reportRetry !== undefined) clearTimeout(this.reportRetry);
+    this.reportRetry = undefined;
+    // Reports travel asynchronously: the Registry takes one only when it is newer than the last it took.
     const seq = (this.ctx.storage.kv.get<number>('summary-seq') ?? 0) + 1;
     this.ctx.storage.kv.put('summary-seq', seq);
     void this.registry()
       .summary(this.projectId, { ...summary, seq })
-      .catch(() => undefined)
-      .then((kept) => {
-        if (kept !== true) this.ctx.storage.kv.delete('summary');
-      });
+      .then(
+        (kept) => {
+          if (kept !== true) this.reportFailed(seq, attempt, new Error('the Registry did not acknowledge the report'));
+        },
+        (error: unknown) => this.reportFailed(seq, attempt, error),
+      )
+      // An instance replaced under its call cannot read its storage: its successor reports at the project's next change.
+      .catch(() => {});
+  }
+
+  /**
+   * A report the Registry did not acknowledge (the call failed, or a Registry still on the previous version dropped
+   * `live`), `attempt` being how many times it went (retry.ts), leaves no copy and is sent again: the project's summary as
+   * it stands when the retry's time comes, under a new `seq`, even though its counts are the same. So a retry never
+   * carries an older state than the project's latest, and the Registry, which takes a report only above the last `seq`
+   * it took, never keeps one over a later report. A report sent meanwhile supersedes it, and has an answer of its own;
+   * after RETRY_ATTEMPTS the next change's report goes out.
+   */
+  private reportFailed(seq: number, attempt: number, error: unknown): void {
+    if (this.ctx.storage.kv.get<number>('summary-seq') !== seq) return;
+    this.ctx.storage.kv.delete('summary');
+    const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
+    logged({ event: 'report-failed', project: this.projectId, seq, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) });
+    if (wait === null) return;
+    this.reportRetry = setTimeout(() => {
+      this.reportRetry = undefined;
+      try {
+        this.reportSummary(attempt + 1);
+      } catch (retryError) {
+        // An instance replaced meanwhile cannot read its storage, and gives the retry up.
+        logged({ event: 'report-failed', seq, attempt: attempt + 1, error: described(retryError), retry_ms: null });
+      }
+    }, wait);
+  }
+
+  /** How long the first retry of a failed report waits at most (retry.ts; the suites' Worker shortens it). */
+  protected retryBaseMs(): number {
+    return RETRY_BASE_MS;
   }
 
   /**

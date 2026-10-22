@@ -1398,12 +1398,10 @@ describe("the grid's live count", () => {
     // During a deploy, the Registry still on the previous version takes the report's counts but not `live`, and answers nothing.
     await hub.nextSummaryAsPrevious();
     const running = { t: 'session', message: envelope(m, project, 'presence', presence('busy')) } as const;
-    let from = grid.frames.length;
+    const from = grid.frames.length;
     await m.postOk([running]);
     await gridReached(grid, project, from, { working: 1, live: 0 }, 'the counts taken without live');
-    // The same presence again: no count changes, and the unacknowledged report goes out again.
-    from = grid.frames.length;
-    await m.postOk([running]);
+    // Unacknowledged, the report goes out again by itself, though no count changed.
     await gridReached(grid, project, from, { working: 1, live: 1 }, 'the counts sent again, live with them');
     grid.close();
     await m.close();

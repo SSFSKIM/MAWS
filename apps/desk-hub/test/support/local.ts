@@ -18,6 +18,7 @@ import {
   ABORT_REASON,
   ALARM_PATH,
   BACKDATE_PATH,
+  DIRECTORY_FAULT_PATH,
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
@@ -46,8 +47,11 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   REPORT_PATH,
+  REPORT_RETRY_PATH,
+  RETRY_BASE_PATH,
   SUMMARIES_BEFORE_LIVE_PATH,
   SUMMARY_AS_PREVIOUS_PATH,
+  SUMMARY_FAULT_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
   WRITE_STALL_PATH,
@@ -111,9 +115,10 @@ export async function startLocalHub() {
   // workerd's own log lines. A line a suite said it expects (`expectRuntimeLog`) is kept for it to assert and not
   // printed, as is the hub's own record of a machine's stream and of a project's failed frame or send
   // (`{"desk":"machine-stream",…}`, `{"desk":"project",…}`, a few per test, many where a suite injects failures); every
-  // other goes out as Miniflare's default handler would print it, so an unexpected error stays visible.
+  // other goes out as Miniflare's default handler would print it, so an unexpected error stays visible. The Registry's
+  // record of a failed push of the directory (`{"desk":"registry",…}`) is kept the same way.
   const runtimeLogs: Array<{ level: string; message: string }> = [];
-  const expectedLogs: RegExp[] = [/^\{"desk":"(machine-stream|project)"/];
+  const expectedLogs: RegExp[] = [/^\{"desk":"(machine-stream|project|registry)"/];
   const handleStructuredLogs = ({ level, message }: { level: string; message: string }) => {
     if (expectedLogs.some((pattern) => pattern.test(message))) return void runtimeLogs.push({ level, message });
     if (level === 'error' || level === 'warn') console.error(message);
@@ -349,6 +354,28 @@ export async function startLocalHub() {
     /** Has a project queue a frame for a machine's stream of `generation`, as a reply on a retired stream is queued. */
     async projectSend(project: string, machine: string, generation: number, frame: unknown) {
       await seam('PROJECT', project, PROJECT_SEND_PATH, { machine, generation, frame });
+    },
+    /** Makes the machine's object throw from its next `times` calls of `directory` (0 disarms), as the Registry's push to
+     * an object a code update reset fails; without `times`, arms nothing. Answers the throws still armed and the calls
+     * taken since it was armed (the suites' Worker only). */
+    async directoryFault(machine: string, times?: number): Promise<{ remaining: number; calls: number }> {
+      return JSON.parse(await seam('MACHINE', machine, DIRECTORY_FAULT_PATH, { times })) as { remaining: number; calls: number };
+    },
+    /** Makes the Registry throw from the project's next `times` summary reports (0 disarms), as a report to a Registry a
+     * code update reset fails; without `times`, arms nothing. Answers the throws still armed and the reports taken since
+     * it was armed (the suites' Worker only). */
+    async summaryFault(project: string, times?: number): Promise<{ remaining: number; calls: number }> {
+      return JSON.parse(await seam('REGISTRY', ORG, SUMMARY_FAULT_PATH, { project, times })) as { remaining: number; calls: number };
+    },
+    /** How long the first retry of the Registry's failed pushes of the directory waits, or of a project's failed summary
+     * reports (the deployed second; each retry after waits twice the one before). */
+    async retryBase(of: 'registry' | { project: string }, ms: number) {
+      if (of === 'registry') await seam('REGISTRY', ORG, RETRY_BASE_PATH, { ms });
+      else await seam('PROJECT', of.project, RETRY_BASE_PATH, { ms });
+    },
+    /** Whether a retry of the project's failed summary report waits for its time (the suites' Worker only). */
+    async reportRetryWaits(project: string): Promise<boolean> {
+      return (JSON.parse(await seam('PROJECT', project, REPORT_RETRY_PATH)) as { waiting: boolean }).waiting;
     },
     /** Makes a project's next `forget` throw, as a failed RPC from the Registry would (the suites' Worker only). */
     async failNextForget(project: string) {

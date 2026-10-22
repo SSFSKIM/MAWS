@@ -1,11 +1,13 @@
 // The org's directory (the sminos org directory's M2) on the local runtime: the `org` frame every machine's stream
 // carries after its `welcome` and again on every change, follow-only hellos, machine projects at the Registry, and
-// machines' online state as the projects' leases report it.
+// machines' online state as the projects' leases report it; and the directory's two hops, the Registry's push to each
+// machine and a project's summary report, sent again after a failure the suites inject, since Miniflare fails neither.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeMachine } from '../fake-machine';
 import type { GridDown, ProjectDown, ProjectSummary } from '../src/protocol/browser';
 import { machineProjectId } from '../src/protocol/identity';
 import type { DownFrame, OrgFrame } from '../src/protocol/machine';
+import { RETRY_ATTEMPTS } from '../src/objects/retry';
 import type { SessionMessage } from '../src/protocol/session';
 import { BrowserClient, enroll, GridClient, MachineClient, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
@@ -353,6 +355,157 @@ describe("a machine's project", () => {
     expect(projectIn(await nextOrg(m, from, (f) => projectIn(f, id) !== undefined, 'the project registered again'), id)).toMatchObject({ kind: 'machine', machine: m.name });
     await other.close();
     await m.close();
+  });
+});
+
+/** The hub's records of a failed hop (`push-failed`, the Registry's; `report-failed`, a project's) logged after `from`. */
+function failures(event: 'push-failed' | 'report-failed', from: number): Array<Record<string, unknown>> {
+  return hub.runtimeLogs
+    .slice(from)
+    .map((line) => {
+      try {
+        return JSON.parse(line.message) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter((line): line is Record<string, unknown> => line?.event === event);
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const everyAttempt = Array.from({ length: RETRY_ATTEMPTS }, (_, i) => i + 1);
+
+describe("the directory's push to a machine, failed", () => {
+  it('is sent again until the machine takes it', async () => {
+    await hub.retryBase('registry', 20);
+    const watcher = await connected();
+    await hub.directoryFault(watcher.name, 2);
+    const from = watcher.frames.length;
+    const b = await connected();
+    await nextOrg(watcher, from, (f) => machineIn(f, b.name) !== undefined, 'the change, after two failed pushes');
+    expect(await hub.directoryFault(watcher.name)).toMatchObject({ remaining: 0 });
+    await b.close();
+    await watcher.close();
+  });
+
+  it(`is given up after ${RETRY_ATTEMPTS} sends, and the next change brings the directory whole`, async () => {
+    await hub.retryBase('registry', 5);
+    const watcher = await connected();
+    await hub.directoryFault(watcher.name, 1000);
+    const logs = hub.runtimeLogs.length;
+    const from = watcher.frames.length;
+    const b = await connected();
+    const mine = () => failures('push-failed', logs).filter((line) => line.machine === watcher.name);
+    const last = await waitFor(() => mine().find((line) => line.retry_ms === null), 15_000);
+    expect(mine().filter((line) => line.version === last.version).map((line) => line.attempt)).toEqual(everyAttempt);
+    const { calls } = await hub.directoryFault(watcher.name);
+    await pause(300);
+    expect((await hub.directoryFault(watcher.name)).calls).toBe(calls);
+    expect(orgFramesOf(watcher, from).some((f) => machineIn(f, b.name) !== undefined)).toBe(false);
+
+    await hub.directoryFault(watcher.name, 0);
+    const next = watcher.frames.length;
+    const c = await connected();
+    const whole = await nextOrg(watcher, next, (f) => machineIn(f, c.name) !== undefined, 'the next change');
+    expect(machineIn(whole, b.name)).toBeDefined();
+    await c.close();
+    await b.close();
+    await watcher.close();
+  });
+
+  it('never brings an older directory after a newer one', async () => {
+    // A retry waits half a second at least: the later change goes out first.
+    await hub.retryBase('registry', 1000);
+    const watcher = await connected();
+    const b = await connected();
+    const project = newProject();
+    const lease = (seq: number, online: boolean) => hub.report(project, { ...COUNTS, seq, machines_state: [{ name: b.name, online, client: b.creds.clientId }] });
+    await hub.directoryFault(watcher.name, 1);
+    const from = watcher.frames.length;
+    // b online, a push that fails; then b offline again, a push that lands.
+    await lease(1, true);
+    await lease(2, false);
+    const newer = (f: OrgFrame) => machineIn(f, b.name)?.online === false && machineIn(f, b.name)?.seen !== null;
+    await nextOrg(watcher, from, newer, 'the later change');
+    const { calls } = await hub.directoryFault(watcher.name);
+    // Past the failed push's retry time, nothing has followed: no directory that holds b online, and no call.
+    await pause(1500);
+    const frames = orgFramesOf(watcher, from);
+    expect(frames.slice(frames.findIndex(newer)).every(newer)).toBe(true);
+    expect((await hub.directoryFault(watcher.name)).calls).toBe(calls);
+    await b.close();
+    await watcher.close();
+  });
+});
+
+describe("a project's summary report, failed", () => {
+  it("is sent again until the Registry takes it: a lease's lapse and its return reach every machine", async () => {
+    const project = newProject();
+    await hub.retryBase({ project }, 20);
+    const watcher = await connected();
+    const m = await connected(newName(), { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
+    let from = watcher.frames.length;
+    await m.sync(project);
+    await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === true, 'the machine online');
+
+    // The daemon stops: its lease lapses in the project, whose report of it fails twice.
+    await hub.summaryFault(project, 2);
+    from = watcher.frames.length;
+    await m.close();
+    await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === false, 'the lapse, after two failed reports');
+    expect(await hub.summaryFault(project)).toEqual({ remaining: 0, calls: 3 });
+
+    // It starts again: the report of its return fails twice too.
+    await hub.summaryFault(project, 2);
+    from = watcher.frames.length;
+    await m.connect();
+    await m.sync(project);
+    await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === true, 'the return, after two failed reports');
+    expect(await hub.summaryFault(project)).toEqual({ remaining: 0, calls: 3 });
+    await m.close();
+    await watcher.close();
+  });
+
+  it(`is given up after ${RETRY_ATTEMPTS} sends`, async () => {
+    const project = newProject();
+    await hub.retryBase({ project }, 5);
+    const m = await connected(newName(), { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
+    await m.sync(project);
+    await nextOrg(m, 0, (f) => machineIn(f, m.name)?.online === true, 'the machine online');
+    await hub.summaryFault(project, 1000);
+    const logs = hub.runtimeLogs.length;
+    await m.close();
+    const mine = () => failures('report-failed', logs).filter((line) => line.project === project);
+    await waitFor(() => mine().find((line) => line.retry_ms === null), 15_000);
+    expect(mine().map((line) => line.attempt)).toEqual(everyAttempt);
+    expect((await hub.summaryFault(project)).calls).toBe(RETRY_ATTEMPTS);
+    await pause(300);
+    expect((await hub.summaryFault(project)).calls).toBe(RETRY_ATTEMPTS);
+  });
+
+  it('is superseded by a later report, and never brings the Registry an older state', async () => {
+    const project = newProject();
+    // A retry that waits half a minute at least: whether it was superseded is read, not waited for.
+    await hub.retryBase({ project }, 60_000);
+    const watcher = await connected();
+    const m = await connected(newName(), { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
+    await m.sync(project);
+    await nextOrg(watcher, 0, (f) => machineIn(f, m.name)?.online === true, 'the machine online');
+
+    // The lapse's report fails, and its retry waits; the machine is back meanwhile.
+    await hub.summaryFault(project, 1);
+    const from = watcher.frames.length;
+    await m.close();
+    await waitFor(async () => ((await hub.reportRetryWaits(project)) ? true : undefined));
+    expect((await hub.summaryFault(project)).calls).toBe(1);
+    await m.connect();
+    await m.sync(project);
+    // The return's report lands, and the retry no longer waits: the Registry was told the return, and nothing older.
+    await waitFor(async () => ((await hub.summaryFault(project)).calls === 2 ? true : undefined));
+    expect(await hub.reportRetryWaits(project)).toBe(false);
+    expect(orgFramesOf(watcher, from).every((f) => machineIn(f, m.name)?.online === true)).toBe(true);
+    await m.close();
+    await watcher.close();
   });
 });
 

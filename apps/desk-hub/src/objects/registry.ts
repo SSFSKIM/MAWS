@@ -54,7 +54,9 @@ import {
   type WrappedKeyRemoved,
 } from '../protocol/identity';
 import { OrgKeys, type StoredKey } from './org-keys';
+import { described } from './project';
 import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
+import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
 
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
@@ -146,6 +148,10 @@ export class Registry extends DurableObject<Env> {
    * may be placed, so it is tried again until it completes, whatever the machine's online state or offline deadline
    * reads since (an object restart forgets it). */
   private readonly unfinished = new Map<string, { name: string; began: number }>();
+  /** The version of the latest change of the directory this instance pushed (`directoryChanged`). */
+  private pushed = 0;
+  /** Per machine, a failed push of that version waiting to be sent again (an object restart forgets it). */
+  private readonly pushRetries = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -532,14 +538,49 @@ export class Registry extends DurableObject<Env> {
   /**
    * The directory changed: every enrolled machine with a stream is sent it whole, through its `Machine` object (one
    * with no stream is not sent it: its next `welcome` brings the directory). Each carries the version of its change, so
-   * a `Machine` that wrote a later one, or the snapshot its stream opened with, passes an older one by.
+   * a `Machine` that wrote a later one, or the snapshot its stream opened with, passes an older one by. A push still
+   * waiting to be sent again is superseded: this change carries everything it did.
    */
   private directoryChanged(): void {
     const version = (this.ctx.storage.kv.get<number>(DIRECTORY_VERSION) ?? 0) + 1;
     this.ctx.storage.kv.put(DIRECTORY_VERSION, version);
     const { frame } = this.orgFrame();
     const org = this.ensureOrg().id;
-    for (const { name } of frame.machines) void this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${name}`)).directory(frame, version).catch(() => {});
+    this.pushed = version;
+    for (const timer of this.pushRetries.values()) clearTimeout(timer);
+    this.pushRetries.clear();
+    for (const { name } of frame.machines) this.pushDirectory(org, name, frame, version, 1);
+  }
+
+  /**
+   * Sends one machine's object the directory of `version`, `attempt` being how many times it was sent (retry.ts). A call
+   * that fails is sent again, the same frame and version, until the object answers, a later change supersedes it, or it
+   * went RETRY_ATTEMPTS times; an answer of "offline" is an answer (the machine's next stream opens with the directory).
+   * Sent again, an older directory still never follows a newer one onto a stream: the `Machine` writes a version only
+   * above the last its stream wrote. A retry reads no storage, which an instance replaced meanwhile could not.
+   */
+  private pushDirectory(org: string, name: string, frame: OrgFrame, version: number, attempt: number): void {
+    void this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${name}`))
+      .directory(frame, version)
+      .catch((error: unknown) => {
+        // A later change was pushed meanwhile, to this machine too.
+        if (version !== this.pushed) return;
+        const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
+        console.log(JSON.stringify({ desk: 'registry', event: 'push-failed', machine: name, version, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
+        if (wait === null) return;
+        this.pushRetries.set(
+          name,
+          setTimeout(() => {
+            this.pushRetries.delete(name);
+            this.pushDirectory(org, name, frame, version, attempt + 1);
+          }, wait),
+        );
+      });
+  }
+
+  /** How long the first retry of a failed push waits at most (retry.ts; the suites' Worker shortens it). */
+  protected retryBaseMs(): number {
+    return RETRY_BASE_MS;
   }
 
   /** Each enrolled machine is online while any project reports a fresh lease of it, opened with its own credential,
