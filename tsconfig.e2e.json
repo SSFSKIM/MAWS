@@ -109,6 +109,7 @@
     "src/artifacts/yjs/*.ts",
     "src/artifacts/document/ids.ts",
     "src/artifacts/document/schema.ts",
+    "src/artifacts/document/provisional-key.ts", // P4-A2 G2: the schema's repair guard reads the layer's key
     "src/artifacts/document/tabs.ts",
     "src/artifacts/document/threads.ts",
     // P3-E (E2 M3): e2e/dashboard.spec.ts binds M1's vendored tables, parsed by the host's own parser
