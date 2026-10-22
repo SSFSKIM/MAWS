@@ -45,8 +45,18 @@ export function commandRoute(catalog: Catalog | null, name: string, args: string
   if (!route) return { kind: 'unavailable', reason: words((args.trim() ? entry.withArgs ?? entry.route : entry.route).forms?.hint ?? 'this form needs different arguments', machine) };
   return action(route, machine);
 }
+function originOf(entry: Catalog['commands'][number], skills: ReadonlySet<string> | null): SlashOrigin {
+  if (skills !== null) {
+    // MAWS composer/mentions/items.ts: built-ins, skill membership, namespace, then custom.
+    if (entry.source === 'builtin' && !entry.name.includes(':')) return 'engine';
+    if (skills.has(entry.name)) return 'skills';
+    return entry.name.includes(':') ? 'plugins' : 'custom';
+  }
+  // A 1.8.0 bridge (or its cache) has no membership field: keep its existing grouping.
+  return entry.source === 'builtin' ? 'engine' : entry.source === 'skill' || entry.source === 'skills' ? 'skills' : entry.plugin || entry.name.includes(':') || entry.source === 'mcp' ? 'plugins' : 'custom';
+}
 export function slashItems(catalog: Catalog | null, machine: string, unavailable: string | null): SlashItem[] {
-  const skills = new Set(catalog?.skills ?? []);
+  const skills = catalog?.skills === undefined ? null : new Set(catalog.skills);
   const items = (catalog?.commands ?? []).map((entry): SlashItem => {
     // Offer the usable argument form, not a bare panel (mcp, goal, rename).
     const route = entry.withArgs && ['run', 'run-prompt'].includes(entry.withArgs.class) ? entry.withArgs : entry.route;
@@ -54,7 +64,7 @@ export function slashItems(catalog: Catalog | null, machine: string, unavailable
     if (entry.name === 'model' || entry.name === 'effort') pick = { kind: 'widget', name: 'model' };
     if (entry.name === 'compact') pick = { kind: 'widget', name: 'compact' };
     if (pick.kind === 'command' && unavailable) pick = { kind: 'unavailable', reason: unavailable };
-    const origin: SlashOrigin = entry.source === 'builtin' ? 'engine' : skills.has(entry.name) || entry.source === 'skill' || entry.source === 'skills' ? 'skills' : entry.plugin || entry.name.includes(':') || entry.source === 'mcp' ? 'plugins' : 'custom';
+    const origin = originOf(entry, skills);
     return { name: entry.name, title: `/${entry.name}`, description: entry.description, origin,
       argumentHint: route.forms?.hint ?? (route.forms?.args === 'required' ? '<arguments>' : null),
       note: route.outlives ? words(route.outlives, machine) : undefined,

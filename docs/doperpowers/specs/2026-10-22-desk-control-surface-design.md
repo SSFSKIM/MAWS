@@ -1875,7 +1875,8 @@ VERBS gains 'command' | 'status' (M0), 'btw' | 'usage' | 'mcp' | 'settings' (M2)
 ops: Record<string /* nonce */, { op: string; phase: 'start' | 'end'; body: JsonObject }>
 // state/catalog.ts (M1)
 useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | null }
-// A10 grouping: built-ins remain Engine; membership in Catalog.skills takes precedence over Plugins/Custom.
+// A10 grouping with skills present: unqualified built-ins are Engine, listed skills are Skills,
+// then names containing a colon are Plugins and the rest Custom (the native MAWS rule).
 // An absent skills field (sminos 1.8.0, including its disk cache) keeps the old source/plugin grouping.
 ```
 

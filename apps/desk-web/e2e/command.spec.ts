@@ -208,6 +208,11 @@ test('A14: a cached catalog is labelled and run items withdraw after downgrade; 
   await box.fill('/');
   await expect(composer.getByTestId('slash-palette')).toContainText('as of');
   await expect(composer.getByRole('option', { name: /color/ })).toHaveAttribute('aria-disabled', 'true');
+  // Withdrawing the bridge alone makes a stale session, not an older machine.
+  await expect(composer.getByTestId('slash-palette')).toContainText("this session's plugin loaded before the update");
+  await expect(composer.getByTestId('slash-palette')).not.toContainText('commands need sminos');
+  hub.setMachines(PROJECT, [{ machine: MACHINE, online: true, policy: { read_only: false, ceiling: 'default' },
+    checkouts: [{ path: fm.recording.cwd, branch: 'main' }], desk: { sminos: '1.7.1', rpcs: ['command'], reads: [] } }]);
   await expect(composer.getByTestId('slash-palette')).toContainText('commands need sminos ≥ 1.8.0');
 });
 
