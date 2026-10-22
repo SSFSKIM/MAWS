@@ -46,6 +46,8 @@ export type LiveState = {
   connected: boolean;
   /** The backlog after the latest resume has arrived. */
   caughtUp: boolean;
+  /** The most recent completed join replay (including command ops), kept across drops for terminal receipt fallback. */
+  caughtUpAt: number | null;
   presence: Record<string, SessionPresence>;
   machines: Record<string, MachinePresence>;
   /** The pending set as the hub sent it, each request's code checked; only a verified one is drawn or counted. */
@@ -71,7 +73,7 @@ export class NoKey extends Error {
 
 export class ProjectConnection {
   readonly log: ProjectLog;
-  readonly live: StoreApi<LiveState> = createStore<LiveState>(() => ({ status: 'connecting', connected: false, caughtUp: false, presence: {}, machines: {}, pending: [], audit: [] }));
+  readonly live: StoreApi<LiveState> = createStore<LiveState>(() => ({ status: 'connecting', connected: false, caughtUp: false, caughtUpAt: null, presence: {}, machines: {}, pending: [], audit: [] }));
   readonly conversation: Conversation;
   readonly client: ProjectClient;
   private key: OrgKey | null = null;
@@ -135,7 +137,7 @@ export class ProjectConnection {
           }
         },
         caughtUp: () => {
-          this.live.setState({ caughtUp: true });
+          this.live.setState({ caughtUp: true, caughtUpAt: Date.now() });
           this.caughtUpTo = this.log.held();
           this.verifiedUp(this.log.store.getState());
         },

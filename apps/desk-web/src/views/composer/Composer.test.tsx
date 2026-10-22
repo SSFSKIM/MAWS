@@ -2,7 +2,9 @@
 // The composers on a phone (mockups/desk/05-phone.html, 4–5): Return makes a new line and posting is the button, while
 // a desk keeps Return to post; the group composer completes an @-tag from the project's live members. A slash in a
 // session's composer is a command where the session can take one (the desk control surface's M0), and its status.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createStore } from 'zustand/vanilla';
+import { RPC_FRESHNESS_MS } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { catalogs, catalogKey } from '../../state/catalog';
 import { pendingCommands } from '../../state/pending-commands';
@@ -10,6 +12,7 @@ import fixture from '../../../../desk-hub/fake-machine/dx4/routes-2.1.307.json';
 import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../../latency/latency';
 import type { ProjectConnection } from '../../project/connection';
+import type { OpEntry } from '../../project/conversation';
 import type { DeskSession } from '../../shell/sessions';
 import { noteModel } from '../../state/models';
 import { DeskContext } from '../conversation/desk-context';
@@ -41,16 +44,16 @@ const session = (id: string, alias: string, group: DeskSession['group'] = 'idle'
 
 let say: ReturnType<typeof vi.fn>;
 let command: ReturnType<typeof vi.fn>;
-function mount(ui: React.ReactNode, conversation: Record<string, unknown> = {}) {
+function mount(ui: React.ReactNode, conversation: Record<string, unknown> = {}, live: Record<string, unknown> = {}) {
   say = vi.fn(async () => 'nonce');
   command = vi.fn(async () => 'cmd-nonce');
-  const store = <T,>(state: T) => ({ getState: () => state, subscribe: () => () => {} });
-  const connection = { project: 'p1', say, command, rpc: vi.fn(async () => 'nonce'), conversation: { store: store({ compactions: {}, rpcs: {}, ops: {}, ...conversation }) }, live: store({ connected: true }) } as unknown as ProjectConnection;
+  const store = <T,>(state: T) => createStore(() => state);
+  const connection = { project: 'p1', say, command, rpc: vi.fn(async () => 'nonce'), client: { reconnect: vi.fn() }, conversation: { store: store({ compactions: {}, rpcs: {}, ops: {}, ...conversation }) }, live: store({ connected: true, caughtUp: true, caughtUpAt: Date.now(), ...live }) } as unknown as ProjectConnection;
   const sessions = new Map([
     [S1, session(S1, 'maws-45')],
     [S2, session(S2, 'maws-fe', 'working')],
   ]);
-  return render(<DeskContext.Provider value={{ connection, member: 'm1', sessions }}>{ui}</DeskContext.Provider>);
+  return { ...render(<DeskContext.Provider value={{ connection, member: 'm1', sessions }}>{ui}</DeskContext.Provider>), connection };
 }
 
 const phone = (narrow: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches: narrow && query.includes('max-width'), addEventListener() {}, removeEventListener() {} }));
@@ -314,7 +317,7 @@ describe('typeahead version guidance', () => {
 });
 
 describe('unseen receipts across a reopened session or fresh page', () => {
-  const end = { op: 'command', phase: 'end', session: S1, body: { rpc: 'own-op', op: 'command', phase: 'end', id: 'c1', name: 'color', args: 'orange', settled: { ok: true }, readback: { how: 'row', text: 'Session color set to: orange', uuid: 'color-row' } } };
+  const end: OpEntry = { op: 'command', phase: 'end', session: S1, body: { rpc: 'own-op', op: 'command', phase: 'end', id: 'c1', name: 'color', args: 'orange', settled: { ok: true }, readback: { how: 'row', text: 'Session color set to: orange', uuid: 'color-row' } } };
   beforeEach(() => {
     localStorage.clear();
     // happy-dom has no layout. Browser e2e exercises actual clipping; this boundary says the mounted line is in view.
@@ -342,6 +345,76 @@ describe('unseen receipts across a reopened session or fresh page', () => {
     cleanup();
     mount(<SessionComposer session={session(S1, 'maws-45')} />, { ops: { 'own-op': end } });
     expect(screen.queryByTestId('command-status')).toBeNull(); // A later view is not a command-history dump.
+  });
+
+  it('settles an old missing receipt only after join replay, acknowledges it when visible, and accepts a late real end', async () => {
+    pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+    const saved = JSON.parse(localStorage.getItem('desk.pending-commands')!);
+    saved[0].at -= RPC_FRESHNESS_MS + 1;
+    localStorage.setItem('desk.pending-commands', JSON.stringify(saved));
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const { connection } = mount(<SessionComposer session={session(S1, 'maws-45')} />, {}, { connected: false, caughtUp: true, caughtUpAt: null });
+    expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('checking');
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+    act(() => connection.live.setState({ connected: true, caughtUp: false }));
+    expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('checking');
+    act(() => connection.live.setState({ caughtUp: true, caughtUpAt: Date.now() }));
+    expect(screen.getByTestId('command-status').getAttribute('data-command-state')).toBe('unknown');
+    expect(screen.getByTestId('command-status').textContent).toMatch(/may not have run.*check the session/i);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+    visibility.mockReturnValue('visible');
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(pendingCommands.pending('p1', 'mini', S1)).toEqual([]));
+    act(() => connection.conversation.store.setState({ ops: { 'own-op': end } }));
+    expect(screen.getByTestId('command-status').textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+    expect(command).not.toHaveBeenCalled();
+    expect(connection.client.reconnect).not.toHaveBeenCalled();
+    cleanup();
+    mount(<SessionComposer session={session(S1, 'maws-45')} />);
+    expect(screen.queryByTestId('command-status')).toBeNull();
+  });
+
+  it('keeps a live in-memory RPC pending even when its saved ownership is old and join replay is complete', () => {
+    pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+    const saved = JSON.parse(localStorage.getItem('desk.pending-commands')!);
+    saved[0].at -= RPC_FRESHNESS_MS + 1;
+    localStorage.setItem('desk.pending-commands', JSON.stringify(saved));
+    mount(<SessionComposer session={session(S1, 'maws-45')} />, { rpcs: { 'own-op': { nonce: 'own-op', state: 'forwarded', rpc: { rpc: 'command', machine: 'mini', args: { session: S1, name: 'color', args: 'orange' } } } } });
+    expect(screen.getByRole('status').getAttribute('data-rpc-state')).toBe('forwarded');
+    expect(pendingCommands.pending('p1', 'mini', S1)).toHaveLength(1);
+  });
+
+  it('gives a fresh in-flight command its freshness window, rechecks once while visible, and preserves a replayed start', async () => {
+    vi.useFakeTimers();
+    try {
+      pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'own-op', name: 'color' });
+      vi.advanceTimersByTime(1000);
+      pendingCommands.remember({ project: 'p1', machine: 'mini', session: S1, nonce: 'second-op', name: 'color' });
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+      const { connection } = mount(<SessionComposer session={session(S1, 'maws-45')} />);
+      const reconnect = vi.mocked(connection.client.reconnect).mockImplementation(() => connection.live.setState({ connected: false }));
+      expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['checking', 'checking']);
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS - 999));
+      expect(reconnect).not.toHaveBeenCalled();
+      visibility.mockReturnValue('visible');
+      act(() => fireEvent(document, new Event('visibilitychange')));
+      expect(reconnect).not.toHaveBeenCalled(); // One join must wait for the newer nonce's freshness too.
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(reconnect).toHaveBeenCalledTimes(1); // The page rotates once, not once per missing nonce.
+      expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['checking', 'checking']);
+      act(() => {
+        connection.conversation.store.setState({ ops: { 'own-op': { ...end, phase: 'start', body: { ...end.body, phase: 'start' } } } });
+        connection.live.setState({ connected: true, caughtUp: true, caughtUpAt: Date.now() });
+      });
+      expect(screen.getAllByTestId('command-status').map((line) => line.getAttribute('data-command-state'))).toEqual(['queued', 'unknown']);
+      expect(pendingCommands.pending('p1', 'mini', S1).some((row) => row.nonce === 'own-op')).toBe(true);
+      act(() => connection.conversation.store.setState({ ops: { 'own-op': end } }));
+      expect(screen.getAllByTestId('command-status')[0].textContent).toBe('Ran · Session color set to: orange · confirmed by its row');
+      await act(() => vi.advanceTimersByTimeAsync(RPC_FRESHNESS_MS + 1));
+      expect(reconnect).toHaveBeenCalledTimes(1);
+      expect(command).not.toHaveBeenCalled();
+    } finally { cleanup(); vi.useRealTimers(); }
   });
 
   it('never renders stale hub-replayed commands this browser did not send', () => {

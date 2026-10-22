@@ -147,7 +147,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   const [refusal, setRefusal] = useState<{ text: string; reason: string } | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   // This mounted view keeps a line while it is read; durable ownership is the project's pending receipt record.
-  const [commands, setCommands] = useState<Array<{ nonce: string; outlives?: string }>>(() => pendingCommands.pending(connection.project, session.machine, session.session));
+  const [commands, setCommands] = useState<Array<{ nonce: string; outlives?: string; at?: number }>>(() => pendingCommands.pending(connection.project, session.machine, session.session));
   const [confirm, setConfirm] = useState<string | null>(null);
   const cached = useCatalog(catalogKey(connection.project, session.session));
   const [paletteHidden, setPaletteHidden] = useState(false);
@@ -284,7 +284,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
         <RpcStatus nonce={rpc} className="ml-auto" />
       </div>
       {commands.length > 0 && <div className="mt-2 max-h-32 space-y-1 overflow-y-auto" aria-label="Command outcomes">
-        {commands.map((command) => <div key={command.nonce} data-testid="command-receipt"><CommandStatus nonce={command.nonce} session={session} outlives={command.outlives} /></div>)}
+        {commands.map((command) => <div key={command.nonce} data-testid="command-receipt"><CommandStatus nonce={command.nonce} session={session} sentAt={command.at} outlives={command.outlives} /></div>)}
       </div>}
       {confirm && <div role="alertdialog" aria-label="Confirm command" className="mt-2 rounded-md border border-border-strong bg-bg-raised p-3 text-ui-sm">
         <p className="m-0 mb-2">{confirm}</p><button type="button" className={BUTTON} onClick={() => commanded(true)}>Run command</button>{' '}<button type="button" className={BUTTON} onClick={() => setConfirm(null)}>Cancel</button>

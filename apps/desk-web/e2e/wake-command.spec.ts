@@ -1,6 +1,7 @@
 // Phone sleep across the end of a long reply and a queued command. The fake machine advances while the page is
 // offline, so recovery must take current state rather than animate its missed stream or forget its receipt.
 import type { Page } from '@playwright/test';
+import { RPC_FRESHNESS_MS } from 'desk-hub/protocol';
 import { type Recording, type Step } from 'desk-hub/fake-machine';
 import { FakeMachineReplay } from './fake-machine';
 import { expect, seedKey, test } from './fixtures';
@@ -33,7 +34,7 @@ function recording(): Recording {
 let replay: FakeMachineReplay | null = null;
 test.afterEach(() => { replay?.stop(); replay = null; });
 
-async function open(page: Page, hub: HubDouble) {
+async function open(page: Page, hub: HubDouble, send = true) {
   await page.setViewportSize({ width: 390, height: 844 });
   await stageProject(hub);
   const fm = replay = new FakeMachineReplay(hub, { project: PROJECT, machine: MACHINE }, { recording: recording(), producer: 'm1' });
@@ -44,14 +45,26 @@ async function open(page: Page, hub: HubDouble) {
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${SID}`);
   await expect(page.getByTestId('session-view')).toContainText('Sentence 0426:');
-  const composer = page.getByTestId('composer');
-  await composer.getByRole('textbox').fill('/color orange');
-  await composer.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(composer.getByTestId('command-status')).toHaveText('Queued until m1-busy is idle');
+  if (send) {
+    const composer = page.getByTestId('composer');
+    await composer.getByRole('textbox').fill('/color orange');
+    await composer.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(composer.getByTestId('command-status')).toHaveText('Queued until m1-busy is idle');
+  }
   return fm;
 }
 const commands = (hub: HubDouble) => hub.up.filter(({ frame }) => frame.t === 'rpc' && frame.rpc.rpc === 'command');
 const subscriptions = (hub: HubDouble) => hub.up.filter(({ frame }) => frame.t === 'subscribe').length;
+
+// Reopening after the RPC freshness window, without making a browser sleep through a minute of wall time.
+async function ageOwnership(page: Page, hub: HubDouble) {
+  await page.goto(`${hub.url}/api/seed`);
+  await page.evaluate((age) => {
+    const rows = JSON.parse(localStorage.getItem('desk.pending-commands') ?? '[]');
+    for (const row of rows) row.at -= age;
+    localStorage.setItem('desk.pending-commands', JSON.stringify(rows));
+  }, RPC_FRESHNESS_MS + 1);
+}
 
 test('@layout an offline phone catches up by fresh snapshot, recovers the missed end, and is as fast as reopening', async ({ page, hub, context }) => {
   const fm = await open(page, hub);
@@ -80,6 +93,60 @@ test('@layout an offline phone catches up by fresh snapshot, recovers the missed
   await test.info().attach('catch-up-times', { body: JSON.stringify({ wakeMs, freshMs }), contentType: 'application/json' });
 });
 
+test('@layout a killed page whose command was refused before running reaches an honest terminal fallback without retrying', async ({ page, hub, context }) => {
+  let refused: string | null = null;
+  await page.routeWebSocket(`**/api/projects/${PROJECT}/socket`, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const frame = JSON.parse(message.toString());
+      if (frame.t === 'rpc' && frame.rpc.rpc === 'command') {
+        // The UI saw online presence when it sent, but the hub's lease is gone by acceptance.
+        hub.dropMachine(PROJECT, MACHINE);
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const frame = JSON.parse(message.toString());
+      if (frame.t === 'rpc-state' && frame.state === 'failed') { refused = frame.nonce; return; }
+      socket.send(message);
+    });
+  });
+  await open(page, hub, false);
+  const composer = page.getByTestId('composer');
+  await composer.getByRole('textbox').fill('/color orange');
+  await composer.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect.poll(() => refused).not.toBeNull(); // The sender never takes this one-shot failure, and no op exists.
+  expect(hub.rpcState(PROJECT, refused!)).toBeNull();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('desk.pending-commands') ?? '[]').length)).toBe(1);
+  await page.close();
+  const fresh = await context.newPage();
+  await fresh.setViewportSize({ width: 390, height: 844 });
+  await ageOwnership(fresh, hub);
+  await fresh.goto(`${hub.url}/p/${PROJECT}/s/${SID}`);
+  await expect(fresh.getByTestId('command-status')).toHaveAttribute('data-command-state', 'unknown');
+  await expect(fresh.getByTestId('command-status')).toContainText(/may not have run.*check the session/i);
+  await expect.poll(() => fresh.evaluate(() => JSON.parse(localStorage.getItem('desk.pending-commands') ?? '[]').length)).toBe(0);
+  await fresh.reload();
+  await expect(fresh.getByTestId('composer')).toBeVisible();
+  await expect(fresh.getByTestId('command-status')).toHaveCount(0);
+  expect(commands(hub)).toHaveLength(1);
+});
+
+test('@layout a fresh page keeps an old replayed command start pending until its real end', async ({ page, hub, context }) => {
+  const fm = await open(page, hub);
+  await page.close();
+  const fresh = await context.newPage();
+  await fresh.setViewportSize({ width: 390, height: 844 });
+  await ageOwnership(fresh, hub);
+  await fresh.goto(`${hub.url}/p/${PROJECT}/s/${SID}`);
+  await expect(fresh.getByTestId('command-status')).toHaveText('Queued until m1-busy is idle');
+  expect(await fresh.evaluate(() => JSON.parse(localStorage.getItem('desk.pending-commands') ?? '[]').length)).toBe(1);
+  fm.playThrough();
+  await expect(fresh.getByTestId('command-status')).toHaveText(RAN);
+  await expect.poll(() => fresh.evaluate(() => JSON.parse(localStorage.getItem('desk.pending-commands') ?? '[]').length)).toBe(0);
+  expect(commands(hub)).toHaveLength(1);
+});
+
 test('@layout an offline home-screen page killed before the end recovers only its own unseen receipt on a fresh page', async ({ page, hub, context }) => {
   const fm = await open(page, hub);
   await context.setOffline(true);
@@ -92,6 +159,7 @@ test('@layout an offline home-screen page killed before the end recovers only it
   await context.setOffline(false);
   const fresh = await context.newPage();
   await fresh.setViewportSize({ width: 390, height: 844 });
+  await ageOwnership(fresh, hub);
   await fresh.goto(`${hub.url}/p/${PROJECT}/s/${SID}`);
   await expect(fresh.getByTestId('session-view')).toContainText('Sentence 1000:');
   await expect(fresh.getByTestId('command-status')).toHaveCount(1);

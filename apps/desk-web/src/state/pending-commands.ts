@@ -32,10 +32,10 @@ export class PendingCommands {
     this.save();
   }
 
-  pending(project: string, machine: string, session: string): PendingCommand[] {
+  pending(project: string, machine?: string, session?: string): PendingCommand[] {
     this.read();
     this.prune();
-    return this.entries.filter((r) => r.project === project && r.machine === machine && r.session === session);
+    return this.entries.filter((r) => r.project === project && (machine === undefined || r.machine === machine) && (session === undefined || r.session === session));
   }
 
   private read(): void {

@@ -2,6 +2,7 @@
 // recovers the real outcome from the hub's op replay. A visible terminal result acknowledges this browser's pending
 // receipt; the mounted composer keeps its displayed line until closed, without making future views a history dump.
 import { useEffect, useRef } from 'react';
+import { RPC_FRESHNESS_MS } from 'desk-hub/protocol';
 import { useStore } from 'zustand';
 import { turnRunning } from '../../conversation/capabilities';
 import { failureOf } from '../../conversation/outcome';
@@ -14,14 +15,44 @@ import { RpcStatus } from '../conversation/RpcStatus';
 import { useDesk } from '../conversation/desk-context';
 
 const cap = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+// One extra read-only join per page, shared by recovered receipts (not one rotation per nonce).
+let recheckedReceipts = false;
 
-export function CommandStatus({ nonce, session, outlives: advertised, className = '' }: { nonce: string | null; session: DeskSession; outlives?: string; className?: string }) {
+export function CommandStatus({ nonce, session, sentAt, outlives: advertised, className = '' }: { nonce: string | null; session: DeskSession; sentAt?: number; outlives?: string; className?: string }) {
   const { connection } = useDesk();
   const entry = useStore(connection.conversation.store, (s) => (nonce ? s.rpcs[nonce] : undefined));
   const op = useStore(connection.conversation.store, (s) => (nonce ? s.ops[nonce] : undefined));
   const ended = op?.op === 'command' && op.session === session.session && op.phase === 'end';
+  const replayed = useStore(connection.live, (s) => s.connected && s.caughtUp);
+  const replayedAt = useStore(connection.live, (s) => s.caughtUpAt);
+  useEffect(() => {
+    if (!nonce || !replayed || entry || op || sentAt === undefined) return;
+    // Join writes every retained op before handling our resume, so caught-up follows their synchronous reduction.
+    // A recent nonce can still be in flight: hub and daemon refuse new RPCs past RPC_FRESHNESS_MS (60s). Wait past
+    // that bound, then rejoin to apply any ops published during the grace before declaring a missing outcome.
+    if (recheckedReceipts || (replayedAt != null && replayedAt > sentAt + RPC_FRESHNESS_MS)) return;
+    const current = connection.conversation.store.getState();
+    // Spend the one extra join after every saved, unresolved nonce in the project has aged, not just the first one.
+    const latest = pendingCommands.pending(connection.project).filter((row) => !current.rpcs[row.nonce] && !current.ops[row.nonce]).reduce((at, row) => Math.max(at, row.at), sentAt);
+    const after = latest + RPC_FRESHNESS_MS;
+    const remaining = Math.max(0, after + 1 - Date.now());
+    const recheck = () => {
+      if (recheckedReceipts || document.visibilityState !== 'visible' || Date.now() <= after) return;
+      const live = connection.live.getState();
+      if (!live.connected || !live.caughtUp) return; // A wake or another receipt already started a join.
+      const known = connection.conversation.store.getState();
+      if (nonce && (known.rpcs[nonce] || known.ops[nonce])) return;
+      recheckedReceipts = true;
+      connection.client.reconnect(); // No saved RPC/arguments: this observes, never re-executes.
+    };
+    const timer = setTimeout(recheck, remaining);
+    document.addEventListener('visibilitychange', recheck);
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', recheck); };
+  }, [replayed, replayedAt, entry, op, nonce, sentAt, connection]);
+  // A late real start or end supersedes even an acknowledged fallback while this line stays mounted.
+  const missing = !entry && !op && sentAt !== undefined && replayedAt != null && replayedAt > sentAt + RPC_FRESHNESS_MS;
   const element = useRef<HTMLSpanElement>(null);
-  const terminal = ended || entry?.state === 'failed' || entry?.state === 'not-connected';
+  const terminal = ended || missing || entry?.state === 'failed' || entry?.state === 'not-connected';
   useEffect(() => {
     if (ended && nonce) latency.commandDrawn(nonce);
   }, [ended, nonce]);
@@ -62,6 +93,11 @@ export function CommandStatus({ nonce, session, outlives: advertised, className 
     );
   }
   if (entry && entry.state !== 'done') return <RpcStatus nonce={nonce} className={className} />;
+  if (missing) return (
+    <span ref={element} className={`${base} text-warning`} role="status" data-testid="command-status" data-command-state="unknown">
+      Command outcome unavailable · may not have run; check the session
+    </span>
+  );
   const queued = !!entry || op?.phase === 'start';
   return (
     <span ref={element} className={`${base} text-fg-muted`} role="status" data-testid="command-status" data-command-state={queued ? 'queued' : 'checking'}>
