@@ -31,7 +31,13 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   } | awk 'NF && $0 != "default" && !seen[$0]++' | paste -sd, -)
   # The refused through the environment, since awk's -v takes no newline.
   printf '%s\n' "$1" | refused=$refused awk -F'\t' -v relaunch="$relaunch" -v label="$label" -v asked="$gates" -v beside="$beside" '
-    function relaunched(job) { if (job ~ /^unit [0-9]+\/[0-9]+$/) job = "unit"; if (!(job in named)) { named[job] = 1; gates = gates "," job } }
+    # A red build skips the guest matrix before expansion, losing its group names. It is a prerequisite, not a gate:
+    # relaunch the requested set, as for a refused plan, rather than omit the unnamed guest groups.
+    function relaunched(job) {
+      if (job ~ /^e2e-build \([^)]+\)$/) { build = 1; return }
+      if (job ~ /^unit [0-9]+\/[0-9]+$/) job = "unit"
+      if (!(job in named)) { named[job] = 1; gates = gates "," job }
+    }
     BEGIN { n = split(ENVIRON["refused"], names, "\n"); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }
     # Under GATE_RUNNER=macos the plan runs on the mini too; refused, it ran nothing, so the relaunch is the whole run.
     $2 == "plan" && $2 in isrefused { plan = 1 }
@@ -44,7 +50,12 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
         printf "ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: %s --gates %s%s --label %s --evidence\n", relaunch, asked, (beside != "" ? " --default-beside " beside : ""), label
         exit
       }
-      printf "ci-gate: refused by the mini (%d):%s; green (%d):%s; red (%d):%s; relaunch the refused and the red (less any red baseline, Decision Log 58(c)): %s --gates %s%s --label %s --evidence\n",
-        nr, r, ng, (ng ? g : " none"), nd, (nd ? d : " none"), relaunch, substr(gates, 2), (beside != "" && index(gates ",", ",e2e:default,") ? " --default-beside " beside : ""), label
+      printf "ci-gate: refused by the mini (%d):%s; green (%d):%s; red (%d):%s; ", nr, r, ng, (ng ? g : " none"), nd, (nd ? d : " none")
+      if (build) {
+        printf "e2e-build did not succeed, so the skipped guest groups cannot be named; relaunch the run: %s --gates %s%s --label %s --evidence\n", relaunch, asked, (beside != "" ? " --default-beside " beside : ""), label
+        exit
+      }
+      printf "relaunch the refused and the red (less any red baseline, Decision Log 58(c)): %s --gates %s%s --label %s --evidence\n",
+        relaunch, substr(gates, 2), (beside != "" && index(gates ",", ",e2e:default,") ? " --default-beside " beside : ""), label
     }'
 }

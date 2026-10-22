@@ -10,6 +10,10 @@
 # stored there, else built and stored there, so a gate on the one-job runner builds each variant once however many
 # groups it runs. A stored build carries the digest of the out/ it copied, checked after every restore; the newest
 # four keys are kept.
+# MAWS_E2E_BUILD_REQUIRE=1 (the gate's guest-eligible e2e jobs, whose out/ the pool's e2e-build job built at the tested
+# commit; ci-kit's mac-lane concurrency spec, Decision Log "out/ is built on the pool"): the script never builds. It
+# restores the stored build, and fails, naming the key, the variant and the entry, when the cache, the key or the entry
+# is missing or the entry does not match its digest.
 set -euo pipefail
 
 case ${1:-} in
@@ -25,6 +29,11 @@ digest() { (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shas
 
 cache=${MAWS_E2E_BUILD_CACHE:-}
 key=${MAWS_E2E_BUILD_KEY:-}
+required=${MAWS_E2E_BUILD_REQUIRE:-}
+if [[ $required == 1 && ( -z $cache || -z $key ) ]]; then
+  echo "e2e-build: MAWS_E2E_BUILD_REQUIRE=1 needs MAWS_E2E_BUILD_CACHE and MAWS_E2E_BUILD_KEY (cache '$cache', key '$key'); out/ ($variant) is restored, never built, here" >&2
+  exit 1
+fi
 if [[ -z $cache || -z $key ]]; then
   build
   exit
@@ -41,8 +50,17 @@ if [[ -f $entry/digest ]]; then
     echo "e2e-build: out/ ($variant) restored from $entry, sha256 $(<"$entry/digest")"
     exit 0
   fi
+  if [[ $required == 1 ]]; then
+    rm -rf out
+    echo "e2e-build: MAWS_E2E_BUILD_REQUIRE=1: the stored build for key $key, variant $variant, at $entry, does not match its digest $(<"$entry/digest"); out/ is restored, never built, here" >&2
+    exit 1
+  fi
   echo "e2e-build: $entry does not match its digest; discarded, building" >&2
   rm -rf "$entry"
+fi
+if [[ $required == 1 ]]; then
+  echo "e2e-build: MAWS_E2E_BUILD_REQUIRE=1: no stored build for key $key, variant $variant (expected $entry/digest and $entry/out/, which the gate's e2e-build job stores); out/ is restored, never built, here" >&2
+  exit 1
 fi
 
 build

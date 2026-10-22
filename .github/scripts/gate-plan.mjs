@@ -46,6 +46,15 @@
 // moves the run's MAC_VM_E2E groups, shared or not, to the guest alone: `vm`, [ci-kit-mac-vm], for a group's trial, a
 // re-measurement, or a session that knows the host is held; `vm-trial`, [ci-kit-mac-vm-trial], the label only a candidate
 // image's trial clone carries, for the commit of an image trial and nothing else.
+// A job on the guest's labels (solo, vm or vm-trial) is guest-eligible, and never builds out/: the guest's 4 GB cannot run
+// `electron-vite build` (the same spec, Decision Log "out/ is built on the pool"). The pool's e2e-build job builds the
+// variants those jobs need at the tested sha, and each restores its own under MAWS_E2E_BUILD_REQUIRE=1
+// (scripts/e2e-build.sh). So only a group whose script starts with `scripts/e2e-build.sh <harness|plain> &&` takes those
+// labels; any other MAC_VM_E2E group (`default`, built by the e2e job's `pnpm build`; a group that builds nothing, or
+// elsewhere) stays off them, as a measured one does. The outputs: `e2e`, every e2e job of the run (what ci-gate-alerts.mjs
+// and e2e-default-specs.mjs read), each guest-eligible entry carrying its `variant`; `e2e_host` and `e2e_vm`, the e2e job's
+// and the e2e-vm job's matrices, without and with a variant; `e2e_build`, the variants e2e-build builds (`[]` for none, so
+// the job does not run), on `e2e_build_runner`, a pool box, for which the pool flag is set too.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -92,6 +101,11 @@ const MAC_SHARED_WAIT_MINUTES = 60;
 const timeoutOn = (runner, minutes) =>
   minutes + (runner === RUNNERS.macos || runner === RUNNERS.macSolo ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
 const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
+// The guest's labels: a job asking for one of these may run in the guest.
+const GUEST = [RUNNERS.macSolo, RUNNERS.macVm, RUNNERS.macVmTrial];
+// e2e-build's box: one `electron-vite build`, which exhausted V8's default heap (about 1 GB) in the 4 GB guest (widgets);
+// the workflow's NODE_OPTIONS lifts that limit to 5 GB, which cpus-4's c3d-highcpu-4, with 8 GB, holds.
+const E2E_BUILD_BOX = poolBox(4);
 // On the pool the whole unit suite runs as UNIT_SHARDS jobs, `unit <k>/<n>`, each vitest's --shard=<k>/<n> on a box of
 // UNIT_CPUS. One vitest process keeps its box's cores only 55-70% busy (its main process transforms for every worker),
 // so more processes on more boxes end the suite sooner than more cores on one. Five or more shards, or 16-core shards,
@@ -160,10 +174,15 @@ const foreground = (group) => /(^|\s)MAWS_E2E_FOREGROUND=1\s/.test(scripts[scrip
 const listedShared = words(env.MAC_SHARED_E2E);
 const keptAlone = listedShared.filter((name) => name !== 'unit:darwin' && (measured.has(name) || foreground(name)));
 const macShared = new Set(listedShared.filter((name) => !keptAlone.includes(name)));
-// MAC_VM_E2E less the measured groups, which keep the host's exclusive instance their bounds were calibrated on.
+// The out/ variant a group's job restores in the guest: its script's leading `scripts/e2e-build.sh <variant> &&`, read as
+// e2e-default-specs.mjs reads it; undefined for a group that builds another way or not at all.
+const variantOf = (group) => /^scripts\/e2e-build\.sh (harness|plain) && /.exec((scripts[scriptOf(group)] ?? '').trim())?.[1];
+// MAC_VM_E2E less the measured groups, which keep the host's exclusive instance their bounds were calibrated on, and the
+// groups whose out/ e2e-build cannot make (unit:darwin builds none).
 const listedVm = words(env.MAC_VM_E2E);
 const keptOffVm = listedVm.filter((name) => measured.has(name));
-const macVm = new Set(listedVm.filter((name) => !measured.has(name)));
+const unbuilt = listedVm.filter((name) => name !== 'unit:darwin' && !measured.has(name) && variantOf(name) === undefined);
+const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name)));
 const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
 const placed = (group) => (!offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
 const e2e = [...gates]
@@ -172,8 +191,12 @@ const e2e = [...gates]
     const group = gate.slice(4);
     const where = placed(group);
     const runner = JSON.stringify(where);
-    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), runner, timeout: timeoutOn(where, measured.has(group) ? 45 : 30) };
+    const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
+    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), runner, timeout: timeoutOn(where, measured.has(group) ? 45 : 30), ...guest };
   });
+const e2eHost = e2e.filter((entry) => entry.variant === undefined);
+const e2eVm = e2e.filter((entry) => entry.variant !== undefined);
+const e2eBuild = [...new Set(e2eVm.map((entry) => entry.variant))].sort();
 const unitDarwinRunner = onMac('unit:darwin');
 
 // Group names; an `e2e:` prefix, as --gates writes them, is read as the group.
@@ -185,7 +208,7 @@ const selection = selectionAsked && affected(env.HEAD_MESSAGE ?? '');
 
 const has = (gate) => String(gates.has(gate));
 const runners = CLASS1A_RUNNERS[class1a];
-const pool = class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)));
+const pool = (class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)))) || e2eBuild.length > 0;
 appendFileSync(
   env.GITHUB_OUTPUT,
   `static=${has('static')}\nunit=${has('unit')}\nunit_darwin=${has('unit:darwin')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\n` +
@@ -201,6 +224,7 @@ appendFileSync(env.GITHUB_OUTPUT, `unit_shards=${JSON.stringify(unitShards)}\n`)
 // The jobs' minutes outside the e2e matrix (whose entries carry their own): packaged is always on the exclusive instance.
 const timeouts = { static: timeoutOn(runners.static, 30), unit: timeoutOn(runners.unit, 30), probes: timeoutOn(runners.probes, 30), unit_darwin: timeoutOn(unitDarwinRunner, 30) };
 appendFileSync(env.GITHUB_OUTPUT, `unit_darwin_runner=${JSON.stringify(unitDarwinRunner)}\ntimeouts=${JSON.stringify(timeouts)}\n`);
+appendFileSync(env.GITHUB_OUTPUT, `e2e_host=${JSON.stringify(e2eHost)}\ne2e_vm=${JSON.stringify(e2eVm)}\ne2e_build=${JSON.stringify(e2eBuild)}\ne2e_build_runner=${JSON.stringify(E2E_BUILD_BOX)}\n`);
 const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
 const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
 // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
@@ -218,7 +242,9 @@ const macNote =
   said('On MAC_SHARED_E2E but measured or foreground, so alone', inRun(keptAlone)) +
   said('Solo Mac (the exclusive instance or the guest, whichever is free)', jobsOn(RUNNERS.macSolo)) +
   laneNote +
-  said('On MAC_VM_E2E but measured, so on the exclusive instance', inRun(keptOffVm));
+  said('On MAC_VM_E2E but measured, so on the exclusive instance', inRun(keptOffVm)) +
+  said('On MAC_VM_E2E but not built through scripts/e2e-build.sh, so off the guest', lane === 'macos' ? inRun(unbuilt.filter((group) => !offMac.has(group))) : []) +
+  said('Out/ built on the pool (e2e-build) for the guest-eligible jobs', e2eBuild);
 appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}\n`);
 process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}`);
 if (selection) {
