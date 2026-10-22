@@ -70,8 +70,8 @@ allows today.
   the frequent classic hooks, the catalog re-lists at every heartbeat, the readback rule
   applies to built-in `run` rows alone.
 - [x] (2026-10-22) The owner's calls on §15's forks: F1 and F5 as recommended, F6 yes
-  under spike 14's condition, F3 not in this run, F4 and F7 the recommendations; F2
-  open between two answers (Decision Log, entry 4).
+  under spike 14's condition, F2 and F3 not in this run, F4 and F7 the recommendations
+  (Decision Log, entries 4 and 6).
 - [x] (2026-10-22) sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries
   `updatedInput`) landed (doperpowers #338, `2920e494`); M3 treats it as its floor.
 - [ ] M0 — foundation: capabilities, the `read` relay, the op-outcome pattern, the
@@ -84,9 +84,8 @@ allows today.
 - [ ] M4 — agents, fork, following an id change (three reviewed increments).
 - [ ] M5 — composer parity: attachments, `@` files, history (`!` shell not in this run:
   F3).
-- [ ] M6 — the attach key driver for `--bg` seats: F2 open between two answers of the
-  owner's (Decision Log, entry 4); nothing before the run's last milestone depends on
-  it.
+- [-] M6 — the attach key driver for `--bg` seats: out of this run (F2, the owner's
+  choice, 2026-10-22; Decision Log, entry 6).
 - [ ] The latency table on #52 against the baseline, and the acceptance walk on both
   Macs.
 
@@ -1061,8 +1060,8 @@ document's own:
 
 None of M0–M5 waits on these; each is the edge a milestone stops at until answered.
 **Ruled by the owner, 2026-10-22** (Decision Log, entry 4): F1 and F5 as recommended;
-F6 yes, narrowed by spike 14 (the `exit` row); F3 not in this run; F4 and F7 the
-recommendations; F2 open, the owner having given two answers. The text below keeps
+F6 yes, narrowed by spike 14 (the `exit` row); F2 and F3 not in this run (F2 settled
+by the owner's choice between two answers, entry 6); F4 and F7 the recommendations. The text below keeps
 each fork as it was put.
 
 - **F1 — Controls whose effect outlives the session.** `/model` and `/effort` save a
@@ -1162,7 +1161,9 @@ answer.
 
 **Machine half (doperpowers).**
 
-- `sminos/hooks/mods/bridge-commands.tsx` (new): the route table for 2.1.307 from the
+- `sminos/hooks/mods/bridge-commands.tsx` (new; as built, the rule, with the table's data
+  in `bridge-routes.tsx`, generated from the fixture by `routes_check.py --write` and
+  checked against it: Decision Log, entry 7): the route table for 2.1.307 from the
   fixture (Interfaces, "The route table"), loaded as data; at M0 the `run` class is
   **enabled** for the five names above, every other `run` and every `run-prompt` row
   carrying `enabled: false` with *comes with M1* — the table is whole from M0 so that
@@ -1549,9 +1550,8 @@ the engine's queue).
 
 ### M6 — The attach key driver for `--bg` seats (stub)
 
-F2 is open (Decision Log, entry 4): the owner answered *not in this run* and, to the
-research session's question on a web terminal, *include it as the run's last
-milestone*; which stands is being asked. If it is in: a daemon key driver that attaches to a `--bg`
+Out of this run: the owner chose *not in this run* for F2 (Decision Log, entry 6).
+Kept as the shape a later run would take: a daemon key driver that attaches to a `--bg`
 job under a pty, sends a key sequence, detaches, and reads the result back from rows,
 never the screen; the rows it would reach are the inventory's §3.6 (Shift+Tab ×N, Enter
 or `4` on a prompt the hooks never saw, the rewind picker by position, Esc on a panel);
@@ -1797,7 +1797,7 @@ malformed one is `bad-shape`.
 
 | `rpc` | `args` | result (`done`) | milestone |
 | --- | --- | --- | --- |
-| `command` | `{session, name, args?}` — `name` 1–128 characters without control characters, exactly as `$.command.list()` spells it; `args` text ≤ 4,096 | `{queued: true, route, id}`; the outcome follows as `op`; a bridge refusal is `failed` with the bridge's code as the message's first word and its reason after | M0 |
+| `command` | `{session, name, args?}` — `name` 1–128 characters without control characters, exactly as `$.command.list()` spells it; `args` text ≤ 4,096 | `{queued: true, route, id}`; the outcome follows as `op`; a bridge refusal is `failed` with the message `<code>: <reason>` (the bridge's code, a colon, its reason) | M0 |
 | `compact` | gains `instructions?` (text ≤ 4,096) | unchanged | M2 |
 | `btw` | `{session, prompt}` (≤ 8,192) | `{started: true, id}`; the answer follows as `op` | M2 |
 | `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` and `mode?: PermissionMode`; at most one of the two, on an allow only | unchanged | M3 |
@@ -2003,6 +2003,16 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Evidence: the citation check of 2026-10-22 (a subagent's read of every B/, S/, W/,
   H/ cite; all 63 R/ paths exist).
 
+- Observation: A browser socket that is down when an `op end` is relayed misses it: the
+  hub does not replay session-wide messages to a browser that reconnects, so the
+  command's status line can stay *queued*. §3's "owed until the hub takes it" covers
+  the daemon → hub leg only.
+  Evidence: task 2's report, concerns; `apps/desk-hub/src/objects/project.ts` relays
+  session-wide kinds unread with no per-browser replay (under review, task 2).
+- Observation: A plugin's mod cannot import JSON and `claude plugin test` gives it no
+  filesystem, so a data table reaches a mod only as a TS module.
+  Evidence: task 1's report, decision 2.
+
 ## Decision Log
 
 - Decision: Verification. One independent spec review of the design (a
@@ -2149,6 +2159,57 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Rationale: the table's prose cells did not map onto the declared shape one to one;
   both halves read the fixture, so its shape is fixed before either half is built.
   Date/Author: 2026-10-22, the M0 plan-executor, from the fixture task's report.
+
+- Decision: F2 closed — M6 (the attach key driver, and a web terminal for `--bg`
+  jobs) is out of this run. Asked by the research session to choose between their two
+  answers (entry 4), the owner chose *not in this run*, the answer they gave the
+  orchestrator.
+  Rationale: the owner's call; it supersedes entry 4's "F2 open".
+  Date/Author: 2026-10-22, the M0 plan-executor, relayed by the orchestrator session
+  (b4948247).
+
+- Decision: The machine half of M0 as built (doperpowers `fcf9c5a2`, task 1), the
+  calls a later reader needs. (1) The route table reaches the mod as a TS module,
+  `bridge-routes.tsx`, generated from the fixture (`routes_check.py --write`, a check
+  failing on drift), since mods import only TS and `claude plugin test` has no
+  filesystem; `bridge-commands.tsx` keeps the rule. (2) A bridge refusal fails the
+  `command` RPC with the message `<code>: <reason>`, the convention the MAWS half
+  parses (DX6 revised). (3) The child keeps a run's `end` beside the answer it keeps
+  under the nonce (`rpcs[nonce].end`), and the daemon's `recover_ops()` sends, once a
+  second per outstanding op, an end no stream brought: without it A8 fails whenever the
+  turn ends while the daemon is down, since the requests reader never sees the event
+  (§3's "owed" covers the daemon → hub leg; this closes the child → daemon one). (4) A
+  `reload-plugins` op is finished by effect when the answering child's (socket inode,
+  pid) changes, not the inode alone, since an unlinked inode can be reused. (5) `op` and
+  `read` go up only when `welcome.kinds` lists them (owed `op` messages are dropped and
+  logged otherwise); `presence.capabilities` and `machine.desk` are not gated, the
+  deployed hub passing the first and rebuilding the body that holds the second. (6) The
+  route check refuses by class before the form check; a disabled `run` row answers
+  `disabled` with its reason; an engine older than every table measures `none` and
+  refuses every built-in as not measured. (7) The Esc refusal is caught as the answer
+  (`stopped`) when the engine rejects within 250 ms; a queued run that meets it later
+  ends `settled {ok: false, error, code: "stopped"}`. (8) The `status` read omits
+  `repo.branch`, which `$.session.repo()` does not give. (9) The fixture's `effort`
+  reason names `/effort`.
+  Rationale: each is the spec's intent met where its text did not reach the code
+  (mods cannot read JSON; a restart can swallow an end; inodes recur).
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from task 1's report.
+- Decision: The hub-and-web half of M0 as built (MAWS `7ce3584e3`..`e2e13cf11`, task 2).
+  (1) The web keeps `ops` by nonce across a reconnect (the daemon owes the outcome
+  under it); an `op` with a null `rpc` (CLI-started) is not drawn; an `end` is never
+  replaced by a repeated `start`. (2) `op.ran.busy` is its own latency path, §12's
+  "kept apart, labelled". (3) At M0 the `mcp enable|disable` label is the web's own
+  (A9's words); from M1 the catalog's `outlives` replaces it. (4) A read-only machine
+  does not withhold the `status` read: a read is no RPC. (5) A malformed `machine.desk`
+  refuses the machine frame `bad-shape`, its lists bounded at 64 names of 64
+  characters. (6) `welcome.kinds` lists every session kind the hub knows. (7) `M0_SMINOS`
+  is `1.7.0` in the web and the fake machine. (8) The Info tab reads `status` on mount,
+  on *Refresh*, and once per subscription open after the first; never on a presence.
+  (9) The fixture is imported as JSON in the fake machine, its CLI running bundled. (10)
+  Master merged in (`e2e13cf11`, desk-latency-baseline #120): the `latency.ts` PATHS
+  union; command samples pass the nonce as the recorder's `ref`.
+  Rationale: as task 2's report argues each; recorded so M1's executor reads them.
+  Date/Author: 2026-10-22, the M0 plan-executor (b4948247), from task 2's report.
 
 ## Outcomes & Retrospective
 
