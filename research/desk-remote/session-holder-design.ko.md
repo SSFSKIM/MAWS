@@ -5,11 +5,12 @@
 §3.6–3.7 위에 선다.
 2026-10-22 비판 검토 한 차례를 거쳐 식별자·인증·복구 계약과 정리·이동의 fence를 보강했다.
 
-사실의 근거는 다음 네 측정 노트다(PTY·명령·handoff는 Claude Code 2.1.307–2.1.308, bridge bench는 2.1.304다).
+사실의 근거는 다음 다섯 측정 노트다(PTY·명령·handoff·정리 신호는 Claude Code 2.1.307–2.1.308, bridge bench는 2.1.304다).
 - [holder-tui-spike.md](holder-tui-spike.md): 우리 PTY 아래의 plain Claude, 엔진 PTY host 설계 발췌
 - [background-work-handoff.md](background-work-handoff.md): 세션을 옮길 때 백그라운드 일
 - [mod-command-run-probe.md](mod-command-run-probe.md): mod, `reply`, PTY 키로 slash 명령 돌리기
 - [bridge-perf-bench.md](bridge-perf-bench.md): bridge 구간 지연
+- [reap-signal-spike.md](reap-signal-spike.md): SIGTERM과 `/exit`의 마감 비교, 턴을 어디서 붙잡을 수 있는가
 
 ## 0. 무엇을 위한 것인가
 
@@ -177,12 +178,16 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
 
   조건 하나라도 깨지면 시계는 0이 된다. manager 재시작 때도 0부터 간다. 24시간 뒤에도 마지막 보고와 신호 사이의
   경쟁을 막기 위해 host가 다음 상태 기계를 집행한다.
-  1. bridge mod를 통해 reap fence를 먼저 arm한다. arm 확인 전에는 신호를 보내지 않는다.
-  2. fence가 있는 동안 bridge의 UserPromptSubmit middleware는 모든 origin의 턴 시도를 `activity`로 host에 보고하고
-     답을 기다린다. 출처의 타입 표면은 `prompt.submit.origin`과 classic `UserPromptSubmit.source`다
-     ([origin](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L9540),
-     [source](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L15602)). 전체 경로의 coverage와 await는 §9에서 검증한다.
-  3. host의 같은 상태 기계가 `reap cancelled`(턴 진행) 또는 `already signalled`(종료 중이므로 턴 거절)로 답한다.
+  1. bridge mod를 통해 reap fence를 먼저 arm한다. arm 확인 전에는 신호를 보내지 않는다. bridge가 건강하지 않으면
+     (heartbeat가 끊겼거나 `turn.step` hook이 걸려 있다는 자기 확인이 없으면) arm하지 않고 일 상태를 unknown으로 둔다.
+  2. 문은 bridge의 `turn.step` hook이다. fence가 있는 동안 이 hook은 main-loop 모델 요청 직전에 `activity`를 host에
+     보고하고 답을 기다린다. prompt hook은 문이 될 수 없다. `!` 셸 모드가 끝나며 시작한 턴과, arm 전에 queue에
+     받아들여졌다가 나중에 꺼내진 prompt는 `prompt.submit`과 UserPromptSubmit을 모두 거치지 않는다. `turn.start`는
+     관찰용이라 붙잡지 못한다(6초 hook 안에서 약 40 ms 뒤 모델 요청이 나갔다). `turn.step`은 3초를 붙잡고 두 경우를
+     모두 모델 요청 전에 멈췄다([측정](reap-signal-spike.md)). `prompt.submit`은 출처와 이른 거절(사람의 초안을 되돌려 줌)에만 쓴다.
+  3. host의 같은 상태 기계가 `reap cancelled`(`next`로 턴 진행) 또는 `already signalled`(종료 중)로 답한다. 후자의
+     거절은 소비된 턴이 된다. prompt는 이미 transcript에 있고 거절이 assistant 답으로 남으므로, 그 답에 "holder가
+     세션을 끝냈다, 다시 열면 이어진다"를 적는다.
   4. fence가 arm된 뒤 최신 일 상태·generation·클라이언트·descendant를 최종 확인하고 SIGTERM을 보낸다.
   5. 수 초 뒤에도 claude가 끝나지 않으면 SIGKILL로 올리지 않는다. 일 상태를 unknown으로 돌리고 세션을 살려 두며
      사건을 기록한다. `waitpid`로 실제 종료를 확인한 경우에만 asleep으로 기록한다.
@@ -190,7 +195,15 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
   정리에 `/exit`을 쓰지 않는다. 열린 panel 뒤에서 명령이 오래 대기하다 뒤늦게 실행될 수 있고
   ([명령 queue 측정](mod-command-run-probe.md#L61)),
   [CommandRunArgs](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L1813)에는 취소가 없다.
-  SIGTERM의 SessionEnd·transcript 마감은 §9의 미지수다.
+  SIGTERM은 측정에서 graceful했다(2.1.308). SessionEnd(reason `other`)가 돌고 터미널 모드가 복원되며, 직전까지의
+  대화가 모두 저장되고 약 1초 안에 exit 143으로 끝났다. panel이나 확인 창이 열려 있어도 같았다([측정](reap-signal-spike.md)).
+  다만 SIGTERM은 `/exit`이 백그라운드 일에 묻는 확인을 건너뛰고 등록된 셸을 죽인다. 그 확인이 안전망이 되지 않으므로
+  잘못된 verified-empty를 막는 책임은 모두 일 상태 판정에 있다.
+
+  `turn.step` 문은 실패하면 열린다. streaming chain이 요청 전에 실패하면 엔진은 그대로 모델로 간다
+  ([2.1.307 L405905](/Users/new/claude-code-bundle/2.1.307/cli.pretty.js#L405905)–405910). 그래서 1의 bridge 건강 조건이 fence의 일부다.
+  남는 위험은 arm 확인과 신호 사이에 hook이 조용히 실패하고 턴이 시작되는 경우다. title·suggestion 같은 보조 요청은
+  이 문 밖이지만 도구를 띄우지 않는다.
 
   asleep 기록은 engineSessionId, launch descriptor(argv, cwd, env), 끝난 시각을 보관한다. 다시 열 때 argv에서
   `-c/--continue`, `-r/--resume <x>`, `--session-id`와 그 값, `-p`, positional prompt를 제거한 뒤
@@ -230,7 +243,7 @@ desk의 bridge mod를 쓴다. 스트림(행, `turn.step` 조각, 서브에이전
 model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. holder를 위한 연결은 다음과 같다.
 - 비밀이 아닌 holderId·processEpoch와 현재 `$.session.id()`를 보고한다. id 변경 때 host·manager가 generation을 바꾸고
   sminos 데몬이 제어·transcript·PTY를 원자적으로 다시 묶는다. 인증 token은 claude env로 전달하지 않는다.
-- turn start·Stop·background launch·재접속을 일 상태에 반영하고 reap fence의 activity gate를 집행한다.
+- turn start·Stop·background launch·재접속을 일 상태에 반영하고 reap fence의 `turn.step` 문을 집행한다.
 - 구조화된 UI 변경을 macro 중재에 참여시키고 "키보드: 웹" 같은 상태를 TUI에 표시한다.
 
 ### 3.5 웹
@@ -367,8 +380,9 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
 10. Query 재입양은 input 전 checkpoint commit, stdinApplied rebase, 줄 경계, pending request 중복 제거, gap reseed를
     검사한다. MAWS 재시작 중 tool 효과가 이미 실행됐어도 orphan 응답이 보통의 재시도를 유도하지 않는다.
 11. **reap-fence 경쟁.** 마지막 빈 Stop 뒤 턴 B가 background 일을 시작하고 interrupt되는 경우는 unknown으로 남는다.
-    fence arm 직전·직후·최종 검사와 SIGTERM 사이 모든 origin의 턴 시도를 넣어 취소 후 진행 또는 신호 후 거절 중 하나만
-    일어나는지 본다. 클라이언트·구독·턴·셸·Monitor·cron·미등록 descendant 중 하나만 남아도 끝내지 않는다.
+    fence arm 직전·직후·최종 검사와 SIGTERM 사이에 모든 origin의 턴 시도를 넣는다. `!` 셸 모드 완료, arm 전에
+    queue에 들어간 prompt, 같은 mod가 넣은 prompt를 포함한다. 취소 후 진행 또는 신호 후 거절 중 하나만 일어나는지
+    본다. `turn.step` hook이 실패하거나 bridge가 끊기면 arm하지 않는지도 본다. 클라이언트·구독·턴·셸·Monitor·cron·미등록 descendant 중 하나만 남아도 끝내지 않는다.
     bridge child·등록 MCP·LSP만으로 영원히 막히지는 않는다. 모두 비었을 때 시험용 시간 뒤 SIGTERM과 waitpid로 asleep이
     되고, 재개 argv가 정규화된다. SIGTERM에 응답하지 않으면 SIGKILL 없이 unknown으로 돌아간다.
 12. 인증 전 hello·ring 유출, observer의 변경, 옛 fence, symlink 소켓, 큰 프레임·checkpoint·queue를 거절한다.
@@ -378,11 +392,11 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
 
 - **TUI 출력 어휘와 복구.** Claude TUI 두 layout의 출력·질의를 열거한다. 동기화 출력, OSC 8, 키보드 프로토콜,
   넓은 문자·결합 문자와 resize를 포함해 §3.2의 bounded contract와 §8의 미래 동작 비교를 검증한다.
-- **SIGTERM 마감.** interactive REPL의 SIGTERM이 `/exit`처럼 SessionEnd hook을 실행하고 transcript를 닫는가.
-  아니라면 reap intent와 generation에 묶인 `command.run` gate가 fallback이다. middleware가 명령 enqueue 때뿐 아니라
-  dequeue되어 실행될 때도 도는지 spike로 보여야 한다. 취소 불가능한 `/exit`을 그대로 예약하는 길로 돌아가지 않는다.
-- **reap gate.** UserPromptSubmit middleware가 사람·SDK·plugin·예약·시스템 주입 등 모든 턴 origin을 덮고 await할 수
-  있는가. 타입의 origin/source만으로 이를 입증했다고 보지 않는다. 검증 전에는 자동 정리의 안전성을 확정하지 않는다.
+- **정리 신호와 문 (2026-10-22 일부 해결, [reap-signal-spike.md](reap-signal-spike.md)).** SIGTERM은 graceful하고, `turn.step`이
+  main-loop 모델 요청을 붙잡는 문이 된다는 것을 2.1.308에서 쟀다. 남은 것은 셋이다.
+  - SDK, Remote Control, peer, channel origin은 같은 경로를 쓴다는 것을 코드로만 읽었다.
+  - `turn.step` hook의 조용한 실패를 bridge 건강 조건이 얼마나 덮는가.
+  - Claude Code가 업데이트될 때마다 두 결과가 그대로인가. 버전마다 다시 잰다.
 - **macOS TCC.** double fork·setsid와 host 아래에서도 responsible process가 원래 터미널 앱으로 남는가.
 - **Linux scope와 lingering.** user transient scope가 logind session cgroup과 분리되고, KillUserProcesses와 로그아웃에서
   의도대로 살아남는가. lingering이 없는 경우의 설치·표시 동작을 확인한다.
@@ -405,7 +419,7 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
 - Ctrl+Z는 plain과 같이 멈춤이다. detach 키는 따로 두지 않는다. 녹화는 꺼 둔다.
 - 정리 시계는 웹 구독자도 클라이언트로 센다. 잊힌 탭이 세션을 붙잡을 수 있으므로 웹 목록에 떠 있은 시간과 RSS를 보인다.
 - 정리 시계는 manager 메모리에만 둔다. 재시작하면 0부터 간다. unknown은 정리하지 않고 descendant는 positive veto로만 쓴다.
-- 정리는 reap fence 뒤 SIGTERM과 waitpid로 끝낸다. SIGKILL escalation과 취소 불가능한 `/exit` 예약은 없다.
+- 정리는 `turn.step` 문의 reap fence 뒤 SIGTERM과 waitpid로 끝낸다. SIGKILL escalation과 취소 불가능한 `/exit` 예약은 없다.
 - 경로 이동은 같은 engineSessionId로 한다(`--fork-session` 없음). 양방향 모두 배타 lock·fence·quiescence·waitpid가 필요하다.
   중단된 턴 재실행은 자동으로 켜지 않는다. launch descriptor와 가능한 세션 override를 보존한다.
 - MAWS 소유의 in-flight 일은 CLI 생존과 별개다. 효과 전 durable ledger와 결과 불명 응답으로 중복 효과를 막는다.

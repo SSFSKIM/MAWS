@@ -1,0 +1,526 @@
+[
+  {
+    "run": "basic",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/basic/home/.claude/projects/-private-tmp-reap-spike-basic-work/7c8ede8e-0fb2-4ff7-8634-8c60feea5ea1.jsonl",
+        "rows": 5,
+        "trailing_newline": true,
+        "assistant_texts": [],
+        "last_types": [
+          "mode",
+          "permission-mode",
+          "system",
+          "last-prompt",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false
+  },
+  {
+    "run": "basic2",
+    "requests": [
+      "2026-10-22T20:39:09.594Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread"
+    ],
+    "cost": 0.00334045,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/basic2/home/.claude/projects/-private-tmp-reap-spike-basic2-work/b140c537-88d0-483c-92f1-7d4dca1d6707.jsonl",
+        "rows": 31,
+        "trailing_newline": true,
+        "assistant_texts": [
+          "The message only says \"plugin-refused,\" with no details about what was refused or what you want me to do. Could you tell me what you need? If the reapprobe plugin refused an action, paste its message or error text and I'll look into it."
+        ],
+        "last_types": [
+          "permission-mode",
+          "atis-latch",
+          "system",
+          "system",
+          "cost-state",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false
+  },
+  {
+    "run": "basic3",
+    "requests": [
+      "2026-10-22T20:40:45.938Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title",
+      "2026-10-22T20:40:45.938Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:40:47.838Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:40:49.576Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:40:53.227Z [DEBUG] [API REQUEST] /v1/messages source=prompt_suggestion"
+    ],
+    "cost": 0.00291905,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/basic3/home/.claude/projects/-private-tmp-reap-spike-basic3-work/b37f24c3-469e-4185-b1a7-326050d142eb.jsonl",
+        "rows": 46,
+        "trailing_newline": true,
+        "assistant_texts": [
+          "The path `/private/tmp/reap-spike/guard` is a small Claude Code plugin named `reapguard` (v0.1.0, \"Independent turn fence\"). It isn't a git repo. It contains three files:\n\n- **`.claude-plugin/plugin.json`**: the manifest, which registers the name, version and description.\n- **`hooks/hooks.json`**: points the hook system at `./register.ts`.\n- **`hooks/register.ts`**: the hook logic.\n\n`register.ts` does the following:\n\n- **`session.start`**: reads the `REAP_BUS` env var and stores it as the bus directory.\n- **`prompt.submit`**:\n  - Reads `${bus}/mode.json`.\n  - Logs a `prompt.enter` event as a JSON file under `${bus}/events/`.\n  - If `mode.delay` is set, sleeps for that long.\n  - If `mode.drop` is set and the prompt text doesn't start with `ALLOW:`, logs `prompt.drop` and returns `{drop: 'reap-fence-refused'}`, so the prompt never reaches the model.\n  - Otherwise passes the prompt on and logs `prompt.result`.\n\nSo it's a gate that can refuse every prompt except ones prefixed `ALLOW:`, controlled by a `mode.json` file and logged to an event directory. The `seen` set and the `busy` flag are declared but never used.\n\nI haven't run it or changed anything. What do you want to do with it: review it, test it, debug something, or change its behavior?"
+        ],
+        "last_types": [
+          "assistant",
+          "system",
+          "system",
+          "cost-state",
+          "last-prompt",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 6622,
+      "exit": 143,
+      "elapsed_s": 0.7165629863739014,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "basic4",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/basic4/home/.claude/projects/-private-tmp-reap-spike-basic4-work/0d3361fd-452c-4608-b203-054a9f175ef5.jsonl",
+        "rows": 13,
+        "trailing_newline": true,
+        "assistant_texts": [],
+        "last_types": [
+          "queue-operation",
+          "queue-operation",
+          "system",
+          "cost-state",
+          "last-prompt",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 32256,
+      "exit": 143,
+      "elapsed_s": 0.6732950210571289,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "exit-bg",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 52027,
+      "exit": 143,
+      "elapsed_s": 0.7501327991485596,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "exit-bg-confirmed",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "exit-confirm",
+      "pid": 77756,
+      "exit": 0,
+      "elapsed_s": 1.3175837993621826,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "exit-empty",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "exit",
+      "pid": 86587,
+      "exit": 0,
+      "elapsed_s": 1.247973918914795,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "exit-seeded",
+    "requests": [
+      "2026-10-22T20:43:41.250Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread"
+    ],
+    "cost": 0.00071074,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/exit-seeded/home/.claude/projects/-private-tmp-reap-spike-exit-seeded-work/9a496d3b-d377-4afa-b763-29559c006201.jsonl",
+        "rows": 26,
+        "trailing_newline": true,
+        "assistant_texts": [
+          "The shell command you ran printed `TRANSCRIPT_FINAL_SENTINEL`, and the working tree is clean on `master` with no commits yet. Nothing else has been changed.\n\nWhat would you like to do next?"
+        ],
+        "last_types": [
+          "cost-state",
+          "last-prompt",
+          "mode",
+          "permission-mode",
+          "atis-latch",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "exit",
+      "pid": 91314,
+      "exit": 0,
+      "elapsed_s": 1.2253761291503906,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "origins",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/origins/home/.claude/projects/-private-tmp-reap-spike-origins-work/7e2b6616-af07-4b0f-ad8b-7558a7daca48.jsonl",
+        "rows": 16,
+        "trailing_newline": true,
+        "assistant_texts": [],
+        "last_types": [
+          "queue-operation",
+          "system",
+          "system",
+          "cost-state",
+          "last-prompt",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 57887,
+      "exit": 143,
+      "elapsed_s": 0.9038529396057129,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "queued",
+    "requests": [
+      "2026-10-22T20:46:09.989Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:46:10.567Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:46:11.786Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:46:14.036Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread"
+    ],
+    "cost": 0,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/queued/home/.claude/projects/-private-tmp-reap-spike-queued-work/370e8a55-156e-4e66-8b05-ba8677233161.jsonl",
+        "rows": 24,
+        "trailing_newline": true,
+        "assistant_texts": [],
+        "last_types": [
+          "atis-latch",
+          "api-request",
+          "api-request",
+          "api-request",
+          "cost-state",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 70054,
+      "exit": 143,
+      "elapsed_s": 0.7205030918121338,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "queued-before-arm",
+    "requests": [
+      "2026-10-22T20:47:12.909Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:47:13.467Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:47:14.578Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:47:16.951Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:47:18.920Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title",
+      "2026-10-22T20:47:18.920Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:47:19.437Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:47:19.480Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title",
+      "2026-10-22T20:47:20.522Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title",
+      "2026-10-22T20:47:20.551Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:47:22.821Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title"
+    ],
+    "cost": 0,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/queued-before-arm/home/.claude/projects/-private-tmp-reap-spike-queued-before-arm-work/60bc9377-302f-4f68-9134-1a7a0307a0f3.jsonl",
+        "rows": 42,
+        "trailing_newline": true,
+        "assistant_texts": [],
+        "last_types": [
+          "permission-mode",
+          "atis-latch",
+          "api-request",
+          "api-request",
+          "cost-state",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 99663,
+      "exit": 143,
+      "elapsed_s": 0.869962215423584,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "step-gate",
+    "requests": [
+      "2026-10-22T20:49:59.003Z [DEBUG] [API REQUEST] /v1/messages source=prompt_suggestion",
+      "2026-10-22T20:49:59.580Z [DEBUG] [API REQUEST] /v1/messages source=prompt_suggestion"
+    ],
+    "cost": 0,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/step-gate/home/.claude/projects/-private-tmp-reap-spike-step-gate-work/b23fb9f4-8373-4554-a3fc-7a739a0db114.jsonl",
+        "rows": 23,
+        "trailing_newline": true,
+        "assistant_texts": [
+          "Reap fence refused this turn.",
+          "Reap fence refused this turn."
+        ],
+        "last_types": [
+          "assistant",
+          "system",
+          "system",
+          "cost-state",
+          "last-prompt",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 74041,
+      "exit": 143,
+      "elapsed_s": 0.7538020610809326,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "step-pass",
+    "requests": [
+      "2026-10-22T20:51:09.997Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread",
+      "2026-10-22T20:51:10.621Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread"
+    ],
+    "cost": 0,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/step-pass/home/.claude/projects/-private-tmp-reap-spike-step-pass-work/ad3b5602-a5e9-4a9a-820c-0fa7dc380701.jsonl",
+        "rows": 22,
+        "trailing_newline": true,
+        "assistant_texts": [],
+        "last_types": [
+          "last-prompt",
+          "mode",
+          "permission-mode",
+          "atis-latch",
+          "cost-state",
+          "api-request"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 11815,
+      "exit": 143,
+      "elapsed_s": 0.7373137474060059,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "term-bg",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 50814,
+      "exit": 143,
+      "elapsed_s": 1.0433249473571777,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "term-confirm",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 83416,
+      "exit": 143,
+      "elapsed_s": 1.015120029449463,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "term-panel",
+    "requests": [],
+    "cost": 0,
+    "transcripts": [],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 80969,
+      "exit": 143,
+      "elapsed_s": 0.9926919937133789,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "term-seeded",
+    "requests": [
+      "2026-10-22T20:43:36.296Z [DEBUG] [API REQUEST] /v1/messages source=repl_main_thread"
+    ],
+    "cost": 0.0007139900000000001,
+    "transcripts": [
+      {
+        "path": "/private/tmp/reap-spike/term-seeded/home/.claude/projects/-private-tmp-reap-spike-term-seeded-work/7720eecb-7270-4a5a-98d5-6c49bfbc4c6f.jsonl",
+        "rows": 26,
+        "trailing_newline": true,
+        "assistant_texts": [
+          "The shell command you ran returned `TRANSCRIPT_FINAL_SENTINEL`. The `printf` call itself did nothing else. The repo is on `master` with a clean working tree and no commits yet.\n\nWhat would you like to do next?"
+        ],
+        "last_types": [
+          "last-prompt",
+          "mode",
+          "permission-mode",
+          "atis-latch",
+          "cost-state",
+          "cost-state"
+        ]
+      }
+    ],
+    "own_daemon_root_exists": false,
+    "exit": {
+      "method": "term",
+      "pid": 88013,
+      "exit": 143,
+      "elapsed_s": 0.8654801845550537,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    }
+  },
+  {
+    "run": "transcript-term",
+    "exit": {
+      "method": "term",
+      "pid": 64889,
+      "exit": 143,
+      "elapsed_s": 0.7810559272766113,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    },
+    "transcript": "/private/tmp/reap-spike/transcript-term/home/.claude/projects/-private-tmp-reap-spike-transcript-term-work/f5f2b815-11f5-4b6b-9bf8-c6eaf26f3f71.jsonl",
+    "rows": 24,
+    "memory_rows": [
+      {
+        "role": "user",
+        "text": "FINAL_DURABILITY_term",
+        "persisted": true
+      },
+      {
+        "role": "assistant",
+        "text": "Reap fence refused this turn.",
+        "persisted": true
+      }
+    ],
+    "requests": [
+      "2026-10-22T20:52:56.255Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title",
+      "2026-10-22T20:52:56.815Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title"
+    ]
+  },
+  {
+    "run": "transcript-exit",
+    "exit": {
+      "method": "exit",
+      "pid": 66725,
+      "exit": 0,
+      "elapsed_s": 1.1400120258331299,
+      "termios_restored": true,
+      "before": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "after": "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n"
+    },
+    "transcript": "/private/tmp/reap-spike/transcript-exit/home/.claude/projects/-private-tmp-reap-spike-transcript-exit-work/90f9f631-4c62-4d9e-a018-7fbd32d49eba.jsonl",
+    "rows": 25,
+    "memory_rows": [
+      {
+        "role": "user",
+        "text": "FINAL_DURABILITY_exit",
+        "persisted": true
+      },
+      {
+        "role": "assistant",
+        "text": "Reap fence refused this turn.",
+        "persisted": true
+      }
+    ],
+    "requests": [
+      "2026-10-22T20:52:59.732Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title",
+      "2026-10-22T20:53:00.280Z [DEBUG] [API REQUEST] /v1/messages source=generate_session_title"
+    ]
+  }
+]

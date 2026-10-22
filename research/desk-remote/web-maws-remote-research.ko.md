@@ -25,6 +25,7 @@
 | [mod-command-run-probe.md](mod-command-run-probe.md) | slash 명령을 mod(`$.command.run`), `control.sock` `reply`, PTY 키로 돌린 결과(2.1.307) |
 | [background-work-handoff.md](background-work-handoff.md) | 세션을 옮길 때 백그라운드 셸·서브에이전트·Monitor·MCP 작업·cron이 어떻게 되는가, headless가 인계를 받는가(2.1.307) |
 | [holder-tui-spike.md](holder-tui-spike.md) | 우리 PTY holder 아래의 plain Claude: 관리자 SIGKILL 생존, 다시 그리기, 두 클라이언트, Ctrl+Z, 엔진 PTY host 설계 발췌(2.1.307–2.1.308) |
+| [reap-signal-spike.md](reap-signal-spike.md) | SIGTERM과 `/exit`으로 끝낼 때의 차이, 턴 시작을 mod가 어디서 붙잡을 수 있는가(2.1.308) |
 | [session-holder-design.ko.md](session-holder-design.ko.md) | 설계 초안: 터미널 세션을 holder가 쥐는 구조와 SDK 경로, "GUI 모드로 이어 가기" |
 
 desk 설계 문서(spec)는 MAWS `48fec4bd1`의 `docs/doperpowers/specs/2026-10-15-desk-design.md`다.
