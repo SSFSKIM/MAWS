@@ -4,7 +4,7 @@
 import type { ArtifactProvisional, ProvisionalOp } from '@shared/artifacts/provisional';
 import { describe, expect, it } from 'vitest';
 import type { DocumentState } from '../host';
-import { ProvisionalLayers, type ProvisionalSource } from './layer';
+import { openFile, ProvisionalLayers, type ProvisionalSource } from './layer';
 
 function fakeHandle() {
   let state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 0, integrated: 4, readOnly: false };
@@ -113,6 +113,40 @@ describe('the provisional layers', () => {
     expect(texts()).toEqual(['b:Written']);
     handle.change({ phase: 'live', integrated: 9 });
     expect(texts()).toEqual([]);
+  });
+
+  // G2 (G-R1): a publish's streaming frame lists only the files that grew or appeared since the frame before
+  it('merge a publish’s files by path: a later text replaces the earlier in its place, a new path is appended, an untouched op is kept as it was', () => {
+    const { handle, layers } = attached();
+    const file = (path: string, text: string): ProvisionalOp => ({ op: 'file', path, text });
+    const files = () => [...layers.get().values()].map((layer) => layer.ops.map((o) => (o.op === 'file' ? `${o.path}=${o.text}` : o.op)));
+    handle.send(frame('a', 'streaming', [file('project/deck.json', '{"order":["s1"'), file('project/slides/s1.html', '<section')]));
+    const deck = layers.get().get('a')!.ops[0];
+    handle.send(frame('a', 'streaming', [file('project/slides/s1.html', '<section id="s1"><p>'), file('project/slides/s2.html', '<sec')]));
+    expect(files()).toEqual([['project/deck.json={"order":["s1"', 'project/slides/s1.html=<section id="s1"><p>', 'project/slides/s2.html=<sec']]);
+    expect(layers.get().get('a')!.ops[0], 'a file no frame touched keeps its op, so a reader can tell it unchanged').toBe(deck);
+    expect(openFile(layers.get().get('a')!), 'while it streams, the last file is the open one').toBe('project/slides/s2.html');
+    // the committed frame names the seq and carries no new files: the files stand until the row is integrated
+    handle.send(frame('a', 'committed', [], 7));
+    expect(files()).toEqual([['project/deck.json={"order":["s1"', 'project/slides/s1.html=<section id="s1"><p>', 'project/slides/s2.html=<sec']]);
+    expect(layers.get().get('a')!.state).toBe('committed');
+    expect(openFile(layers.get().get('a')!), 'at the commit every file is whole').toBeNull();
+    handle.change({ integrated: 7 });
+    expect(files()).toEqual([]);
+  });
+
+  it('keep every other op list replacing the one before, and a call’s files apart from another call’s', () => {
+    const { handle, layers } = attached();
+    handle.send(frame('a', 'streaming', [{ op: 'dataset', dataset: 'sal', text: 'sal' }]));
+    handle.send(frame('a', 'streaming', [{ op: 'dataset', dataset: 'sales', text: 'sales' }]));
+    handle.send(frame('b', 'streaming', [{ op: 'file', path: 'project/slides/s1.html', text: '<section id="s1">' }]));
+    handle.send(frame('c', 'streaming', [{ op: 'file', path: 'project/slides/s1.html', text: '<sect' }]));
+    expect(openFile(layers.get().get('a')!), 'a layer with no files has none open').toBeNull();
+    expect([...layers.get().values()].map((layer) => layer.ops)).toEqual([
+      [{ op: 'dataset', dataset: 'sales', text: 'sales' }],
+      [{ op: 'file', path: 'project/slides/s1.html', text: '<section id="s1">' }],
+      [{ op: 'file', path: 'project/slides/s1.html', text: '<sect' }],
+    ]);
   });
 
   it('stop listening and clear the layers when stopped', () => {

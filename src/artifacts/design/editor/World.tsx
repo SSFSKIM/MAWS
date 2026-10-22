@@ -14,6 +14,9 @@
 // past the model's cap. A press on the empty world clears the selection and pans; so does Space-drag or the middle
 // button anywhere. The wheel pans; ⌃-wheel (a pinch) or ⌥-wheel zooms about the pointer. A held or missing board, or a
 // read-only replica, is selected and inspected but never written.
+// P4-A2 G2.4 (X35; G-R6 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn as it
+// streams (./provisional.tsx): each board it writes takes the deck's layer on its canvas, beneath the screen chrome and
+// the overlay, the session protecting the human's elements on the active board; a new board stands at its frame.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import type { AssetUrl, SlideCanvas } from '../../slides/canvas';
 import type { FaceAliases } from '../../slides/canvas/faces';
@@ -38,6 +41,8 @@ import { boardTextMarkup } from './insert';
 import { boardLabel, type BoardView } from './boards';
 import { DESIGN_COPY as C } from './copy';
 import { useViewFrame, useViewZoom } from './use-view';
+import { SlideLayer, type DeckProvisional, type ScreenZoom } from '../../slides/editor/provisional';
+import { ProvisionalBoards, useBoardWritten, useWorldZoom } from './provisional';
 import { panBy, zoomAt, type DesignView, type Viewport } from './viewport';
 
 const DRAG_START_PX = 3; // screen px a title press moves before it is a drag (C's overlay's)
@@ -72,6 +77,8 @@ export interface WorldProps {
   /** The board-frame commands the keys share with the list. */
   removeBoard: (boardId: string) => void;
   duplicateBoard: (boardId: string) => void;
+  /** P4-A2 G2.4 (X35): a publish's boards as they stream, drawn on each board and at a new board's frame. */
+  provisional?: DeckProvisional | null;
 }
 
 // A frame gesture owns the keys it moves (a move the position, a handle the edges it drags) and writes those alone, each
@@ -97,11 +104,12 @@ const keysFrom = (frame: BoardFrame, keys: readonly FrameKey[]): Partial<BoardFr
 const writable = (b: BoardView | undefined, readOnly: boolean): b is BoardView & { frame: BoardFrame } => !readOnly && b !== undefined && b.frame !== null && b.held === null && !b.missing;
 
 export function World(props: WorldProps) {
-  const { session, view, boards, active, canvases, onCanvas, assetUrl, faces, scope, readOnly, onNotice, artifactId, importAsset, surface, onSurface } = props;
+  const { session, view, boards, active, canvases, onCanvas, assetUrl, faces, scope, readOnly, onNotice, artifactId, importAsset, surface, onSurface, provisional = null } = props;
   // M6 (the scale gate's pan and zoom frame work): the world renders on a change of zoom or of the selected frame alone;
   // the pan is two transforms written straight from the view (below), so a pan re-renders nothing and re-lays nothing
   const zoom = useViewZoom(view);
   const selectedFrame = useViewFrame(view);
+  const worldZoom = useWorldZoom(view); // P4-A2 G2.4: the provisional layers' screen-sized marks, followed with no render
   // the surface as React attaches and detaches it: the ref object everything here and C's overlay read, and the owner told
   const attachSurface = useCallback(
     (element: HTMLDivElement | null) => {
@@ -461,9 +469,36 @@ export function World(props: WorldProps) {
       <div className="design-world-ground" data-design-ground />
       <div ref={layer} className="design-world-layer" data-design-layer>
         {scope(
-          boards.map((b) =>
-            b.frame ? <Board key={b.id} doc={session.doc} board={b as BoardView & { frame: BoardFrame }} active={b.id === active?.id} frameSelected={b.id === selectedFrame} assetUrl={assetUrl} faces={faces} onCanvas={onCanvas} /> : null,
-          ),
+          <>
+            {boards.map((b) =>
+              b.frame ? (
+                <Board
+                  key={b.id}
+                  session={session}
+                  board={b as BoardView & { frame: BoardFrame }}
+                  active={b.id === active?.id}
+                  frameSelected={b.id === selectedFrame}
+                  assetUrl={assetUrl}
+                  faces={faces}
+                  onCanvas={onCanvas}
+                  canvas={canvases.get(b.id) ?? null}
+                  provisional={provisional}
+                  zoom={worldZoom}
+                />
+              ) : null,
+            )}
+            {provisional && (
+              <ProvisionalBoards
+                deck={provisional}
+                zoom={worldZoom}
+                assetUrl={assetUrl}
+                faces={faces}
+                session={session}
+                canvases={canvases}
+                activeFrame={active?.frame ? `${active.frame.x} ${active.frame.y} ${active.frame.w} ${active.frame.h}` : null}
+              /> /* P4-A2 G2.4 (G-R6, G-R4) */
+            )}
+          </>,
         )}
       </div>
       <div ref={pan} className="design-world-pan" data-design-pan>
@@ -639,19 +674,27 @@ function activate(session: DeckSession, view: DesignView, boardId: string, canva
   session.select(pick(slideTree(session.doc, boardId), hits, []).selection);
 }
 
-/** One board in the world: its canvas at scale 1 in the boards' layer (its title and marks are screen chrome). */
+/**
+ * One board in the world: its canvas at scale 1 in the boards' layer (its title and marks are screen chrome). P4-A2 G2.4:
+ * while a publish writes it, the deck's layer over its canvas (G-R3), the session protecting the human's elements while
+ * this is the active board (its current slide, G-R4).
+ */
 const Board = memo(function Board(props: {
-  doc: DeckSession['doc'];
+  session: DeckSession;
   board: BoardView & { frame: BoardFrame };
   active: boolean;
   frameSelected: boolean;
   assetUrl: AssetUrl;
   faces: FaceAliases;
   onCanvas: (boardId: string, canvas: SlideCanvas | null) => void;
+  canvas: SlideCanvas | null;
+  provisional: DeckProvisional | null;
+  zoom: ScreenZoom;
 }) {
-  const { doc, board, active, frameSelected, assetUrl, faces, onCanvas } = props;
+  const { session, board, active, frameSelected, assetUrl, faces, onCanvas, canvas, provisional, zoom } = props;
   const { id, frame } = board;
   const canvasOf = useCallback((canvas: SlideCanvas | null) => onCanvas(id, canvas), [onCanvas, id]);
+  const written = useBoardWritten(provisional, id);
   return (
     <div
       className="design-board"
@@ -662,7 +705,10 @@ const Board = memo(function Board(props: {
       data-missing={board.missing || undefined}
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
     >
-      <SlideView doc={doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" describe={describeElement} /* P4-B2 (D15, A1) */ />
+      <SlideView doc={session.doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" describe={describeElement} /* P4-B2 (D15, A1) */ />
+      {provisional && written && canvas?.slideId === id && (
+        <SlideLayer deck={provisional} canvas={canvas} slideId={id} scale={1} size={{ w: frame.w, h: frame.h }} session={session} assetUrl={assetUrl} faces={faces} zoom={zoom} /> /* P4-A2 G2.4 (G-R3, G-R4) */
+      )}
       {board.missing && <div className="design-board-missing" />}
     </div>
   );

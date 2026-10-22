@@ -6,7 +6,9 @@
 // undo step (the session's `edit`).
 // P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; V10): a slide with open comments carries their
 // count, orphans counted, said in its thumbnail's name.
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+// P4-A2 G2.3 (G-R5 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): every slide a publish is writing shows
+// it, ringed in the agent's colour, and a slide new to the deck stands at its place as an entry that is no button.
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -24,6 +26,7 @@ import { SLIDE_W, SlideView } from './SlideView';
 import { DECK_COPY as C } from './copy';
 import { COMMENTS_COPY } from './comments/copy';
 import { useOpenThreadCounts } from './comments/use-threads';
+import { NewSlideEntry, ThumbnailLayer, useWrittenOrder, type DeckProvisional } from './provisional';
 
 export interface FilmstripProps {
   session: DeckSession;
@@ -39,11 +42,14 @@ export interface FilmstripProps {
   fromLayout?: ReactNode;
   /** B6: the deck's uploaded faces' private names (editor/page-styles.ts). */
   faces?: FaceAliases;
+  /** P4-A2 G2.3 (X35): a publish's slides as they stream. */
+  provisional?: DeckProvisional | null;
 }
 
-export function Filmstrip({ session, view, current, assetUrl, width, readOnly, onDrawn, fromLayout, faces }: FilmstripProps) {
+export function Filmstrip({ session, view, current, assetUrl, width, readOnly, onDrawn, fromLayout, faces, provisional = null }: FilmstripProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
-  const ids = view.slides.map((s) => s.id);
+  const ids = useMemo(() => view.slides.map((s) => s.id), [view.slides]);
+  const entries = useWrittenOrder(provisional, ids); // P4-A2 G2.3: new slides being written at their places
   const scale = width / SLIDE_W;
   // a reorder as assistive technology hears it: the slides by position and title, over the order last drawn
   const accessibility = useReorderAccessibility(ids, (id, n) => C.reorderItem(n, slideTitle(session.doc, id)));
@@ -82,27 +88,33 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={accessibility}>
         <SortableContext items={ids} strategy={verticalListSortingStrategy} disabled={readOnly}>
           <ol className="deck-filmstrip-list" aria-label={C.slides}>
-            {view.slides.map((slide, index) => (
-              <li key={slide.id} className="deck-filmstrip-item">
-                {headersBefore(slide.id).map((header) => (
-                  <SectionTitle key={header.key} session={session} header={header} readOnly={readOnly} />
-                ))}
-                <Thumbnail
-                  session={session}
-                  slide={slide}
-                  index={index}
-                  current={slide.id === current}
-                  scale={scale}
-                  assetUrl={assetUrl}
-                  faces={faces}
-                  readOnly={readOnly}
-                  startsSection={view.sections.some((s) => s.before === slide.id && !s.empty)}
-                  full={full}
-                  comments={comments.get(slide.id) ?? 0}
-                  onCanvas={(canvas) => (canvas ? canvases.current.set(slide.id, canvas) : canvases.current.delete(slide.id))}
-                />
-              </li>
-            ))}
+            {entries.map((id) => {
+              const index = ids.indexOf(id);
+              const slide = view.slides[index];
+              if (!slide) return provisional && <NewSlideEntry key={id} deck={provisional} slideId={id} scale={scale} assetUrl={assetUrl} faces={faces} />;
+              return (
+                <li key={slide.id} className="deck-filmstrip-item">
+                  {headersBefore(slide.id).map((header) => (
+                    <SectionTitle key={header.key} session={session} header={header} readOnly={readOnly} />
+                  ))}
+                  <Thumbnail
+                    session={session}
+                    slide={slide}
+                    index={index}
+                    current={slide.id === current}
+                    scale={scale}
+                    assetUrl={assetUrl}
+                    faces={faces}
+                    readOnly={readOnly}
+                    startsSection={view.sections.some((s) => s.before === slide.id && !s.empty)}
+                    full={full}
+                    comments={comments.get(slide.id) ?? 0}
+                    onCanvas={(canvas) => (canvas ? canvases.current.set(slide.id, canvas) : canvases.current.delete(slide.id))}
+                    provisional={provisional}
+                  />
+                </li>
+              );
+            })}
           </ol>
         </SortableContext>
       </DndContext>
@@ -134,8 +146,10 @@ function Thumbnail(props: {
   /** P4-B2: its open comments, orphans counted. */
   comments: number;
   onCanvas: (canvas: SlideCanvas | null) => void;
+  /** P4-A2 G2.3: a publish's slides as they stream (the ring and the provisional slide over the thumbnail). */
+  provisional: DeckProvisional | null;
 }) {
-  const { session, slide, index, current, scale, assetUrl, faces, readOnly, startsSection, full, comments, onCanvas } = props;
+  const { session, slide, index, current, scale, assetUrl, faces, readOnly, startsSection, full, comments, onCanvas, provisional } = props;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slide.id, disabled: readOnly });
   const doc = session.doc;
   const label = C.slideLabel(index + 1, slide.hidden, slide.held !== null) + (comments > 0 ? `, ${COMMENTS_COPY.openOnSlide(comments)}` : ''); // P4-B2
@@ -191,6 +205,7 @@ function Thumbnail(props: {
         }}
       >
         <SlideView doc={doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} thumbnail />
+        {provisional && <ThumbnailLayer deck={provisional} slideId={slide.id} scale={scale} assetUrl={assetUrl} faces={faces} />}
         {slide.held && <span className="deck-thumb-badge">{C.held}</span>}
         {slide.hidden && <span className="deck-thumb-badge deck-thumb-badge-quiet">{C.hiddenBadge}</span>}
         {comments > 0 && (

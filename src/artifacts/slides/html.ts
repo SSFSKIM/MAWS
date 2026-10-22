@@ -70,3 +70,31 @@ export function outerMarkup(html: string): string[] {
 export function parseHtml(html: string): RawNode[] {
   return parseFragment(html).childNodes.map(convert);
 }
+
+/** An element a cut markup text ends inside: its tag, and where its content starts in the text. */
+export interface OpenElement {
+  tag: string;
+  contentStart: number;
+}
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+const ROW_GROUPS = new Set(['tbody', 'thead', 'tfoot']);
+
+/**
+ * P4-A2 G2 (G-R2): the elements a text cut while it streams ends inside, outermost first (the section, then each last
+ * child whose end tag has not come); empty once the outermost element's end tag has come. Read by the same tree builder
+ * as `parseHtml`, so a level here is an element there; a table's row groups are transparent, as the loader reads them.
+ */
+export function openElements(html: string): OpenElement[] {
+  const out: OpenElement[] = [];
+  let nodes = parseFragment(html, { sourceCodeLocationInfo: true }).childNodes;
+  for (;;) {
+    const last = [...nodes].reverse().find((n): n is DefaultTreeAdapterMap['element'] => 'tagName' in n);
+    if (!last) return out;
+    const host = last.nodeName === 'template' ? (last as DefaultTreeAdapterMap['template']).content : last;
+    nodes = host.childNodes;
+    if (ROW_GROUPS.has(last.tagName)) continue; // implied or written, never a level of the slide's tree
+    const at = last.sourceCodeLocation;
+    if (!at || at.endTag || VOID_TAGS.has(last.tagName)) return out;
+    out.push({ tag: last.tagName, contentStart: at.startTag?.endOffset ?? at.endOffset });
+  }
+}

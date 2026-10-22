@@ -167,6 +167,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         onRevealed={takeOpenRequest}
         registerEditClaimant={registerEditClaimant} /* P4-B2 K6: the Edit menu's Undo and Redo on the deck's stack */
         bindsKey={keymapBinds} /* P4-B2 (D14): the editor's F6 steps aside for a key the owner bound */
+        provisional={snapshot.provisional} /* P4-A2 G2.3: an agent's publish drawn as it streams */
       />
     </div>
   );

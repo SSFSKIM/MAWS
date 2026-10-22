@@ -4,18 +4,21 @@
 // colour at their targets: `replace_text` dims the quoted passage and draws the streamed text after it (a quote not
 // found in the block's text, markdown syntax in it say, is drawn as a block after the block); `replace_block` dims the
 // block and draws the text after it; `insert` draws it after or before its anchor; `set_cell` after the table; `delete`
-// and `move` stream no text (presence outlines them). Rule 1: decorations only, never a document change, never history.
+// and `move` stream no text (presence outlines them); a dashboard's `dataset` labels every chart block bound to that
+// dataset, "<name> is updating <dataset>…" (G2's G-R7). Rule 1: decorations only, never a document change, never history.
 // Rule 4: an op that would draw inside the block the person composes in waits until the composition ends, and no
 // widget takes focus or the selection. Rule 2's and 3's withdrawal is the store's; this redraws when it changes, in the
 // same task, so the real text and the layer swap within one task. A redraw tells `onGrow` (the page frame's `moved`,
 // coalesced to one `layoutKey` bump per animation frame), since the layer's text grows the page.
 import { Extension } from '@tiptap/core';
 import type { Node as PMNode, ResolvedPos } from '@tiptap/pm/model';
-import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
+import { Plugin, type EditorState, type PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { useEffect, useMemo } from 'react';
 import type { ArtifactProvisional, ProvisionalOp } from '@shared/artifacts/provisional';
+import { datasetIdFromSource } from '../../dashboard/datasets';
 import { ProvisionalLayers } from '../../provisional';
+import { provisionalKey as layerKey } from '../provisional-key';
 import { isBindingTransaction } from '../../yjs';
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { cssColor, type DocumentHandle } from './host-types';
@@ -43,7 +46,8 @@ export interface ProvisionalState {
   drawn: number;
 }
 
-export const provisionalKey = new PluginKey<ProvisionalState>('provisional');
+// the key the schema's repairs know a redraw by (../provisional-key.ts), typed with this plugin's state
+export const provisionalKey: PluginKey<ProvisionalState> = layerKey;
 
 const NO_IDS: ReadonlySet<string> = new Set();
 
@@ -121,6 +125,32 @@ function locate(doc: PMNode, ids: ReadonlySet<string>): Map<string, { node: PMNo
   return found;
 }
 
+interface Bound {
+  node: PMNode;
+  pos: number;
+  /** The ids of the blocks the chart stands in. */
+  around: ReadonlySet<string>;
+}
+
+// The chart blocks bound to each dataset (a chart's source names it, read as the dashboard's views read it), each with
+// the blocks it stands in; textblocks hold no chart, so they are not entered.
+function boundCharts(doc: PMNode, datasets: ReadonlySet<string>): Map<string, Bound[]> {
+  const found = new Map<string, Bound[]>();
+  if (datasets.size === 0) return found;
+  doc.descendants((node, pos) => {
+    if (node.type.name !== 'chart') return !node.isTextblock && !node.isAtom;
+    const dataset = datasetIdFromSource(node.attrs.source);
+    if (datasets.has(dataset)) found.set(dataset, [...(found.get(dataset) ?? []), { node, pos, around: blocksAround(doc.resolve(pos)) }]);
+    return false;
+  });
+  return found;
+}
+
+interface Targets {
+  blocks: Map<string, { node: PMNode; pos: number }>;
+  charts: Map<string, Bound[]>;
+}
+
 const targetsOf = (op: ProvisionalOp): Array<string | null | undefined> => {
   switch (op.op) {
     case 'replace_text':
@@ -135,7 +165,7 @@ const targetsOf = (op: ProvisionalOp): Array<string | null | undefined> => {
   }
 };
 
-function opDecorations(op: ProvisionalOp, index: number, who: Who, found: Map<string, { node: PMNode; pos: number }>, composing: ReadonlySet<string>): Decoration[] {
+function opDecorations(op: ProvisionalOp, index: number, who: Who, { blocks: found, charts }: Targets, composing: ReadonlySet<string>): Decoration[] {
   const style = `--doc-presence: ${who.color}`;
   switch (op.op) {
     case 'replace_text': {
@@ -167,6 +197,20 @@ function opDecorations(op: ProvisionalOp, index: number, who: Who, found: Map<st
       const target = found.get(op.table);
       return target ? [blockWidget(target.pos + target.node.nodeSize, 'after', op.op, who, index, op.text)] : [];
     }
+    case 'dataset': {
+      // the label rides the chart block itself (its node view keeps its drawing through a decoration change), so no
+      // line moves; a chart inside the block the person composes in waits, as every op does
+      const attrs = {
+        class: 'doc-provisional-dataset',
+        style,
+        'data-provisional': who.id,
+        'data-provisional-op': op.op,
+        'data-provisional-by': who.name,
+        'data-provisional-dataset': op.dataset,
+        'data-provisional-label': `${who.name} is updating ${op.dataset}…`,
+      };
+      return (charts.get(op.dataset) ?? []).filter((chart) => ![...chart.around].some((id) => composing.has(id))).map((chart) => Decoration.node(chart.pos, chart.pos + chart.node.nodeSize, attrs));
+    }
     default:
       return [];
   }
@@ -176,12 +220,18 @@ function draw(state: EditorState, layers: ReadonlyMap<string, ArtifactProvisiona
   if (layers.size === 0) return DecorationSet.empty;
   if ((ySyncPluginKey.getState(state) as { renderer?: unknown } | undefined)?.renderer != null) return DecorationSet.empty; // a diff is shown
   const ids = new Set<string>();
-  for (const layer of layers.values()) for (const op of layer.ops) for (const id of targetsOf(op)) if (id) ids.add(id);
-  const found = locate(state.doc, ids);
+  const datasets = new Set<string>();
+  for (const layer of layers.values()) {
+    for (const op of layer.ops) {
+      for (const id of targetsOf(op)) if (id) ids.add(id);
+      if (op.op === 'dataset') datasets.add(op.dataset);
+    }
+  }
+  const targets: Targets = { blocks: locate(state.doc, ids), charts: boundCharts(state.doc, datasets) };
   const decorations: Decoration[] = [];
   for (const layer of layers.values()) {
     const who = { id: layer.toolUseId as string, name: layer.name, color: cssColor(layer.color) };
-    layer.ops.forEach((op, index) => decorations.push(...opDecorations(op, index, who, found, composing)));
+    layer.ops.forEach((op, index) => decorations.push(...opDecorations(op, index, who, targets, composing)));
   }
   return DecorationSet.create(state.doc, decorations);
 }

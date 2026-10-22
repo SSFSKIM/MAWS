@@ -625,6 +625,9 @@ const LIVENESS_BOUNDS = {
   'e2e/engine-replay.spec.ts': {
     'expect(ms).toBeLessThan(10_000);': 'the host\'s own 8 s deadline, read before the router\'s 10 s',
   },
+  'e2e/presentations-provisional.spec.ts': {
+    "expect(Date.now() - downAt, 'the commit reached the tab inside the hold’s cap').toBeLessThan(4_500);": 'the gesture hold\'s own 5 s cap (P4-B2 D17), a timer of the product\'s',
+  },
   'e2e/sessions.spec.ts': {
     'expect(failedAfterMs).toBeLessThan(110_000);': 'two of the product\'s first-output bounds (58 s or more), read before the long class\'s 120 s',
   },

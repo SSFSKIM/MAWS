@@ -31,6 +31,7 @@
     "test/support/git-env.ts",
     "test/support/import-reports.ts",
     "test/support/memory-reader.ts",
+    "test/support/optional-heap.ts",
     "test/support/panel-child-fixture.ts",
     "test/support/panel-child-tail.ts",
     "test/support/r3-surface.ts",

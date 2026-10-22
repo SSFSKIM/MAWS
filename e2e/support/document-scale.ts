@@ -133,8 +133,8 @@ export class PerfSeam {
     return this.send({ cmd: 'seed', artifactId, state: Buffer.from(state).toString('base64') });
   }
   // P4-A2: `args.toolUseId`, when given, is the call's tool-use id (the one a `stream` used, so the call commits or
-  // drops that layer); the tool never sees it
-  call<R>(session: string, tool: 'artifact_read' | 'artifact_edit' | 'artifact_reply' /* P4-B1 */, args: Record<string, unknown>, timeoutMs?: number): Promise<CallAnswer<R>> {
+  // drops that layer); the tool never sees it. P4-A2 G2 (G-R9): a deck's or a design's publish, a dashboard's dataset
+  call<R>(session: string, tool: 'artifact_read' | 'artifact_edit' | 'artifact_reply' /* P4-B1 */ | 'artifact_publish' | 'artifact_dataset', args: Record<string, unknown>, timeoutMs?: number): Promise<CallAnswer<R>> {
     return this.send({ cmd: 'call', session, tool, args }, timeoutMs);
   }
   // P4-A2 (X35; R12): a call's input fed to the session's provisional emitter one piece per `tickMs` (20 by default), as

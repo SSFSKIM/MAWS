@@ -16,8 +16,10 @@
 // name is added: the channel is the profile's directory, which only the e2e that launched the app writes.
 //
 //   seed     {artifactId, state (base64 V2)}       the document's tabs replaced by the state's, as the human
-//   call     {session, tool, args}                 artifact_read or artifact_edit as `session`; `baseRevision: 'last'`
-//                                                  stands for the revision the session last saw (its read or its batch);
+//   call     {session, tool, args}                 artifact_read (a document's, a deck's, a design's, a dashboard's),
+//                                                  artifact_edit, artifact_reply, artifact_publish or artifact_dataset
+//                                                  (P4-A2 G2) as `session`; `baseRevision: 'last'` stands for the
+//                                                  revision the session last saw (its read, its batch or its publish);
 //                                                  `args.toolUseId`, when given, is the call's tool-use id (P4-A2)
 //   stream   {session, toolUseId, name, deltas,    P4-A2 (X35; the child's R12): the pieces of a call's input fed to the
 //             tickMs?}                             session's provisional emitter one per `tickMs` (20), as the engine's
@@ -36,6 +38,10 @@ import { applyV2 } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import { PROVISIONAL_TICK_MS, type ProvisionalTool } from '@shared/artifacts/provisional';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
+import { ArtifactSession } from '../../tool-server/artifact-context'; // P4-A2 G2
+import { artifactPublishTool } from '../../tool-server/artifact-publish'; // P4-A2 G2
+import { artifactReadTool } from '../../tool-server/artifact-tools'; // P4-A2 G2
+import { artifactDatasetTool } from '../../tool-server/datasets'; // P4-A2 G2
 import { artifactEditTool, artifactReplyTool /* P4-B1 */, documentReadTool, DocumentToolSession } from '../../tool-server/documents';
 import { ProvisionalEmitter } from '../../tool-server/provisional';
 import type { McpToolDefinition } from '../../tool-server/server';
@@ -184,11 +190,12 @@ export type PerfAnswer =
 
 export const documentPerfSeamRequested = (env: Record<string, string | undefined>): boolean => env.MAWS_E2E === '1' && env.MAWS_DOCUMENT_PERF === '1';
 
-/** P4-B1: the tools the seam runs as a session; `artifact_reply` for the margin's e2e (an agent's reply growing a card). */
-export type PerfTool = 'artifact_read' | 'artifact_edit' | 'artifact_reply';
+/** P4-B1: the tools the seam runs as a session; `artifact_reply` for the margin's e2e (an agent's reply growing a card).
+ * P4-A2 G2 (G-R9): `artifact_publish` and `artifact_dataset` for the deck's, the design's and the dashboard's layers. */
+export type PerfTool = 'artifact_read' | 'artifact_edit' | 'artifact_reply' | 'artifact_publish' | 'artifact_dataset';
 
 interface PerfSession {
-  tools: Record<PerfTool, McpToolDefinition>;
+  tools: Partial<Record<PerfTool, McpToolDefinition>>;
   calls: number;
   lastRevision: number;
   provisional: ProvisionalEmitter; // P4-A2: the session's layers, which its edits commit or drop
@@ -267,8 +274,17 @@ export class DocumentPerfSeam {
           if (frame.state === 'streaming') streamed.set(frame.toolUseId, (streamed.get(frame.toolUseId) ?? 0) + 1);
         },
       });
-      const deps = { artifacts: () => this.store, session: new DocumentToolSession(), provisional };
-      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps), artifact_reply: artifactReplyTool(deps) /* P4-B1 */ }, calls: 0, lastRevision: 0, provisional, streamed };
+      // P4-A2 G2: A's tools beside the document's, as `mawsTools` pairs them: one session memory, the document's read
+      // handing every other kind to A's
+      const artifacts = { artifacts: () => this.store, session: new ArtifactSession(), provisional };
+      const deps = { artifacts: () => this.store, session: new DocumentToolSession(artifacts.session.guided), provisional };
+      session = {
+        tools: this.options.tools?.(deps) ?? {
+          artifact_read: documentReadTool(deps, artifactReadTool(artifacts)), artifact_edit: artifactEditTool(deps), artifact_reply: artifactReplyTool(deps) /* P4-B1 */,
+          artifact_publish: artifactPublishTool(artifacts), artifact_dataset: artifactDatasetTool(artifacts), // P4-A2 G2
+        },
+        calls: 0, lastRevision: 0, provisional, streamed,
+      };
       this.sessions.set(name, session);
     }
     return session;

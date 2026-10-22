@@ -17,6 +17,8 @@
 // selected and brought into view, as a shown thread's is; a version previewed in the history rail.
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D14; tracker row 253): F6 and ⇧F6 cycle the
 // workbench's regions (C's a11y.ts), keeping the selection.
+// P4-A2 G2.4 (X35; G-R6 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn as it
+// streams, from the tab's provisional layers, in the live world (World.tsx, ./provisional.tsx).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
@@ -59,6 +61,9 @@ import { BOARD_FIT_MAX, DesignView, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, t
 import { useViewFrame, useViewZoom, WithZoom } from './use-view';
 import { World } from './World';
 import { useEditClaim, type RegisterEditClaimant } from '../../slides/editor/edit-claim'; // P4-B2 K6
+import type { ProvisionalLayers } from '../../provisional';
+import { useDeckProvisional } from '../../slides/editor/provisional';
+import { DESIGN_FILES } from './provisional';
 import '../../slides/editor/chrome.css';
 import '../../slides/editor/deck.css';
 import './workbench.css';
@@ -100,6 +105,8 @@ export interface DesignWorkbenchProps extends DeckRevealProps /* P4-B4 */ {
   registerEditClaimant?: RegisterEditClaimant;
   /** P4-B2 (D14): whether the owner's keymap binds a key (the shell's): the workbench's own F6 then steps aside. */
   bindsKey?: (event: KeyboardEvent) => boolean;
+  /** P4-A2 G2.4 (X35): the replica's provisional layers (the tab's, one per handle); without them, none are drawn. */
+  provisional?: ProvisionalLayers | null;
 }
 
 const NOTICE_MS = 6_000;
@@ -139,10 +146,11 @@ function useBoardCss(): void {
 }
 
 export function DesignWorkbench(props: DesignWorkbenchProps) {
-  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, onCanvases, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, bindsKey } = props;
+  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, onCanvases, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, bindsKey, provisional = null } = props;
   useCanvasCss();
   useBoardCss();
   const doc = session.doc;
+  const written = useDeckProvisional(provisional, doc, DESIGN_FILES); // P4-A2 G2.4
   const { boards, overrides, faces: deckFaces } = useBoards(doc);
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   // M6: the frame selection alone; the zoom is read where it is drawn (WithZoom), and a pan re-renders none of this
@@ -583,6 +591,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
             fitSelection={fitSelection}
             removeBoard={remove}
             duplicateBoard={duplicate}
+            provisional={written}
           />
           </DesignCommentFrame>
         )}

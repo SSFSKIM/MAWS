@@ -195,7 +195,8 @@ export class DocumentService {
   readonly stats: ServiceStats = { framesIn: 0, contentFramesIn: 0, rowsAppended: 0, commits: 0, rejections: 0, rejected: [], lostBatches: 0 };
   private readonly docs = new Map<string, HostDoc>();
   private readonly adapters = new Map<ArtifactKind, KindAdapter>();
-  private readonly outbox: { conn: Connection; frame: Uint8Array }[] = [];
+  // a frame, or frames built when they are sent (P4-A2 G2: a sync's listeners, `onSynced`)
+  private readonly outbox: { conn: Connection; frame: Uint8Array | (() => Uint8Array[]) }[] = [];
   private readonly dirty = new Map<string, number>(); // artifact → its revision, for the rows in the open batch
   private readonly dirtyActors = new Map<string, Map<string, Actor>>(); // artifact → who wrote its rows in the batch
   private readonly waiters: { resolve: () => void; reject: (error: Error) => void }[] = [];
@@ -204,6 +205,7 @@ export class DocumentService {
   private readonly beforeCommitListeners = new Set<(artifactIds: string[]) => void>();
   private readonly unloadListeners = new Set<(artifactId: string) => void>();
   private readonly loadListeners = new Set<(artifactId: string) => void>(); // P4-B2 D19
+  private readonly syncedListeners = new Set<(artifactId: string) => Uint8Array[]>(); // P4-A2 G2
   private readonly agentReplicas = new Map<string, AgentReplica>(); // by `${appSessionId}\0${artifactId}`
   private readonly heldPresence = new WeakMap<AgentReplica, { turnEnded: boolean }>(); // P3-F (F19): outlines inside their hold
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -266,6 +268,16 @@ export class DocumentService {
   onLoad(listener: (artifactId: string) => void): () => void {
     this.loadListeners.add(listener);
     return () => this.loadListeners.delete(listener);
+  }
+
+  // P4-A2 G2 (X35; the child's G-R1): host-only frames for one connection of `artifactId` whose step 1 the host has just
+  // answered, sent to it alone right after its step 2 (and a restore's catch-up, which keeps its place), so they reach a
+  // replica that holds the host's state: the provisional layers open on the doc, restated whole for a view that attaches
+  // mid-stream. Built when they are sent, at the commit that reveals the step 2, so they are no older than any frame sent
+  // to the connection before it. A throw is logged; the connection is kept.
+  onSynced(listener: (artifactId: string) => Uint8Array[]): () => void {
+    this.syncedListeners.add(listener);
+    return () => this.syncedListeners.delete(listener);
   }
 
   adapterFor(kind: ArtifactKind): KindAdapter | undefined {
@@ -692,6 +704,7 @@ export class DocumentService {
           // The catch-up for a replica that was away across a restore (Decision Log 16): directly after the step 2, on
           // the same connection, with no frame between them; the provider recognises it by that position.
           if (hostDoc.restored) this.queue(conn, encodeFrame({ type: 'restored', ...hostDoc.restored }));
+          this.queue(conn, () => this.syncedFrames(hostDoc.id)); // P4-A2 G2
           return;
         case 'step2':
         case 'update':
@@ -1008,7 +1021,20 @@ export class DocumentService {
     if (hasPending(suggestion.doc)) this.evict(suggestion, 'a main doc update left it pending');
   }
 
-  private queue(conn: Connection, frame: Uint8Array): void {
+  // P4-A2 G2: every sync listener's frames for a connection of `artifactId`, each listener's failure logged
+  private syncedFrames(artifactId: string): Uint8Array[] {
+    const frames: Uint8Array[] = [];
+    for (const listener of this.syncedListeners) {
+      try {
+        frames.push(...listener(artifactId));
+      } catch (error) {
+        this.log(`an onSynced listener threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return frames;
+  }
+
+  private queue(conn: Connection, frame: Uint8Array | (() => Uint8Array[])): void {
     this.outbox.push({ conn, frame });
     this.scheduleFlush();
   }
@@ -1040,7 +1066,10 @@ export class DocumentService {
     const committed: Committed[] = [...this.dirty].map(([artifactId, revision]) => ({ artifactId, revision, actors: [...(this.dirtyActors.get(artifactId)?.values() ?? [])] }));
     this.dirty.clear();
     this.dirtyActors.clear();
-    for (const { conn, frame } of this.outbox.splice(0)) this.send(conn, frame);
+    for (const { conn, frame } of this.outbox.splice(0)) {
+      if (typeof frame !== 'function') this.send(conn, frame);
+      else if (!conn.closed) for (const built of frame()) this.send(conn, built); // P4-A2 G2
+    }
     for (const hostDoc of this.docs.values()) {
       for (const conn of hostDoc.conns) {
         if (!conn.ackDue) continue;

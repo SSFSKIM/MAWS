@@ -138,6 +138,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
         onRevealed={takeOpenRequest}
         registerEditClaimant={registerEditClaimant} /* P4-B2 K6: the Edit menu's Undo and Redo on the design's stack */
         bindsKey={keymapBinds} /* P4-B2 (D14): the workbench's F6 steps aside for a key the owner bound */
+        provisional={snapshot.provisional} /* P4-A2 G2.4: an agent's publish drawn as it streams */
       />
     </div>
   );
