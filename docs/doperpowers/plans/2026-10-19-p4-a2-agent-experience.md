@@ -39,6 +39,8 @@ Turn time is unchanged. What changes is the time to the first visible change: fr
 
 - 2026-10-22 (G2.1, d0a592e21 and 0bf0a973c on `p4-a2g2-host`, fast-forwarded into `p4-a2g2`; by a sub-worker on opus): the emitter streams a presentation's and a design's publish as per-path `file` frames and a dataset's id; `DocumentService.onSynced(listener)` restates every open call to a connection whose step 1 the host answers (one complete frame per call, built at the flush that sends its step 2); the dataset's presence outlines the chart blocks bound to it; the perf seam's tools gain `artifact_publish`, `artifact_dataset` and a read that serves decks, designs and dashboards. 112 tests green over the touched files; class 1a 39713153852 green at d0a592e21.
 
+- 2026-10-22 (G2.5, 800f4e6ae on `p4-a2g2-dash`, merged at 2249cb142; by a sub-worker on opus): the document `Provisional` extension draws a `dataset` op as a node decoration on each chart block bound to it (`data-provisional-op="dataset"`, `data-provisional-dataset`, `data-provisional-label` drawn by CSS `::before` at the block's top left, so no line moves; the chart is not redrawn), none while the person composes in a block holding it. 3 new DOM cases in both DOM projects, red before.
+
 ## Scope and what the code says (M0 grounding)
 
 Everything the parent decided is taken as decided. What follows is the residue the section leaves to the child, each grilled against the code on master at 151826d9a.
