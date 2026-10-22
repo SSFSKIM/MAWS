@@ -11,13 +11,12 @@
 //               tab's drawnAt, which waits each canvas's first layout pass); the tab constructor to drawn beside it; every
 //               board's identity, size and element count verified in the DOM at ready                       ≤ 1,000 ms
 //   2 frames    real wheel input through the world's own handler (pan at 25 %; a pinch zoom from fit to about 100 % and
-//               back): a DevTools trace's per-frame slices of main-thread work (every top-level task's executing time
-//               clipped to the renderer's BeginFrame interval it falls in, so a task longer than a frame is split across
-//               the frames it spans; the input's handling, React, style, layout, paint, layerization and commit all
-//               count; e2e/support/design-frames.ts), p95 over the active frames; not E0's 4 ms callback-CPU stand-in.
-//               Precondition, recorded with the row: the window's display at most 100 Hz (DL40's 60 Hz frame), so a
-//               frame is longer than the bound and a task over it still reads missed; a faster display, or one whose
-//               rate cannot be read, fails the row                                                        ≤ 10 ms
+//               back): a DevTools trace's main-thread work per frame, each top-level task whole in the renderer's
+//               BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads
+//               its whole length at any display rate (the input's handling, React, style, layout, paint, layerization
+//               and commit all count; e2e/support/design-frames.ts), p95 over the active frames; not E0's 4 ms
+//               callback-CPU stand-in. Precondition, recorded with the row: the window's display at most 100 Hz
+//               (DL40's 60 Hz frame); a faster display, or one whose rate cannot be read, fails the row    ≤ 10 ms
 //   2 drops     the rAF-gap proxy over its calibrated idle interval (≤ 2 %); the compositor's own PipelineReporter drops
 //               beside it, separately labelled (≤ 2 %, or unavailable when the trace carries none)
 //   2 stress    the same frame rows, a pan and a pinch zoom each in its own rows, for at least 5 s while the owner drags a
@@ -549,7 +548,7 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   });
 
   const frameRows = (label: string, what: string, trials: (FrameTrial & { load: number; note?: string })[]) => {
-    rows.add(`2 ${label} frame work p95`, `${what}: per-frame slices of main-thread work (each top-level task's executing time clipped to the renderer's BeginFrame interval it falls in, a task longer than a frame split across the frames it spans; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)`, 'ms', 10, '≤ 10 ms of main-thread work per frame, on a display at most 100 Hz (DL40; not E0’s 0.4 ms callback CPU)', trials.map((t) => (t.work ? { value: t.work.active.p95, load: t.load, note: `${t.work.active.n} active of ${t.work.all.n} frames; all-frames p95 ${t.work.all.p95.toFixed(2)} ms; active max ${t.work.active.max.toFixed(2)} ms; ${t.work.inputs} inputs dispatched${t.note ? `; ${t.note}` : ''}` } : { value: null, load: t.load, error: t.error })), false, 'worst', frameDisplay);
+    rows.add(`2 ${label} frame work p95`, `${what}: main-thread work per frame (each top-level task whole in the renderer's BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads its whole length; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)`, 'ms', 10, '≤ 10 ms of main-thread work per frame, on a display at most 100 Hz (DL40; not E0’s 0.4 ms callback CPU)', trials.map((t) => (t.work ? { value: t.work.active.p95, load: t.load, note: `${t.work.active.n} active of ${t.work.all.n} frames; all-frames p95 ${t.work.all.p95.toFixed(2)} ms; active max ${t.work.active.max.toFixed(2)} ms; ${t.work.inputs} inputs dispatched${t.note ? `; ${t.note}` : ''}` } : { value: null, load: t.load, error: t.error })), false, 'worst', frameDisplay);
     rows.add(`2 ${label} dropped (rAF proxy)`, `${what}: the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval`, '%', 2, '≤ 2 % (E0 0–0.4 %)', trials.map((t) => (t.drops ? { value: t.drops.share * 100, load: t.load, note: `${t.drops.dropped} of ${t.drops.expected} at ${t.drops.intervalMs.toFixed(2)} ms; longest gap ${t.drops.longestGapMs.toFixed(1)} ms` } : { value: null, load: t.load, error: t.error })));
     const compositor = trials.map((t) => t.work?.compositor ?? null);
     if (compositor.every((c) => c !== null))
