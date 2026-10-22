@@ -91,6 +91,8 @@ allows today.
   gates. MAWS's final combined-head gates are being completed; local headless
   desktop/phone screenshot tests passed (2/2), and both images were inspected.
   Neither merge nor rollout is part of this executor's handoff.
+- [ ] M1's rollout and walk: both halves ship back to back once cua's hold 3 on the
+  mini releases, and the walk follows the order in the Decision Log's last entry.
 - [ ] M2 — native panels from reads: side question, context and usage, model and effort,
   MCP, compact with instructions, status, permissions and hooks.
 - [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
@@ -2434,6 +2436,40 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   leaving its GitHub run untouched; no slot lock was manually removed.
   Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's execution
   correction after the observed slot starvation.
+
+- Decision: A14's catalog gate stands with no M0 fallback, and M1 rolls out web and
+  machines back to back. Remote slash commands need sminos 1.8.0's catalog, so a
+  1.7.1 machine refuses `/list-agents`, `/rename` and `/reload-plugins` with the
+  older-plugin reason while the native controls and `read.status` keep working; once
+  the machine is on 1.8.0, a session still loaded on 1.7.1 gets the stale-session
+  reason. That is the designed mixed-version behaviour, not a regression, but it
+  would refuse every desk slash command from the web deploy to the machines'
+  install, so neither half ships early: after cua's hold 3 on the mini releases
+  (about 16:40Z on 2026-10-22; the mini pulls the doperpowers marketplace on its own,
+  and a sminos daemon restart inside the hold would stop cua's run), doperpowers #353
+  merges, MAWS #126 merges and deploys at once, and the MacBook rolls to 1.8.0
+  minutes later. M1's walk, in that order:
+  1. Before the deploy, open one `web@master.f12fb35c` tab and leave it unrefreshed.
+  2. After the deploy, on the still-1.7.1 MacBook: `/list-agents` and `/rename` are
+     refused with the older-plugin reason; the native controls work. This proves
+     A14 and A5's older-machine half; A1's historical no-`read.status` half has no
+     live fixture left (every machine runs 1.7.0 or later) and rests on the
+     old-producer tests.
+  3. After the MacBook's roll, before any reload: a seat loaded on 1.7.1 is refused
+     with the stale-session reason (A5's second half).
+  4. A9's replaced-module branch: `/reload-plugins` to that seat from the retained
+     old tab, its receipt *confirmed by effect* and `daemon.log`'s `how=effect` line
+     for the same op. If the old client can't be kept usable, `sminos command <seat>
+     reload-plugins` proves the machine half and the record names the CLI as the
+     route; the desk-visible effect receipt is then walked at the next sminos bump,
+     on a seat loaded on 1.8.0.
+  5. The visible *Ran* label, A10–A14, the sleeping-phone missed-end recovery, and
+     A33's samples. The comparative RC column stays deferred (MAWS #52).
+  Rationale: the new desk cannot send the first reload to a session whose mod
+  predates the catalog, and a browser-side legacy command table would reopen the
+  approved gate to keep a window of minutes usable. Rejected: deploying the web as
+  soon as its gates pass, which leaves every desk slash command refused until
+  16:40Z or later. Date/Author: 2026-10-22, the orchestrator's integration ruling.
 
 ## Outcomes & Retrospective
 
