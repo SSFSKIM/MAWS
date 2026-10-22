@@ -12,12 +12,13 @@
 // coalesced to one `layoutKey` bump per animation frame), since the layer's text grows the page.
 import { Extension } from '@tiptap/core';
 import type { Node as PMNode, ResolvedPos } from '@tiptap/pm/model';
-import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
+import { Plugin, type EditorState, type PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { useEffect, useMemo } from 'react';
 import type { ArtifactProvisional, ProvisionalOp } from '@shared/artifacts/provisional';
 import { datasetIdFromSource } from '../../dashboard/datasets';
 import { ProvisionalLayers } from '../../provisional';
+import { provisionalKey as layerKey } from '../provisional-key';
 import { isBindingTransaction } from '../../yjs';
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { cssColor, type DocumentHandle } from './host-types';
@@ -45,7 +46,8 @@ export interface ProvisionalState {
   drawn: number;
 }
 
-export const provisionalKey = new PluginKey<ProvisionalState>('provisional');
+// the key the schema's repairs know a redraw by (../provisional-key.ts), typed with this plugin's state
+export const provisionalKey: PluginKey<ProvisionalState> = layerKey;
 
 const NO_IDS: ReadonlySet<string> = new Set();
 

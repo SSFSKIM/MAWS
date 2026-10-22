@@ -18,7 +18,11 @@ import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle } from './host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import { Provisional, provisionalKey } from './provisional';
-import { World, blocks, doc, endOf, para, ticks, until } from './test-world';
+import { pmnodeToDelta } from '../../yjs/prosemirror';
+import { YNode } from '../../yjs/document';
+import { schemaFor } from '../schema';
+import { tabBody } from '../tabs';
+import { TAB, World, blocks, doc, endOf, para, ticks, until } from './test-world';
 
 let world: World | null = null;
 let handles: DocumentHandle[] = [];
@@ -402,6 +406,33 @@ describe('the provisional layer on a dashboard’s charts', () => {
     expect([labelled(container), charts(container)[2].dataset.provisionalLabel]).toEqual([['c3'], 'Fix the build is updating costs…']);
     world!.host.announce(dataset('tu2', 'dropped', 'costs'));
     await until(() => labelled(container).length === 0, 'the dropped call withdrawn');
+  });
+
+  // Rule 1 against the editor's own repairs: a remote write that leaves a chart last arms TrailingNode, which appends a
+  // paragraph on the editor's next transaction that is not the binding's; the layer's redraws must not be that
+  // transaction, or a frame would write the person's doc (the Mac run 39733208468's revision 24, there set off by
+  // Presence's redraw).
+  it('writes nothing when a frame arrives after a remote write left a chart last: no trailing paragraph, no Y update', async () => {
+    const { handle, container, editor } = await mount(undefined, undefined, doc(para('p1', 'Quarterly sales.'), para('p4', 'The end.')));
+    world!.host.write((d) => {
+      const body = tabBody(d, TAB)!;
+      body.insert(body.length, [YNode.from(pmnodeToDelta(schemaFor().nodeFromJSON(chart('c9', 'sales'))))]);
+    }, AGENT);
+    await until(() => charts(container).length === 1, 'the remote chart');
+    await ticks();
+    expect(editor().state.doc.lastChild?.type.name, 'the remote write itself repairs nothing').toBe('chart');
+    const replica = stateVector(handle.doc);
+    const host = stateVector(world!.host.doc);
+    const revision = world!.host.revision;
+    world!.host.announce(dataset('tu1', 'streaming', 'sales'));
+    await until(() => labelled(container).length === 1, 'the dataset’s label');
+    world!.host.announce(frame('tu2', 'streaming', [{ op: 'replace_text', block: 'p1', old: 'sales', text: 'revenue' }]));
+    await until(() => drawn(container, 'tu2').length === 1, 'the edit’s layer');
+    await ticks();
+    expect(editor().state.doc.lastChild?.type.name, 'no paragraph appended after the chart').toBe('chart');
+    expect(stateVector(handle.doc)).toEqual(replica);
+    expect(stateVector(world!.host.doc)).toEqual(host);
+    expect([world!.host.revision, handle.state().unsaved]).toEqual([revision, 0]);
   });
 
   it('labels no chart inside the block the person composes in until the composition ends', async () => {
