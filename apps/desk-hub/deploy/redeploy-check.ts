@@ -18,7 +18,7 @@ import type { HumanDraft, LogEvent } from '../src/protocol/log';
 import { join } from 'node:path';
 import { readDeployConfig, type DeployConfig } from './config';
 import { deployArgs, deployHub, readSecrets, type DeployOptions } from './deploy';
-import { enroll, LogFollower, newOrgKey, Person, sleep } from './hub';
+import { enroll, LogFollower, newOrgKey, Person, sleep, STOP_WAIT_MS } from './hub';
 import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
 
 async function until<T>(read: () => Promise<T | undefined>, what: string, ms: number): Promise<T> {
@@ -106,7 +106,9 @@ async function check(
     s.send({ t: 'resume', after: received.size ? Math.max(...received.keys()) : 0 });
     for (const event of unacked.values()) s.send({ t: 'human', event });
   });
-  // Registered before the first open: stopping it ends any reconnect still trying, and closes its socket.
+  // Registered before the first open: stopping it ends any reconnect still trying, and closes its socket. A connection
+  // still opening is waited for no longer than STOP_WAIT_MS from the first stop (the stop-writing step's), so this step
+  // holds the revocations after it no longer than that step's bound.
   cleanup.add('stop the browser', () => browser.stop());
   await browser.open();
   let writing = true;
@@ -117,7 +119,7 @@ async function check(
     writing = false;
     clearInterval(running.watch);
     const stopping = browser.stop();
-    await Promise.race([Promise.allSettled([stopping, ...running.loops]), sleep(15_000)]);
+    await Promise.race([Promise.allSettled([stopping, ...running.loops]), sleep(STOP_WAIT_MS)]);
   });
   const browserLoop = (async () => {
     for (let i = 1; writing; i++) {
