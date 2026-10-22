@@ -6292,6 +6292,19 @@ a hub that connects into machines (§2).
   the same lookup), `smns-enroll-v1.` with a flag (an older sminos would read `machine` for a meaning it lacks), and a
   browserless admin revoke (a member credential outside Access; deferred with its future shape).
   Date/Author: 2026-10-21, the owner (design approved) and the spec's author.
+- Decision: DX3's frame bound and DX6's hub check bound what a browser sends, before the org admits members other
+  than its owner (the tracker's 2026-10-15 DC3 row). A browser's part set joins to at most 4 MiB in at most 9 parts
+  (DX3's frame bound has the derivation); a part past either is refused `too-large`, the first before anything of its
+  set is held. The hub fails an RPC over 1 MiB as canonical JSON `bad-shape` (DX6), as DX1 bounds an event: before, an
+  RPC was bounded only by the part sets, and one past the storage's row limit failed inside the object, its request left
+  waiting. A set's refusal names no request, the frame never read, so the web ends a `human` or an RPC whose frame
+  would join past the bound itself (`ProjectClient`, through `HumanRefused` and a `failed` `rpc-state`). Consumers
+  flagged: DC5 (the web's sends, changed in the same branch); DC7 (nothing: such an RPC never reaches a daemon).
+  Rejected: one per-set bound for every assembler (a machine's stream, and the web's receiving side, carry frames up
+  to the 16 MiB a set may hold there: a snapshot, a grid of many projects); a refusal naming the part set's `id` (no
+  browser keeps which request went under which id). Left to the org phase (tracker): a bound across a project's
+  sockets, each of which still holds up to 16 MiB of unfinished sets.
+  Date/Author: 2026-10-21, the desk's debt worker (branch `desk-hub-bounds`).
 
 ## Outcomes & Retrospective
 
