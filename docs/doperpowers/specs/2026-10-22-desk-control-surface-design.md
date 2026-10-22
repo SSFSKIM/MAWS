@@ -69,8 +69,9 @@ allows today.
   condition tracks task ids, the mode is published from the bridge's own decisions and
   the frequent classic hooks, the catalog re-lists at every heartbeat, the readback rule
   applies to built-in `run` rows alone.
-- [x] (2026-10-22) The owner's calls on §15's forks: F1, F5 and F6 as recommended, F2
-  and F3 not in this run, F4 and F7 the recommendations (Decision Log, entry 4).
+- [x] (2026-10-22) The owner's calls on §15's forks: F1 and F5 as recommended, F6 yes
+  under spike 14's condition, F3 not in this run, F4 and F7 the recommendations; F2
+  open between two answers (Decision Log, entry 4).
 - [x] (2026-10-22) sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries
   `updatedInput`) landed (doperpowers #338, `2920e494`); M3 treats it as its floor.
 - [ ] M0 — foundation: capabilities, the `read` relay, the op-outcome pattern, the
@@ -83,8 +84,9 @@ allows today.
 - [ ] M4 — agents, fork, following an id change (three reviewed increments).
 - [ ] M5 — composer parity: attachments, `@` files, history (`!` shell not in this run:
   F3).
-- [-] M6 — the attach key driver for `--bg` seats: not in this run (F2, the owner,
-  2026-10-22).
+- [ ] M6 — the attach key driver for `--bg` seats: F2 open between two answers of the
+  owner's (Decision Log, entry 4); nothing before the run's last milestone depends on
+  it.
 - [ ] The latency table on #52 against the baseline, and the acceptance walk on both
   Macs.
 
@@ -1058,9 +1060,10 @@ document's own:
 ### 15. The owner's calls: open forks, each with a recommendation
 
 None of M0–M5 waits on these; each is the edge a milestone stops at until answered.
-**Ruled by the owner, 2026-10-22** (Decision Log, entry 4): F1, F5 and F6 as
-recommended; F2 and F3 not in this run; F4 and F7 the recommendations. The text below
-keeps each fork as it was put.
+**Ruled by the owner, 2026-10-22** (Decision Log, entry 4): F1 and F5 as recommended;
+F6 yes, narrowed by spike 14 (the `exit` row); F3 not in this run; F4 and F7 the
+recommendations; F2 open, the owner having given two answers. The text below keeps
+each fork as it was put.
 
 - **F1 — Controls whose effect outlives the session.** `/model` and `/effort` save a
   default for new sessions; `/autocompact`, `/output-style`, `/config k=v` write
@@ -1546,8 +1549,9 @@ the engine's queue).
 
 ### M6 — The attach key driver for `--bg` seats (stub)
 
-Not in this run: the owner ruled F2 no (2026-10-22). Kept as the shape a later run
-would take: a daemon key driver that attaches to a `--bg`
+F2 is open (Decision Log, entry 4): the owner answered *not in this run* and, to the
+research session's question on a web terminal, *include it as the run's last
+milestone*; which stands is being asked. If it is in: a daemon key driver that attaches to a `--bg`
 job under a pty, sends a key sequence, detaches, and reads the result back from rows,
 never the screen; the rows it would reach are the inventory's §3.6 (Shift+Tab ×N, Enter
 or `4` on a prompt the hooks never saw, the rewind picker by position, Esc on a panel);
@@ -1694,10 +1698,15 @@ sminos 1.6.3).
 ### The route table (owner: doperpowers `sminos/tests/routes-2.1.307.json`, loaded by `bridge-commands.tsx`; vendored to MAWS `apps/desk-hub/fake-machine/dx4/`)
 
 ```ts
-Route = {class: Class, to?: string, reason?: string, forms?: Forms, outlives?: string, confirm?: true, enabled: boolean, measured: "M" | "I"}
+Route = {class: Class, to?: string, reason?: string, forms?: Forms, outlives?: string, confirm?: true, enabled: boolean, measured: "M" | "I", otherwise?: Route}
 Class = "run" | "run-prompt" | "routed" | "follow" | "panel" | "local" | "drop"
 Forms = {args: "none" | "required" | "optional", pattern?: string /* a JS RegExp source matched whole against the trimmed args */, hint?: string}
 Entry = {name: string, bare: Route, withArgs?: Route}   // `withArgs` applies when the trimmed args are non-empty; else `bare`
+// `bad-args` is no class: it is derived. With no `withArgs`, `bare` applies to both forms; args that its
+// `forms.args` forbids or requires, or that miss its `forms.pattern`, are `bad-args`. `otherwise` is the
+// route taken when `forms.pattern` misses (only `goal`: `clear` is `run`, any other text `run-prompt`);
+// without it a miss is `bad-args`. `enabled` gates a route's own action: a `panel`, `local`, `drop` or
+// `routed` route is `enabled: true` from M0, since its refusal or its routing is in force from M0.
 ```
 
 A non-built-in (`source` ≠ `builtin`) has no entry: it is `run-prompt` (enabled from M1)
@@ -1728,7 +1737,7 @@ milestone that enables it; `—` means the same as the bare route):
 | `branch` | `follow` | `follow`, optional | — | M4 |
 | `resume` | `panel` (the picker) | `follow`, required (a session id) | — | M4 (args) |
 | `background` | `follow`, confirm, under §8.3's condition | `bad-args` | the confirm names the loss (§8.3) | M4 |
-| `exit` | `run`, confirm | `bad-args` | F6: the confirm names the machine, that it closes the terminal session, and the shells and monitors it kills | M1 |
+| `exit` | `run`, confirm, only while the bridge sees no running task (shell, monitor, agent, workflow, MCP task) and no worktree the session created; otherwise refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome is the session's `session.end`, never the settled `{}` | M1 |
 | `config` | `panel` | `drop` (*saves a default on <machine>; terminal only*, F1) | — | — |
 | `autocompact` | `panel` | `drop` (F1) | — | — |
 | `output-style` | `panel` | `drop` (F1) | — | — |
@@ -2090,12 +2099,27 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   `userSettings`) stay terminal-only, as the table and §11 already have them. **F5** — a
   rule suggestion's destinations are `session` and, labelled and only as the engine
   itself suggests it, `localSettings` (M3, as §7 and §11 have it). **F6** — `/exit` is
-  offered behind a confirm naming the machine, that it closes the terminal session, and
-  the shells and monitors it kills: the `exit` row is enabled in M1, where the
-  typeahead draws a route's `confirm` (M0 enables its five rows alone; `exit` carries
-  `enabled: false`, *comes with M1*, until then). **F2** and **F3** — neither M6 (the
-  attach key driver) nor `!` shell (A5) is in this run. **F4** and **F7** — the
-  recommendations (§11's cut; fork with M4's agents and following). Two execution
+  offered behind a confirm naming the machine and that it closes the terminal session,
+  narrowed by spike 14 (2.1.307, `desk-mod-run-spikes.md` §14): with one background
+  shell running, `/exit` opened the terminal's *Background work is running … Exit and
+  stop tasks / Move to background and exit / Stay* dialog, its promise pending past
+  12 s with a queued `/color` waiting behind it (a panel, H-panel), and *Stay* resolved
+  `{}`, the same as success; from code (cli 2.1.307:209156, 616826) the dialog opens
+  whenever a task that does not stop on exit runs (shells, monitors, agents, workflows,
+  MCP tasks) or the session is in a worktree it created (*Exiting worktree session*),
+  and otherwise `/exit` exits at once. So the bridge runs `exit` only while it sees no
+  running task and no worktree of the session's own, and refuses it otherwise with *the
+  terminal would ask what to do with the running work: exit there*; the confirm
+  promises no stop of shells (with work running, nothing stops until someone answers at
+  the terminal); the outcome is the session's `session.end`, never the settled `{}`.
+  The `exit` row is enabled in M1, where the typeahead draws a route's `confirm` (M0
+  enables its five rows alone; `exit` carries `enabled: false`, *comes with M1*, until
+  then). **F3** — `!` shell (A5) is not in this run. **F2** — open: the owner answered
+  *not in this run* to the orchestrator and *include it as the run's last milestone* to
+  the research session's own question on a web terminal for `--bg` jobs; the research
+  session is asking which stands. Nothing before the run's last milestone depends on
+  it. **F4** and **F7** — the recommendations (§11's cut; fork with M4's agents and
+  following). Two execution
   calls for M0: (1) the app-start latency paths (`app.cold`, `app.warm`,
   `app.reconnect`, `app.me`, `app.chunk`, `app.state`, `app.key`) are left to the
   `desk-latency-baseline` branch, which is adding them now with its harness under
@@ -2111,6 +2135,20 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   latency split keeps two branches from writing the same marks; the two halves meet
   only at the wire shapes Interfaces fixes and the one fixture.
   Date/Author: 2026-10-22, the M0 plan-executor for the orchestrator session (b4948247).
+
+- Decision: The route fixture's shape, from writing it (doperpowers `9cdd2a2b`,
+  `sminos/tests/routes-2.1.307.json`, 72 built-ins and the `diff` exception). The
+  table's `bad-args` cells are derived from `forms` rather than being a class; `goal`'s
+  two with-args routes need `Route.otherwise` (the route on a pattern miss); `enabled`
+  is `true` for every refusing or routing class, `false` for `plan` bare (*comes with
+  M3*) and every `follow` row (*comes with M4*); `usage` is `panel` to `read usage` (A4
+  needs the panel refusal) while `context` is `routed` to it; each route's `measured`
+  mark is derived from the inventory's appendix, the probe and the spikes, the table
+  having none per row; `outlives` is stored as plain text. Interfaces gains the
+  derivation and `otherwise`.
+  Rationale: the table's prose cells did not map onto the declared shape one to one;
+  both halves read the fixture, so its shape is fixed before either half is built.
+  Date/Author: 2026-10-22, the M0 plan-executor, from the fixture task's report.
 
 ## Outcomes & Retrospective
 
