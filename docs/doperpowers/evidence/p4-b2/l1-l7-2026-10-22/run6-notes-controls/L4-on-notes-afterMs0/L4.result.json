@@ -1,0 +1,516 @@
+{
+ "case": "L4",
+ "policy": "replace",
+ "checks": {
+  "a reads 한글": [
+   "Hello",
+   "한글"
+  ],
+  "no bare jamo": [
+   false,
+   false
+  ]
+ },
+ "facts": {
+  "a": "Hello",
+  "b": "World",
+  "elements": 3,
+  "left": "200px",
+  "state": {
+   "surface": "main",
+   "selection": [],
+   "editingText": null,
+   "keyboard": "stage"
+  },
+  "firstKey": {
+   "key": "g",
+   "keyCode": 71,
+   "isComposing": false
+  },
+  "pressToFirstKeyMs": 92.6,
+  "focusChanges": [
+   "focusout stage @3515.4",
+   "focusin textarea @3515.9",
+   "focusout textarea @4015.1",
+   "focusin stage @4015.3"
+  ],
+  "notesValue": "Notesgㅏㄴ글",
+  "postedAt": [
+   1792642058744
+  ]
+ },
+ "probes": [
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "51005",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--at",
+    "1792642058650",
+    "--ansi-keys",
+    "gksrmf"
+   ],
+   "startedAt": 1792642056162,
+   "ms": 2609,
+   "report": {
+    "units": 6,
+    "presses": [
+     {
+      "unicode": null,
+      "keyCode": 5,
+      "flags": 0
+     },
+     {
+      "keyCode": 40,
+      "unicode": null,
+      "flags": 0
+     },
+     {
+      "unicode": null,
+      "keyCode": 1,
+      "flags": 0
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 15
+     },
+     {
+      "keyCode": 46,
+      "unicode": null,
+      "flags": 0
+     },
+     {
+      "unicode": null,
+      "keyCode": 3,
+      "flags": 0
+     }
+    ],
+    "layout": "com.apple.keylayout.ABC",
+    "exitStatus": 0,
+    "postedAt": 1792642058744,
+    "mode": "ansiKeys",
+    "pid": 51038,
+    "chars": 6
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 0,
+   "pressToKeyMs": 92.6
+  }
+ ],
+ "events": [
+  {
+   "t": 3512.7,
+   "type": "pointerdown",
+   "target": "textarea",
+   "slide": {
+    "x": -41,
+    "y": 1155
+   },
+   "defaultPrevented": false
+  },
+  {
+   "t": 3515.4,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3515.9,
+   "type": "focusin",
+   "target": "textarea",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3605.3,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "g",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3605.3,
+   "type": "keypress",
+   "target": "textarea",
+   "key": "g",
+   "code": "KeyG",
+   "keyCode": 103,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3644.9,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertText",
+   "data": "g",
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3645.5,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertText",
+   "data": "g",
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3605.6,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3610.9,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 229,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3656.6,
+   "type": "compositionstart",
+   "target": "textarea",
+   "data": "",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3656.8,
+   "type": "compositionupdate",
+   "target": "textarea",
+   "data": "ㅏ",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3656.8,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㅏ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3657.1,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㅏ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3611.2,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3612.5,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 229,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3660.1,
+   "type": "compositionupdate",
+   "target": "textarea",
+   "data": "ㅏ",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3660.1,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㅏ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3660.2,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㅏ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3660.2,
+   "type": "compositionend",
+   "target": "textarea",
+   "data": "ㅏ",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3661.4,
+   "type": "compositionstart",
+   "target": "textarea",
+   "data": "",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3661.4,
+   "type": "compositionupdate",
+   "target": "textarea",
+   "data": "ㄴ",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3661.4,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㄴ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3661.9,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㄴ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3612.9,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 83,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3614.2,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "ㄱ",
+   "code": "KeyR",
+   "keyCode": 229,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3663.7,
+   "type": "compositionupdate",
+   "target": "textarea",
+   "data": "ㄴ",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3663.7,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㄴ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3663.7,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㄴ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3663.8,
+   "type": "compositionend",
+   "target": "textarea",
+   "data": "ㄴ",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3664.9,
+   "type": "compositionstart",
+   "target": "textarea",
+   "data": "",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3664.9,
+   "type": "compositionupdate",
+   "target": "textarea",
+   "data": "ㄱ",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3664.9,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㄱ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3665.1,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "ㄱ",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3614.5,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "ㄱ",
+   "code": "KeyR",
+   "keyCode": 82,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3615.7,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "ㅡ",
+   "code": "KeyM",
+   "keyCode": 229,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3666.6,
+   "type": "compositionupdate",
+   "target": "textarea",
+   "data": "그",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3666.6,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "그",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3666.8,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "그",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3616.1,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "ㅡ",
+   "code": "KeyM",
+   "keyCode": 77,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3617.4,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "ㄹ",
+   "code": "KeyF",
+   "keyCode": 229,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3670.6,
+   "type": "compositionupdate",
+   "target": "textarea",
+   "data": "글",
+   "defaultPrevented": false
+  },
+  {
+   "t": 3670.6,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "글",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3670.8,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertCompositionText",
+   "data": "글",
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 3617.7,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "ㄹ",
+   "code": "KeyF",
+   "keyCode": 70,
+   "isComposing": true,
+   "defaultPrevented": false
+  },
+  {
+   "t": 4013,
+   "type": "pointerdown",
+   "target": "stage",
+   "slide": {
+    "x": 101,
+    "y": 1000
+   },
+   "defaultPrevented": true
+  },
+  {
+   "t": 4014.4,
+   "type": "compositionend",
+   "target": "textarea",
+   "data": "글",
+   "defaultPrevented": false
+  },
+  {
+   "t": 4015.1,
+   "type": "focusout",
+   "target": "textarea",
+   "defaultPrevented": false
+  },
+  {
+   "t": 4015.3,
+   "type": "focusin",
+   "target": "stage",
+   "defaultPrevented": false
+  }
+ ]
+}

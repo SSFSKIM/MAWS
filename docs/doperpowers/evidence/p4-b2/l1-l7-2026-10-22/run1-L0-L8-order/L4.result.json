@@ -1,0 +1,605 @@
+{
+ "case": "L4",
+ "policy": "replace",
+ "halted": "inconclusive: no attempt's keys landed within 100 ms of the press (press to first keydown, ms, per attempt: [110.9,106.8,127.9])",
+ "probes": [
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "41353",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--at",
+    "1792641438268",
+    "--ansi-keys",
+    "gksrmf"
+   ],
+   "startedAt": 1792641435777,
+   "ms": 2586,
+   "report": {
+    "units": 6,
+    "chars": 6,
+    "layout": "com.apple.keylayout.2SetHangul",
+    "presses": [
+     {
+      "keyCode": 5,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "keyCode": 40,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "keyCode": 1,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "unicode": null,
+      "keyCode": 15,
+      "flags": 0
+     },
+     {
+      "keyCode": 46,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "unicode": null,
+      "flags": 0,
+      "keyCode": 3
+     }
+    ],
+    "postedAt": 1792641438340,
+    "pid": 41467,
+    "exitStatus": 0,
+    "mode": "ansiKeys"
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 0,
+   "pressToKeyMs": 110.9
+  },
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "41353",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--at",
+    "1792641440930",
+    "--ansi-keys",
+    "gksrmf"
+   ],
+   "startedAt": 1792641438433,
+   "ms": 2587,
+   "report": {
+    "postedAt": 1792641440995,
+    "layout": "com.apple.keylayout.2SetHangul",
+    "units": 6,
+    "exitStatus": 0,
+    "pid": 41472,
+    "presses": [
+     {
+      "keyCode": 5,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "keyCode": 40,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "keyCode": 1,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 15
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 46
+     },
+     {
+      "unicode": null,
+      "keyCode": 3,
+      "flags": 0
+     }
+    ],
+    "mode": "ansiKeys",
+    "chars": 6
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 0,
+   "pressToKeyMs": 106.8
+  },
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "41353",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--at",
+    "1792641443594",
+    "--ansi-keys",
+    "gksrmf"
+   ],
+   "startedAt": 1792641441097,
+   "ms": 2610,
+   "report": {
+    "pid": 41476,
+    "postedAt": 1792641443681,
+    "mode": "ansiKeys",
+    "units": 6,
+    "presses": [
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 5
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 40
+     },
+     {
+      "keyCode": 1,
+      "flags": 0,
+      "unicode": null
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 15
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 46
+     },
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 3
+     }
+    ],
+    "exitStatus": 0,
+    "layout": "com.apple.keylayout.2SetHangul",
+    "chars": 6
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 0,
+   "pressToKeyMs": 127.9
+  }
+ ],
+ "events": [
+  {
+   "t": 2466.9,
+   "type": "pointerdown",
+   "target": "node:a",
+   "slide": {
+    "x": 261,
+    "y": 250
+   },
+   "defaultPrevented": true,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 2482.7,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 2483,
+   "type": "focusin",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 2594.8,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 2624.3,
+   "type": "compositionstart",
+   "target": "textbox:a",
+   "data": "",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 2624.7,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "ㅎ",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 2624.8,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 2625,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 2595.1,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 2600.7,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 2627,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "하",
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 2627.1,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 2627.1,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 2601.1,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 2602.7,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 2630.5,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "한",
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 2630.6,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 2630.6,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2603,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㄴ",
+   "code": "KeyS",
+   "keyCode": 83,
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2604.8,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㄱ",
+   "code": "KeyR",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2632.5,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "한",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2632.5,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2632.6,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "한",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2632.7,
+   "type": "compositionend",
+   "target": "textbox:a",
+   "data": "한",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2632.7,
+   "type": "compositionstart",
+   "target": "textbox:a",
+   "data": "",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2633.2,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "ㄱ",
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2633.2,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㄱ",
+   "isComposing": true,
+   "textBefore": "한",
+   "defaultPrevented": false,
+   "textAfter": "한"
+  },
+  {
+   "t": 2633.3,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㄱ",
+   "isComposing": true,
+   "textBefore": "한ㄱ",
+   "defaultPrevented": false,
+   "textAfter": "한ㄱ"
+  },
+  {
+   "t": 2605.1,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㄱ",
+   "code": "KeyR",
+   "keyCode": 82,
+   "isComposing": true,
+   "textBefore": "한ㄱ",
+   "defaultPrevented": false,
+   "textAfter": "한ㄱ"
+  },
+  {
+   "t": 2607,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㅡ",
+   "code": "KeyM",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "한ㄱ",
+   "defaultPrevented": false,
+   "textAfter": "한ㄱ"
+  },
+  {
+   "t": 2634.8,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "그",
+   "textBefore": "한ㄱ",
+   "defaultPrevented": false,
+   "textAfter": "한ㄱ"
+  },
+  {
+   "t": 2634.9,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "그",
+   "isComposing": true,
+   "textBefore": "한ㄱ",
+   "defaultPrevented": false,
+   "textAfter": "한ㄱ"
+  },
+  {
+   "t": 2634.9,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "그",
+   "isComposing": true,
+   "textBefore": "한그",
+   "defaultPrevented": false,
+   "textAfter": "한그"
+  },
+  {
+   "t": 2607.3,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㅡ",
+   "code": "KeyM",
+   "keyCode": 77,
+   "isComposing": true,
+   "textBefore": "한그",
+   "defaultPrevented": false,
+   "textAfter": "한그"
+  },
+  {
+   "t": 2608.7,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㄹ",
+   "code": "KeyF",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "한그",
+   "defaultPrevented": false,
+   "textAfter": "한그"
+  },
+  {
+   "t": 2636.7,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "글",
+   "textBefore": "한그",
+   "defaultPrevented": false,
+   "textAfter": "한그"
+  },
+  {
+   "t": 2636.7,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "글",
+   "isComposing": true,
+   "textBefore": "한그",
+   "defaultPrevented": false,
+   "textAfter": "한그"
+  },
+  {
+   "t": 2636.8,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "글",
+   "isComposing": true,
+   "textBefore": "한글",
+   "defaultPrevented": false,
+   "textAfter": "한글"
+  },
+  {
+   "t": 2609.1,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㄹ",
+   "code": "KeyF",
+   "keyCode": 70,
+   "isComposing": true,
+   "textBefore": "한글",
+   "defaultPrevented": false,
+   "textAfter": "한글"
+  }
+ ]
+}

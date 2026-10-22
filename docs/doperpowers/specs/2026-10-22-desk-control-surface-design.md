@@ -1,0 +1,2082 @@
+# The desk's control surface: what the terminal can do, done from the desk (2026-10-22)
+
+The living spec of one run, written from the research session's brief and inventory
+(`~/claude-code-bundle/2.1.300/notes/desk-mod-run-brief.md` and
+`desk-mod-surface-inventory.md`, 2-1-300-9a, 2026-10-21, the brief as amended by its
+adversarial review and by its spike results), the probe that measured commands on
+2.1.307 (`mod-command-run-probe.md`), the ten spikes that measured the inventory's
+unknowns (`desk-mod-run-spikes.md`, 2026-10-22), and the background-work handoff note
+(MAWS PR #79, `research/desk-remote/background-work-handoff.md`, 2.1.307). It extends
+the desk's design, `docs/doperpowers/specs/2026-10-15-desk-design.md` (below, "the desk
+spec"): its contracts DX2–DX6, its §5 control table, its §6 authentication model. From
+here on this document is the reference, the inventory its input; where the two differ,
+§14 says so and why, and where the spikes contradicted the inventory the spikes win.
+
+## Purpose
+
+The owner drives their Claude Code sessions from the desk — a phone, another Mac — and
+today the desk reaches a tenth of what the terminal does: Send, Steer, Interrupt, a
+question's answer, allow or deny, model and effort, Compact without instructions, a
+job's Stop, Spawn, Retire, Resume. A `/skill` typed into the desk reaches the model as
+words. There is no way to run a plugin command, ask a side question, see the context
+grid, allow a tool "and don't ask again", approve a plan into a mode (today's Allow on a
+plan does nothing: the terminal's dialog stays), stop one subagent, or fork a
+conversation.
+
+After this run, inside today's architecture (the bridge mod in each session → its
+`sminos bridge` child → the machine's daemon → the hub → desk-web), two things are true:
+
+1. **Control.** What the owner can do at the terminal they can do from the desk. The
+   exceptions are the things that physically need keys in the terminal — a panel the
+   engine draws, a dialog the hooks never see, a rewind picker, Shift+Tab, the input
+   that clears an Esc — and the desk names each one and says why, instead of hiding it
+   or failing when pressed.
+2. **Latency.** Every desk load is as fast as its claude.ai/code Remote Control
+   equivalent, at p50 and p95, under the same machine load, measured end to end from the
+   person's action to useful content with usable controls, in three cohorts (cold, warm,
+   reconnect).
+
+**How to see it working.** Open the desk on the phone, pick a session on the MacBook,
+type `/` — the typeahead opens at once with that session's commands, each badged where it
+comes from and, for the ones the desk cannot run, why. Run `/rename desk-walk`: the
+composer's status line says *queued*, then *ran*, then shows the engine's own line,
+`Session renamed to: desk-walk`, read back from the transcript, and the channel's title
+changes. Press *Side question*, ask "what did we decide about the cache?", and read the
+answer in a side pane while the session's turn goes on. When the session asks to edit a
+file, the card offers *Allow*, *Deny*, *Allow for this session* and *Allow and switch to
+accept edits*. Pick the mini, still on last week's plugin: the same `/` opens, and each
+control the mini cannot take says *mini's plugin is older than the desk's controls:
+update doperpowers on mini*. Turn the latency readout on (`?latency`) and read each new
+control's time against its budget.
+
+Done means both are shown working on the owner's two Macs (`macbook` and `mini`), which
+run mixed versions while doperpowers rolls out; merged code alone does not count. MAWS
+#52's full remote-client protocol continues separately; this run takes what the mod API
+allows today.
+
+## Progress
+
+- [x] (2026-10-22 03:10Z) The spec written from the brief, the inventory, the probe, the
+  desk spec and both repositories at their heads (MAWS `0ee14186a`, doperpowers
+  `646cb02c`, sminos 1.6.2); the inventory's code cites re-checked (§14, Surprises).
+- [x] (2026-10-22 03:40Z) Self-review; the static gate green on `c4d9b59e1` (run
+  39716397728); PR https://github.com/SSFSKIM/MAWS/pull/118 open.
+- [x] (2026-10-22 04:50Z) The ten spikes, the handoff note, the buildability review and
+  the design review folded in one revision (Decision Log, entry 2); the self-review
+  re-run.
+- [x] (2026-10-22 06:00Z) Merged on master (MAWS #118, `ed06afbe2`). The research
+  session's re-check of §14 folded (Decision Log, entry 3): the `/background` workflow
+  condition tracks task ids, the mode is published from the bridge's own decisions and
+  the frequent classic hooks, the catalog re-lists at every heartbeat, the readback rule
+  applies to built-in `run` rows alone.
+- [ ] The owner's calls on §15's forks (each has a recommendation; M0–M5 need none of
+  them to start, M6 needs the first).
+- [ ] sminos 1.6.3 (`bridge-plan-allow`: the plan approval carries `updatedInput`) lands;
+  M3 treats it as its floor.
+- [ ] M0 — foundation: capabilities, the `read` relay, the op-outcome pattern, the
+  `command` op's dispatch with five measured rows (doperpowers; MAWS).
+- [ ] M1 — the command spine: the route table whole, the typeahead.
+- [ ] M2 — native panels from reads: side question, context and usage, model and effort,
+  MCP, compact with instructions, status, permissions and hooks.
+- [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
+  "allow and switch", the mode chip.
+- [ ] M4 — agents, fork, following an id change (three reviewed increments).
+- [ ] M5 — composer parity: attachments, `@` files, history (`!` shell on the owner's
+  yes).
+- [ ] M6 — the attach key driver for `--bg` seats (a stub until the owner answers).
+- [ ] The latency table on #52 against the baseline, and the acceptance walk on both
+  Macs.
+
+## Terms
+
+- **The engine** is Claude Code (2.1.307 on the owner's Macs at writing). A **mod** is a
+  function-hook plugin the engine loads; **the bridge** is the sminos plugin's mod,
+  doperpowers `sminos/hooks/mods/bridge.tsx` and its `bridge-*.tsx` siblings. `$` is the
+  engine interface a mod calls (`$.command.run`, `$.session.usage`, …), typed in the
+  2.1.300 bundle's `claude-code.d.ts`. A module **reload** (`/reload-plugins`, or a
+  restart) replaces the loaded mod; a session keeps the mod it loaded until one.
+- **The child** is `sminos bridge --session <id>` (`sminos/skills/sminos/scripts/sminos_bridge.py`),
+  spawned by the bridge for the session's life, serving the session's endpoint at
+  `$SMINOS_HOME/bridge/<id>.sock` (DX5). An **op** is one command line the child hands
+  the bridge (`{id, op, …}`), answered by a `result` event. A **DX5 event** is one line
+  of the child's stream (`GET /events`).
+- **The daemon** is `sminos daemon` on each Mac; its **uplink** (`sminos_uplink.py`)
+  holds the machine's stream to the hub; its **plane** (`sminos_plane.py`) serves the
+  session plane: presence and subscriptions; its **requests reader**
+  (`sminos_requests.py`) follows each bridge's stream for the requests, settlements and
+  compactions it relays session-wide. **RPCs** are the daemon's (`sminos_rpc.py`), DX6.
+  The daemon is the execution boundary (desk spec §6).
+- **The hub** is MAWS `apps/desk-hub` (a Cloudflare Worker and its Durable Objects);
+  **the web** is `apps/desk-web`. **DX2** is machine ↔ hub, **DX3** browser ↔ hub, **DX4**
+  the session-plane envelope, **DX5** the bridge's local protocol, **DX6** the RPC shapes
+  (the desk spec's Interfaces, where each is defined; this document adds to them).
+- **Presence** is DX4's per-session `{record, bridge}` message, kept by the hub and sent
+  to every browser; the **machine presence** is DX4's per-machine `{policy, checkouts}`.
+  A **subscription** (a **sub**) is one browser's live view of one transcript, numbered
+  `n` from its snapshot.
+- A **seat** is a session sminos spawned (`claude --bg`); a **terminal session** is one
+  the owner opened. A `--bg` **job** is the engine supervisor's record of a seat.
+- **X class**: an RPC that causes execution on the machine, so a machine its owner set
+  read-only refuses it (`read-only`), and the daemon runs it only after the code, the
+  machine, project and session, the ledger, its age and the policy all hold (desk spec
+  §6, DX6). Every RPC this document adds is X class.
+- **A read** is a request over the session plane that changes nothing on the machine and
+  answers on the sub that asked (today: `diff`, `output`; this document adds one `read`
+  frame carrying several kinds).
+- **The route table** is the bridge's classification of every built-in command, per
+  form, by engine version: run, run-prompt, routed, follow, panel, local, drop, with a
+  confirm flag (§2; the table itself is in Interfaces).
+- **Readback** is how the desk learns what a command did: the engine's printed line
+  exists only as a transcript row, never in the call's settled value (H-noout), and the
+  bridge reads it in its `session.append` hook (§6).
+- **Following** is the desk moving its selection and subscriptions to the new session
+  id a command gave the conversation (`/clear`, `/branch`, `/resume <id>`,
+  `/background`).
+- **A capability** is one entry of the per-session and per-machine lists the bridge and
+  the daemon advertise and the web reads to decide what to offer and what to name as
+  out of reach (§4).
+- **The hazards** H-panel, H-noout, H-default, H-sid, H-esc, H-mcp, H-reply, H-queue and
+  H-ctx are the inventory's §1, cited by name below; each is a measured fact about the
+  engine, not a design choice. The spikes are cited as **S1**–**S10** (the spikes file's
+  sections); the handoff note as **HN**.
+
+## Acceptance
+
+Each item is behavior a person can verify on the owner's machines, with the commands.
+`<desk>` is the deployed desk; `<member>` a session as `sminos` names it (`alias#short`).
+The readout is `localStorage['desk.latency'] = '1'` or `?latency`; `window.deskLatency()`
+prints each path's n, p50, p95 and max. The **older-plugin machine** in each milestone
+is the mini while it still runs the sminos version before that milestone's (the
+rollout, §13); every milestone is walked once with the mini behind. A **stale session**
+is one on an updated machine whose mod loaded before the update (no reload yet); every
+milestone's walk includes one.
+
+**M0 — foundation**
+
+- A1. On a session whose bridge is at or above M0's sminos, the Info tab shows the
+  engine's version and release base, its repository root and its surfaces within
+  `B.read` of the tab opening (a `read status` answered on the sub). On the
+  older-plugin machine the tab shows the same fields as *not available from this
+  plugin* and the version it would need, not a spinner.
+- A2. In the desk's composer, typing `/rename desk-m0` and pressing Send on a bridged
+  session at M0's sminos shows *queued*, then *ran*, then *Session renamed to: desk-m0*
+  with the mark *confirmed by its row*, and the session's title in the sidebar is
+  `desk-m0` (`sminos list --here` shows the new name). `sminos watch <member> --json`
+  shows one `run` event with `phase: "end"` and `readback.how: "row"`.
+- A3. The same typed `/rename` while the session's turn runs says *queued until
+  <name> is idle*, and runs after the turn (H-queue: a mod-path command waits, even an
+  `immediate` one).
+- A4. Typing `/usage` (a panel) is refused: *opens a panel in the terminal; it would
+  hold the session's queue*. Typing `/model sonnet` is refused with *use Model instead:
+  /model saves a default for new sessions*. Typing `/foo` is refused *not a command this
+  session knows*. At M0 the refusal is the bridge's (the RPC fails with that reason and
+  nothing ran: `sminos watch` shows no `run` event); from M1 the composer refuses
+  before sending, from the catalog, with the same words.
+- A5. On the older-plugin machine, typing `/rename x` is refused in the composer with
+  *mini's plugin is older than the desk's controls: update doperpowers on mini*, with a
+  *Send as text anyway* that delivers it as words as today. On a stale session of the
+  updated macbook the refusal reads *this session's plugin loaded before the update:
+  run /reload-plugins in it, or restart it*, and after `/reload-plugins` typed in that
+  terminal the command works.
+- A6. With the desk showing a session, stopping its bridge child (`kill <child pid>`;
+  the mod respawns it) leaves the composer's controls as they were within 3 s (presence
+  re-probed; capabilities unchanged). The e2e, against the fake machine, covers the
+  case no live walk can stage: a presence whose capabilities shrink withdraws the
+  controls with the reason.
+- A7. A `command` RPC sent to a machine set read-only (`sminos daemon policy --read-only
+  on`) fails *read-only* and nothing ran (`sminos watch` shows no `run` event).
+- A8. Restarting the daemon (`sminos daemon restart`) between a command's *queued* and
+  its *ran* still shows the command's *ran* and its line under the same status line
+  once the daemon is back (the outcome is owed under the RPC's nonce, as a
+  compaction's is).
+- A9. `/reload-plugins` from the desk shows *queued*, then *ran: the plugins reloaded*
+  (*confirmed by effect*) within 10 s — the bridge answers again from a fresh child, and
+  the Info tab's capabilities are those of the reloaded mod; `/reload-skills` shows the
+  engine's `Reloaded skills: …` line (*confirmed by text*); `/mcp disable <server>`
+  shows `MCP server "<server>" disabled` under the label *saved for this project on
+  <machine> until enabled again* (H-default, labelled).
+
+**M1 — the command spine**
+
+- A10. Typing `/` opens the typeahead within `B.palette` of the keystroke with no network
+  round trip (the readout's `palette.open` samples are under it, and the socket shows no
+  frame between keystroke and draw): every command `$.command.list()` lists for that
+  session, named exactly as listed (an MCP prompt as `<server>:<prompt> (MCP)`), grouped
+  as MAWS groups them (Engine, Skills, Plugins, Custom), each with its description, and
+  each that the desk cannot run marked with its reason (a panel; saves a default; needs
+  the terminal; not measured on this engine).
+- A11. `/color red` from the typeahead shows `Session color set to: red` (*confirmed by
+  its row*). Two commands sent back to back (`/color red`, then `/color blue` before the
+  first ran) each show their own line (the bridge runs desk commands one at a time); a
+  command typed at the terminal between two desk commands leaves the desk's two lines
+  right and the terminal's unattributed. The one case the engine cannot tell apart —
+  the same command with the same arguments typed at the terminal during the turn the
+  desk's waited on (S7.2) — shows *ran, unconfirmed*, never a neighbour's line.
+- A12. A skill command (`/doperpowers:execspec …`) from the typeahead starts a turn in the
+  session (the transcript shows the prompt-type command's row and the model's answer);
+  the composer's status line says *started a turn*. `/goal <condition>` likewise starts
+  a turn; while a goal runs, the typeahead's `/goal clear` says *a queued clear waits
+  behind the goal: Interrupt stops it* (S4).
+- A13. After the owner presses Esc in the terminal to stop a turn, a desk command is
+  refused *stopped at the terminal: commands resume after input is typed there* (S6:
+  no mod call clears it, the desk's Send included). After the desk's own Interrupt, a
+  desk command is not refused (the mod's `$.turn.abort` does not set the refusal:
+  measured, spike 11 — this item checks the built path, the bridge's interrupt and its
+  note row).
+- A14. On the older-plugin machine the typeahead opens (A10) with the desk's own panels
+  (Model, Compact, and whatever M2 has added) and one line, *commands need sminos ≥
+  <M1's> on mini*; a session whose catalog the desk cached before its machine fell
+  behind (a downgrade; the e2e stages it) draws that catalog labelled *as of <time>*,
+  every run item marked as A5 says.
+
+**M2 — native panels from reads**
+
+- A15. *Side question* with "one line: what is this session doing?" answers in a side
+  pane within `B.btw` (idle: about a second, S3) while the session's turn runs; the
+  conversation gains no row (`sminos watch` shows `btw` start and end and no
+  `row-seen`); the pane shows the tokens spent. On the older-plugin machine the button
+  says *needs sminos ≥ <M2>*.
+- A16. The Info tab's *Context* opens the context grid (the categories and their tokens,
+  as `/context` draws them) within `B.panel`, from `read usage {breakdown: "summary"}`,
+  and *Count exactly* re-reads with `full`; nothing is written into the conversation
+  (H-ctx: `/context` is never run).
+- A17. *Model* opens the selector with the engine's own options (`default, sonnet, opus,
+  …` from `$.config.list()`'s `model` row), the aliases this session maps marked, the
+  rest offered as ids; applying one shows *applies to this session's main loop from its
+  next request; the terminal's footer keeps showing the launch model* (the session-only
+  rewrite; `/model` is never run: H-default).
+- A18. The Jobs tab's MCP list shows each server as connected (with its tool count),
+  disabled (from the project's `.claude.json`), or unknown, with *Reconnect*, *Disable*
+  and *Enable* running M0's `/mcp` forms, and after *Disable* the list marks the server
+  disabled; OAuth and a failed server say *in the terminal: /mcp*.
+- A19. *Compact* takes instructions, and the status line shows the compaction's start,
+  its counts, a hook's skip or the engine's error, as today.
+- A20. *Permissions* and *Hooks* (Info tab) show the session's permission rules by
+  source and each hook's event and matcher with how many commands it runs; a hook's
+  command text is not shown and says *terminal: /hooks* (§11's cut).
+
+**M3 — requests and modes**
+
+- A21. A permission card whose request carries an `addRules` suggestion offers, beside
+  Allow and Deny, *Allow for this session* (the rule with destination `session`: no
+  file written, the next identical call not raised — `sminos watch` shows no `raised`
+  for it) and, where the engine's suggestion names `localSettings`, *Always allow … in
+  <project>* labelled as writing `.claude/settings.local.json` on <machine> (the file
+  gains the rule). A request without suggestions offers Allow and Deny alone.
+- A22. A permission card whose request carries a `setMode` suggestion (the engine
+  suggests `acceptEdits` on an edit in default mode, S1) offers *Allow and switch to
+  accept edits*; choosing it leaves the session in that mode (the terminal's footer
+  reads `⏵⏵ accept edits on`; the chip follows within 3 s).
+- A23. An ExitPlanMode request is drawn as a plan card: the plan as markdown, *Implement
+  in <mode>* with the modes the machine's ceiling allows, *Keep planning* with feedback
+  (a deny carrying the text), and *Clear and implement* once M4's following exists.
+  Implementing in `acceptEdits` closes the terminal's *Exit plan mode?* dialog and
+  leaves the session in that mode (S1: the allow carries `updatedInput` and `setMode`;
+  the chosen mode beats the mode the session was in before plan).
+- A24. The mode chip shows the session's current mode stamped *as of <time>* (the
+  bridge's own decision the moment it hands one out — A22's switch shows on the chip
+  before the terminal's footer is read — else the latest classic hook's reading; a
+  Shift+Tab at the terminal on an idle session leaves the chip on the old mode, with
+  its stamp, until the next hook fires), and its menu offers *plan* (runs `/plan`)
+  and names every other switch *Shift+Tab in the terminal; or allow a request into it*
+  (on a `--bg` seat also *M6*). Nothing is "armed": in auto mode and in plan mode
+  harmless calls raise no request (S1), so a change waiting for one could wait forever.
+
+**M4 — agents, fork, following**
+
+- A25. In a running subagent's drill-in, *Stop* ends that agent (its row turns
+  `stopped`; the parent's turn goes on, and the parent does not spawn it again — the
+  note row tells it the person stopped it, S2), and *Message* delivers text the agent
+  reads at its next step (`sminos watch` shows the `tell` op; the agent's transcript
+  shows the peer message). A background agent (2.1.307's default for every
+  model-spawned agent) and, with `CLAUDE_CODE_FORK_SUBAGENT=0`, a foreground one.
+- A26. *Fork* on a running or ended session starts a copy as a new seat of the project
+  (`claude --bg --resume <id> --fork-session`), listed with *forked from <alias>*, the
+  original byte-identical and running (S8: `shasum` of its transcript before and after).
+- A27. `/clear` from the desk: the channel ends with *continued as <new alias>*, the
+  selection moves to the new session within `B.follow`, an RPC issued to the old id
+  before the clear shows its outcome under the old session, unchanged (never re-sealed).
+  `/branch <name>` and `/resume <id>` likewise.
+- A28. `/background` is offered only while `$.agent.list()` names no running agent and
+  no workflow the bridge saw launched is still running — a `Workflow` launched from the
+  desk's session hides the control until its `<task-notification>` arrives — (S10: a
+  running subagent opens
+  *Background this session?*, which holds the queue; a background shell carries over
+  with no dialog); its confirm names what the move keeps and loses (§8.3: the running
+  shells by id, carried but their exit codes lost; the running monitors by id, lost; an
+  MCP call in flight, lost silently; the turn in flight, re-run) and that the terminal
+  exits; then the seat appears with the conversation and the channel continues
+  *continued as <alias>*. With the old transcript's `continued-in` record deleted by
+  hand before the walk, the link still forms from the bridge's notice and the job's
+  directory and time, marked *unconfirmed*. With an agent running, the typeahead says
+  *terminal only while an agent runs: the engine would ask about it*.
+- A29. On a plan card, *Clear and implement* clears the conversation, follows to the new
+  session and sends the plan as its first prompt, in that order, and the plan's text is
+  the new session's first user row.
+
+**M5 — composer parity**
+
+- A30. A photo pasted or picked on the phone appears in the strip; Send writes it under
+  the session's working directory and the model reads it (its answer describes it: the
+  prompt names the saved path and asks for a Read, S9 — the engine attaches nothing to
+  a mod's prompt); a file over the bound says so before anything is sent.
+- A31. Typing `@` lists the working tree's files (from `git ls-files`) fuzzy-filtered as
+  typed, within `B.palette` after the first list; picking one inserts its path.
+- A32. Up-arrow in an empty composer recalls the previous sends; a draft survives a
+  reload of the page.
+
+**Latency, every milestone**
+
+- A33. Each new control's path (§12) is in `window.deskLatency()` after one use, and its
+  p50 and p95 over 20 uses are under its budget. The end-to-end cohorts (`app.cold`,
+  `app.warm`, `app.reconnect`) are under theirs on both Macs, under the same load as
+  the RC measurement they are compared with, and the table on #52 shows desk and RC
+  side by side for each.
+
+## Design
+
+### 1. What this document extends, and the architecture it stays inside
+
+Nothing here changes the shape of the desk spec's §2: the hub never connects into a
+machine, the hub never stores transcripts, every effect is an RPC the daemon admits, and
+session depth is relayed without codes. The run adds, in order of distance from the
+session:
+
+| Layer | Adds |
+| --- | --- |
+| the bridge (mod) | ops `read`, `command`, `btw`, `stop-agent`, `tell`; DX5 events `run`, `btw`, `catalog`, `mode`, `continuing`; `GET /status` `capabilities` and `mode`; `session` start `previous`; `raised.suggestions`; a decision's `updatedPermissions`; desk commands run one at a time |
+| the child | relays the ops and keeps the catalog, the capabilities and the mode; keeps an op's `id` → RPC nonce until the op's outcome, not only until its first answer; carries a refusal's `code` |
+| the plane / daemon | `presence.capabilities` and `presence.mode`; the machine presence's `desk` capabilities; the `read` relay (one worker thread, as `diff`); DX4 kinds `read`, `catalog`, `op`; the requests reader following `run`, `btw` and `continuing` events into `op` outcomes owed under their nonce; the `reload-plugins` outcome finished by effect; RPCs `command`, `btw`, `stop-agent`, `tell`, `fork`, `attach`; `decide` widened; `compact` with `instructions`; the `continued` log event and the `end {continued}` reason; the lineage of a `/background` |
+| the hub | the kinds and frames listed, relayed unread; the RPC names; the presence fields; `welcome.kinds` |
+| the web | `capabilities()` from both presences; `Subscription.read()`; the `ops` store; the typeahead and the panels, ported from MAWS's renderer |
+
+The owner's two Macs run mixed versions throughout; §13 orders the rollout so that no
+pair of old and new breaks.
+
+### 2. Every command sorted three ways, and the route table
+
+The engine's own thin client sorts a slash command as *post-text* (send it, the session
+runs it), *control-request* (the client draws its own panel from a read), or *local*
+(the client's own). MAWS's widgets outrank the engine's catalogue the same way
+(`src/renderer/src/composer/mentions/items.ts`, `WIDGET_COMMANDS` first). The desk does
+the same, with the mod API as the control path:
+
+- **post-text** is a bridge op `command {name, args}` over `$.command.run` — only for
+  argument forms measured to open no panel;
+- **control-request** is a native web panel fed by bridge reads — or named as
+  terminal-only when no read can draw it;
+- **local** stays in the browser.
+
+**A bare panel form is never run.** `$.command.run` of a panel command holds its promise
+and the session's whole input queue — desk Sends included, since `$.prompt.submit` joins
+the same queue — until someone presses keys in the terminal, and a mod cannot (H-panel).
+
+**The route table lives in the bridge, keyed by engine version, and is advertised.**
+`$.command.list()` says nothing about a command's type or whether it opens a panel, and
+types move between releases (`/rewind` and `/fork` changed between 2.1.300 and 2.1.307).
+So the bridge carries, in `sminos/hooks/mods/bridge-commands.tsx`, one table per
+measured engine base — 2.1.307's is in Interfaces, whole, and checked in as a fixture
+both repositories test against — and a session whose base has no table uses the newest
+one below it with the capability saying so (`routes.measured` ≠ `engine`). **Every
+(name, form) is in one class:** a row has a **bare** route and, where the command takes
+arguments, a **with-args** route with its `forms` (Interfaces); the bare route applies
+when `args` is empty after trimming, the with-args route otherwise. A route may also
+carry `confirm: true`, which makes the web confirm before sending. The classes:
+
+| class | meaning | examples (2.1.307) |
+| --- | --- | --- |
+| `run` | an argument form measured to print one line and open nothing | `rename <name>`, `color <c>`, `reload-plugins`, `reload-skills`, `mcp enable\|disable\|reconnect <server>`, `cd <path>` (limited to the project's known checkouts), `goal clear`, `exit` (with `confirm`, pending fork F6) |
+| `run-prompt` | a command that starts a turn, and the turn is its outcome: the built-in prompt-type commands, `goal <condition>` (S4), `plan <description>`, and every `source` other than `builtin` — skills, plugin and MCP commands, named exactly as listed (`<server>:<prompt> (MCP)`), which resolve at turn start with no panel (S5) | `init`, `security-review`, `insights`, `team-onboarding`, every skill |
+| `routed` | never run: a dedicated op, read or RPC does it, named in `to` | `model`, `effort` → `model`; `compact` → `compact`; `btw` → `btw`; `context`, `usage` → `read usage`; `plan` (bare) → the mode control, which runs `command plan`; `fork` → the `fork` RPC |
+| `follow` | changes the session id (H-sid); refused until M4, then run with following | `clear`, `branch [name]`, `resume <id>`, `background` (with `confirm` and its own condition, §8) |
+| `panel` | refused: *opens a panel in the terminal; it would hold the session's queue*; where a read or a tab draws the same, `to` names it | `usage`, `permissions`, `hooks`, `skills`, `status`, `config` (bare), `mcp` (bare), `tasks`, `memory`, `sandbox`, `workflows`, `add-dir`, `rewind`, `plugin`, `resume` (bare), and the plugin panel `diff` |
+| `local` | the browser's own | `copy`, `export`, `help` |
+| `drop` | not available from the desk, with the reason | `recap` (it refuses any run a plugin starts, S4), `agents`, `login`, `logout`, `theme`, `tui`, and the rest of the table's `drop` rows |
+
+Four more rules bind the table:
+
+- **A built-in not in the table is refused**, `unknown-builtin`, with *not measured on
+  this engine* — never tried (the brief's decision 2). A row the spikes did not reach
+  (`fast on|off` — the test machine's gateway disables fast mode, S4) is in the table
+  with `enabled: false` and *not measured on <engine>* until the research session
+  measures it; a measured row is enabled by a one-line table change (spike 13 did this
+  for `list-agents` and `subtask`: both `run`, no panel; `list-agents` names the
+  machine's other Claude sessions as well as the subagents, sessions outside this
+  project included, so its item says so; `subtask <task>` starts a background fork
+  agent whose finish arrives as a `<task-notification>` that starts a main turn).
+- **What outlives the session is labelled or not offered** (the brief's design rule;
+  the inventory's H-default). A `run` row whose command saves a setting carries
+  `outlives`, a sentence the web shows with the command: `mcp disable` and `mcp enable`
+  (*saved for this project on <machine>: `.claude.json`*). The rows that save a default
+  for new sessions — `config k=v`, `autocompact N`, `output-style <s>`, and `fast
+  on|off` if it proves to persist — are `drop` in this run with the reason *saves a
+  default on <machine>; terminal only*, pending fork F1. `model` and `effort` are never
+  run: the desk's Model control is the per-request rewrite, session-only (desk spec §5).
+- **The bridge runs no command its own plugin registers** (S5: `$.command.run` skips
+  every `command.run` hook of the calling plugin, so such a run falls to the engine's
+  "no hook answered" text). A listed command whose `plugin` is `sminos` is refused
+  `self` with *run it from the terminal*. The sminos plugin registers none today; the
+  rule keeps a later one honest.
+- **`/reload-plugins` reloads the bridge itself.** The probe's `Reloaded: 1 plugin` with
+  one plugin loaded says every loaded plugin reloads, the sminos mod included: the old
+  module instance's posts are fenced off (DX5's nonce, 409), its child is replaced, and
+  its `run end` never reaches the stream (S4's own `reload-plugins` run that never
+  resolved, the spikes file's contradiction 11). So the bridge never awaits its own
+  reload: the op answers `queued`,
+  and the **daemon finishes the outcome by effect** (§6): when the session's bridge
+  answers again from a new socket within 60 s of the claim, `op end` with `readback
+  {how: "effect"}`; otherwise `op end` with `settled {ok: false, error: "the bridge did
+  not come back within 60 s"}`. `reload-skills` reloads no plugin and keeps its `{text}`.
+
+The web never decides a class: it reads the class from the catalog (§5) to draw the
+hint and to refuse before sending, and the bridge checks the class again on every
+`command` op, so an older or wrong web cannot run a panel.
+
+**The Esc refusal (H-esc) stays, and has no cure from the desk.** After an Esc stops a
+turn, the engine rejects `$.command.run` and `$.prompt.submit` with *the session was
+stopped and nobody has sent input since* until the person types at the terminal. The
+bridge's inbox wake starts a turn but does not clear it (S6); nothing a mod can send
+counts as the human's input. The bridge answers a `command` with that refusal verbatim,
+code `stopped`, and the web says *stopped at the terminal: commands resume after input is
+typed there* — never *Send to wake*. Measured (spike 11, 2.1.307): the mod's own
+`$.turn.abort({turnId})` 2 s into a turn ended it 0.24 s later, and right after it
+`$.command.run` and `$.prompt.submit({asUser: true})` both ran; in the same session an
+Esc keyed into the PTY set the refusal (the run rejected, the submit dropped) and a
+prompt typed there cleared it. So the desk's Interrupt leaves commands usable, and the
+refusal follows only the terminal's Esc or Remote Control's interrupt; A13 checks the
+built path (the bridge's interrupt and its note row). On a `--bg` seat a
+supervisor `reply` clears it, which this run does not use: a `reply` is a channel where
+text can act as a keystroke (H-reply).
+
+**Mid-turn, every command queues** until the turn ends, `immediate` ones included
+(H-queue). The op answers at once with `queued`, and the outcome comes later (§3).
+
+### 3. Ops answer at once; the outcome comes on the stream
+
+The daemon waits at most 10 s for a bridge answer (`COMMAND_WAIT_MS`,
+`sminos_control.py`), and a queued command can wait a whole turn. So every op this run
+adds answers at once — `{queued: true}` or `{started: true}` with the op's `id` — and
+reports its outcome later as DX5 events the daemon turns into one DX4 session-wide kind,
+**`op`**, keyed by the RPC's nonce, as `compact` does today, with the plumbing
+generalized where `compact`'s is specific:
+
+- **The child keeps the nonce until the outcome.** Today the child maps a relayed
+  command's `id` to the RPC nonce the daemon tagged it with (`rpc_of`) and pops the
+  mapping at the first `result` event, writing the answer under the nonce
+  (`sminos_bridge.py`, `_apply`'s `result` branch). For an op whose first answer is
+  `queued` or `started`, the child keeps the mapping until the event that ends it (a
+  `run` or `btw` with `phase: "end"` and that `id`), annotating each such event it
+  relays with `rpc: <nonce>`, and drops it then or after `RPCS_KEPT` newer ones.
+- **The daemon learns the outcome from the requests reader**, which follows every
+  bridge's stream for the session-wide events it relays (`WANTED` in
+  `sminos_requests.py`: `raised`, `settled`, `resync`, `compact`); it gains `run`,
+  `btw` and `continuing`. As `compact` is handled today — `Rpcs.compact()` notes the
+  command's `id` on the RPC's claim (`compact_id`), `compacted()` turns each event into
+  a DX4 message carrying the nonce or null, `restore_compacts()` re-arms the mapping
+  after a restart from the ledger, and the message is owed until the hub takes it — the
+  `op` outcome uses the same four pieces made general: a claim notes `op_id` and `op`,
+  `op_events()` turns a `run` or `btw` event into DX4 `op {rpc, op, phase, id, …}`
+  through the same held-until-named and owed paths, and `restore_ops()` re-arms them.
+  A8 proves the restart case. One outcome the daemon finishes itself: a
+  `reload-plugins` run, by the bridge answering again (§2).
+- **The web keeps `ops[nonce]`** beside `compactions[session]` and draws three states
+  for a command — *queued*, *ran*, and the line read back — and never shows a resolved
+  promise as success: the transcript row or the checked effect is the success (the
+  brief's decision 4).
+
+```
+op  {rpc: <nonce> | null, op: "command" | "btw" | "stop-agent" | "tell", phase: "start" | "end", id, ...}
+```
+
+`compact` keeps its own kind; everything new rides `op`. An `op` body goes to every
+browser of the project, as rows do (the same exposure class); a `btw` answer's `text` is
+bounded to 64 KiB so the body fits a frame. The strongest alternative, one DX4 kind per
+op (`command`, `btw`, …), lost: each new op would need a hub change to list its kind,
+and the hub reads none of these bodies.
+
+### 4. A capability list per session, and one per machine
+
+Today the web hard-codes what each kind of session can do
+(`apps/desk-web/src/conversation/capabilities.ts`, the desk spec's §5 table). Every
+control this run adds exists on some machines and not others while doperpowers rolls
+out, the route table shifts with the engine, a session keeps the mod it loaded until a
+reload, and some controls are the daemon's alone (`fork`, `attach`, the `files` read
+need no bridge). So two lists:
+
+- **The bridge advertises** in `GET /status` `capabilities` (Interfaces, DX5): its own
+  plugin version, the protocol, the engine base, the ops the bridge answers, the read
+  kinds it serves, and the route table's measured base. **The plane forwards it in
+  presence**, as a sibling field: `presence {record, bridge, capabilities?, mode?}`. Not
+  under `bridge`, as the inventory proposed: the hub refuses a presence whose `bridge`
+  is not a boolean (`Project.presence`, `apps/desk-hub/src/objects/project.ts`), while
+  it passes an extra field through and stores the message whole — so a new daemon's
+  presence reaches an old hub and an old web unharmed. The plane learns both fields
+  from the body of the probe it already makes (`Bridges.probe`, `sminos_plane.py`, which
+  today keeps only whether the status answered); presence is sent again when either
+  changes (a module reload spawns a new child, a new socket inode, a new probe; a mode
+  change reaches the probe within `BRIDGE_RECHECK`, 2 s).
+- **The daemon advertises** in the machine presence: `machine {…, desk?: {sminos, rpcs,
+  reads}}` — the plugin's version on the machine, the RPC names this daemon executes,
+  the read kinds the plane answers itself (`files`). The hub rebuilds a `machine` body
+  from the fields it knows (`machinePresence` in `project.ts`), so M0's hub must admit
+  and keep `desk`; through an older hub it is dropped, and the web then says *an older
+  plugin* without the number.
+- **The web derives from both.** `capabilities()` gains the new verbs; each verb names
+  what it needs: a bridge op (in `presence.capabilities.ops`), a daemon RPC (in
+  `machine.desk.rpcs`), a read (in either's `reads`), or a combination (`command` needs
+  the op and the RPC; `fork` the RPC alone; `btw` both), and reads its `can` and
+  `reason` from them. **Three fallbacks**, told apart so the reason sends the owner to
+  the right place: a session with no `capabilities` on a machine whose `desk.sminos` is
+  at or above the control's version is a **stale session** — *this session's plugin
+  loaded before the update: run /reload-plugins in it, or restart it*; a session with
+  no `capabilities` on a machine whose `desk` is absent or below is the **older
+  machine** — *<machine>'s plugin (<desk.sminos>, when known) is older than the desk's
+  controls: update doperpowers on <machine>*; a `--bg` seat or terminal session without
+  a bridge at all keeps the kind table's reasons as today. The capability's own `sminos`
+  decides a control's availability; the machine's `desk.sminos` only names the number.
+
+A capability names *what the machine can do*, not *what this moment allows*: a turn
+running, a request pending, a mode's ceiling are read from presence and rows as today,
+and the capability's `note` says how the action will land.
+
+### 5. Reads over the plane, and the catalogs pushed
+
+**Reads are not RPCs.** RPCs carry a nonce ledger, a code and the 60 s freshness rule,
+all for effects; a read changes nothing and should cost one frame each way. The plane
+already serves two reads per subscription (`diff`, `output`). This run adds one
+up-frame, DX3 `{t: "read", sub, id, what, args?}`, carried to the machine as DX2 with
+the sub's session, and one down-kind, DX4 `read {id, what, result?, error?}` on that
+sub. The plane finds the sub, and on a worker thread (as `diff` runs git) POSTs the
+bridge child `/command?wait=<COMMAND_WAIT_MS>` with `{op: "read", what, args}` — a path
+the plane does not use today (it reads the child through `GET /events` and `GET /status`
+alone; `post_command` is `sminos_control.py`'s) — and the bridge answers from `$`. No
+bridge, no such read, a timeout or a failure come back as the answer's `error`, never as
+a hub refusal. A read is a main-transcript subscription's unless its kind says otherwise.
+
+| `what` | answers from | milestone |
+| --- | --- | --- |
+| `status` | `$.session.version()`, `model()`, `cwd()`, `root()`, `repo()` (its remote URL stripped of any userinfo), `surfaces()`, the bridge's override and its mode | M0 |
+| `catalog` | the catalog below, on demand (a refresh after `/reload-plugins`) | M1 |
+| `usage {breakdown: "summary" \| "full"}` | `$.session.usage({breakdown})`: the context window with `context.breakdown` in the SDK's `get_context_usage` shape, the rate-limit windows, the cost; never `/context`, which writes its grid into the conversation (H-ctx) | M2 |
+| `mcp` | `$.tool.list()` grouped by `mcp__<server>__*` into connected servers with tool counts; the plane adds the servers the project's `.claude.json` disables (`projects[<cwd>].disabledMcpServers`, the one key it reads of that file) as `disabled`; never `$.mcp.call` (H-mcp) | M2 |
+| `settings` | `$.settings.read()` cut to what §11 allows: permissions by source, and hooks as event, matcher and count | M2 |
+| `files {query?}` | the plane itself, `git ls-files` in the session's working directory, no bridge involved: the tree's file names, which `diff` already exposes | M5 |
+
+**The catalogs are pushed, not fetched.** Nothing a panel shows when it opens should wait
+on a fetch if it can be pushed and cached, and the typeahead must open with no round
+trip. The command list and the model list belong to one session — plugins and mods add
+and replace entries, and aliases resolve through that session's environment — so they
+are **live catalogs**, cached by session plus a fingerprint and invalidated by push; only
+the built-in routing rules are fixed per engine version (the brief's caching amendment).
+The bridge emits a DX5 `catalog` event at `session.start` and whenever its content
+changes: it re-lists `$.command.list()` **at every heartbeat** (5 s) and after any
+command row (door `command`, whoever typed it) naming `reload-plugins`, `reload-skills`
+or `mcp`, and emits only when the fingerprint changed. The list is cheap (1 ms for 92
+entries in the probe's one sample, run1 bus 0004) and the start-time list is incomplete
+by construction: plugin markdown commands and skills load with their plugin, a mod's
+`register()` adds entries when it runs, and an MCP server's prompts exist only once it
+connects, often after `session.start` (from the API; when each kind appears was not
+measured). A trigger on `$.tool.list()`'s server set, considered first, would miss a
+server that offers prompts but no tools, a mod registering late, and a skill change. The
+catalog is the commands (`$.command.list()` joined with the route each gets, names
+verbatim), the models (`$.config.list()`'s `model` row's options, and which family
+aliases this session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` maps), and the fingerprint. The
+child keeps the latest and puts it in its snapshot; the plane carries it in the DX4
+snapshot as `catalog` and relays each change as a DX4 `catalog` message on main subs.
+The web caches it per `(session, fingerprint)` in memory and in `localStorage` (the last
+32 sessions), so a re-opened session's typeahead draws from the cache before its
+snapshot lands, labelled *as of <time>* until the snapshot confirms the fingerprint; a
+cache from another session is never used.
+
+### 6. Readback: the row the hook sees, linked by name and arguments
+
+Only `type: "local"` commands return `{text}` (`reload-skills`, `output-style`, `clear`,
+a mod's command); the one-line built-ins the desk cares about resolve `{}` whether they
+succeeded or failed (`/model bogus` → `{}`), and the printed line exists only as a
+transcript row (H-noout). S7 measured where that row is and how it can be linked:
+
+- **The row is written 5–22 ms after the promise settles**, as a `user` row for some
+  commands (`/effort`, `/mcp …`, `/goal <c>`, the command row of `/reload-*`) and as a
+  `system` row of subtype `local_command` for others (`/color`, `/rename`,
+  `/output-style`, `/goal clear`, the output row of `/reload-*`). **`$.session.messages()`
+  never shows the `system` rows**; the bridge's `session.append` hook sees both kinds
+  (door `command`), and sees the rows of a command the bridge itself ran (S7.2: the
+  probe's hook saw its own run's rows; what the hook never sees is a plugin's own
+  `$.session.append`). So the readback reads the hook, never `messages()` and never the
+  disk.
+- **The hook gives `{message, door, origin, uuid}`: no `parentUuid`, no run id.** A
+  `user` command row of the desk's run carries `origin {kind: "plugin", name: "sminos"}`;
+  a `system` one carries `{kind: "engine"}` whoever ran it. The one link stronger than
+  timing is the command row's own text: `<command-name>/color</command-name> …
+  <command-args>green</command-args>`.
+- **Desk commands run one at a time.** The bridge issues the next `$.command.run` only
+  after the previous run's readback settled or timed out (2 s after its settle, to
+  `none`); the engine queues them anyway, so this costs no latency, and it makes the
+  attribution of two desk commands exact.
+- **Which runs the rule applies to: built-in `run` rows alone.** A `run-prompt`
+  command's outcome is the turn it starts, and its command row need not carry the
+  listed name (the MCP prompt listed as `probe:probe-prompt (MCP)` wrote
+  `/mcp__probe__probe-prompt`, S5); a command another plugin serves settles `{text}`
+  and leaves `<command-args>` empty in its row (S5), so it reads back by `text`. The
+  name-and-args link is never applied to either.
+- **The rule.** For a built-in `run` row, after the op's promise settles, take the
+  first command row of the main loop whose name and args match the run; then the output
+  row that follows it within 100 ms. A command row that is not this run's between the two — a terminal-typed
+  command — makes it *ran, unconfirmed*; so does a second matching command row within
+  the window (the person typed the same command with the same arguments during the turn
+  the desk's run waited on, whose rows the engine writes at the turn's end, the same
+  millisecond the queued run settles, S7.2). Never a neighbour's line (the brief's
+  amended decision 4).
+
+A `run`'s DX5 `end` event carries, beside the settled value, the **readback**:
+
+```
+readback: {how: "text" | "row" | "effect" | "none", text?, uuid?}
+```
+
+`text`: the settled value carried the line (a `local` command). `row`: the output row
+linked by the rule, its text and uuid. `effect`: the one command whose row cannot reach
+the stream, `reload-plugins`, confirmed by the daemon when the bridge answers again
+(§2). `none`: *ran, unconfirmed*, shown as such. The desk already draws these rows as
+MAWS's `local_command` rows (the transcript is MAWS's `Transcript`); the composer's
+status line shows the readback for a command run from the desk, since the desk has no
+chips for most settings. Where a command's effect is also drawable (`mcp
+enable|disable` → the MCP panel's list, re-read after the op; `cd` → the Info tab's
+directory), that panel is the second confirmation; the readback itself stays the row.
+
+### 7. Requests: scopes, "allow and switch", plan approval, and the mode
+
+S1 measured what an allow from a hook can carry: `addRules`, `addDirectories` and
+`setMode` with destination `session` take effect at once and write no file; `addRules`
+with `localSettings` writes the project's `.claude/settings.local.json`; an ExitPlanMode
+allow is dropped unless it carries `updatedInput` (the request's own input, `{}` works),
+which the bridge sends for questions and not yet for anything else — so today's Allow on
+a plan from the desk does nothing. That fix is being built outside this spec as sminos
+1.6.3 (`bridge-plan-allow`: `engineDecision` sends the request's input as
+`updatedInput` for every non-question), and M3 treats it as landed.
+
+**"Allow for this session", and "always allow" (B2).** The engine's `PermissionRequest`
+hook input carries `permission_suggestions` (the SDK's `PermissionUpdate` list; measured:
+`addDirectories [<cwd>] session` and `setMode acceptEdits session` on a Bash in default
+mode, `addRules allow [{Bash, <command>}] localSettings` on another, none on a question
+or a plan). The bridge drops them today (`raisedFields` in `bridge-stream.tsx`). This
+run: `raised` gains `suggestions` (the list verbatim, bounded: Interfaces). A scoped
+allow is DX6 `decide {decision: "allow", scope: {suggestion, sha256, destination}}`:
+`suggestion` the index into the raised list, `sha256` the SHA-256 of that suggestion's
+canonical JSON as the browser drew it, `destination` the one the person chose. The
+daemon re-reads the pending request from the bridge (as `check_digest` does), takes the
+suggestion at the index, refuses `not-pending` with *the suggestions changed* when its
+hash differs, and applies the one transformation MAWS's scope radio applies
+(`request-card/scope.ts`): the destination may be replaced by `session`, or kept when
+it is the suggestion's own `localSettings`; every other destination is refused
+`bad-shape` (§11). The decision the bridge hands the engine is `{behavior: "allow",
+updatedInput, updatedPermissions: [that suggestion with that destination]}`. The web
+ports the scope radio cut to those two scopes: *Allow for this session* (the first
+`addRules` suggestion with destination `session`; when the engine suggested no rule,
+no session scope is offered — the desk never constructs a rule) and *Always allow … in
+<project>* (a `localSettings` suggestion as offered), labelled as writing the file. The
+code the RPC carries covers the scope; the digest binds the request.
+
+**"Allow and switch to <mode>" (C5, on a live request).** Where the suggestions carry a
+`setMode`, the card offers it as a third allow, the same `scope` shape with that
+suggestion's index; the daemon checks the mode against the machine's ceiling
+(`admit_spawn`'s rule, factored out). This is the one place a mode can change from the
+desk besides a plan's approval and `/plan`: in auto mode, and in plan mode on 2.1.307,
+harmless calls raise no request at all (S1), so a mode "armed for the next answer" could
+wait forever, and the inventory's row C5 is narrowed to what a live request carries.
+
+**Plan approval (B4).** An ExitPlanMode request is drawn as MAWS's plan card
+(`variants/Plan.tsx`): the plan as markdown from the request's input. *Implement in
+<mode>* is `decide {decision: "allow", mode}` → the bridge's `{behavior: "allow",
+updatedInput: <the input>, updatedPermissions: [{type: "setMode", mode, destination:
+"session"}]}` (S1: the chosen mode beats the mode the session was in before plan;
+`acceptEdits`, `default` and `auto` measured; `mode` is allowed only when the pending
+request's tool is `ExitPlanMode` and within the ceiling); *Keep planning* is a deny
+with the feedback as `message`; *Clear and implement* is M4's following plus a Send
+(A29), offered once M4 exists.
+
+**The mode (reading it).** Three sources, in order of trust, each stamped with when it
+was read:
+
+1. **The bridge's own decisions, published at once.** The bridge knows every mode it
+   sets itself — an allow it handed out carrying `setMode` (a scoped allow, a plan's
+   approval), and `/plan` when it ran one — so it publishes the new mode the moment the
+   decision is handed to the engine, without waiting for a hook.
+2. **Five classic hooks' input, measured (spike 12, 2.1.307).** `permission_mode` is
+   carried by `classic.UserPromptSubmit`, `classic.PermissionRequest`,
+   `classic.PostToolUse`, `classic.PostToolBatch` and `classic.Stop`, read as the hook
+   fires (a Shift+Tab mid-turn showed in the same turn's next `PostToolUse`). It is
+   **not** carried by `classic.PreToolUse` (a mod's `e` there is the `ToolCallEnvelope`,
+   not the classic input: 34 of 34 had none) nor by `classic.MessageDisplay`. The bridge
+   registers `PermissionRequest` today; in auto mode requests are rare, so a reading fed
+   by it alone goes stale for long stretches. M3 adds pass-through hooks on the other
+   four — `UserPromptSubmit` on every prompt, `PostToolUse` on every tool result,
+   `PostToolBatch`, `Stop` — each reading `permission_mode` and calling `next(e)` with
+   nothing else (no `$` call, so it holds the turn for nothing). A reading from a hook
+   never overrides a decision of the bridge's own that is newer.
+3. **Not the rows.** The transcript's `permission-mode` rows appear at flush points and
+   skip changes: an allow's `setMode` wrote none; `auto` first showed at the next
+   prompt, `acceptEdits` never got a row (S1). They are not read.
+
+**The gap, labelled.** A Shift+Tab at the terminal fires no hook at all
+(`ConfigChange` stays silent), and the mod API has no mode read to poll (spike 12), so
+a change made at an idle terminal is invisible until the next prompt or tool result
+fires one of the five. The bridge emits DX5 `mode {mode, at}`
+when its reading changes, the child keeps it, `GET /status` carries it and the plane
+forwards it in `presence.mode` (§4); the web draws MAWS's `ModeChip` stamped *as of
+<time>* from `at`, and *unknown* before any reading. The menu (`ModeMenu`, with
+`MODE_REFUSAL_WORDS`'s pattern): *plan* runs `/plan` (measured: `Enabled plan mode`);
+every other switch is named *Shift+Tab in the terminal; or allow a request into it*, and
+*M6* on a `--bg` seat. `/config permissionMode=X` is never used: it sets only the default
+for new sessions.
+
+### 8. Following an id change
+
+`/clear`, `/branch`, `/resume <id>` and `/background` change the session id, and the
+desk keys everything on it: the log member, the plane subscription, the bridge socket,
+RPC `args.session` (H-sid). The desk follows rather than avoids (the brief's decision
+5), under three contracts:
+
+1. **Issued RPCs stay put.** Following moves the selection, the subscriptions and future
+   actions only. An RPC already issued stays bound to its original session and nonce,
+   and its outcome is shown under the old session when it arrives; it is never re-sealed
+   or reissued against the new id — the code covers the session argument and the ledger
+   keys execution by nonce (`project-client.ts`'s RPC map; desk spec DX6). Re-sealing
+   could run an approval or an interrupt against the wrong conversation, or twice.
+2. **Two kinds of following.**
+   - *Within one process* (`/clear`, `/branch`, `/resume <id>`): the bridge already
+     spawns a child for the new id (DX5, "When the mod spawns one"); its first `session`
+     start to that child gains `previous: {session, reason}`. The plane, seeing a new
+     session whose bridge start names `previous`, writes the log event `continued {from,
+     to, reason, confirmed: true}` under the machine's writer, ends the old sub with
+     `end {reason: "continued", to, confirmed: true}`, and the new id is a member as any
+     new session is (the member mark carries, `sminos.py`'s `member_mark`). The hub
+     adds the `end` reason; the web moves, redraws the old channel's end marker as
+     *continued as <alias>*, and keeps the old channel's history and its RPC outcomes.
+   - *Across processes* (`/background`): the TUI exits and the mod loads fresh in the
+     supervisor's worker with no old state, and no job record names the old id (S10:
+     the supervisor's `list`, the job's `state.json` and `sessions/<pid>.json` all carry
+     the new id alone). So the lineage is built in three steps, each weaker than the
+     last: (i) before running `/background`, the bridge emits a DX5 `continuing
+     {command: "background", cwd, t}`, which the requests reader turns into the daemon
+     expecting a continuation of that session from that directory; (ii) the daemon
+     reads the old transcript's `continued-in` record (`{type: "continued-in",
+     sessionId, continuedInSessionId}`, appended as the TUI exits; written
+     best-effort, cli 2.1.307:239409-239430) and links `confirmed: true`; (iii) with the
+     record missing, it links the one `--bg` job with `source: "slash"` whose `cwd` is the
+     expected directory and whose `startedAt` is within 60 s of the notice, `confirmed:
+     false`, and the web shows *continued as <alias> (unconfirmed)*; with none or
+     several, no link, and the old channel ends as an ended session does. The new
+     record is `kind: "bg"`, so the session's kind changes from terminal to seat.
+3. **`/background` has a dialog of its own, and a cost the desk names.** It asks
+   *Background this session?* in the terminal when a task would be abandoned or a
+   workflow agent runs (cli 2.1.307:239626); a background shell carries over with no
+   dialog, a running subagent raises it, and it holds the queue; *Stay* resolves `{}`,
+   the same as success (S10). A web confirm does not answer it. The engine's own
+   condition counts abandonable tasks and running workflow agents (`abandonable.count
+   === 0 && workflowAgents.running === 0`, cli 2.1.307:239626), not tool calls. So the
+   bridge offers `background` (the route's condition) only while `$.agent.list()` names
+   no running agent and **no workflow it saw launched is still running**. `$.agent.list()`
+   leaves workflow agents out, and a `Workflow` tool call settles at once — the tool
+   returns a task id and the workflow runs on (cli 2.1.307:793338: "this tool returns
+   immediately with a task ID, and a `<task-notification>` arrives when the workflow
+   completes") — so a settled call proves nothing. The bridge takes the task id from the
+   `Workflow` tool's result (its `tool.call` hook sees every call and result) and holds
+   it as running until the `<task-notification>` row naming that task id reaches its
+   `session.append` hook with a terminal status (`completed`, `failed`, `killed`). A
+   module loaded mid-session still misses a workflow launched before it: the dialog then
+   opens in the terminal, and the web, seeing no job within 60 s, says *the terminal is
+   asking: answer it there*. Otherwise the command is terminal-only with *terminal only
+   while an agent or a workflow runs: the engine would ask about it*. **The confirm names what the move keeps and loses** (HN, measured on
+   2.1.307): the running background shells, listed by id from the Jobs tab's ledger,
+   carried with the same pid but their exit codes lost (each completes as *exit code
+   -1*); the running monitors, listed by id, lost (never fire again); an MCP call in
+   flight, lost silently; the turn in flight, re-run from its prompt; session crons,
+   kept. Success is judged from the effect — the job appears, the TUI exits — never
+   from `{}`. A28 is the acceptance case. The same loss table binds any later takeover
+   of a busy terminal session (#52's lane B, outside this spec): it goes terminal →
+   `/background` first, and headless only after the job drains, since a plain terminal
+   exit kills every shell and monitor (HN).
+
+Until M4, the four commands are refused with *changes the session id; following comes
+with M4*.
+
+### 9. Agents, forks, side questions
+
+- **Stop one subagent (G11).** `TaskStop` takes an agent's id or the Agent call's `name`,
+  not its description (S2); the bridge refuses agent ids in `stop` on purpose
+  (`stopTask`, bridge.tsx) and the daemon's `stop` checks the jobs index only, so this
+  is a separate op and RPC, `stop-agent {agentId}`, validated against `$.agent.list()`
+  (status `running`; the id or the `name`) in the bridge and the plane's subagent tree
+  in the daemon. **The note row matters:** a stopped background agent wakes the parent
+  with a notice that credits the stop to Claude, and a stopped foreground agent reads to
+  the parent as an interruption of its tool call, which the parent then re-spawned at
+  once (S2). So the bridge leaves the parent a note row as `stopNote` does for a job:
+  *Agent <id or name> was stopped by the person from the desk: it is not running. Do
+  not start it again or redo its task unless the person asks.* On 2.1.307's defaults
+  every model-spawned agent runs in the background (`CLAUDE_CODE_FORK_SUBAGENT=0` makes
+  one foreground); both are covered.
+- **Message one subagent (G12).** `tell {agentId, text}` → `$.session.send({to:
+  {agentId}, text})`, the SendMessage tool's own delivery; the agent reads it at its
+  next step, framed as a peer's.
+- **Fork (E4).** The daemon runs `claude --bg --resume <id> --fork-session` in the
+  session's working directory (or a worktree, as spawn does), going around sminos's "a
+  flag starts a copy" guard since here the copy is the goal; the copy joins as a seat
+  with the spawn's ceiling, named afresh by the engine, and its `joined` event carries
+  `fork_of: <id>`. The original is byte-identical and keeps running (S8). `/fork
+  <prompt>` through the command op also works with no panel (S4) and is kept `routed` to
+  the RPC: the RPC carries the brief, the worktree and the model as spawn does.
+- **Side question (E6).** `btw {prompt}` → `$.model.fork({prompt})`: one tool-less
+  completion over the session's own transcript as the main thread last sent it, served
+  from the prefix cache (about a second idle, S3), nothing written into the
+  conversation, not refused after an Esc. Async (a completion can outlast 10 s):
+  `{started, id}` at once, then `op` start and end with `text` (at most 64 KiB) and
+  `usage` or `reason` (`nothing-to-fork` before the first response or after `/clear`,
+  `api-error`, `empty-reply`, `aborted`). **The prompt is framed** so the model does not
+  continue its open task or reach for a tool (S3: unframed mid-turn it does, and answers
+  about the task or returns `empty-reply`): the bridge prefixes the person's question
+  with *Answer the following without using any tools and without continuing your
+  current task; one reply, then stop.* The fork sees the main thread's last request, so
+  what happened after it (a command, a steer) is not in view; the pane says so under
+  the answer. `/btw` itself is an overlay and is never run.
+
+### 10. Composer parity
+
+- **Attachments (A6).** A mod's prompt gets no attachment from `@path`, `asUser` or not
+  (S9; the types say so, dts 9359), and `$.session.append` takes text only. What works
+  is a Read: the daemon saves the upload inside the session's working directory, where
+  a Read asks no permission, and the message tells the model to read it. RPC `attach
+  {session, name, type, bytes}` (base64, bounded by the RPC's 1 MiB canonical JSON —
+  about 700 KB of bytes; the web downscales a photo to fit and refuses a larger file
+  with the bound; `name` a basename, `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, else
+  `bad-shape`) is written by the daemon to `<cwd>/.claude/desk-uploads/<nonce>-<name>`
+  (mode 0600; `.claude/desk-uploads/` added to the repository's `.git/info/exclude` on
+  first write so it never shows in `git status`; swept with the session's bridge state),
+  answering `{path}` relative to the working directory; the web then sends the message
+  with a line appended: *The owner attached <name>, saved at <path>. Read it with the
+  Read tool.* A session whose working directory is not a git repository gets the file
+  under `<cwd>/.claude/desk-uploads/` all the same, with no exclude.
+- **`@` files (A7).** The `files` read above; the web ports MAWS's `AtMenu` with the
+  list filtered in the browser.
+- **History and drafts (A8).** Web-local: the transcript's own human rows plus
+  IndexedDB.
+- **`!` shell (A5).** Not built without the owner's yes (fork F3): it changes the
+  machine's security policy.
+
+### 11. Security: the authentication model applied
+
+The desk spec's model (§6): every effect is an RPC sealed with the org key the hub never
+holds and executed only by the machine's daemon under its policy; session depth is
+display, relayed without codes, and what the human approves is bound by digest. This
+run keeps every line of it and makes two calls the brief asked for.
+
+**Reads that expose more than the transcript are cut to what the UI shows.** A read goes
+over the plane uncoded, like rows. `$.settings.read()` returns everything, `env` and
+hook commands included ("nothing is filtered", the engine's types), and an MCP server's
+configuration carries URLs and headers. Neither is shown. The `settings` read answers
+`permissions` (the rules by source: `allow`, `ask`, `deny`, `additionalDirectories`,
+`defaultMode`, what `/permissions` draws) and `hooks` as each event's matchers and how
+many commands each runs — never the command text, which the web names *terminal:
+/hooks*; `env` and every other key never leave the bridge. The `mcp` read answers names,
+status and tool counts — never a server's configuration; of `.claude.json` the plane
+reads the one key `disabledMcpServers` and relays nothing else. The `status` read's
+repository remote is stripped of any userinfo (a token in an `https://user:token@…`
+URL). The `files` read is the working tree's file names, which `diff` already exposes.
+The strongest alternative, sealing reads with a code (an RPC-shaped read), lost: it
+would put a nonce ledger and the freshness rule on a display path, and still relay the
+data through the hub in the clear; authentication codes on session depth stay deferred
+(desk spec, Deferred).
+
+**Every effect stays X class.** `command`, `btw`, `stop-agent`, `tell`, `fork`, `attach`
+and the widened `decide` are refused `read-only` before execution (after the code, the
+name, the machine, project and session, the ledger and the age, in DX6's order), and
+the daemon never trusts a class the web asserts: the bridge's route table decides what a
+`command` runs. `fork` runs under the spawn's ceiling (`admit_spawn`); a `setMode` on a
+decision is checked against the same ceiling; `cd` is limited to the project's known
+checkouts as spawn is, checked in the daemon.
+
+**A scoped allow is bound to what was shown.** The web sends an index and the hash of the
+suggestion it drew; the daemon resolves the rule from the bridge's current list, never
+from the web, and refuses when the list changed (§7). Two destinations are allowed:
+`session` (nothing saved) and `localSettings` (`.claude/settings.local.json` of that
+checkout, labelled, and only when the engine itself suggested it); `userSettings`,
+`projectSettings` and `cliArg` are refused `bad-shape` whatever the suggestion offers —
+a project's committed settings and the user's global ones are the terminal's to change,
+pending fork F1. The commands that save a default are `drop` (§2) pending the same fork;
+`mcp enable|disable` is offered, labelled, because the terminal's `/mcp` does exactly
+that and it is what the owner needs when a server misbehaves.
+
+**Channels that stay closed** (the brief): no text through a channel where it could act
+as a keystroke (a supervisor `reply` aimed at a dialog becomes a prompt, H-reply; the
+desk never sends one, not even to clear an Esc); no `$.command.run` from a held hook
+frame (the bridge runs every op from its command loop, outside any hook); no `$.mcp.call`
+as a data path (H-mcp).
+
+**An upload lands where a Read asks nothing** (§10): inside the session's working
+directory, under the engine's own `.claude/`, with a basename the daemon checks,
+excluded from git — never outside it, where a Read would raise a prompt the desk then
+answers for itself.
+
+### 12. Latency: marks, budgets, cohorts
+
+Every new control gets a path in `apps/desk-web/src/latency/latency.ts`'s `PATHS` and a
+budget. The budgets are **named placeholders tied to the baseline table** the
+`desk-latency-baseline` branch is measuring now and will post on #52: `B.<name>` means
+*the RC equivalent's p50 and p95 for that load, from the baseline table, under the same
+machine load*, and parity means desk ≤ RC at both. Until the table lands the names
+stand; the executor of each milestone fills the number from the table when it exists and
+leaves the name where it does not yet. `B.palette` is the one fixed number, 50 ms: a
+typeahead that touches the network has failed whatever the table says.
+
+| path | measures | budget |
+| --- | --- | --- |
+| `app.cold` | navigation start → the first session view drawn with its controls usable (capabilities applied) | `B.cold` |
+| `app.warm` | the tab shown again (`visibilitychange`) → presence fresh and the subscription live | `B.warm` |
+| `app.reconnect` | the project socket dropped → controls usable again | `B.reconnect` |
+| `app.me`, `app.chunk`, `app.state`, `app.key` | `/api/me`, the project chunk, project state, the device-key gate: per-hop, for diagnosis (today's paths start at the subscription, so the app's own start sits outside them: `App.tsx`, `ProjectView.tsx`) | none; diagnosis |
+| `palette.open` | the `/` keystroke → the typeahead drawn | `B.palette` = 50 ms |
+| `catalog.ready` | subscribe sent → the catalog usable (the snapshot's, or the cache's) | `B.catalog` |
+| `read.<what>` | a read sent → its answer in, per kind | `B.read` |
+| `op.queued` | a command RPC sent → `queued` | `B.op` |
+| `op.ran` | a command RPC sent → its `op end` | `B.ran` (a sample taken while the session was busy is kept apart, labelled: it waited for the turn) |
+| `op.readback` | a command RPC sent → its readback drawn | `B.readback` |
+| `btw.answer` | a side question sent → its text drawn | `B.btw` |
+| `panel.<name>` | the tap → the panel drawn with content (context, usage, model, mcp, settings, status) | `B.panel` |
+| `decide.scoped` | a scoped allow tapped → its `settled` in | `B.decide` (today's `request.*` paths are the diagnosis) |
+| `mode.drawn` | a mode change at the engine → the chip redrawn (cross-clock) | `B.mode` |
+| `follow.moved` | the old sub's `end {continued}` → the new session's first rows drawn | `B.follow` |
+| `agent.stop`, `agent.tell`, `fork.joined` | the tap → `op end`; → the new seat's presence | `B.op`, `B.spawn` |
+| `attach.sent` | the file picked → `{path}` in | `B.attach` |
+
+Acceptance is end to end (the brief's amendment): the action (navigation, choosing a
+session, returning to a tab, a tap) to useful content with usable controls, in the three
+cohorts, with the RC side measured at its matching endpoints under the same load. Per-hop
+marks diagnose; they do not prove parity.
+
+**The method** (the brief's latency track): take the baseline, rank the offenders by
+their gap to RC times how often the load happens, fix in that order, measure again after
+each fix. The suspects on record are hypotheses for the ranking, not a fix list: the
+bridge child's Python imports under load (1–2 s), the snapshot held for the mod's first
+resync (the child's 5 s `SMINOS_BRIDGE_READY_WAIT`; the CLI's `FIRST_WAIT_S` is 8 s, not
+the 5 the brief cites — Surprises), the hub ending machine streams every 23–96 min with
+1.35 s reconnects and 12–16 s outliers, and every hop a read adds unless it is pushed.
+The fixes are a separate line of work on #52 this spec does not schedule; what this spec
+binds is that nothing it adds makes the ranking worse: a panel opens from pushed data,
+the typeahead from the cache, and a read costs one frame each way.
+
+### 13. Rollout across mixed versions
+
+The hub refuses a frame it does not list (`no frame "read"`), a session kind it does not
+list (`no session message "op"`), and an RPC name it does not know (`no RPC "command"`),
+each `bad-shape` into the audit record; the daemon passes a frame it does not handle by
+(`sminos_uplink.py`, *not handled here yet: passed by*); the web acts only on
+capabilities the presences advertise. So:
+
+1. **MAWS first**, hub and web together (they deploy together: `apps/desk-hub/deploy`).
+   The new hub lists every kind, frame and name this document adds and says so in its
+   `welcome` (`kinds`, written where the Machine object writes the welcome,
+   `apps/desk-hub/src/objects/machine.ts`); the new web offers nothing until a session's
+   presence says the bridge can.
+2. **Then doperpowers**, the sminos bump installed on the macbook first (the owner's
+   working machine), the mini last. Each milestone's acceptance is walked with the mini
+   still behind: that is the older-plugin case. A session open through the update keeps
+   its old mod until a reload: that is the stale-session case (§4), walked too.
+3. **Daemon-first is safe but inert.** A new daemon's `presence.capabilities`,
+   `presence.mode` and the snapshot's `catalog` field pass an old hub (an extra field; a
+   snapshot's body is relayed unread) and an old web ignores them; the machine
+   presence's `desk` is dropped by an old hub, which rebuilds that body. A new *kind*
+   (`read`, `catalog`, `op`) an old hub would refuse `bad-shape` into the audit record,
+   so the daemon sends a kind only when the stream's `welcome` lists it; a `welcome`
+   without `kinds` is the old hub, to which none is sent (an old web asks for none, and
+   a CLI-started op's outcome is simply not relayed). An old web never sends a new
+   frame.
+4. **Per milestone**, each MAWS PR merges and deploys before its doperpowers PR rolls out;
+   a milestone's capability names are the gate the web reads, so a partial rollout
+   never breaks.
+
+### 14. Departures from the inventory
+
+Listed in one place so the research session can re-check the hazards each leaned on.
+Where a spike contradicted the inventory, the spikes file's "What contradicts the
+inventory" is the record and this document follows it; the departures that are this
+document's own:
+
+1. **`capabilities` and `mode` are siblings of `bridge` in presence, not under it** (§4):
+   the hub refuses a non-boolean `bridge`. **The daemon's own capabilities ride in the
+   machine presence** (`desk`), since `fork`, `attach` and `files` need no bridge; and
+   the capability carries the bridge's own plugin version, so a stale session is told
+   apart from an older machine.
+2. **The catalogs are pushed in the snapshot and as a `catalog` kind; `read catalog` is
+   the refresh** (§5): the inventory had `commands` and `models` as reads only. Cached
+   per session and fingerprint (the brief's amendment), never shared across sessions;
+   re-listed at every heartbeat, since the start-time list is incomplete (the research
+   session's Q1).
+3. **One DX4 kind `op` carries every async outcome** (§3); DX5 keeps per-op events, named
+   `run` for a command (the child already emits a `command` event of its own for every
+   relayed op, DX5 Events).
+4. **Readback reads the hook and links by the command row's name and arguments, for
+   built-in `run` rows alone, with desk commands run one at a time** (§6, S7); the
+   inventory's §3.2 took the hook's view of these rows as read (C), and the probe's
+   "read it in `$.session.messages()`" does not hold for `system` rows; a `run-prompt`'s
+   outcome is its turn and a mod's command reads back by `text` (the MCP prompt's row
+   carries another name, a mod's row empty args, S5). **`/reload-plugins` is confirmed
+   by the daemon, by effect**, since it reloads the bridge (§2).
+5. **The `settings` read is cut** to permissions and hooks' shape; hook commands and
+   `env` never leave the bridge; `mcp` carries no configuration; `status` strips a
+   remote's userinfo (§11).
+6. **The mode is the bridge's own decision when it set it, else the classic hooks'
+   `permission_mode`, forwarded in presence stamped with its time**; the rows are not
+   read (§7, S1: an allow's `setMode` writes no `permission-mode` row; the rows trail
+   and skip). A Shift+Tab at the terminal is the labelled gap.
+7. **No armed mode** (§7, S1): a mode changes only on a live request or by `/plan`.
+8. **A scoped allow carries an index, a hash and a destination**, and the daemon applies
+   MAWS's one transformation (§7): the inventory's "`suggestion: <index>`" alone could
+   not say *this session* for a `localSettings` suggestion, nor refuse a changed list.
+9. **`/background` is offered only while no agent runs and no workflow the bridge saw
+   launched is still running — tracked by the task id the `Workflow` tool returns at
+   once, until its `<task-notification>`, since the call itself settles immediately**
+   (§8, S10, cli 2.1.307:793338; a shell carries over), **its confirm names what is lost**
+   (HN),
+   and its lineage has three sources in order (the bridge's `continuing` notice, the
+   `continued-in` record, the job's directory and time), the last `unconfirmed`.
+10. **Two kinds of following; issued RPCs stay put** (§8, the brief's amendment).
+11. **The `command` op's dispatch contract is in M0** with five measured rows, the
+    `mcp` forms among them so M2 needs M0 alone (the brief offered the choice); M1
+    fills the table and opens non-built-ins.
+12. **`stop-agent` is its own op and RPC**, not a widened `stop` (§9), with a note that
+    tells the parent not to redo the task (S2).
+13. **The commands that save a default are `drop` pending fork F1** (§2): the inventory
+    classed `autocompact`, `output-style` and `config k=v` as `run`. `recap` is `drop`
+    (S4); `goal <c>` is `run-prompt` (S4).
+14. **Attachments are saved inside the working directory and read by the model** (§10,
+    S9): the inventory's `@<path>` route does not exist for a mod's prompt.
+15. **`FIRST_WAIT_S` is 8 s** (the CLI's wait); the 5 s is the child's
+    `SMINOS_BRIDGE_READY_WAIT` (Surprises).
+16. **The sminos tests live under `sminos/tests/`**, not `tests/sminos/` (Surprises).
+
+### 15. The owner's calls: open forks, each with a recommendation
+
+None of M0–M5 waits on these; each is the edge a milestone stops at until answered.
+
+- **F1 — Controls whose effect outlives the session.** `/model` and `/effort` save a
+  default for new sessions; `/autocompact`, `/output-style`, `/config k=v` write
+  `settings.json`; `/mcp disable` writes the project's `.claude.json`; a suggestion's
+  `localSettings`, `projectSettings` and `userSettings` write settings files; `/add-dir`
+  *remember* likewise. **Recommendation:** offer in this run only what the terminal's own
+  session controls do and label it — `mcp enable|disable` (`.claude.json`, per project)
+  and a suggestion's `localSettings` as the engine offers it — and keep the defaults
+  (`config`, `autocompact`, `output-style`, the model and effort defaults,
+  `projectSettings`, `userSettings`) terminal-only, named as such; a later, separate
+  *Settings* panel with its own review could add them. The alternative, a labelled
+  *save as default* beside Model, is sound if the owner changes models from the phone
+  often enough to want it.
+- **F2 — M6, the attach key driver for `--bg` seats** (Shift+Tab at any moment, the
+  rewind picker, Enter on a dialog) and whether this run includes a web terminal for
+  `--bg` jobs. **Recommendation:** not in this run. It picks by screen position, races a
+  person attached at the same time, and reads nothing back from the screen; every row it
+  would unlock is already named terminal-only with its reason, which is the brief's
+  bar. Becomes worth it if the owner runs most sessions as `--bg` seats and rewind from
+  the phone matters more than its fragility.
+- **F3 — `!` shell from the web (A5).** `$.process.run` plus the `<bash-input>` rows,
+  behind the machine's policy. **Recommendation:** not in this run. It is arbitrary
+  execution from the hub's side of the boundary, exactly what §6 keeps the daemon from
+  passing. If wanted: a per-machine policy flag (`shell: true`, default off, set only by
+  `sminos daemon policy` on the machine), X class, its own review.
+- **F4 — The settings and MCP reads' gate.** **Recommendation:** the cut in §11 (rules
+  and hooks' shape, no commands, no `env`, no MCP configuration). The alternative is a
+  coded read, which brings the RPC machinery onto a display path for data the hub would
+  still relay in the clear.
+- **F5 — Rule suggestions' destinations.** `session` only, or `session` and
+  `localSettings`. **Recommendation:** both, `localSettings` labelled and only as the
+  engine itself suggests it (S1 measured the write: one rule into the project's
+  `.claude/settings.local.json`); it is what "don't ask again" means to the owner, and
+  it stays in the checkout's untracked local file.
+- **F6 — `/exit` from the desk.** Ends the process; for a terminal session that closes
+  the owner's terminal session, and a plain exit kills every running background shell
+  and monitor (HN). **Recommendation:** offer behind a confirm naming the machine, that
+  it closes the terminal session, and the running shells and monitors it will kill (by
+  id, from the Jobs tab); Retire already does this for seats.
+- **F7 — Fork's placement.** A fork is a spawn: the brief's M4 puts it with agents and
+  following. **Recommendation:** as the brief has it; nothing turns on it.
+
+## Plan of Work
+
+**Binding every milestone.**
+
+- Two repositories, one spec. Each milestone has a machine half (doperpowers, under
+  `sminos/`) and a hub-and-web half (MAWS, `apps/desk-hub`, `apps/desk-web`); the
+  interface between them is fixed in Interfaces and Dependencies, so the two halves can
+  be built by two executors at once, each proving its half against the stand-in the
+  other repository already keeps: MAWS's fake machine (`apps/desk-hub/fake-machine/`,
+  `RpcScript` in `machine.ts` for scripted RPC answers, `SessionDepth` in `session.ts`
+  for the plane's producer rules) stands for the machine; doperpowers' hub stand-in
+  (`sminos/tests/hub_standin.py`) and the fake mod of `test-bridge-control.sh` stand for
+  the hub and the engine. The route table and the catalog shape are one fixture both
+  test against (`sminos/tests/routes-2.1.307.json`, vendored to
+  `apps/desk-hub/fake-machine/dx4/` as `dx4-jobs.json` is). Each milestone's acceptance
+  on the owner's Macs (its A-items) runs after both halves are merged and rolled out in
+  §13's order.
+- Rollout order §13; mixed versions are the normal state, and every new field is
+  additive and optional on the wire.
+- doperpowers: every change bumps sminos in the same commit (`scripts/bump-version.sh
+  --plugin sminos <version>`, one minor per milestone; M3's floor is 1.6.3), the tests
+  `sminos/tests/run-sminos-tests.sh` and `sminos/tests/mods/run.sh`, and
+  `tests/mods/typecheck.sh`; DX5 changes land in this document's Interfaces (the desk
+  spec's DX5 copy points here from a dated line, added in M0's MAWS PR).
+- MAWS: `scripts/ci-gate.sh <worktree> --gates static,unit` on every commit that is
+  reviewed, `e2e:desk-web` for a milestone with a web half, `e2e:desk-web-hub` where the
+  hub's relay changed; the protocol's types in `apps/desk-hub/src/protocol/` are the
+  one place a shape is written; the fake machine produces everything the plane does.
+- The hazards bind as measured facts: no bare panel form is run; `/model`, `/effort`,
+  `/context`, `/add-dir`, `/recap` are never run; `$.mcp.call` is never used; nothing is
+  sent through a supervisor `reply`; nothing is read from `$.session.messages()` for a
+  readback; the bridge never awaits its own reload.
+- Copy: a refusal names the thing that cannot be done and why, in the reasons' voice
+  `capabilities.ts` already uses (*<name> is idle: Send starts a turn*); a control that
+  needs a newer plugin names the version and the machine, or the session's stale mod.
+- Latency: every new control's path in `PATHS` with its label, sampled whether or not
+  the readout is on; a budget from §12.
+- Every spike has landed (S1–S10); no row waits on one. A row the spikes did not reach
+  stays `enabled: false` in the table (§2) until measured.
+
+### M0 — Foundation: capabilities, the `read` relay, the op outcome, the `command` dispatch
+
+**What exists at its end.** A bridged session and its machine advertise what they can
+do; the web offers a control only when they say it can, and names the version, the
+machine or the stale session otherwise. One read (`status`) travels browser → hub →
+daemon → child → bridge and back on the sub, and the Info tab shows it. The `command`
+op runs five measured built-ins (`rename <name>`, `color <c>`, `reload-plugins`,
+`reload-skills`, `mcp enable|disable|reconnect <server>`) from a `/` typed in the
+composer, answering at once, reporting on the stream, read back by the row rule, by
+text or (for `reload-plugins`) by the daemon's effect check, the outcome owed across a
+daemon restart; everything else typed as a slash is refused with its class's reason by
+the bridge. A read-only machine refuses the RPC. Nothing here waits on an owner's
+answer.
+
+**Machine half (doperpowers).**
+
+- `sminos/hooks/mods/bridge-commands.tsx` (new): the route table for 2.1.307 from the
+  fixture (Interfaces, "The route table"), loaded as data; at M0 the `run` class is
+  **enabled** for the five names above, every other `run` and every `run-prompt` row
+  carrying `enabled: false` with *comes with M1* — the table is whole from M0 so that
+  the catalog (M1) and the refusals (M0) read one source. `routeOf(engineBase, listed,
+  name, args)` → the route, or a refusal `{code, reason}` (`unknown-builtin`, `panel`,
+  `routed`, `follow`, `drop`, `local`, `bad-args`, `disabled`, `self`); `listed` is the
+  `$.command.list()` entry, so a non-built-in's class comes from its `source`.
+- `bridge.tsx`: ops `read` and `command` in `commandAnswer`. `read {what, args}` answers
+  `{ok, result}` for `status` and `{ok: false, error: "no read <what>"}` otherwise.
+  `command {name, args, from, rpc}`: the route check, then the run queued behind any
+  desk run still awaiting its readback (§6: one at a time), then `$.command.run
+  ({command: name, args})` **not awaited past the call** — answer `{ok: true, result:
+  {queued: true, route, id: command.id}}` at once (the engine queues mid-turn, H-queue);
+  the settled promise emits DX5 `run {phase: "end", id, name, args, settled,
+  readback}`, with `run {phase: "start", id, name, args}` emitted as the call is made;
+  the Esc rejection answers `{ok: false, error, code: "stopped"}`; an engine rejection
+  after the call is the `end`'s `settled.error`. The readback (§6) in `bridge-rows.tsx`:
+  from the settle, the first main-loop command row (door `command`) whose
+  `<command-name>` and `<command-args>` match, then the output row within 100 ms, both
+  from the `session.append` hook the bridge already has; a foreign command row between,
+  or a second matching one within the window, makes it `none`. A `reload-plugins` run
+  emits its `start` and nothing more from this module (§2).
+- `GET /status` `capabilities` (Interfaces, DX5): assembled by the bridge at its hello
+  and after each module load, posted to the child as part of `resync` (`capabilities`
+  field) so the child answers it from its state; `engine` from `$.session.version()`,
+  `sminos` from the plugin's own manifest.
+- `sminos_bridge.py`: keeps `capabilities` from the resync and answers it in `status()`;
+  the command response and the kept RPC answer carry `code` beside `result` and `error`
+  (today both copy `result` and `error` alone); `rpc_of` is kept past a `queued` or
+  `started` answer until the op's `end` (§3), and every relayed `run` event whose `id`
+  it holds carries `rpc`.
+- `sminos_plane.py`: `Bridges.probe` keeps the status body's `capabilities` (and `mode`,
+  M3) and the socket's inode it answered from; `presence_of` adds them when held; the
+  machine presence gains `desk: {sminos, rpcs, reads}` (the version from
+  `sminos/.claude-plugin/plugin.json` beside the scripts; `rpcs` the daemon's
+  `RPC_NAMES`; `reads` empty until M5). The `read` frame: `Plane.read(frame)` finds the
+  sub, passes a malformed frame by (as `output` does), and runs `post_command(path,
+  {op: "read", what, args}, wait_ms=COMMAND_WAIT_MS)` on a worker thread (as `diff` runs
+  git: a thread per read, bounded to 4 in flight per sub, the rest answered `error
+  {code: "busy"}`), queuing the answer for the pump, which emits DX4 `read {id, what,
+  result | error}` on the sub.
+- `sminos_requests.py` and `sminos_rpc.py`: `WANTED` gains `run` (and `btw`,
+  `continuing` later); the `op` outcome path of §3 (`op_id` and `op` on the claim,
+  `op_events()`, `restore_ops()`, owed through `sminos_owed` as compactions are); for a
+  claim whose `op` is `reload-plugins`, the daemon emits `op end {readback: {how:
+  "effect"}}` when the plane's probe sees the session's bridge answer from a new inode
+  within 60 s of the claim, else `op end {settled: {ok: false, error}}` at 60 s.
+  `RPC_NAMES` gains `command`; `shape()` checks `name` (1–128 characters, no control
+  characters: a name exactly as `$.command.list()` spells it, ` (MCP)` suffix included)
+  and `args` (a string of at most 4,096 characters, optional); `plan()` runs
+  `command(path, {op: "command", name, args, rpc: nonce, from: "desk"})` when bridged,
+  else `unsupported`; the bridge's `{ok: false, code, error}` is `failed` with the
+  bridge's reason as the message and its code as the message's first word.
+  `sminos_uplink.py`: the `read` frame handler, and `welcome.kinds` read and kept
+  (§13.3): the plane sends a kind this run adds (`read`, `op`; M1's `catalog`) only
+  when the stream's `welcome` lists it.
+- `sminos_control.py`: `sminos command <member> <name> [args]` and `sminos read <member>
+  <what>` as CLI verbs, so the live walk can drive the ops without the hub.
+- Tests: `sminos/tests/mods/bridge.test.ts` (the route check's every class from the
+  fixture; `command` answering at once and emitting `run` start and end; one at a
+  time; readback by text and by row, the foreign-row and two-row cases as `none`; the
+  `stopped` code; `reload-plugins` emitting start alone); `test-bridge-control.sh` (the
+  child relaying `read` and `command`; `code` in the response and the kept answer;
+  `rpc_of` kept to the `end` and the `rpc` annotation; `capabilities` in `status`);
+  `test_session_plane.py` (presence with `capabilities`, the machine presence's `desk`,
+  the `read` relay and its errors, the inode kept); `test_rpcs.py` (`command`'s shape,
+  read-only, unsupported without a bridge; `op` from a `run` event with its nonce, the
+  immediate answer then a delayed end, a restart between them, an outcome with no sub
+  open, and `reload-plugins` finished by a new inode and by the 60 s timeout).
+
+**Hub and web half (MAWS).**
+
+- `apps/desk-hub/src/protocol/`: `SessionPresence.capabilities?` and `.mode?`;
+  `MachinePresence.desk?`; `ProjectUp` gains `read`; DX2's machine frames gain `read`;
+  `SUBSCRIPTION_KINDS` gains `read` and `catalog`; `SESSION_WIDE_KINDS` gains `op`;
+  `RpcArgs.command`, `RpcResults.command`, `RPC_NAMES`; DX2 `welcome.kinds`. `project.ts`:
+  the `read` up-frame (shape check: `sub` owned, `id` a name of at most 64 characters,
+  `what` `[a-z-]{1,32}`, `args` absent or an object of at most 4 KiB; carried to the
+  machine with the route), `op` relayed unread like `compact`, the machine presence's
+  `desk` admitted and kept. `machine.ts`: `kinds` in the `welcome`.
+- `apps/desk-hub/fake-machine/`: presence with capabilities and a machine presence with
+  `desk` (a `Producer` level `'m0'`), `read status` answered on the sub, a `command` RPC
+  answered `queued` and followed by scripted `op` messages with a readback (`RpcScript`
+  plus a `commands` script keyed by name, reading the vendored route fixture), the
+  older-producer case (no capabilities) and the stale-session case (a machine with
+  `desk`, a session without `capabilities`) kept.
+- `apps/desk-web/src/conversation/capabilities.ts`: `VERBS` gains `command` and `status`
+  (`status` a read's capability, drawn by the Info tab, not a verb button);
+  `capabilities()` reads both presences (§4), with the three fallbacks and their
+  reasons. `shell/session-plane.ts`: `Subscription.read(what, args) → Promise<JsonValue>`,
+  correlating by `id`, rejecting with the answer's `error`, timing out at 15 s (the
+  machine's own 10 s plus the hops). `project/conversation.ts`: `ops` beside
+  `compactions`, fed by `op` messages. `views/composer/Composer.tsx`: a text beginning
+  `/<name>` is a command when `can.command.can` — the RPC `command {session, name,
+  args}` — and otherwise refused in place with the capability's reason and *Send as text
+  anyway*; a new `CommandStatus` beside `RpcStatus` draws queued → ran → the readback
+  (`words.ts` gains `command`'s result and the op's phases). `depth/view/SessionInfo.tsx`:
+  the engine's version, base, root, repository, surfaces from `read status`, or *not
+  available from this plugin (needs sminos ≥ <M0's>)*. `latency.ts`: `read.status`,
+  `op.queued`, `op.ran`, `op.readback`, and the app-start paths (`app.cold`, `app.warm`,
+  `app.reconnect`, `app.me`, `app.chunk`, `app.state`, `app.key`), each with its label.
+  `docs/doperpowers/specs/2026-10-15-desk-design.md`: a dated line under DX4, DX5 and
+  DX6 pointing here.
+- Tests: hub unit (`session-plane.test.ts`: `read` carried and `op` relayed; the shape
+  refusals; `desk` kept), fake-machine tests, web unit (`capabilities.test.ts` for the
+  derivation from both presences and the three fallbacks; the composer's slash
+  handling; `CommandStatus`'s three states), e2e (`depth-info.spec.ts` for the status
+  read; a new `command.spec.ts` for A2–A5 against the fake machine, the older-producer
+  and stale-session cases included).
+
+**Interfaces.** Exposes: DX5 `capabilities`, ops `read` and `command`, events `run`;
+DX4 `presence.capabilities`, `machine.desk`, kinds `read` and `op`; DX3/DX2 `read`; DX6
+`command`; DX2 `welcome.kinds`; the route fixture; the web's `Subscription.read`, `ops`,
+`capabilities()`. Consumes nothing new.
+
+**Decisions of this milestone.** The five enabled rows are measured `run` rows whose
+readback the row rule, `{text}` or the reload's effect check confirms. `rename`'s match
+tolerates the name mod's own `/rename` (`name.tsx`) running between: the match is on
+*this* name. The Info tab asks `read status` once per subscription open and on
+*Refresh*, not on every presence. A `read` on an agent sub is refused by the web before
+sending (`status` is the main transcript's). The MCP panel that draws `mcp`'s effect is
+M2's; at M0 the `mcp` forms confirm by their row.
+
+**Does not touch.** The typeahead and the catalog (M1); any read but `status`; any
+built-in beyond the five; `compact`'s instructions (M2); the request card (M3).
+
+**Proves.** A1–A9, and A33 for its paths.
+
+### M1 — The command spine: the table whole, the typeahead
+
+**What exists at its end.** Every command of the session is in a typeahead that opens
+with no round trip; the enabled `run` rows are the table's measured `run` class, the
+`run-prompt` rows and every non-built-in run, and the Esc refusal says what it is.
+
+**What the spikes settled for this milestone.** S4: `goal <condition>` is `run-prompt`
+and `goal clear` is `run` (it cannot stop a running goal: the typeahead's hint names
+Interrupt); `recap` is `drop`; `fast on|off` stays `enabled: false` (not settled: the
+gateway disables it). S5: every non-built-in is `run-prompt`, named verbatim, and a
+mod's own command returns `{text}`; the bridge refuses its own plugin's commands `self`.
+S6: the Esc refusal's copy is *stopped at the terminal: commands resume after input is
+typed there*, with no cure offered; the desk's Interrupt is checked not to set it (A13).
+S7: the readback rule of §6, as M0 built it. Spike 13: `list-agents` is `run`, bare,
+`{text}` in 24 ms, no panel — its item says it lists this machine's other Claude
+sessions too, outside this project (X class like every command, the readback `text`).
+
+**Machine half.** `bridge-commands.tsx`: every measured `run` and `run-prompt` row
+enabled; the catalog (§5): `catalogNow($)` joins `$.command.list()` with the route each
+entry gets, reads `$.config.list()`'s `model` row's options and resolves each family
+alias through the session's environment, fingerprints the two, and emits DX5 `catalog`
+at `session.start`, at every heartbeat, and after any command row naming
+`reload-plugins`, `reload-skills` or `mcp`, when the fingerprint changed (§5). `sminos_bridge.py`: keeps the latest `catalog` and puts it in the
+snapshot. `sminos_plane.py`: the DX4 snapshot gains `catalog` from the child's; a
+`catalog` event is relayed as DX4 `catalog` on main subs when the hub lists it; `read
+catalog` answers the same body. `sminos_rpc.py`: `cd <path>` is checked against the
+project's known checkouts (`sminos_policy.known_checkouts`, as spawn is checked) before
+it is forwarded, refused `unknown-checkout`: the bridge cannot know the project's
+checkouts.
+
+**Hub and web half.** Hub: `snapshot.catalog?` and the `catalog` kind, relayed unread.
+Web: the typeahead ported from MAWS — `composer/mentions/SlashPalette.tsx`, `popup.tsx`,
+`rank.ts`, `items.ts`'s `SlashItem` with `origin` from `source`/`plugin` and `action`
+from the route (`text` for `run` and `run-prompt`, `widget` for `routed` and
+`panel`-with-`to`, `unavailable` with the reason otherwise; the typeahead offers the
+argument form of a row whose bare form is a panel: `mcp` shows `enable|disable|
+reconnect <server>`), MAWS's tiers and recents as they are — into `SessionComposer`; the
+catalog store (`state/catalog.ts`, per session and fingerprint, `localStorage` for the
+last 32 sessions, the *as of* label); `CommandStatus` draws *ran, unconfirmed*, *started
+a turn* for a `run-prompt`, and the Esc copy. `latency.ts`: `palette.open`,
+`catalog.ready`, `read.catalog`. Fake machine: a recorded catalog in the snapshot and a
+`catalog` change on command.
+
+**Decisions.** The typeahead's items for a session with no catalog (an older bridge)
+come from the cache if one exists, else the desk's own panel items alone with the
+version line (A14); the web holds no copy of the route table. A `run-prompt` command's
+outcome is the turn it starts: the status line says *started a turn* at the `op end`
+and nothing more. A `run` row with `outlives` draws its label under the item and again
+in the status line. The composer's typed form (M0's) and the typeahead share one path:
+the typeahead inserts text, Send routes it.
+
+**Does not touch.** Panels (M2); the request card (M3); `follow` rows (M4); the `!`
+mode.
+
+**Proves.** A10–A14, A33 for its paths.
+
+### M2 — Native panels from reads
+
+**What exists at its end.** Side question, context and usage, the model and effort
+selector, MCP status and actions, compact with instructions, status, permissions and
+hooks — each a web panel drawn from pushed or read data, none a terminal panel. Built
+and reviewed panel by panel over the one read contract; it needs M0 alone (the `mcp`
+forms are M0's).
+
+**What the spikes settled.** S3: `$.model.fork` answers in 0.75–1.0 s idle, cache-warm,
+writes nothing, is not refused after an Esc, and mid-turn must be told not to continue
+the task (§9's framing); an Esc on the main turn does not abort a fork made outside a
+hook. `B.btw`'s samples are split by idle and busy.
+
+**Machine half.** `bridge.tsx`: op `btw` (§9, with the framing prefix and the 64 KiB
+bound); reads `usage`, `mcp`, `settings` (§5, cut per §11). `bridge.tsx` `compact`:
+already takes `instructions`; `sminos_rpc.py` `shape()` gains a `compact` branch
+(`instructions` optional text, at most 4,096 characters) and `plan()` passes it;
+`RPC_NAMES` gains `btw` (`prompt` text at most 8,192 characters); `WANTED` gains `btw`,
+and `btw` events become `op` as `run`'s do. `sminos_plane.py`: the `mcp` read's
+`disabled` list from `.claude.json` (the session's working directory's project entry,
+the one key).
+
+**Hub and web half.** Hub: `RpcArgs.compact.instructions?`, `RpcArgs.btw`,
+`RpcResults.btw`. Web, each ported from MAWS's renderer and cut to the desk's data: the
+side pane (`side/BtwWidget.tsx`, `side/store.ts`, `SideTool.tsx`) drawing `op end`'s
+text and usage, open while the turn runs, with *answers from the session's last model
+request* under it; `widgets/ContextWidget.tsx` and `composer/frame/ContextRing.tsx` from
+`read usage` (summary on open, *Count exactly* for full); `widgets/UsageWidget.tsx`
+(rate limits are empty without a subscription: say so); `widgets/ModelSelector.tsx`'s
+model and effort views from the catalog's models, applying through today's `model` RPC
+with the session-only note (A17); `widgets/McpWidget.tsx`'s list from `read mcp` with
+*Reconnect*, *Disable*, *Enable* issuing M0's `command` (`mcp <verb> <server>`), the
+`outlives` label on the actions, the list re-read after each `op end`, and *in the
+terminal: /mcp* for OAuth and a failed server; `widgets/CompactWidget.tsx` with
+instructions; `widgets/StatusWidget.tsx` widening the Info tab; `widgets/PermissionsWidget.tsx`
+and `HooksWidget.tsx` read-only from `read settings`. The typed `/btw`, `/context`,
+`/usage`, `/model`, `/effort`, `/compact`, `/permissions`, `/hooks`, `/status` open
+their panel from the typeahead (`widget` action; before M1, from the composer's typed
+form). `latency.ts`: `btw.answer`, `read.usage`, `read.mcp`, `read.settings`, `panel.*`.
+
+**Decisions.** A panel opens from what it has (the catalog, the last usage) and reads
+on open for what it does not; a read's error draws in the panel with *Retry*. The MCP
+panel's *unknown* is a server named by the loop's rows (`mcp` in the `subagents` body)
+that `$.tool.list()` does not name and the disabled list does not hold. `read settings`
+is asked when the Permissions or Hooks panel opens, never pushed.
+
+**Does not touch.** The request card's scopes (M3); `/mcp`'s bare panel; plugin
+management (`/plugin`, a daemon CLI path, out of this run).
+
+**Proves.** A15–A20, A33 for its paths.
+
+### M3 — Requests and modes
+
+**What exists at its end.** A permission card offers the engine's suggestions with a
+scope, and "allow and switch" where the engine suggests a mode; a plan is approved into a
+chosen mode and the terminal's dialog closes; the mode chip shows the session's mode
+from the bridge and reaches what the mod API reaches.
+
+**What the spikes settled.** S1, all of §7: `session` updates apply at once and write no
+file; `localSettings` writes the project's local file; a plan allow needs `updatedInput`
+(sminos 1.6.3 sends it; this milestone's floor); the chosen mode beats the pre-plan
+mode; no armed mode. What S1 left unrun is not offered: `addRules` with `userSettings`
+or `projectSettings`, `removeRules`, `removeDirectories`.
+
+**Machine half.** `bridge-stream.tsx` `raisedFields` gains `suggestions` (bounded:
+Interfaces); `bridge-requests.tsx` `engineDecision` passes `updatedPermissions` from a
+decision's resolved suggestion or `mode`, beside the `updatedInput` 1.6.3 added;
+`sminos_bridge.py` `_check_decision` admits `updatedPermissions` (an array of at most 8
+objects) on a permission and refuses it on a question. The mode (§7): `bridge.tsx`
+publishes the mode from its own decisions at once (an allow it hands out carrying
+`setMode`; a `/plan` it ran), reads `permission_mode` from `classic.PermissionRequest`,
+and adds pass-through `classic.UserPromptSubmit`, `classic.PostToolUse`,
+`classic.PostToolBatch` and `classic.Stop` hooks that read it and call `next(e)` with
+no `$` call (the five hooks spike 12 measured to carry it; never `PreToolUse`, whose
+`e` carries none), never lets a hook's reading override a newer decision of its own,
+and emits DX5 `mode {mode, at}` on change; the child keeps it and answers it in
+`status()`.
+`sminos_requests.py` `raised_draft` passes `suggestions`; `sminos_rpc.py` `shape()` and
+`check_digest`: `scope.suggestion` an integer within the re-read list, `scope.sha256`
+equal to that suggestion's canonical hash (else `not-pending`, *the suggestions
+changed*), `scope.destination` in `{session, localSettings}` with `localSettings` only
+when it is the suggestion's own, `mode` only when the pending request's tool is
+`ExitPlanMode` and within the ceiling (`admit_spawn`'s rule, factored out); a
+`setMode` suggestion's mode likewise within the ceiling. `sminos_plane.py`: `presence.mode`
+from the probe's status body.
+
+**Hub and web half.** Hub: `Raised.suggestions?` (the code covers it; `raisedShapeError`
+admits an array of at most 8 objects each at most 2 KiB), `RpcArgs.decide.scope?`,
+`.mode?`, `SessionPresence.mode?`. Web: `request-card/scope.ts` and
+`variants/Permission.tsx`'s scope radio cut to the two scopes plus *Allow and switch to
+<mode>*; `variants/Plan.tsx`; `composer/frame/ModeChip.tsx` and `statusline/ModeMenu.tsx`
+with `MODE_REFUSAL_WORDS`'s pattern for the unreachable modes; the mode from
+`presence.mode`, with the rows as the fallback. `latency.ts`: `decide.scoped`,
+`mode.drawn`.
+
+**Decisions.** A suggestion is shown as the engine words it (the rule's `toolName` and
+`ruleContent`), under the scope radio; the hash the web sends is over the suggestion as
+drawn, so a list that changed under the card is refused and the card redraws from the
+new `raised`. A plan card's modes are the machine's ceiling and below;
+`bypassPermissions` is never offered. The chip's *as of its last prompt* appears only on
+the rows fallback (a bridge older than M3).
+
+**Does not touch.** Shift+Tab's arbitrary switching (M6 or terminal); `add-dir`'s dialog
+(it always confirms: H-panel; only the suggestion path, F5's shape); *Clear and
+implement* (M4).
+
+**Proves.** A21–A24, A33 for its paths.
+
+### M4 — Agents, fork, following
+
+**What exists at its end.** One subagent can be stopped or messaged; a conversation can
+be forked into a new seat; `/clear`, `/branch`, `/resume <id>` and `/background` are
+followed, `/background` with its loss named; a plan can be cleared into a fresh session
+and implemented. Executed as **three increments, each reviewed at its boundary** before
+the next starts: (a) agents (`stop-agent`, `tell`), (b) fork, (c) following and *Clear
+and implement*. Following alone combines in-process migration, cross-process lineage
+and the preservation of old RPC outcomes.
+
+**What the spikes and the handoff note settled.** S2: `TaskStop` takes an id or a `name`,
+both kinds of agent; the note row must tell the parent not to redo the task. S8:
+`--fork-session` on a live session is clean. S10: `/background`'s dialog opens for a
+running subagent, not for a shell; no job record names the old id; the `continued-in`
+record is best-effort. HN: what `/background` carries and loses (§8.3's confirm). Spike
+13: `subtask <task>` is `run` (`{}` in 0.32 s, no panel): it starts a background fork
+agent (`$.agent.list()` type `fork`, with a name), its row reads `⑂ forked <name>
+(<last 4 of id>)`, and its finish is a `<task-notification>` that starts a main turn.
+
+**Machine half.** (a) `bridge.tsx`: ops `stop-agent` and `tell` (§9) with the note's
+text; `bridge-agents.tsx`: the workflows it saw launched, each held as running from the
+task id in the `Workflow` tool's result until the `<task-notification>` row naming it
+reaches `session.append` with `completed`, `failed` or `killed`, for (c)'s `background`
+condition (§8.3). (b) also enables the `subtask <task>` row beside `fork`: its readback
+is the `⑂ forked …` row by the name-and-args rule, the fork agent appears in the
+subagent tree from `$.agent.list()` as any agent does, and its finish notification is
+one more task notification the jobs ledger already reads. `sminos_rpc.py`:
+`stop-agent` (the agent in the plane's tree, `unknown-agent` otherwise), `tell`;
+`RPC_NAMES`. (b) `sminos_rpc.py`: `fork` (the spawn path with `--resume <id>
+--fork-session`, around the copy guard, `fork_of` on the `joined` event). (c)
+`bridge.tsx`: `session` start gains `previous` (the mod remembers the ended id and reason
+across the id change it already handles, and the heartbeat's fallback for a change with
+no `session.end` names `reason: "unknown"`); the `follow` rows enabled, `background`
+with §8.3's condition and the DX5 `continuing` notice before the run.
+`sminos_requests.py`: `WANTED` gains `continuing`; `sminos_plane.py`: the `continued` log
+event and `end {continued, to, confirmed}` (§8.2), the `/background` lineage's three
+sources in order.
+
+**Hub and web half.** Hub: the RPC names and shapes; `end`'s `continued` reason with
+`to` and `confirmed`; the `continued` log kind is any kind to the hub (it checks the
+code, not the kind). Web: (a) `tools/agents/subagents/DrillIn.tsx`'s `StopAgent` with its
+confirm and `RelayComposer.tsx` in the subagent drill-in; (b) a subset of
+`sessions/ForkSheet.tsx` (no rewind-to-message), *forked from <alias>* from `joined`'s
+`fork_of`; (c) following in `shell/sessions.ts` and `ProjectView.tsx` (the selection
+moves, subscriptions re-target, RPCs stay); the end marker's *continued as* with
+*(unconfirmed)*; the `continued` event in the log projection; `/background`'s confirm
+built from the Jobs tab's ledger (the running shells and monitors by id, the loss
+table of §8.3); the plan card's *Clear and implement*: the `command clear`, the follow,
+then a Send of the plan's text to the new session, each step waiting for the one before
+(A29). `latency.ts`: `agent.stop`, `agent.tell`, `fork.joined`, `follow.moved`.
+
+**Decisions.** A `tell` to an agent the tree does not hold is refused `unknown-agent` (a
+new DX6 code). `fork`'s result names the new session and alias as `spawn`'s does; the
+new seat's brief is the fork's `brief` if given, else none (the conversation is the
+brief). Following keeps the old session's channel selectable from the sidebar under its
+last title with *continued*. *Clear and implement* is offered only when the session's
+capabilities list `command` and the follow class is enabled; its Send is the owner's
+`human` event as any Send is.
+
+**Does not touch.** `/resume`'s bare picker; `E5`'s value is covered by Resume; a
+workflow agent's own stop (`$.agent.list()` does not list them); a takeover into lane
+B (#52).
+
+**Proves.** A25–A29, A33 for its paths.
+
+### M5 — Composer parity
+
+**What exists at its end.** Attachments, `@` file mentions, prompt history and drafts.
+
+**What the spikes settled.** S9: no `@path` attachment for a mod's prompt; a Read of a
+file inside the working directory asks nothing and works (§10).
+
+**Machine half.** `sminos_rpc.py`: `attach` (§10: the bound, the basename check, the
+directory under `<cwd>/.claude/desk-uploads/`, the exclude, the sweep with the bridge's
+`<id>.json`); `sminos_plane.py`: the `files` read (`git ls-files -z`, cached per working
+directory for 10 s, at most 20,000 entries then `truncated: true`, answered in parts
+above the frame limit as snapshots are); the machine presence's `desk.reads` gains
+`files`, `desk.rpcs` `attach`. Fork F3's `shell` is not built.
+
+**Hub and web half.** Hub: `RpcArgs.attach`, `RpcResults.attach`. Web: the editor and
+its controller (`composer/editor/Editor.tsx`, `controller.ts`, the long-paste atoms of
+`extensions.ts`), `frame/AttachmentStrip.tsx` and `editor/paste.ts` with `pathForFile`
+replaced by the `attach` RPC's path and the appended line (§10); `mentions/AtMenu.tsx`
+from `read files`; `editor/history.ts` and `drafts.ts` on IndexedDB. `latency.ts`:
+`attach.sent`, `read.files`.
+
+**Does not touch.** `!` shell (F3); the queue's edit and withdraw (A4: no mod noun lists
+the engine's queue).
+
+**Proves.** A30–A32, A33 for its paths.
+
+### M6 — The attach key driver for `--bg` seats (stub)
+
+Waits on fork F2. If the owner says yes: a daemon key driver that attaches to a `--bg`
+job under a pty, sends a key sequence, detaches, and reads the result back from rows,
+never the screen; the rows it would reach are the inventory's §3.6 (Shift+Tab ×N, Enter
+or `4` on a prompt the hooks never saw, the rewind picker by position, Esc on a panel);
+offered only where the capability says `attach`. The spec gains its design and
+milestone then, with a dated line.
+
+## Concrete Steps
+
+Working directories: doperpowers at its clone (`sminos/` paths below are the plugin's);
+MAWS at its clone. Each milestone's branch names its half: `desk-ctl-m<N>` in both.
+
+**doperpowers, every milestone.**
+
+```
+scripts/bump-version.sh --plugin sminos <next minor>     # same commit as the change
+sminos/tests/run-sminos-tests.sh                          # the sminos gate; SMINOS_PART=core|suites|all
+sminos/tests/mods/run.sh                                  # the sminos-mods gate (claude plugin test)
+tests/mods/typecheck.sh                                   # the mods-types gate
+```
+Expected: each script ends with its pass count and exit 0; `run-sminos-tests.sh` prints
+`PASS <n>` per suite and `all suites passed`.
+
+**MAWS, every milestone.** `scripts/ci-gate.sh` pushes the tree to a `ci/` ref and runs
+the gates on GitHub Actions; on the owner's Macs it is run under
+`/tmp/maws-review/with-slot.sh`, this host's convention for one heavy run at a time
+(not a repository file: another host runs the script bare).
+
+```
+scripts/ci-gate.sh <worktree> --gates static,unit
+scripts/ci-gate.sh <worktree> --gates e2e:desk-web                     # a web half (a Linux lane)
+scripts/ci-gate.sh <worktree> --gates e2e:desk-web-hub --runner macos  # the relay changed (not in LINUX_E2E)
+pnpm --filter desk-hub test ; pnpm --filter desk-web test               # while iterating
+pnpm --filter desk-hub fake-machine -- --help                           # the stand-in's CLI
+```
+Expected: `ci-gate: run <id> success` then `GREEN <run-url>`; a red gate prints
+`FAIL <gate> log=<path>`.
+
+**The live walk, each milestone, on both Macs** (after MAWS is deployed and the sminos
+bump installed on the macbook, the mini behind, one session on the macbook left open
+through the update):
+
+```
+sminos list --here                                        # the sessions and their names
+sminos watch <member> --json | grep -E '"type": "(run|catalog|btw|mode|session|continuing)"'
+sminos command <member> rename desk-m0                    # M0's CLI verb: the same op the desk issues
+sminos read <member> status
+sminos daemon policy --read-only on                       # A7, then --read-only off
+sminos daemon restart                                     # A8, between a command's queued and its ran
+```
+Then the desk with `?latency`, the A-items of the milestone in order, and
+`window.deskLatency()` copied into the milestone's report under the spec's directory;
+the table on #52 updated with the desk's numbers beside RC's.
+
+**M0's first proof**, before any web: `sminos command <member> rename desk-m0` prints
+`queued (run) id=<id>`, and `sminos watch` shows `{"type":"run","phase":"end",…,
+"readback":{"how":"row","text":"Session renamed to: desk-m0","uuid":"…"}}` within 5 s;
+`sminos read <member> status` prints the version, base, root and surfaces; `sminos
+command <member> reload-plugins` prints `queued`, and the daemon's log shows the op
+finished by effect within 10 s.
+
+## Interfaces and Dependencies
+
+Each interface names the repository that owns it. Fields marked `?` are optional on the
+wire and absent from an older producer; a consumer treats absence as "the older side".
+
+### DX5 (doperpowers: `sminos/hooks/mods/`, `sminos/skills/sminos/scripts/sminos_bridge.py`)
+
+**`GET /status`** gains:
+
+```json
+"capabilities": {
+  "sminos": "1.7.0",
+  "protocol": 2,
+  "engine": "2.1.307",
+  "ops": ["ping","steer","interrupt","stop","model","compact","deliver","answer","read","command"],
+  "reads": ["status"],
+  "routes": {"measured": "2.1.307"}
+},
+"mode": {"mode": "default", "at": 1760000000000}
+```
+`sminos` is the loaded mod's own plugin version. `ops` and `reads` grow by milestone (M1
+adds read `catalog`; M2 op `btw`, reads `usage`, `mcp`, `settings`; M4 ops
+`stop-agent`, `tell`; M5 nothing of the bridge's). `mode` (M3) is the bridge's current
+reading — its own decision's mode, else the latest classic hook input's — with `at`,
+when it was read (epoch ms, the machine's clock); absent before M3 or before any
+reading. The bridge posts both to the child in `resync` (`capabilities`, `mode`); the
+child answers `status()` with the latest.
+
+**Ops** (the child's stdout lines; the mod's `result` events). The child's HTTP answer
+to `POST /command?wait=` and the answer it keeps under an RPC nonce carry `code` beside
+`result` and `error` when the mod's result has one.
+
+| op | args | result |
+| --- | --- | --- |
+| `read` | `{what, args?}` | `{ok: true, result}` per kind below; `{ok: false, error}` for a kind it does not serve (`no read <what>`) or a failed call |
+| `command` | `{name, args?, from?, rpc?}` | at once: `{ok: true, result: {queued: true, route: <class>, id}}`; refused: `{ok: false, error, code}` with `code` one of `unknown-builtin`, `panel`, `routed`, `follow`, `drop`, `local`, `bad-args`, `disabled`, `self`, `stopped`, `turn-unknown` |
+| `btw` (M2) | `{prompt, rpc?}` | `{ok: true, result: {started: true, id}}`; `{ok: false, error}` (empty prompt; `nothing-to-fork` known at once) |
+| `stop-agent` (M4) | `{agentId, from?}` | `{ok: true, result: {agentId}}`; `{ok: false, error}` (not a running agent by id or name; TaskStop's error) |
+| `tell` (M4) | `{agentId, text}` | `{ok: true, result: {sent: true}}`; `{ok: false, error}` |
+
+The child keeps `rpc_of[id]` for an op answered `queued` or `started` until the `run` or
+`btw` event with `phase: "end"` and that `id`, and annotates each such event with `rpc`.
+The bridge runs desk `command` ops one at a time (§6).
+
+Read results:
+
+```ts
+status:   {version: {version, base?, builtAt?}, model, cwd, root, repo: {remote?, branch?} | null,   // remote without userinfo
+           surfaces: string[], override: {model, effort} | null, mode?: {mode: string, at: number}}
+catalog:  Catalog                                                   // below
+usage:    SessionUsage & {context: {breakdown?: ContextBreakdown}}  // the engine's shape, `$.session.usage(args)`
+mcp:      {servers: [{name, status: "connected" | "disabled" | "unknown", tools: number}]}
+          // the bridge answers connected servers with counts; the plane adds `disabled` from `.claude.json`
+settings: {permissions: {allow: Rule[], ask: Rule[], deny: Rule[], additionalDirectories: string[], defaultMode: string | null,
+                         bySource: {[source: "user" | "project" | "local" | "policy" | "cliArg"]: {allow: Rule[], ask: Rule[], deny: Rule[]}}},
+           hooks: {[event: string]: [{matcher: string | null, commands: number}]}}       // never a command's text, never `env`
+Rule   =  {toolName: string, ruleContent?: string}                 // the engine's PermissionRuleValue
+files:    {root: string, entries: string[], truncated: boolean}    // M5; the plane's own; paths relative to root
+```
+A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeout`,
+`busy`, `failed`, with a message.
+
+**Events** (the mod's posts):
+
+| type / phase | fields |
+| --- | --- |
+| `run` / `start` | `id, name, args, t` — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
+| `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; never emitted by the module a `reload-plugins` run replaces (the daemon finishes that op) |
+| `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
+| `catalog` (M1) | `Catalog`: `{fingerprint, commands: [{name, description, source, plugin?, route: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
+| `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
+| `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
+| `session` / `start` (M4) | gains `previous?: {session, reason: "clear" \| "resume" \| "branch" \| "unknown"}` |
+| `raised` (M3) | gains `suggestions?: PermissionUpdate[]` (at most 8; each rule string at most 512 characters; the list is the engine's `permission_suggestions` verbatim within those bounds, or absent) |
+
+The child's snapshot line gains `capabilities`, `mode` and `catalog` (the latest of each).
+
+**`POST /requests/<request>/decision`** (M3) admits `updatedPermissions?:
+PermissionUpdate[]` (at most 8) on a permission; refuses it on a question (400). The
+decision the bridge hands the engine for a permission is `{behavior: "allow",
+updatedInput: <the request's input>, updatedPermissions?}` (the `updatedInput` from
+sminos 1.6.3).
+
+### The route table (owner: doperpowers `sminos/tests/routes-2.1.307.json`, loaded by `bridge-commands.tsx`; vendored to MAWS `apps/desk-hub/fake-machine/dx4/`)
+
+```ts
+Route = {class: Class, to?: string, reason?: string, forms?: Forms, outlives?: string, confirm?: true, enabled: boolean, measured: "M" | "I"}
+Class = "run" | "run-prompt" | "routed" | "follow" | "panel" | "local" | "drop"
+Forms = {args: "none" | "required" | "optional", pattern?: string /* a JS RegExp source matched whole against the trimmed args */, hint?: string}
+Entry = {name: string, bare: Route, withArgs?: Route}   // `withArgs` applies when the trimmed args are non-empty; else `bare`
+```
+
+A non-built-in (`source` ≠ `builtin`) has no entry: it is `run-prompt` (enabled from M1)
+unless it is listed under **plugin exceptions** or its `plugin` is `sminos` (`self`).
+The 2.1.307 table (the inventory's §7 as the spikes left it; `enabled` names the
+milestone that enables it; `—` means the same as the bare route):
+
+| name | bare | with args (`forms`) | to / outlives / reason / confirm | enabled |
+| --- | --- | --- | --- | --- |
+| `rename` | `bad-args` (*a name is needed*) | `run`, required | — | M0 |
+| `color` | `bad-args` | `run`, required, `^[a-z]+$` | — | M0 |
+| `reload-plugins` | `run` (the daemon confirms by effect) | `bad-args` | — | M0 |
+| `reload-skills` | `run` | `bad-args` | — | M0 |
+| `mcp` | `panel`, to `read mcp` | `run`, required, `^(enable\|disable\|reconnect) \S+$` | outlives *saved for this project on <machine>: `.claude.json`* | M0 |
+| `cd` | `bad-args` | `run`, required | the daemon checks the path against the project's known checkouts | M1 |
+| `goal` | `panel` (*the bare form opens a panel*) | `clear`: `run` (hint *a queued clear waits behind a running goal: Interrupt stops it*); otherwise `run-prompt` | — | M1 |
+| `plan` | `routed`, to the mode control (M3 runs it through the command path) | `run-prompt` | — | M1 (args), M3 (bare) |
+| `init`, `security-review`, `insights`, `team-onboarding` | `run-prompt` | `run-prompt` | — | M1 |
+| `fast` | `bad-args` | `run`, required, `^(on\|off)$` | *not settled: fast mode was disabled where it was measured* | disabled (I) |
+| `list-agents` | `run` (readback `text`; the item says *lists this machine's other Claude sessions too, outside this project*) | `bad-args` | — | M1 (spike 13) |
+| `subtask` | `bare: bad-args` | `run`, required (a background fork agent; its finish is a `<task-notification>` that starts a main turn, tracked as a workflow's is) | — | M4 (spike 13) |
+| `model`, `effort` | `routed`, to `model` | — | *use Model instead: /model saves a default for new sessions* | — |
+| `compact` | `routed`, to `compact` | — | — | — |
+| `btw` | `routed`, to `btw` | — | — | — |
+| `context`, `usage` | `routed`, to `read usage` (`usage`'s bare form is a panel) | — | — | — |
+| `fork` | `routed`, to the `fork` RPC | — | — | — |
+| `clear` | `follow` | `bad-args` | — | M4 |
+| `branch` | `follow` | `follow`, optional | — | M4 |
+| `resume` | `panel` (the picker) | `follow`, required (a session id) | — | M4 (args) |
+| `background` | `follow`, confirm, under §8.3's condition | `bad-args` | the confirm names the loss (§8.3) | M4 |
+| `exit` | `run`, confirm | `bad-args` | pending fork F6; the confirm names the shells and monitors it kills | disabled |
+| `config` | `panel` | `drop` (*saves a default on <machine>; terminal only*, F1) | — | — |
+| `autocompact` | `panel` | `drop` (F1) | — | — |
+| `output-style` | `panel` | `drop` (F1) | — | — |
+| `add-dir` | `panel` (it always confirms) | `panel`, to *a request's suggestion* | — | — |
+| `permissions`, `hooks` | `panel`, to `read settings` | — | — | — |
+| `skills` | `panel`, to `read catalog` | — | — | — |
+| `status` | `panel`, to `read status` | — | — | — |
+| `tasks` | `panel`, to *the Jobs tab* | — | — | — |
+| `memory`, `sandbox`, `workflows`, `plugin` | `panel` | — | — | — |
+| `rewind` | `panel` (the picker), to *M6 on a `--bg` seat* | — | — | — |
+| `copy`, `export`, `help` | `local` | `local` | — | — |
+| `recap` | `drop` (*it refuses any run a plugin starts*, S4) | — | — | — |
+| `agents` | `drop` (*removed by the engine*) | — | — | — |
+| `login`, `logout`, `setup-bedrock`, `setup-vertex`, `design-login`, `design-consent`, `design-revoke` | `drop` (*provider setup and sign-in: terminal*) | — | — | — |
+| `theme`, `tui`, `ide`, `mobile`, `terminal-setup`, `keybindings`, `statusline`, `stickers`, `focus`, `radio`, `powerup`, `passes`, `pro-trial-expired`, `release-notes`, `feedback`, `bug`, `heapdump` | `drop` (*the terminal's own*) | — | — | — |
+| `__remote-workflow`, `workflow-launch-exec` | `drop` (*server-launched only*) | — | — | — |
+| **plugin exceptions:** `diff` (plugin `cc-plugin-diff`) | `panel`, to *the Diff tab* | — | — | — |
+
+Any built-in name not in this table: `unknown-builtin`. The fixture carries each row's
+`measured` mark (`M` from the probe or the spikes, `I` otherwise) so a later probe moves
+rows by data.
+
+### DX4 (owner: MAWS `apps/desk-hub/src/protocol/session.ts`; producers: the plane and the fake machine)
+
+```ts
+SessionPresence = { record: JsonObject | null; bridge: boolean; capabilities?: Capabilities; mode?: { mode: string; at: number } };
+Capabilities = { sminos: string; protocol: number; engine: string; ops: string[]; reads: string[]; routes: { measured: string } };
+MachinePresence = { online; policy; checkouts; desk?: { sminos: string; rpcs: string[]; reads: string[] } };
+
+// subscription kinds (n = 1, 2, …), relayed unread:
+read:    { id: string; what: string; result?: JsonValue; error?: { code: 'no-bridge' | 'unsupported' | 'timeout' | 'busy' | 'failed'; message: string } }
+catalog: Catalog                                                            // M1; main subs only; also `snapshot.catalog?`
+// session-wide (sub and n null), relayed unread:
+op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
+// `end` reasons gain:
+end:     { reason: ... | 'continued'; to?: string; confirmed?: boolean }      // M4
+```
+`SUBSCRIPTION_KINDS` lists `read` and `catalog`; `SESSION_WIDE_KINDS` lists `op`. The
+hub checks an `op`'s and a `read`'s body only for being an object, as it does `compact`.
+The `machine` body's `desk` is admitted as `{sminos: string, rpcs: string[], reads:
+string[]}` and kept with the body the hub rebuilds.
+
+### DX3 and DX2 (owner: MAWS `apps/desk-hub/src/protocol/browser.ts`, `machine.ts`)
+
+```ts
+// browser → hub
+{ t: 'read'; sub: string; id: string; what: string; args?: JsonObject }       // id ≤ 64 chars, what /^[a-z-]{1,32}$/, args ≤ 4 KiB
+// hub → machine
+{ t: 'read'; project: string; session: string; agentId: string | null; sub: string; id: string; what: string; args?: JsonObject }
+// hub → machine, `welcome` gains (written in objects/machine.ts where the welcome is written)
+{ t: 'welcome'; ...; kinds?: string[] }                                       // the session kinds this hub lists
+```
+A `read` on a sub the socket does not own is passed over quietly, as `diff` is; a
+malformed one is `bad-shape`.
+
+### DX6 (owner: MAWS `apps/desk-hub/src/protocol/rpc.ts`; executed by `sminos_rpc.py`)
+
+| `rpc` | `args` | result (`done`) | milestone |
+| --- | --- | --- | --- |
+| `command` | `{session, name, args?}` — `name` 1–128 characters without control characters, exactly as `$.command.list()` spells it; `args` text ≤ 4,096 | `{queued: true, route, id}`; the outcome follows as `op`; a bridge refusal is `failed` with the bridge's code as the message's first word and its reason after | M0 |
+| `compact` | gains `instructions?` (text ≤ 4,096) | unchanged | M2 |
+| `btw` | `{session, prompt}` (≤ 8,192) | `{started: true, id}`; the answer follows as `op` | M2 |
+| `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` and `mode?: PermissionMode`; at most one of the two, on an allow only | unchanged | M3 |
+| `stop-agent` | `{session, agentId}` (`[A-Za-z0-9_-]{1,128}`, an id or a name) | `{agentId}` | M4 |
+| `tell` | `{session, agentId, text}` | `{sent: true}` | M4 |
+| `fork` | `{session, brief?, worktree?, model?, effort?}` | `{session, alias}` | M4 |
+| `attach` | `{session, name, type, bytes}` (base64; the RPC's 1 MiB bound; `name` `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`) | `{path}` (relative to the working directory) | M5 |
+
+New error codes: `unknown-agent` (M4). Every new RPC is X class: `read-only` before
+execution; `unsupported` without a bridge (`fork` and `attach` need none: the daemon
+runs them). A `decide` with `scope` is refused `not-pending` (*the suggestions changed*)
+when the hash does not match the suggestion at the index in the request the bridge
+still holds, `bad-shape` for a destination outside the two or a `localSettings` the
+suggestion did not offer, `above-ceiling` for a `setMode` above the machine's.
+
+### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
+
+`continued {from, to, reason, confirmed}` (M4), written under the machine's writer when a
+bridge's first `session` start names `previous` (`confirmed: true`), or when the daemon
+links a `/background` from the `continued-in` record (`true`) or from the job's directory
+and time alone (`false`); the web's projection draws it as the old channel's end and the
+new session's start. `joined` gains `fork_of?: string` (M4).
+
+### The web (owner: MAWS `apps/desk-web/src/`)
+
+```ts
+// shell/session-plane.ts
+interface Subscription { read(what: string, args?: JsonObject): Promise<JsonValue>; /* rejects with the answer's error; 15 s */ }
+// conversation/capabilities.ts
+VERBS gains 'command' | 'status' (M0), 'btw' | 'usage' | 'mcp' | 'settings' (M2), 'scope' | 'mode' (M3), 'stop-agent' | 'tell' | 'fork' | 'follow' (M4), 'attach' | 'files' (M5)
+// each verb names what it needs: NEEDS: Record<Verb, {op?: string; rpc?: string; read?: string; sminos: string /* the version that added it */}>,
+// checked against presence.capabilities.{sminos,ops,reads} and machine.desk.{sminos,rpcs,reads}; a read kind is a capability like a verb;
+// the three fallbacks of §4 by (capabilities present?, desk present?, desk.sminos ≥ needed?)
+// project/conversation.ts
+ops: Record<string /* nonce */, { op: string; phase: 'start' | 'end'; body: JsonObject }>
+// state/catalog.ts (M1)
+useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | null }
+```
+
+### Dependencies
+
+- Engine 2.1.307 on both Macs for the measured table; a newer engine uses the table
+  with `routes.measured` behind it until a probe re-measures (the research session's).
+- sminos 1.6.3 (`bridge-plan-allow`) before M3: the plan allow's `updatedInput`.
+- MAWS's renderer units named in each milestone, imported where free of Electron and
+  Node, copied and adapted otherwise (the desk spec §2's rule).
+- The baseline table on #52 (the `desk-latency-baseline` branch) for every `B.<name>`.
+- The spikes file, `~/claude-code-bundle/2.1.300/notes/desk-mod-run-spikes.md`, for the
+  measured facts the design rests on (S1–S10); the handoff note, MAWS PR #79
+  `research/desk-remote/background-work-handoff.md`, for `/background`'s loss table.
+
+## Surprises & Discoveries
+
+- Observation: The inventory's §3.5 plan to carry capabilities "under the bridge field"
+  of presence cannot ship: the hub refuses a presence whose `bridge` is not a boolean,
+  and passes extra fields through; the `machine` body it rebuilds from the fields it
+  knows, so a daemon-side field there needs the new hub.
+  Evidence: `apps/desk-hub/src/objects/project.ts` `presence()`: `typeof body.bridge
+  !== 'boolean' … → bad-shape`; `machinePresence()` `putMachinePresence(…, {online,
+  policy, checkouts})`.
+- Observation: A session keeps the mod it loaded until a reload, so on every rollout the
+  machine's version and a live session's bridge version differ for a while; a fallback
+  reason keyed on the machine's version alone would send the owner to update a machine
+  already updated (the design review, 2026-10-22). The capability carries the bridge's
+  own version, and the reason tells a stale session from an older machine.
+  Evidence: `bridge.tsx` 46-48 (a module reloads on `/reload-plugins` or restart; the old
+  instance is fenced 409).
+- Observation: `/reload-plugins` from the desk reloads the bridge itself, so the module
+  that ran it never posts its `end`; the daemon confirms it by the bridge answering
+  again (the design review; S4's own run that never resolved).
+  Evidence: the probe's `Reloaded: 1 plugin` with one plugin loaded; the spikes file's
+  contradiction 11; DX5's nonce
+  fence.
+- Observation: The plane never POSTs the bridge's `/command`; it reads the child only
+  through `GET /events` and `GET /status` probes, and throws the status body away. The
+  `read` relay is a new path and must block off the uplink's thread as `diff` does.
+  Evidence: `sminos_plane.py` `Bridges.probe` keeps `answered` alone; `Plane.diff` runs
+  `working_diff` on a thread; `post_command` is `sminos_control.py`'s, called by the
+  daemon's RPCs and the CLI verbs only.
+- Observation: The child drops an op's nonce at the first `result`, and the daemon
+  learns a compaction's outcome from its requests reader, not from the plane: the
+  op-outcome pattern needs the child to keep `rpc_of` to the op's end and the reader to
+  follow the new events (the buildability review, 2026-10-22).
+  Evidence: `sminos_bridge.py` `_apply`: `rpc = self.rpc_of.pop(e.get("id"), None)` on
+  `result`; `sminos_requests.py` `WANTED = (b'"raised"', b'"settled"', b'"resync"',
+  b'"compact"')`; `sminos_rpc.py` `compact()`, `compacted()`, `restore_compacts()`,
+  `compact_id` on the claim.
+- Observation: The child's `POST /command` answer and its kept RPC answer copy `result`
+  and `error` alone, so a refusal `code` the mod returns never reached the daemon; M0
+  widens both.
+  Evidence: `sminos_bridge.py` `command()`: `for k in ("result", "error")`; `_apply`'s
+  `result` branch: `{k: e[k] for k in ("op", "ok", "result", "error") if k in e}`.
+- Observation: The child already emits a `command {id, op}` event for every op it relays,
+  so the mod's command lifecycle events are named `run`.
+  Evidence: `sminos_bridge.py` `command()`: `self.ingest([{"type": "command", "id": cid,
+  "op": body["op"], …}])`; DX5 Events, `command | M1 (the child's own)`.
+- Observation: The rows a command the bridge ran writes do reach the bridge's
+  `session.append` hook, `system` rows included, 5–22 ms after the promise settles;
+  `$.session.messages()` never shows the `system` ones (`/color`, `/rename`,
+  `/output-style`, `/goal clear`, the output of `/reload-*`). The inventory's §3.2 had
+  the hook's view as C and the probe's `messages()` reading as the fallback; the first is
+  now M and the second is wrong.
+  Evidence: S7.1's table (`stdout row kept, after settle: +5…+22 ms`; `In
+  $.session.messages(): never` for the `system` rows); S7.2's hook stream, which saw the
+  probe mod's own `/color green` rows.
+- Observation: MAWS's scope radio makes the session scope by copying a suggestion and
+  replacing its destination with `session`, so an index alone cannot say which scope
+  the person chose; the desk's `decide` carries the index, the suggestion's hash and the
+  destination (the buildability and design reviews, 2026-10-22).
+  Evidence: `src/renderer/src/request-card/scope.ts` `scopeOptions`: `updatedPermissions:
+  [first ? { ...first, destination: 'session' } : …]`.
+- Observation: `/background` carries a background shell with its pid but loses its exit
+  code, carries a subagent not in a long foreground command, loses monitors and stdio
+  MCP tasks (silently), and re-runs the turn in flight; a plain terminal exit kills
+  every shell and monitor. Nothing headless adopts a job's carried work.
+  Evidence: HN §1–§2, measured on 2.1.307 (runs A–H).
+- Observation: A `Workflow` tool call settles the moment the workflow starts, so "no
+  `Workflow` call the bridge saw is unfinished" was always true and guarded nothing; the
+  engine's own dialog counts running workflow agents, and a workflow's end is the
+  `<task-notification>` naming its task id (the research session's re-check,
+  2026-10-22).
+  Evidence: cli 2.1.307:793338, the tool's description: "this tool returns immediately
+  with a task ID, and a `<task-notification>` arrives when the workflow completes";
+  cli 2.1.307:239626 `Bo.count === 0 && xo.running === 0` with `xo` the dialog's
+  `workflowAgents`. Whether a workflow agent's own calls reach `tool.call` hooks is
+  unmeasured, and nothing here depends on it now.
+- Observation: An allow's `setMode` writes no `permission-mode` row; the rows appear at
+  flush points, `auto` first showing at the next prompt and `acceptEdits` never getting
+  one. The transcript is no source for the mode; the bridge's own decisions and five
+  classic hooks' `permission_mode` are, and a Shift+Tab at the terminal is the one
+  change neither sees until the next of those hooks fires.
+  Evidence: S1, "Transcript rows lag"; spike 12 (`desk-mod-run-spikes.md` §12,
+  2.1.307): `permission_mode` present on `UserPromptSubmit`, `PermissionRequest`,
+  `PostToolUse`, `PostToolBatch` and `Stop`, read as each fires (a mid-turn Shift+Tab
+  showed in the same turn's next `PostToolUse`); absent on `PreToolUse` (34 of 34; a
+  mod's `e` there is the `ToolCallEnvelope`) and `MessageDisplay`; a Shift+Tab fires no
+  hook (`ConfigChange` silent) and the mod API has no mode read. This replaces the
+  earlier reading from code (cli ~1084852, the classic base input).
+- Observation: `$.command.list()` is cheap enough to re-list every heartbeat — 1 ms for
+  92 entries in one sample — and the start-time list is incomplete: MCP prompts exist
+  only once their server connects, a mod's entries once its `register()` ran (from the
+  API; when each kind appears was not measured).
+  Evidence: probe run1 bus 0004 (`t0` 1792633725947, `t1` 1792633725948, 92 entries).
+- Observation: The MCP prompt listed as `probe:probe-prompt (MCP)` wrote its command
+  row as `/mcp__probe__probe-prompt`, and a command another plugin serves left
+  `<command-args>` empty: the name-and-args link holds for built-in `run` rows only.
+  Evidence: S5's table (the MCP prompt's row; `probe-reg beta`'s empty args).
+- Observation: The desk's own Interrupt does not set the Esc refusal, now measured: a
+  mod's `$.turn.abort({turnId})` 2 s into a turn ended it 0.24 s later and
+  `$.command.run` and `$.prompt.submit({asUser: true})` ran right after; an Esc keyed
+  into the same session's PTY set the refusal and a typed prompt cleared it. What §2
+  had from code is a fact.
+  Evidence: spike 11 (`desk-mod-run-spikes.md` §11, 2.1.307, isolated).
+- Observation: The two built-in rows the table had marked unmeasured open no panel:
+  `list-agents` resolves `{text}` with its listing in 24 ms, and the listing names the
+  machine's other Claude sessions as well as the subagents; `subtask <task>` resolves
+  `{}` in 0.32 s, starts a background fork agent (`$.agent.list()` type `fork`, named),
+  writes the row `⑂ forked <name> (<last 4 of id>)`, and finishes with a
+  `<task-notification>` that starts a main turn.
+  Evidence: spike 13 (`desk-mod-run-spikes.md` §13, 2.1.307, idle session).
+- Observation: `FIRST_WAIT_S` is 8 s, not 5; it is the CLI verbs' wait for a first
+  snapshot. The 5 s the brief and the inventory cite is the child's
+  `SMINOS_BRIDGE_READY_WAIT` (`_ready_wait()`), and the plane's own bound on a bridge
+  that sends no snapshot is `OPEN_WAIT`, 20 s.
+  Evidence: `sminos_control.py:39` `FIRST_WAIT_S = 8`; `sminos_bridge.py:130-135`;
+  `sminos_plane.py:178`.
+- Observation: The daemon's `compact` RPC sends `{"op": "compact"}` alone and `shape()`
+  has no `compact` branch, while the bridge's op and the CLI's `sminos compact` already
+  take `instructions`: M2's change is the daemon's and the hub type's.
+  Evidence: `sminos_rpc.py:592`, `:855-890`; `sminos_control.py:311-313`.
+- Observation: The bridge already calls `$.settings.read({source: 'user'})` (to find
+  the secrets guard) and `$.session.usage()` without `breakdown`; `$.command.list`,
+  `$.model.fork` and `$.config.list` appear nowhere in the mods, and `$.command.run` only
+  in the name mod's `/rename`.
+  Evidence: `bridge.tsx:1212`, `:1492`; `name.tsx:188`.
+- Observation: The sminos tests live under `sminos/tests/` (`bridge_order.py`,
+  `dx4-jobs.json`, `run-sminos-tests.sh`), not `tests/sminos/` as the inventory and the
+  desk spec's DX4 cite; `dx4-jobs.gen.py` and the fake machine's README still print the
+  old path.
+  Evidence: `ls /tmp/dp-main/sminos/tests`; `tests/` at origin/main holds `mods/` only.
+- Observation: The hub refuses an RPC whose name it does not list, so a new RPC needs the
+  hub before the web can send it; the daemon passes a frame it does not handle by;
+  `e2e:desk-web-hub` runs on the macOS lane only.
+  Evidence: `project.ts:1365` `no RPC ${name}`; `sminos_uplink.py:1302-1305`;
+  `.github/workflows/gate.yml` `LINUX_E2E: library artifacts available tools agents
+  desk-web`.
+- Observation: The spikes contradicted the inventory in ten places, each folded here: the
+  Esc refusal has no cure from a mod (S6); `/recap` refuses plugin-origin runs (S4); a
+  desk allow on ExitPlanMode did nothing for want of `updatedInput` (S1); an armed mode
+  may never find a request in auto or plan mode (S1); `messages()` misses `system` rows
+  (S7); no `@path` attachment for a mod's prompt (S9); `/goal <c>` starts a turn and a
+  queued clear cannot stop one (S4); every model-spawned agent is background on
+  2.1.307's defaults and a foreground stop reads as an interruption the parent redoes
+  (S2); a plugin cannot run a command it serves itself (S5); `/background` asks only for
+  an agent or a workflow, a shell carries over, and *Stay* resolves like success (S10).
+  Evidence: the spikes file, "What contradicts the inventory", 1–11.
+- Observation: The inventory's cites otherwise hold at both heads (MAWS `0ee14186a`
+  with #116 and #117; doperpowers `646cb02c`, sminos 1.6.2); two moved (`A7`'s
+  `sminos_plane.py:2124-2126` is `diffed`, the git work is `working_diff` at 2144 from
+  `Plane.diff` at 2548; `capabilities.ts` is 163 lines, the table 44-162), one is weak
+  (`E1`'s `sminos.py:2392` says only that the member mark carries across `/clear`), and
+  "the depth column is read-only" overstates: the Jobs tab has Stop.
+  Evidence: the citation check of 2026-10-22 (a subagent's read of every B/, S/, W/,
+  H/ cite; all 63 R/ paths exist).
+
+## Decision Log
+
+- Decision: Verification. One independent spec review of the design (a
+  general-purpose subagent, model fable, with this path and two sentences of context),
+  and the `doperpowers:adversarial-reviewer` agent's buildability review of the
+  execution section (more than one milestone), in the same round; findings weighed, the
+  surviving changes folded with a dated line here, the self-review re-run, stopping at
+  a round that changes nothing. Each milestone's branch, in each repository, gets
+  `doperpowers:review-code` at the rung its stakes set: M0 `high` (the foundation every
+  later milestone and both repositories consume), M1 `high` (arbitrary commands run on
+  the owner's machine from the web), M2 `medium`, M3 `high` (permission rules and modes
+  saved), M4 `high` (forks and following move sessions; three increments, each reviewed),
+  M5 `medium`, M6 as its own design says. The last milestone of the run executes the
+  acceptance section as written on both Macs.
+  Rationale: the stakes, not the size: every milestone widens what the hub's side can
+  make a machine do.
+  Date/Author: 2026-10-22, the desk orchestrator's spec session (b4948247).
+- Decision: The ten spikes, the handoff note and both reviews folded in one revision.
+  From the spikes: readback reads the `session.append` hook and links by the command
+  row's name and arguments (§6); the armed mode is dropped and a mode changes only on a
+  live request or by `/plan` (§7); a scoped allow and a plan's approval are as S1
+  measured, with sminos 1.6.3's `updatedInput` as M3's floor; `/background`'s condition
+  is a running agent or an unfinished workflow, and its lineage has three sources (§8);
+  the stop note tells the parent not to redo the task (§9); uploads are saved inside
+  the working directory and read by the model (§10); `recap` is dropped, `goal <c>` is
+  `run-prompt`, the Esc refusal has no cure. From the handoff note: `/background`'s
+  confirm and `/exit`'s name what is lost (§8.3, F6). From the buildability review: the
+  op outcome's plumbing spelled out (the child keeps the nonce to the end, the requests
+  reader follows the events, the claim carries `op_id`), the `code` carried through the
+  child, the mod's events named `run`, daemon capabilities in the machine presence, the
+  suggestion's scope sealed as index, hash and destination, the route table in full as
+  a checked-in fixture with `confirm` a flag, the read results typed (`files`, `mcp`'s
+  `disabled`, `Rule`), the MCP-list assertion moved to A18, *Clear and implement*
+  assigned to M4 (A29), M4 as three reviewed increments, `e2e:desk-web-hub` on the macOS
+  lane, `with-slot.sh` named as this host's convention. From the design review: the
+  capability carries the bridge's own version and the fallback tells a stale session
+  from an older machine (§4, A5); `/reload-plugins` is finished by the daemon by effect
+  (§2); desk commands run one at a time, and a foreign command row between makes a
+  readback `none` (§6); M0 enables the `mcp` forms so M2 needs M0 alone; `status` strips
+  a remote's userinfo, `files` and `.claude.json` named in §11; `attach.name` a checked
+  basename; catalog re-lists on any reload or mcp command row and on a changed server
+  set; `btw`'s text bounded. Not taken: the buildability review's metadata-read endpoint
+  on the child for M0's effect checks (S7 made the hook the readback's source) and the
+  design review's armed-mode taste fork (the armed mode is gone).
+  Rationale: the spikes replaced every gate with a measured fact, the handoff note
+  measured what a `/background` costs, and the reviews found premises in M0 the code
+  did not support and a fallback that would have misdirected the owner on every
+  rollout; all belong in the document before an executor reads it.
+  Date/Author: 2026-10-22, the spec session (b4948247), from 2-1-300-9a's spikes, MAWS
+  PR #79's handoff note, the adversarial reviewer's and the design reviewer's reports.
+- Decision: The research session's re-check of §14 folded, after the first merge
+  (MAWS #118, `ed06afbe2`). Fourteen departures hold; two change. (1) `/background`'s
+  workflow condition tracks the task id the `Workflow` tool returns at once, held as
+  running until its `<task-notification>` arrives in `session.append` with a terminal
+  status; the "no unfinished `Workflow` call" test is dropped, since the call settles
+  as the workflow starts and the test was always true. The "the terminal is asking"
+  fallback stays for a module that loaded after a workflow was launched. (2) The mode
+  is published from the bridge's own decisions the moment it hands one out, then from
+  the five classic hooks spike 12 measured to carry `permission_mode`
+  (`UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, `PostToolBatch`, `Stop`),
+  the four the bridge lacks added as pass-throughs, since `PermissionRequest` alone
+  goes stale for long stretches in auto mode; `PreToolUse` carries none and is not
+  used; the rows are not read (an allow's `setMode` writes none), the reading carries
+  its time and the chip is stamped *as of <time>*, and a Shift+Tab at the terminal —
+  which fires no hook, with no mode read to poll — is the labelled gap.
+  DX5 `mode` and `presence.mode` become `{mode, at}` (M3's shapes; M0's are untouched).
+  Also from the re-check: the catalog re-lists `$.command.list()` at every heartbeat and
+  compares fingerprints, in place of a trigger on `$.tool.list()`'s server set, which
+  would miss prompt-only servers, late mod registrations and skill changes (Q1); and
+  the readback's name-and-args link applies to built-in `run` rows alone — a
+  `run-prompt`'s outcome is its turn, a mod's command reads back by `text` — since an
+  MCP prompt's row carries another name and a mod's row empty args (the minor). Spike
+  11, measured after the merge, turns §2's "from code" on the desk's Interrupt into a
+  fact; A13 keeps checking the built path. Spike 12 replaces the "every classic hook
+  carries `permission_mode`" reading from code with the five hooks measured to carry it
+  and the two that do not. Spike 13 measures the two table rows that were marked
+  unmeasured: `list-agents` becomes `run` in M1 (readback `text`; it names sessions
+  outside this project, which the item says), `subtask <task>` becomes `run` in M4
+  beside fork, its finish notification tracked as a workflow's is.
+  Rejected: keeping the rows as the mode's fallback (S1 shows an allow's `setMode`
+  writes none, so the fallback would show a mode the engine left); reading the mode
+  from `PermissionRequest` alone (stale in auto mode); a `PreToolUse` pass-through
+  (its `e` carries no `permission_mode`, spike 12); the server-set trigger for the
+  catalog (misses three cases the heartbeat catches for 1 ms).
+  Rationale: two conditions in the design were vacuous or stale against the engine's
+  own behavior, measured or read from code; the re-check found them before M0 starts.
+  Date/Author: 2026-10-22, the spec session (b4948247), from 2-1-300-9a's re-check of
+  §14 and its answers to the design reviewer's three questions.
+
+## Outcomes & Retrospective
+
+Pending — written at finish.

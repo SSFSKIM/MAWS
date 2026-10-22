@@ -4,15 +4,16 @@
 //
 // Frame work. The window's renderer main thread is the one whose `blink.user_timing` marks bracket the gesture (the spec
 // marks its start and end with `performance.mark`). Frames are the intervals between consecutive `BeginFrame` events of
-// that renderer (its compositor's vsync-driven frames). A frame's work is the main thread's executing time inside it: the
-// union of its top-level tasks (`RunTask`, else `ThreadControllerImpl::RunTask`; nested and overlapping slices counted
-// once), clipped to the frame, so React, style, layout and paint inside those tasks all count, and time the thread waits
-// idle for the next frame does not. These are per-frame slices, not whole tasks: a task longer than a frame is split
-// across the frames it spans, so no frame reads more than its own interval, and a bound at or over the display's frame
-// interval can never be missed (design-scale.spec.ts judges its 10 ms rows only on a display at most 100 Hz). An active
-// frame is one in which the main thread handled input (an `EventDispatch` of a wheel or pointer event) or produced a
-// frame (style, layout, pre-paint, paint, layerize or commit); idle frames inside the window are kept in `all` but the
-// bound is judged on the active ones.
+// that renderer (its compositor's vsync-driven frames). A frame's work is the main thread's tasks that start in it, each
+// read whole: the union of the top-level tasks (`RunTask`, else `ThreadControllerImpl::RunTask`; nested and overlapping
+// slices counted once, tasks that only touch kept apart) taken as stretches of busy time, each stretch given in its whole
+// length to the frame it starts in (one begun before the first frame and running into it is the first frame's), so React,
+// style, layout and paint inside those tasks all count, and time the thread waits idle for the next frame does not.
+// Nothing is clipped at a frame's end: a task longer than a frame reads its whole length in its first frame, and the
+// frames it overruns read none of it, so a long task reads over a bound at any display rate. An active frame is one
+// whose tasks handled input (an `EventDispatch` of a wheel or pointer event) or produced a frame (style, layout,
+// pre-paint, paint, layerize or commit), anywhere in their length, in or out of the marked window; idle frames inside
+// the window are kept in `all` but the bound is judged on the active ones.
 //
 // Dropped frames, two separately labelled readings: the compositor's own (its `PipelineReporter` frames and their
 // `STATE_DROPPED` share, with the timeline's `DroppedFrame` instants beside it; null when the trace carries no reporter
@@ -68,18 +69,17 @@ const INPUT = /^(wheel|mousewheel|pointermove|pointerdown|pointerup|mousemove|mo
 
 const eventType = (e: TraceEvent) => ((e.args?.data as { type?: unknown } | undefined)?.type as string | undefined) ?? '';
 
-/** The union of [start, end) intervals, merged. */
+/** The union of [start, end) intervals, merged where they overlap; ones that only touch stay apart. */
 function union(intervals: [number, number][]): [number, number][] {
   const sorted = intervals.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
   const out: [number, number][] = [];
   for (const [a, b] of sorted) {
     const last = out.at(-1);
-    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    if (last && a < last[1]) last[1] = Math.max(last[1], b);
     else out.push([a, b]);
   }
   return out;
 }
-const overlap = (intervals: [number, number][], a: number, b: number) => intervals.reduce((sum, [x, y]) => sum + Math.max(0, Math.min(b, y) - Math.max(a, x)), 0);
 
 /** The frame work between two `performance.mark`s of the page (see the header); throws when the trace cannot say. */
 export function frameWork(events: TraceEvent[], startMark: string, endMark: string): FrameWork {
@@ -97,13 +97,23 @@ export function frameWork(events: TraceEvent[], startMark: string, endMark: stri
   const begins = events.filter((e) => e.pid === pid && e.name === 'BeginFrame' && e.ts >= t0 && e.ts <= t1).map((e) => e.ts).sort((a, b) => a - b);
   const bounds = [...new Set(begins)];
   if (bounds.length < 2) throw new Error(`the trace holds ${bounds.length} BeginFrame for the renderer in the window: no frame to measure`);
-  const signals = main
+  const signals = events
+    .filter((e) => e.pid === pid && e.tid === tid && e.ph === 'X' && typeof e.dur === 'number')
     .filter((e) => PRODUCES.has(e.name) || (e.name === 'EventDispatch' && INPUT.test(eventType(e))))
     .map((e) => [e.ts, e.ts + e.dur!] as [number, number]);
-  const frames = bounds.slice(0, -1).map((a, k) => {
-    const b = bounds[k + 1]!;
-    return { at: (a - t0) / 1000, ms: (b - a) / 1000, workMs: overlap(busy, a, b) / 1000, active: signals.some(([x, y]) => x < b && y > a) };
-  });
+  // each stretch of busy time goes whole to the frame it starts in (the first, when it began before it and runs into it),
+  // and makes that frame active by what it did anywhere in its length, even outside the marked window (signals are read
+  // from every complete slice of the thread); one that ends before the first frame or starts at or after the last frame's
+  // end belongs to no frame
+  const workUs = new Array<number>(bounds.length - 1).fill(0);
+  const active = new Array<boolean>(bounds.length - 1).fill(false);
+  for (const [x, y] of busy) {
+    if (y <= bounds[0]! || x >= bounds.at(-1)!) continue;
+    const k = Math.max(0, bounds.findLastIndex((b) => b <= x));
+    workUs[k] = workUs[k]! + y - x;
+    if (signals.some(([s, e]) => s < y && e > x)) active[k] = true;
+  }
+  const frames = bounds.slice(0, -1).map((a, k) => ({ at: (a - t0) / 1000, ms: (bounds[k + 1]! - a) / 1000, workMs: workUs[k]! / 1000, active: active[k]! }));
   const reporters = events.filter((e) => e.pid === pid && e.name === 'PipelineReporter' && e.ph === 'b' && e.ts >= t0 && e.ts <= t1);
   const state = (e: TraceEvent) => (e.args?.chrome_frame_reporter as { state?: unknown } | undefined)?.state;
   const droppedFrameEvents = events.filter((e) => e.pid === pid && e.name === 'DroppedFrame' && e.ts >= t0 && e.ts <= t1).length;

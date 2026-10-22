@@ -1,0 +1,407 @@
+{
+ "case": "L5",
+ "policy": "replace",
+ "checks": {
+  "a keeps 하": [
+   "하",
+   "하"
+  ],
+  "b gets a fresh ㅏ, no stray jamo": [
+   "ㅏ",
+   "ㅏ"
+  ]
+ },
+ "facts": {
+  "a": "하",
+  "b": "ㅏ",
+  "elements": 3,
+  "left": "200px",
+  "state": {
+   "surface": "main",
+   "selection": [],
+   "editingText": null,
+   "keyboard": "stage"
+  },
+  "firstKey": {
+   "key": "ㅎ",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "textAfter": ""
+  },
+  "pressToFirstKeyMs": 418.1,
+  "compositionStartText": "",
+  "focusChanges": [
+   "focusout stage @20.7",
+   "focusin textbox:a @21",
+   "focusout textbox:a @735.4",
+   "focusin stage @735.7",
+   "focusout stage @750.8",
+   "focusin textbox:b @751.1",
+   "focusout textbox:b @1508.7",
+   "focusin stage @1508.9"
+  ]
+ },
+ "probes": [
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "45983",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--ansi-keys",
+    "gk"
+   ],
+   "startedAt": 1792641850804,
+   "ms": 96,
+   "report": {
+    "presses": [
+     {
+      "flags": 0,
+      "unicode": null,
+      "keyCode": 5
+     },
+     {
+      "flags": 0,
+      "keyCode": 40,
+      "unicode": null
+     }
+    ],
+    "mode": "ansiKeys",
+    "units": 2,
+    "pid": 46017,
+    "chars": 2,
+    "layout": "com.apple.keylayout.2SetHangul",
+    "postedAt": 1792641850885,
+    "exitStatus": 0
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 3
+  },
+  {
+   "args": [
+    "--probe",
+    "keystroke",
+    "--user-pid",
+    "45983",
+    "--user-bounds",
+    "0,30,2560,1358",
+    "--ansi-keys",
+    "k"
+   ],
+   "startedAt": 1792641851544,
+   "ms": 130,
+   "report": {
+    "presses": [
+     {
+      "unicode": null,
+      "keyCode": 40,
+      "flags": 0
+     }
+    ],
+    "chars": 1,
+    "layout": "com.apple.keylayout.2SetHangul",
+    "mode": "ansiKeys",
+    "units": 1,
+    "pid": 46019,
+    "postedAt": 1792641851663,
+    "exitStatus": 0
+   },
+   "stderr": "",
+   "failure": null,
+   "traceFrom": 20
+  }
+ ],
+ "events": [
+  {
+   "t": 1.1,
+   "type": "pointerdown",
+   "target": "node:a",
+   "slide": {
+    "x": 261,
+    "y": 250
+   },
+   "defaultPrevented": true,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 20.7,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 21,
+   "type": "focusin",
+   "target": "textbox:a",
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": "Hello"
+  },
+  {
+   "t": 419.2,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "Hello",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 447,
+   "type": "compositionstart",
+   "target": "textbox:a",
+   "data": "",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 447.6,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "ㅎ",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 447.6,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 453,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "ㅎ",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 419.6,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㅎ",
+   "code": "KeyG",
+   "keyCode": 71,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 422.6,
+   "type": "keydown",
+   "target": "textbox:a",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 229,
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 458.1,
+   "type": "compositionupdate",
+   "target": "textbox:a",
+   "data": "하",
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 458.1,
+   "type": "beforeinput",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "ㅎ",
+   "defaultPrevented": false,
+   "textAfter": "ㅎ"
+  },
+  {
+   "t": 458.3,
+   "type": "input",
+   "target": "textbox:a",
+   "inputType": "insertCompositionText",
+   "data": "하",
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 422.9,
+   "type": "keyup",
+   "target": "textbox:a",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": true,
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 732.2,
+   "type": "pointerdown",
+   "target": "node:b",
+   "slide": {
+    "x": 1061,
+    "y": 250
+   },
+   "textBefore": "하",
+   "defaultPrevented": true,
+   "textAfter": "World"
+  },
+  {
+   "t": 734.2,
+   "type": "compositionend",
+   "target": "textbox:a",
+   "data": "하",
+   "textBefore": "하",
+   "defaultPrevented": false,
+   "textAfter": "하"
+  },
+  {
+   "t": 735.4,
+   "type": "focusout",
+   "target": "textbox:a",
+   "defaultPrevented": false
+  },
+  {
+   "t": 735.7,
+   "type": "focusin",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 750.8,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 751.1,
+   "type": "focusin",
+   "target": "textbox:b",
+   "textBefore": "World",
+   "defaultPrevented": false,
+   "textAfter": "World"
+  },
+  {
+   "t": 1196,
+   "type": "keydown",
+   "target": "textbox:b",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 229,
+   "isComposing": false,
+   "textBefore": "World",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 1208.4,
+   "type": "compositionstart",
+   "target": "textbox:b",
+   "data": "",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 1209.8,
+   "type": "compositionupdate",
+   "target": "textbox:b",
+   "data": "ㅏ",
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 1209.9,
+   "type": "beforeinput",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "ㅏ",
+   "isComposing": true,
+   "textBefore": "",
+   "defaultPrevented": false,
+   "textAfter": ""
+  },
+  {
+   "t": 1210.2,
+   "type": "input",
+   "target": "textbox:b",
+   "inputType": "insertCompositionText",
+   "data": "ㅏ",
+   "isComposing": true,
+   "textBefore": "ㅏ",
+   "defaultPrevented": false,
+   "textAfter": "ㅏ"
+  },
+  {
+   "t": 1196.3,
+   "type": "keyup",
+   "target": "textbox:b",
+   "key": "ㅏ",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": true,
+   "textBefore": "ㅏ",
+   "defaultPrevented": false,
+   "textAfter": "ㅏ"
+  },
+  {
+   "t": 1506.2,
+   "type": "pointerdown",
+   "target": "stage",
+   "slide": {
+    "x": 101,
+    "y": 1000
+   },
+   "textBefore": "ㅏ",
+   "defaultPrevented": true
+  },
+  {
+   "t": 1508,
+   "type": "compositionend",
+   "target": "textbox:b",
+   "data": "ㅏ",
+   "textBefore": "ㅏ",
+   "defaultPrevented": false,
+   "textAfter": "ㅏ"
+  },
+  {
+   "t": 1508.7,
+   "type": "focusout",
+   "target": "textbox:b",
+   "defaultPrevented": false
+  },
+  {
+   "t": 1508.9,
+   "type": "focusin",
+   "target": "stage",
+   "defaultPrevented": false
+  }
+ ]
+}
