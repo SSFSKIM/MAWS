@@ -1,0 +1,2629 @@
+{
+  "run": "2026-10-22T04:13:10.190Z",
+  "design": "benchDesignFiles(): E0’s 24-board mix with its card grids (src/artifacts/design/fixtures/bench.ts)",
+  "boards": [
+    {
+      "id": "b01",
+      "size": "phone",
+      "w": 390,
+      "h": 844,
+      "elements": 29
+    },
+    {
+      "id": "b02",
+      "size": "phone",
+      "w": 390,
+      "h": 844,
+      "elements": 29
+    },
+    {
+      "id": "b03",
+      "size": "phone",
+      "w": 390,
+      "h": 844,
+      "elements": 29
+    },
+    {
+      "id": "b04",
+      "size": "phone",
+      "w": 390,
+      "h": 844,
+      "elements": 29
+    },
+    {
+      "id": "b05",
+      "size": "phone",
+      "w": 390,
+      "h": 844,
+      "elements": 29
+    },
+    {
+      "id": "b06",
+      "size": "phone",
+      "w": 390,
+      "h": 844,
+      "elements": 29
+    },
+    {
+      "id": "b07",
+      "size": "tablet",
+      "w": 834,
+      "h": 1194,
+      "elements": 42
+    },
+    {
+      "id": "b08",
+      "size": "tablet",
+      "w": 834,
+      "h": 1194,
+      "elements": 42
+    },
+    {
+      "id": "b09",
+      "size": "tablet",
+      "w": 834,
+      "h": 1194,
+      "elements": 42
+    },
+    {
+      "id": "b10",
+      "size": "tablet",
+      "w": 834,
+      "h": 1194,
+      "elements": 42
+    },
+    {
+      "id": "b11",
+      "size": "tablet",
+      "w": 834,
+      "h": 1194,
+      "elements": 42
+    },
+    {
+      "id": "b12",
+      "size": "desktop",
+      "w": 1440,
+      "h": 1024,
+      "elements": 68
+    },
+    {
+      "id": "b13",
+      "size": "desktop",
+      "w": 1440,
+      "h": 1024,
+      "elements": 68
+    },
+    {
+      "id": "b14",
+      "size": "desktop",
+      "w": 1440,
+      "h": 1024,
+      "elements": 68
+    },
+    {
+      "id": "b15",
+      "size": "desktop",
+      "w": 1440,
+      "h": 1024,
+      "elements": 68
+    },
+    {
+      "id": "b16",
+      "size": "desktop",
+      "w": 1440,
+      "h": 1024,
+      "elements": 68
+    },
+    {
+      "id": "b17",
+      "size": "slide",
+      "w": 1920,
+      "h": 1080,
+      "elements": 85
+    },
+    {
+      "id": "b18",
+      "size": "slide",
+      "w": 1920,
+      "h": 1080,
+      "elements": 85
+    },
+    {
+      "id": "b19",
+      "size": "slide",
+      "w": 1920,
+      "h": 1080,
+      "elements": 85
+    },
+    {
+      "id": "b20",
+      "size": "slide",
+      "w": 1920,
+      "h": 1080,
+      "elements": 85
+    },
+    {
+      "id": "b21",
+      "size": "poster",
+      "w": 1080,
+      "h": 8192,
+      "elements": 182
+    },
+    {
+      "id": "b22",
+      "size": "poster",
+      "w": 1080,
+      "h": 8192,
+      "elements": 182
+    },
+    {
+      "id": "b23",
+      "size": "square",
+      "w": 4096,
+      "h": 4096,
+      "elements": 182
+    },
+    {
+      "id": "b24",
+      "size": "tall",
+      "w": 4096,
+      "h": 8192,
+      "elements": 182
+    }
+  ],
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "cores": 10,
+    "memoryGiB": 16,
+    "os": "darwin 27.0.0",
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "display": {
+      "hz": 60.000003814697266,
+      "scale": 2
+    },
+    "window": {
+      "x": 640,
+      "y": 299,
+      "width": 1600,
+      "height": 1000
+    },
+    "build": "0bac7a576670fbf8341d5bd5e0f9d424b68de983"
+  },
+  "loads": {
+    "start": 2.94,
+    "end": 4.85
+  },
+  "quiet": {
+    "rule": "the 1-minute load under 5 on two consecutive reads 30 s apart, waited for at most 180 s (gate-offload Decision Log 75, ci-kit's mac/settle)",
+    "quiet": true,
+    "waitedMs": 30002,
+    "budgetMs": 180000,
+    "startedAt": "2026-10-22T04:13:10.441Z",
+    "startLoad": 2.94,
+    "endLoad": 2.42,
+    "reads": [
+      {
+        "atMs": 0,
+        "load": 2.94
+      },
+      {
+        "atMs": 30002,
+        "load": 2.42
+      }
+    ],
+    "summary": "quiet after 30 s (loads 2.94, 2.42)"
+  },
+  "agentFirstRead": {
+    "wallMs": 57.92675000001327,
+    "loopMaxMs": 47.76029199999175,
+    "busyMs": 77.43745800000033,
+    "load": 2.16
+  },
+  "stressPublications": [
+    {
+      "gesture": "pan",
+      "trial": 1,
+      "board": "b01",
+      "window": {
+        "startedAt": 1792642714168,
+        "endedAt": 1792642724149,
+        "ms": 9981
+      },
+      "inside": {
+        "indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "count": 14,
+        "intervalsMs": [
+          700,
+          698,
+          702,
+          699,
+          702,
+          698,
+          701,
+          699,
+          701,
+          698,
+          703,
+          699,
+          699
+        ]
+      },
+      "publishes": 18,
+      "everyMs": 700,
+      "intervalsMs": [
+        699,
+        700,
+        698,
+        702,
+        699,
+        702,
+        698,
+        701,
+        699,
+        701,
+        698,
+        703,
+        699,
+        699,
+        701,
+        698,
+        700
+      ],
+      "requestedAt": [
+        1792642713843,
+        1792642714542,
+        1792642715242,
+        1792642715940,
+        1792642716642,
+        1792642717341,
+        1792642718043,
+        1792642718741,
+        1792642719442,
+        1792642720141,
+        1792642720842,
+        1792642721540,
+        1792642722243,
+        1792642722942,
+        1792642723641,
+        1792642724342,
+        1792642725040,
+        1792642725740
+      ],
+      "answeredAt": [
+        1792642714028,
+        1792642714676,
+        1792642715318,
+        1792642716012,
+        1792642716725,
+        1792642717406,
+        1792642718109,
+        1792642718821,
+        1792642719503,
+        1792642720223,
+        1792642720908,
+        1792642721611,
+        1792642722315,
+        1792642723010,
+        1792642723713,
+        1792642724397,
+        1792642725095,
+        1792642725796
+      ],
+      "lateMs": [
+        3,
+        2,
+        2,
+        0,
+        2,
+        1,
+        3,
+        1,
+        2,
+        1,
+        2,
+        0,
+        3,
+        2,
+        1,
+        2,
+        0,
+        0
+      ],
+      "hostStartApproxMs": [
+        76.7,
+        760.3,
+        1420.8,
+        2122.6,
+        2829.4,
+        3525.3,
+        4225.5,
+        4927.3,
+        5624.5,
+        6325.4,
+        7021.6,
+        7723.7,
+        8425.1,
+        9126.5,
+        9825.8,
+        10521.8,
+        11219.3,
+        11921.7
+      ],
+      "changed": [
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ]
+      ],
+      "busyMs": [
+        106.37,
+        109.86,
+        56.63,
+        44.39,
+        55.5,
+        35.7,
+        43.29,
+        52.51,
+        33.51,
+        57.71,
+        46.58,
+        48.23,
+        45.9,
+        44.17,
+        48.18,
+        30.21,
+        31.85,
+        30.29
+      ]
+    },
+    {
+      "gesture": "pan",
+      "trial": 2,
+      "board": "b01",
+      "window": {
+        "startedAt": 1792642728178,
+        "endedAt": 1792642738099,
+        "ms": 9921
+      },
+      "inside": {
+        "indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "count": 14,
+        "intervalsMs": [
+          700,
+          700,
+          699,
+          702,
+          700,
+          698,
+          700,
+          701,
+          701,
+          697,
+          702,
+          701,
+          698
+        ]
+      },
+      "publishes": 18,
+      "everyMs": 700,
+      "intervalsMs": [
+        698,
+        700,
+        700,
+        699,
+        702,
+        700,
+        698,
+        700,
+        701,
+        701,
+        697,
+        702,
+        701,
+        698,
+        701,
+        699,
+        700
+      ],
+      "requestedAt": [
+        1792642727851,
+        1792642728549,
+        1792642729249,
+        1792642729949,
+        1792642730648,
+        1792642731350,
+        1792642732050,
+        1792642732748,
+        1792642733448,
+        1792642734149,
+        1792642734850,
+        1792642735547,
+        1792642736249,
+        1792642736950,
+        1792642737648,
+        1792642738349,
+        1792642739048,
+        1792642739748
+      ],
+      "answeredAt": [
+        1792642727940,
+        1792642728617,
+        1792642729321,
+        1792642730022,
+        1792642730725,
+        1792642731418,
+        1792642732139,
+        1792642732820,
+        1792642733519,
+        1792642734230,
+        1792642734927,
+        1792642735617,
+        1792642736319,
+        1792642737023,
+        1792642737720,
+        1792642738406,
+        1792642739106,
+        1792642740081
+      ],
+      "lateMs": [
+        3,
+        1,
+        1,
+        1,
+        0,
+        2,
+        2,
+        0,
+        0,
+        1,
+        2,
+        -1,
+        1,
+        2,
+        0,
+        1,
+        0,
+        0
+      ],
+      "hostStartApproxMs": [
+        26.4,
+        728,
+        1424.4,
+        2124.5,
+        2827.5,
+        3520.6,
+        4230.2,
+        4920.6,
+        5612.2,
+        6332,
+        7028.5,
+        7722.9,
+        8422.1,
+        9126.3,
+        9823.5,
+        10523.1,
+        11221.6,
+        12198.6
+      ],
+      "changed": [
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ]
+      ],
+      "busyMs": [
+        60.64,
+        40.91,
+        48.99,
+        48.91,
+        48.92,
+        48.72,
+        55.82,
+        50.82,
+        53.86,
+        45.07,
+        51.24,
+        45.89,
+        48.28,
+        44.76,
+        50.01,
+        29.91,
+        31.42,
+        29.41
+      ]
+    },
+    {
+      "gesture": "pan",
+      "trial": 3,
+      "board": "b01",
+      "window": {
+        "startedAt": 1792642742183,
+        "endedAt": 1792642752249,
+        "ms": 10066
+      },
+      "inside": {
+        "indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "count": 14,
+        "intervalsMs": [
+          699,
+          699,
+          700,
+          701,
+          699,
+          700,
+          700,
+          699,
+          701,
+          701,
+          698,
+          702,
+          699
+        ]
+      },
+      "publishes": 19,
+      "everyMs": 700,
+      "intervalsMs": [
+        700,
+        699,
+        699,
+        700,
+        701,
+        699,
+        700,
+        700,
+        699,
+        701,
+        701,
+        698,
+        702,
+        699,
+        701,
+        701,
+        698,
+        851
+      ],
+      "requestedAt": [
+        1792642741850,
+        1792642742550,
+        1792642743249,
+        1792642743948,
+        1792642744648,
+        1792642745349,
+        1792642746048,
+        1792642746748,
+        1792642747448,
+        1792642748147,
+        1792642748848,
+        1792642749549,
+        1792642750247,
+        1792642750949,
+        1792642751648,
+        1792642752349,
+        1792642753050,
+        1792642753748,
+        1792642754599
+      ],
+      "answeredAt": [
+        1792642741940,
+        1792642742622,
+        1792642743322,
+        1792642744019,
+        1792642744724,
+        1792642745406,
+        1792642746121,
+        1792642746824,
+        1792642747519,
+        1792642748221,
+        1792642748923,
+        1792642749621,
+        1792642750320,
+        1792642751019,
+        1792642751722,
+        1792642752419,
+        1792642753105,
+        1792642753809,
+        1792642754656
+      ],
+      "lateMs": [
+        2,
+        2,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        -1,
+        0,
+        1,
+        -1,
+        1,
+        0,
+        1,
+        2,
+        0,
+        151
+      ],
+      "hostStartApproxMs": [
+        28.2,
+        727.1,
+        1425.3,
+        2120.8,
+        2825.5,
+        3522.7,
+        4226.7,
+        4925,
+        5621.5,
+        6325.6,
+        7027.5,
+        7728.1,
+        8423.3,
+        9126.5,
+        9825.8,
+        10528.5,
+        11223.4,
+        11924.4,
+        12775.2
+      ],
+      "changed": [
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ]
+      ],
+      "busyMs": [
+        59.86,
+        46.87,
+        49.36,
+        47.18,
+        50.83,
+        32.28,
+        47.82,
+        51.43,
+        51.19,
+        48.89,
+        47.96,
+        46.19,
+        48.53,
+        45.67,
+        48.22,
+        38.56,
+        30.58,
+        32.59,
+        28.85
+      ]
+    },
+    {
+      "gesture": "zoom",
+      "trial": 1,
+      "board": "b01",
+      "window": {
+        "startedAt": 1792642756433,
+        "endedAt": 1792642769716,
+        "ms": 13283
+      },
+      "inside": {
+        "indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19
+        ],
+        "count": 19,
+        "intervalsMs": [
+          700,
+          699,
+          701,
+          700,
+          701,
+          699,
+          700,
+          699,
+          702,
+          700,
+          698,
+          700,
+          701,
+          701,
+          699,
+          701,
+          699,
+          701
+        ]
+      },
+      "publishes": 24,
+      "everyMs": 700,
+      "intervalsMs": [
+        699,
+        700,
+        699,
+        701,
+        700,
+        701,
+        699,
+        700,
+        699,
+        702,
+        700,
+        698,
+        700,
+        701,
+        701,
+        699,
+        701,
+        699,
+        701,
+        699,
+        701,
+        698,
+        1892
+      ],
+      "requestedAt": [
+        1792642756084,
+        1792642756783,
+        1792642757483,
+        1792642758182,
+        1792642758883,
+        1792642759583,
+        1792642760284,
+        1792642760983,
+        1792642761683,
+        1792642762382,
+        1792642763084,
+        1792642763784,
+        1792642764482,
+        1792642765182,
+        1792642765883,
+        1792642766584,
+        1792642767283,
+        1792642767984,
+        1792642768683,
+        1792642769384,
+        1792642770083,
+        1792642770784,
+        1792642771482,
+        1792642773374
+      ],
+      "answeredAt": [
+        1792642756156,
+        1792642756847,
+        1792642757551,
+        1792642758243,
+        1792642758954,
+        1792642759649,
+        1792642760345,
+        1792642761042,
+        1792642761748,
+        1792642762454,
+        1792642763151,
+        1792642763855,
+        1792642764552,
+        1792642765261,
+        1792642765955,
+        1792642766657,
+        1792642767355,
+        1792642768053,
+        1792642768753,
+        1792642769455,
+        1792642770134,
+        1792642770841,
+        1792642771537,
+        1792642773431
+      ],
+      "lateMs": [
+        2,
+        1,
+        1,
+        0,
+        1,
+        1,
+        2,
+        1,
+        1,
+        0,
+        2,
+        2,
+        0,
+        0,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        0,
+        1192
+      ],
+      "hostStartApproxMs": [
+        25,
+        721.6,
+        1424.1,
+        2123,
+        2826.1,
+        3525.6,
+        4223.4,
+        4914.9,
+        5623.3,
+        6327.6,
+        7025.3,
+        7728,
+        8420.6,
+        9126.5,
+        9824.1,
+        10526.3,
+        11224.1,
+        11923.9,
+        12622.3,
+        13326.9,
+        14020.4,
+        14725.3,
+        15423.3,
+        17311.8
+      ],
+      "changed": [
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ]
+      ],
+      "busyMs": [
+        44.98,
+        45.59,
+        46.21,
+        34.98,
+        42.87,
+        37.42,
+        39.71,
+        46.58,
+        43.44,
+        46.53,
+        44.88,
+        46.76,
+        45.46,
+        48.49,
+        49.04,
+        49.46,
+        48.84,
+        49,
+        48.81,
+        47.52,
+        27.65,
+        30.7,
+        27.7,
+        33.19
+      ]
+    },
+    {
+      "gesture": "zoom",
+      "trial": 2,
+      "board": "b01",
+      "window": {
+        "startedAt": 1792642775191,
+        "endedAt": 1792642788249,
+        "ms": 13058
+      },
+      "inside": {
+        "indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19
+        ],
+        "count": 19,
+        "intervalsMs": [
+          698,
+          702,
+          699,
+          700,
+          701,
+          701,
+          700,
+          701,
+          699,
+          697,
+          701,
+          702,
+          698,
+          700,
+          702,
+          698,
+          702,
+          700
+        ]
+      },
+      "publishes": 24,
+      "everyMs": 700,
+      "intervalsMs": [
+        698,
+        698,
+        702,
+        699,
+        700,
+        701,
+        701,
+        700,
+        701,
+        699,
+        697,
+        701,
+        702,
+        698,
+        700,
+        702,
+        698,
+        702,
+        700,
+        698,
+        700,
+        700,
+        1072
+      ],
+      "requestedAt": [
+        1792642774850,
+        1792642775548,
+        1792642776246,
+        1792642776948,
+        1792642777647,
+        1792642778347,
+        1792642779048,
+        1792642779749,
+        1792642780449,
+        1792642781150,
+        1792642781849,
+        1792642782546,
+        1792642783247,
+        1792642783949,
+        1792642784647,
+        1792642785347,
+        1792642786049,
+        1792642786747,
+        1792642787449,
+        1792642788149,
+        1792642788847,
+        1792642789547,
+        1792642790247,
+        1792642791319
+      ],
+      "answeredAt": [
+        1792642774940,
+        1792642775608,
+        1792642776320,
+        1792642777028,
+        1792642777718,
+        1792642778412,
+        1792642779117,
+        1792642779822,
+        1792642780514,
+        1792642781227,
+        1792642781915,
+        1792642782621,
+        1792642783321,
+        1792642784021,
+        1792642784716,
+        1792642785415,
+        1792642786124,
+        1792642786817,
+        1792642787520,
+        1792642788222,
+        1792642788903,
+        1792642789602,
+        1792642790302,
+        1792642791376
+      ],
+      "lateMs": [
+        3,
+        1,
+        -1,
+        1,
+        0,
+        0,
+        1,
+        2,
+        2,
+        3,
+        2,
+        -1,
+        0,
+        2,
+        0,
+        0,
+        2,
+        0,
+        2,
+        2,
+        0,
+        0,
+        0,
+        372
+      ],
+      "hostStartApproxMs": [
+        29.6,
+        722.2,
+        1426.7,
+        2127,
+        2821.7,
+        3515.4,
+        4224.8,
+        4927.5,
+        5621.6,
+        6334.9,
+        7021.3,
+        7727.4,
+        8420.7,
+        9126.9,
+        9822.3,
+        10522.3,
+        11226,
+        11925.9,
+        12627.7,
+        13325.4,
+        14019.2,
+        14719.4,
+        15420.7,
+        16493
+      ],
+      "changed": [
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ]
+      ],
+      "busyMs": [
+        59.38,
+        38.28,
+        46.27,
+        50.04,
+        49.91,
+        44.67,
+        44.49,
+        47.28,
+        45.06,
+        51.48,
+        46.19,
+        45.89,
+        53.03,
+        43.17,
+        42.7,
+        45.7,
+        50.75,
+        40.1,
+        45.07,
+        49.37,
+        32.81,
+        31.83,
+        29.36,
+        32.04
+      ]
+    },
+    {
+      "gesture": "zoom",
+      "trial": 3,
+      "board": "b01",
+      "window": {
+        "startedAt": 1792642793125,
+        "endedAt": 1792642806164,
+        "ms": 13039
+      },
+      "inside": {
+        "indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19
+        ],
+        "count": 19,
+        "intervalsMs": [
+          701,
+          699,
+          700,
+          700,
+          700,
+          701,
+          698,
+          702,
+          698,
+          701,
+          700,
+          699,
+          700,
+          700,
+          703,
+          699,
+          699,
+          699
+        ]
+      },
+      "publishes": 24,
+      "everyMs": 700,
+      "intervalsMs": [
+        699,
+        701,
+        699,
+        700,
+        700,
+        700,
+        701,
+        698,
+        702,
+        698,
+        701,
+        700,
+        699,
+        700,
+        700,
+        703,
+        699,
+        699,
+        699,
+        702,
+        698,
+        700,
+        1615
+      ],
+      "requestedAt": [
+        1792642792783,
+        1792642793482,
+        1792642794183,
+        1792642794882,
+        1792642795582,
+        1792642796282,
+        1792642796982,
+        1792642797683,
+        1792642798381,
+        1792642799083,
+        1792642799781,
+        1792642800482,
+        1792642801182,
+        1792642801881,
+        1792642802581,
+        1792642803281,
+        1792642803984,
+        1792642804683,
+        1792642805382,
+        1792642806081,
+        1792642806783,
+        1792642807481,
+        1792642808181,
+        1792642809796
+      ],
+      "answeredAt": [
+        1792642792867,
+        1792642793552,
+        1792642794252,
+        1792642794956,
+        1792642795662,
+        1792642796360,
+        1792642797051,
+        1792642797755,
+        1792642798452,
+        1792642799149,
+        1792642799851,
+        1792642800556,
+        1792642801267,
+        1792642801956,
+        1792642802654,
+        1792642803361,
+        1792642804055,
+        1792642804743,
+        1792642805454,
+        1792642806149,
+        1792642806839,
+        1792642807541,
+        1792642808237,
+        1792642809857
+      ],
+      "lateMs": [
+        2,
+        1,
+        2,
+        1,
+        1,
+        1,
+        1,
+        2,
+        0,
+        2,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        3,
+        2,
+        1,
+        0,
+        2,
+        0,
+        0,
+        915
+      ],
+      "hostStartApproxMs": [
+        23.3,
+        723.7,
+        1425.7,
+        2121.1,
+        2827.5,
+        3530.8,
+        4221.8,
+        4924.3,
+        5627.1,
+        6324,
+        7027.9,
+        7730.2,
+        8429.5,
+        9128.3,
+        9822,
+        10531.8,
+        11225.7,
+        11928.8,
+        12626.5,
+        13332.9,
+        14026.3,
+        14724.9,
+        15423.7,
+        17038.6
+      ],
+      "changed": [
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ],
+        [
+          "project/boards/b01.html"
+        ]
+      ],
+      "busyMs": [
+        58.78,
+        47.76,
+        45.23,
+        49.88,
+        54.27,
+        46.2,
+        49.95,
+        51.64,
+        45.02,
+        46.49,
+        44.4,
+        46.14,
+        59.81,
+        43.73,
+        51.57,
+        45.23,
+        50.03,
+        33.48,
+        47.78,
+        35.67,
+        27.75,
+        31.16,
+        29.34,
+        33.39
+      ]
+    }
+  ],
+  "failures": [],
+  "judging": {
+    "rule": "each row on its worst trial (DL39: the one-board publish row on the median of all 24 boards, its heaviest boards on their worst); a trial at a 1-minute load of 10 or more is not acceptance; an unreadable trial is never replaced by a number",
+    "loadLimit": 10
+  },
+  "rows": [
+    {
+      "row": "1 open cold",
+      "measure": "artifact-cold open in a ready app: the library row’s pointerdown to every board’s canvas laid out (drawnAt), identities, sizes and element counts verified",
+      "unit": "ms",
+      "bound": "≤ 1,000 ms (E0 123 ms world-only warm)",
+      "limit": 1000,
+      "judgedBy": "worst",
+      "value": 302,
+      "verdict": "met",
+      "loads": [
+        2.07,
+        2.44,
+        2.16
+      ],
+      "trials": [
+        {
+          "value": 302,
+          "load": 2.07,
+          "note": "24 boards drawn; constructor → drawn 296.6 ms; press → constructor 5.4 ms; the window’s first design open"
+        },
+        {
+          "value": 141.7,
+          "load": 2.44,
+          "note": "24 boards drawn; constructor → drawn 138.0 ms; press → constructor 3.7 ms"
+        },
+        {
+          "value": 122.6,
+          "load": 2.16,
+          "note": "24 boards drawn; constructor → drawn 119.9 ms; press → constructor 2.7 ms"
+        }
+      ]
+    },
+    {
+      "row": "1 open cold (constructor)",
+      "measure": "the same opens: the tab’s constructor (openedAt) to every canvas laid out",
+      "unit": "ms",
+      "bound": "recorded beside row 1",
+      "limit": null,
+      "judgedBy": "worst",
+      "value": 296.6,
+      "verdict": "recorded",
+      "loads": [
+        2.07,
+        2.44,
+        2.16
+      ],
+      "trials": [
+        {
+          "value": 296.6,
+          "load": 2.07
+        },
+        {
+          "value": 138,
+          "load": 2.44
+        },
+        {
+          "value": 119.9,
+          "load": 2.16
+        }
+      ]
+    },
+    {
+      "row": "5 publish one board (median of the bench)",
+      "measure": "each of the 24 bench boards published alone by the agent’s session through A’s real artifact_publish, once, in the bench’s order: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick), the median of the 24; every board’s figure kept",
+      "unit": "ms",
+      "bound": "≤ 65 ms, median of the bench boards (DL40)",
+      "limit": 65,
+      "judgedBy": "median",
+      "value": 59.283,
+      "verdict": "met",
+      "loads": [
+        2.16,
+        2.16,
+        2.16,
+        2.16,
+        2.16,
+        2.16,
+        2.16,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.38,
+        2.35,
+        2.35,
+        2.35
+      ],
+      "trials": [
+        {
+          "value": 37.452,
+          "load": 2.16,
+          "note": "b01 (phone, 390×844, 29 elements); longest loop gap 38.5 ms; wall 38.4 ms; changed project/boards/b01.html"
+        },
+        {
+          "value": 61.326,
+          "load": 2.16,
+          "note": "b02 (phone, 390×844, 29 elements); longest loop gap 60.9 ms; wall 60.8 ms; changed project/boards/b02.html"
+        },
+        {
+          "value": 56.682,
+          "load": 2.16,
+          "note": "b03 (phone, 390×844, 29 elements); longest loop gap 46.4 ms; wall 58.6 ms; changed project/boards/b03.html"
+        },
+        {
+          "value": 57.531,
+          "load": 2.16,
+          "note": "b04 (phone, 390×844, 29 elements); longest loop gap 45.3 ms; wall 58.3 ms; changed project/boards/b04.html"
+        },
+        {
+          "value": 41.12,
+          "load": 2.16,
+          "note": "b05 (phone, 390×844, 29 elements); longest loop gap 42.1 ms; wall 42.1 ms; changed project/boards/b05.html"
+        },
+        {
+          "value": 56.054,
+          "load": 2.16,
+          "note": "b06 (phone, 390×844, 29 elements); longest loop gap 45.6 ms; wall 58.0 ms; changed project/boards/b06.html"
+        },
+        {
+          "value": 56.312,
+          "load": 2.16,
+          "note": "b07 (tablet, 834×1194, 42 elements); longest loop gap 45.0 ms; wall 58.3 ms; changed project/boards/b07.html"
+        },
+        {
+          "value": 43.119,
+          "load": 2.38,
+          "note": "b08 (tablet, 834×1194, 42 elements); longest loop gap 44.1 ms; wall 44.1 ms; changed project/boards/b08.html"
+        },
+        {
+          "value": 57.121,
+          "load": 2.38,
+          "note": "b09 (tablet, 834×1194, 42 elements); longest loop gap 58.1 ms; wall 58.1 ms; changed project/boards/b09.html"
+        },
+        {
+          "value": 38.208,
+          "load": 2.38,
+          "note": "b10 (tablet, 834×1194, 42 elements); longest loop gap 29.3 ms; wall 40.2 ms; changed project/boards/b10.html"
+        },
+        {
+          "value": 57.341,
+          "load": 2.38,
+          "note": "b11 (tablet, 834×1194, 42 elements); longest loop gap 47.0 ms; wall 59.3 ms; changed project/boards/b11.html"
+        },
+        {
+          "value": 59.475,
+          "load": 2.38,
+          "note": "b12 (desktop, 1440×1024, 68 elements); longest loop gap 60.5 ms; wall 60.4 ms; changed project/boards/b12.html"
+        },
+        {
+          "value": 62.211,
+          "load": 2.38,
+          "note": "b13 (desktop, 1440×1024, 68 elements); longest loop gap 63.2 ms; wall 63.2 ms; changed project/boards/b13.html"
+        },
+        {
+          "value": 61.62,
+          "load": 2.38,
+          "note": "b14 (desktop, 1440×1024, 68 elements); longest loop gap 62.6 ms; wall 62.6 ms; changed project/boards/b14.html"
+        },
+        {
+          "value": 60.559,
+          "load": 2.38,
+          "note": "b15 (desktop, 1440×1024, 68 elements); longest loop gap 44.7 ms; wall 61.4 ms; changed project/boards/b15.html"
+        },
+        {
+          "value": 59.091,
+          "load": 2.38,
+          "note": "b16 (desktop, 1440×1024, 68 elements); longest loop gap 44.6 ms; wall 61.1 ms; changed project/boards/b16.html"
+        },
+        {
+          "value": 64.878,
+          "load": 2.38,
+          "note": "b17 (slide, 1920×1080, 85 elements); longest loop gap 65.9 ms; wall 65.9 ms; changed project/boards/b17.html"
+        },
+        {
+          "value": 44.822,
+          "load": 2.38,
+          "note": "b18 (slide, 1920×1080, 85 elements); longest loop gap 33.9 ms; wall 46.8 ms; changed project/boards/b18.html"
+        },
+        {
+          "value": 61.967,
+          "load": 2.38,
+          "note": "b19 (slide, 1920×1080, 85 elements); longest loop gap 46.6 ms; wall 63.9 ms; changed project/boards/b19.html"
+        },
+        {
+          "value": 62.009,
+          "load": 2.38,
+          "note": "b20 (slide, 1920×1080, 85 elements); longest loop gap 46.3 ms; wall 64.0 ms; changed project/boards/b20.html"
+        },
+        {
+          "value": 76.764,
+          "load": 2.38,
+          "note": "b21 (poster, 1080×8192, 182 elements); longest loop gap 48.0 ms; wall 77.6 ms; changed project/boards/b21.html"
+        },
+        {
+          "value": 76.006,
+          "load": 2.35,
+          "note": "b22 (poster, 1080×8192, 182 elements); longest loop gap 48.8 ms; wall 78.0 ms; changed project/boards/b22.html"
+        },
+        {
+          "value": 71.631,
+          "load": 2.35,
+          "note": "b23 (square, 4096×4096, 182 elements); longest loop gap 72.6 ms; wall 72.6 ms; changed project/boards/b23.html"
+        },
+        {
+          "value": 77.232,
+          "load": 2.35,
+          "note": "b24 (tall, 4096×8192, 182 elements); longest loop gap 49.7 ms; wall 79.2 ms; changed project/boards/b24.html"
+        }
+      ]
+    },
+    {
+      "row": "5 publish one board (heaviest)",
+      "measure": "the heaviest bench boards (b21 1080×8192, b22 1080×8192, b23 4096×4096, b24 4096×8192, 182 elements) each published alone 3 times: the host loop’s busy time over the call, the worst",
+      "unit": "ms",
+      "bound": "≤ 100 ms, the heaviest board (DL39)",
+      "limit": 100,
+      "judgedBy": "worst",
+      "value": 83.114,
+      "verdict": "met",
+      "loads": [
+        2.35,
+        2.35,
+        2.35,
+        2.35,
+        2.35,
+        2.35,
+        2.35,
+        2.35,
+        2.35,
+        2.24,
+        2.24,
+        2.24
+      ],
+      "trials": [
+        {
+          "value": 78.253,
+          "load": 2.35,
+          "note": "b21 (poster, 1080×8192, 182 elements); longest loop gap 50.5 ms; wall 79.1 ms; changed project/boards/b21.html"
+        },
+        {
+          "value": 75.443,
+          "load": 2.35,
+          "note": "b21 (poster, 1080×8192, 182 elements); longest loop gap 49.0 ms; wall 77.4 ms; changed project/boards/b21.html"
+        },
+        {
+          "value": 77.947,
+          "load": 2.35,
+          "note": "b21 (poster, 1080×8192, 182 elements); longest loop gap 51.4 ms; wall 79.9 ms; changed project/boards/b21.html"
+        },
+        {
+          "value": 77.758,
+          "load": 2.35,
+          "note": "b22 (poster, 1080×8192, 182 elements); longest loop gap 78.8 ms; wall 78.7 ms; changed project/boards/b22.html"
+        },
+        {
+          "value": 78.811,
+          "load": 2.35,
+          "note": "b22 (poster, 1080×8192, 182 elements); longest loop gap 50.6 ms; wall 79.7 ms; changed project/boards/b22.html"
+        },
+        {
+          "value": 75.758,
+          "load": 2.35,
+          "note": "b22 (poster, 1080×8192, 182 elements); longest loop gap 75.8 ms; wall 75.7 ms; changed project/boards/b22.html"
+        },
+        {
+          "value": 83.114,
+          "load": 2.35,
+          "note": "b23 (square, 4096×4096, 182 elements); longest loop gap 56.8 ms; wall 85.1 ms; changed project/boards/b23.html"
+        },
+        {
+          "value": 76.695,
+          "load": 2.35,
+          "note": "b23 (square, 4096×4096, 182 elements); longest loop gap 49.3 ms; wall 77.6 ms; changed project/boards/b23.html"
+        },
+        {
+          "value": 76.084,
+          "load": 2.35,
+          "note": "b23 (square, 4096×4096, 182 elements); longest loop gap 49.1 ms; wall 78.1 ms; changed project/boards/b23.html"
+        },
+        {
+          "value": 76.523,
+          "load": 2.24,
+          "note": "b24 (tall, 4096×8192, 182 elements); longest loop gap 50.1 ms; wall 78.5 ms; changed project/boards/b24.html"
+        },
+        {
+          "value": 77.76,
+          "load": 2.24,
+          "note": "b24 (tall, 4096×8192, 182 elements); longest loop gap 49.9 ms; wall 79.7 ms; changed project/boards/b24.html"
+        },
+        {
+          "value": 63.782,
+          "load": 2.24,
+          "note": "b24 (tall, 4096×8192, 182 elements); longest loop gap 64.8 ms; wall 64.8 ms; changed project/boards/b24.html"
+        }
+      ]
+    },
+    {
+      "row": "5 publish whole design",
+      "measure": "the whole design in one publish: all 24 boards, each changed, and the manifest sent unchanged: the host loop’s busy time over the call",
+      "unit": "ms",
+      "bound": "≤ 300 ms",
+      "limit": 300,
+      "judgedBy": "worst",
+      "value": 254.257,
+      "verdict": "met",
+      "loads": [
+        2.24,
+        2.24,
+        2.24,
+        2.22,
+        2.22
+      ],
+      "trials": [
+        {
+          "value": 253.3,
+          "load": 2.24,
+          "note": "longest loop gap 254.3 ms; wall 254.3 ms; 25 files sent (the manifest unchanged among them), 24 changed"
+        },
+        {
+          "value": 228.099,
+          "load": 2.24,
+          "note": "longest loop gap 118.6 ms; wall 230.1 ms; 25 files sent (the manifest unchanged among them), 24 changed"
+        },
+        {
+          "value": 254.257,
+          "load": 2.24,
+          "note": "longest loop gap 133.8 ms; wall 256.2 ms; 25 files sent (the manifest unchanged among them), 24 changed"
+        },
+        {
+          "value": 219.76,
+          "load": 2.22,
+          "note": "longest loop gap 115.0 ms; wall 221.7 ms; 25 files sent (the manifest unchanged among them), 24 changed"
+        },
+        {
+          "value": 214.148,
+          "load": 2.22,
+          "note": "longest loop gap 117.5 ms; wall 216.1 ms; 25 files sent (the manifest unchanged among them), 24 changed"
+        }
+      ]
+    },
+    {
+      "row": "2 pan frame work p95",
+      "measure": "a pan at 25 % by 240 real wheel events: main-thread work per frame (each top-level task whole in the renderer's BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads its whole length; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)",
+      "unit": "ms",
+      "bound": "≤ 10 ms of main-thread work per frame (DL40; not E0’s 0.4 ms callback CPU)",
+      "limit": 10,
+      "judgedBy": "worst",
+      "value": 4.804,
+      "verdict": "met",
+      "loads": [
+        2.81,
+        3.8,
+        3.28
+      ],
+      "trials": [
+        {
+          "value": 4.767,
+          "load": 2.81,
+          "note": "605 active of 605 frames; all-frames p95 4.77 ms; active max 16.29 ms; 240 inputs dispatched; the view panned through (177, 301) → turned back at its far end (177, 301) at zoom 0.25; 3 boards in view at the start, 3 at the end"
+        },
+        {
+          "value": 4.804,
+          "load": 3.8,
+          "note": "605 active of 605 frames; all-frames p95 4.80 ms; active max 6.04 ms; 240 inputs dispatched; the view panned through (177, 301) → turned back at its far end (177, 301) at zoom 0.25; 3 boards in view at the start, 3 at the end"
+        },
+        {
+          "value": 4.636,
+          "load": 3.28,
+          "note": "586 active of 586 frames; all-frames p95 4.64 ms; active max 16.09 ms; 240 inputs dispatched; the view panned through (177, 301) → turned back at its far end (177, 301) at zoom 0.25; 3 boards in view at the start, 3 at the end"
+        }
+      ]
+    },
+    {
+      "row": "2 pan dropped (rAF proxy)",
+      "measure": "a pan at 25 % by 240 real wheel events: the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval",
+      "unit": "%",
+      "bound": "≤ 2 % (E0 0–0.4 %)",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        2.81,
+        3.8,
+        3.28
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 2.81,
+          "note": "0 of 604 at 16.70 ms; longest gap 18.7 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.8,
+          "note": "0 of 604 at 16.70 ms; longest gap 18.7 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.28,
+          "note": "0 of 586 at 16.70 ms; longest gap 18.7 ms"
+        }
+      ]
+    },
+    {
+      "row": "2 pan dropped (compositor)",
+      "measure": "a pan at 25 % by 240 real wheel events: the compositor’s PipelineReporter frames dropped, of its frames in the window",
+      "unit": "%",
+      "bound": "≤ 2 %",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        2.81,
+        3.8,
+        3.28
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 2.81,
+          "note": "0 of 609; 4 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.8,
+          "note": "0 of 606; 0 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.28,
+          "note": "0 of 587; 0 DroppedFrame events"
+        }
+      ]
+    },
+    {
+      "row": "2 zoom frame work p95",
+      "measure": "a pinch (⌃-wheel) zoom from fit in and back out about a desktop board, 240 real wheel events: main-thread work per frame (each top-level task whole in the renderer's BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads its whole length; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)",
+      "unit": "ms",
+      "bound": "≤ 10 ms of main-thread work per frame (DL40; not E0’s 0.4 ms callback CPU)",
+      "limit": 10,
+      "judgedBy": "worst",
+      "value": 6.957,
+      "verdict": "met",
+      "loads": [
+        3.31,
+        3.8,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 6.682,
+          "load": 3.31,
+          "note": "547 active of 548 frames; all-frames p95 6.68 ms; active max 16.39 ms; 240 inputs dispatched; zoom 0.0302 (fit) → 0.7710 → 0.0302 over 240 pinch steps"
+        },
+        {
+          "value": 6.957,
+          "load": 3.8,
+          "note": "546 active of 547 frames; all-frames p95 6.96 ms; active max 11.99 ms; 240 inputs dispatched; zoom 0.0302 (fit) → 0.7710 → 0.0302 over 240 pinch steps"
+        },
+        {
+          "value": 6.798,
+          "load": 3.39,
+          "note": "540 active of 540 frames; all-frames p95 6.80 ms; active max 15.86 ms; 240 inputs dispatched; zoom 0.0302 (fit) → 0.7710 → 0.0302 over 240 pinch steps"
+        }
+      ]
+    },
+    {
+      "row": "2 zoom dropped (rAF proxy)",
+      "measure": "a pinch (⌃-wheel) zoom from fit in and back out about a desktop board, 240 real wheel events: the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval",
+      "unit": "%",
+      "bound": "≤ 2 % (E0 0–0.4 %)",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        3.31,
+        3.8,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 3.31,
+          "note": "0 of 550 at 16.60 ms; longest gap 18.7 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.8,
+          "note": "0 of 545 at 16.70 ms; longest gap 18.6 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.39,
+          "note": "0 of 538 at 16.70 ms; longest gap 18.7 ms"
+        }
+      ]
+    },
+    {
+      "row": "2 zoom dropped (compositor)",
+      "measure": "a pinch (⌃-wheel) zoom from fit in and back out about a desktop board, 240 real wheel events: the compositor’s PipelineReporter frames dropped, of its frames in the window",
+      "unit": "%",
+      "bound": "≤ 2 %",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        3.31,
+        3.8,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 3.31,
+          "note": "0 of 559; 10 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.8,
+          "note": "0 of 560; 10 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.39,
+          "note": "0 of 546; 5 DroppedFrame events"
+        }
+      ]
+    },
+    {
+      "row": "2 stress pan frame work p95",
+      "measure": "a pan by real wheel events during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window): main-thread work per frame (each top-level task whole in the renderer's BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads its whole length; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)",
+      "unit": "ms",
+      "bound": "≤ 10 ms of main-thread work per frame (DL40; not E0’s 0.4 ms callback CPU)",
+      "limit": 10,
+      "judgedBy": "worst",
+      "value": 6.787,
+      "verdict": "met",
+      "loads": [
+        3.52,
+        3.52,
+        3.37
+      ],
+      "trials": [
+        {
+          "value": 6.467,
+          "load": 3.52,
+          "note": "604 active of 604 frames; all-frames p95 6.47 ms; active max 13.80 ms; 365 inputs dispatched; dragged b01 {\"x\":0,\"y\":0,\"w\":390,\"h\":844} → {\"x\":200,\"y\":90,\"w\":390,\"h\":844}; window 9981 ms; 14 of 18 publications asked and answered inside it (indexes 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14; every 699 ms, max 703); card #fff4d6 (drawn rgb(255, 244, 214))"
+        },
+        {
+          "value": 6.787,
+          "load": 3.52,
+          "note": "600 active of 600 frames; all-frames p95 6.79 ms; active max 11.45 ms; 365 inputs dispatched; dragged b01 {\"x\":200,\"y\":90,\"w\":390,\"h\":844} → {\"x\":380,\"y\":175,\"w\":390,\"h\":844}; window 9921 ms; 14 of 18 publications asked and answered inside it (indexes 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14; every 700 ms, max 702); card #fff4d6 (drawn rgb(255, 244, 214))"
+        },
+        {
+          "value": 6.711,
+          "load": 3.37,
+          "note": "609 active of 609 frames; all-frames p95 6.71 ms; active max 16.46 ms; 365 inputs dispatched; dragged b01 {\"x\":380,\"y\":175,\"w\":390,\"h\":844} → {\"x\":560,\"y\":255,\"w\":390,\"h\":844}; window 10066 ms; 14 of 19 publications asked and answered inside it (indexes 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14; every 700 ms, max 702); card #ffffff (drawn rgb(255, 255, 255))"
+        }
+      ]
+    },
+    {
+      "row": "2 stress pan dropped (rAF proxy)",
+      "measure": "a pan by real wheel events during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window): the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval",
+      "unit": "%",
+      "bound": "≤ 2 % (E0 0–0.4 %)",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        3.52,
+        3.52,
+        3.37
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 3.52,
+          "note": "0 of 606 at 16.60 ms; longest gap 18.8 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.52,
+          "note": "0 of 603 at 16.60 ms; longest gap 18.7 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.37,
+          "note": "0 of 609 at 16.70 ms; longest gap 18.7 ms"
+        }
+      ]
+    },
+    {
+      "row": "2 stress pan dropped (compositor)",
+      "measure": "a pan by real wheel events during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window): the compositor’s PipelineReporter frames dropped, of its frames in the window",
+      "unit": "%",
+      "bound": "≤ 2 %",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        3.52,
+        3.52,
+        3.37
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 3.52,
+          "note": "0 of 610; 4 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.52,
+          "note": "0 of 603; 2 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.37,
+          "note": "0 of 610; 1 DroppedFrame events"
+        }
+      ]
+    },
+    {
+      "row": "2 stress zoom frame work p95",
+      "measure": "a pinch (⌃-wheel) zoom in and out during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window): main-thread work per frame (each top-level task whole in the renderer's BeginFrame interval it starts in, never clipped at the frame's end, so a task longer than a frame reads its whole length; the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)",
+      "unit": "ms",
+      "bound": "≤ 10 ms of main-thread work per frame (DL40; not E0’s 0.4 ms callback CPU)",
+      "limit": 10,
+      "judgedBy": "worst",
+      "value": 7.413,
+      "verdict": "met",
+      "loads": [
+        3.51,
+        3.51,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 7.413,
+          "load": 3.51,
+          "note": "802 active of 802 frames; all-frames p95 7.41 ms; active max 17.64 ms; 485 inputs dispatched; dragged b01 {\"x\":560,\"y\":255,\"w\":390,\"h\":844} → {\"x\":740,\"y\":335,\"w\":390,\"h\":844}; window 13283 ms; 19 of 24 publications asked and answered inside it (indexes 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19; every 700 ms, max 702); card #ffffff (drawn rgb(255, 255, 255))"
+        },
+        {
+          "value": 6.731,
+          "load": 3.51,
+          "note": "789 active of 790 frames; all-frames p95 6.73 ms; active max 19.88 ms; 485 inputs dispatched; dragged b01 {\"x\":740,\"y\":335,\"w\":390,\"h\":844} → {\"x\":920,\"y\":415,\"w\":390,\"h\":844}; window 13058 ms; 19 of 24 publications asked and answered inside it (indexes 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19; every 700 ms, max 702); card #ffffff (drawn rgb(255, 255, 255))"
+        },
+        {
+          "value": 7.338,
+          "load": 3.39,
+          "note": "788 active of 788 frames; all-frames p95 7.34 ms; active max 18.87 ms; 485 inputs dispatched; dragged b01 {\"x\":920,\"y\":415,\"w\":390,\"h\":844} → {\"x\":1100,\"y\":495,\"w\":390,\"h\":844}; window 13039 ms; 19 of 24 publications asked and answered inside it (indexes 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19; every 700 ms, max 703); card #ffffff (drawn rgb(255, 255, 255))"
+        }
+      ]
+    },
+    {
+      "row": "2 stress zoom dropped (rAF proxy)",
+      "measure": "a pinch (⌃-wheel) zoom in and out during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window): the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval",
+      "unit": "%",
+      "bound": "≤ 2 % (E0 0–0.4 %)",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        3.51,
+        3.51,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 3.51,
+          "note": "0 of 801 at 16.70 ms; longest gap 18.7 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.51,
+          "note": "0 of 787 at 16.70 ms; longest gap 18.8 ms"
+        },
+        {
+          "value": 0,
+          "load": 3.39,
+          "note": "0 of 786 at 16.70 ms; longest gap 18.7 ms"
+        }
+      ]
+    },
+    {
+      "row": "2 stress zoom dropped (compositor)",
+      "measure": "a pinch (⌃-wheel) zoom in and out during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window): the compositor’s PipelineReporter frames dropped, of its frames in the window",
+      "unit": "%",
+      "bound": "≤ 2 %",
+      "limit": 2,
+      "judgedBy": "worst",
+      "value": 0,
+      "verdict": "met",
+      "loads": [
+        3.51,
+        3.51,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 0,
+          "load": 3.51,
+          "note": "0 of 805; 2 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.51,
+          "note": "0 of 791; 2 DroppedFrame events"
+        },
+        {
+          "value": 0,
+          "load": 3.39,
+          "note": "0 of 792; 2 DroppedFrame events"
+        }
+      ]
+    },
+    {
+      "row": "3 relayout",
+      "measure": "a Theme background change (the design’s overrides; the world’s scope verified to hold the requested --ds-color-bg): the wall time of the one animation-frame callback that ran all 24 canvases’ first layout pass after the scope stood (DevTools trace; its measure and write phases included; a synchronous callback, so no scheduling wait; its thread time noted, not judged)",
+      "unit": "ms",
+      "bound": "≤ 50 ms (E0 13.5 ms, a stand-in)",
+      "limit": 50,
+      "judgedBy": "worst",
+      "value": 7.28,
+      "verdict": "met",
+      "loads": [
+        3.39,
+        3.39,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 7.28,
+          "load": 3.39,
+          "note": "callback 10997: wall 7.28 ms, thread (CPU) 7.18 ms; 3.36 ms before the first board’s listener (the measure and write phases), listeners over 3.49 ms; scope → callback 216.41 ms; the frame’s style, layout and paint after it 2.43 ms; Enter → scope 5.10 ms; Enter → first fresh layout 224.90 ms, last 228.40 ms (listener spread 3.50 ms)"
+        },
+        {
+          "value": 5.723,
+          "load": 3.39,
+          "note": "callback 10999: wall 5.72 ms, thread (CPU) 5.70 ms; 2.60 ms before the first board’s listener (the measure and write phases), listeners over 2.84 ms; scope → callback 3.19 ms; the frame’s style, layout and paint after it 1.12 ms; Enter → scope 3.80 ms; Enter → first fresh layout 9.60 ms, last 12.40 ms (listener spread 2.80 ms)"
+        },
+        {
+          "value": 5.887,
+          "load": 3.39,
+          "note": "callback 11001: wall 5.89 ms, thread (CPU) 5.87 ms; 2.71 ms before the first board’s listener (the measure and write phases), listeners over 2.89 ms; scope → callback 8.30 ms; the frame’s style, layout and paint after it 1.01 ms; Enter → scope 3.20 ms; Enter → first fresh layout 14.20 ms, last 17.10 ms (listener spread 2.90 ms)"
+        }
+      ]
+    },
+    {
+      "row": "3 relayout (latency)",
+      "measure": "the same changes: the Enter to the last of 24 fresh layouts after the scope stood (an upper bound including the frame wait), recorded beside row 3",
+      "unit": "ms",
+      "bound": "recorded beside row 3",
+      "limit": null,
+      "judgedBy": "worst",
+      "value": 228.4,
+      "verdict": "recorded",
+      "loads": [
+        3.39,
+        3.39,
+        3.39
+      ],
+      "trials": [
+        {
+          "value": 228.4,
+          "load": 3.39,
+          "note": "Enter → scope 5.10 ms; Enter → first fresh layout 224.90 ms, last 228.40 ms (listener spread 3.50 ms)"
+        },
+        {
+          "value": 12.4,
+          "load": 3.39,
+          "note": "Enter → scope 3.80 ms; Enter → first fresh layout 9.60 ms, last 12.40 ms (listener spread 2.80 ms)"
+        },
+        {
+          "value": 17.1,
+          "load": 3.39,
+          "note": "Enter → scope 3.20 ms; Enter → first fresh layout 14.20 ms, last 17.10 ms (listener spread 2.90 ms)"
+        }
+      ]
+    },
+    {
+      "row": "6 pdf all boards",
+      "measure": "every board as one PDF through main’s export service (the menu’s route): the request to its answer with the file committed, 24 native pages checked",
+      "unit": "ms",
+      "bound": "< 55 s",
+      "limit": 55000,
+      "strict": true,
+      "judgedBy": "worst",
+      "value": 4392,
+      "verdict": "met",
+      "loads": [
+        5.28,
+        5.28,
+        5.1
+      ],
+      "trials": [
+        {
+          "value": 4392,
+          "load": 5.28,
+          "note": "24 pages at each board’s native size"
+        },
+        {
+          "value": 4184,
+          "load": 5.28,
+          "note": "24 pages at each board’s native size"
+        },
+        {
+          "value": 4151,
+          "load": 5.1,
+          "note": "24 pages at each board’s native size"
+        }
+      ]
+    },
+    {
+      "row": "4 renderer memory",
+      "measure": "the window’s renderer working set (its own pid in the metrics), ordinary, with the design open after every row above and every export window closed; the bound read as 500 × 10⁶ bytes",
+      "unit": "MiB",
+      "bound": "≤ 500 MB (476.8 MiB; E0 276)",
+      "limit": 476.837158203125,
+      "judgedBy": "worst",
+      "value": 232.969,
+      "verdict": "met",
+      "loads": [
+        4.85
+      ],
+      "trials": [
+        {
+          "value": 232.969,
+          "load": 4.85,
+          "note": "pid 55502, 238560 KiB; after a forced collection 232.8 MiB"
+        }
+      ]
+    },
+    {
+      "row": "4 renderer memory (after collection)",
+      "measure": "the same renderer after HeapProfiler.collectGarbage",
+      "unit": "MiB",
+      "bound": "recorded beside row 4",
+      "limit": null,
+      "judgedBy": "worst",
+      "value": 232.766,
+      "verdict": "recorded",
+      "loads": [
+        4.85
+      ],
+      "trials": [
+        {
+          "value": 232.766,
+          "load": 4.85,
+          "note": "pid 55502, 238352 KiB"
+        }
+      ]
+    }
+  ]
+}

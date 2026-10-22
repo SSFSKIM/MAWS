@@ -1,7 +1,8 @@
 // P3-E1 M6 (e2e/support/design-frames.ts): the design scale gate's frame readings on tiny synthetic traces. A frame's work
-// is the renderer main thread's executing time inside it (nested and overlapping tasks counted once, clipped to the
-// frame), not the frame's length; idle frames are kept but the bound reads the active ones; the compositor's drops are
-// reported only when the trace carries its reporter; the rAF proxy counts skipped frames against a calibrated interval.
+// is the renderer main thread's tasks that start in it, each read whole (nested and overlapping tasks counted once, never
+// clipped at the frame's end), not the frame's length; idle frames are kept but the bound reads the active ones; the
+// compositor's drops are reported only when the trace carries its reporter; the rAF proxy counts skipped frames against a
+// calibrated interval.
 import { describe, expect, it } from 'vitest';
 import { distribution, frameWork, inside, rafDrops, relayoutCallback, type TraceEvent } from '../../e2e/support/design-frames';
 
@@ -14,8 +15,8 @@ const task = (ts: number, dur: number, name = 'RunTask', tid = MAIN, pid = PID):
 const slice = (name: string, ts: number, dur: number, type?: string): TraceEvent => ({ name, cat: 'devtools.timeline', ph: 'X', ts, dur, pid: PID, tid: MAIN, ...(type && { args: { data: { type } } }) });
 const reporter = (ts: number, state: string): TraceEvent => ({ name: 'PipelineReporter', cat: 'benchmark', ph: 'b', ts, pid: PID, tid: COMPOSITOR, args: { chrome_frame_reporter: { state } } });
 
-/** Four 16 ms frames from t=0: a wheel frame with 3 ms of work (a nested RunTask inside), an idle one, a painting one with
- * 2 ms split by its boundary, and a frame where another renderer and another thread were busy. */
+/** Four 16 ms frames from t=0: a wheel frame with 3 ms of work (a nested RunTask inside), an idle one, a painting one whose
+ * 4 ms task runs 2 ms past its end, and a frame where another renderer and another thread were busy. */
 function trace(extra: TraceEvent[] = []): TraceEvent[] {
   return [
     mark('start', 0),
@@ -28,7 +29,7 @@ function trace(extra: TraceEvent[] = []): TraceEvent[] {
     task(1_500, 1_000), // nested in the one above: counted once
     slice('EventDispatch', 1_200, 2_000, 'wheel'),
     // frame 2 (16–32): nothing on the main thread
-    task(46_000, 4_000), // 2 ms in frame 3, 2 ms in frame 4
+    task(46_000, 4_000), // starts in frame 3 and runs 2 ms into frame 4: all 4 ms are frame 3's
     slice('Paint', 46_500, 1_000),
     task(50_000, 5_000, 'RunTask', 9), // another thread: not the main thread's work
     task(50_000, 5_000, 'RunTask', MAIN, 99), // another renderer
@@ -39,24 +40,95 @@ function trace(extra: TraceEvent[] = []): TraceEvent[] {
 }
 
 describe('the frame work in a marked window', () => {
-  it('reads each frame’s executing main-thread time, nested tasks once, clipped at the frame boundary', () => {
+  it('reads each frame’s main-thread tasks whole in the frame they start in, nested tasks once, never clipped at its end', () => {
     const work = frameWork(trace(), 'start', 'end');
     expect([work.pid, work.tid, work.windowMs]).toEqual([PID, MAIN, 64]);
     expect(work.frames.map((f) => [f.at, f.ms, f.workMs, f.active])).toEqual([
       [0, 16, 3, true],
       [16, 16, 0, false],
-      [32, 16, 2, true],
-      [48, 16, 2, false],
+      [32, 16, 4, true],
+      [48, 16, 0, false],
     ]);
-    expect(work.all).toMatchObject({ n: 4, p95: 3, max: 3 });
-    expect(work.active).toMatchObject({ n: 2, p50: 2, p95: 3 });
+    expect(work.all).toMatchObject({ n: 4, p95: 4, max: 4 });
+    expect(work.active).toMatchObject({ n: 2, p50: 3, p95: 4 });
     expect(work.inputs).toBe(1);
     expect(work.compositor).toBeNull(); // no reporter in the trace: not "no drops"
   });
 
   it('falls back to the thread controller’s task slices when the trace has no RunTask', () => {
     const events = trace().map((e) => (e.name === 'RunTask' ? { ...e, name: 'ThreadControllerImpl::RunTask' } : e));
-    expect(frameWork(events, 'start', 'end').frames.map((f) => f.workMs)).toEqual([3, 0, 2, 2]);
+    expect(frameWork(events, 'start', 'end').frames.map((f) => f.workMs)).toEqual([3, 0, 4, 0]);
+  });
+
+  // the defect the whole-task reading closes: a frame's slice could never exceed the frame, so on a display whose frame
+  // is at most the 10 ms bound a long task read under it
+  it.each([
+    ['60', 16_667],
+    ['99', 10_101],
+    ['100', 10_000],
+    ['120', 8_333],
+  ])('reads a 12 ms wheel task as 12 ms of one active frame on a %s Hz display, the frames it overruns idle', (_, every) => {
+    const events = [mark('start', 0), ...Array.from({ length: 6 }, (_, k) => begin(k * every)), task(1_000, 12_000), slice('EventDispatch', 1_100, 11_000, 'wheel'), mark('end', 5 * every)];
+    const work = frameWork(events, 'start', 'end');
+    expect(work.frames.map((f) => [f.workMs, f.active])).toEqual([[12, true], [0, false], [0, false], [0, false], [0, false]]);
+    expect(work.active).toMatchObject({ n: 1, p95: 12, max: 12 });
+  });
+
+  it('makes the frame a long task starts in active by what the task did, wherever in the task it did it', () => {
+    // a 40 ms task whose only frame production (its paint) lies two frames after the one it starts in
+    const events = [mark('start', 0), begin(0), begin(16_000), begin(32_000), begin(48_000), task(2_000, 40_000), slice('Paint', 39_000, 2_000), mark('end', 48_000)];
+    expect(frameWork(events, 'start', 'end').frames.map((f) => [f.workMs, f.active])).toEqual([[40, true], [0, false], [0, false]]);
+  });
+
+  it('reads a task’s activity over its whole length, past the end mark', () => {
+    // 8 ms frames; a 20 ms task at 9–29 ms whose only paint (26–27 ms) lies after the end mark at 25 ms
+    const events = [
+      mark('start', 0),
+      begin(0),
+      begin(8_000),
+      begin(16_000),
+      begin(24_000),
+      task(1_000, 1_000),
+      slice('EventDispatch', 1_100, 500, 'wheel'),
+      task(9_000, 20_000),
+      slice('Paint', 26_000, 1_000),
+      mark('end', 25_000),
+    ];
+    const work = frameWork(events, 'start', 'end');
+    expect(work.frames.map((f) => [f.workMs, f.active])).toEqual([[1, true], [20, true], [0, false]]);
+    expect(work.active).toMatchObject({ n: 2, p95: 20, max: 20 });
+  });
+
+  it('reads a task’s activity over its whole length, before the start mark', () => {
+    // a task begun at 1 ms, before the start mark at 5 ms, running into the first frame; its only wheel dispatch ends before the mark
+    const events = [mark('start', 5_000), task(1_000, 10_000), slice('EventDispatch', 2_000, 1_000, 'wheel'), begin(6_000), begin(14_000), begin(22_000), mark('end', 22_000)];
+    const work = frameWork(events, 'start', 'end');
+    expect(work.frames.map((f) => [f.workMs, f.active])).toEqual([[10, true], [0, false]]);
+    expect(work.inputs).toBe(0); // inputs stay those dispatched in the window
+  });
+
+  it('keeps a task that begins the instant the previous one ends apart from it', () => {
+    const events = [mark('start', 0), begin(0), begin(16_000), begin(32_000), task(10_000, 6_000), slice('Paint', 10_500, 500), task(16_000, 3_000), slice('Paint', 16_500, 500), mark('end', 32_000)];
+    expect(frameWork(events, 'start', 'end').frames.map((f) => [f.workMs, f.active])).toEqual([[6, true], [3, true]]);
+  });
+
+  it('gives a task begun before the first frame and running into it to that frame, and none to a task outside the frames', () => {
+    const events = [
+      mark('start', 0),
+      task(200, 1_000), // ends before the first frame begins
+      task(1_500, 3_000), // begins before the first frame, runs into it
+      slice('EventDispatch', 1_600, 2_000, 'wheel'),
+      begin(2_000),
+      begin(18_000),
+      begin(34_000),
+      task(35_000, 1_000), // after the last frame's start: no frame of the window holds it
+      slice('Paint', 35_100, 500),
+      mark('end', 40_000),
+    ];
+    expect(frameWork(events, 'start', 'end').frames.map((f) => [f.at, f.workMs, f.active])).toEqual([
+      [2, 3, true],
+      [18, 0, false],
+    ]);
   });
 
   it('reports the compositor’s frames and its dropped ones when its reporter is traced', () => {

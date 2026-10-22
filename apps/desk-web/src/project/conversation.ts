@@ -368,9 +368,9 @@ export class Conversation {
     for (const [key, { at, call }] of this.raisedIn) {
       if (!requests[key]) continue;
       this.raisedIn.delete(key);
-      latency.drawn('request.drawn', at);
+      latency.drawn('request.drawn', at, false, requests[key].request);
       const written = latency.callAt(call);
-      if (written !== undefined) latency.drawn('request.row', written, true);
+      if (written !== undefined) latency.drawn('request.row', written, true, requests[key].request);
     }
   }
 }

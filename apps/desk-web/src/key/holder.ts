@@ -14,6 +14,7 @@
 // The chain's order is the order IndexedDB applies them in.
 import { create } from 'zustand';
 import type { OrgKey } from 'desk-hub/protocol';
+import { latency } from '../latency/latency';
 import { holdKeyBytes, keyFingerprint } from './derive';
 import { idbKeyStore, loadOrgKey, type KeyStore } from './org-key';
 
@@ -37,6 +38,8 @@ export const useKeyHolder = create<KeyHolder>()(() => ({ state: 'loading', key: 
 let op = 0;
 /** Every device-key write, one after the other. */
 let writes: Promise<unknown> = Promise.resolve();
+/** The device's key has been timed from the navigation's start (`latency/latency.ts`'s cold load: the key's gate). */
+let keyTimed = false;
 
 /** Runs `write` after every write asked for before it; it settles as `write` does, and never holds the chain up. */
 function serially(write: () => Promise<void>): Promise<void> {
@@ -58,6 +61,9 @@ export async function loadDeviceKey(org: string, store: KeyStore = idbKeyStore()
   const fingerprint = key ? await keyFingerprint(key) : null;
   if (began !== op) return; // an unlock or a Lock began meanwhile: it decides
   useKeyHolder.setState(key ? { state: 'unlocked', key, kept: 'device', fingerprint } : { state: 'locked', key: null, kept: null, fingerprint: null });
+  // Nothing of a project is drawn before the key is held: on a cold load this is the gate (0 is the navigation's start).
+  if (key && !keyTimed) latency.drawn('app.key', 0);
+  keyTimed ||= key !== null;
 }
 
 /** Whether `key` is still the one this tab holds: false once a Lock (or another unlock) replaced it. */

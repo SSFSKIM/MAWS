@@ -3,7 +3,9 @@
 // deliveries, RPCs, the outbox, compactions, a command's op), and the socket that feeds them. The socket starts only once the browser's
 // record is read, so its first resume is after the last offset the record holds. What the web issues — a `human`, an
 // RPC — is sealed here with the org key (DX1, DX6) and never leaves unsealed. A session's message or question arriving
-// live is timed from its `ts` until it is verified and drawn (`latency/latency.ts`).
+// live is timed from its `ts` until it is verified and drawn (`latency/latency.ts`), and so are an RPC until its
+// result, the project from its start until its backlog is caught up and verified, and the socket from a drop, from the
+// tab shown again, or from the browser back online, until it is caught up and verified after the reconnect.
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   inputSha256,
@@ -26,7 +28,7 @@ import {
   type SessionPresence,
   type Settled,
 } from 'desk-hub/protocol';
-import { latency } from '../latency/latency';
+import { latency, RETURN_WINDOW_MS } from '../latency/latency';
 import type { LogRecord } from '../log/record';
 import { ProjectLog, type ProjectLogState } from '../log/project-log';
 import { HumanRefused, ProjectClient, type ConnectionStatus } from '../hub/project-client';
@@ -77,6 +79,18 @@ export class ProjectConnection {
   private head = 0;
   /** Live log events from a session, by offset, with their `ts`, until they verify and are drawn (`latency.ts`). */
   private readonly untold = new Map<number, number>();
+  /** When the project started (`latency.ts`'s project open), until its first catch-up. */
+  private startedAt: number | null = null;
+  /** When the welcomed socket dropped (`latency.ts`'s socket gap), until it is caught up again. */
+  private droppedAt: number | null = null;
+  /** The tab shown again or the browser back online (`latency.ts`): when, and whether a reconnect after it was welcomed. */
+  private returned: { kind: 'wake' | 'online'; at: number; welcomed: boolean } | null = null;
+  /**
+   * The offset the latest catch-up reached, while its backlog awaits verification: the catch-up's samples are drawn once
+   * no entry up to it is pending (a view draws only verified entries). A newer welcome, a drop or a stop clears it, so a
+   * catch-up of a superseded connection is never drawn; its starts stay for the next one.
+   */
+  private caughtUpTo: number | null = null;
 
   constructor(
     readonly project: string,
@@ -91,6 +105,9 @@ export class ProjectConnection {
       handlers: {
         held: () => this.log.held(),
         welcome: (frame) => {
+          this.caughtUpTo = null;
+          const back = this.returned;
+          if (back) this.returned = performance.now() - back.at <= RETURN_WINDOW_MS ? { ...back, welcomed: true } : null;
           const replaced = this.log.welcome(frame.head);
           this.head = frame.head;
           // Presence from before the drop may no longer hold; until the hub sends it again a session's group reads the
@@ -110,7 +127,11 @@ export class ProjectConnection {
             if (event.kind === 'human' && typeof nonce === 'string') this.conversation.outboxStored(nonce);
           }
         },
-        caughtUp: () => this.live.setState({ caughtUp: true }),
+        caughtUp: () => {
+          this.live.setState({ caughtUp: true });
+          this.caughtUpTo = this.log.held();
+          this.verifiedUp(this.log.store.getState());
+        },
         session: (message) => this.session(message),
         machines: (machines) => this.live.setState({ machines: Object.fromEntries(machines.map(({ machine, ...presence }) => [machine, presence])) }),
         pending: (requests) => {
@@ -127,11 +148,21 @@ export class ProjectConnection {
         decided: (decision) => this.conversation.decided(decision, this.log.offsetAt(decision.at)),
         refused: (entry) => this.record({ kind: 'refused', entry }),
         rejected: (entry) => this.record({ kind: 'rejected', entry }),
-        status: (status) => this.live.setState(status === 'connecting' ? { status, connected: false } : { status }),
+        status: (status) => {
+          if (status === 'connecting') this.caughtUpTo = null;
+          if (status === 'connecting' && this.live.getState().connected) this.droppedAt ??= performance.now();
+          this.live.setState(status === 'connecting' ? { status, connected: false } : { status });
+        },
       },
     });
-    this.client.onRpcState((frame) => this.conversation.rpcState(frame.nonce, frame.state, frame.outcome));
-    this.log.store.subscribe((state) => this.told(state));
+    this.client.onRpcState((frame) => {
+      latency.rpcState(frame.nonce, frame.state);
+      this.conversation.rpcState(frame.nonce, frame.state, frame.outcome);
+    });
+    this.log.store.subscribe((state) => {
+      this.told(state);
+      this.verifiedUp(state);
+    });
   }
 
   /** The session events awaited that the log now has a verdict on: each verified one is drawn at the next frame. */
@@ -152,13 +183,49 @@ export class ProjectConnection {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+    this.startedAt = performance.now();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.shown);
+      addEventListener('online', this.online);
+    }
     await this.log.load();
     if (!this.stopped) this.client.start();
   }
 
   stop(): void {
     this.stopped = true;
+    this.caughtUpTo = null;
     this.client.stop();
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.shown);
+      removeEventListener('online', this.online);
+    }
+  }
+
+  // Returns and catch-ups (`latency.ts`).
+
+  private readonly shown = () => {
+    if (document.visibilityState === 'visible') this.returned = { kind: 'wake', at: performance.now(), welcomed: false };
+  };
+
+  private readonly online = () => {
+    this.returned = { kind: 'online', at: performance.now(), welcomed: false };
+  };
+
+  /**
+   * The hub's backlog is in and every entry up to it verified: the project's first catch-up, a dropped socket's, and a
+   * return's, each drawn at the next frame.
+   */
+  private verifiedUp(state: ProjectLogState): void {
+    const upTo = this.caughtUpTo;
+    if (upTo === null || state.entries.some((e) => e.offset <= upTo && e.verdict === 'pending')) return;
+    this.caughtUpTo = null;
+    if (this.startedAt !== null) latency.drawn('project.caught-up', this.startedAt, false, this.project);
+    if (this.droppedAt !== null) latency.drawn('socket.gap', this.droppedAt, false, this.project);
+    if (this.returned?.welcomed) latency.drawn(this.returned.kind === 'wake' ? 'wake.caught-up' : 'online.caught-up', this.returned.at, false, this.project);
+    this.startedAt = null;
+    this.droppedAt = null;
+    if (this.returned?.welcomed) this.returned = null;
   }
 
   setKey(key: OrgKey | null): void {
@@ -193,9 +260,13 @@ export class ProjectConnection {
   async rpc<N extends RpcName>(member: string, machine: string, name: N, args: RpcArgs[N], request?: string): Promise<string> {
     const key = this.requireKey();
     const draft = { rpc: name, project: this.project, machine, member, created: new Date().toISOString(), nonce: newNonce(), args } as RpcDraft;
+    latency.rpcSent(draft.nonce, name);
     const rpc = await sealRpc(key, draft);
     this.conversation.rpcSent(rpc, request);
-    if (!this.client.sendRpc(rpc)) this.conversation.rpcNotConnected(rpc.nonce);
+    if (!this.client.sendRpc(rpc)) {
+      latency.rpcState(rpc.nonce, 'failed');
+      this.conversation.rpcNotConnected(rpc.nonce);
+    }
     return rpc.nonce;
   }
 

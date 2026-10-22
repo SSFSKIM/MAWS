@@ -1,12 +1,13 @@
-// The latency instrument (desk ticket #57): its ring and its percentiles, the readout's switch, a frame's batch, and the
-// hops one transcript records into it — its first rows, a chunk's stamp, a resume's gap.
+// The latency instrument (desk ticket #57): its ring and its percentiles, the readout's switch, a frame's batch, the raw
+// samples a measurement run reads, an RPC's time, and the hops one transcript records into it — its first rows, a
+// chunk's stamp, a resume's gap, an older page.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';
 import { Chain, SESSION } from '../../test/double/chain-rows';
 import { FakePlane, mount, settle } from '../../test/double/fake-plane';
-import { readRecording, scriptOf } from '../../test/double/session-stream';
+import { readRecording, rowsBefore, scriptOf } from '../../test/double/session-stream';
 import { DeskTranscript } from '../depth/source/desk-transcript';
-import { latency, LatencyRecorder, PENDING, percentile, RING, type LatencyPath } from './latency';
+import { latency, LatencyRecorder, LOG, PENDING, percentile, RING, type LatencyPath } from './latency';
 
 afterEach(() => vi.useRealTimers());
 
@@ -93,6 +94,52 @@ describe('the recorder', () => {
     expect(paths['owner.ack']?.n).toBe(1);
     expect(paths['owner.delivered']?.n).toBe(1);
     expect(paths['owner.row']?.n).toBe(1);
+    expect(recorder.samples().map((s) => [s.path, s.ref])).toEqual([
+      ['owner.ack', 'n1'],
+      ['owner.delivered', 'n1'],
+      ['owner.row', 'n1'],
+    ]);
+  });
+
+  it('keeps the last LOG samples raw, each with when it was taken and its ref, for a script to read from a time on', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date', 'performance'] });
+    const recorder = new LatencyRecorder(() => {});
+    vi.setSystemTime(1_000);
+    recorder.record('owner.ack', 12, 'n1');
+    vi.setSystemTime(2_000);
+    recorder.record('view.snapshot', 30);
+    recorder.drawn('request.drawn', performance.now() - 5, false, 'req-1');
+    vi.runAllTimers();
+    expect(recorder.samples()).toEqual([
+      { path: 'owner.ack', ms: 12, at: 1_000, ref: 'n1' },
+      { path: 'view.snapshot', ms: 30, at: 2_000 },
+      { path: 'request.drawn', ms: 5, at: 2_000, ref: 'req-1' },
+    ]);
+    expect(recorder.samples(1_000).map((s) => s.path)).toEqual(['view.snapshot', 'request.drawn']);
+    for (let i = 0; i < LOG + 5; i++) recorder.record('stream.chunk', i);
+    const kept = recorder.samples();
+    expect(kept).toHaveLength(LOG);
+    expect([kept[0].ms, kept.at(-1)!.ms]).toEqual([5, LOG + 4]);
+  });
+
+  it('times an RPC whose name has a path from its sending until its result, once, and not one that failed', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date', 'performance'] });
+    const recorder = new LatencyRecorder(() => {});
+    recorder.rpcSent('r1', 'interrupt');
+    recorder.rpcSent('r2', 'decide');
+    recorder.rpcSent('r3', 'model'); // no path for it: not timed
+    vi.advanceTimersByTime(40);
+    recorder.rpcSent('r1', 'interrupt'); // a retry keeps the first send's time
+    recorder.rpcState('r1', 'forwarded');
+    vi.advanceTimersByTime(10);
+    recorder.rpcState('r1', 'done');
+    recorder.rpcState('r1', 'done');
+    recorder.rpcState('r2', 'failed');
+    recorder.rpcState('r3', 'done');
+    const { paths } = recorder.report();
+    expect(paths['rpc.interrupt']).toMatchObject({ n: 1, max: 50 });
+    expect(paths['rpc.decide']).toBeUndefined();
+    expect(recorder.samples().map((s) => s.ref)).toEqual(['r1']);
   });
 
   it('times a command from its RPC to queued, to its op end (a mid-turn one kept apart), and to its readback drawn, each once', () => {
@@ -180,6 +227,25 @@ describe('one transcript’s hops', () => {
     plane.send('row', { row: c.answer('Blue.', progress), agentId: null });
     await settle();
     expect(samples('stream.row')).toBe(before + 1);
+    unmount();
+    controller.close();
+  });
+
+  it('times an older page from its asking until its rows are in', async () => {
+    const plane = new FakePlane('proj');
+    const store = createTranscriptStore();
+    const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId: null }, store, page: 3 });
+    controller.open();
+    const unmount = mount(controller, store);
+    const held = script.findLastIndex((item) => item.kind === 'row') + 1;
+    plane.current.snapshot(script, held, 3);
+    await settle();
+    const before = samples('view.older-page');
+    controller.loadOlder();
+    const asked = plane.current.asked.at(-1)!;
+    plane.send('rows', rowsBefore(script, held, asked.before, asked.limit));
+    expect(samples('view.older-page')).toBe(before + 1);
+    expect(latency.samples().at(-1)).toMatchObject({ path: 'view.older-page', ref: 'sub' }); // the fake plane's subscription id
     unmount();
     controller.close();
   });
