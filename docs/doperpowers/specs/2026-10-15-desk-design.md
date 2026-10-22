@@ -2697,6 +2697,12 @@ its summaries, proved on the local runtime by `test/session-plane.test.ts`, incl
 `bad-shape` (`dispatch`'s default), which is why the hub ships before the web asks and before any uplink answers.
 
 ### DX4 — The session-plane envelope (owner DC3; G1; the relay built at M3)
+
+2026-10-22: extended by the desk control surface (`docs/doperpowers/specs/2026-10-22-desk-control-surface-design.md`, its Interfaces' DX4, DX3 and DX2): the session
+presence's `capabilities` and `mode`, the machine presence's `desk`, the subscription kinds `read` and `catalog`,
+the session-wide `op`, the browser's `read` frame carried to the machine, and DX2 `welcome.kinds`. Where the two
+differ, that spec's shapes (written once, in `apps/desk-hub/src/protocol/`) hold.
+
 ```ts
 type Envelope<K, Session, Sub, N> = {
   project: string;            // .smns id
@@ -2965,6 +2971,10 @@ recording's `tasks/<taskId>.output`, and keeps answering `rows` after a replay e
 all of it (DC8).
 
 ### DX5 — Local bridge protocol (owner DC2; version 1 with its M2, M3 and M4 extensions and its final review, folded 2026-10-15)
+
+2026-10-22: from the desk control surface's M0 on, DX5 is kept in `docs/doperpowers/specs/2026-10-22-desk-control-surface-design.md`, its Interfaces'
+DX5 (the bridge's `capabilities`, the ops `read` and `command`, the `run` event, the route table): this copy
+stands as folded and is amended there, not here.
 
 Folded from DC2's plan (doperpowers `0afc902f`, as merged in PR #195,
 `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md`): version 1 as
@@ -3516,6 +3526,10 @@ a full backlog refuses too). The child's listen backlog is 128.
   ambiguous or rewritten; it stays on the bridge's stream (§9.7).
 
 ### DX6 — RPC shapes (owner DC3; G1; the hub's record built at M3)
+
+2026-10-22: extended by the desk control surface (`docs/doperpowers/specs/2026-10-22-desk-control-surface-design.md`, its Interfaces' DX6): the RPC
+`command {session, name, args?}`, answered at once `{queued, route, id}`, its outcome an `op` on the stream
+under the RPC's nonce.
 
 ```ts
 type Rpc<N> = {
