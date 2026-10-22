@@ -5,6 +5,9 @@
 //     the hub's, refusing what does not verify and reporting it up (`rejected`);
 //   - publishes its presence, each session's presence, pending requests, settlements, and delivery outcomes;
 //   - serves subscriptions (session.ts), and the depth's `rows`, `diff`, and (as DC8's producer) `output`;
+//   - as the desk control surface's M0 producer (`m0`), advertises its sessions' bridge capabilities and its own `desk`,
+//     answers `read status`, and runs `command` RPCs through the vendored route table, answered at once and reported
+//     as `op` messages (commands.ts), a stale session (`staleSessions`, `reload`) kept without capabilities;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
@@ -19,12 +22,13 @@ import { decodeEnrollmentCode, type Redeemed } from '../src/protocol/identity';
 import type { JsonObject } from '../src/protocol/json';
 import type { LogEvent, Vector } from '../src/protocol/log';
 import type { DownFrame, OrgFrame, Refusal, RejectionReason, UpFrame } from '../src/protocol/machine';
-import { RPC_FRESHNESS_MS, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
+import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
 import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from '../src/protocol/session';
 import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
-import { SessionDepth, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
+import { Commands, opMessages, refusalMessage, type CommandPlan, type CommandScript } from './commands';
+import { M0_SMINOS, producerAtLeast, SessionDepth, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -87,9 +91,16 @@ export type FakeMachineOptions = {
   diffBase?: (session: string) => string | undefined;
   /**
    * The daemon it stands for (`Producer`): `dc8` carries DX4's widened `subagents` body, `jobs` and `mcp`, and answers
-   * `output`; `dc3` (the default, as DC3 built it) sends each agent's id and meta alone and passes `output` by.
+   * `output`; `dc3` (the default, as DC3 built it) sends each agent's id and meta alone and passes `output` by; `m0`
+   * (the desk control surface's M0) adds each bridged session's `capabilities` to its presence and `desk` to the
+   * machine's, answers `read status`, and runs `command` RPCs.
    */
   producer?: Producer;
+  /** What each command prints, by name, in the place of `commands.ts`'s defaults (an `m0` producer). */
+  commands?: CommandScript;
+  /** Sessions whose mod loaded before the machine's update (an `m0` producer): bridged, with no capabilities, until
+   * `reload` brings their mod up to date. */
+  staleSessions?: string[];
   /**
    * The plugin its sessions' bridge and ask run in (doperpowers' sminos plugin design, §11): `doperpowers` (the default),
    * a machine not yet rolled; `sminos`, one on sminos 1.0.0, whose bridge appends its rows under origin `sminos` and
@@ -103,7 +114,9 @@ export type FakeMachineOptions = {
 export type RpcRecord = { nonce: string; rpc: RpcName; outcome: RpcOutcome | null; executed: boolean };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop']);
+const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop', 'command']);
+/** Whether text holds a control character, which a command's name may not (DX6 `command`). */
+const hasControl = (text: string) => [...text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 const fail = (code: RpcError['code'], message: string, extra: Partial<RpcError> = {}): RpcOutcome => ({ state: 'failed', error: { code, message, ...extra } });
 const done = (result: object): RpcOutcome => ({ state: 'done', result }) as RpcOutcome;
 
@@ -136,6 +149,9 @@ export class FakeMachine {
   private readonly settledRequests = new Map<string, Settled>();
   private readonly waiters = new Map<string, () => void>();
   private readonly compactsAtTurnEnd: Array<{ session: string; nonce: string }> = [];
+  /** The commands queued behind each session's running turn: each one's `op` end is sent at the turn's end (H-queue). */
+  private readonly commandsAtTurnEnd: Array<{ session: string; nonce: string; plan: Extract<CommandPlan, { ok: true }> }> = [];
+  private readonly commands: Commands;
   private readonly models = new Map<string, { model: string | null; effort: string | null }>();
   private have: ((frame: Extract<DownFrame, { t: 'have' }>) => void) | null = null;
   private crashArmed: ((rpc: Rpc) => boolean) | null = null;
@@ -156,9 +172,11 @@ export class FakeMachine {
       () => this.closed(),
       (error) => this.refused(error),
     );
+    this.commands = new Commands(options.commands);
     const where = { project: this.project, machine: this.name };
     for (const recording of options.recordings ?? []) {
       const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session), this.producer, this.plugin);
+      depth.stale = options.staleSessions?.includes(recording.session) === true;
       this.sessions.set(recording.session, depth);
       for (const step of recording.steps) this.timeline.push({ session: depth, step });
     }
@@ -254,7 +272,19 @@ export class FakeMachine {
   /** The machine's DX4 `machine` presence. */
   presence(): MachinePresence {
     const checkouts = this.options.checkouts ?? [...new Set([...this.sessions.values()].map((s) => s.cwd).filter((c): c is string => c !== null))].map((path) => ({ path, branch: 'main' }));
-    return { online: true, policy: { read_only: this.options.readOnly === true, ceiling: this.options.ceiling ?? 'default' }, checkouts };
+    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: M0_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
+    return { online: true, policy: { read_only: this.options.readOnly === true, ceiling: this.options.ceiling ?? 'default' }, checkouts, ...desk };
+  }
+
+  /**
+   * A session's mod reloaded (`/reload-plugins`, or a restart): a stale session's presence carries its capabilities
+   * from now on, and is published again. `stale: true` stages the opposite, a mod that loaded before the update.
+   */
+  reload(session: string, stale = false): void {
+    const depth = this.sessions.get(session);
+    if (!depth) return;
+    depth.stale = stale;
+    this.sendPresence(depth);
   }
 
   /** Drops the connection, as a daemon whose network went: the hub ends its subscriptions and marks its forwarded RPCs
@@ -418,7 +448,7 @@ export class FakeMachine {
   // The session plane.
 
   private sendPresence(depth: SessionDepth): void {
-    this.queue({ t: 'session', message: { project: this.project, machine: this.name, session: depth.id, kind: 'presence', sub: null, n: null, body: { record: depth.presence, bridge: depth.bridge } } });
+    this.queue({ t: 'session', message: { project: this.project, machine: this.name, session: depth.id, kind: 'presence', sub: null, n: null, body: depth.presenceBody() } });
   }
 
   private sendSessionWide(message: SessionMessage): void {
@@ -673,6 +703,8 @@ export class FakeMachine {
     if (rpc.project !== this.project) return answer(fail('unknown-project', `${this.name} serves no project ${rpc.project}`));
     if (!(await verifyRpc(this.key, rpc, this.project))) return answer(fail('bad-code', 'the RPC’s code does not verify'));
     if (rpc.machine !== this.name) return answer(fail('wrong-machine', `this is ${this.name}, not ${rpc.machine}`));
+    // A daemon older than the desk control surface's M0 knows no `command`.
+    if (rpc.rpc === 'command' && !producerAtLeast(this.producer, 'm0')) return answer(fail('bad-shape', 'no RPC "command"'));
     const malformed = argumentProblem(rpc);
     if (malformed) return answer(fail('bad-shape', malformed));
     const session = (rpc.args as { session?: string }).session;
@@ -701,6 +733,12 @@ export class FakeMachine {
       const depth = this.sessions.get(rpc.args.session)!;
       if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
       if (!depth.runningJob(rpc.args.taskId)) return answer(fail('unknown-task', `${rpc.args.taskId} is not a running job of ${rpc.args.session}`));
+    }
+    // A command needs a running session whose bridge takes it: a stale session's mod (loaded before the update) does not.
+    if (rpc.rpc === 'command') {
+      const depth = this.sessions.get(rpc.args.session)!;
+      if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
+      if (!depth.capabilities?.ops.includes('command')) return answer(fail('unsupported', "the session's bridge takes no commands: its plugin loaded before the update"));
     }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
@@ -833,7 +871,33 @@ export class FakeMachine {
         await this.flush();
         return this.traced(rpc, record, depth.id, { taskId: rpc.args.taskId });
       }
+      case 'command': {
+        // The bridge's route check, then the op answered at once; its start and end follow as `op` notices.
+        const depth = this.sessions.get(rpc.args.session)!;
+        const plan = this.commands.plan(rpc.args.name, rpc.args.args ?? '', depth.id, this.name);
+        if (!plan.ok) return fail('failed', refusalMessage(plan));
+        notices.push(() => this.runCommand(depth, rpc.nonce, plan));
+        return this.traced(rpc, record, depth.id, { queued: true, route: plan.route, id: plan.id });
+      }
     }
+  }
+
+  /** A queued command: its `op` start now, its end now or, mid-turn, at the turn's end (H-queue). */
+  private async runCommand(depth: SessionDepth, nonce: string, plan: Extract<CommandPlan, { ok: true }>): Promise<void> {
+    this.sendSessionWide(opMessages({ project: this.project, machine: this.name }, depth.id, nonce, plan).start);
+    if (depth.mainTurn !== null) {
+      this.commandsAtTurnEnd.push({ session: depth.id, nonce, plan });
+      await this.flush();
+      return;
+    }
+    await this.finishCommand(depth.id, nonce, plan);
+  }
+
+  private async finishCommand(session: string, nonce: string, plan: Extract<CommandPlan, { ok: true }>): Promise<void> {
+    this.sendSessionWide(opMessages({ project: this.project, machine: this.name }, session, nonce, plan).end);
+    const { title } = plan.outcome;
+    if (title !== undefined) await this.write(`rpc:${nonce}:titled`, `${this.name}/${session}`, { kind: 'titled', session, title });
+    await this.flush();
   }
 
   private async compact(session: string, nonce: string): Promise<void> {
@@ -849,6 +913,11 @@ export class FakeMachine {
     for (const held of this.compactsAtTurnEnd.filter((c) => c.session === session)) {
       this.compactsAtTurnEnd.splice(this.compactsAtTurnEnd.indexOf(held), 1);
       await this.compact(session, held.nonce);
+    }
+    // The commands the turn held run now, in the order they were queued.
+    for (const held of this.commandsAtTurnEnd.filter((c) => c.session === session)) {
+      this.commandsAtTurnEnd.splice(this.commandsAtTurnEnd.indexOf(held), 1);
+      await this.finishCommand(session, held.nonce, held.plan);
     }
   }
 
@@ -895,6 +964,9 @@ export class FakeMachine {
         return;
       case 'output':
         this.sessions.get(frame.session)?.output(frame.sub, frame.taskId, frame.tail);
+        return;
+      case 'read':
+        this.sessions.get(frame.session)?.read(frame.sub, frame.id, frame.what);
         return;
       default:
         return;
@@ -975,6 +1047,11 @@ function argumentProblem(rpc: Rpc): string | null {
       return needs(str('session') && isTaskId(a.taskId), '{session, taskId}, taskId as the engine spells it');
     case 'spawn':
       return needs(str('checkout') && str('brief') && ['worktree', 'model', 'effort', 'permission_mode'].every(optStr), '{checkout, brief, worktree?, model?, effort?, permission_mode?}');
+    case 'command': {
+      const name = a.name;
+      const nameOk = typeof name === 'string' && name.length >= 1 && name.length <= 128 && !hasControl(name);
+      return needs(str('session') && nameOk && optStr('args') && (a.args === undefined || (a.args as string).length <= 4096), '{session, name: 1 to 128 characters without a control character, args?: at most 4,096}');
+    }
     default:
       return `no RPC ${String((rpc as { rpc: unknown }).rpc)}`;
   }

@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { join, posix } from 'node:path';
 import { isOutputTail, isTaskId } from '../src/protocol/browser';
 import type { JsonObject } from '../src/protocol/json';
-import type { Job, SessionBodies, SessionMessage, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+import type { Capabilities, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
@@ -30,9 +30,31 @@ import type { Recording, Row, Step } from './recording';
 /**
  * Which daemon the fake machine stands for. `dc8` carries DX4's widened `subagents` body (status, evidence, the bridge's
  * spawn, the rows' outcome, file facts), `jobs` and `mcp`, and answers `output`; `dc3`, as DC3 built it, sends each
- * agent's id and meta alone and passes `output` by, as a daemon older than DC8 does.
+ * agent's id and meta alone and passes `output` by, as a daemon older than DC8 does. `m0` is a daemon and bridge at the
+ * desk control surface's M0 (sminos `M0_SMINOS`), everything `dc8` does and more: each bridged session's presence
+ * carries its `capabilities` (but a stale session's, whose mod loaded before the update), the machine presence its
+ * `desk`, a `read status` is answered on the sub, and a `command` RPC runs (`commands.ts`); an older producer sends
+ * neither field and passes `read` by.
  */
-export type Producer = 'dc3' | 'dc8';
+export type Producer = 'dc3' | 'dc8' | 'm0';
+
+const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2 };
+
+/** Whether `producer` does what `level` added. */
+export const producerAtLeast = (producer: Producer, level: Producer): boolean => LEVEL[producer] >= LEVEL[level];
+
+/** The sminos version of the desk control surface's M0 (one minor past 1.6.3, the spec's Plan of Work). */
+export const M0_SMINOS = '1.7.0';
+
+/** An M0 bridge's capabilities (DX5 `GET /status`), as the plane forwards them in presence. */
+export const M0_CAPABILITIES: Capabilities = {
+  sminos: M0_SMINOS,
+  protocol: 2,
+  engine: '2.1.307',
+  ops: ['ping', 'steer', 'interrupt', 'stop', 'model', 'compact', 'deliver', 'answer', 'read', 'command'],
+  reads: ['status'],
+  routes: { measured: '2.1.307' },
+};
 
 /** The per-uid temporary root the recordings' engine wrote task outputs under (macOS, uid 501): `<resolved tmp>/claude-<uid>`. */
 export const ENGINE_TMP = '/private/tmp/claude-501';
@@ -142,9 +164,58 @@ export class SessionDepth {
     return this.recording?.diff ?? '';
   }
 
+  /** A DC8 producer's or later: the widened `subagents` body, `jobs`, `mcp`, `output`. */
+  private get widens(): boolean {
+    return producerAtLeast(this.producer, 'dc8');
+  }
+
+  /**
+   * The bridge's capabilities as an M0 producer's plane forwards them: absent without a bridge, from an older producer,
+   * and while the session is `stale` (its mod loaded before its machine's update, until a reload).
+   */
+  get capabilities(): Capabilities | null {
+    return this.bridge && producerAtLeast(this.producer, 'm0') && !this.stale ? M0_CAPABILITIES : null;
+  }
+
+  /** The session's DX4 presence body: its record, whether it is bridged, and its bridge's capabilities when held. */
+  presenceBody(): SessionPresence {
+    const capabilities = this.capabilities;
+    return { record: this.record, bridge: this.bridge, ...(capabilities && { capabilities }) };
+  }
+
+  /** The session's `read status` answer (an M0 bridge's `$`); a suite may put another in its place. */
+  status: StatusRead = {
+    version: { version: '2.1.307', base: '2.1.307' },
+    model: null,
+    cwd: '',
+    root: '',
+    repo: { remote: 'https://github.com/SSFSKIM/MAWS.git', branch: 'main' },
+    surfaces: ['cli'],
+    override: null,
+  };
+
+  /**
+   * Answers a browser's `read` on the subscription (an M0 producer; an older one passes it by): `status` from the bridge
+   * on a main-scope subscription, every other kind and scope an `unsupported` error, as the plane answers them.
+   */
+  read(sub: string, id: string, what: string): void {
+    const s = this.subs.get(sub);
+    if (!s || !producerAtLeast(this.producer, 'm0')) return;
+    const answer = (body: Omit<ReadAnswer, 'id' | 'what'>) => this.deliver(sub, s, { kind: 'read', body: { id, what, ...body } });
+    if (!this.bridge || this.record === null) return answer({ error: { code: 'no-bridge', message: 'the session has no bridge, or has ended' } });
+    if (what !== 'status' || !this.capabilities) return answer({ error: { code: 'unsupported', message: `no read ${what}` } });
+    if (s.agentId !== null) return answer({ error: { code: 'unsupported', message: "status is the main transcript's" } });
+    const cwd = this.recording?.cwd ?? '';
+    const model = (this.rows.get('main') ?? []).findLast((r) => r.type === 'assistant')?.message as { model?: string } | undefined;
+    return answer({ result: { ...this.status, cwd: this.status.cwd || cwd, root: this.status.root || cwd, model: this.status.model ?? model?.model ?? null } as unknown as JsonObject });
+  }
+
+  /** The session's mod loaded before its machine's update: its presence carries no capabilities until a reload. */
+  stale = false;
+
   /** The session's subagent tree: each started subagent's `meta.json`, with its status as a DC8 producer. */
   subagents(): SubagentMeta[] {
-    if (this.producer === 'dc8') return this.current().subagents;
+    if (this.widens) return this.current().subagents;
     return [...this.tree].map(([agentId, meta]) => ({ agentId, meta }));
   }
 
@@ -186,7 +257,7 @@ export class SessionDepth {
    * subscriptions, each subscribed agent's own jobs and MCP names to that agent's.
    */
   private refresh(): void {
-    if (this.producer !== 'dc8') return;
+    if (!this.widens) return;
     const body = this.derived();
     const json = JSON.stringify(body);
     if (json !== this.bodyJson) {
@@ -256,7 +327,7 @@ export class SessionDepth {
       case 'agent': {
         this.joinTree(step.agentId);
         if (step.spawn) this.bridgeAgents.set(step.agentId, { agentId: step.agentId, ...step.spawn, running: true });
-        if (this.producer === 'dc8') this.refresh();
+        if (this.widens) this.refresh();
         else this.fanOut(null, { kind: 'subagents', body: { subagents: this.subagents() } }, false);
         return;
       }
@@ -270,7 +341,7 @@ export class SessionDepth {
         this.bridgeAgents.clear();
         for (const a of step.agents) {
           this.bridgeAgents.set(a.agentId, a);
-          if (this.producer === 'dc8') this.joinTree(a.agentId);
+          if (this.widens) this.joinTree(a.agentId);
         }
         this.refresh();
         return;
@@ -290,7 +361,7 @@ export class SessionDepth {
   /** A row reaches the disk: its transcript's subscribers receive it. */
   appendRow(agentId: string | null, row: Row): void {
     const key = agentId ?? 'main';
-    if (agentId !== null && this.producer === 'dc8') this.joinTree(agentId);
+    if (agentId !== null && this.widens) this.joinTree(agentId);
     let list = this.rows.get(key);
     if (!list) this.rows.set(key, (list = []));
     if (list.some((r) => r.uuid === row.uuid)) return;
@@ -425,8 +496,8 @@ export class SessionDepth {
     for (const m of streaming) s.marks.set(keyOf(m), m.upTo);
     // A DC8 producer's snapshot carries the subscribed loop's jobs and MCP names: the session's, or the agent's own.
     let widened: Pick<Body, 'jobs' | 'mcp'> | null = null;
-    if (this.producer === 'dc8' && agentId === null) widened = this.current();
-    else if (this.producer === 'dc8' && agentId !== null) {
+    if (this.widens && agentId === null) widened = this.current();
+    else if (this.widens && agentId !== null) {
       widened = this.agentBody(agentId);
       this.agentBodies.set(agentId, JSON.stringify(widened));
     }
@@ -434,7 +505,7 @@ export class SessionDepth {
       rows,
       more: rows.length < cut,
       subagents: agentId === null ? this.subagents() : [],
-      presence: { record: this.presence, bridge: this.bridge },
+      presence: this.presenceBody(),
       streaming,
       ...(agentId === null && { usage: this.bridge ? this.usage : null }),
       ...(widened && { jobs: widened.jobs, mcp: widened.mcp }),
@@ -486,7 +557,7 @@ export class SessionDepth {
    */
   output(sub: string, taskId: string, tail: number): void {
     const s = this.subs.get(sub);
-    if (!s || this.producer !== 'dc8' || !isTaskId(taskId) || !isOutputTail(tail)) return;
+    if (!s || !this.widens || !isTaskId(taskId) || !isOutputTail(tail)) return;
     const index = this.indexes.get(s.agentId ?? 'main')?.index ?? new LoopIndex();
     const { roots, locate } = this.tasks();
     this.deliver(sub, s, { kind: 'output', body: answerOutput({ taskId, tail }, index, this.id, roots, locate) });
