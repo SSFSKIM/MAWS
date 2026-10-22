@@ -6,8 +6,9 @@ import { cornerOrigin, windowCorner } from '../../e2e/support/window-origin';
 const shared = (name: string | undefined) => ({ CI_KIT_SHARED_DESKTOP: '1', RUNNER_NAME: name });
 
 describe('windowCorner', () => {
-  it('moves nothing without CI_KIT_SHARED_DESKTOP=1: the exclusive instance, any other runner, a desk', () => {
-    for (const env of [{}, { RUNNER_NAME: 'ci-kit-mac-mini' }, { RUNNER_NAME: 'ci-kit-mac-mini-2' }, { CI_KIT_SHARED_DESKTOP: '0', RUNNER_NAME: 'ci-kit-mac-mini-3' }]) {
+  // ci-kit's guest (its VM lane) has a desktop of its own and never sets the flag; its name ends in no instance number.
+  it('moves nothing without CI_KIT_SHARED_DESKTOP=1: the exclusive instance, ci-kit\'s guest, any other runner, a desk', () => {
+    for (const env of [{}, { RUNNER_NAME: 'ci-kit-mac-mini' }, { RUNNER_NAME: 'ci-kit-mac-mini-2' }, { CI_KIT_SHARED_DESKTOP: '0', RUNNER_NAME: 'ci-kit-mac-mini-3' }, { CI_KIT_VM_GUEST: '1', RUNNER_NAME: 'ci-kit-mac-mini-vm' }]) {
       expect(windowCorner(env), JSON.stringify(env)).toBeNull();
     }
   });

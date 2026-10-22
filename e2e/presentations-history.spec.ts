@@ -25,6 +25,12 @@ import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
 
+// The heavy deck's preview bound is presentations-scale's row 5, measured there settled and calibrated (MEASURED_E2E);
+// here, in a functional group a neighbour or ci-kit's guest may run beside, the median is printed and the bound asserted
+// only under MAWS_PRESENTATIONS_PERF=1, the presentations group's switch for its measured bounds, a run on purpose
+// (gate.yml's VM contract).
+const MEASURED = process.env.MAWS_PRESENTATIONS_PERF === '1';
+
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
   const result = (await page.evaluate(([n, i]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke(n as string, i), [name, input] as const)) as Result<T>;
@@ -454,5 +460,5 @@ test('the preview of a 3-month-old version of S7a’s heavy deck draws within 1,
   }
   const median = [...times].sort((a, b) => a - b)[1]!;
   console.log(`[deck history e2e] 3-month-old version of S7a's heavy deck (version ${old.versionId}): preview to drawn ms ${JSON.stringify(times.map((t) => Math.round(t)))}, median ${Math.round(median)} (load ${loadavg()[0]!.toFixed(1)})`);
-  expect(median).toBeLessThanOrEqual(1_000);
+  if (MEASURED) expect(median).toBeLessThanOrEqual(1_000);
 });

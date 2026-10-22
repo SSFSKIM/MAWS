@@ -136,6 +136,21 @@ test('a list of gates goes through as given, live groups with --live too', () =>
   assert.deepEqual(trailers(pooled.message), ['Gates: static,unit,probes', 'Runner: macos', 'Class1a: pool']);
 });
 
+// ci-kit's VM lane: --lane names where the run's MAC_VM_E2E groups go (gate-plan.mjs reads the `Lane:` trailer).
+test('--lane vm or vm-trial goes through as a Lane: trailer; any other value is refused before anything is pushed', () => {
+  const vm = gate(['--gates', 'e2e:document-app', '--runner', 'macos', '--lane', 'vm']);
+  assert.match(vm.stdout, /^ci-gate: [0-9a-f]{40} as ci\/gates-[0-9a-f]{8} \(Gates: e2e:document-app\) \(Runner: macos\) \(Lane: vm\)$/m);
+  assert.deepEqual(trailers(vm.message), ['Gates: e2e:document-app', 'Runner: macos', 'Lane: vm']);
+  assert.deepEqual(trailers(gate(['--gates', 'e2e:document-app', '--lane', 'vm-trial']).message), ['Gates: e2e:document-app', 'Lane: vm-trial']);
+  for (const value of ['host', 'VM', 'vm,vm-trial']) {
+    const refused = gate(['--gates', 'e2e:document-app', '--lane', value], { alerts: true });
+    assert.equal(refused.status, 2, value);
+    assert.equal(refused.stderr, `ci-gate: --lane is vm or vm-trial, not ${value}\n`);
+    assert.deepEqual(refused.calls, []);
+    assert.deepEqual(refused.refs, []);
+  }
+});
+
 // ci-kit's test-history spec, M4: --affected lists the change from the merge base with origin/master in the pushed
 // commit, which the plan (gate-plan.mjs, gate-affected.mjs) reads to narrow unit; the run's title says `affected`.
 const files = { 'src/shared/a.ts': 'export const a = 1;\n', 'src/shared/b.test.ts': 'test\n', 'src/shared/c.ts': 'export const c = 1;\n', 'src/shared/d.ts': 'export {};\n' };

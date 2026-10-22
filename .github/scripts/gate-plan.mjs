@@ -37,6 +37,15 @@
 // wait in ci-kit's job-started hook, counted against the job's timeout, which carries that bound on top of its own
 // minutes (`timeouts`, and each e2e entry's `timeout`): an exclusive job MAC_EXCLUSIVE_WAIT_MINUTES for the shared
 // instances to stop, a shared one MAC_SHARED_WAIT_MINUTES while an exclusive job holds the desktop.
+// ci-kit's VM lane (the same spec, "The VM lane", V3): a group on MAC_VM_E2E asks for [ci-kit-mac-solo], which the
+// exclusive instance and ci-kit's macOS guest, a second desktop on the Mac, both carry, so it runs on whichever is free;
+// on the exclusive instance its start waits MAC_EXCLUSIVE_WAIT_MINUTES as any exclusive job's does, in the guest nowhere.
+// A MEASURED_E2E group stays on today's labels whatever the list says: the guest runs 1.3-1.7x the host's time on other
+// hardware, and the measured bounds are the host's. A group on both lists runs shared: beside a neighbour it leaves the
+// exclusive instance alone, the scarcer of the two. `Lane:` (a push; the `lane` input on a dispatch; ci-gate.sh --lane)
+// moves the run's MAC_VM_E2E groups, shared or not, to the guest alone: `vm`, [ci-kit-mac-vm], for a group's trial, a
+// re-measurement, or a session that knows the host is held; `vm-trial`, [ci-kit-mac-vm-trial], the label only a candidate
+// image's trial clone carries, for the commit of an image trial and nothing else.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -66,12 +75,22 @@ const trailer = (key) =>
 
 // The shared label alone: ci-kit registers the shared instances with nothing else, so no job asking for `self-hosted`
 // (today's, an old commit's) can reach one.
-const RUNNERS = { linux: 'ubuntu-24.04', macos: ['self-hosted', 'macOS', 'ARM64'], macShared: ['ci-kit-mac-shared'] };
+const RUNNERS = {
+  linux: 'ubuntu-24.04',
+  macos: ['self-hosted', 'macOS', 'ARM64'],
+  macShared: ['ci-kit-mac-shared'],
+  // ci-kit's VM lane: the exclusive instance or the guest; the guest alone; the guest under the trial slot's identity.
+  macSolo: ['ci-kit-mac-solo'],
+  macVm: ['ci-kit-mac-vm'],
+  macVmTrial: ['ci-kit-mac-vm-trial'],
+};
 // ci-kit's bounds on the waits in its job-started hook; past one, the hook refuses the job with the `ci-kit: … rerun`
 // line ci-gate.sh relaunches. Added to the job's own minutes, so the refusal comes before GitHub's timeout.
 const MAC_EXCLUSIVE_WAIT_MINUTES = 10;
 const MAC_SHARED_WAIT_MINUTES = 60;
-const timeoutOn = (runner, minutes) => minutes + (runner === RUNNERS.macos ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
+// A solo job may land on the exclusive instance, so it carries that wait; a job that asks for the guest alone waits nowhere.
+const timeoutOn = (runner, minutes) =>
+  minutes + (runner === RUNNERS.macos || runner === RUNNERS.macSolo ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
 const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
 // On the pool the whole unit suite runs as UNIT_SHARDS jobs, `unit <k>/<n>`, each vitest's --shard=<k>/<n> on a box of
 // UNIT_CPUS. One vitest process keeps its box's cores only 55-70% busy (its main process transforms for every worker),
@@ -94,6 +113,11 @@ if (!Object.hasOwn(CLASS1A_RUNNERS, class1a)) refuse(`no such class-1a runner: $
 
 const lane = ((dispatched ? env.INPUT_RUNNER : trailer('Runner')) || env.GATE_E2E_RUNNER || (gateRunner === 'pool' ? '' : gateRunner) || 'linux').toLowerCase();
 if (lane !== 'linux' && lane !== 'macos') refuse(`no such runner: ${lane} (linux or macos; the pool takes class 1a and the POOL_E2E groups, through Class1a: pool)`);
+
+// Where `Lane:` sends the run's MAC_VM_E2E groups; none keeps them on [ci-kit-mac-solo].
+const LANES = { vm: RUNNERS.macVm, 'vm-trial': RUNNERS.macVmTrial };
+const vmLane = ((dispatched ? env.INPUT_LANE : trailer('Lane')) || '').toLowerCase();
+if (vmLane && !Object.hasOwn(LANES, vmLane)) refuse(`no such lane: ${vmLane} (vm or vm-trial, through ci-gate.sh --lane; none for the default routing)`);
 
 const evidence = dispatched ? env.INPUT_EVIDENCE === 'true' : trailer('Evidence')?.toLowerCase() === 'yes';
 const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCase() === 'yes';
@@ -136,7 +160,11 @@ const foreground = (group) => /(^|\s)MAWS_E2E_FOREGROUND=1\s/.test(scripts[scrip
 const listedShared = words(env.MAC_SHARED_E2E);
 const keptAlone = listedShared.filter((name) => name !== 'unit:darwin' && (measured.has(name) || foreground(name)));
 const macShared = new Set(listedShared.filter((name) => !keptAlone.includes(name)));
-const onMac = (name) => (macShared.has(name) ? RUNNERS.macShared : RUNNERS.macos);
+// MAC_VM_E2E less the measured groups, which keep the host's exclusive instance their bounds were calibrated on.
+const listedVm = words(env.MAC_VM_E2E);
+const keptOffVm = listedVm.filter((name) => measured.has(name));
+const macVm = new Set(listedVm.filter((name) => !measured.has(name)));
+const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
 const placed = (group) => (!offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
 const e2e = [...gates]
   .filter((gate) => gate.startsWith('e2e:'))
@@ -178,12 +206,21 @@ const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join
 // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
 const moved = e2e.filter((entry) => offMac.has(entry.group) && entry.runner !== JSON.stringify(RUNNERS[lane])).map((entry) => entry.group);
 const pooledNote = moved.length > 0 ? ` (${class1a === 'pool' ? 'on the pool' : 'on the hosted Linux runner'}: ${moved.join(', ')})` : '';
-// Said only when MAC_SHARED_E2E reaches a job of this run, or names one it keeps alone.
-const sharedJobs = [...(gates.has('unit:darwin') && unitDarwinRunner === RUNNERS.macShared ? ['unit:darwin'] : []), ...e2e.filter((entry) => entry.runner === JSON.stringify(RUNNERS.macShared)).map((entry) => `e2e:${entry.group}`)];
-const keptAloneHere = keptAlone.map((group) => `e2e:${group}`).filter((gate) => gates.has(gate));
-const sharedNote = `${sharedJobs.length > 0 ? ` Shared Mac instances: ${sharedJobs.join(', ')}.` : ''}${keptAloneHere.length > 0 ? ` On MAC_SHARED_E2E but measured or foreground, so alone: ${keptAloneHere.join(', ')}.` : ''}`;
-appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${sharedNote}\n`);
-process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${sharedNote ? `${sharedNote.trim()}\n` : ''}`);
+// Said only when MAC_SHARED_E2E or MAC_VM_E2E reaches a job of this run, or names one it keeps on the exclusive instance,
+// and whenever the run has a Lane:.
+const jobsOn = (runner) => [...(gates.has('unit:darwin') && unitDarwinRunner === runner ? ['unit:darwin'] : []), ...e2e.filter((entry) => entry.runner === JSON.stringify(runner)).map((entry) => `e2e:${entry.group}`)];
+const inRun = (groups) => groups.map((group) => `e2e:${group}`).filter((gate) => gates.has(gate));
+const said = (lead, jobs) => (jobs.length > 0 ? ` ${lead}: ${jobs.join(', ')}.` : '');
+const laneJobs = vmLane ? jobsOn(LANES[vmLane]) : [];
+const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
+const macNote =
+  said('Shared Mac instances', jobsOn(RUNNERS.macShared)) +
+  said('On MAC_SHARED_E2E but measured or foreground, so alone', inRun(keptAlone)) +
+  said('Solo Mac (the exclusive instance or the guest, whichever is free)', jobsOn(RUNNERS.macSolo)) +
+  laneNote +
+  said('On MAC_VM_E2E but measured, so on the exclusive instance', inRun(keptOffVm));
+appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}\n`);
+process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}`);
 if (selection) {
   const line = selection.related
     ? `Selection: affected — ${selection.paths} paths, unit runs vitest related`

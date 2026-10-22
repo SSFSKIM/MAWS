@@ -12,10 +12,10 @@ const sha = '512107c14abcdef0512107c14abcdef0512107c1';
 
 // The summary line for a run's jobs ("conclusion<TAB>name", sorted by name as ci-gate.sh sorts them) and failed log,
 // under ci-gate.sh's flags.
-function refusals(jobs, log, { gates = 'all', runner = 'macos', class1a = 'pool', live = '', default_beside = '', label = 'f1-landing' } = {}) {
+function refusals(jobs, log, { gates = 'all', runner = 'macos', class1a = 'pool', live = '', lane = '', default_beside = '', label = 'f1-landing' } = {}) {
   return execFileSync('bash', ['-c', 'set -uo pipefail; source "$0"; refusals "$1" "$2"', join(root, 'scripts/ci-gate-refusals.sh'), jobs.join('\n'), log.join('\n')], {
     encoding: 'utf8',
-    env: { ...process.env, sha, gates, runner, class1a, live, default_beside, label },
+    env: { ...process.env, sha, gates, runner, class1a, live, lane, default_beside, label },
   });
 }
 
@@ -123,4 +123,19 @@ test('a live run relaunches live, its refused groups and a refused plan alike', 
   assert.match(refusals(liveRun, [refusal('e2e:library-live')], { live: 'yes', class1a: '' }), / scripts\/ci-gate\.sh \w+ --runner macos --live --gates e2e:library-live --label /);
   const planRefused = ['failure\tplan', 'skipped\te2e:library-live'];
   assert.match(refusals(planRefused, [refusal('plan')], { live: 'yes', gates: 'e2e:library-live' }), / --class1a pool --live --gates e2e:library-live --label /);
+});
+
+// ci-kit's VM lane: a run sent to the guest (--lane vm) relaunches there, the guest's own refusals (a dialog in the
+// guest, a display off its geometry) counted as the host's are.
+test('a run on a Lane: relaunches on it, its refused groups and a refused plan alike', () => {
+  const guestRefusal = (job) => `${job}\tSet up runner\t2026-10-22T09:00:00.0000000Z ci-kit: the guest on the mini shows a display of 1024x768@2x, under 1600 pt wide — rerun`;
+  const vmRun = ['failure\te2e:document-app', 'success\te2e:widgets', 'success\tplan'];
+  assert.equal(
+    refusals(vmRun, [guestRefusal('e2e:document-app')], { lane: 'vm', class1a: '' }),
+    'ci-gate: refused by the mini (1): e2e:document-app; green (1): e2e:widgets; red (0): none; ' +
+      `relaunch the refused and the red (less any red baseline, Decision Log 58(c)): scripts/ci-gate.sh ${sha} --runner macos --lane vm ` +
+      '--gates e2e:document-app --label f1-landing --evidence\n',
+  );
+  const planRefused = ['failure\tplan', 'skipped\te2e:document-app'];
+  assert.match(refusals(planRefused, [refusal('plan')], { lane: 'vm-trial', gates: 'e2e:document-app' }), / --class1a pool --lane vm-trial --gates e2e:document-app --label /);
 });

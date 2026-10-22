@@ -56,8 +56,9 @@ test('the Mac jobs of a run, from the flags and the repository variables', () =>
 // Every combination of the flags and the variables over a few gate sets, against the plan the workflow would run.
 test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its jobs on a Mac', async () => {
   const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
-  // The exclusive instance's labels, or the shared instances' one (ci-kit's mac-lane concurrency spec, M2).
-  const macs = ['["self-hosted","macOS","ARM64"]', '["ci-kit-mac-shared"]'];
+  // The exclusive instance's labels, the shared instances' one (ci-kit's mac-lane concurrency spec, M2), or the VM
+  // lane's: solo (the exclusive instance or the guest), the guest alone, its trial slot (V3).
+  const macs = ['["self-hosted","macOS","ARM64"]', '["ci-kit-mac-shared"]', '["ci-kit-mac-solo"]', '["ci-kit-mac-vm"]', '["ci-kit-mac-vm-trial"]'];
   // The placements gate-plan.mjs does not write: the plan job on the Mac under GATE_RUNNER=macos; packaged always on
   // the Mac. unit:darwin takes the Mac runner the plan writes for it.
   assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}\n/);
@@ -147,6 +148,21 @@ test('no online Mac free of an alert: stop, naming each alert and where it lives
   assert.deepEqual(decide({ jobs, alerts: [mini, studio], runners }), expected);
   // The mini still online (busy when the dialog came) with no other Mac: still stopped.
   assert.equal(decide({ jobs, alerts: [mini], runners: [{ name: 'ci-kit-mac-mini', status: 'online' }] }).stop, true);
+});
+
+// A machine's runners (ci-kit's mac-lane concurrency spec): its exclusive instance, ci-kit-mac-<machine>; its shared
+// instances, ci-kit-mac-<machine>-<n>, on the same desktop, which a dialog there holds as it holds the exclusive one; and
+// its guest, ci-kit-mac-<machine>-vm (and the trial slot's -vm-trial), a desktop of its own, so a machine of its own,
+// which opens no alert.
+test("a shared instance is its machine's, held by its alert; the guest is a machine of its own", () => {
+  const online = (...names) => names.map((name) => ({ name, status: 'online' }));
+  assert.equal(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-mini', 'ci-kit-mac-mini-2', 'ci-kit-mac-mini-3') }).stop, true);
+  assert.deepEqual(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-mini-2', 'ci-kit-mac-studio-2') }).lines, ['ci-gate: ci-kit alert open on mini; going ahead on studio']);
+  for (const [guest, machine] of [['ci-kit-mac-mini-vm', 'mini-vm'], ['ci-kit-mac-mini-vm-trial', 'mini-vm-trial'], ['ci-kit-mac-mini-vm2', 'mini-vm2']]) {
+    assert.deepEqual(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-mini', guest) }), { stop: false, lines: [`ci-gate: ci-kit alert open on mini; going ahead on ${machine}`] }, guest);
+  }
+  // Two instances of one free machine name it once.
+  assert.deepEqual(decide({ jobs, alerts: [mini], runners: online('ci-kit-mac-studio', 'ci-kit-mac-studio-2') }).lines, ['ci-gate: ci-kit alert open on mini; going ahead on studio']);
 });
 
 // A fake gh: each read answers with the lines of its --jq, or throws as execFileSync does on a failed gh.
