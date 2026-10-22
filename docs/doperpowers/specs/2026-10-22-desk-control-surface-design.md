@@ -1744,7 +1744,7 @@ milestone that enables it; `—` means the same as the bare route):
 | `branch` | `follow` | `follow`, optional | — | M4 |
 | `resume` | `panel` (the picker) | `follow`, required (a session id) | — | M4 (args) |
 | `background` | `follow`, confirm, under §8.3's condition | `bad-args` | the confirm names the loss (§8.3) | M4 |
-| `exit` | `run`, confirm, only while every running-task class (shell, monitor, agent, workflow, MCP task) and session-created worktree state is positively established clear; unknown state is refused *can't tell whether work is running here: exit there* (Decision 14); known work is refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome is the session's `session.end`, never the settled `{}` | M1 |
+| `exit` | `run`, confirm, only while every running-task class (shell, monitor, agent, workflow, MCP task) and session-created worktree state is positively established clear; unknown state is refused *can't tell whether work is running here: exit there* (Decision 14); known work is refused *the terminal would ask what to do with the running work: exit there* | `bad-args` | F6 and spike 14: the confirm names the machine and that it closes the terminal session, and promises no stop (with work running the engine's own dialog holds the queue until answered at the terminal); the outcome, once a reliable guard exists, is the session's `session.end`, never the settled `{}` | disabled in M1: no complete state proof (Decision 14) |
 | `config` | `panel` | `drop` (*saves a default on <machine>; terminal only*, F1) | — | — |
 | `autocompact` | `panel` | `drop` (F1) | — | — |
 | `output-style` | `panel` | `drop` (F1) | — | — |
@@ -2344,7 +2344,18 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Rationale: the mod API exposes no complete task/worktree-state noun. More
   refusal in M1 is acceptable; a false clear opens a terminal dialog and stalls
   the desk queue, including on seats with no person attached. An engine-level
-  task/worktree noun for exit remains residue for a later ticket.
+  task/worktree noun, or a ledger whose completeness the mod can prove, remains
+  residue for a later ticket. This narrows F6's availability because of an
+  observation gap; it does not reverse the owner's approval of a positively safe
+  `/exit`. The orchestrator accepted this M1 scope and is putting the narrowing to
+  the owner without blocking M1; a different owner ruling can follow separately.
+  Implementation conclusion: the transcript's jobs ledger is partial after
+  reload/compaction, and the sminos member's worktree is spawn metadata rather than
+  authoritative `EnterWorktree` state. No complete clear-state proof was found.
+  Consequently M1 advertises `/exit` as disabled with the unknown-state reason and
+  independently refuses it in the command path, while retaining its measured
+  `run`/confirm semantics for a later reliable guard. All desk `/exit` remains
+  unavailable; partial trackers and unreachable success handling are not added.
   Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's ruling on
   the machine executor's API gap.
 
