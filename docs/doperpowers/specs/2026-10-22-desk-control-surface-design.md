@@ -2347,8 +2347,8 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   task/worktree noun, or a ledger whose completeness the mod can prove, remains
   residue for a later ticket. This narrows F6's availability because of an
   observation gap; it does not reverse the owner's approval of a positively safe
-  `/exit`. The orchestrator accepted this M1 scope and is putting the narrowing to
-  the owner without blocking M1; a different owner ruling can follow separately.
+  `/exit`. The owner confirmed *keep it off in M1* ("M1에선 끄기"), 2026-10-22,
+  relayed by the orchestrator; this is the approved M1 scope.
   Implementation conclusion: the transcript's jobs ledger is partial after
   reload/compaction, and the sminos member's worktree is spawn metadata rather than
   authoritative `EnterWorktree` state. No complete clear-state proof was found.
@@ -2358,6 +2358,17 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   unavailable; partial trackers and unreachable success handling are not added.
   Date/Author: 2026-10-22, the M1 plan-executor, from the orchestrator's ruling on
   the machine executor's API gap.
+
+- Decision: The daemon admits `/cd` only for a literal absolute path whose
+  canonical real path matches one of the project's known checkouts, and forwards
+  that canonical absolute path. Relative paths and `~` are refused
+  `unknown-checkout`, with guidance to use an absolute known-checkout path.
+  Rationale: the daemon's working directory is not the session's, and the joined
+  record may lag an earlier `/cd`. Resolving relative input against either could
+  validate a different target than the engine would use. This keeps the existing
+  known-checkout boundary without a new wire field or a guessed working directory.
+  Date/Author: 2026-10-22, the M1 plan-executor, from the machine executor's policy
+  implementation and focused tests.
 
 ## Outcomes & Retrospective
 
