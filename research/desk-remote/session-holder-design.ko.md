@@ -31,7 +31,7 @@
 1. 사람이 여는 터미널 세션은 처음부터 wrapper를 통해 holder 안에서 돈다.
 2. PTY는 우리가 만든 holder가 쥔다(claude-ssh 방식). 엔진 supervisor(`runPtyHost`, `claude daemon`)는 참고만 한다.
 3. 경로는 세션이 어디서 시작됐는지로 정한다. 터미널에서 시작한 세션은 TUI로 holder 안에, MAWS 앱이나 웹에서 시작한
-   세션은 SDK 경로로 간다. 그리고 웹에 "full-control 모드로 이어 가기" 버튼을 두어 터미널 세션을 SDK 경로로 넘긴다.
+   세션은 SDK 경로로 간다. 그리고 웹에 "GUI 모드로 이어 가기 (세션을 다시 띄움)" 버튼을 두어 터미널 세션을 SDK 경로로 넘긴다(이름은 F4).
 4. 키로만 되는 조작은 웹의 터미널 창으로 하고, 검증된 몇 가지만 GUI 매크로로 만든다.
 5. 터미널 창을 닫으면 세션은 detach되어 계속 돈다(F1).
 6. detach된 세션은 클라이언트가 없고, 턴이 돌지 않고, 백그라운드 일과 예약된 cron이 없는 상태로 24시간이 지나면
@@ -247,7 +247,7 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. hol
   - footer가 목표 모드를 보일 때까지 최대 4번 누른다. 측정된 순환은 manual → accept edits → plan을 거친다
     ([키 측정](mod-command-run-probe.md#L96)). 도는 tool이 있을 때 이 경로로
     plan에 가면 잠깐 accept edits를 켜므로, 직접 `/plan`으로 가는 것과 같지 않다.
-- **이어 가기 버튼.** §3.6의 프로세스 재시작이다. "full-control 모드로 이어 가기"라는 이름은 §7 F4에서 owner가 정한다.
+- **이어 가기 버튼.** "GUI 모드로 이어 가기 (세션을 다시 띄움)"(F4). §3.6의 프로세스 재시작이다.
 
 ### 3.6 SDK 경로와 이어 가기
 
@@ -326,9 +326,9 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. hol
   hub가 내려주는 JS 자체의 신뢰 한계도 남는다. 이를 정하지 않고 키 입력 승인을 안전하다고 부르지 않는다.
 - 녹화는 꺼 둔다. 보존하는 launch descriptor의 env도 비밀 데이터로 다루고 출력·로그에 노출하지 않는다.
 
-## 7. owner가 정한 갈림길과 열린 이름 (2026-10-22)
+## 7. owner가 정한 갈림길 (2026-10-22)
 
-F1–F3은 정해졌다(§1의 5–7). F4는 이름만 남은 질문이다.
+F1–F4 모두 정해졌다(§1의 3, 5–7).
 
 - **F1. 터미널 창을 닫으면?** 정함: detach되어 계속 돈다. 다음 `claude`에서 이어 붙기를 묻는다. 원격에서 이어
   쓰는 것이 목적이기 때문이다. 버린 대안: plain과 같이 끝내고, 원격 이어 쓰기는 사람이 명시적으로 detach했을
@@ -339,9 +339,9 @@ F1–F3은 정해졌다(§1의 5–7). F4는 이름만 남은 질문이다.
 - **F3. holder는 어느 제품에 속하는가.** 정함: 독립된 작은 서비스(MAWS 저장소의 workspace app)로 두고 sminos
   데몬과 MAWS 데몬이 둘 다 클라이언트가 된다(§3.2 구현). 버린 대안: MAWS headless 데몬의 일부(설치가 하나로
   줄지만 MAWS 없는 기계에 MAWS 데몬을 깔아야 한다), sminos의 일부(Python이라 xterm.js 에뮬레이터를 쓰지 못한다).
-- **F4. 이어 가기 버튼을 무엇이라 부를까?** owner가 정할 열린 질문이다. 권고는 "GUI 모드로 이어 가기 (세션을 다시 띄움)"이다.
-  TUI + 터미널 창도 이미 전체 제어를 주므로 "full-control 모드로 이어 가기"는 오해를 부를 수 있다. SDK 경로가 더하는 것은
-  다시 띄운 프로세스에서의 GUI-native 제어다. §1의 버튼 이름을 확정 변경한 것은 아니다.
+- **F4. 이어 가기 버튼의 이름.** 정함: "GUI 모드로 이어 가기 (세션을 다시 띄움)". 버린 대안: 처음 이름인 "full-control 모드로
+  이어 가기". TUI + 터미널 창도 이미 전체 제어를 주므로 "full-control 모드로 이어 가기"는 오해를 부를 수 있다. SDK 경로가 더하는 것은
+  다시 띄운 프로세스에서의 GUI-native 제어다. 이름이 그 대가(프로세스 재시작)를 드러낸다.
 
 ## 8. 검증 계획 (구현할 때)
 
@@ -409,7 +409,7 @@ F1–F3은 정해졌다(§1의 5–7). F4는 이름만 남은 질문이다.
 - 경로 이동은 같은 engineSessionId로 한다(`--fork-session` 없음). 양방향 모두 배타 lock·fence·quiescence·waitpid가 필요하다.
   중단된 턴 재실행은 자동으로 켜지 않는다. launch descriptor와 가능한 세션 override를 보존한다.
 - MAWS 소유의 in-flight 일은 CLI 생존과 별개다. 효과 전 durable ledger와 결과 불명 응답으로 중복 효과를 막는다.
-- 이름은 workspace app `apps/session-holder`, 사람이 치는 명령 `claude-holder`다. 웹의 이어 가기 이름은 F4로 남긴다.
+- 이름은 workspace app `apps/session-holder`, 사람이 치는 명령 `claude-holder`다. 웹의 이어 가기 버튼은 "GUI 모드로 이어 가기"다(F4).
 - 설치는 MAWS 앱이 있는 Mac에서는 MAWS가 함께 하고, 그 밖에는 플랫폼별 release 묶음(manager, host, wrapper)을 따로 깐다.
 
 ## 11. 검토하고 버린 대안
