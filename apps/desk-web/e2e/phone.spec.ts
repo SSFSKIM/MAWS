@@ -323,7 +323,7 @@ test("@layout a session's channel on the phone is its session view: its working 
   // which stays on a computer, so nothing in it opens one.
   const launched = view.locator('[data-row-id^="user:"]').filter({ hasText: 'Do these four steps' });
   for (let i = 0; i < 80 && (await launched.count()) === 0; i++) {
-    await scroller(view).evaluate((el) => el.scrollBy({ top: -el.clientHeight * 0.6 }));
+    await scroller(view).evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollBy({ top: -el.clientHeight * 0.6 }); });
     await page.waitForTimeout(60);
   }
   const launchTurn = await launched.locator('[data-turn-id]').first().getAttribute('data-turn-id');

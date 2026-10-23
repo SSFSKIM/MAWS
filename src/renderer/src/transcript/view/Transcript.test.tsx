@@ -415,6 +415,7 @@ describe('follow mode across a change of the viewport’s height', () => {
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 2_000 });
     act(() => void fireEvent.scroll(scroller)); // at the end
     act(() => {
+      fireEvent.wheel(scroller, { deltaY: -1 });
       top = 0; // the reader scrolls up: follow mode ends
       fireEvent.scroll(scroller);
     });
@@ -471,6 +472,7 @@ describe('the scroll carried across a card’s float and dock', () => {
     const key = `transcript-test-${++keys}`;
     const view = await mount(key, turns());
     metrics.scrollTo(18_000); // at the end
+    act(() => { fireEvent.wheel(scroller(), { deltaY: -1 }); });
     metrics.scrollTo(410); // the reader scrolls up: follow mode ends
     const first = rendered().find((row) => startOf(row) <= 410 && 410 < startOf(row) + 40)!;
     const ids = useTranscriptStore.getState().entries[key].rows.map((row) => row.id);
@@ -557,6 +559,7 @@ describe('the scroll carried across a card’s float and dock', () => {
     it('a reader scrolled up comes back at the row the removed mount showed, pane to card and card to pane', async () => {
       const { metrics, ids, swap, inCard } = await swapScene();
       metrics.scrollTo(18_000);
+      act(() => { fireEvent.wheel(scroller(), { deltaY: -1 }); });
       metrics.scrollTo(410);
       const there = rowAt(410);
       expect(there).not.toBe(ids[3]);

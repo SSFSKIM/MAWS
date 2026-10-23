@@ -221,7 +221,11 @@ test('follow mode breaks on scroll-up and Jump to latest restores it', async ({ 
   await expect(jump).toHaveCount(0);
 
   // Scrolling up 200 px during streaming leaves follow mode and shows the control; the stream no longer moves the reader.
-  await page.evaluate(() => document.querySelector<HTMLElement>('[data-transcript-scroller]')!.scrollBy(0, -200));
+  await page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scroller.scrollBy(0, -200);
+  });
   await expect.poll(async () => (await metrics(page)).following, { message: 'a scroll up leaves follow mode' }).toBe(false);
   await expect(jump).toBeVisible();
   // W2 (B3): Codex's round 32px button, right of the column, never over the prose of a pane with room for it
@@ -287,10 +291,11 @@ test('a scroll upward after a viewport shrinks mid-scroll leaves follow mode', a
     const frames = async (n: number) => {
       for (let k = 0; k < n; k++) await new Promise((resolve) => requestAnimationFrame(resolve));
     };
-    scroller.scrollBy(0, -1); // within the threshold: still following, and the virtualiser now scrolling
+    scroller.scrollBy(0, -1); // a programmatic settling move, not reader intent; still following
     await frames(1);
     scroller.style.height = `${scroller.clientHeight - 80}px`; // shrinks while that scroll settles
     await frames(3);
+    scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     scroller.scrollBy(0, -200); // the owner scrolls up
   });
   const jump = page.getByRole('button', { name: /^Jump to latest/ });
@@ -332,6 +337,7 @@ test('a scroll upward right after the list follows a row growth leaves follow mo
       const observer = new ResizeObserver(() => {
         observer.disconnect();
         const followed = scroller.scrollTop;
+        scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
         scroller.scrollBy(0, -200); // the owner scrolls up
         resolve({ before, followed, scrolled: scroller.scrollTop });
       });
@@ -845,6 +851,7 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         }
       };
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); // a reader walks the virtual range
       scroller.scrollTop = 0;
       await mounted();
       for (let guard = 0; guard < 400; guard += 1) {
@@ -1403,7 +1410,7 @@ for (const { fixture, headers } of sittingReplays) test(`M3 owner sitting preser
   await surfaceReplay((root) => recordedSurfaceJournal(root, fixture), async ({ page, pane, id, userData }) => {
     // Scroll the actual session through the virtual range, so both turns mount and ask.
     const scroller = pane.locator('[data-transcript-scroller]');
-    if (await scroller.count()) await scroller.evaluate((el) => { el.scrollTop = 0; });
+    if (await scroller.count()) await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTop = 0; });
     const drawings = pane.locator('[data-plugin-drawn="AssistantMessage"]');
     const commentary = drawings.filter({ hasText: "I'm going through both spec branches" });
     await expect(commentary.locator('[data-surface="markdown"]')).toHaveText("I'm going through both spec branches to see where each one stands.");
@@ -1448,6 +1455,7 @@ for (const { fixture, headers } of sittingReplays) test(`M3 owner sitting preser
     // (E7: its ListAgents call is a listing row of its own) can leave the first answer outside the mounted window
     await expect.poll(() => pane.locator('[data-transcript-scroller]').evaluate(async (scroller) => {
       const seen = new Set<string>();
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); // a reader walks the virtual range
       scroller.scrollTop = 0;
       for (let guard = 0; guard < 100; guard += 1) {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));

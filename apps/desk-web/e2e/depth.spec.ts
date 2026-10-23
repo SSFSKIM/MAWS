@@ -142,12 +142,12 @@ test('older rows page in when the reader reaches the top, and the reader stays w
 
   const scroller = depth.locator('[data-transcript-scroller]');
   // The reader scrolls to the top and so leaves MAWS's follow mode, which its "Jump to latest" button shows. The list
-  // leaves follow mode only on a scroll it reads as upward at an unchanged viewport height; once on the Linux lane it
-  // did not, and the stream pulled the reader back to the end. The reader scrolls again until the list has left it.
+  // gives up the end on input, not on a browser clamp, so the fixture includes the wheel intent before the offset.
+  // The reader scrolls again until the list has left follow mode.
   const jump = depth.getByRole('button', { name: 'Jump to latest' });
   await expect
     .poll(async () => {
-      await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+      await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
       return jump.isVisible();
     })
     .toBe(true);
@@ -175,7 +175,7 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   expect(Math.abs(at(after) - at(before))).toBeLessThan(4);
   player.advance(player.script.length);
   await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   await expect(depth).toContainText('Think briefly first'); // the turn's prompt, from the older page
 });
 

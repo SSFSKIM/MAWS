@@ -565,6 +565,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         let el: HTMLElement | null = main.querySelector<HTMLElement>('[data-index]')?.parentElement ?? null;
         while (el && el !== main && el.scrollHeight <= el.clientHeight) el = el.parentElement;
         if (!el || el === main) return { labels: [] as string[], clicked: false };
+        el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); // the owner walks the main transcript
         el.scrollTop = 0;
         for (let i = 0; i < 400; i += 1) {
           await frame();

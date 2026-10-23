@@ -28,7 +28,7 @@ const toggle = (page: Page, view: 'Report' | 'Transcript') => page.getByRole('gr
 async function allRowIds(scope: Locator): Promise<string[]> {
   const scroller = scope.locator('[data-transcript-scroller]').first();
   const ids: string[] = [];
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   for (let i = 0; i < 100; i++) {
     await scope.page().waitForTimeout(60);
     for (const id of await rowIds(scope)) if (id !== null && !ids.includes(id)) ids.push(id);
@@ -100,7 +100,7 @@ test("the report: the marks and questions, one working record per marked turn, a
   const report = await allRowIds(view);
   const marked = report.filter((id) => id.startsWith('owner-record:'));
   expect(marked).toHaveLength(1); // the turn that answered with a <message>, its work folded
-  await view.locator('[data-transcript-scroller]').evaluate((el) => el.scrollTo({ top: 0 }));
+  await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   await expect(records(view)).toContainText(/Working record · \d+ tool calls?/);
   await expect(view).toContainText('Color→blue'); // its question (the ask mod's, answered) stays in view
 
@@ -183,7 +183,7 @@ for (const width of [1280, 1440, 1920]) {
     const view = page.getByTestId('session-view');
     await expect(view).toContainText('Both subagents reported back.');
     const jump = view.getByRole('button', { name: 'Jump to latest' });
-    await view.locator('[data-transcript-scroller]').evaluate((el) => el.scrollTo({ top: 0 }));
+    await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
     await expect(view.locator('[data-streamdown="table-wrapper"]')).toBeVisible();
     await expect(view.locator('[data-streamdown="code-block"]')).toBeVisible();
     await expect(jump).toBeVisible();
@@ -294,7 +294,7 @@ async function pageToFirstRow(hub: HubDouble, view: Locator): Promise<number> {
   await expect
     .poll(
       async () => {
-        await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+        await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
         return view.getByText('Think briefly first', { exact: false }).count();
       },
       { timeout: 15_000 },
@@ -376,7 +376,7 @@ for (const delay of [0, 300, 1500]) {
       const before = asked();
       await expect
         .poll(async () => {
-          await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+          await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
           return asked();
         })
         .toBeGreaterThan(before);
@@ -408,7 +408,7 @@ test("a notification's landing on a request reaches its card from far up in the 
   await expect(view).toContainText('Both subagents reported back.');
   await expect(card).toContainText('Wants to run a command');
   // The reader goes far up the history: the list no longer mounts the card.
-  await view.locator('[data-transcript-scroller]').evaluate((el) => el.scrollTo({ top: 0 }));
+  await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   await expect(card).toHaveCount(0);
   // A tap on the request's notification, with the app open on this channel.
   await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url } })), `/p/${PROJECT}/s/${S.asks}?request=toolu_far`);

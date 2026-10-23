@@ -73,6 +73,7 @@ const outputOf = (depth: Locator, taskId: string) => depth.locator(`[data-testid
 
 /** Scrolls the virtualized list a step at a time (`direction` -1 up, 1 down) until `target` is drawn. */
 async function scrollUntil(page: Page, scroller: Locator, target: Locator, direction: 1 | -1, steps = 80): Promise<void> {
+  await scroller.dispatchEvent('wheel', { deltaY: -200 }); // the reader owns this history walk
   for (let i = 0; i < steps; i++) {
     if ((await target.count()) > 0) return target.first().scrollIntoViewIfNeeded();
     await scroller.evaluate((el, d) => el.scrollBy({ top: d * el.clientHeight * 0.6 }), direction);

@@ -25,7 +25,7 @@ const rowIds = (scope: Locator) => scope.locator('[data-row-id]').evaluateAll((e
 async function allRowIds(scope: Locator): Promise<string[]> {
   const scroller = scope.locator('[data-transcript-scroller]').first();
   const ids: string[] = [];
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   for (let i = 0; i < 100; i++) {
     await scope.page().waitForTimeout(60); // the list draws the window it scrolled to
     for (const id of await rowIds(scope)) if (id !== null && !ids.includes(id)) ids.push(id);

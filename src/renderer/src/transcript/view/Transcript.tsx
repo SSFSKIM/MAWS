@@ -4,9 +4,10 @@
 // the source's history could not be loaded (the store's failed hydration phase).
 //
 // TanStack Virtual in chat mode: stable X3 keys, `anchorTo: 'end'` (a change at either edge keeps the row under the
-// reader where it was), `followOnAppend` (a reader at the end stays pinned as rows arrive), measured rows in normal
-// DOM order, and browser scroll anchoring off because the virtualiser owns it. Follow mode is a mode: entered at the
-// end, left only by a scroll upward, and while following every structural change keeps the end pinned.
+// reader where it was), measured rows in normal DOM order, and browser scroll anchoring off because the virtualiser
+// owns it. Follow mode belongs to the list: wheel/touch intent or witnessed keyboard/scrollbar movement releases it;
+// only returning to the bottom or Jump to latest resumes it. While following, structural changes and measurements
+// keep the end pinned.
 import { elementScroll, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import 'katex/dist/katex.min.css';
@@ -31,8 +32,12 @@ import { liveMarkedRowIds, reportRows, reportViewOf } from '../../owner/report/p
 // P2-C end
 import './transcript.css';
 
-export const SCROLL_END_THRESHOLD = 80;
+// Fractional scroll positions can round by a pixel. A larger near-end band traps small finger/trackpad movements:
+// a streamed update pins them back before successive deltas can ever leave that band.
+export const SCROLL_END_THRESHOLD = 1;
 export const OVERSCAN = 6;
+// Native key/scrollbar motion can finish after its input event; read that tail before retiring its short witness.
+const INPUT_SCROLL_SETTLE_MS = 250;
 
 // Per-kind first guesses, replaced by measurement as rows render.
 const ESTIMATES: Record<RowKind, number> = {
@@ -73,16 +78,54 @@ export interface TranscriptListProps {
   onLeave?: (scroll: TranscriptScroll) => void;
 }
 
+// A nested tool/group scroller owns input it can consume. Containment blocks chaining even when its contents fit.
+function nestedScrollerOwnsUp(target: EventTarget | null, scroller: HTMLElement): boolean {
+  for (let element = target instanceof Element ? target : null; element && element !== scroller; element = element.parentElement) {
+    const style = getComputedStyle(element);
+    if (!['auto', 'scroll'].includes(style.overflowY)) continue;
+    if (element.scrollTop > 0 || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
+  }
+  return false;
+}
+
 export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id, takeCarried, onLeave }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
+  const scrollbarPointer = useRef<number | null>(null);
+  const movementWitness = useRef(false);
+  const changeFollow = useCallback((next: boolean) => {
+    if (followingRef.current === next) return;
+    followingRef.current = next;
+    onFollowChange?.(next);
+  }, [onFollowChange]);
   const restoreAt = useRef<TranscriptScroll | null>(null); // P4-B3: the carried place, until the mount applies it
-  // P2-C start (2026-10-09): the scroller's offset and viewport height as the follow rule last knew them (below)
-  const known = useRef({ offset: 0, height: 0 });
+  // P2-C start (2026-10-09): the geometry as the follow rule last knew it. The end can move before a queued native
+  // scroll event arrives; reaching the end observed before that movement still means the reader returned to latest.
+  const known = useRef({ offset: 0, end: 0 });
   const remember = useCallback(() => {
     const element = scrollRef.current;
-    if (element) known.current = { offset: element.scrollTop, height: element.clientHeight };
+    if (element) known.current = { offset: element.scrollTop, end: Math.max(0, element.scrollHeight - element.clientHeight) };
   }, []);
+  // Explicit row navigation opts out when it lands away from the end.
+  const leaveIfAway = useCallback((measuredSize: number) => {
+    const element = scrollRef.current;
+    // A measurement can shrink the logical list before React commits its smaller sizer. The old DOM scrollHeight
+    // must not turn the browser's clamp to that new end into an apparent scroll away from it.
+    const away = element !== null && Math.min(element.scrollHeight, measuredSize) - element.clientHeight - element.scrollTop > SCROLL_END_THRESHOLD;
+    if (away) changeFollow(false);
+    return away;
+  }, [changeFollow]);
+  // Movement releases only with a witness and a real gap: a key may be consumed elsewhere while this list clamps
+  // to its new end. Upward wheel/touch intent releases immediately below.
+  const readScroll = useCallback((measuredSize: number) => {
+    const element = scrollRef.current;
+    if (!element) return;
+    if ((scrollbarPointer.current !== null || movementWitness.current) && element.scrollTop < known.current.offset) leaveIfAway(measuredSize);
+    const movedDown = element.scrollTop > known.current.offset;
+    const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - SCROLL_END_THRESHOLD;
+    remember();
+    if (movedDown && reachedEnd) changeFollow(true);
+  }, [changeFollow, leaveIfAway, remember]);
   // P2-C end
   // A row's size as last measured, by id, which stays its first guess (W8): the virtualiser keeps a measurement only
   // where it differs from the guess, so a group measured closed at exactly its closed guess would be guessed at the open
@@ -93,11 +136,14 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const getItemKey = useCallback((index: number) => rows[index].id, [rows]);
   const estimateSize = useCallback((index: number) => measured.current.get(rows[index].id) ?? estimateRow(rows[index]), [rows]);
   const measure = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Parameters<typeof measureElement>[2]) => {
+    // Notice a return or browser clamp to the DOM end before measurement moves it or anchoring replaces the offset.
+    const scroller = scrollRef.current;
+    if (scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= SCROLL_END_THRESHOLD) readScroll(instance.getTotalSize());
     const size = measureElement(element, entry, instance);
     const id = element.getAttribute('data-row-id');
     if (id !== null) measured.current.set(id, size);
     return size;
-  }, []);
+  }, [readScroll]);
 
   // React Compiler skips this component (the hook returns functions it cannot memoise); the list memoises by hand.
   // eslint-disable-next-line react-hooks/incompatible-library -- see above
@@ -109,58 +155,119 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     measureElement: measure,
     overscan: OVERSCAN,
     anchorTo: 'end',
-    followOnAppend: true,
-    scrollEndThreshold: SCROLL_END_THRESHOLD,
-    // P2-C: every scroll the list makes (to the end, anchoring, a jump) is known at once, as the browser clamped it
+    // One follow policy: the list handles appends and insertions alike below. The virtualiser still anchors a reader
+    // through prepends and measurements, but cannot decide to resume following from a stale near-end offset.
+    followOnAppend: false,
+    // End-follow deltas must not enter the virtualiser's iOS-deferred anchor accumulator: a later upward gesture
+    // needs real above-reader compensation, but must never replay growth below the reader. The list owns end-follow.
+    scrollEndThreshold: -1,
+    // Anchoring and explicit row jumps remain the virtualiser's; remember their clamped DOM offset immediately.
     scrollToFn: (offset, options, instance) => {
+      readScroll(instance.getTotalSize());
       elementScroll(offset, options, instance);
       remember();
     },
-    // Reaching the end (within the threshold) enters follow mode; only a scroll upward leaves it (the scroller's own
-    // scroll events, P2-C below). Content changing size under a follower is not a reason to stop following.
-    onChange: (instance) => {
-      if (!instance.isAtEnd() || followingRef.current) return;
-      followingRef.current = true;
-      onFollowChange?.(true);
-    },
   });
 
-  // P2-C start (2026-10-09): what leaves follow mode, read from the scroller itself rather than the virtualiser, whose
-  // notifications come only when its range or scrolling state changes and whose direction outlives the scroll that set
-  // it (a viewport resize then read as a scroll upward or, unreported, hid the next real one). Two things leave it, each
-  // only away from the end: a jump the handle is asked for (the offset is read as soon as it is written, before a row
-  // change in the same frame could pin the end again), and a scroll event whose offset is lower than the last known one
-  // with the viewport the same height. The known offset and height are those at the last scroll event, viewport resize
-  // or scroll the list made itself: a scroll of its own lands a frame before its scroll event, and a scroll upward in
-  // between would otherwise be measured from before it and missed. The browser's clamp as the viewport grows is not one.
-  const leaveIfAway = useCallback(() => {
-    const element = scrollRef.current;
-    if (!element || !followingRef.current || element.scrollHeight - element.clientHeight - element.scrollTop <= SCROLL_END_THRESHOLD) return;
-    followingRef.current = false;
-    onFollowChange?.(false);
-  }, [onFollowChange]);
+  const releaseFollow = useCallback(() => changeFollow(false), [changeFollow]);
+
+  // Release on intent, before the native scroll event: a streamed render can otherwise win that race. Capture the
+  // scroll itself too, before the virtualiser's listener can synchronously render/measure against the old follow mode.
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
     remember();
-    const scrolled = () => {
-      const movedUp = element.scrollTop < known.current.offset && element.clientHeight === known.current.height;
-      remember();
-      if (movedUp) leaveIfAway();
+    const scrolled = () => { readScroll(virtualizer.getTotalSize()); };
+    // Growth before an input belongs to that input's current end, not an obsolete end from an earlier gesture.
+    const observeEnd = () => { known.current.end = Math.max(0, element.scrollHeight - element.clientHeight); };
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armMovement = () => {
+      movementWitness.current = true;
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        readScroll(virtualizer.getTotalSize());
+        movementWitness.current = false;
+        settleTimer = undefined;
+      }, INPUT_SCROLL_SETTLE_MS);
     };
-    const observer = new ResizeObserver(remember);
+    const pointerDown = (event: PointerEvent) => {
+      if (event.target === element && event.button === 0 && event.pointerType !== 'touch') {
+        scrollbarPointer.current = event.pointerId;
+        observeEnd();
+        releaseFollow();
+      }
+    };
+    const pointerEnd = (event: PointerEvent) => {
+      if (scrollbarPointer.current !== event.pointerId) return;
+      armMovement(); // pointerup can precede the final native offset, not just its scroll event
+      readScroll(virtualizer.getTotalSize());
+      scrollbarPointer.current = null;
+    };
+    const wheel = (event: WheelEvent) => {
+      observeEnd();
+      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+    };
+    let touchY: number | null = null;
+    const touchStart = (event: TouchEvent) => { observeEnd(); touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
+    const touchMove = (event: TouchEvent) => {
+      observeEnd();
+      const next = event.touches.length === 1 ? event.touches[0].clientY : null;
+      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+      touchY = next;
+    };
+    const key = (event: KeyboardEvent) => {
+      const editor = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]');
+      const pageKey = ['PageUp', 'PageDown', 'Home', 'End'].includes(event.key);
+      const navigation = !editor && (event.key.startsWith('Arrow') || event.key === ' ');
+      if (!pageKey && !navigation) return;
+      observeEnd();
+      armMovement(); // body/editor focus and nested containment do not tell us which list the browser will scroll
+    };
+    const observer = new ResizeObserver(() => { readScroll(virtualizer.getTotalSize()); });
     observer.observe(element);
-    element.addEventListener('scroll', scrolled, { passive: true });
+    element.addEventListener('scroll', scrolled, { passive: true, capture: true });
+    element.addEventListener('pointerdown', pointerDown, { passive: true, capture: true });
+    window.addEventListener('pointerup', pointerEnd, { passive: true, capture: true });
+    window.addEventListener('pointercancel', pointerEnd, { passive: true, capture: true });
+    element.addEventListener('wheel', wheel, { passive: true, capture: true });
+    element.addEventListener('touchstart', touchStart, { passive: true, capture: true });
+    element.addEventListener('touchmove', touchMove, { passive: true, capture: true });
+    window.addEventListener('keydown', key, { capture: true });
     return () => {
       observer.disconnect();
-      element.removeEventListener('scroll', scrolled);
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      movementWitness.current = false;
+      element.removeEventListener('scroll', scrolled, true);
+      element.removeEventListener('pointerdown', pointerDown, true);
+      window.removeEventListener('pointerup', pointerEnd, true);
+      window.removeEventListener('pointercancel', pointerEnd, true);
+      scrollbarPointer.current = null;
+      element.removeEventListener('wheel', wheel, true);
+      element.removeEventListener('touchstart', touchStart, true);
+      element.removeEventListener('touchmove', touchMove, true);
+      window.removeEventListener('keydown', key, true);
     };
-  }, [leaveIfAway, remember]);
-  // P2-C end
+  }, [readScroll, releaseFollow, remember, virtualizer]);
 
-  // A transcript opens at its end, and a following reader stays there through every structural change. The
-  // virtualiser's own followOnAppend covers a new last row only; a row inserted above the last one (the live answer
-  // above its turn's receipt) would otherwise be anchored from the top and push the end away. P4-B3: a carried place
+  // Follow the committed DOM end with an absolute offset, not an index target that can chase later measurements.
+  // This command accounts for current sizes, retiring any anchor compensation it already absorbed. Releasing follow
+  // sends no command at all, so compensation accumulated after the reader leaves is preserved for the virtualiser.
+  const pinEnd = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const size = virtualizer.getTotalSize();
+    const committed = Number.parseFloat((element.firstElementChild as HTMLElement).style.height);
+    // A clamped command cannot absorb positive compensation before the larger extent commits. Keep it pending;
+    // the content observer will follow that commit unless reader input has already released following.
+    if (committed + SCROLL_END_THRESHOLD < size && element.scrollHeight + SCROLL_END_THRESHOLD < size) return;
+    // A pending shrink is already reachable. Otherwise use the browser's actual end, including overflowing content
+    // or rounding beyond the logical sizer (the virtualiser's last-row/end alignment does the same).
+    const end = committed > size + SCROLL_END_THRESHOLD ? Math.max(0, size - element.clientHeight) : element.scrollHeight;
+    virtualizer.scrollToOffset(end, { behavior: 'instant' });
+  }, [virtualizer]);
+
+  // A transcript opens at its end, and a following reader stays there through every structural change, including a
+  // row inserted above the last one (the live answer above its turn's receipt). P4-B3: a carried place
   // opens with its first visible row at the top instead, out of follow mode. A row, not an offset: a mount knows no row's
   // size until it measures it, and the virtualiser keeps re-aiming a scroll to a row as the rows measure, where an
   // offset would stay fixed on estimates (the width differs between a pane and a card too).
@@ -173,7 +280,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const carried = takeCarried?.() ?? null;
     if (carried === null || carried.following || carried.signature !== scrollSignature(rows)) return;
     restoreAt.current = carried;
-    followingRef.current = false;
+    changeFollow(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, as the list mounts, over the rows it mounts with
   }, []);
   useLayoutEffect(() => {
@@ -183,10 +290,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const index = at.anchor === null ? -1 : rows.findIndex((row) => row.id === at.anchor);
       if (index === -1) virtualizer.scrollToOffset(at.offset, { behavior: 'instant' });
       else virtualizer.scrollToIndex(index, { align: 'start', behavior: 'instant' });
-      onFollowChange?.(false);
       return;
     }
-    if (followingRef.current) virtualizer.scrollToEnd({ behavior: 'instant' });
+    readScroll(virtualizer.getTotalSize());
+    if (followingRef.current) pinEnd();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per row list, reading the follow mode of the moment
   }, [rows]);
 
@@ -219,18 +326,45 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const next = entries.at(-1)?.contentRect.height ?? height;
       const changed = height !== null && next !== height;
       height = next;
-      if (changed && followingRef.current) virtualizer.scrollToEnd({ behavior: 'instant' });
+      if (changed) {
+        readScroll(virtualizer.getTotalSize());
+        if (followingRef.current) pinEnd();
+      }
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [virtualizer]);
+  }, [pinEnd, readScroll, virtualizer]);
+
+  // Measured growth can happen without a new rows array (disclosures, fonts, asynchronous Markdown). Follow the
+  // committed sizer only while the reader follows; virtual-core keeps ordinary anchoring independent of this policy.
+  useEffect(() => {
+    const content = scrollRef.current?.firstElementChild;
+    if (!content) return;
+    let height: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries.at(-1)?.contentRect.height ?? height;
+      const changed = height === null || next !== height;
+      height = next;
+      if (changed) {
+        readScroll(virtualizer.getTotalSize());
+        if (followingRef.current) pinEnd();
+      }
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [pinEnd, readScroll, virtualizer]);
 
   useImperativeHandle(handle, () => ({
     scrollToIndex: (index, align) => {
+      remember();
       virtualizer.scrollToIndex(index, { align, behavior: 'instant' });
-      leaveIfAway(); // P2-C
+      leaveIfAway(virtualizer.getTotalSize()); // P2-C
     },
-    scrollToEnd: () => virtualizer.scrollToEnd({ behavior: 'instant' }),
+    scrollToEnd: () => {
+      remember();
+      changeFollow(true);
+      pinEnd();
+    },
     get following() {
       return followingRef.current;
     },

@@ -491,6 +491,7 @@ describe('the round trip with the real transcript and composer', () => {
     // grown in the card back in the pane
     act(() => void editor().editor.commands.insertContent('kept across the round trip'));
     scrollTo(18_000);
+    act(() => { fireEvent.wheel(scroller(), { deltaY: -1 }); });
     scrollTo(410);
     const inPane = rowAt(410);
     act(() => useLayout.getState().focusPane(1));
