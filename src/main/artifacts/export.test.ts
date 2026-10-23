@@ -150,7 +150,7 @@ describe('runExport', () => {
     const job = request({ kind: 'document', format: 'png', inspection: true });
     const budget = new ExportBudget(60_000);
     slowRename.path = job.path;
-    slowRename.wait = () => vi.advanceTimersByTimeAsync(60_001);
+    slowRename.wait = async () => { await vi.advanceTimersByTimeAsync(60_001); };
     expect(await runExport(registry, job, sources(), budget)).toEqual({ ok: false, error: 'the export did not finish within 60 s' });
     expect(slowRename.path).toBeNull(); // the image really was published before the simulated completion delay
     expect(existsSync(job.path)).toBe(false);
@@ -274,7 +274,7 @@ describe('the export service', () => {
     const acknowledgments: string[] = [];
     const service = startExportService({ ...deps, answer: async (input) => {
       host.answered.push(input);
-      const outcome = bridge.answer(input.requestId, input.answer);
+      const outcome = bridge.answer(input.requestId as RequestId, input.answer);
       acknowledgments.push(outcome);
       return { ok: true, value: { outcome } };
     } });

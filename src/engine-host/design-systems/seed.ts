@@ -17,13 +17,12 @@ import type { DefaultAsset } from '@artifacts/types/design_system/default-assets
 import type { Actor } from '@shared/artifacts/actor';
 import type { DocumentService } from '../documents/service';
 import type { ArtifactStore } from '../documents/store';
+import { seedRevisionKey } from './seed-provenance';
 
 const HUMAN: Actor = { kind: 'human' }; // the owner's: X29 has no system actor, and the defaults are the owner's to edit
 
 /** The store meta key of the seeding record. */
 export const SEEDING_KEY = 'designSystems.seeding';
-// Independent of the last actor/time and the prunable update log: only this revision is installation, not an edit.
-export const seedRevisionKey = (id: string): string => `designSystems.seedRevision.${id}`;
 
 // Older installs have no boundary. Canonical file equality can prove they still hold the bundled seed; an unequal
 // system is marked -1 once, so a later edit back to the defaults cannot erase its attribution on a subsequent start.

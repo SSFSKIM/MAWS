@@ -96,6 +96,7 @@ function start(): void {
     answer: async (input) => {
       expect(mawsCommands['maws.artifact.exported'].input.parse(input)).toEqual(input); // the answer's schema keeps it whole
       pending.get(input.requestId)!(input.answer);
+      return { ok: true, value: { outcome: 'delivered' } };
     },
     print: async (html) => (printed.push(html), new TextEncoder().encode('%PDF-')),
   });

@@ -10,7 +10,7 @@ import { applyV2, newDoc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact, type DocKind } from '@shared/artifacts/entity';
 import type { LibraryEntry, LibraryEntryAnswer, LibrarySnapshot } from '@shared/ipc/schema/library';
-import { seedRevisionKey } from '../design-systems/seed';
+import { seedRevisionKey } from '../design-systems/seed-provenance';
 import { ArtifactStoreError } from '../documents/errors';
 import { timed } from '../documents/host-work'; // P4-R6
 import type { DocumentService } from '../documents/service';
