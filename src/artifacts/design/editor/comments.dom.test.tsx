@@ -210,6 +210,9 @@ describe('the rail’s words for a design (Decision Log 29)', () => {
     // the board deleted: its thread orphaned, saying the board went, where it was named
     act(() => session.edit((origin) => Y.deleteSlide(doc, 'b2') ?? origin));
     await act(async () => new Promise((r) => setTimeout(r, 80)));
+    expect(container.querySelector('article[data-thread="tb"]')).toBeNull();
+    expect(within(toolbar()).getByRole('button', { name: 'Comments (1 open)' })).toBeTruthy();
+    fireEvent.click(within(rail).getByRole('button', { name: 'Show deleted-target comments' }));
     const orphan = container.querySelector<HTMLElement>('article[data-thread="tb"]')!;
     expect(orphan.querySelector('.deck-thread-slide')!.textContent).toBe('A deleted board');
     expect(orphan.querySelector('.deck-thread-note')!.textContent).toBe('The commented board was deleted.');

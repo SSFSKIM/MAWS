@@ -162,9 +162,17 @@ describe('the threads rail', () => {
     const { handle, first, second } = await seeded();
     await until(() => (listThreads(handle.doc).length === 3), 'the threads');
     const toggle = within(toolbar()).getByRole('button', { name: /^Comments/ });
-    expect(toggle.textContent).toContain('3');
+    await quiet();
+    expect(toggle.textContent).toContain('1');
     act(() => fireEvent.click(toggle));
     await quiet();
+    expect(within(rail()).getAllByRole('group').map((item) => item.dataset.thread)).toEqual([first]);
+    const before = listThreads(handle.doc);
+    const reveal = within(rail()).getByRole('button', { name: 'Show deleted-target comments' });
+    expect(reveal.getAttribute('aria-pressed')).toBe('false');
+    act(() => fireEvent.click(reveal));
+    expect(reveal.getAttribute('aria-pressed')).toBe('true');
+    expect(listThreads(handle.doc)).toEqual(before);
     const items = within(rail()).getAllByRole('group');
     expect(items.map((item) => item.dataset.thread)).toEqual([first, second, 'zz000001']);
     expect(items[0]!.textContent).toContain('ships quarterly');
@@ -187,7 +195,7 @@ describe('the threads rail', () => {
     const { editor } = await seeded();
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
-    act(() => fireEvent.click(within(rail()).getAllByRole('button', { name: /^Show/ })[0]!));
+    act(() => fireEvent.click(within(rail()).getAllByRole('button', { name: /^Show passage/ })[0]!));
     await act(() => ticks(5));
     expect(editor().view.dom.querySelector('.comment-active')?.textContent).toBe('ships quarterly');
     expect(editor().state.doc.textBetween(editor().state.selection.from, editor().state.selection.to)).toBe('ships quarterly');
@@ -197,7 +205,8 @@ describe('the threads rail', () => {
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
 
-    act(() => fireEvent.click(within(rail()).getAllByRole('button', { name: /^Show/ })[2]!));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show deleted-target comments' })));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show passage: Appendix' })));
     await until(() => screen.getByRole('tab', { name: 'Appendix' }).getAttribute('aria-selected') === 'true', 'the other tab');
   });
 
@@ -214,6 +223,8 @@ describe('the threads rail', () => {
     const choose = (name: string) => act(() => fireEvent.click(within(rail()).getByRole('radio', { name })));
     const search = (value: string) => act(() => fireEvent.change(within(rail()).getByRole('searchbox', { name: 'Search comments' }), { target: { value } }));
     const field = (id: string) => within(rail().querySelector<HTMLElement>(`[data-thread="${id}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
+    expect(ids()).toEqual([first]);
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show deleted-target comments' })));
     expect(ids()).toEqual([first, 'zz000001', second]); // All: open first, then the resolved section
     expect(within(rail()).getByRole('radio', { name: 'All' })).toHaveProperty('checked', true);
     expect(within(rail()).getByRole('radio', { name: 'All tabs' })).toHaveProperty('checked', true);
@@ -267,6 +278,7 @@ describe('the threads rail', () => {
     const { first } = await seeded();
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show deleted-target comments' })));
     const cards = () => within(rail()).getAllByRole('group');
     cards()[0]!.focus();
     expect(cards()[0]!.dataset.thread).toBe(first);
@@ -431,7 +443,7 @@ describe('the tab strip’s comment dot', () => {
     act(() => fireEvent.click(commentButton()));
     act(() => void select(editor(), 'Owners'));
     act(() => fireEvent.click(commentButton()));
-    act(() => void addThread(handle.doc, { threadId: 'zz000001', tabId: 'tab2', blockId: 'a1', quote: 'Appendix', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() + 1 }));
+    act(() => void addThread(handle.doc, { threadId: 'zz000001', tabId: 'tab2', blockId: 'a1', quote: 'Appendix', anchor: { kind: 'block' }, by: SESSION, at: Date.now() + 1 }));
     await until(() => dot('Appendix') !== null, 'the dots');
     expect(dot('Main')?.getAttribute('aria-label')).toBe('2 open comments');
     expect(dot('Appendix')?.getAttribute('aria-label')).toBe('1 open comment');

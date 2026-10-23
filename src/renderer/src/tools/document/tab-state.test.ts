@@ -140,13 +140,20 @@ describe('a document tab’s state', () => {
     await until(() => !state.snapshot().noContent, 'the tab to clear it');
   });
 
-  it('counts the open threads and follows the replica’s saved state', async () => {
+  it('counts only live-target open threads, follows replaced and restored targets and the replica’s saved state (WR 49)', async () => {
     const w = world();
     const state = w.open();
     await ready(state);
     const handle = w.handles[0];
-    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: null, quote: 'q', anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    createDocument(handle.doc, { title: 'Launch', id: 'tab00001', generateID: () => 'p1' });
+    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: 'p1', quote: 'q', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1 });
+    addThread(handle.doc, { threadId: 'th2', tabId: 'tab00001', blockId: 'gone', quote: 'Gone', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 2 });
     expect(state.snapshot().unresolved).toBe(1);
+    const block = tabBody(handle.doc, 'tab00001')!.get(0) as import('@artifacts/yjs').Node;
+    block.setAttr('id', 'replacement');
+    await until(() => state.snapshot().unresolved === 0, 'the target replacement to hide the count');
+    block.setAttr('id', 'p1');
+    await until(() => state.snapshot().unresolved === 1, 'the restored target to count again');
     w.memory.dropConnections();
     await until(() => state.snapshot().document?.phase !== 'live', 'the replica to see its port go');
   });

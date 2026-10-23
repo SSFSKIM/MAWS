@@ -20,7 +20,7 @@ import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { ProvisionalLayers } from '@artifacts/provisional';
 import { DeckSession } from '@artifacts/slides/editor/session';
-import { observeThreads, openThreadCount } from '@artifacts/slides/threads';
+import { deckCommentCounts } from '@artifacts/slides/comment-counts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import type { CloseAsk } from '../../panel/editor-host'; // P4-B2
@@ -54,7 +54,7 @@ export interface DeckTabSnapshot {
   /** The replica's state as of its last change of phase, sync or read-only. */
   document: DocumentState | null;
   saving: boolean;
-  /** M7: the deck's open threads, orphans included (the header's count). */
+  /** M7, WR 49: the deck's live-target open threads (the header's count). */
   unresolved: number;
   /** P4-A2 G2.3: the replica's provisional layers (an agent's publish as it streams), listening while the tab holds it. */
   provisional: ProvisionalLayers | null;
@@ -142,17 +142,18 @@ export class DeckTabState {
     const session = new DeckSession(handle.doc, this.openedAt, { holdRemote: (on) => handle.holdRemote(on), presence: { awareness: handle.awareness, name, color }, readOnly: () => handle.state().readOnly });
     session.timings.syncedAt = performance.now();
     const provisional = new ProvisionalLayers(handle); // P4-A2 G2.3
+    const comments = deckCommentCounts(handle.doc);
     this.stops.push(
       provisional.attach(),
       handle.subscribe((document) => this.follow(handle, document)),
       handle.onRestored(() => session.undo.clear()),
       () => this.stopSavingTimer(),
-      observeThreads(handle.doc, () => {
-        const unresolved = openThreadCount(handle.doc);
+      comments.subscribe(() => {
+        const unresolved = comments.getSnapshot().total;
         if (unresolved !== this.current.unresolved) this.set({ unresolved });
       }), // M7
     );
-    this.set({ handle, session, document: handle.state(), unresolved: openThreadCount(handle.doc), provisional });
+    this.set({ handle, session, document: handle.state(), unresolved: comments.getSnapshot().total, provisional });
   }
 
   // M8: the owner's last view as the artifact's row holds it before this showing records its own (L's `onShown`, after

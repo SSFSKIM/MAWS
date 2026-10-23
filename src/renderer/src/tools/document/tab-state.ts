@@ -22,7 +22,7 @@
 // A replica never initialises its document: the host writes a new document's first tab in the create's own commit (the
 // document adapter's `initial`, A's seed hook), and the editor shows "Loading…" until that tab has arrived, then binds it.
 import { listTabs } from '@artifacts/document/tabs';
-import { listThreads, observeThreads } from '@artifacts/document/threads';
+import { documentCommentCounts } from '@artifacts/document/comment-counts';
 import { onUpdate, type Node as YType } from '@artifacts/yjs';
 import { UndoManager } from '@artifacts/yjs/document'; // P4-B3 M5
 import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
@@ -198,15 +198,18 @@ export class DocumentTabState {
     }
     const handle = opened.value;
     if (this.disposed) return void handle.close();
-    const openThreads = () => listThreads(handle.doc).filter((thread) => thread.status === 'open').length;
+    const comments = documentCommentCounts(handle.doc);
     this.stops.push(
       handle.subscribe((document) => this.follow(handle, document)),
       () => this.stopSavingTimer(),
-      observeThreads(handle.doc, () => this.set({ unresolved: openThreads() })),
+      comments.subscribe(() => {
+        const unresolved = comments.getSnapshot().total;
+        if (unresolved !== this.current.unresolved) this.set({ unresolved });
+      }),
       handle.onRestored(() => this.undo.forEach((manager) => manager.clear())), // P4-B3 M5
       this.awaitFirstTab(handle),
     );
-    this.set({ handle, document: handle.state(), unresolved: openThreads(), ready: true });
+    this.set({ handle, document: handle.state(), unresolved: comments.getSnapshot().total, ready: true });
   }
 
   // A document's first tab is the host's, written with the creation (A's seed hook); only a document made before that

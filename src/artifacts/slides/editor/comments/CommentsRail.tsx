@@ -8,6 +8,7 @@
 // P4-B2 (D16 of docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md; V5): a thread's reply field reads and writes the
 // editor's reply drafts, the pin popover's too, so a reply typed in either is there in the other. Show opens the
 // thread's pin popover (the controller's, V11) and the rail stays open.
+// WR 49: conversations whose targets were deleted stay out of both sections until explicitly revealed.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { newThreadId, reopen, reply, resolve, type DeckThreadState } from '../../threads';
@@ -34,11 +35,14 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
   const threads = useDeckThreadStates(doc);
   const drafts = useReplyDrafts(api.drafts); // P4-B2
   const [showResolved, setShowResolved] = useState(true);
+  const [showDeleted, setShowDeleted] = useState(false);
   // the slides' numbers follow the deck at once, as the filmstrip's do (the thread list waits for a quiet moment)
   const slides = useDeckView(doc).slides;
   const numbers = new Map(slides.map((slide, i) => [slide.id, i + 1]));
-  const open = threads.filter((thread) => thread.status === 'open');
-  const resolved = threads.filter((thread) => thread.status === 'resolved');
+  // WR 49: missing targets stay hidden even when their conversation has been resolved.
+  const shown = threads.filter((thread) => showDeleted || thread.live);
+  const open = shown.filter((thread) => thread.status === 'open');
+  const resolved = shown.filter((thread) => thread.status === 'resolved');
   const item = (thread: DeckThreadState) => (
     <ThreadItem
       key={thread.id}
@@ -64,6 +68,11 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
         </button>
       </header>
       <div className="deck-comments-body">
+        {threads.some((thread) => !thread.live) && (
+          <button type="button" className="deck-comments-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+            {showDeleted ? 'Hide deleted-target comments' : 'Show deleted-target comments'}
+          </button>
+        )}
         {open.length === 0 ? <p className="deck-comments-empty">{labels?.empty ?? C.empty /* P3-E */}</p> : open.map(item)}
         {resolved.length > 0 && (
           <section className="deck-comments-resolved" aria-label={C.resolved(resolved.length)}>
