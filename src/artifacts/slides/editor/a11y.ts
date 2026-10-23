@@ -50,7 +50,7 @@ export const DECK_REGIONS: readonly Region[] = [
   { selector: '[data-stage-surface]', target: (r) => r, still: true }, // its focus goes on to the selection's (A3)
   { selector: '[data-deck-inspector]' },
   { selector: '.deck-notes' },
-  { selector: '[data-deck-rail]' },
+  { selector: '[data-deck-rail]:not([data-deck-rail="inspector"])' },
 ];
 /** The board's ring: the toolbar, the board list (its current board), the world, the inspector and the open rail. */
 export const BOARD_REGIONS: readonly Region[] = [
@@ -58,7 +58,7 @@ export const BOARD_REGIONS: readonly Region[] = [
   { selector: '[data-design-rail="boards"]', target: (r) => r.querySelector<HTMLElement>('[data-current] .design-board-row') },
   { selector: '[data-stage-surface]', target: (r) => r, still: true },
   { selector: '[data-design-rail="inspector"]' },
-  { selector: '[data-deck-rail]' },
+  { selector: '[data-deck-rail]:not([data-deck-rail="inspector"])' },
 ];
 
 const TABBABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';

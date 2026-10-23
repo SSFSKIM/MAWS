@@ -612,7 +612,7 @@
     {
       "name": "artifact_export",
       "title": "Export artifact",
-      "description": "Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file's path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format's own default; fonts chooses a presentation's pptx faces: named (the default: the deck's faces by name), basic (faces every Office has) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (its cover slide) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Needs the MAWS app open.",
+      "description": "Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file's path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format's own default; fonts chooses a presentation's pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Needs the MAWS app open.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -626,6 +626,7 @@
             "enum": [
               "pdf",
               "png",
+              "pngs",
               "docx",
               "pptx",
               "md",
