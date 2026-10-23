@@ -20,7 +20,7 @@ import { TranscriptActionsProvider } from '../../../transcript/view/context'; //
 import { openFile } from '../../code/open-file'; // P2-C3
 import type { AskSheetParams } from '../actions';
 import { SHEET } from './copy';
-import { canSubmit, EMPTY_DRAFT, skippedCount } from './draft';
+import { canSubmit, EMPTY_DRAFT } from './draft';
 import { AnsweredSection, QuestionSection } from './QuestionSection';
 import { askSheet, dismissAsk, editDraft, ensureLoaded, loadAsks, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
 
@@ -127,7 +127,7 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
   }
 
   const ready = canSubmit(ask.questions, drafts); // Submit's rule, Retry's too (submitAsk enforces it)
-  const skipped = skippedCount(ask.questions, drafts);
+  const skipped = ask.questions.filter((question) => drafts?.get(question.id ?? '')?.skip).length;
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">
