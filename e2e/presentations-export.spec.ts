@@ -662,7 +662,7 @@ test('a named Google Fonts face with no network: Lora fetched once and drawn off
   // Skia/PDF writes a web face as a Type 3 font (its glyphs' outlines, with a ToUnicode map), whose dictionary has no
   // /BaseFont; its name is in its descriptor, where an embedded TrueType face carries it too
   expect(pdf).toMatch(/\/FontName\s*\/(?:[A-Z]{6}\+)?Lora/);
-  const pptx = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
+  const pptx = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx', { fonts: 'named' })).path));
   expect(typefaces(await slideXml(pptx, 1))).toContain('Lora');
 });
 

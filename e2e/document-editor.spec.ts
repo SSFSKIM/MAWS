@@ -491,12 +491,12 @@ test.describe('the document editor', () => {
     await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('named', 'owner', { label: 'Clean draft' }));
     await page.evaluate((text) => (window as unknown as HarnessWindow).__maws_document.agentAppend('para0002', text), ADDED);
     await expect.poll(() => blockText(page, 'a', 'para0002')).toBe(`The river runs north; the river is cold.${ADDED}`);
-    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('turn', 'agent', { summary: 'Added a sentence' }));
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('turn', 'agent', { label: 'Agent revision' }));
 
     await toolbar(page, 'a').getByRole('button', { name: 'Version history' }).click();
     const rail = replica(page, 'a').getByRole('complementary', { name: 'Version history' });
     const today = rail.getByRole('region', { name: 'Today' });
-    await today.getByRole('button', { name: /Added a sentence/ }).click();
+    await today.getByRole('button', { name: /^Version Agent revision by / }).click();
     const bar = replica(page, 'a').getByRole('toolbar', { name: 'Version preview' });
     await expect(bar.getByText('1 change', { exact: true })).toBeVisible();
     const inserted = previewContent(page, 'a').locator('.doc-change-ins');

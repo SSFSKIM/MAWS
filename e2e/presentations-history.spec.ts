@@ -155,6 +155,11 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     await editor.evaluate((el) => { (el as HTMLElement).style.width = '560px'; });
     await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width).toBeGreaterThan(300);
     await editor.evaluate((el) => { (el as HTMLElement).style.width = ''; });
+    // The width reset and its ResizeObserver fit are separate frames: take the history baseline only after both.
+    await expect.poll(() => tab.locator('[data-stage-surface]').evaluate((el) => {
+      const fittedWidth = 1920 * Math.max(0.05, Math.min((el.clientWidth - 48) / 1920, (el.clientHeight - 48) / 1080));
+      return Math.abs(el.querySelector('[data-stage-slide]')!.getBoundingClientRect().width - fittedWidth);
+    }), { message: 'the wide stage has fitted its restored viewport' }).toBeLessThan(1);
   });
 
   await test.step('the header’s Version history opens B’s rail, listing A’s versions', async () => {

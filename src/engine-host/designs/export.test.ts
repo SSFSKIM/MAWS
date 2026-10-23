@@ -133,6 +133,7 @@ function libraryFiles(dialog: () => Promise<string>) {
     root: join(userData, 'artifacts'),
     downloads: () => userData,
     showSaveDialog: async () => ({ canceled: false, filePath: await dialog() }),
+    confirmReplaceFolder: async () => false,
     openPath: async () => '',
     readFile: async () => {
       throw new Error('not read here');
