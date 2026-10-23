@@ -106,7 +106,7 @@ export function Inspector({ session, slideId, readOnly, faces, uploadAsset, meas
   const slide = picked.length === 1 && picked[0]!.id === ROOT;
   const title = picked.length === 0 ? '' : slide ? C.slide : picked.length > 1 ? C.selected(picked.length) : elementName(picked[0]!);
   return (
-    <aside aria-label={C.panel} className="deck-inspector" data-deck-inspector>
+    <aside aria-label={C.panel} className="deck-inspector" data-deck-inspector data-deck-rail="inspector">
       {picked.length > 0 && (
         <InspectorContext.Provider value={api}>
           {/* keyed by what is edited, so a field's unsaved text never carries to another element */}
