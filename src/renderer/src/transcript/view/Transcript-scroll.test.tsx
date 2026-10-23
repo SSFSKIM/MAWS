@@ -124,7 +124,6 @@ for (const [input, up] of [
     fireEvent.touchStart(el, { touches: [{ identifier: 1, clientY: 100 }] });
     fireEvent.touchMove(el, { touches: [{ identifier: 1, clientY: 101 }] });
   }],
-  ['keyboard', (el: HTMLElement) => fireEvent.keyDown(el, { key: 'ArrowUp' })],
 ] as const) {
   it(`${input} scroll-up intent stops following before any scroll event or incoming row`, async () => {
     const s = await scene();
@@ -135,6 +134,77 @@ for (const [input, up] of [
     expect(s.writes).toEqual([]);
   });
 }
+
+it('a scroll-capable key does not release a list that did not move', async () => {
+  const s = await scene();
+  act(() => { fireEvent.keyDown(s.scroller, { key: 'ArrowUp' }); });
+  s.stream();
+  expect(s.handle.current!.following).toBe(true);
+  expect(s.changed.mock.calls).toEqual([]);
+});
+
+for (const key of ['PageUp', 'Home']) {
+  it(`${key} from a short editor witnesses outer-list movement before its scroll event`, async () => {
+    const s = await scene();
+    const editor = document.createElement('textarea');
+    editor.className = 'transcript-peer-input';
+    s.scroller.querySelector('[data-index]')!.appendChild(editor);
+    act(() => { fireEvent.keyDown(editor, { key }); });
+    s.move(-40, false);
+    s.stream();
+    expect(s.handle.current!.following).toBe(false);
+    expect(s.writes).toEqual([]);
+  });
+
+  it(`${key} targeted at body after a gutter click witnesses this list's upward movement`, async () => {
+    const s = await scene();
+    const gutter = document.createElement('div');
+    s.scroller.appendChild(gutter);
+    act(() => {
+      fireEvent.pointerDown(gutter, { pointerType: 'mouse', button: 0, pointerId: 7 });
+      fireEvent.pointerUp(window, { pointerType: 'mouse', button: 0, pointerId: 7 });
+      fireEvent.keyDown(document.body, { key });
+    });
+    s.move(-40, false);
+    s.stream();
+    expect(s.handle.current!.following).toBe(false);
+    expect(s.writes).toEqual([]);
+  });
+}
+
+it('Home from a contained group at its top can witness the outer movement WebKit actually performs', async () => {
+  const s = await scene();
+  const group = document.createElement('div');
+  group.className = 'transcript-group-cells';
+  group.style.overflowY = 'auto';
+  group.style.overscrollBehaviorY = 'contain';
+  Object.defineProperties(group, { scrollHeight: { value: 600 }, clientHeight: { value: 224 }, scrollTop: { value: 0 } });
+  s.scroller.querySelector('[data-index]')!.appendChild(group);
+  act(() => { fireEvent.keyDown(group, { key: 'Home' }); });
+  s.move(-40, false);
+  s.stream();
+  expect(s.handle.current!.following).toBe(false);
+  expect(s.writes).toEqual([]);
+});
+
+for (const key of ['a', 'Enter']) {
+  it(`${key} does not witness a replacement or clamp as reader scrolling`, async () => {
+    const s = await scene();
+    act(() => { fireEvent.keyDown(document.body, { key }); });
+    s.move(-40, false);
+    s.stream();
+    expect(s.handle.current!.following).toBe(true);
+  });
+}
+
+it('a quiet keyboard witness expires before a later unwitnessed clamp', async () => {
+  const s = await scene();
+  act(() => { fireEvent.keyDown(document.body, { key: 'PageUp' }); });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  s.move(-40, false);
+  s.stream();
+  expect(s.handle.current!.following).toBe(true);
+});
 
 for (const report of [false, true]) {
   it(`an upward position change without input does not release following (native event reported: ${report})`, async () => {
@@ -170,6 +240,23 @@ it('a scrollbar drag that reaches bottom and reverses releases following again b
   expect(s.writes).toEqual([]);
 });
 
+for (const report of [false, true]) {
+  it(`a final upward offset after pointerup retains its scrollbar witness (native event reported: ${report})`, async () => {
+    const s = await scene();
+    act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'mouse', button: 0, pointerId: 1 }); });
+    s.move(-20);
+    s.move(20);
+    expect(s.handle.current!.following).toBe(true);
+    act(() => { fireEvent.pointerUp(window, { pointerType: 'mouse', button: 0, pointerId: 1 }); });
+    s.move(-20, report); // Chromium/WebKit can apply this after pointerup has already been delivered
+    if (!report) await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    s.writes.length = 0;
+    s.stream();
+    expect(s.handle.current!.following).toBe(false);
+    expect(s.writes).toEqual([]);
+  });
+}
+
 it('a pointer press on row content is not a scrollbar drag even if it moves across the scroller', async () => {
   const s = await scene();
   act(() => {
@@ -186,7 +273,8 @@ it('ending a scrollbar drag retires its input ownership', async () => {
   act(() => { fireEvent.pointerUp(window, { pointerType: 'mouse', button: 0, pointerId: 1 }); });
   s.move(20);
   expect(s.handle.current!.following).toBe(true);
-  s.move(-10); // an unwitnessed browser movement after the drag is no longer scrollbar input
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  s.move(-10); // after the trailing native movement window, a later clamp is no longer scrollbar input
   s.stream();
   expect(s.handle.current!.following).toBe(true);
 });
@@ -415,6 +503,7 @@ for (const [input, up] of [
       Object.defineProperties(group, { scrollHeight: { value: height }, clientHeight: { value: 224 }, scrollTop: { value: position, writable: true } });
       s.scroller.querySelector('[data-index]')!.appendChild(group);
       act(() => { up(group); });
+      if (input === 'keyboard' && !consumed) s.move(-32); // the browser chained this key's movement to the outer list
       expect(s.handle.current!.following).toBe(consumed);
       s.stream();
       expect(s.handle.current!.following).toBe(consumed);

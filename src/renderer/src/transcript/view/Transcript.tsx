@@ -5,8 +5,9 @@
 //
 // TanStack Virtual in chat mode: stable X3 keys, `anchorTo: 'end'` (a change at either edge keeps the row under the
 // reader where it was), measured rows in normal DOM order, and browser scroll anchoring off because the virtualiser
-// owns it. Follow mode belongs to the list: upward input releases it before the browser scrolls; only returning to
-// the bottom or Jump to latest resumes it. While following, structural changes and measurements keep the end pinned.
+// owns it. Follow mode belongs to the list: wheel/touch intent or witnessed keyboard/scrollbar movement releases it;
+// only returning to the bottom or Jump to latest resumes it. While following, structural changes and measurements
+// keep the end pinned.
 import { elementScroll, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import 'katex/dist/katex.min.css';
@@ -35,6 +36,8 @@ import './transcript.css';
 // a streamed update pins them back before successive deltas can ever leave that band.
 export const SCROLL_END_THRESHOLD = 1;
 export const OVERSCAN = 6;
+// Native key/scrollbar motion can finish after its input event; read that tail before retiring its short witness.
+const INPUT_SCROLL_SETTLE_MS = 250;
 
 // Per-kind first guesses, replaced by measurement as rows render.
 const ESTIMATES: Record<RowKind, number> = {
@@ -89,6 +92,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   const scrollbarPointer = useRef<number | null>(null);
+  const movementWitness = useRef(false);
   const changeFollow = useCallback((next: boolean) => {
     if (followingRef.current === next) return;
     followingRef.current = next;
@@ -112,11 +116,11 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     return away;
   }, [changeFollow]);
   // Unwitnessed movement cannot release following: clamps, replacements and remeasurement move the offset without
-  // a reader. An active scrollbar drag is witnessed; the other upward inputs release immediately below.
+  // a reader. Scrollbar/key input witnesses actual movement; upward wheel/touch intent releases immediately below.
   const readScroll = useCallback(() => {
     const element = scrollRef.current;
     if (!element) return;
-    if (scrollbarPointer.current !== null && element.scrollTop < known.current.offset) changeFollow(false);
+    if ((scrollbarPointer.current !== null || movementWitness.current) && element.scrollTop < known.current.offset) changeFollow(false);
     const movedDown = element.scrollTop > known.current.offset;
     const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - SCROLL_END_THRESHOLD;
     remember();
@@ -176,6 +180,16 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const scrolled = () => { readScroll(); };
     // Growth before an input belongs to that input's current end, not an obsolete end from an earlier gesture.
     const observeEnd = () => { known.current.end = Math.max(0, element.scrollHeight - element.clientHeight); };
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armMovement = () => {
+      movementWitness.current = true;
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        readScroll();
+        movementWitness.current = false;
+        settleTimer = undefined;
+      }, INPUT_SCROLL_SETTLE_MS);
+    };
     const pointerDown = (event: PointerEvent) => {
       if (event.target === element && event.button === 0 && event.pointerType !== 'touch') {
         scrollbarPointer.current = event.pointerId;
@@ -185,7 +199,8 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     };
     const pointerEnd = (event: PointerEvent) => {
       if (scrollbarPointer.current !== event.pointerId) return;
-      readScroll(); // include a final movement whose native scroll event is still pending
+      armMovement(); // pointerup can precede the final native offset, not just its scroll event
+      readScroll();
       scrollbarPointer.current = null;
     };
     const wheel = (event: WheelEvent) => {
@@ -201,11 +216,14 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       touchY = next;
     };
     const key = (event: KeyboardEvent) => {
-      if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const editor = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]');
+      const pageKey = ['PageUp', 'PageDown', 'Home', 'End'].includes(event.key);
+      const navigation = !editor && (event.key.startsWith('Arrow') || event.key === ' ');
+      if (!pageKey && !navigation) return;
       observeEnd();
-      if ((['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+      armMovement(); // body/editor focus and nested containment do not tell us which list the browser will scroll
     };
-    const observer = new ResizeObserver(remember);
+    const observer = new ResizeObserver(readScroll);
     observer.observe(element);
     element.addEventListener('scroll', scrolled, { passive: true, capture: true });
     element.addEventListener('pointerdown', pointerDown, { passive: true, capture: true });
@@ -214,9 +232,11 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     element.addEventListener('wheel', wheel, { passive: true, capture: true });
     element.addEventListener('touchstart', touchStart, { passive: true, capture: true });
     element.addEventListener('touchmove', touchMove, { passive: true, capture: true });
-    element.addEventListener('keydown', key, { capture: true });
+    window.addEventListener('keydown', key, { capture: true });
     return () => {
       observer.disconnect();
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      movementWitness.current = false;
       element.removeEventListener('scroll', scrolled, true);
       element.removeEventListener('pointerdown', pointerDown, true);
       window.removeEventListener('pointerup', pointerEnd, true);
@@ -225,7 +245,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       element.removeEventListener('wheel', wheel, true);
       element.removeEventListener('touchstart', touchStart, true);
       element.removeEventListener('touchmove', touchMove, true);
-      element.removeEventListener('keydown', key, true);
+      window.removeEventListener('keydown', key, true);
     };
   }, [readScroll, releaseFollow, remember]);
 
