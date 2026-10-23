@@ -86,13 +86,38 @@ allows today.
   A9's replaced-module effect branch and older/stale A1/A5 carry into M1's walk
   below. Observed latency samples are in Outcomes; comparative A33 remains open.
 - [x] (2026-10-22 12:36Z) M1 — the command spine: the route table whole, the typeahead;
-  built and reviewed, walk pending. Both task reviews and both `high` branch
-  reviews are clean; sminos 1.8.0's final machine head `70fc4bc6` passed all eight
-  gates. MAWS's final combined-head gates are being completed; local headless
-  desktop/phone screenshot tests passed (2/2), and both images were inspected.
-  Neither merge nor rollout is part of this executor's handoff.
-- [ ] M1's rollout and walk: both halves ship back to back once cua's hold 3 on the
-  mini releases, and the walk follows the order in the Decision Log's last entry.
+  build handoff. Both task reviews and both `high` branch reviews were clean;
+  sminos 1.8.0's final machine head `70fc4bc6` passed all eight gates. At handoff,
+  MAWS's combined-head gates and rollout/walk remained; local headless desktop/phone
+  screenshot tests passed (2/2), and both images were inspected. Outcomes records
+  the later combined-head verification and live walk.
+- [x] (2026-10-22 20:02Z) M1 rolled out: MAWS #126 (`d399c1cac`) deployed at
+  19:58Z; doperpowers #353 (`00e34537`, sminos 1.8.0) merged after the older-plugin
+  check, then the MacBook rolled at 19:59Z and the mini at 20:01Z. A5's older/stale
+  refusals passed; the actual order and A9's missed fixture are recorded below.
+- [x] (2026-10-22 20:49Z) M1's first live walk and the owner's attended terminal
+  checks completed: the visible Ran label, A10's local opening/names/reasons/MCP,
+  A11's two desk commands and terminal command between, A12, and both A13 paths
+  passed. A10's Skills grouping and the sleeping-phone recovery failed; the
+  observations and A33's measured samples are in Outcomes, not a full M1 sign-off.
+- [x] (2026-10-22 22:03Z) First walk fixes deployed: doperpowers #355 (`099a44c9`,
+  sminos 1.8.1) and MAWS #127 (`1cea5bc35`), adding Skills membership, guarded
+  chunk-load recovery, corrected upgrade/stale guidance and the G1 test-helper fix.
+  The live catalog carried `skills`; the deployed Skills UI re-check remains owed.
+- [x] (2026-10-22 23:55Z) Phone wake resnapshot and unseen-receipt recovery deployed
+  in MAWS #128 (`4c12e4a1b`), including the missing-outcome line. Committed-head
+  Linux and macOS gates passed; browser fixtures are not the owner's phone re-walk.
+- [ ] Owner's phone re-walk on the deployed build: fully reopen the app, recheck
+  Skills, queue `/color orange` during a long turn, lock through its end, then
+  unlock and check current content and the row-confirmed Ran receipt. The owner
+  deferred this until available (2026-10-23 00:34Z); it is not done.
+- [ ] MAWS #129 is in flight, awaiting its Mac gate: free scroll while streaming
+  makes follow yield to the reader's scrolling input, with an explicit return to
+  the bottom. It is not deployed; physical iPhone momentum remains to be walked.
+- [ ] M1's unwalked branches: A9's replaced-module effect, A11's same-command
+  collision, A14's cached-catalog downgrade and A1's historical no-status fixture
+  remain test evidence only. `read.catalog` has no UI consumer and no live timing
+  samples; comparative A33 and the full two-Mac acceptance remain open.
 - [ ] M2 — native panels from reads: side question, context and usage, model and effort,
   MCP, compact with instructions, status, permissions and hooks.
 - [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
@@ -2084,7 +2109,8 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   text replaced *Queued* directly with the readback. M1 now labels the completed
   receipt *Ran* without inventing a timed intermediate phase. A9's two reloads
   confirmed by text because the 1.7.1 module was unchanged; neither proves module
-  replacement. The first reload during the 1.8.0 rollout supplies that fixture.
+  replacement. The first reload during the 1.8.0 rollout was intended to supply
+  that fixture; the rollout observation below records why it did not.
   Older/stale A1/A5 also move to M1's walk because the prior fixtures gained
   `read.status`. These are explicit carryovers, not failed or silently waived tests.
   Evidence: orchestrator's completed M0 walk, 2026-10-22 12:19–12:31Z; Outcomes.
@@ -2108,6 +2134,50 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   walk remains the owner-facing visual acceptance.
   Evidence: run 39774400638's upload log (no files found), reported to the
   orchestrator and CI-opt; no desk-branch `gate.yml` change.
+
+- Observation: A10's live command inventory was right but its grouping was not:
+  136 names and descriptions matched, all 83 unavailable commands had reasons,
+  and MCP names kept `(MCP)`, yet Skills had zero entries (Engine 98, Plugins 28,
+  Custom 10). The engine reports skills with `user`/`plugin` provenance, not a
+  distinct skill source. The `skills` enrichment and its bounded model-context
+  listing are now specified in Interfaces and the existing fix decision below.
+  Evidence: the 20:03–20:22Z walk on `web@master.d399c1ca`, sminos 1.8.0;
+  `/tmp/dsk-scripts/m1acc/`, doperpowers #355 and MAWS #127.
+- Observation: The retained pre-deploy tab could not reach its project after the
+  deploy: its removed `ProjectView-DKS-TIwS.js` returned the SPA HTML fallback.
+  Meanwhile the plugin's automatic reload replaced the stale bridge before the
+  CLI fallback could exercise A9's effect path. An old tab and an old module are
+  separate fixtures, and keeping the first did not preserve the second.
+  Evidence: 20:00Z rollout: stale-session refusal at 20:00:06Z, automatic
+  `/reload-plugins` at 20:00:12Z, CLI fallback at 20:00:47Z ending `how=text`.
+  A9's live effect confirmation remains unproven; MAWS #127 fixes chunk recovery.
+- Observation: G1's scroll helper could count a virtual row and lose it before
+  scrolling it. The first chunk-recovery candidate failed two remote G1 runs,
+  while the pinned baseline passed two; instrumenting the candidate found no
+  ProjectView, SessionView or scroller replacement/removal and no preload error.
+  Baseline and candidate each passed five local G1 runs. The evidence supported
+  a helper race exposed by timing, not the suspected lazy-view remount.
+  Evidence: MAWS #127's investigation, `/tmp/dsk-scripts/m1fix/maws-pr.txt`;
+  diagnostic run 39858604975 (zero replacements/removals), then two green remote
+  browser runs on helper fix `7243dffc4` (39860309618, 39860320211).
+- Observation: Hub replay alone did not recover the owner's sleeping phone. On
+  unlock the transcript still streamed sentence 426 of 1,000 and caught up slowly;
+  reopening reached 1,000 at once. `/color orange`, completed while locked, stayed
+  queued, then vanished on reopen. The same walk found that streaming pinned the
+  reader to the bottom. These are three different failures: stale stream state,
+  browser receipt ownership, and shared transcript follow behavior.
+  Evidence: the owner's attended `m1-busy` walk, 20:36–20:49Z; orange ran at
+  20:44:55Z. MAWS #128's Chromium/WebKit fixtures pass after the wake/receipt fixes;
+  physical phone revalidation is still owed, and scroll is separated into #129.
+- Observation: A fresh snapshot aggregates the reply so far, but the real plane's
+  post-snapshot live backlog can still grow and drain one event at a time. It is
+  not enough to dismiss a slow burst as a fake producer's artifact, nor does that
+  burst establish a production latency cause.
+  Evidence: the phone-fix trace found `BridgeReader.items` unbounded and queued
+  events emitted without coalescing or a drain budget (the mod batches up to 500);
+  a synthetic 574-chunk post-join burst delayed receipt visibility past five
+  seconds. Doperpowers board #128 tracks measuring and bounding this path; the
+  wake decision below records the distinction from snapshot recovery.
 
 ## Decision Log
 
@@ -2634,6 +2704,59 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   this browser-ownership boundary explicitly after the phone walk.
   Date/Author: 2026-10-22, the phone-fix executor and orchestrator.
 
+- Decision: The actual M1 rollout reverses entry 17's merge order, not its A14
+  gate: deploy MAWS #126, walk the still-1.7.1 MacBook, then merge doperpowers #353
+  and roll the machines immediately. The mini's hold did not start at the expected
+  time; rollout waited for the owner to unlock and approve it at 19:44Z. The
+  MacBook's marketplace clone also auto-pulls, so merging #353 first could erase
+  the older-machine fixture before the web was ready. MAWS deployed at 19:58Z;
+  older-plugin refusals passed at 19:59Z, the MacBook rolled next, and its stale
+  session was observed before automatic reload. The mini settled at 20:01Z.
+  Rationale: preserve the short mixed-version check without weakening the catalog
+  gate or leaving the two halves apart. Rejected: merging the machine half first
+  as entry 17 scheduled, which no longer guaranteed a 1.7.1 machine to walk.
+  This walk uses the MacBook as the older machine, rather than §13's intended
+  mini fixture; rolling both machines is not a full two-Mac acceptance walk.
+  Date/Author: 2026-10-22, the orchestrator's rollout at 19:46–20:03Z.
+
+- Decision: Fix G1's count-then-scroll race in its helper, separately from the
+  chunk-recovery production change. Resolve the current matching row and scroll
+  it in one browser evaluation; retry a missing or recycled match within the
+  existing 120-window budget. Keep the assertions and production scrolling
+  unchanged. The sister helper in `depth-jobs.spec.ts` is recorded in
+  `docs/tech-debt-tracker.md`, not broadened into this fix.
+  Rationale: the baseline/candidate comparison and instrumented run (Surprises)
+  did not support a user-facing remount; the detached row was directly observed.
+  Rejected: treating two failed gates as a harmless flake, adding waits, or
+  changing the lazy-view lifecycle without evidence. The final head must pass
+  two remote desk-web runs; `7243dffc4` did, before MAWS #127 merged.
+  Date/Author: 2026-10-22, the orchestrator and live-walk fix executor, 21:45Z.
+
+- Decision: Split streaming free scroll out of the phone recovery PR. MAWS #128
+  ships only wake/current-snapshot recovery, browser-owned unseen receipts and
+  their missing-outcome fallback; its shared Transcript files equal master.
+  MAWS #129 carries the reader-follow change separately, with its own review and
+  desktop/Mac gates before landing. No outcome for #129 is claimed here.
+  Rationale: the first combined candidate exposed shared virtualizer regressions
+  (deferred iOS adjustment and nested scrolling), not just a phone-only fix.
+  Rejected: holding the independently verifiable wake/receipt repair behind that
+  broader change, or shipping the combined head on browser evidence alone.
+  Measuring the post-snapshot live backlog also stays separate: doperpowers board
+  #128, P2 ready-for-architect. Desk `/exit` remains off under entry 14; its
+  complete-state-proof residue is doperpowers board #127, deferred P3.
+  Date/Author: 2026-10-22, the orchestrator and phone-fix executor, 23:27–23:40Z.
+
+- Decision: Bring the M1 record forward through rollout, the failed and passed
+  live checks, and the deployed follow-ups, without declaring M1 accepted.
+  Progress distinguishes deployment from the owner's still-owed phone re-walk;
+  Outcomes separates observed timings from comparative A33 and names the branches
+  not walked. The existing Skills, chunk, wake and receipt decisions stand.
+  Rationale: merged fixes and controlled-browser proof do not replace the physical
+  phone check that found the failures. Rejected: closing acceptance from green
+  gates, or leaving the record at the executor's pre-rollout handoff.
+  Date/Author: 2026-10-23, the orchestrator's M1 record update, from the working
+  log, walk artifacts and verified PR merge records.
+
 ## Outcomes & Retrospective
 
 **M0 (2026-10-22).** Built in both repositories as two parallel tasks against the
@@ -2686,7 +2809,7 @@ The first latency samples (milliseconds) are measured desk observations, not A33
 | op.readback | 9 | 1035.1 | 34724.3 | 34724.3 |
 | op.ran.busy | 2 | 6039.3 | 34693.9 | 34693.9 |
 
-**M1 (2026-10-22): built and reviewed, walk pending.** Both repositories implement
+**M1 build handoff (2026-10-22 12:36Z; rollout and walk below).** Both repositories implement
 one catalog contract and share the byte-identical route/catalog fixture. Sminos
 1.8.0 enables measured M1 commands and prompt routes, pushes and serves catalogs,
 keeps them through child recovery, and applies the canonical known-checkout `/cd`
@@ -2715,9 +2838,102 @@ by executor and controller. The palette, descriptions/refusals and mixed-version
 copy fit those viewports. These fake-session images are supporting evidence,
 not a substitute for the deployed phone/keyboard and mixed-Mac walk.
 
-The executor leaves both PRs unmerged. The orchestrator deploys MAWS first, rolls
-out sminos to the MacBook before the mini, and performs A10–A14, the three M0
-carryovers, and A33's measurements. A sleeping phone must also be walked through a
-missed command end and reconnect. Residue: an engine task/worktree noun (or ledger
-whose completeness the mod can prove) is needed before re-enabling desk `/exit`.
-Comparative RC budgets remain deferred; no live M1 acceptance is claimed here.
+That executor handoff left both PRs unmerged and the live walk to the orchestrator.
+The following record supersedes its pending verification and rollout status; it
+is not a sign-off of the acceptance branches that remain open.
+
+**M1 rollout and first acceptance walk (2026-10-22 19:58–20:49Z).** Both halves
+landed back to back, then two fix waves followed the walk. Merge commits below
+are checked against each repository's PR record; deployment times and build
+labels are the orchestrator's rollout observations.
+
+| Landed change | Merge | Rollout |
+| --- | --- | --- |
+| [MAWS #126](https://github.com/SSFSKIM/MAWS/pull/126), M1 command spine | `d399c1cac` | 19:58Z, hub `d399c1ca`, web `master.d399c1ca`. |
+| [doperpowers #353](https://github.com/SSFSKIM/doperpowers/pull/353), sminos 1.8.0 | `00e34537` | MacBook 19:59Z; mini daemon/uplink restarted 20:01Z. |
+| [doperpowers #355](https://github.com/SSFSKIM/doperpowers/pull/355), sminos 1.8.1 | `099a44c9` | MacBook 21:37Z; mini followed through automatic reload after its hold released. |
+| [MAWS #127](https://github.com/SSFSKIM/MAWS/pull/127), catalog, chunk and guidance fixes | `1cea5bc35` | 22:03Z, hub `1cea5bc3`, web `master.1cea5bc3`. |
+| [MAWS #128](https://github.com/SSFSKIM/MAWS/pull/128), wake and receipt recovery | `4c12e4a1b` | 23:55Z, hub `4c12e4a1`, web `master.4c12e4a1`. |
+
+MAWS #126's final combined head `c4503dce1` passed static, all four unit shards,
+`e2e:desk-web` and `e2e:desk-web-hub` in macOS run 39842811898 (attempt 2: the
+known `pause-take-over.pty.test.ts` zsh emacs-mode failure passed its rerun).
+Doperpowers #353's eight-gate evidence is recorded in the build handoff above.
+The live UI walk used the MacBook seats `m1-walk` and `m1-busy`; the mini was
+rolled, not a second complete UI walk. Evidence is under
+`/tmp/dsk-scripts/m1acc/`; the attended terminal/phone observations are the
+orchestrator's working log, 20:36–20:49Z.
+
+| Check | Observed result |
+| --- | --- |
+| A5 / A14 older machine | On the still-1.7.1 MacBook, `/list-agents` and `/rename` were refused with the older-plugin reason and Send as text anyway; the palette kept the desk's Model/Compact items, and Info's `read.status` still answered. The wording incorrectly named doperpowers as the plugin to update; #127 corrects it to sminos. |
+| A5 stale session | After the MacBook roll, its 1.7.1-loaded seat said to run `/reload-plugins` or restart. #127 removes the misleading older-machine minimum-version prefix from this branch. |
+| Ran label / A10 | `Ran · Session color set to: red · confirmed by its row` was visible. Palette opening caused no socket frames; all 136 names/descriptions matched, all 83 unavailable entries had reasons and MCP names kept `(MCP)`. Skills grouping failed (zero Skills); #355/#127 repair it. |
+| A11 | Desk red then blue each read back their own line. With the owner typing yellow between desk commands at 20:37:03Z, yellow stayed unattributed and both desk lines remained row-confirmed. |
+| A12 | A skill command and `/goal` started turns and showed Started a turn; the goal-clear hint named Interrupt rather than promising a queued clear would stop the running goal. |
+| A13 | Desk Interrupt left `/color` usable. After the owner's terminal Esc, desk green was refused with *stopped at the terminal: commands resume after input is typed there*; terminal purple cleared the condition and desk green ran at 20:40:19Z. |
+| Sleeping phone | Failed on the original M1 build: stale streaming content after unlock, orange still queued after its end, receipt lost on reopen, and no free scroll while streaming. Wake/receipts are deployed in #128; the physical re-walk is open. Scroll remains in-flight #129. |
+
+**A33 samples from that walk**, milliseconds, on the original M1 deployment before
+the fixes (MacBook load observed at 18–55). The first five paths each have at
+least 20 uses; the single busy sample is diagnostic only. The palette meets its
+fixed 50 ms budget, but this is not RC parity or the cold/warm/reconnect cohorts
+on both Macs. `catalog.ready` mostly measures the cache, not an uncached read.
+Source: `/tmp/dsk-scripts/m1acc/final-evidence.txt`.
+
+| Path | n | p50 | p95 | max |
+| --- | ---: | ---: | ---: | ---: |
+| palette.open | 27 | 1.0 | 8.4 | 9.1 |
+| catalog.ready | 24 | 0.1 | 0.1 | 408.6 |
+| op.queued | 30 | 296.4 | 590.0 | 677.1 |
+| op.ran (idle) | 29 | 468.6 | 641.2 | 680.1 |
+| op.readback | 30 | 468.1 | 646.1 | 682.7 |
+| op.ran.busy | 1 | 345.0 | 345.0 | 345.0 |
+
+`read.catalog` had zero samples: the UI used pushed/cached catalogs and had no
+consumer of the on-demand read. A14's cached-catalog downgrade was not staged
+live; cache-ready samples do not prove that refusal branch. A9's effect branch
+was not reached (the old tab lost its chunk and automatic reload consumed the
+stale module before the CLI fallback). A11's identical-command/arguments collision
+was not staged in the attended walk; the different terminal command between desk
+commands proves only that case. Those branches rest on their automated tests,
+not live passes. A1's pre-`read.status` producer likewise had no live fixture.
+The comparative RC column stays deferred on MAWS #52; the separate second latency
+window was skipped while the owner's screen was locked, yielding no samples.
+
+**Fixes landed; phone revalidation still owed (2026-10-23).** Skills membership
+now crosses the child and plane allowlists as well as the mod/web types, and an
+unavailable usage summary leaves the command catalog intact. The live 1.8.1
+catalog was checked after deployment and carried `skills`; the screen was locked,
+so the deployed Skills UI was not re-walked. #127 also recovers failed lazy chunks
+with a build-scoped one-reload guard, fixes both capability wordings and hardens
+G1's live-row scroll helper without changing production scrolling. Pre-fix tabs
+still need one manual reload to acquire that recovery code.
+
+Doperpowers #355's final `d172adfc` passed all eight gates (39854813385) after
+review found and fixed the optional-summary failure and both transport allowlists.
+MAWS #127's `7243dffc4` passed static/unit/desk-web (39860309618), a second desk-web
+run (39860320211), and macOS desk-web-hub (39861585627); its independent review
+had no material findings. #128's `fc5697e51` passed static/unit/desk-web
+(39873504020), macOS desk-web-hub (39874568939), and re-review. Its focused
+Chromium/WebKit wake/receipt fixtures passed 8/8, including killed/reopened unseen
+ends and a missing outcome. These are controlled-browser results, not a deployed
+phone latency measurement. The exact fallback is *Command outcome unavailable ·
+may not have run; check the session.* It neither claims success nor retries an
+effect. The implementation contracts and their tradeoffs are in the existing
+wake/receipt Decision Log entries; fix evidence is under `/tmp/dsk-scripts/m1fix/`
+and in the linked PRs.
+
+The owner has not re-walked the deployed fix: at 00:34Z they deferred until
+available. Progress keeps that check open, alongside the in-flight free-scroll
+PR and the unwalked acceptance branches. Residue is tracked in the backlog:
+doperpowers board #127, complete task/worktree proof before desk `/exit` can be
+re-enabled (deferred P3), and #128, post-snapshot live backlog measurement and
+bounding (P2 ready-for-architect). M2–M5 and comparative A33 remain ahead.
+
+The lesson of this walk is that an outcome reaching the hub is not yet an outcome
+the person can read: a sleeping browser needs both a current transcript and its
+own unseen receipt identity after reopen. The actual engine inventory likewise
+proved more than a fixture could about grouping, and the rollout's automatic
+updates consumed a fixture the plan expected to keep. The record preserves those
+limits instead of turning merged code or a nearby passing check into acceptance.
