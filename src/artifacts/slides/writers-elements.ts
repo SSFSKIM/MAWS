@@ -259,14 +259,17 @@ export function duplicateWithin(doc: Doc, slideId: string, ids: string[], offset
 /** Freeze a measured layout atomically; the loader validates all pins before any write. */
 export function preparePinnedLayout(doc: Doc, slideId: string, writes: Record<string, ElementWrites>): (origin: unknown) => void {
   const plan = newPlan();
+  const elements = readFlat(doc, slideId, false);
+  const byId = new Map(elements.map((element) => [element.id, element]));
   for (const [id, write] of Object.entries(writes)) {
     if (write.style) putStyle(plan, id, write.style);
     for (const [key, value] of Object.entries(write.attrs ?? {})) put(plan, id, `attr:${key}`, value);
-    put(plan, id, 'order', null);
+    if (byId.get(id)?.order !== undefined) put(plan, id, 'order', null);
   }
-  for (const children of childLists(readFlat(doc, slideId, false)).values()) {
+  for (const children of childLists(elements).values()) {
     const ids = children.filter((child) => writes[child.id]).map((child) => child.id);
-    for (const [id, key] of rekey(ids, new Map(), OVER)) put(plan, id, 'z', key);
+    const current = new Map(children.filter((child) => child.z !== undefined).map((child) => [child.id, child.z!]));
+    for (const [id, key] of rekey(ids, current, OVER)) put(plan, id, 'z', key);
   }
   preflight(doc, slideId, plan);
   return (origin) => commit(doc, slideId, plan, origin);

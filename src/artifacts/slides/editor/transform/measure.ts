@@ -7,7 +7,7 @@
 // px (`left`/`top`, connector coordinates) to the slide; gestures read pointer moves back through its inverse.
 import type { SlideCanvas } from '../../canvas';
 import { connectorRoute } from '../../glyphs';
-import { apply, boundsOf, cornersOf, IDENTITY, multiply, shift, transformMatrix, type Affine, type Box, type FlowAxis, type Pt } from '../../geometry';
+import { apply, applyLinear, boundsOf, cornersOf, IDENTITY, invert, multiply, shift, transformMatrix, type Affine, type Box, type FlowAxis, type Pt } from '../../geometry';
 import { ROOT } from '../../model';
 
 export interface Measured {
@@ -50,12 +50,11 @@ function layoutAt(n: HTMLElement, root: HTMLElement): Pt | null {
 }
 
 /** An element's own transform as a matrix about its origin, in its box's px. */
-function ownTransform(n: HTMLElement): Affine | null {
+function ownTransform(n: HTMLElement | SVGElement, w: number, h: number): Affine | null {
   const view = n.ownerDocument.defaultView!;
   const computed = view.getComputedStyle(n);
   const value = computed.transform && computed.transform !== 'none' ? computed.transform : n.style.getPropertyValue('transform');
   if (!value || value === 'none') return null;
-  const [w, h] = [n.offsetWidth, n.offsetHeight];
   // a browser answers matrix(…); without one (a test's DOM) the inline value is read as the dialect writes it
   const three = /^matrix3d\(([^)]*)\)$/.exec(value);
   const m = three ? (() => {
@@ -73,13 +72,35 @@ function matrixOf(n: HTMLElement, root: HTMLElement): Affine | null {
   if (!at) return null;
   let m = shift(at.x, at.y);
   for (let a: HTMLElement | null = n; a && a !== root; a = a.parentElement) {
-    const own = ownTransform(a);
+    const own = ownTransform(a, a.offsetWidth, a.offsetHeight);
     if (!own) continue;
     const pos = layoutAt(a, root);
     if (!pos) return null;
     m = multiply(multiply(shift(pos.x, pos.y), multiply(own, shift(-pos.x, -pos.y))), m);
   }
   return m;
+}
+
+/**
+ * An outer SVG has no HTML offsets. Chromium resolves its used CSS width/height in px; its client rect supplies the
+ * translation only. Recover that translation through its parent's axes, not the rotated/scaled rect's width/height.
+ */
+function svgLayout(n: HTMLElement, root: HTMLElement, scale: number): { matrix: Affine; at: Pt; w: number; h: number } | null {
+  const parent = n.parentElement;
+  if (!parent) return null;
+  const parentMatrix = parent === root ? IDENTITY : matrixOf(parent, root);
+  const parentAt = parent === root ? { x: 0, y: 0 } : layoutAt(parent, root);
+  if (!parentMatrix || !parentAt) return null;
+  const css = n.ownerDocument.defaultView!.getComputedStyle(n);
+  const used = (value: string) => /^\d+(?:\.\d+)?px$/.test(value) ? Number.parseFloat(value) : NaN;
+  const [w, h] = [used(css.width), used(css.height)];
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
+  const own = ownTransform(n, w, h) ?? IDENTITY;
+  const zero = boundsOf(cornersOf(multiply(parentMatrix, own), w, h));
+  const rect = n.getBoundingClientRect();
+  const origin = root.getBoundingClientRect();
+  const local = applyLinear(invert(parentMatrix), { x: (rect.left - origin.left) / scale - zero.x, y: (rect.top - origin.top) / scale - zero.y });
+  return { matrix: multiply(parentMatrix, multiply(shift(local.x, local.y), own)), at: { x: parentAt.x + local.x, y: parentAt.y + local.y }, w, h };
 }
 
 /** The nearest positioned ancestor inside the slide (what `position:absolute` places against), else the slide. */
@@ -127,19 +148,17 @@ export function measure(canvas: SlideCanvas, id: string, scale: number): Measure
   let matrix: Affine | null;
   let w: number;
   let h: number;
+  let at: Pt | null;
   if (n instanceof n.ownerDocument.defaultView!.HTMLElement) {
     matrix = matrixOf(n, root);
     [w, h] = [n.offsetWidth, n.offsetHeight];
+    at = layoutAt(n, root);
   } else {
-    // an svg (no offsets): its drawn rect, unscaled
-    const r = (n as Element).getBoundingClientRect();
-    const o = root.getBoundingClientRect();
-    matrix = shift((r.left - o.left) / scale, (r.top - o.top) / scale);
-    [w, h] = [r.width / scale, r.height / scale];
+    const svg = svgLayout(n, root, scale);
+    if (!svg) return null;
+    ({ matrix, w, h, at } = svg);
   }
-  if (!matrix || !hostAt) return null;
-  const at = n instanceof n.ownerDocument.defaultView!.HTMLElement ? layoutAt(n, root) : { x: matrix.e, y: matrix.f };
-  if (!at) return null;
+  if (!matrix || !hostAt || !at) return null;
   const inHost = { x: at.x - hostAt.x - hostNode.clientLeft, y: at.y - hostAt.y - hostNode.clientTop, w, h };
   const corners = cornersOf(matrix, w, h);
   return { id, w, h, inHost, matrix, hostMatrix, corners, bounds: boundsOf(corners), host };
@@ -168,13 +187,14 @@ export function flowAxis(canvas: SlideCanvas, parent: string): FlowAxis {
 }
 
 /** A child's layout box in its parent's own px (untransformed), for the flow's slots. */
-export function boxInParent(canvas: SlideCanvas, parent: string, id: string): Box | null {
+export function boxInParent(canvas: SlideCanvas, parent: string, id: string, scale: number): Box | null {
   const n = canvas.node(id);
   const p = parent === ROOT ? canvas.root : canvas.node(parent);
   if (!n || !p) return null;
-  const at = layoutAt(n, canvas.root);
+  const svg = n instanceof n.ownerDocument.defaultView!.HTMLElement ? null : svgLayout(n, canvas.root, scale);
+  const at = svg?.at ?? layoutAt(n, canvas.root);
   const pAt = p === canvas.root ? { x: 0, y: 0 } : layoutAt(p, canvas.root);
-  return at && pAt ? { x: at.x - pAt.x, y: at.y - pAt.y, w: n.offsetWidth, h: n.offsetHeight } : null;
+  return at && pAt ? { x: at.x - pAt.x, y: at.y - pAt.y, w: svg?.w ?? n.offsetWidth, h: svg?.h ?? n.offsetHeight } : null;
 }
 
 /**

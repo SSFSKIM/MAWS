@@ -263,7 +263,8 @@ export function startMove(ctx: GestureContext, ids: readonly string[], p0: Pt): 
       last = key;
       transact(ctx.session.doc, () => {
         if (first) placement.write(ctx.session.origin);
-        drag.write({ ...(first ? placement.writes : {}), ...movedBy(bases, { x: dx, y: dy }, first) });
+        // Freezing an unselected sibling is not a drag of it: only the selected elements win conflicts on drop.
+        drag.write(movedBy(bases, { x: dx, y: dy }, first));
       }, ctx.session.origin);
       first = false;
       return { guides };
@@ -308,7 +309,7 @@ export function startFlowMove(ctx: GestureContext, id: string, p0: Pt): Gesture 
   });
   const others = flow.filter((s) => s !== id);
   // the slots in the parent's own px, the pointer read back into them (the parent may be turned)
-  const boxes = others.map((s) => boxInParent(ctx.canvas, parent, s)).filter((b): b is Box => b !== null);
+  const boxes = others.map((s) => boxInParent(ctx.canvas, parent, s, ctx.scale)).filter((b): b is Box => b !== null);
   const frame = containerMatrix(ctx.canvas, parent)?.box ?? null;
   const me = measure(ctx.canvas, id, ctx.scale);
   const axis = flowAxis(ctx.canvas, parent);

@@ -467,6 +467,46 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 const selected = (tab: Locator) => tab.locator('[data-overlay] [data-selected]');
 const px = (v: string | undefined) => Number.parseFloat(v ?? 'NaN');
 
+test('WR #35: first movement preserves a real SVG and flow-only-styled siblings inside a transformed flow container', async () => {
+  const page = await ready();
+  const id = await createDeck(page, 'SVG placement', {
+    'project/deck.json': JSON.stringify({ v: 4, title: 'SVG placement', cover: 'svg', order: ['svg'] }),
+    'project/slides/svg.html': `<section id="svg" style="background:#ffffff;padding:100px;gap:32px">
+<div id="group" style="width:600px;height:400px;gap:32px;transform:translate(40px, 30px) rotate(90deg)">
+<svg id="drawing" viewBox="0 0 100 50" style="width:200px;height:100px;transform:translate(10px, 20px)"><rect width="100" height="50" fill="#2b7a78"/></svg>
+<p id="caption" style="font-size:32px;flex:1;align-self:center;min-width:120px;max-width:500px">A stationary caption</p></div>
+<div id="target" style="position:absolute;left:1300px;top:600px;width:200px;height:100px;background:#ee7733"></div></section>`,
+  });
+  const tab = await openFromLibrary(page, 'SVG placement', id);
+  const node = (eid: string) => tab.locator(`[data-stage-slide="svg"] [data-eid="${eid}"]`);
+  await expect(node('drawing')).toBeVisible();
+  expect(await node('drawing').evaluate((el) => el instanceof SVGSVGElement && !('offsetWidth' in el))).toBe(true);
+  const target = (await node('target').boundingBox())!;
+  const start = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
+  await page.mouse.click(start.x, start.y);
+  await expect(tab.locator('[data-overlay] [data-selected="target"]')).toBeVisible();
+  const stationary = ['group', 'drawing', 'caption'];
+  const before = await Promise.all(stationary.map((eid) => node(eid).boundingBox()));
+  const { scale } = await stageAt(tab);
+  await page.keyboard.down('Meta');
+  await drag(page, start, { x: start.x + 60 * scale, y: start.y + 40 * scale });
+  await page.keyboard.up('Meta');
+  await expect.poll(async () => (await elementOf(page, id, 'svg', 'target'))?.style.left).toBe('1360px');
+  expect((await elementOf(page, id, 'svg', 'target'))?.style.top).toBe('640px');
+  for (const [i, eid] of stationary.entries()) {
+    await expect(node(eid)).toHaveCSS('position', 'absolute');
+    const after = (await node(eid).boundingBox())!;
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(after[key], `${eid}: ${key}`).toBeCloseTo(before[i]![key], 1);
+  }
+  const afterTarget = (await node('target').boundingBox())!;
+  expect(afterTarget.x - target.x).toBeCloseTo(60 * scale, 1);
+  expect(afterTarget.y - target.y).toBeCloseTo(40 * scale, 1);
+  const caption = (await elementOf(page, id, 'svg', 'caption'))!;
+  expect(['flex', 'align-self', 'min-width', 'max-width'].filter((key) => caption.style[key] !== undefined)).toEqual([]);
+  expect((await elementOf(page, id, 'svg', 'group'))?.style.transform).toBe('translate(40px, 30px) rotate(90deg)');
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
 test('the transform layer: select, move with guides, resize, rotate, nudge, flow re-order and Detach, z-order, group, duplicate and delete', async () => {
   test.setTimeout(180_000);
   const page = await ready();
