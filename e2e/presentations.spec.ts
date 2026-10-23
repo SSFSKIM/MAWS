@@ -515,19 +515,16 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   await page.keyboard.press('Shift+ArrowDown');
   await expect.poll(async () => [(await element('b'))?.style.left, (await element('b'))?.style.top]).toEqual(['701px', '510px']);
 
-  // a flow child dragged below its sibling re-orders, an insertion bar drawn meanwhile
+  // WR #35: the first move already fixed the structured elements. A later drag moves only its target.
   const head = (await tab.locator('[data-stage-slide] [data-eid="head"]').boundingBox())!;
   const para = (await tab.locator('[data-stage-slide] [data-eid="para"]').boundingBox())!;
   await page.mouse.click(head.x + 40, head.y + head.height / 2);
-  await drag(page, { x: head.x + 40, y: head.y + head.height / 2 }, { x: para.x + 40, y: para.y + para.height - 2 }, { during: async () => await expect(tab.locator('[data-insertion]')).toBeVisible() });
-  await expect.poll(async () => (await slideOf(page, id, 'lab')).children.filter((c) => c.style.position !== 'absolute').map((c) => c.id)).toEqual(['para', 'head']);
-
-  // Detach: the paragraph pinned where it is drawn
+  await drag(page, { x: head.x + 40, y: head.y + head.height / 2 }, { x: head.x + 40 + 60 * scale, y: head.y + head.height / 2 + 40 * scale });
+  await expect.poll(async () => (await element('head'))?.style.position).toBe('absolute');
   const paraNow = (await tab.locator('[data-stage-slide] [data-eid="para"]').boundingBox())!;
-  await page.mouse.click(paraNow.x + 20, paraNow.y + paraNow.height / 2);
-  await tab.getByRole('button', { name: 'Detach' }).click();
-  await expect.poll(async () => (await element('para'))?.style.position).toBe('absolute');
-  expect(px((await element('para'))!.style.left)).toBeCloseTo(128, -1);
+  expect(paraNow.x).toBeCloseTo(para.x, 0);
+  expect(paraNow.y).toBeCloseTo(para.y, 0);
+  await expect(tab.getByRole('button', { name: 'Detach' })).toBeDisabled();
 
   // z-order: a sent to back sits under the flow layer (listed before the first flow child)
   await page.mouse.click(at(310, 510).x, at(310, 510).y);
