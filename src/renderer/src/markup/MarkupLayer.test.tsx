@@ -1,6 +1,6 @@
 // P3-G (§D4.2): the overlay over the surface: the still, the drawing in the five inks with Pen, Box, Arrow and Text,
 // Undo and Clear, Escape (outside a text field) discarding, Add to chat delivering.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DropdownMenu } from 'radix-ui';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
@@ -10,6 +10,7 @@ import { registerFocusTarget, resetComposerStore, useComposerStore } from '../st
 import { useLayout } from '../stores/layout';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
+import { installResizeObserver } from '../test-support/resize';
 import { MarkupLayer } from './MarkupLayer';
 import { resetMarkup, startMarkup, useMarkup } from './session';
 import { registerMarkupSurface, resetMarkupSurfaces } from './surface';
@@ -53,6 +54,7 @@ afterEach(() => {
   cleanup();
   resetMarkup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   document.body.innerHTML = '';
 });
 
@@ -77,6 +79,58 @@ describe('MarkupLayer', () => {
     expect(undo.getAttribute('title')).toBe('Nothing to undo yet');
     expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('title')).toBe('Nothing to clear yet');
     expect(screen.getByRole('button', { name: 'Add to chat' })).toHaveProperty('disabled', false); // an unmarked still is a screenshot
+  });
+
+  it('moves the toolbar without drawing and keeps it inside the annotation surface', async () => {
+    await open();
+    const toolbar = document.querySelector<HTMLElement>('[data-markup-toolbar]')!;
+    vi.spyOn(toolbar, 'getBoundingClientRect').mockReturnValue({ left: 450, top: 560, width: 500, height: 40 } as DOMRect);
+    const handle = screen.getByRole('button', { name: 'Move mark-up toolbar' });
+    fireEvent.pointerDown(handle, { clientX: 460, clientY: 570, pointerId: 9, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 410, clientY: 270, pointerId: 9 });
+    fireEvent.pointerUp(handle, { pointerId: 9 });
+    expect(toolbar.style.left).toBe('100px');
+    expect(toolbar.style.top).toBe('140px');
+    expect(paths()).toEqual([]);
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(toolbar.style.top).toBe('130px');
+    fireEvent.pointerDown(handle, { clientX: 460, clientY: 570, pointerId: 10, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 10000, clientY: -10000, pointerId: 10 });
+    fireEvent.pointerUp(handle, { pointerId: 10 });
+    expect(toolbar.style.left).toBe('292px');
+    expect(toolbar.style.top).toBe('8px');
+  });
+
+  it.each(['keyboard', 'pointer'] as const)('starts %s movement from the displayed toolbar position after its surface shrinks', async (input) => {
+    const { resize } = installResizeObserver();
+    const surface = document.body.appendChild(document.createElement('div'));
+    await open(undefined, surface);
+    let width = 800;
+    let height = 500;
+    vi.spyOn(surface, 'getBoundingClientRect').mockImplementation(() => ({ left: 300, top: 120, width, height }) as DOMRect);
+    const toolbar = document.querySelector<HTMLElement>('[data-markup-toolbar]')!;
+    vi.spyOn(toolbar, 'getBoundingClientRect').mockImplementation(() => ({
+      left: 300 + (Number.parseFloat(toolbar.style.left) || 200),
+      top: 120 + (Number.parseFloat(toolbar.style.top) || 440), width: 200, height: 40,
+    }) as DOMRect);
+    const grip = screen.getByRole('button', { name: 'Move mark-up toolbar' });
+    for (let i = 0; i < 40; i++) fireEvent.keyDown(grip, { key: 'ArrowRight' });
+    for (let i = 0; i < 4; i++) fireEvent.keyDown(grip, { key: 'ArrowDown' });
+    expect(toolbar.style).toMatchObject({ left: '592px', top: '452px' });
+    width = 600;
+    height = 300;
+    resize(surface, { width, height });
+    await waitFor(() => expect(toolbar.style).toMatchObject({ left: '392px', top: '252px' }));
+    if (input === 'keyboard') {
+      fireEvent.keyDown(grip, { key: 'ArrowLeft' });
+      fireEvent.keyDown(grip, { key: 'ArrowUp' });
+    } else {
+      fireEvent.pointerDown(grip, { clientX: 700, clientY: 380, pointerId: 9, button: 0 });
+      fireEvent.pointerMove(grip, { clientX: 690, clientY: 370, pointerId: 9 });
+      fireEvent.pointerUp(grip, { pointerId: 9 });
+    }
+    expect(toolbar.style).toMatchObject({ left: '382px', top: '242px' });
+    expect(paths()).toEqual([]);
   });
 
   it('draws a pen stroke in surface px, then a box in the ink chosen; Undo and Clear take them back', async () => {
@@ -193,7 +247,7 @@ describe('MarkupLayer', () => {
     await user.tab({ shift: true });
     expect(document.activeElement, 'from the overlay itself, to its last control').toBe(add);
     await user.tab();
-    expect(document.activeElement, 'from the last control, round to the first').toBe(screen.getByRole('radio', { name: 'Pen' }));
+    expect(document.activeElement, 'from the last control, round to the first').toBe(screen.getByRole('button', { name: 'Move mark-up toolbar' }));
     await user.tab({ shift: true });
     expect(document.activeElement, 'from the first control, round to the last').toBe(add);
     expect(layer.contains(document.activeElement)).toBe(true);

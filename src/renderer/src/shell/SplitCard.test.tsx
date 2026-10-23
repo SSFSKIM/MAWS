@@ -234,11 +234,12 @@ describe('the split’s floating card in the Shell', () => {
     dragTo(150);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     expect(card()).toBeNull();
-    expect(composers()).toEqual([]);
+    expect(composers()).toEqual([A]);
     expect(set().focusedPane, 'the pill is no pane: A is what is on screen').toBe(1);
     const shown = pill()!;
     expect(document.activeElement).toBe(shown);
-    expect([shown.dataset.floatingPill, shown.style.right, shown.style.bottom]).toEqual(['floating', '16px', '16px']);
+    const compact = screen.getByRole('region', { name: 'Compact session composer' });
+    expect([shown.dataset.floatingPill, compact.style.right, compact.style.bottom]).toEqual(['floating', '16px', '16px']);
     expect(mainRegion().contains(shown)).toBe(true);
     expect(shown.querySelector('[aria-label="Unread"]')).toBeNull();
     act(() => useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
@@ -248,10 +249,26 @@ describe('the split’s floating card in the Shell', () => {
     expect(card()).not.toBeNull();
     expect(focused).toEqual([A]);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(document.activeElement).toBe(pill());
     focused.splice(0);
     act(() => useAttention.setState({ bySession: new Map([[A, [attention('app-a', 'permission', T0)]]]) }));
     expect(card()).not.toBeNull();
-    expect(focused, 'the raise never takes the keyboard').toEqual([]);
+    expect(focused, 'the raise hands the compact surface’s keyboard to its replacement').toEqual([A]);
+  });
+
+  it('a new request raises the card without taking keyboard focus held in the other pane', async () => {
+    const user = userEvent.setup();
+    shell();
+    dragTo(150);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    const elsewhere = within(mainRegion().querySelector<HTMLElement>('[data-pane="1"]')!).getByRole('tab');
+    act(() => elsewhere.focus());
+    expect(document.activeElement).toBe(elsewhere);
+    focused.splice(0);
+    act(() => useAttention.setState({ bySession: new Map([[A, [attention('app-a', 'permission', T0)]]]) }));
+    expect(card()).not.toBeNull();
+    expect(focused, 'a request must not move the keyboard out of another surface').toEqual([]);
+    expect(document.activeElement).toBe(elsewhere);
   });
 
   it('a window resize re-clamps the card inside the content and writes no size; a resize of its edges writes it on release, keyed by A’s tab', () => {

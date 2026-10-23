@@ -21,6 +21,7 @@ import { connectorDatasetSink } from './dataset-sink'; // E3
 import { ConnectorStatusCache } from './provenance'; // P3-HD
 import { DirectCalls } from './direct-calls'; // P3-HD M2
 import { DirectConnectionPool } from './direct-client'; // P3-HD M2
+import { ConfiguredDeliverySources } from './configured-delivery'; // WR 76/78
 
 type HostConnectorCommand = { [N in keyof typeof ConnectorCommands]: (typeof ConnectorCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof ConnectorCommands];
 
@@ -47,6 +48,7 @@ export interface ConnectorsSurfaceDeps {
   datasetRefresh?: DatasetRefreshRequests; // E3: the agents' refresh requests a dataset start may name (absent: none)
   statusCache?: ConnectorStatusCache; // P3-HD: tests
   direct?: DirectCalls; // P3-HD M2: tests
+  deliveryConfig?: { userData: string; captureEnv: () => Promise<Record<string, string>> }; // WR 76/78: host-owned, never renderer input
 }
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}, code: 'invalid_input' | 'internal' = 'invalid_input'): HostCommandError {
@@ -71,7 +73,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   // P3-HD M2: route D's host half over the same store and observations; its connections live for main's attachment
   const direct =
     deps.direct ??
-    new DirectCalls({ datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), cache: statusCache, pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
+    new DirectCalls({ datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), cache: statusCache, ...(deps.deliveryConfig && { deliverySources: new ConfiguredDeliverySources(deps.deliveryConfig) }), pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
   const storeOf = (): ArtifactStore => {
     if (!store) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
     return store;

@@ -9,7 +9,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { displayTitle } from '../sessions/title';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { CARD_MARGIN, cardOver, cardSession, openCard, useFloatingCard } from './floating';
+import { CARD_MARGIN, cardOver, cardSession, focusCompactCard, openCard, splitFloat, useFloatingCard } from './floating';
+import { currentSet } from '../stores/layout-model';
+import { SessionPane } from '../session/SessionPane';
 
 export const useSessionTitle = (appSessionId: AppSessionId) => useSessions((s) => displayTitle(s.records.get(appSessionId)));
 
@@ -25,8 +27,9 @@ export function Pill({ appSessionId, placement }: { appSessionId: AppSessionId; 
     useFloatingCard.setState({ pillTakesFocus: false });
     self.current?.focus();
   }, []);
-  const place = placement === 'floating' ? 'pointer-events-auto absolute h-7 shadow-float' : 'h-6 shrink-0';
-  return (
+  const paneIndex = useLayout((s) => splitFloat(s.main)?.pane ?? currentSet(s.main).focusedPane);
+  const place = placement === 'floating' ? 'h-7 w-full rounded-t-lg' : 'h-6 shrink-0 rounded-full border border-border-strong';
+  const titleButton = (
     <button
       ref={self}
       type="button"
@@ -34,13 +37,27 @@ export function Pill({ appSessionId, placement }: { appSessionId: AppSessionId; 
       title={unread ? `${title} · Unread` : title}
       data-floating-pill={placement}
       onClick={openCard}
-      style={placement === 'floating' ? { right: CARD_MARGIN, bottom: CARD_MARGIN } : undefined}
-      className={`inline-flex items-center gap-2 rounded-full border border-border-strong bg-bg-raised px-3 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 ${place}`}
+      className={`inline-flex items-center gap-2 bg-bg-raised px-3 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 ${place}`}
     >
       <span className="max-w-[220px] truncate">{title}</span>
       {unread && <span aria-label="Unread" role="img" className="block size-[5px] shrink-0 rounded-full bg-info" />}
     </button>
   );
+  // Native browser surfaces keep their inline title until the shell's native-view layout is revisited.
+  if (placement === 'inline') return titleButton;
+  return <section
+    role="region"
+    aria-label="Compact session composer"
+    data-pane="card"
+    data-compact-session={appSessionId}
+    className="pointer-events-auto absolute flex max-h-[calc(100%-32px)] flex-col overflow-hidden rounded-lg border border-border-strong bg-bg shadow-float"
+    style={{ right: CARD_MARGIN, bottom: CARD_MARGIN, width: 420, maxWidth: `calc(100% - ${2 * CARD_MARGIN}px)` }}
+  >
+    {titleButton}
+    <div className="min-h-0 overflow-y-auto" onPointerDownCapture={focusCompactCard} onFocusCapture={focusCompactCard}>
+      <SessionPane key={appSessionId} appSessionId={appSessionId} paneIndex={paneIndex} compact />
+    </div>
+  </section>;
 }
 
 // The pill in a browser chrome's row, while the card over its surface is closed: the chrome renders it only where its

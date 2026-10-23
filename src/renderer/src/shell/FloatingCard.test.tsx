@@ -112,13 +112,25 @@ describe('the floating card in the Shell', () => {
     expect(shown.closest('#root, [data-region="panel"]')).toBe(region('panel'));
   });
 
-  it('Close leaves the pill, with the unread dot while the record is unread; the pill brings the card back', async () => {
+  it('offers a visible grip that also resizes with the keyboard', () => {
+    mockColumnLayout(() => 420);
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const before = Number.parseInt(card()!.style.width);
+    const grip = screen.getByRole('button', { name: 'Resize session card top-left' });
+    expect(grip.querySelector('svg')).not.toBeNull();
+    fireEvent.keyDown(grip, { key: 'ArrowLeft' });
+    expect(Number.parseInt(card()!.style.width)).toBe(before + 20);
+  });
+
+  it('Close keeps a usable compact composer and unread title; the title brings the transcript back', async () => {
     const user = userEvent.setup();
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     expect(card()).toBeNull();
-    expect(composers()).toEqual([]);
+    expect(composers()).toEqual([A]);
+    expect(within(screen.getByRole('region', { name: 'Compact session composer' })).getByTestId('composer')).toBeTruthy();
     const pill = screen.getByRole('button', { name: 'Show session card' });
     expect(pill.textContent).toBe('Alpha session');
     expect(pill.querySelector('[aria-label="Unread"]')).toBeNull();

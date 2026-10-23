@@ -9,7 +9,8 @@ export const SERVICE: Record<DeliveryTarget, string> = { notion: 'Notion', drive
 export const GWS_INSTALL = 'npm install -g @googleworkspace/cli';
 export const GWS_SETUP = 'gws auth setup --login';
 
-const scopeWords = (scope: 'user' | 'local') => (scope === 'user' ? 'your user settings' : 'this project’s local settings');
+const scopeWords = (scope: NotionSource['scope']) => (scope === 'app' ? 'MAWS settings' : scope === 'user' ? 'your user settings' : 'this project’s local settings');
+const NOTION_NOT_FOUND = 'Add Notion’s MCP server (https://mcp.notion.com/mcp) in Settings › Engine › MCP servers, then check again. No session is needed.';
 
 export const SEND_TO_COPY = {
   item: (service: string) => `Send to ${service}…`, // the library's Export menu
@@ -50,8 +51,8 @@ export const SEND_TO_COPY = {
   notionSignIn: (server: string) => `MAWS needs your go-ahead to reach “${server}” once. Connect opens Notion in your browser; MAWS keeps its own sign-in.`,
   notionReconnect: (server: string) => `MAWS’s sign-in to “${server}” needs renewing.`,
   notionBusy: 'A Notion sign-in is under way. Finish it in your browser, then check again.',
-  notionNoSession: 'MAWS finds your Notion connector through a running session. Open or start any session, then check again.',
-  notionNotFound: 'None of your running sessions has a Notion connector MAWS can reach itself. Add Notion’s MCP server (https://mcp.notion.com/mcp) to your Claude Code user settings, start a session, then check again.',
+  notionNoSession: NOTION_NOT_FOUND,
+  notionNotFound: NOTION_NOT_FOUND,
   notionUnavailable: 'MAWS’s own connection isn’t available right now.',
   connect: 'Connect Notion',
   reconnect: 'Reconnect',

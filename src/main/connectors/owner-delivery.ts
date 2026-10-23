@@ -4,11 +4,11 @@
 // no model turn is taken, no artifact grant is made or used: the owner's gesture in a trusted sheet is the authority,
 // and the host's last check at the actual write is route D's (`connectors.directSend`).
 //
-// - Finding. Route D knows a server only from a live engine's report (P3-HD: a cold app needs a live observation), and
-//   nothing reads a report unless something asks, so `find` first has the live sessions' mcp_status read (route E's
-//   `connectors.observe`: the artifact's own sessions first, then the rest in the host's order, at most OBSERVE_LIMIT;
-//   nothing launched, acquired or marked used), then asks the host which verified sources can take the tool. HTTP sources
-//   of one saved identity (one configured entry observed in several directories) are one.
+// - Finding. WR 76/78 adds cold user-scope literal HTTP entries and validated app MCP settings to the host's delivery
+//   source authority (configured-delivery.ts), independently of engine reports. Existing observed sources remain:
+//   `find` reads live sessions' mcp_status (the artifact's own first, at most OBSERVE_LIMIT; nothing launched, acquired
+//   or marked used), then asks the host which attested sources can take the tool. HTTP sources of one saved identity
+//   (including the same user entry read cold and observed in a session) are one.
 // - A source's connection is MAWS's own: a stdio server needs no sign-in of MAWS's (`local`); an HTTP server's state is
 //   the provider's sealed record. With none saved, the server may be open: as the owner's Connect does (./owner.ts), a
 //   listing without a credential is tried first (`open`), and only the server's refusal makes it `signIn`; a server is

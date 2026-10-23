@@ -21,7 +21,7 @@ export const DeliveryDestinationSchema = z.discriminatedUnion('kind', [
 ]);
 
 // The Notion connector MAWS would send through: the server's name and where it is configured, never its entry.
-const NotionSourceSchema = z.strictObject({ key: SourceKey, server: z.string().min(1).max(256), scope: z.enum(['user', 'local']), transport: z.enum(['stdio', 'http']), file: z.string().min(1).max(4096) });
+const NotionSourceSchema = z.strictObject({ key: SourceKey, server: z.string().min(1).max(256), scope: z.enum(['user', 'local', 'app']), transport: z.enum(['stdio', 'http']), file: z.string().min(1).max(4096) });
 // `ready`: sends now, through MAWS's own sign-in (`connection: connected`), a local server (`local`) or an open one
 // (`open`); `signIn`, `reconnect`, `busy`: found, but the owner's Connect is needed first, its saved sign-in replaced, or
 // one is under way; `none`: none MAWS can reach, no session running to report one (`why: noSession`) or none of their

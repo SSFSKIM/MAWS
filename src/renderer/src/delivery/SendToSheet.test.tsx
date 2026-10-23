@@ -84,10 +84,19 @@ describe('the Send to sheet: Notion', () => {
     await waitFor(() => expect((sendButton() as HTMLButtonElement).disabled).toBe(false));
   });
 
-  it('says what to do when no session reports a Notion connector MAWS can reach', async () => {
-    status.notion = { target: 'notion', state: 'none', why: 'noSession' };
+  it('offers app-configured Notion with no session and describes the app settings rather than project settings', async () => {
+    status.notion = { target: 'notion', state: 'ready', connection: 'connected', source: { ...SOURCE, scope: 'app', file: '/app/settings.json' } };
     await openSheet();
-    expect(screen.getByText(C.notionNoSession)).toBeTruthy();
+    expect(screen.getByText(/Connected through MAWS:.*MAWS settings/)).toBeTruthy();
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(false);
+    expect(main.calls.map((call) => call.name).filter((name) => name.startsWith('session.') || name.startsWith('engine.'))).toEqual([]);
+  });
+
+  it.each(['noSession', 'notFound'] as const)('offers app configuration without asking for a chat when no connector is found (%s)', async (why) => {
+    status.notion = { target: 'notion', state: 'none', why };
+    await openSheet();
+    expect(screen.getByText(/Settings.*Engine.*MCP servers/)).toBeTruthy();
+    expect(screen.queryByText(/start.*session/i)).toBeNull();
     expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
   });
 

@@ -160,10 +160,24 @@ useLayout.subscribe((state, before) => {
   if (floatIdentity(state) !== floatIdentity(before) && useFloatingCard.getState().closed) useFloatingCard.setState({ closed: false, pillTakesFocus: false });
 });
 
+// A compact composer still stands for S for keyboard actions, but typing in it is not a request to expand. Only its
+// synchronous pane-focus update skips the raise; sidebar/tab selection and attention navigation keep their behavior.
+let focusingCompact = false;
+export function focusCompactCard(): void {
+  const split = cardHost(useLayout.getState()) === 'split' ? splitFloat(useLayout.getState().main) : null;
+  if (split === null) return;
+  focusingCompact = true;
+  try {
+    useLayout.getState().focusPane(split.pane);
+  } finally {
+    focusingCompact = false;
+  }
+}
+
 // P4-B3 (its Decision Log 7): the split's card stands for S. While it is a pill, the focused pane moving to S (a sidebar
 // click on S's session, attention navigation, ⌘⇧\) opens it, and its composer takes the keyboard.
 useLayout.subscribe((state, before) => {
-  if (!useFloatingCard.getState().closed || cardHost(state) !== 'split' || state.main.current !== before.main.current) return;
+  if (focusingCompact || !useFloatingCard.getState().closed || cardHost(state) !== 'split' || state.main.current !== before.main.current) return;
   const split = splitFloat(state.main);
   if (split !== null && currentSet(state.main).focusedPane === split.pane && currentSet(before.main).focusedPane !== split.pane) openCard();
 });
@@ -171,7 +185,7 @@ useLayout.subscribe((state, before) => {
 // P4-B3 (its Decision Log 13; Codex: elicitations force its card open (source); a command approval did not (LC-3, live)):
 // a pill opens when its session gains an open request that asks for an answer (the kinds the composer docks), one no
 // pending list held before. A pill closed while that request is still pending stays closed for it; the next new one
-// raises it again. It never takes the keyboard.
+// raises it again. It hands over the keyboard only when the departing compact surface owned it.
 const RAISING: ReadonlySet<AttentionKind> = new Set<AttentionKind>(['permission', 'question', 'plan', 'elicitation', 'dialog']);
 let raised: { session: AppSessionId | null; ids: ReadonlySet<string> } = { session: null, ids: new Set() };
 function raiseOnRequest(): void {
@@ -180,7 +194,11 @@ function raiseOnRequest(): void {
   const ids = new Set(items.filter((item) => RAISING.has(item.kind)).map((item) => item.id as string));
   const fresh = session !== null && session === raised.session && [...ids].some((id) => !raised.ids.has(id));
   raised = { session, ids };
-  if (fresh && useFloatingCard.getState().closed) useFloatingCard.getState().setClosed(false);
+  if (fresh && useFloatingCard.getState().closed) {
+    const compact = document.activeElement?.closest<HTMLElement>('[data-compact-session]');
+    if (session !== null && compact?.dataset.compactSession === session) markFocusOnMount(session);
+    useFloatingCard.getState().setClosed(false);
+  }
 }
 useAttention.subscribe(raiseOnRequest);
 useLayout.subscribe(raiseOnRequest);
@@ -380,6 +398,9 @@ export function expandPane(pane: 0 | 1 = currentSet(layout().main).focusedPane):
 export function focusSplitCard(): void {
   const split = splitFloat(layout().main);
   if (split === null) return;
+  // A compact composer is still registered until React swaps it for the expanded pane.
+  // Let openCard's mount handoff focus the replacement, not the departing composer.
+  if (useFloatingCard.getState().closed) return openCard();
   layout().focusPane(split.pane);
   useComposerStore.getState().focusTargets.get(split.appSessionId)?.focusFrame();
 }

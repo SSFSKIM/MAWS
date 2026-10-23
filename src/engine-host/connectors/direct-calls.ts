@@ -44,6 +44,7 @@ import type { ConnectorDatasetSink } from './dataset-sink';
 import type { RefreshRaw, RefreshPublish, RefreshPublication } from '../dashboards/refresh';
 import { DirectToolHints } from './direct-hints'; // P3-HD M3b
 import type { ConnectorSourceRefusal, ConnectorStatusCache, VerifiedConnectorSource } from './provenance';
+import type { ConfiguredDeliverySources } from './configured-delivery';
 
 export const DIRECT_CALL_DEADLINE_MS = 180_000; // a discovery's too: connect, initialize, tools/list
 export const DIRECT_RESOLVE_BOUND_MS = 8_000;
@@ -76,6 +77,8 @@ type DirectFence = object; // the store's own (documents/store.ts ConnectorFence
 export interface DirectCallsOptions {
   datasets?: ConnectorDatasetSink; // E3c: the shared host-only refresh sink
   cache: Pick<ConnectorStatusCache, 'resolve' | 'resolveSource' | 'readEntryForWrite'> & Partial<Pick<ConnectorStatusCache, 'candidates'>>; // P4-B5: candidates
+  // WR 76/78: separate authority for owner delivery/discovery only; never consulted by page resolve/start.
+  deliverySources?: ConfiguredDeliverySources;
   pool: Pick<DirectConnectionPool, 'acquire' | 'invalidate' | 'close'>;
   store(): DirectGrantStore | null;
   completed(operationId: string): void; // `connectors.directOperation`, the id alone
@@ -298,6 +301,7 @@ export class DirectCalls {
   // its own); every connection is invalidated, and the returned promise is their processes' end.
   close(): Promise<void> {
     this.attachment += 1;
+    this.options.deliverySources?.clear(); // WR 76/78: configured source selectors belong to this attachment too
     this.hints.clear(); // P3-HD M3b
     this.endAll();
     this.floors.clear();
@@ -589,8 +593,14 @@ export class DirectCalls {
     return bytes <= this.maxResultBytes ? { ok: true, result: answer.result as never } : { ok: false, failure: 'tooLarge', reason: 'tooLarge' };
   }
 
+  private ownerSources(directory: string): DirectCallsOptions['cache'] | ConfiguredDeliverySources {
+    const configured = this.options.deliverySources;
+    return configured?.owns(directory) ? configured : this.options.cache;
+  }
+
   private async discovered(operation: Operation, input: DirectDiscoverInput): Promise<DirectDiscoverAnswer> {
-    const { cache, pool } = this.options;
+    const { pool } = this.options;
+    const cache = this.ownerSources(input.directory);
     const { signal } = operation.controller;
     const attachment = this.attachment;
     if (!this.credentialValid(input.credential)) return discoverFailure(unavailable('credential'));
@@ -630,11 +640,13 @@ export class DirectCalls {
     const hosts = new Set(input.urlHosts);
     const sources: DirectSource[] = [];
     let lookups = 0;
-    for (const candidate of cache.candidates?.(input.tool) ?? []) {
+    const configured = await this.options.deliverySources?.candidates(input.urlHosts) ?? [];
+    if (!this.registered(operation)) return { sources: [] };
+    for (const candidate of [...configured, ...cache.candidates?.(input.tool) ?? []]) {
       if (sources.length >= DIRECT_LOCATE_MAX || lookups >= DIRECT_LOCATE_VERIFY_MAX) break;
       if (!candidate.listed && !(candidate.http && hosts.size > 0)) continue;
       lookups += 1;
-      const answer = await cache.resolveSource(candidate.cwd, candidate.server);
+      const answer = await this.ownerSources(candidate.cwd).resolveSource(candidate.cwd, candidate.server);
       if (!this.registered(operation)) return { sources: [] };
       if (!answer.ok || this.hints.taskRequired(answer.source, input.tool)) continue;
       if (candidate.listed || hosts.has(hostOf(answer.source.url))) sources.push(publicSource(answer.source));
@@ -652,7 +664,8 @@ export class DirectCalls {
   // unlike a page's call, whose answer would be published into an artifact: withholding it would hide a delivery that
   // happened. Nothing is retried.
   private async sent(operation: Operation, input: DirectSendInput): Promise<DirectCallOutcome> {
-    const { cache, pool } = this.options;
+    const { pool } = this.options;
+    const cache = this.ownerSources(input.directory);
     const { signal } = operation.controller;
     const attachment = this.attachment;
     const store = this.options.store();
@@ -688,6 +701,12 @@ export class DirectCalls {
       const connected = check();
       if (connected) return connected;
       const listed = await lease.listTools(signal);
+      // A cold source is file-attested, not engine-observed. Initialization/listing may have waited a long time;
+      // reread the selected entry before the delivery write rather than carrying its earlier file snapshot through it.
+      if (cache !== this.options.cache) {
+        const current = await cache.readEntryForWrite(read.source);
+        if (!current.ok) return unavailable('source', current.why);
+      }
       const afterList = check();
       if (afterList) return afterList;
       if (!listed.ok) return fromTransport(listed, 'connection');

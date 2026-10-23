@@ -21,6 +21,7 @@ import type { LibraryRow } from '@shared/ipc/schema/library';
 import { formatAgo } from '@shared/app/date-format';
 import { panelInMain } from '../app/regions';
 import { useNow } from '../app/use-now';
+import { DocumentSessionSpace } from '../shell/DocumentSessionSpace';
 import { holdArtifactEditorState, releaseArtifactEditorState, useArtifactEditor, useHeldArtifactEditorState, type RegisteredArtifactEditor } from '../artifacts/registry';
 import { ipc } from '../ipc/client';
 import { registerReplaceVerdict } from '../keymap/actions-runtime';
@@ -122,7 +123,9 @@ function MountedEditor({ artifactId, kind, editor, scope, visible, children }: {
     <div data-artifact-tab={scope.surface === 'main' ? artifactId : undefined} className="flex h-full flex-col">
       {children}
       <div className="relative min-h-0 flex-1">
-        <Body artifactId={artifactId} state={hold.state} scope={scope} visible={visible} onShown={onShown} />
+        <DocumentSessionSpace surface={scope.surface} enabled={visible && kind === 'document'}>
+          <Body artifactId={artifactId} state={hold.state} scope={scope} visible={visible} onShown={onShown} />
+        </DocumentSessionSpace>
       </div>
     </div>
   );

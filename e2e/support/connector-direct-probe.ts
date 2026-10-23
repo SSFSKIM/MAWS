@@ -73,8 +73,8 @@ export const readLog = (layout: ProbeLayout): LogEntry[] => (existsSync(layout.l
 const authPorts = new Set<number>();
 
 // `auth`: a MAWS-client-only fixture; a probe engine whose configuration names one refuses to launch.
-export async function startHttpFixture(layout: ProbeLayout, id: string, options: { auth?: boolean } = {}): Promise<{ url: string; close(): void }> {
-  const child: ChildProcess = spawn(process.execPath, [DIRECT_SERVER, 'http', '--id', id, '--log', layout.log, ...(options.auth ? ['--auth'] : [])], { stdio: ['ignore', 'pipe', 'inherit'] });
+export async function startHttpFixture(layout: ProbeLayout, id: string, options: { auth?: boolean; tools?: readonly string[] } = {}): Promise<{ url: string; close(): void }> {
+  const child: ChildProcess = spawn(process.execPath, [DIRECT_SERVER, 'http', '--id', id, '--log', layout.log, ...(options.auth ? ['--auth'] : []), ...(options.tools ? ['--tools', JSON.stringify(options.tools)] : [])], { stdio: ['ignore', 'pipe', 'inherit'] });
   const port = await new Promise<number>((resolve, reject) => {
     child.stdout!.once('data', (chunk: Buffer) => resolve((JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { port: number }).port));
     child.once('exit', (code) => reject(new Error(`the http fixture ${id} exited (${code})`)));

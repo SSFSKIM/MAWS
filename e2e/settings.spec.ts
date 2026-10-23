@@ -253,6 +253,39 @@ test('settings: Engine shows the resolved binary, its version and the tested one
 // W9 (H1, the comparative assessment's M-01): ⌘, then ⌘\ at the default window puts Settings in a pane of about 300px.
 // Below 32rem the index is a top row and every row stacks, so the Engine section's controls sit inside the pane and
 // nothing scrolls sideways; back in one pane the index and the label column are as they were.
+test('WR #57: first tab click after choosing or dismissing the design-system popup navigates', async () => {
+  const maws = await launchMaws();
+  try {
+    const { app, page } = maws;
+    await menu(app, 'artifacts.open');
+    const main = page.locator('[data-region="main"]');
+    const library = main.getByRole('tab').filter({ hasText: 'Artifacts' });
+    await expect(library).toBeVisible();
+    await menu(app, 'settings.open');
+    const settings = main.getByRole('tab').filter({ hasText: 'Settings' });
+    await panel(page).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Artifacts', exact: true }).click();
+    const select = panel(page).getByRole('combobox', { name: 'Default design system', exact: true });
+    await expect(select.locator('option', { hasText: 'Classroom' })).toHaveCount(1);
+    for (const commit of [true, false]) {
+      // A real popup, not selectOption: its native dismissal is what is under test.
+      await select.click();
+      if (commit) {
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('Enter');
+      } else {
+        await page.keyboard.press('Escape');
+      }
+      // Exactly one click: no second click hides a swallowed one.
+      await library.click();
+      await expect(library).toHaveAttribute('aria-selected', 'true');
+      await settings.click();
+      await expect(settings).toHaveAttribute('aria-selected', 'true');
+    }
+  } finally {
+    await maws.cleanup();
+  }
+});
+
 test('settings: in a 50/50 split the view stacks inside its pane, and in one pane it keeps its columns', async () => {
   const maws = await launchMaws();
   try {

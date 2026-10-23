@@ -82,7 +82,7 @@ export interface VerifiedConnectorSource {
   readonly generation: number;
   readonly cwd: string;
   readonly server: string;
-  readonly scope: 'user' | 'local';
+  readonly scope: 'user' | 'local' | 'app'; // app: host-attested owner delivery only (configured-delivery.ts)
   readonly transport: ConnectorTransport;
   readonly url?: string; // http: the resource URL, as the engine reports it
   readonly path: string; // the config file

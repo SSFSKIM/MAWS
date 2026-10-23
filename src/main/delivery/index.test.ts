@@ -94,6 +94,16 @@ describe('the Notion target', () => {
     expect(connectors.send.mock.calls[0]![0]).toEqual(source);
   });
 
+  it('offers and sends an app-configured connector from a cold app, preserving its truthful scope across IPC', async () => {
+    const appSource = { ...source, scope: 'app', path: '/app/settings.json', entryPath: ['engine', 'mcpServers', 'name=notion'] };
+    connectors.find.mockResolvedValueOnce({ sources: [{ source: appSource, connection: 'connected' }], live: 0 });
+    const status = await call('delivery.status', { target: 'notion', artifactId: ART }) as { source: { key: string } };
+    expect(status).toMatchObject({ state: 'ready', source: { scope: 'app', file: '/app/settings.json' } });
+    await sendNotion({ source: status.source.key });
+    expect(connectors.send.mock.calls[0]![0]).toEqual(appSource);
+    expect(connectors.send).toHaveBeenCalledTimes(1);
+  });
+
   it('says no session runs to report one, or that none of their reports names one', async () => {
     connectors.find.mockResolvedValueOnce({ sources: [], live: 0 }).mockResolvedValueOnce({ sources: [], live: 2 });
     expect(await call('delivery.status', { target: 'notion', artifactId: ART })).toEqual({ target: 'notion', state: 'none', why: 'noSession' });

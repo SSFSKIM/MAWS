@@ -16,7 +16,7 @@ import type { ReadModelWriter, SessionSource } from './read-model';
 import type { ScenarioClock } from './select-source';
 import { StubStore } from './stub-store';
 import { readRecentTurns } from './recent-turns'; // P2-D
-import type { SessionPatch } from '@shared/ipc/schema/session';
+import type { Draft, SessionPatch } from '@shared/ipc/schema/session';
 
 export interface StubSourceDeps {
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
@@ -149,8 +149,11 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
       const loaded = typeof scenario === 'string' ? loadScenario(scenario, wallNow()) : scenario;
       timeline = loaded.timeline;
       const s = (store = new StubStore(loaded.projects, loaded.sessions, iso));
+      // Scenario records never enter C4's index, so their drafts live with this source too, across renderer remounts.
+      const drafts = new Map<AppSessionId, Draft>();
       s.onChange((change) => {
         if (change.kind === 'removed') {
+          drafts.delete(change.appSessionId);
           emit('session.removed', { appSessionId: change.appSessionId, revision: change.revision });
           return;
         }
@@ -170,6 +173,15 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
         deps.intercept('session.list', (input) => s.list(input)),
         deps.intercept('session.get', ({ appSessionId }) => s.get(appSessionId as AppSessionId)),
         deps.intercept('session.update', (input) => s.update(input.appSessionId as AppSessionId, input.patch as SessionPatch)),
+        deps.intercept('session.drafts.get', ({ appSessionId }) => {
+          if (!s.get(appSessionId as AppSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
+          return drafts.get(appSessionId as AppSessionId) ?? null;
+        }),
+        deps.intercept('session.drafts.set', ({ appSessionId, draft }) => {
+          if (!s.get(appSessionId as AppSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
+          if (draft === null) drafts.delete(appSessionId as AppSessionId);
+          else drafts.set(appSessionId as AppSessionId, draft);
+        }),
         deps.intercept('session.projects.list', () => s.projectsList()),
         deps.intercept('attention.list', () => [...attention.values()].flat().filter((i) => OPEN.has(i.state))),
         deps.intercept('attention.request', ({ appSessionId, requestId }) => ({ event: requests.get(requestKey(appSessionId, requestId)) ?? null })),

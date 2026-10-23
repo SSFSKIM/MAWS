@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } }));
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName } from '@shared/ipc/schema';
+import type { Draft } from '@shared/ipc/schema/session';
 import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import type { onEmitted } from '../ipc/events';
 import { emittedAttentionSource } from '.';
@@ -83,8 +84,26 @@ describe('stub source plays a timeline', () => {
     expect(answer.event).toMatchObject({ kind: 'permission.requested', toolName: 'Bash' });
     expect(h.call('attention.request', { appSessionId: FIX, requestId: 'nope' })).toEqual({ event: null });
     expect([...h.handlers.keys()].sort()).toEqual([
-      'attention.list', 'attention.request', 'session.answer', 'session.events', 'session.get', 'session.list', 'session.projects.list', 'session.recentTurns' /* P2-D */, 'session.update',
+      'attention.list', 'attention.request', 'session.answer', 'session.drafts.get', 'session.drafts.set', 'session.events', 'session.get', 'session.list', 'session.projects.list', 'session.recentTurns' /* P2-D */, 'session.update',
     ]);
+  });
+
+  it('keeps scenario drafts per session across a composer remount’s immediate save/read and clears on null', () => {
+    const draft: Draft = {
+      doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Continue from the compact composer' }] }] },
+      attachments: [], updatedAt: '2026-10-23T11:00:00.000Z',
+    };
+    expect(h.call('session.drafts.get', { appSessionId: USAGE })).toBeNull();
+    h.call('session.drafts.set', { appSessionId: USAGE, draft });
+    expect(h.call('session.drafts.get', { appSessionId: USAGE })).toEqual(draft);
+    expect(h.call('session.drafts.get', { appSessionId: FIX })).toBeNull();
+    h.call('session.drafts.set', { appSessionId: USAGE, draft: null });
+    expect(h.call('session.drafts.get', { appSessionId: USAGE })).toBeNull();
+  });
+
+  it('refuses scenario draft reads and writes for a session it does not hold', () => {
+    expect(() => h.call('session.drafts.get', { appSessionId: 'nope' })).toThrow('unknown app session: nope');
+    expect(() => h.call('session.drafts.set', { appSessionId: 'nope', draft: null })).toThrow('unknown app session: nope');
   });
 
   // P2-D: the resume chooser's preview reads the scenario's transcript through main's own derivation

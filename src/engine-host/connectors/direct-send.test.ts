@@ -14,6 +14,8 @@ import { openDocuments, type Documents } from '../documents';
 import { ManualClock, ScriptedPool, deferred } from './direct-pool.fixture';
 import { DIRECT_LOCATE_VERIFY_MAX, DirectCalls, type DirectCallsOptions, type DirectSendInput } from './direct-calls';
 import { ConnectorStatusCache, connectorLaunchContext, type ConnectorLaunchContext } from './provenance';
+import { ConfiguredDeliverySources } from './configured-delivery';
+import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
 
 type Server = { name: string; status: string; scope: string; source: string; config: Record<string, unknown>; tools?: { name: string; annotations?: Record<string, unknown> }[] };
 const notion = (tools: Server['tools'] = [{ name: 'notion-create-pages', annotations: {} }, { name: 'notion-search', annotations: { readOnly: true } }]): Server => ({ name: 'notion', status: 'connected', scope: 'user', source: 'user', config: { type: 'stdio', command: 'toy', args: ['notion.mjs'] }, tools });
@@ -95,6 +97,118 @@ const sendOutcome = async (operationId: string) => {
 };
 const toolCalls = () => pool.wire.filter((entry) => entry.kind === 'tools/call');
 const fences = () => (documents.store as unknown as { fences: Map<string, Set<unknown>> }).fences.size;
+
+describe('WR 76/78: cold app-owned delivery', () => {
+  const settings = (servers: { name: string; type: 'http'; url: string }[]) => writeFileSync(join(dir, 'data', 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V17, engine: { ...SETTINGS_DEFAULTS_V17.engine, mcpServers: servers } }));
+  const configured = (captureEnv = async () => ({ CLAUDE_CONFIG_DIR: config, HOME: join(dir, 'home') })) => new ConfiguredDeliverySources({ userData: join(dir, 'data'), captureEnv });
+  const inputOf = (source: Awaited<ReturnType<typeof located>>[number]): DirectSendInput => ({ operationId: nextId(), artifactId, directory: source.directory, server: source.server, sourceId: source.sourceId, generation: source.generation, tool: 'notion-create-pages', arguments: { pages: [{ content: '# Cold delivery' }] } });
+
+  it('locates app and user HTTP entries without observations and sends exactly once using the app credential', async () => {
+    settings([{ name: 'notion-app', type: 'http', url: 'https://mcp.notion.com/mcp' }]);
+    calls = build({ deliverySources: configured() });
+    const sources = await located();
+    expect(sources.map((s) => [s.server, s.scope])).toEqual([['notion-app', 'app'], ['notion-hosted', 'user']]);
+    expect(pool.acquires).toEqual([]);
+    const input = { ...inputOf(sources[0]!), credential: { connectionId: nextId(), credentialEpoch: 1, accessToken: 'maws-owned-token' } };
+    calls.send(input);
+    expect(await sendOutcome(input.operationId)).toEqual({ ok: true, result: pool.result });
+    expect(toolCalls()).toEqual([{ kind: 'tools/call', name: 'notion-create-pages' }]);
+    expect(pool.acquires[0]?.credential?.accessToken).toBe('maws-owned-token');
+    expect(await documents.store.connectorGrants(artifactId)).toEqual([]);
+    expect(await cache.resolveSource(input.directory, input.server)).toEqual({ ok: false, why: 'unobserved' });
+  });
+
+  it('locates and sends overlapping user HTTP deliveries without treating another reader as a settings change', async () => {
+    writeFileSync(join(config, '.claude.json'), JSON.stringify({ mcpServers: {
+      one: { type: 'http', url: 'https://mcp.notion.com/mcp' },
+      two: { type: 'http', url: 'https://mcp.notion.com/mcp' },
+    } }));
+    calls = build({ deliverySources: configured() });
+    const [first, second] = await Promise.all([located(), located()]);
+    expect(first.map((s) => s.server)).toEqual(['one', 'two']);
+    expect(second).toEqual(first);
+    const inputs = first.map(inputOf);
+    for (const input of inputs) calls.send(input);
+    expect(await Promise.all(inputs.map((input) => sendOutcome(input.operationId)))).toEqual([
+      { ok: true, result: pool.result }, { ok: true, result: pool.result },
+    ]);
+    expect(toolCalls()).toEqual([
+      { kind: 'tools/call', name: 'notion-create-pages' }, { kind: 'tools/call', name: 'notion-create-pages' },
+    ]);
+  });
+
+  it('rejects a removed app entry before writing and never exposes it through page resolution', async () => {
+    settings([{ name: 'notion-app', type: 'http', url: 'https://mcp.notion.com/mcp' }]);
+    calls = build({ deliverySources: configured() });
+    const source = (await located())[0]!;
+    const resolveId = nextId();
+    calls.resolve({ operationId: resolveId, artifactId, directories: [source.directory], server: source.server });
+    expect(await taken(resolveId)).toEqual({ kind: 'resolve', answer: { ready: false, why: 'unobserved' } });
+    settings([]);
+    const input = inputOf(source);
+    calls.send(input);
+    expect(await sendOutcome(input.operationId)).toMatchObject({ ok: false, reason: 'source' });
+    expect(pool.acquires).toEqual([]);
+    expect(toolCalls()).toEqual([]);
+  });
+
+  it('does not send an entry removed while its connection initialized', async () => {
+    settings([{ name: 'notion-app', type: 'http', url: 'https://mcp.notion.com/mcp' }]);
+    calls = build({ deliverySources: configured() });
+    const input = inputOf((await located())[0]!);
+    pool.startup = deferred();
+    calls.send(input);
+    await vi.waitFor(() => expect(pool.acquires).toHaveLength(1));
+    settings([]);
+    pool.startup.resolve();
+    expect(await sendOutcome(input.operationId)).toMatchObject({ ok: false, reason: 'source' });
+    expect(toolCalls()).toEqual([]);
+  });
+
+  it('does not send from an old config home when the shell capture refreshes during initialization, even at the same URL', async () => {
+    const text = JSON.stringify({ mcpServers: { personal: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
+    writeFileSync(join(config, '.claude.json'), text);
+    const refreshedHome = join(dir, 'refreshed-config');
+    mkdirSync(refreshedHome);
+    writeFileSync(join(refreshedHome, '.claude.json'), text);
+    let capturedHome = config;
+    calls = build({ deliverySources: configured(async () => ({ CLAUDE_CONFIG_DIR: capturedHome, HOME: join(dir, 'home') })) });
+    const source = (await located())[0]!;
+    const input = inputOf(source);
+    pool.startup = deferred();
+    calls.send(input);
+    await vi.waitFor(() => expect(pool.acquires).toHaveLength(1));
+    capturedHome = refreshedHome;
+    pool.startup.resolve();
+    expect(await sendOutcome(input.operationId)).toMatchObject({ ok: false, reason: 'source' });
+    expect(toolCalls()).toEqual([]);
+    const refreshed = (await located())[0]!;
+    expect(refreshed.sourceId).not.toBe(source.sourceId);
+    const retry = inputOf(refreshed);
+    calls.send(retry);
+    expect(await sendOutcome(retry.operationId)).toEqual({ ok: true, result: pool.result });
+    expect(toolCalls()).toEqual([{ kind: 'tools/call', name: 'notion-create-pages' }]);
+  });
+
+  it('discovers configured tools with no engine and revokes a pending write when the source authority clears', async () => {
+    settings([{ name: 'notion-app', type: 'http', url: 'https://mcp.notion.com/mcp' }]);
+    const sources = configured();
+    calls = build({ deliverySources: sources });
+    const source = (await located())[0]!;
+    const discoverId = nextId();
+    calls.discover({ operationId: discoverId, directory: source.directory, server: source.server, sourceId: source.sourceId, generation: source.generation });
+    expect(await taken(discoverId)).toMatchObject({ kind: 'discover', answer: { ok: true } });
+    expect(toolCalls()).toEqual([]);
+    const input = inputOf(source);
+    pool.atWrite = deferred();
+    calls.send(input);
+    await pool.reachedWrite.promise;
+    sources.clear();
+    pool.atWrite.resolve();
+    expect(await sendOutcome(input.operationId)).toMatchObject({ ok: false, reason: 'source' });
+    expect(toolCalls()).toEqual([]);
+  });
+});
 
 describe('DirectCalls.locate: the sources an owner’s delivery can use', () => {
   it('names a server whose report lists the tool, and an HTTP server on a named host though it reports no tools; never another', async () => {

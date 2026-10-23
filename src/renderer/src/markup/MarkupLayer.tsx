@@ -245,6 +245,7 @@ function MarkupOverlay({ session }: { session: MarkupSession }) {
         />
       )}
       <Toolbar
+        bounds={rect}
         tool={tool}
         ink={inkName}
         onTool={(next) => {
@@ -291,6 +292,7 @@ const BUTTON =
 const RADIO = `${BUTTON} w-7 px-0 data-[state=checked]:bg-bg-active data-[state=checked]:text-fg`;
 
 interface ToolbarProps {
+  bounds: Rect;
   tool: MarkupTool;
   ink: InkName;
   onTool(tool: MarkupTool): void;
@@ -301,12 +303,65 @@ interface ToolbarProps {
   onAdd(): void;
 }
 
-function Toolbar({ tool, ink: inkName, onTool, onInk, undo, clear, adding, onAdd }: ToolbarProps) {
+function Toolbar({ bounds, tool, ink: inkName, onTool, onInk, undo, clear, adding, onAdd }: ToolbarProps) {
+  const self = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<Point | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const drag = useRef<{ id: number; x: number; y: number; start: Point } | null>(null);
+  useLayoutEffect(() => {
+    const element = self.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setSize({ width: element.offsetWidth, height: element.offsetHeight }));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const clamp = (point: Point, measured = size): Point => ({
+    x: Math.max(8, Math.min(point.x, bounds.width - measured.width - 8)),
+    y: Math.max(8, Math.min(point.y, bounds.height - measured.height - 8)),
+  });
+  const current = () => {
+    const box = self.current!.getBoundingClientRect();
+    setSize({ width: box.width, height: box.height });
+    return { box, point: position ? clamp(position, box) : { x: box.left - bounds.left, y: box.top - bounds.top } };
+  };
+  const placed = position && clamp(position);
   return (
     <div
+      ref={self}
       data-markup-toolbar=""
+      style={placed ? { left: placed.x, top: placed.y, bottom: 'auto', transform: 'none', translate: 'none' } : undefined}
       className="absolute bottom-2.5 left-1/2 flex max-w-[calc(100%-16px)] -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-lg border border-border-strong bg-bg-raised p-1 shadow-float"
     >
+      <button
+        type="button"
+        aria-label="Move mark-up toolbar"
+        title="Drag to move; arrow keys to adjust"
+        className={`${BUTTON} cursor-move touch-none`}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.focus();
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, start: current().point };
+        }}
+        onPointerMove={(event) => {
+          const gesture = drag.current;
+          if (!gesture || gesture.id !== event.pointerId) return;
+          setPosition(clamp({ x: gesture.start.x + event.clientX - gesture.x, y: gesture.start.y + event.clientY - gesture.y }));
+        }}
+        onPointerUp={() => { drag.current = null; }}
+        onPointerCancel={() => { drag.current = null; }}
+        onLostPointerCapture={() => { drag.current = null; }}
+        onKeyDown={(event) => {
+          const delta = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] }[event.key];
+          if (!delta) return;
+          event.preventDefault();
+          const { point, box } = current();
+          setPosition(clamp({ x: point.x + delta[0], y: point.y + delta[1] }, box));
+        }}
+      >
+        <Icon><path d="M5 3v10M10 3v10" strokeDasharray="1 3" strokeLinecap="round" /></Icon>
+      </button>
       <RadioGroup.Root aria-label={MARKUP_COPY.tools} value={tool} onValueChange={(value) => onTool(value as MarkupTool)} orientation="horizontal" className="flex items-center gap-0.5">
         {MARKUP_TOOLS.map((name) => (
           <RadioGroup.Item key={name} value={name} aria-label={TOOL_LABEL[name]} title={TOOL_LABEL[name]} className={RADIO}>

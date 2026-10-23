@@ -108,7 +108,7 @@ const RecordSchema = z.strictObject({
   identity: z.strictObject({
     requestUrl: z.string().min(1).max(8_192),
     server: z.string().min(1).max(256),
-    scope: z.enum(['user', 'local']),
+    scope: z.enum(['user', 'local', 'app']),
     configPath: z.string().min(1).max(4_096),
     entryPath: z.array(z.string().max(4_096)).max(8),
   }),

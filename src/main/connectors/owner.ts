@@ -82,7 +82,7 @@ export interface ConnectorOwner {
 
 type Selection = { ok: true; source: DirectSource; known: boolean } | { ok: false; why: Extract<ConnectorServerRow, { kind: 'engineOnly' }>['why'] };
 type Last = NonNullable<Extract<ConnectorServerRow, { kind: 'source' }>['last']>;
-type Origin = { server: string; scope: 'user' | 'local'; path: string };
+type Origin = { server: string; scope: DirectSource['scope']; path: string };
 interface Handle {
   readonly id: string;
   readonly artifactId: string;

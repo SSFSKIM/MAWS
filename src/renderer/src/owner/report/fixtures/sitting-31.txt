@@ -1,0 +1,24 @@
+<message>
+`⚠ Critical ────────────────────────────────────`
+The agent tool for creating artifacts can't put a new artifact into a Space. "P3 sitting note" was first created outside every Space, so it was governed by the built-in MAWS design system, not the Space default. The tool's reply also named "MAWS" as the governing system. An agent that trusts that reply would follow the wrong system's rules. This is deliberate in the source: a comment in `artifact-tools.ts` says "a new artifact has no system or Space of its own".
+Handled: fully. I used Move to Space in the MAWS Library to put the note into the P3 sitting Space. The app's database now has the note in that Space with no design system of its own. MAWS picks a document's design system in this order: its own, then its Space's default, then the user default, then the house system. So the note now uses P3 sitting DS, which the settings set as the Space default.
+Needs you: only if you want this treated as a MAWS gap. Agents need a way to choose the Space when they create something, and the create reply should name the system that will actually apply.
+`─────────────────────────────────────────────────`
+"P3 sitting note" is done and open in MAWS. I checked it in the app with a screenshot. It has:
+- A three-sentence introduction. It links to example.com, and its last sentence is highlighted: "Each task has one owner and one due date; raise a clash before the date, not after it."
+- A "Next steps" heading with three tasks: send the note to everyone who attended, collect the open questions into one list, and book the follow-up sitting.
+- An Owner / Due date table with date chips for Wednesday, October 21, Friday, October 23 and Monday, October 26, 2026.
+
+The accent colour shows: the link is terracotta, and the highlighted sentence has a terracotta bar under it.
+
+Things to know:
+- **The table shows roles, not names.** You didn't give names, so the owners are "Note taker", "Session lead" and "Space owner". The design system's voice rules ask for real names with roles. Give me the names and I'll fill them in.
+- **The screenshot can't show which system is applied.** P3 sitting DS is an exact copy of MAWS: same rules, same tokens. The note looks the same under either one, so the proof that the Space default applies is the database record, not the look.
+- **The editor breaks a rule in the design system.** The system's hard rules say "No accent on … a link", but the editor colours links terracotta anyway. That may be worth noting for this sitting.
+
+`★ Insight ─────────────────────────────────────`
+- In MAWS a document is linked to its design system by reference, not by copying. A note with no system of its own follows whatever its Space's default is now, so changing P3 sitting DS later will restyle it. That's why I left its own system empty rather than setting it to P3 sitting DS directly.
+- The Space defaults aren't stored in the database. They live in the app's settings file under `artifacts.spaceDesignSystems`, and each Space is linked to its folder on disk. Moving the note into the Space also gave it a copy in `/private/tmp/p3-sitting-project/artifacts`.
+- Two MAWS apps were running. The GUI tool first connected to the old build, which has no Spaces, so I had to point it at the sitting build by its full path.
+`─────────────────────────────────────────────────`
+</message>
