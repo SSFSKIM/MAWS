@@ -22,6 +22,7 @@ import { FIXTURE_SERVER } from './support/connector-engine';
 import { expectQuietJournals, sessionJournals } from './support/connector-direct-scene';
 import { invoke, value, withScene } from './support/connector-scene';
 import { launchMaws } from './support/launch';
+import { coldHttpDelivery } from './support/connector-cold-delivery';
 
 test.skip(process.env.MAWS_DELIVERY_E2E !== '1', 'the delivery group runs under MAWS_DELIVERY_E2E=1 (pnpm e2e:delivery)');
 test.describe.configure({ timeout: 300_000 });
@@ -114,6 +115,12 @@ test('notion: the document header’s Send to makes a readable page through MAWS
       env: (scene) => ({ MAWS_E2E_OPEN_LOG: join(scene.root, 'open.log') }),
     },
   );
+});
+
+// WR 76/78: the real built host and SDK, with no engine/session or synthetic observation. The test supplies loopback
+// hosts only to the private host command, leaving SendToSheet's production Notion allowlist untouched.
+test('notion cold HTTP: the built host locates user/app settings and sends once per source without a session', async () => {
+  await coldHttpDelivery(test.info());
 });
 
 // ── Drive through the gws stand-in ──
