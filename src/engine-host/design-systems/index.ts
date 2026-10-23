@@ -16,7 +16,7 @@ import { DesignSystemChain } from './chain';
 import { designSystemContext } from './context';
 import { registerDesignSystemReads } from './reads';
 import { seedDefaults, type SeedDeps } from './seed';
-import { holdForSeed } from './seed-gate';
+import { seedReadiness } from './seed-gate';
 
 export { DESIGN_SYSTEMS_DEADLINE_SHAPES } from './reads';
 
@@ -25,6 +25,8 @@ export interface DesignSystems {
   readonly chain: DesignSystemChain | null;
   /** Settles once seeding has run (or was not needed); never rejects (a failure is logged). */
   readonly seeded: Promise<void>;
+  /** Startup request admission: opens on completion, failure or the shared 8 s bound. */
+  readonly ready: Promise<void>;
   close(): void;
 }
 
@@ -40,7 +42,7 @@ export function registerDesignSystems({ on, documents, log = (line) => console.e
   const unregisterMirror = registerMirrorWriter('design_system', designSystemMirrorWriter);
   if (!documents) {
     registerDesignSystemReads(on, null);
-    return { chain: null, seeded: Promise.resolve(), close: unregisterMirror };
+    return { chain: null, seeded: Promise.resolve(), ready: Promise.resolve(), close: unregisterMirror };
   }
   const { store, service } = documents;
   // An agent's publish checks canon structure by parse5's tree, the spec's as the page's DOMParser builds it, so the host
@@ -51,6 +53,6 @@ export function registerDesignSystems({ on, documents, log = (line) => console.e
   const chain = new DesignSystemChain(store, service);
   store.registerDesignSystemChain(chain);
   registerDesignSystemReads(on, { store, chain });
-  const seeded = holdForSeed(store, seedDefaults({ store, service, loadAssets, log }), log);
-  return { chain, seeded, close: unregisterMirror };
+  const { seeded, ready } = seedReadiness(seedDefaults({ store, service, loadAssets, log }), log);
+  return { chain, seeded, ready, close: unregisterMirror };
 }

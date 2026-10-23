@@ -38,6 +38,21 @@ describe('the start import’s gate', () => {
     await expect(waiting).resolves.toBeUndefined();
   });
 
+  it('shares the startup deadline with later reads without shortening the tools’ unbounded import wait', async () => {
+    const held = store();
+    holdForImport(held, new Promise<void>(() => {}));
+    await vi.advanceTimersByTimeAsync(6_000);
+    const waiting = importSettledWithin(held, 8_000);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(await settled(waiting)).toBe(false);
+    const late = importSettledWithin(held, 8_000);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await settled(waiting)).toBe(true);
+    expect(await settled(late)).toBe(true);
+    expect(await settled(importSettledWithin(held, 8_000))).toBe(true);
+    expect(await settled(importSettled(held))).toBe(false);
+  });
+
   it('waits at most the bound when asked to', async () => {
     const held = store();
     holdForImport(held, new Promise<void>(() => {}));

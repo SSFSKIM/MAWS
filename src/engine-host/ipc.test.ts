@@ -145,7 +145,7 @@ describe('x2 deadlines fit the bridge', () => {
     let deliver!: (data: unknown) => void;
     const port: HostPort = { postMessage: (m) => void posted.push(m), start: () => {}, on: (_e, l) => void (deliver = (data) => l({ data })) };
     let ipc!: ReturnType<typeof registerEngineIpc>;
-    createHostRuntime((on, emit) => (ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT }))).serve(port);
+    createHostRuntime((on, emit) => { ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT }); }).serve(port);
     deliver({ t: 'req', id: '1', name: 'session.launch', input: { spec: replaySpec('app-unanswered', 'test/fixtures/engine/unanswered-read.jsonl') } });
     await until(() => ipc.table.get('app-unanswered' as AppSessionId)?.lifecycle === 'ready', 'ready');
     expect(posted[0]).toMatchObject({ t: 'res', id: '1', ok: true, value: { status: 'launching' } });

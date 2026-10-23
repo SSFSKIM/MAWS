@@ -26,7 +26,8 @@ export type HostEmit = <N extends EventName>(name: N, payload: EventPayload<N>) 
 // E4c: and the client's going (the browser bridge settles its pending requests on it)
 // P3-A M4: and the document ports main posts on the parent port (`onDocPort`)
 export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */ | 'onDocPort' /* P3-A M4 */>;
-export type HostRegister = (on: HostOn, emit: HostEmit, client: HostClientHooks) => void;
+// Registration is synchronous; an optional returned startup promise holds request admission, not the handshake.
+export type HostRegister = (on: HostOn, emit: HostEmit, client: HostClientHooks) => void | Promise<void>;
 
 // The part of MessagePortMain the runtime uses, so tests can drive it with a fake.
 // E10: `postMessage` may answer `false` when it wrote nothing (a socket port already closing); a MessagePort answers
@@ -128,6 +129,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     // E10: a port that wrote nothing is closing, closed or stalled, and never writes again: the client is gone (the
     // caller's detach follows at the close), so hasClient() after a false tells a gone client from a refused payload
     ready = false;
+    port = null; // definitively gone: queued startup requests from this source must never reach a handler
     console.info(`[host] the client stopped taking events (at ${name}); dropping until a client is ready`); // E11: a client leaving, as a keep-quit does
     dropped += 1;
     clientGone(); // E4c
@@ -155,7 +157,11 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     }
   };
   // P3-A M4 end
-  register(on, emit, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */ });
+  const startup = register(on, emit, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */ });
+  // One shared admission hold. The register owns its bound and logging; even rejection must not wedge the host.
+  // Clearing it restores synchronous handler admission instead of awaiting a fulfilled promise on every request.
+  let admission: Promise<void> | null = null;
+  if (startup) admission = startup.then(() => { admission = null; }, () => { admission = null; });
 
   // E10 start
   const setReady = () => {
@@ -197,7 +203,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
           console.error('[host] dropped a malformed message from main', request.error.issues);
           return;
         }
-        void answer(request.data).then((response) => p.postMessage(response));
+        void answer(request.data, p).then((response) => { if (response) p.postMessage(response); });
       });
       p.start();
     },
@@ -217,7 +223,10 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     docPort, // P3-A M4
   };
 
-  async function answer({ id, name, input }: HostRequest): Promise<HostMessage> {
+  async function answer({ id, name, input }: HostRequest, source: HostPort): Promise<HostMessage | undefined> {
+    // Promise continuations share arrival order on the one served port (renderer windows multiplex through main).
+    if (admission) await admission;
+    if (port !== source) return; // detached/replaced while waiting: do not invoke a vanished caller's handler
     if (!isCommandName(name)) return { t: 'res', id, ok: false, error: ipcError('unknown_command', `unknown command: ${name}`) };
     const handler = handlers.get(name);
     if (!handler) return { t: 'res', id, ok: false, error: ipcError('internal', `this host has no handler for ${name}`) };

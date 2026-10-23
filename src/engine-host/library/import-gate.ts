@@ -4,26 +4,30 @@
 // is logged where it runs and must not wedge the tools. A store no import holds is open.
 import type { ArtifactStore } from '../documents/store';
 
-const gates = new WeakMap<ArtifactStore, Promise<void>>();
+const gates = new WeakMap<ArtifactStore, { settled: Promise<void>; startedAt: number }>();
 
 export function holdForImport(store: ArtifactStore, imported: Promise<unknown>): void {
-  gates.set(
-    store,
-    imported.then(
+  gates.set(store, {
+    startedAt: Date.now(),
+    settled: imported.then(
       () => undefined,
       () => undefined,
     ),
-  );
+  });
 }
 
-export const importSettled = (store: ArtifactStore): Promise<void> => gates.get(store) ?? Promise.resolve();
+export const importSettled = (store: ArtifactStore): Promise<void> => gates.get(store)?.settled ?? Promise.resolve();
 
-// The gate, waited on for at most `ms`: a read main asks under its bridge's request timeout answers from the store as it
-// is once the bound passes, and the import's own change events bring the rest.
+// Readiness budget starts with the import, not each request: startup seed admission must not stack another full wait
+// ahead of this one. Past the shared deadline a read answers current state; import change events bring the rest.
 export async function importSettledWithin(store: ArtifactStore, ms: number): Promise<void> {
+  const gate = gates.get(store);
+  if (!gate) return;
+  const remaining = ms - (Date.now() - gate.startedAt);
+  if (remaining <= 0) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([importSettled(store), new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)))]);
+    await Promise.race([gate.settled, new Promise<void>((resolve) => (timer = setTimeout(resolve, remaining)))]);
   } finally {
     clearTimeout(timer);
   }

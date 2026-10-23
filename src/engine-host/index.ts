@@ -148,6 +148,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     log: (line) => console.log(`[supervisor] ${line}`),
   });
   supervision.register(on, client);
+  return designSystems.ready; // one bounded startup admission gate, before any request handler may run
 };
 
 // E10 start

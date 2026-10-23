@@ -22,6 +22,89 @@ function fakePort() {
 
 const PING = { pid: 42, uptimeMs: 10, hostVersion: 'test' };
 
+describe('startup request admission', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  function startup() {
+    let open!: () => void;
+    const ready = new Promise<void>((resolve) => { open = resolve; });
+    return { ready, open };
+  }
+  const write = (id: string, data: string) => ({ t: 'req', id, name: 'pty.write', input: { ptyId: 'p', data } });
+
+  it('holds requests at ingress and admits the served port in arrival order when startup settles', async () => {
+    const gate = startup();
+    const called: string[] = [];
+    const fake = fakePort();
+    createHostRuntime((on) => {
+      on('pty.write', async ({ data }) => { called.push(data); });
+      return gate.ready;
+    }).serve(fake.port);
+    await fake.deliver(write('1', 'first window'));
+    await fake.deliver(write('2', 'second window'));
+    expect(called).toEqual([]);
+    expect(fake.posted).toEqual([]);
+    gate.open();
+    await fake.deliver(write('3', 'after startup'));
+    expect(called).toEqual(['first window', 'second window', 'after startup']);
+  });
+
+  it.each(['detached', 'replaced', 'write failed'] as const)('drops queued requests from a %s connection and preserves the new source’s order', async (end) => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const gate = startup();
+    const called: string[] = [];
+    let emit!: HostEmit;
+    const runtime = createHostRuntime((on, e) => {
+      emit = e;
+      on('pty.write', async ({ data }) => { called.push(data); });
+      return gate.ready;
+    });
+    const old = fakePort();
+    let writable = true;
+    const oldPort: HostPort = { ...old.port, postMessage: (message) => writable ? old.port.postMessage(message) : false };
+    const fresh = fakePort();
+    runtime.serve(oldPort);
+    runtime.setReady();
+    await old.deliver(write('old', 'vanished caller'));
+    if (end === 'detached') runtime.detach();
+    if (end === 'write failed') {
+      writable = false;
+      expect(emit('pty.data', { ptyId: 'p' as never, offset: 0, data: new Uint8Array([1]) })).toBe(false);
+    }
+    if (end === 'replaced') {
+      runtime.serve(fresh.port);
+      await fresh.deliver(write('new1', 'new first'));
+      await fresh.deliver(write('new2', 'new second'));
+      expect(called).toEqual([]);
+    }
+    gate.open();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(old.posted).toEqual([]);
+    if (end !== 'replaced') {
+      expect(called).toEqual([]);
+      runtime.serve(fresh.port);
+      await fresh.deliver(write('new1', 'new first'));
+      await fresh.deliver(write('new2', 'new second'));
+    }
+    expect(called).toEqual(['new first', 'new second']);
+  });
+
+  it.each([false, true])('keeps handler admission synchronous with an absent or already settled startup hold (%s)', async (held) => {
+    const gate = startup();
+    const called: string[] = [];
+    const fake = fakePort();
+    createHostRuntime((on) => {
+      on('pty.write', async ({ data }) => { called.push(data); });
+      return held ? gate.ready : undefined;
+    }).serve(fake.port);
+    gate.open();
+    await gate.ready;
+    const delivered = fake.deliver(write('1', 'now'));
+    expect(called).toEqual(['now']);
+    await delivered;
+  });
+});
+
 describe('host runtime speaks the host protocol', () => {
   beforeEach(() => vi.restoreAllMocks());
 
@@ -112,7 +195,7 @@ describe('host runtime speaks the host protocol', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fake = fakePort();
     let emit!: HostEmit;
-    const runtime = createHostRuntime((_on, e) => (emit = e));
+    const runtime = createHostRuntime((_on, e) => { emit = e; });
     runtime.serve(fake.port);
     runtime.setReady();
     const data = new Uint8Array([104, 105]);
@@ -268,9 +351,9 @@ describe('host runtime client hooks', () => {
     expect(hook).toHaveBeenCalledTimes(2);
     expect(first.posted).toEqual([]);
     expect(second.posted).toHaveLength(1);
-    // a request on the old port is still answered there (the caller closed its socket, so the answer drops)
+    // A replaced source must not invoke handlers, even if an already buffered request arrives afterward.
     await first.deliver({ t: 'req', id: 'old', name: 'engine.ping', input: undefined });
-    expect(first.posted).toEqual([{ t: 'res', id: 'old', ok: true, value: PING }]);
+    expect(first.posted).toEqual([]);
   });
 
   // E11 (tracker row E10 "host.log expected traffic as errors"): dropping while no client is ready is the rule, not a
