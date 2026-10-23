@@ -20,6 +20,7 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { ArtifactRefusal, ArtifactRow, commands as ArtifactCommands } from '@shared/ipc/schema/artifacts';
 import type { commands as SpaceCommands } from '@shared/ipc/schema/spaces';
 import type { DeadlineShape } from '../ipc';
+import { seedSettled } from '../design-systems/seed-gate';
 import { ArtifactFiles } from './bytes';
 import { ArtifactStoreError, StoreTooNewError } from './errors';
 import { SuggestionError } from '@artifacts/yjs';
@@ -85,6 +86,8 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   const serve = <N extends HostArtifactCommand>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) =>
     on(name, async (input) => {
       try {
+        // Wait before entering the store's write/commit barrier: seeding needs to commit its own writes first.
+        if (documents && (name === 'artifacts.list' || name === 'artifacts.create')) await seedSettled(documents.store);
         const run = async () => handler(input);
         return await (documents ? documents.store.writeCommitted(run) : run());
       } catch (error) {

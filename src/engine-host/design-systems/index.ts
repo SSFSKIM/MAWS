@@ -16,6 +16,7 @@ import { DesignSystemChain } from './chain';
 import { designSystemContext } from './context';
 import { registerDesignSystemReads } from './reads';
 import { seedDefaults, type SeedDeps } from './seed';
+import { holdForSeed } from './seed-gate';
 
 export { DESIGN_SYSTEMS_DEADLINE_SHAPES } from './reads';
 
@@ -50,9 +51,6 @@ export function registerDesignSystems({ on, documents, log = (line) => console.e
   const chain = new DesignSystemChain(store, service);
   store.registerDesignSystemChain(chain);
   registerDesignSystemReads(on, { store, chain });
-  const seeded = seedDefaults({ store, service, loadAssets, log }).then(
-    () => {},
-    (error: unknown) => log(`seeding the built-in design systems failed: ${error instanceof Error ? error.message : String(error)}`),
-  );
+  const seeded = holdForSeed(store, seedDefaults({ store, service, loadAssets, log }), log);
   return { chain, seeded, close: unregisterMirror };
 }

@@ -1,8 +1,8 @@
 // The engine host's `library.*` commands (the P3-L document, Decision Log 2; the P3 interface ledger §1): main's reads
 // of the host's artifact store, from which it rebuilds and reconciles its derived library (index version 10). Main-only
 // by the registry (`mainOnlyCommands`), so no window reads the store around main's index. Each is answered from the
-// store at its commit (reads.ts) once the start import has landed or a bound under the bridge's router timeout has
-// passed (M6b fix wave 1, `./index.ts`), so none can outlive that timeout: all `immediate`. A refusal the store
+// store at its commit (reads.ts) once the start import and design-system seed have settled or their parallel bounds
+// under the bridge's router timeout have passed (M6b fix wave 1, `./index.ts`): all `immediate`. A refusal the store
 // names reaches main as A's surface sends it (an `ArtifactRefusal` in the IpcError's `issues`); a store that failed to
 // open answers `unavailable`.
 import { HostCommandError, type HostOn } from '@shared/host/runtime';
@@ -12,6 +12,7 @@ import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import { ArtifactStoreError } from '../documents/errors';
 import type { ArtifactStore } from '../documents/store';
 import type { DeadlineShape } from '../ipc';
+import { seedSettled } from '../design-systems/seed-gate';
 import { readEntry, readSnapshot, readText, type LibraryDocuments } from './reads';
 
 type LibraryHostCommand = 'library.snapshot' | 'library.entry' | 'library.text';
@@ -29,7 +30,8 @@ export function registerLibraryReads(on: HostOn, documents: LibraryDocuments | n
   const serve = <N extends LibraryHostCommand>(name: N, handler: (input: CommandInput<N>, documents: LibraryDocuments) => Promise<CommandOutput<N>>) =>
     on(name, async (input) => {
       if (!documents) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
-      await afterImport?.(documents.store);
+      // Parallel waits keep the combined readiness bound under the bridge's 10 s timeout.
+      await Promise.all([afterImport?.(documents.store), seedSettled(documents.store)]);
       try {
         return await handler(input, documents);
       } catch (error) {

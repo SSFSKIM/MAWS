@@ -13,6 +13,7 @@ import type { commands as DesignSystemCommands } from '@shared/ipc/schema/design
 import type { ArtifactStore } from '../documents/store';
 import type { DeadlineShape } from '../ipc';
 import type { DesignSystemChain } from './chain';
+import { seedSettled } from './seed-gate';
 
 export const DESIGN_SYSTEMS_DEADLINE_SHAPES: Record<keyof typeof DesignSystemCommands, DeadlineShape> = { 'designSystems.house': 'immediate', 'designSystems.governing': 'immediate' };
 
@@ -26,10 +27,12 @@ export function registerDesignSystemReads(on: HostOn, reads: { store: ArtifactSt
   };
   on('designSystems.house', async () => {
     const { store, chain } = opened();
+    await seedSettled(store);
     return store.readCommitted(() => ({ houseId: chain.house() }));
   });
   on('designSystems.governing', async ({ artifactId, versionId }) => {
     const { store, chain } = opened();
+    await seedSettled(store);
     return store.readCommitted(() => {
       const artifact = store.get(artifactId);
       if (!artifact) throw refused('notFound', `no artifact ${artifactId}`);
