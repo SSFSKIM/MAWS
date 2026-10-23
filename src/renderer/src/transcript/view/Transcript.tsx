@@ -75,11 +75,11 @@ export interface TranscriptListProps {
   onLeave?: (scroll: TranscriptScroll) => void;
 }
 
-// A nested tool/group scroller owns input it can consume, including a contained edge that cannot chain to the list.
+// A nested tool/group scroller owns input it can consume. Containment blocks chaining even when its contents fit.
 function nestedScrollerOwnsUp(target: EventTarget | null, scroller: HTMLElement): boolean {
   for (let element = target instanceof Element ? target : null; element && element !== scroller; element = element.parentElement) {
     const style = getComputedStyle(element);
-    if (!['auto', 'scroll'].includes(style.overflowY) || element.scrollHeight <= element.clientHeight) continue;
+    if (!['auto', 'scroll'].includes(style.overflowY)) continue;
     if (element.scrollTop > 0 || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
   }
   return false;
@@ -94,11 +94,12 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     onFollowChange?.(next);
   }, [onFollowChange]);
   const restoreAt = useRef<TranscriptScroll | null>(null); // P4-B3: the carried place, until the mount applies it
-  // P2-C start (2026-10-09): the scroller's offset and viewport height as the follow rule last knew them (below)
-  const known = useRef({ offset: 0, height: 0 });
+  // P2-C start (2026-10-09): the geometry as the follow rule last knew it. The end can move before a queued native
+  // scroll event arrives; reaching the end observed before that movement still means the reader returned to latest.
+  const known = useRef({ offset: 0, height: 0, end: 0 });
   const remember = useCallback(() => {
     const element = scrollRef.current;
-    if (element) known.current = { offset: element.scrollTop, height: element.clientHeight };
+    if (element) known.current = { offset: element.scrollTop, height: element.clientHeight, end: Math.max(0, element.scrollHeight - element.clientHeight) };
   }, []);
   // Also read the DOM before a following write: a browser can move the scroll offset before delivering its event.
   const leaveIfAway = useCallback((measuredSize: number) => {
@@ -114,9 +115,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     if (!element) return false;
     const movedUp = element.scrollTop < known.current.offset && element.clientHeight === known.current.height;
     const movedDown = element.scrollTop > known.current.offset;
+    const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - SCROLL_END_THRESHOLD;
     remember();
     const left = movedUp && leaveIfAway(measuredSize);
-    if (!movedUp && movedDown && element.scrollHeight - element.clientHeight - element.scrollTop <= SCROLL_END_THRESHOLD) changeFollow(true);
+    if (movedDown && reachedEnd) changeFollow(true);
     return left;
   }, [changeFollow, leaveIfAway, remember]);
   // P2-C end
@@ -129,11 +131,14 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const getItemKey = useCallback((index: number) => rows[index].id, [rows]);
   const estimateSize = useCallback((index: number) => measured.current.get(rows[index].id) ?? estimateRow(rows[index]), [rows]);
   const measure = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Parameters<typeof measureElement>[2]) => {
+    // Notice a return or browser clamp to the DOM end before measurement moves it or anchoring replaces the offset.
+    const scroller = scrollRef.current;
+    if (scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= SCROLL_END_THRESHOLD) readScroll(instance.getTotalSize());
     const size = measureElement(element, entry, instance);
     const id = element.getAttribute('data-row-id');
     if (id !== null) measured.current.set(id, size);
     return size;
-  }, []);
+  }, [readScroll]);
 
   // React Compiler skips this component (the hook returns functions it cannot memoise); the list memoises by hand.
   // eslint-disable-next-line react-hooks/incompatible-library -- see above
@@ -153,6 +158,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     scrollEndThreshold: -1,
     // Anchoring and explicit row jumps remain the virtualiser's; remember their clamped DOM offset immediately.
     scrollToFn: (offset, options, instance) => {
+      readScroll(instance.getTotalSize());
       elementScroll(offset, options, instance);
       remember();
     },
@@ -167,16 +173,23 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     if (!element) return;
     remember();
     const scrolled = () => { readScroll(virtualizer.getTotalSize()); };
-    const wheel = (event: WheelEvent) => { if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseFollow(); };
+    // Growth before an input belongs to that input's current end, not an obsolete end from an earlier gesture.
+    const observeEnd = () => { known.current.end = Math.max(0, element.scrollHeight - element.clientHeight); };
+    const wheel = (event: WheelEvent) => {
+      observeEnd();
+      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+    };
     let touchY: number | null = null;
-    const touchStart = (event: TouchEvent) => { touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
+    const touchStart = (event: TouchEvent) => { observeEnd(); touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
     const touchMove = (event: TouchEvent) => {
+      observeEnd();
       const next = event.touches.length === 1 ? event.touches[0].clientY : null;
       if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
       touchY = next;
     };
     const key = (event: KeyboardEvent) => {
       if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      observeEnd();
       if ((['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
     };
     const observer = new ResizeObserver(remember);

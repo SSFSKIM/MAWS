@@ -169,52 +169,84 @@ for (const input of ['wheel', 'touch-like'] as const) {
   });
 }
 
-test('@layout upward input in an overflowing tool group belongs to the group, not transcript follow', async ({ page, hub, browserName }) => {
-  const { view, scroller, replay } = await openStream(page, hub);
-  if (timer) clearInterval(timer);
-  timer = null;
-  replay.depth.apply({ at: 0, k: 'step-end', body: { turnId: 'scroll-turn', agentId: null, step: 0 } });
-  const calls = Array.from({ length: 16 }, (_, i) => ({ type: 'tool_use', id: `toolu_scroll_${i}`, name: 'Read', input: { file_path: `/tmp/scroll-file-${i}.ts` } }));
-  const row = {
-    uuid: 'scroll-group-calls', parentUuid: 'scroll-prompt', isSidechain: false, timestamp: '2026-10-22T10:01:00.000Z', sessionId: replay.session,
-    type: 'assistant', message: { id: 'msg_scroll_group', role: 'assistant', type: 'message', model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'Earlier investigation.\n\n'.repeat(40) }, ...calls], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } },
-  };
-  replay.depth.apply({ at: 0, k: 'row', agentId: null, row: row as never });
-  await view.locator('.transcript-group-header').click();
-  const cells = view.locator('.transcript-group-cells');
-  await expect(cells).toBeVisible();
-  await expect.poll(() => cells.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(100);
-  const jump = view.getByRole('button', { name: 'Jump to latest' });
-  if (await jump.count()) await jump.click();
-  await expect.poll(() => bottomGap(scroller)).toBeLessThanOrEqual(1);
-  for (const input of ['wheel', 'touch', 'keyboard']) {
-    if (input === 'wheel' && browserName === 'webkit') continue;
-    await cells.evaluate((el) => { el.scrollTop = 150; });
-    if (input === 'wheel') {
-      const box = (await cells.boundingBox())!;
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await page.mouse.wheel(0, -64);
-    } else if (input === 'keyboard') {
-      await cells.focus();
-      await page.keyboard.press('ArrowUp');
-    } else {
-      await cells.evaluate((el) => {
-        for (const [type, y] of [['touchstart', 200], ['touchmove', 250], ['touchend', 250]] as const) {
-          const event = new Event(type, { bubbles: true });
-          Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [{ identifier: 1, clientY: y }] });
-          el.dispatchEvent(event);
-          if (type === 'touchmove') el.scrollBy(0, -50);
-        }
-      });
-    }
-    // Mobile WebKit delivers the key but does not scroll this box from synthetic hardware-key input. The ownership
-    // assertion still runs there; native keyboard scrolling is not the app behavior under test.
-    if (input !== 'keyboard' || browserName !== 'webkit') await expect.poll(() => cells.evaluate((el) => el.scrollTop)).toBeLessThan(150);
-    await expect(jump, `${input} consumed by group cells must not detach the transcript`).toHaveCount(0);
+for (const toolCount of [2, 16]) {
+  test(`@layout upward input in ${toolCount === 2 ? 'a fitting' : 'an overflowing'} tool group belongs to the group, not transcript follow`, async ({ page, hub, browserName }) => {
+    const { view, scroller, replay } = await openStream(page, hub);
+    if (timer) clearInterval(timer);
+    timer = null;
+    replay.depth.apply({ at: 0, k: 'step-end', body: { turnId: 'scroll-turn', agentId: null, step: 0 } });
+    const calls = Array.from({ length: toolCount }, (_, i) => ({ type: 'tool_use', id: `toolu_scroll_${i}`, name: 'Read', input: { file_path: `/tmp/scroll-file-${i}.ts` } }));
+    const row = {
+      uuid: 'scroll-group-calls', parentUuid: 'scroll-prompt', isSidechain: false, timestamp: '2026-10-22T10:01:00.000Z', sessionId: replay.session,
+      type: 'assistant', message: { id: 'msg_scroll_group', role: 'assistant', type: 'message', model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'Earlier investigation.\n\n'.repeat(40) }, ...calls], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } },
+    };
+    replay.depth.apply({ at: 0, k: 'row', agentId: null, row: row as never });
+    await view.locator('.transcript-group-header').click();
+    const cells = view.locator('.transcript-group-cells');
+    await expect(cells).toBeVisible();
+    if (toolCount === 16) await expect.poll(() => cells.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(100);
+    else await expect.poll(() => cells.evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
+    const jump = view.getByRole('button', { name: 'Jump to latest' });
+    if (await jump.count()) await jump.click();
     await expect.poll(() => bottomGap(scroller)).toBeLessThanOrEqual(1);
-  }
-  // A real new row still follows after all three nested-input paths.
-  replay.depth.apply({ at: 0, k: 'row', agentId: null, row: { ...row, uuid: 'scroll-after-group', parentUuid: row.uuid, message: { ...row.message, id: 'msg_scroll_after_group', content: [{ type: 'text', text: 'The transcript still follows after scrolling the tool group.' }] } } as never });
-  await expect(view.getByText('The transcript still follows after scrolling the tool group.', { exact: true })).toBeInViewport();
-  await expect(jump).toHaveCount(0);
+    for (const input of toolCount === 16 ? ['wheel', 'touch', 'keyboard'] : ['wheel', 'touch']) {
+      if (input === 'wheel' && browserName === 'webkit') continue;
+      await cells.evaluate((el) => { el.scrollTop = 150; });
+      if (input === 'wheel') {
+        // The full box can extend under the composer while disclosure motion settles. Playwright's hit-tested hover
+        // chooses a visible point and waits for stability instead of wheeling at a clipped bounding-box midpoint.
+        await cells.evaluate((el) => { el.addEventListener('wheel', () => el.setAttribute('data-e2e-wheel', 'received'), { once: true }); });
+        await cells.hover();
+        await page.mouse.wheel(0, -64);
+        await expect(cells).toHaveAttribute('data-e2e-wheel', 'received');
+      } else if (input === 'keyboard') {
+        await cells.focus();
+        await page.keyboard.press('ArrowUp');
+      } else {
+        await cells.evaluate((el) => {
+          for (const [type, y] of [['touchstart', 200], ['touchmove', 250], ['touchend', 250]] as const) {
+            const event = new Event(type, { bubbles: true });
+            Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [{ identifier: 1, clientY: y }] });
+            el.dispatchEvent(event);
+            if (type === 'touchmove') el.scrollBy(0, -50);
+          }
+        });
+      }
+      // Mobile WebKit delivers the key but does not scroll this box from synthetic hardware-key input. The ownership
+      // assertion still runs there; native keyboard scrolling is not the app behavior under test.
+      if (toolCount === 16 && (input !== 'keyboard' || browserName !== 'webkit')) await expect.poll(() => cells.evaluate((el) => el.scrollTop), `${input} reaches the nested scroller`).toBeLessThan(150);
+      await expect(jump, `${input} consumed by group cells must not detach the transcript`).toHaveCount(0);
+      await expect.poll(() => bottomGap(scroller)).toBeLessThanOrEqual(1);
+    }
+    // A real new row still follows after the nested-input paths, including a contained box with nothing to scroll.
+    replay.depth.apply({ at: 0, k: 'row', agentId: null, row: { ...row, uuid: 'scroll-after-group', parentUuid: row.uuid, message: { ...row.message, id: 'msg_scroll_after_group', content: [{ type: 'text', text: 'The transcript still follows after scrolling the tool group.' }] } } as never });
+    await expect(view.getByText('The transcript still follows after scrolling the tool group.', { exact: true })).toBeInViewport();
+    await expect(jump).toHaveCount(0);
+  });
+}
+
+test.describe('fractional browser geometry', () => {
+  test.use({ deviceScaleFactor: 2 });
+  test('@layout returning to the end resumes follow at DPR 2 and 110% zoom, then follows later measured growth', async ({ page, hub }) => {
+    const { view, scroller, appendBlock } = await openStream(page, hub);
+    await page.evaluate(() => { document.documentElement.style.zoom = '1.1'; });
+    await scroller.evaluate((el) => { el.style.height = '463.25px'; });
+    await expect.poll(() => bottomGap(scroller)).toBeLessThanOrEqual(1);
+    await scroller.evaluate((el) => { el.scrollTop -= 200; });
+    const jump = view.getByRole('button', { name: 'Jump to latest' });
+    await expect(jump).toBeVisible();
+    // Let the browser clamp to its real maximum; do not manufacture an integer offset from scrollHeight-clientHeight.
+    const gap = await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      return el.scrollHeight - el.clientHeight - el.scrollTop;
+    });
+    expect(Math.abs(gap)).toBeLessThanOrEqual(1);
+    await expect(jump).toHaveCount(0);
+    appendBlock();
+    await expect(view.locator('[data-row-id^="desk-stream:"]')).toHaveCount(2);
+    const at = await scroller.evaluate((el) => el.scrollTop);
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(at + 100);
+    await expect.poll(() => bottomGap(scroller)).toBeLessThanOrEqual(1);
+    await expect(jump).toHaveCount(0);
+  });
 });

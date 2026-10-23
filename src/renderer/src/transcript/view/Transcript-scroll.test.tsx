@@ -22,12 +22,14 @@ const resizeEntry = (target: Element, height: number): ResizeObserverEntry => ({
 
 // Only layout is supplied: the real list and virtualizer decide what to scroll and when to follow. Browser coverage
 // in desk-web/e2e/stream-scroll.spec.ts exercises actual wheel/touch-like input and measured streaming Markdown.
-async function scene(ios = false) {
+async function scene(ios = false, observedMeasurements = ios) {
   const observers = new Set<{ targets: Set<Element>; callback: ResizeObserverCallback; observer: ResizeObserver }>();
   const heights = new WeakMap<Element, number>();
   if (ios) {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('iPhone');
     _resetIOSDetectionForTests();
+  }
+  if (observedMeasurements) {
     vi.stubGlobal('ResizeObserver', class {
       private readonly entry: { targets: Set<Element>; callback: ResizeObserverCallback; observer: ResizeObserver };
       constructor(callback: ResizeObserverCallback) {
@@ -43,6 +45,7 @@ async function scene(ios = false) {
   let frozenSize: number | null = null;
   let pendingContentSize: string | null = null;
   let overflow = 0;
+  let endShortfall = 0;
   const writes: number[] = [];
   const size = (el: HTMLElement) => frozenSize !== null && el.hasAttribute('data-transcript-scroller') ? frozenSize : (Number.parseFloat((el.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0) + overflow;
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
@@ -51,12 +54,12 @@ async function scene(ios = false) {
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200);
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return size(this); });
   vi.spyOn(HTMLElement.prototype, 'scrollTop', 'get').mockImplementation(function (this: HTMLElement) {
-    if (this.hasAttribute('data-transcript-scroller')) top = Math.max(0, Math.min(top, size(this) - 200));
+    if (this.hasAttribute('data-transcript-scroller')) top = Math.max(0, Math.min(top, size(this) - 200 - endShortfall));
     return top;
   });
   vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
     if (typeof options === 'object' && options.top !== undefined) {
-      top = Math.max(0, Math.min(options.top, size(this) - 200));
+      top = Math.max(0, Math.min(options.top, size(this) - 200 - endShortfall));
       writes.push(top);
     }
   });
@@ -79,6 +82,7 @@ async function scene(ios = false) {
       pendingContentSize = null;
     },
     extendDOMEnd: (pixels: number) => { overflow = pixels; },
+    roundDOMEnd: (pixels: number) => { endShortfall = pixels; },
     reportContentSize: () => act(() => {
       const content = scroller.firstElementChild!;
       for (const { targets, callback, observer } of observers) {
@@ -158,6 +162,54 @@ it('scrolling downward near the end does not resume following until the reader r
   expect(s.changed.mock.calls).toEqual([[false], [true]]);
 });
 
+for (const shortfall of [0.25, 0.75, 1]) {
+  it(`returning to the browser's fractional maximum resumes following with a ${shortfall}px rounded bottom gap`, async () => {
+    const s = await scene();
+    s.move(-200);
+    expect(s.handle.current!.following).toBe(false);
+    s.roundDOMEnd(shortfall); // zoom/DPR can leave an integer scrollHeight above the reachable maximum scrollTop
+    s.move(1000);
+    expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(shortfall);
+    expect(s.handle.current!.following).toBe(true);
+    s.stream();
+    expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(shortfall);
+    expect(s.changed.mock.calls).toEqual([[false], [true]]);
+  });
+}
+
+it('a native return to the last observed end resumes following when new DOM growth precedes its scroll event', async () => {
+  const s = await scene();
+  s.move(-200);
+  s.move(200, false); // reached the physical end before this next streamed layout
+  s.extendDOMEnd(40); // rendered overflow grows before ResizeObserver and the queued native scroll event
+  act(() => { fireEvent.scroll(s.scroller); });
+  expect(s.handle.current!.following).toBe(true);
+  s.stream();
+  expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
+});
+
+it('a downward gesture observes a newly grown end rather than resuming at the obsolete one', async () => {
+  const s = await scene();
+  s.move(-200);
+  s.extendDOMEnd(40); // an asynchronous block grew before the gesture, not after it
+  act(() => { fireEvent.wheel(s.scroller, { deltaY: 200 }); });
+  s.move(200);
+  expect(s.handle.current!.following).toBe(false);
+  s.move(40);
+  expect(s.handle.current!.following).toBe(true);
+});
+
+it('a reader reaching the bottom is noticed before a pending measurement moves that bottom again', async () => {
+  const s = await scene(true);
+  s.move(-200);
+  s.move(1); // real virtual-core may compensate a newly measured row above the reader while moving forward
+  s.move(199, false); // the reader reached the old end, but the browser has not delivered its scroll event
+  s.resizeRow('first');
+  s.reportContentSize();
+  expect(s.handle.current!.following).toBe(true);
+  expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
+});
+
 it('Jump to latest resumes following even without a browser scroll event to acknowledge the jump', async () => {
   const s = await scene();
   act(() => { fireEvent.wheel(s.scroller, { deltaY: -1 }); });
@@ -197,6 +249,17 @@ it('a browser clamp during remeasurement is not reader intent, even before the s
   s.stream();
   expect(s.handle.current!.following).toBe(true);
   expect(s.writes.length).toBeGreaterThan(0);
+});
+
+it('a desktop shrink and regrowth before its native scroll event do not detach a following reader', async () => {
+  const s = await scene(false, true);
+  s.resizeRow('last', -40); // the browser clamps to this smaller end before delivering a scroll event
+  expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
+  s.resizeRow('last', 40); // another measurement restores the extent before that native event or content-size report
+  s.reportContentSize();
+  expect(s.handle.current!.following).toBe(true);
+  expect(s.changed.mock.calls).toEqual([]);
+  expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
 });
 
 it('does not retire iOS anchor compensation before its measured extent can commit', async () => {
@@ -276,14 +339,14 @@ for (const [input, up] of [
   }],
   ['keyboard', (el: HTMLElement) => fireEvent.keyDown(el, { key: 'ArrowUp' })],
 ] as const) {
-  for (const [position, containment, consumed] of [[100, 'auto', true], [0, 'contain', true], [0, 'auto', false]] as const) {
-    it(`${input} belongs to nested group cells at ${position}px with ${containment} overscroll`, async () => {
+  for (const [height, position, containment, consumed] of [[600, 100, 'auto', true], [600, 0, 'contain', true], [600, 0, 'auto', false], [224, 0, 'contain', true], [224, 0, 'none', true], [224, 0, 'auto', false]] as const) {
+    it(`${input} belongs to ${height > 224 ? 'overflowing' : 'fitting'} nested group cells at ${position}px with ${containment} overscroll`, async () => {
       const s = await scene();
       const group = document.createElement('div');
       group.className = 'transcript-group-cells';
       group.style.overflowY = 'auto';
       group.style.overscrollBehaviorY = containment;
-      Object.defineProperties(group, { scrollHeight: { value: 600 }, clientHeight: { value: 224 }, scrollTop: { value: position, writable: true } });
+      Object.defineProperties(group, { scrollHeight: { value: height }, clientHeight: { value: 224 }, scrollTop: { value: position, writable: true } });
       s.scroller.querySelector('[data-index]')!.appendChild(group);
       act(() => { up(group); });
       expect(s.handle.current!.following).toBe(consumed);
