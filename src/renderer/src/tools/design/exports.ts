@@ -11,6 +11,9 @@
 import type { MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
 import type { ShownVersion } from '@artifacts/design/editor/viewport';
+import { boardLabel, readBoards } from '@artifacts/design/editor/boards';
+import type { HistoryApi } from '@artifacts/document/editor/history/api';
+import { applyV2, newDoc } from '@artifacts/yjs';
 import { ipc } from '../../ipc/client';
 import { toastFailure } from '../../library/dialogs';
 import type { EditorHostExport } from '../../panel/editor-host';
@@ -63,6 +66,35 @@ export function designExports(context: Pick<DesignExportContext, 'board' | 'show
     const disabled = context.shown === 'compare' || (entry.of === 'board' && context.board === null);
     return { id: entry.id, label: entry.label, onSelect: () => run(entry), ...(disabled && { disabled }) };
   });
+}
+
+/** WR 66: the card's version, with the same board choice as its preview: selected if retained, otherwise first. */
+export function designVersionExports(artifactId: string, versionId: number, current: DesignExportContext, source: Pick<HistoryApi, 'versionState'>): EditorHostExport[] {
+  return DESIGN_EXPORTS.map((entry) => ({
+    id: entry.id,
+    label: entry.label,
+    onSelect: async () => {
+      try {
+        if (entry.of === 'all') return await exportDesign(artifactId, { format: entry.format, versionId }, { boardName: (id) => id });
+        const state = await source.versionState(versionId);
+        const doc = newDoc();
+        let context: DesignExportContext;
+        try {
+          applyV2(doc, state);
+          const boards = readBoards(doc).boards;
+          const board = boards.find((b) => b.id === current.board) ?? boards[0];
+          if (!board) throw new Error('This version has no boards.');
+          const label = boardLabel(board);
+          context = { board: board.id, label, shown: { versionId, board: board.id, label } };
+        } finally {
+          doc.destroy();
+        }
+        await runDesignExport(artifactId, entry, context);
+      } catch (error) {
+        toastFailure(VIEWERS_COPY.exportFailed(error instanceof Error ? error.message : String(error)));
+      }
+    },
+  }));
 }
 
 export type DesignExportAsk = (sheet: ConfirmRequest) => Promise<boolean>;

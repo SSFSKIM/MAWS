@@ -247,6 +247,22 @@ describe('a document tab’s state', () => {
     expect(exporting().slice(4)[0]).toEqual(['artifacts.export', { artifactId: A, format: 'html', pageSize: 'letter', ownFile: true }]);
   });
 
+  it('exports the history card’s explicit version without changing the live, preview or comparison view', async () => {
+    const w = world({ 'artifacts.export': { path: '/u/x', revision: 5 }, 'library.saveAs': { saved: false } });
+    const state = w.open();
+    await ready(state);
+    for (const shown of [null, { versionId: 3 }, 'compare'] as const) {
+      state.setPreviewing(shown !== null, shown);
+      await state.export('pdf', 'a4', 7);
+      expect(state.snapshot().shown).toEqual(shown);
+    }
+    expect(w.calls.filter(([name]) => name === 'artifacts.export')).toEqual([
+      ['artifacts.export', { artifactId: A, format: 'pdf', versionId: 7, pageSize: 'a4', ownFile: true }],
+      ['artifacts.export', { artifactId: A, format: 'pdf', versionId: 7, pageSize: 'a4', ownFile: true }],
+      ['artifacts.export', { artifactId: A, format: 'pdf', versionId: 7, pageSize: 'a4', ownFile: true }],
+    ]);
+  });
+
   it('exports nothing while two versions are compared', async () => {
     const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: true, path: '/d/x' } });
     const state = w.open();

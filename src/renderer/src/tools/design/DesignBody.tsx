@@ -27,7 +27,7 @@ import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F 
 import { useDocumentComments } from '../document/comments';
 import { chooseDeckSystem } from '../presentation/commands';
 import { useDeckSystem } from '../presentation/governing';
-import { designExports, runDesignExport } from './exports';
+import { designExports, designVersionExports, runDesignExport } from './exports';
 import { designHeader, type DesignHeaderCommands } from './header';
 import type { DesignTabState } from './tab-state';
 
@@ -132,6 +132,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
         onCanvases={state.setCanvases}
         comments={target === null ? undefined : comments /* P3-F (L230) */}
         history={history}
+        versionExports={history ? (versionId) => designVersionExports(artifactId, versionId, state.exportContext(), history.api) : undefined}
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
         reveal={reveal} /* P4-B4 */

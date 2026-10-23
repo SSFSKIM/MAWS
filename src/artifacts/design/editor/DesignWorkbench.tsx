@@ -31,6 +31,7 @@ import { ElementBar } from '../../slides/editor/ElementBar';
 import { DeckCommentsProvider } from '../../slides/editor/comments/controller';
 import { CommentsRail } from '../../slides/editor/comments/CommentsRail';
 import { DeckHistoryRail } from '../../slides/editor/history/DeckHistoryRail';
+import type { VersionExports } from '../../document/editor/history/HistoryRail';
 import { HISTORY_COPY } from '../../slides/editor/history/copy';
 import { aliasOverrides, previewFaces } from '../../slides/editor/history/faces';
 import { historyAssets } from '../../slides/editor/history/HistoryPreview';
@@ -97,6 +98,7 @@ export interface DesignWorkbenchProps extends DeckRevealProps /* P4-B4 */ {
   commentAuthor?: CommentAuthor;
   /** M4: the design's version history (B's api through the design model, the replica, the projection's count). */
   history?: DeckHistorySource;
+  versionExports?: VersionExports;
   /** M4: a session's title for the history's author chips. */
   sessionTitle?: (appSessionId: string) => string | undefined;
   /** M4: an asset's URL at a revision (a version's), for a preview drawn with the version's assets. */
@@ -146,7 +148,7 @@ function useBoardCss(): void {
 }
 
 export function DesignWorkbench(props: DesignWorkbenchProps) {
-  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, onCanvases, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, bindsKey, provisional = null } = props;
+  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, onCanvases, comments, commentAuthor, history: historySource, versionExports, sessionTitle, assetUrlAt, bindsKey, provisional = null } = props;
   useCanvasCss();
   useBoardCss();
   const doc = session.doc;
@@ -438,7 +440,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const exportBoardId = exportBoard?.id ?? null;
   const exportLabel = exportBoard ? boardLabel(exportBoard) : null;
   useEffect(() => view.showVersion(shownKind === 'version' && shownId !== null ? { versionId: shownId, board: exportBoardId, label: exportLabel } : shownKind === 'compare' ? 'compare' : null), [view, shownKind, shownId, exportBoardId, exportLabel]);
-  const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
+  const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} versionExports={versionExports} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
   const onMoved = (to: BoardView, ids: string[]) => {
     session.show(to.id);
     session.select(ids);

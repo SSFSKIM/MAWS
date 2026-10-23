@@ -288,9 +288,9 @@ export class DocumentTabState {
     }
   }
 
-  /** P3-F (F7): the document as shown exported as `format` on `pageSize`, then saved where the owner chooses. */
-  async export(format: DocumentExportFormat, pageSize: PageSize): Promise<void> {
-    const { shown } = this.current;
+  /** The document as shown, or WR 66's explicit history-card version, saved where the owner chooses. */
+  async export(format: DocumentExportFormat, pageSize: PageSize, versionId?: number): Promise<void> {
+    const shown = versionId === undefined ? this.current.shown : { versionId };
     if (this.current.exporting?.phase === 'running' || shown === 'compare') return; // two versions compared: nothing is exported
     this.set({ exporting: { phase: 'running', format } });
     try {

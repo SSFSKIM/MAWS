@@ -61,7 +61,7 @@ import { FindBar } from './Find';
 import type { HistoryApi } from './history/api';
 import type { HistoryController, HistorySnapshot, PinnedScope, Preview } from './history/controller';
 import { HistoryBar } from './history/HistoryBar';
-import { HistoryRail } from './history/HistoryRail';
+import { HistoryRail, type VersionExports } from './history/HistoryRail';
 import { goToChange, setCarried, setExtra /* P3-E */ } from './history/paint';
 import { ShowEditorsMenu, useShowEditors } from './history/ShowEditors';
 import { useHistoryController, useHistorySnapshot } from './history/use-history';
@@ -92,6 +92,8 @@ export interface DocumentEditorProps {
   comments?: DocumentComments;
   /** The document's versions and history actions (M5); without it, version history is not offered. */
   history?: HistoryApi;
+  /** The host's export formats for each retained version's history card. */
+  versionExports?: VersionExports;
   /** The host service that opens and settles the artifact’s proposal replica (D14). */
   suggestions?: SuggestionHost;
   /**
@@ -410,7 +412,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
           />
         )}
         {rail === 'history' && history && snapshot && (
-          <HistoryRail controller={history} snapshot={snapshot} sessionTitle={props.history?.sessionTitle?.bind(props.history)} saving={saving} onSaving={setSaving} onClose={() => openRail(null)} />
+          <HistoryRail controller={history} snapshot={snapshot} versionExports={props.versionExports} sessionTitle={props.history?.sessionTitle?.bind(props.history)} saving={saving} onSaving={setSaving} onClose={() => openRail(null)} />
         )}
       </div>
     </div>
