@@ -171,7 +171,7 @@ describe('the views and the groups', () => {
     expect(screen.queryByRole('heading', { name: 'Make something new' })).toBeNull();
 
     await user.click(screen.getByRole('radio', { name: 'By Space' }));
-    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'No Space']));
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'General']));
     expect(screen.getByText('Nothing in this Space yet')).toBeTruthy();
     expect(screen.getByText('Mirrored to /Users/me/work/artifacts')).toBeTruthy();
   });
@@ -190,7 +190,7 @@ describe('the views and the groups', () => {
     await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document', spaceId: WORK }]));
 
     await user.click(screen.getByRole('button', { name: 'All Spaces' }));
-    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'No Space']));
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'General']));
   });
 
   it('says what puts artifacts here when a view is empty', async () => {
@@ -256,6 +256,20 @@ describe('search and the type filter', () => {
     await screen.findByRole('article', { name: 'Notes' });
     await user.type(screen.getByRole('searchbox', { name: 'Search artifacts' }), 'window');
     await waitFor(() => expect(within(article('Notes')).getByText('…the launch window opens…')).toBeTruthy());
+  });
+});
+
+describe('General home', () => {
+  it('filters to artifacts without a Space and creates there, as All does', async () => {
+    registerArtifactEditor('document', { Panel: () => null, createState: vi.fn() });
+    render(<Library />);
+    await screen.findByRole('article', { name: 'Launch plan' });
+    fireEvent.click(screen.getByRole('radio', { name: 'General' }));
+    await waitFor(() => expect(libraryCalls()).toContainEqual({ spaceId: null }));
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Launch plan' })).toBeNull());
+    expect(screen.getByRole('article', { name: 'Pricing page' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document' }]));
   });
 });
 
@@ -390,7 +404,7 @@ describe('the row actions', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Home' }));
     await waitFor(() => expect(main.callsOf('artifacts.update')).toContainEqual({ artifactId: id(2), spaceId: HOME }));
     await user.click(within(await openMenu(user, 'Launch plan')).getByRole('menuitem', { name: 'Move to Space' }));
-    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'No Space' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'General' }));
     await waitFor(() => expect(main.callsOf('artifacts.update')).toContainEqual({ artifactId: id(1), spaceId: null }));
   });
 

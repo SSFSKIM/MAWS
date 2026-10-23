@@ -108,7 +108,7 @@ describe('spaceGroups', () => {
     expect(groups.map((g) => [g.title, g.rows.map((r) => r.id), g.space?.id ?? null])).toEqual([
       ['Home', [], H],
       ['work', [inWork.id], W],
-      ['No Space', [loose.id], null],
+      ['General', [loose.id], null],
     ]);
   });
 

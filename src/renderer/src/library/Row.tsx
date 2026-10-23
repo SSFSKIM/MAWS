@@ -15,7 +15,7 @@ import { openArtifactTab } from './actions';
 import { KIND_LABELS, ROW_COPY } from './copy';
 import { KindIcon } from './icons';
 import { RowContextMenu, RowMenu } from './RowMenu';
-import { showSpace } from './view';
+import { setLibraryView, showSpace } from './view';
 import { SEND_TO_COPY } from '../delivery/copy'; // P4-B5
 import { latestReceipt, useDelivery } from '../delivery/store'; // P4-B5
 import { ipc } from '../ipc/client'; // P4-B5
@@ -137,7 +137,7 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, o
         </span>
         <span data-part="facts" className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
           <span className="shrink-0">{KIND_LABELS[row.kind]}</span>
-          {row.space && (
+          {row.space ? (
             <>
               <Dot />
               <button
@@ -148,6 +148,11 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, o
               >
                 <span className="truncate">{row.space.name}</span>
               </button>
+            </>
+          ) : (
+            <>
+              <Dot />
+              <button type="button" tabIndex={tabIndex} onClick={() => setLibraryView({ view: 'general', spaceId: null })} className="rounded-sm px-1 text-ui-sm outline-accent hover:text-fg focus-visible:outline-2">General</button>
             </>
           )}
           {row.project && (

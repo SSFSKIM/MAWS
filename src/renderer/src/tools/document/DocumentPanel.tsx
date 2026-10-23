@@ -22,6 +22,7 @@ import { useArtifactCommentTarget } from './comment-session'; // P3-F1
 import { forgetCardActivation, useDocumentComments } from './comments'; // P4-B3: forgetCardActivation
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
+import { useLibraryRow, useLibrarySpaces } from '../../library/store';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
 import { setCommentsView } from './comments-view'; // P4-B1
 import { useSettings } from '../../stores/settings'; // P4-B1
@@ -72,7 +73,13 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   // P4-B5: Send to, the shown version's when one is previewed (none while two are compared, as Export)
   const sendTo = useSendToAction(snapshot.title && snapshot.shown !== 'compare' ? { artifactId, kind: artifactKind ?? 'document', title: snapshot.title, ...(snapshot.shown && { versionId: snapshot.shown.versionId }) } : null);
   const actions = [...(header.actions ?? []), ...(additionalActions ?? []), ...(sendTo ? [sendTo] : [])]; // P3-E: a dashboard's actions after B's; P4-B5: Send to last
-  useEditorHost(scope, { ...header, actions });
+  const governing = useSystemFor(snapshot.placement);
+  const systemRow = useLibraryRow(governing && 'id' in governing ? governing.id : null).value;
+  const spaces = useLibrarySpaces().value;
+  const home = snapshot.placement.spaceId ? spaces?.find((space) => space.id === snapshot.placement.spaceId)?.name : 'General';
+  const systemName = governing && ('builtin' in governing ? 'MAWS' : systemRow?.title);
+  const breadcrumb = snapshot.ready ? [home ?? 'Loading Space…', ...(systemName && snapshot.shown === null ? [`Design: ${systemName}`] : [])] : [];
+  useEditorHost(scope, { ...header, breadcrumb, actions });
 
   // Comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown, to
   // the artifact's own context (its session, a session its directory starts on Comment, or a card saying why not);
