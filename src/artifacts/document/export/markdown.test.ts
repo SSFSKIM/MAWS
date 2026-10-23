@@ -7,8 +7,29 @@ import { describe, expect, it } from 'vitest';
 import { comparable, everyKindSource, sourceOf } from '../convert.fixture';
 import { importMarkdown } from '../import/markdown';
 import { exportMarkdown } from './markdown';
+import { docMarkdown } from '../markdown';
 
 describe('exportMarkdown', () => {
+  it('exports chip labels as escaped readable text and omits trailing editing space without mutating the source', () => {
+    const source = sourceOf([
+      { type: 'paragraph', content: [
+        { type: 'date', attrs: { iso: '2026-10-23' } },
+        { type: 'text', text: ' · ' },
+        { type: 'mention', attrs: { kind: 'person', ref: 'private-id', label: '*Mina*' } },
+        { type: 'text', text: ' · ' },
+        { type: 'dropdown', attrs: { value: '[Ready]', options: ['[Ready]', 'Later'] } },
+      ] },
+      { type: 'paragraph' },
+    ]);
+    const before = source.tabs[0].body.toJSON();
+    const md = exportMarkdown(source);
+    const html = new Marked().parse(md) as string;
+    expect(html).toContain('2026-10-23 · *Mina* · [Ready]');
+    expect(html).not.toMatch(/<chip|private-id|<em>|&#160;/);
+    expect(source.tabs[0].body.toJSON()).toEqual(before);
+    expect(docMarkdown().serialize(source.tabs[0].body)).toContain('<chip');
+  });
+
   it('writes one tab without ids or comment milestones', () => {
     const source = everyKindSource();
     const md = exportMarkdown(source, { tab: 'tab-1' });
@@ -39,9 +60,9 @@ describe('exportMarkdown', () => {
     expect(html).toMatch(/<p>a<br>\s*# b<br>\s*- c<\/p>/);
   });
 
-  it('round-trips the every-kind fixture through the import', () => {
+  it('keeps the agent dialect lossless independently of reader exports', () => {
     const source = everyKindSource();
-    const back = importMarkdown(exportMarkdown(source, { tab: 'tab-1' }));
+    const back = importMarkdown(docMarkdown().serialize(source.tabs[0].body, { ids: false }));
     expect(comparable(back)).toEqual(comparable(source.tabs[0].body));
   });
 

@@ -11,7 +11,25 @@
 // linked-directory mirror (a searchable read-only copy, not what `artifact_read` or an edit's quotes use) writes a
 // document's `.md` through it.
 // Several tabs are written in order, each introduced by its title as a top-level heading.
+import type { JSONContent } from '@tiptap/core';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import { docMarkdown } from '../markdown';
+
+// Reader exports are not the agent's lossless editing dialect. Chips become their visible values; trailing empty
+// paragraphs are editing space, not content in a Markdown file. Neither transformation touches the stored document.
+function readerBody(body: PMNode): PMNode {
+  const readable = (node: JSONContent): JSONContent[] => {
+    const field = node.type === 'date' ? 'iso' : node.type === 'mention' ? 'label' : node.type === 'dropdown' ? 'value' : null;
+    if (field) {
+      const text = String(node.attrs?.[field] ?? '');
+      return text ? [{ type: 'text', text, ...(node.marks && { marks: node.marks }) }] : [];
+    }
+    return [{ ...node, ...(node.content && { content: node.content.flatMap(readable) }) }];
+  };
+  const json = readable(body.toJSON())[0];
+  while (json.content?.length && json.content.at(-1)?.type === 'paragraph' && !json.content.at(-1)?.content?.length) json.content.pop();
+  return body.type.schema.nodeFromJSON(json);
+}
 import { schemaFor } from '../schema';
 import { tabsOf, type ExportSource, type ViewRenderer } from './source';
 
@@ -29,7 +47,7 @@ export function exportMarkdown(source: ExportSource, { tab, renderView }: { tab?
         return true;
       });
   const parts = tabs.map(({ title, body }) => {
-    const text = md.serialize(body, { ids: false, forReaders: true, ...(charts.size > 0 && { charts }) });
+    const text = md.serialize(readerBody(body), { ids: false, forReaders: true, ...(charts.size > 0 && { charts }) });
     if (tabs.length === 1) return text;
     const heading = schema.node('heading', { level: 1 }, title ? [schema.text(title)] : []);
     return `${md.block(heading, { ids: false, forReaders: true })}\n\n${text}`;
