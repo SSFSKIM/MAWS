@@ -117,6 +117,31 @@ async function watchSaved(page: Page, header: Locator): Promise<() => Promise<st
   return () => page.evaluate(() => (window as unknown as { __saved: string[] }).__saved);
 }
 
+test('WR #12: the floating session reserves document space when wide and overlays only when narrow', async () => {
+  const page = await start();
+  await launch!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 900));
+  await pinArtifactsTool(page);
+  const { id } = await openInMain(page, 'Reading beside a conversation');
+  const record = await openInPanel(page, id);
+  await (await sidebarRow(page, 'Harness A')).click();
+  const panel = page.locator('[data-region="panel"]');
+  await panel.getByRole('button', { name: 'Float session over panel' }).click();
+  const card = panel.getByRole('region', { name: 'Session card' });
+  const column = record.locator('[data-document-session-column]');
+  await expect(column).toBeVisible();
+  await expect(card).toHaveAttribute('data-floating-card', 'column');
+  const sheet = record.locator('.ds-doc').first();
+  await expect.poll(async () => {
+    const doc = (await sheet.boundingBox())!;
+    const chat = (await card.boundingBox())!;
+    return Math.round(doc.x + doc.width) <= Math.round(chat.x);
+  }, { message: 'the reading sheet does not extend underneath the conversation' }).toBe(true);
+  await launch!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1100, 900));
+  await expect(column).toHaveCount(0);
+  await expect(card).toHaveAttribute('data-floating-card', 'card');
+  await expect(record.locator('.ProseMirror')).toBeVisible();
+});
+
 test('a document opens in a main tab and in the panel as two replicas; the header follows saves and a host restart; History saves, lists and restores', async () => {
   test.setTimeout(150_000);
   const page = await start();

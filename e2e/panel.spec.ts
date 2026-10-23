@@ -1113,8 +1113,12 @@ test.describe('the floating session card (P3-G)', () => {
         await expect(card).toHaveCount(0);
         await expect(pill).toHaveText(USAGE);
         await expect(composers, 'the compact composer remains usable').toHaveCount(1);
+        const compact = panel.getByRole('region', { name: 'Compact session composer' });
+        await compact.getByRole('textbox', { name: 'Message' }).fill('Continue from the compact composer');
         await menu(app, 'panel.float');
         await expect(card).toBeVisible();
+        await expect(card.getByRole('textbox', { name: 'Message' })).toHaveText('Continue from the compact composer');
+        await card.getByRole('textbox', { name: 'Message' }).fill('');
         await card.getByRole('button', { name: 'Close session card' }).click();
         await expect(pill.locator('[aria-label="Unread"]')).toHaveCount(0);
         await advanceTo(app, 8000);
