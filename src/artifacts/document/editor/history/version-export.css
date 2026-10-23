@@ -12,3 +12,17 @@
   flex-shrink: 0;
   margin-top: var(--space);
 }
+.doc-version-export-group {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(var(--space) * 3);
+}
+.doc-version-export-label {
+  display: flex;
+  flex-direction: column;
+}
+.doc-version-export-description {
+  max-width: 32ch;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}

@@ -16,6 +16,8 @@ export interface HistoryExport {
   id: string;
   label: string;
   disabled?: boolean;
+  description?: string;
+  children?: readonly HistoryExport[];
   onSelect(): void;
 }
 /** The host's existing export formats, bound to this card's retained version, not the editor's current view. */
@@ -144,11 +146,28 @@ function VersionExportMenu({ version, entries }: { version: ArtifactVersion; ent
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="doc-tab-menu" align="end" sideOffset={4} aria-label={label}>
-          {entries.map((entry) => <DropdownMenu.Item key={entry.id} className="doc-tab-menu-item" disabled={entry.disabled} onSelect={() => entry.onSelect()}>{entry.label}</DropdownMenu.Item>)}
+          {entries.map((entry) => <VersionExportItem key={entry.id} entry={entry} />)}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   );
+}
+
+function VersionExportItem({ entry }: { entry: HistoryExport }) {
+  const label = <span className="doc-version-export-label">{entry.label}{entry.description && <span className="doc-version-export-description">{entry.description}</span>}</span>;
+  if (entry.children?.length) return (
+    <DropdownMenu.Sub>
+      <DropdownMenu.SubTrigger className="doc-tab-menu-item doc-version-export-group" disabled={entry.disabled}>
+        {label}<span aria-hidden="true">›</span>
+      </DropdownMenu.SubTrigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.SubContent className="doc-tab-menu" sideOffset={4} aria-label={entry.label}>
+          {entry.children.map(child => <VersionExportItem key={child.id} entry={child} />)}
+        </DropdownMenu.SubContent>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Sub>
+  );
+  return <DropdownMenu.Item className="doc-tab-menu-item" disabled={entry.disabled} onSelect={() => entry.onSelect()}>{label}</DropdownMenu.Item>;
 }
 
 // Save version: a name (required) and what changed.
