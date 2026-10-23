@@ -151,7 +151,7 @@ test('a replacement-only agent change counts, marks and steps after a host resta
     expect(versionRows).not.toContain('30');
 
     await bar.getByRole('button', { name: 'Make a copy' }).click();
-    await expect(rail.getByRole('status')).toHaveText('A copy of this version was made.', { timeout: 15_000 });
+    await expect.poll(async () => (await ok<{ artifacts: { id: string; kind: string }[] }>(page, 'artifacts.list', {})).artifacts.filter((row) => row.kind === 'dashboard' && row.id !== id).length, { timeout: 15_000 }).toBe(1);
     await bar.getByRole('button', { name: 'Back to document' }).click();
     await showsNew(live(main));
     const liveRows = await sourceRows();
