@@ -15,6 +15,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { api, BASH_RESULT, builder } from '../../transcript/model/test-events';
 import type { TranscriptSource } from '../../transcript/source/types';
 import { Transcript } from '../../transcript/view/Transcript';
+import sitting31 from './fixtures/sitting-31.txt?raw';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -77,6 +78,24 @@ const record = () => screen.queryByRole('button', { name: /^(Working record|Fold
 const dividers = () => [...document.querySelectorAll('[data-kind="divider"] .transcript-divider > .transcript-disclosure')] as HTMLElement[];
 
 describe('the report view', () => {
+  // WR #31: exact assistant text at 2026-10-19 08:25:08.827Z, sitting session
+  // 720e2008, transcript line 288. Its critical block has soft line endings,
+  // inline-code Unicode dividers, and no Markdown headings or horizontal rules.
+  it('replays the sitting reply without losing its supplied lists or inline structure', async () => {
+    const b = builder();
+    b.turn('sitting-user');
+    b.text('sitting-reply', 0, sitting31);
+    b.end(['sitting-user']);
+    await mounted(b.events);
+    await waitFor(() => expect(document.querySelectorAll('.transcript-prose li')).toHaveLength(9));
+    expect(document.querySelectorAll('.transcript-prose ul')).toHaveLength(3);
+    expect(document.querySelectorAll('.transcript-prose [data-streamdown="strong"]')).toHaveLength(3);
+    expect(document.querySelectorAll('.transcript-prose h1, .transcript-prose h2, .transcript-prose hr')).toHaveLength(0);
+    const critical = [...document.querySelectorAll('.transcript-prose p')].find((p) => p.textContent?.includes('Handled: fully.'))!;
+    expect(critical.textContent).toContain('Needs you:');
+    expect(critical.querySelector('code')?.textContent).toContain('Critical');
+  });
+
   it('folds a marked turn to its prompt, one working record and its marks, and opens it to level 1 and level 2', async () => {
     await mounted(session());
     // level 0
