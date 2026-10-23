@@ -74,7 +74,7 @@ async function pageInAndReturn(hub: HubDouble, view: Locator): Promise<void> {
   await expect
     .poll(
       async () => {
-        await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+        await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
         return first.count();
       },
       { timeout: 15_000 },
@@ -152,7 +152,7 @@ async function watch(page: Page): Promise<() => Promise<Watched>> {
 async function allRowIds(scope: Locator): Promise<string[]> {
   const scroller = scope.locator('[data-transcript-scroller]').first();
   const ids: string[] = [];
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   for (let i = 0; i < 100; i++) {
     await scope.page().waitForTimeout(60);
     for (const id of await rowIds(scope)) if (id !== null && !ids.includes(id)) ids.push(id);
@@ -200,7 +200,7 @@ for (const [disruption, disrupt] of [
 
     // The older rows the reader paged in are still drawn, and were not asked for again.
     const scroller = view.locator('[data-transcript-scroller]');
-    await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+    await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
     await expect(view.locator('[data-row-id^="user:"]').filter({ hasText: FIRST_PROMPT })).toHaveCount(1);
     await page.waitForTimeout(300);
     expect(rowsAsked(hub)).toBe(asked);

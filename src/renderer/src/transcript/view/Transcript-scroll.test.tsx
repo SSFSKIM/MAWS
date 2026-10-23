@@ -109,6 +109,11 @@ async function scene(ios = false, observedMeasurements = ios) {
       top += by;
       if (report) fireEvent.scroll(scroller);
     }),
+    readerMove: (by: number, report = true) => act(() => {
+      fireEvent.wheel(scroller, { deltaY: by });
+      top += by;
+      if (report) fireEvent.scroll(scroller);
+    }),
     stream: () => view.rerender(draw([...rows, { id: 'new-stream-row' as RowId, turnId: null, at: '', kind: 'time', label: 'Incoming answer' }])),
   };
 }
@@ -131,9 +136,70 @@ for (const [input, up] of [
   });
 }
 
+for (const report of [false, true]) {
+  it(`an upward position change without input does not release following (native event reported: ${report})`, async () => {
+    const s = await scene();
+    s.move(-40, report); // a clamp, replacement, focus or other browser movement is not witnessed reader intent
+    s.stream();
+    expect(s.handle.current!.following).toBe(true);
+    expect(s.changed.mock.calls).toEqual([]);
+    expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
+  });
+}
+
+it('a primary pointer press on the scroller gives a scrollbar drag ownership before its scroll event', async () => {
+  const s = await scene();
+  act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'mouse', button: 0 }); });
+  expect(s.handle.current!.following).toBe(false);
+  s.move(-20, false);
+  s.stream();
+  expect(s.writes).toEqual([]);
+});
+
+it('a scrollbar drag that reaches bottom and reverses releases following again before its next move', async () => {
+  const s = await scene();
+  act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'mouse', button: 0 }); });
+  s.move(-20);
+  s.move(20);
+  expect(s.handle.current!.following).toBe(true);
+  act(() => { fireEvent.pointerMove(s.scroller, { pointerType: 'mouse', buttons: 1 }); });
+  s.move(-20, false);
+  s.writes.length = 0;
+  s.stream();
+  expect(s.handle.current!.following).toBe(false);
+  expect(s.writes).toEqual([]);
+});
+
+it('a pointer press on row content is not a scrollbar drag even if it moves across the scroller', async () => {
+  const s = await scene();
+  act(() => {
+    fireEvent.pointerDown(s.scroller.querySelector('[data-index]')!, { pointerType: 'mouse', button: 0, pointerId: 1 });
+    fireEvent.pointerMove(s.scroller, { pointerType: 'mouse', buttons: 1, pointerId: 1 });
+  });
+  expect(s.handle.current!.following).toBe(true);
+});
+
+it('ending a scrollbar drag retires its input ownership', async () => {
+  const s = await scene();
+  act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'mouse', button: 0, pointerId: 1 }); });
+  s.move(-20);
+  act(() => { fireEvent.pointerUp(window, { pointerType: 'mouse', button: 0, pointerId: 1 }); });
+  s.move(20);
+  expect(s.handle.current!.following).toBe(true);
+  s.move(-10); // an unwitnessed browser movement after the drag is no longer scrollbar input
+  s.stream();
+  expect(s.handle.current!.following).toBe(true);
+});
+
+it('a touch press on empty scroller space does not release following before a drag', async () => {
+  const s = await scene();
+  act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'touch', button: 0 }); });
+  expect(s.handle.current!.following).toBe(true);
+});
+
 it('a small upward scroll releases follow mode before the next streamed row, even inside the old end threshold', async () => {
   const s = await scene();
-  s.move(-20);
+  s.readerMove(-20);
   expect(s.changed.mock.calls).toEqual([[false]]);
   expect(s.handle.current!.following).toBe(false);
   s.stream();
@@ -144,7 +210,7 @@ it('a small upward scroll releases follow mode before the next streamed row, eve
 
 it('a streamed row cannot overwrite an upward scroll whose browser event has not arrived yet', async () => {
   const s = await scene();
-  s.move(-200, false);
+  s.readerMove(-200, false);
   s.stream();
   expect(s.handle.current!.following).toBe(false);
   expect(s.writes).toEqual([]);
@@ -152,10 +218,10 @@ it('a streamed row cannot overwrite an upward scroll whose browser event has not
 
 it('scrolling downward near the end does not resume following until the reader reaches the bottom', async () => {
   const s = await scene();
-  s.move(-200);
-  s.move(180); // twenty pixels from the bottom is still the reader's place
+  s.readerMove(-200);
+  s.readerMove(180); // twenty pixels from the bottom is still the reader's place
   expect(s.handle.current!.following).toBe(false);
-  s.move(20);
+  s.readerMove(20);
   expect(s.handle.current!.following).toBe(true);
   s.stream();
   expect(s.writes.length).toBeGreaterThan(0);
@@ -165,10 +231,10 @@ it('scrolling downward near the end does not resume following until the reader r
 for (const shortfall of [0.25, 0.75, 1]) {
   it(`returning to the browser's fractional maximum resumes following with a ${shortfall}px rounded bottom gap`, async () => {
     const s = await scene();
-    s.move(-200);
+    s.readerMove(-200);
     expect(s.handle.current!.following).toBe(false);
     s.roundDOMEnd(shortfall); // zoom/DPR can leave an integer scrollHeight above the reachable maximum scrollTop
-    s.move(1000);
+    s.readerMove(1000);
     expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(shortfall);
     expect(s.handle.current!.following).toBe(true);
     s.stream();
@@ -179,8 +245,8 @@ for (const shortfall of [0.25, 0.75, 1]) {
 
 it('a native return to the last observed end resumes following when new DOM growth precedes its scroll event', async () => {
   const s = await scene();
-  s.move(-200);
-  s.move(200, false); // reached the physical end before this next streamed layout
+  s.readerMove(-200);
+  s.readerMove(200, false); // reached the physical end before this next streamed layout
   s.extendDOMEnd(40); // rendered overflow grows before ResizeObserver and the queued native scroll event
   act(() => { fireEvent.scroll(s.scroller); });
   expect(s.handle.current!.following).toBe(true);
@@ -190,19 +256,19 @@ it('a native return to the last observed end resumes following when new DOM grow
 
 it('a downward gesture observes a newly grown end rather than resuming at the obsolete one', async () => {
   const s = await scene();
-  s.move(-200);
+  s.readerMove(-200);
   s.extendDOMEnd(40); // an asynchronous block grew before the gesture, not after it
   act(() => { fireEvent.wheel(s.scroller, { deltaY: 200 }); });
-  s.move(200);
+  s.readerMove(200);
   expect(s.handle.current!.following).toBe(false);
-  s.move(40);
+  s.readerMove(40);
   expect(s.handle.current!.following).toBe(true);
 });
 
 it('a reader reaching the bottom is noticed before a pending measurement moves that bottom again', async () => {
   const s = await scene(true);
-  s.move(-200);
-  s.move(1); // real virtual-core may compensate a newly measured row above the reader while moving forward
+  s.readerMove(-200);
+  s.readerMove(1); // real virtual-core may compensate a newly measured row above the reader while moving forward
   s.move(199, false); // the reader reached the old end, but the browser has not delivered its scroll event
   s.resizeRow('first');
   s.reportContentSize();
@@ -229,7 +295,7 @@ for (const initialReport of [false, true]) {
     s.resizeRow('last');
     s.reportContentSize();
     expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
-    s.move(-200);
+    s.readerMove(-200);
     const held = s.scroller.scrollTop;
     s.writes.length = 0;
     s.resizeRow('last');
@@ -311,8 +377,8 @@ for (const jumpFirst of [false, true]) {
   it(`preserves iOS above-viewport resize compensation through a drag (${jumpFirst ? 'after Jump to latest' : 'already reading history'})`, async () => {
     const s = await scene(true);
     if (!jumpFirst) {
-      s.move(-200);
-      s.move(1); // a forward direction allows the real virtualizer to anchor a re-measured row above the viewport
+      s.readerMove(-200);
+      s.readerMove(1); // a forward direction allows the real virtualizer to anchor a re-measured row above the viewport
     }
     act(() => {
       if (jumpFirst) s.handle.current!.scrollToEnd();

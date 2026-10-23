@@ -232,6 +232,7 @@ test.describe('fractional browser geometry', () => {
     await page.evaluate(() => { document.documentElement.style.zoom = '1.1'; });
     await scroller.evaluate((el) => { el.style.height = '463.25px'; });
     await expect.poll(() => bottomGap(scroller)).toBeLessThanOrEqual(1);
+    await scroller.dispatchEvent('wheel', { deltaY: -200 }); // the reader owns this move; the clamp below tests geometry
     await scroller.evaluate((el) => { el.scrollTop -= 200; });
     const jump = view.getByRole('button', { name: 'Jump to latest' });
     await expect(jump).toBeVisible();

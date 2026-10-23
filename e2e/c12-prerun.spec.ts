@@ -1136,7 +1136,7 @@ test('§10.7 a 500-turn transcript stays anchored while old work expands; stream
       const trials: Record<string, unknown>[] = [];
       for (const where of ['above', 'below'] as const) {
         // mid-way (a different point each trial), then the nearest collapsed turn centred in the viewport
-        await scroller(page).evaluate((s, w) => (s.scrollTop = (s.scrollHeight - s.clientHeight) * (w === 'above' ? 0.5 : 0.4)), where);
+        await scroller(page).evaluate((s, w) => { s.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); s.scrollTop = (s.scrollHeight - s.clientHeight) * (w === 'above' ? 0.5 : 0.4); }, where);
         await settle(page);
         const button = await scroller(page).evaluate((s) => {
           const v = s.getBoundingClientRect();
@@ -1198,7 +1198,7 @@ test('§10.7 a 500-turn transcript stays anchored while old work expands; stream
         const tall = await scroller(page).evaluate((el) => el.scrollHeight > el.clientHeight + 700);
         return s.turn !== null && tall;
       }, { timeout: 120_000, intervals: [250] }).toBe(true);
-      await scroller(page).evaluate((s) => s.scrollBy(0, -500));
+      await scroller(page).evaluate((s) => { s.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); s.scrollBy(0, -500); });
       await expect(page.getByRole('button', { name: /^Jump to latest/ })).toBeVisible({ timeout: 5_000 });
       const readingAt = await scroller(page).evaluate((s) => s.scrollTop);
       let maxDelta = 0;

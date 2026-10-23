@@ -33,7 +33,7 @@ async function scrollTo(view: Locator, row: Locator): Promise<void> {
   const scroller = view.locator('[data-transcript-scroller]');
   await scroller.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
   for (let i = 0; i < 60 && (await row.count()) === 0; i++) {
-    await scroller.evaluate((el) => el.scrollBy({ top: -el.clientHeight * 0.8 }));
+    await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollBy({ top: -el.clientHeight * 0.8 }); });
     await view.page().waitForTimeout(60);
   }
   await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
@@ -166,7 +166,7 @@ test('the pending requests are cards at the tail, answered in place and gone onc
   // Scrolled away from them, the reader gets the pill; it brings them back.
   const pill = view.getByTestId('waiting-pill');
   await expect(pill).toHaveCount(0);
-  await view.locator('[data-transcript-scroller]').evaluate((el) => el.scrollTo({ top: 0 }));
+  await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   await expect(pill).toHaveText('2 waiting ↓');
   await shot(view, 'requests-pill');
   await pill.click();
