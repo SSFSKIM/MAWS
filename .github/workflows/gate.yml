@@ -135,7 +135,7 @@ env:
   # A name joins only on that spec's trial evidence (its V4: green in the guest, matching the host's results). The plan
   # keeps a MEASURED_E2E group on the exclusive instance whatever this says, and runs a group on both lists shared; a
   # `Lane:` trailer moves these groups to the guest alone.
-  MAC_VM_E2E: ''
+  MAC_VM_E2E: document-app widgets to-human
 
 defaults:
   run:
