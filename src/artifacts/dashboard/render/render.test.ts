@@ -18,9 +18,17 @@ const gdp = table(GDP_CSV);
 const penguins = table(PENGUINS_CSV);
 const theme = themeFrom(HOUSE_TOKENS.properties).theme;
 
+it('does not borrow an accent when the governing system has not authorized it for figures', () => {
+  const props = { '--ds-color-bg-raised': '#ffffff', '--ds-color-text': '#405569', '--ds-color-accent': '#bb22cc' };
+  const draw = (values: Record<string, string>) => renderView({ view: 'bar', x: 'k', y: 'v' }, table('k,v\nNorth,12'), themeFrom(values).theme, 'sales').svg!;
+  expect(draw(props)).not.toContain('#bb22cc');
+  expect(draw(props)).toMatch(/<path [^>]*fill="#405569"[^>]*data-tip=/);
+  expect(draw({ ...props, '--ds-color-figure': '#2864bb' })).toMatch(/<path [^>]*fill="#2864bb"[^>]*data-tip=/);
+});
+
 it('draws repeated bars in the governing accent while keeping labels in text ink', () => {
   const data = table('k,v\nNorth,12\nNorth,7\nSouth,9');
-  const render = (accent: string) => renderView({ view: 'bar', x: 'k', y: 'v' }, data, themeFrom({ ...HOUSE_TOKENS.properties, '--ds-color-accent': accent }).theme, 'sales').svg!;
+  const render = (accent: string) => renderView({ view: 'bar', x: 'k', y: 'v' }, data, themeFrom({ ...HOUSE_TOKENS.properties, '--ds-color-figure': accent }).theme, 'sales').svg!;
   const first = render('#2864bb');
   const marks = [...first.matchAll(/<path [^>]*data-tip="[^"]*"[^>]*>/g)].map(match => match[0]);
   expect(marks).toHaveLength(3);
@@ -407,7 +415,7 @@ describe('renderView', () => {
   });
 
   it('refuses a hostile theme value and keeps the house value', () => {
-    const hostile = themeFrom({ '--ds-color-text': 'red" onload="alert(1)', '--ds-font-body': 'x;}</style><script>', '--ds-color-border': 'url(https://e.example/x)', '--ds-type-caption-size': '0px', '--ds-type-body-size': '16px' });
+    const hostile = themeFrom({ ...HOUSE_TOKENS.properties, '--ds-color-text': 'red" onload="alert(1)', '--ds-font-body': 'x;}</style><script>', '--ds-color-border': 'url(https://e.example/x)', '--ds-type-caption-size': '0px', '--ds-type-body-size': '16px' });
     expect(hostile.warnings).toEqual(['theme value --ds-color-text refused', 'theme value --ds-color-border refused', 'theme value --ds-font-body refused', 'theme value --ds-type-caption-size refused']);
     expect(hostile.theme).toEqual(theme);
     const c = byId('bar-gdp-2024');

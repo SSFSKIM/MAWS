@@ -43,7 +43,7 @@ stack falls to Segoe UI and Malgun Gothic, which are also the Office faces.
   attributions; never for a sentence the reader must act on.
 - **`color.accent` is the accent role.** Terracotta marks the reader's one action on a page or slide: the disc beside
   "To do", a 2 px underline under the action phrase, or one figure on a slide. One mark per page or slide.
-- Exception for charts: bar data marks and their legend keys may use `color.accent`; chart text never does.
+- Exception for charts: bar data marks and their legend keys may use `color.accent` through `color.figure`; chart text never does.
 - `color.accent` measures 3.7 : 1 on the ground, so it sets text only at 24 px, or 19 px bold, and above. A body-size
   action stays in ink and takes the underline.
 - `color.accent.text` (3.9 : 1 on the accent) appears only on an accent fill, at the same large sizes.

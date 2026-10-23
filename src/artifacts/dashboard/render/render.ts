@@ -4,7 +4,7 @@
 // no href, no id or `url(...)` reference, no external resource; every text is escaped, every theme value validated
 // (`themeFrom`). Equal inputs give byte-equal output: nothing reads a DOM, the locale, the clock or randomness.
 //
-// WR 68: bars and their legend keys use the governing accent; labels retain text ink. Other figures keep ink.
+// WR 68: bars and their legend keys use the governing figure role (house: accent); labels retain text ink. Other figures keep ink.
 // There is no categorical palette: series part by dash, marker shape and
 // fill treatment, always with a legend (two or more series) or a direct label, never by colour alone; status colours
 // are never borrowed. There are six forms: a view whose unfiltered snapshot holds more series identities draws labelled

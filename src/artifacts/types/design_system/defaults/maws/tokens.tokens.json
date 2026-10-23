@@ -55,6 +55,10 @@
       "info": {
         "$value": { "colorSpace": "srgb", "components": [0.2314, 0.4353, 0.8196], "hex": "#3b6fd1" }
       }
+    },
+    "figure": {
+      "$value": "{color.accent.$root}",
+      "$description": "Bar data marks and their legend keys; labels remain text ink."
     }
   },
   "font": {

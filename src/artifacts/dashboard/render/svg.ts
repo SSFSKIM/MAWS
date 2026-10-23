@@ -115,7 +115,7 @@ const FONT = /^[\p{L}\p{N} ,"'\-_.]{1,300}$/u;
 export const FIGURE_WIDTH = 672;
 
 /** The `--ds-*` names a figure reads. */
-export const THEME_PROPERTIES = ['--ds-color-bg-raised', '--ds-color-accent', '--ds-color-text', '--ds-color-text-muted', '--ds-color-border', '--ds-font-body', '--ds-font-mono', '--ds-type-caption-size', '--ds-type-body-size'] as const;
+export const THEME_PROPERTIES = ['--ds-color-bg-raised', '--ds-color-figure', '--ds-color-text', '--ds-color-text-muted', '--ds-color-border', '--ds-font-body', '--ds-font-mono', '--ds-type-caption-size', '--ds-type-body-size'] as const;
 
 /** The theme from resolved `--ds-*` properties (an absent or empty one is the house system's, D's `maws` default); a value
  * the figure cannot take safely (not a six-digit hex colour, a font list with markup, a size outside 8 to 40 px) is
@@ -146,7 +146,9 @@ export function themeFrom(props: Readonly<Record<string, string | undefined>>, w
     theme: {
       ground: pick('--ds-color-bg-raised', HEX),
       ink: pick('--ds-color-text', HEX),
-      barInk: pick('--ds-color-accent', HEX),
+      // An explicit figure role authorizes its color. A supplied system without it keeps its own text ink,
+      // never borrowing an accent that its law may reserve for actions. With no system, use the house figure.
+      barInk: given('--ds-color-figure') !== undefined ? pick('--ds-color-figure', HEX) : given('--ds-color-text') !== undefined ? pick('--ds-color-text', HEX) : house['--ds-color-figure'],
       muted: pick('--ds-color-text-muted', HEX),
       rule: pick('--ds-color-border', HEX),
       fontBody: authoredFontStack(pick('--ds-font-body', FONT)),

@@ -48,7 +48,6 @@ number on a slide). It prints as a dark block on a copier and is the only filled
 - **`color.accent` is the accent role.** Cobalt fills the part tab and the current step's tab, nothing else: never a
   heading, a word, a rule or a link. One filled tab per slide or component; on paper one per part.
 - `color.accent.text` is the tab's letter or number, on the accent fill only (6.7 : 1).
-- Exception for charts: bar data marks and their legend keys may use `color.accent`; chart text never does.
 - `color.border` (3.1 : 1) draws write-in boxes, answer lines, check boxes and table cells, because a box to write in
   is a control and must survive the copier.
 - The status set (`ok`, `warn`, `error`, `info`) colours a word ("Tip", "Check", "Careful") or a mark beside a word.

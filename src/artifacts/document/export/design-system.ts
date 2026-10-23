@@ -53,6 +53,7 @@ export const HOUSE_TOKENS: LocalTokens = {
     '--ds-color-text': '#1f1e1b',
     '--ds-color-text-muted': '#72716e',
     '--ds-color-accent': '#c9663f',
+    '--ds-color-figure': '#c9663f',
     '--ds-color-accent-text': '#ffffff',
     '--ds-color-border': '#e3e2df',
     '--ds-color-status-ok': '#1f8f55',
