@@ -184,6 +184,26 @@ describe('comments on a deck’s elements (D9)', () => {
   });
 
   // P4-B2: a pin opens its popover now (pin-popover.dom.test.tsx), not the rail
+  it('distinguishes coincident identical comment targets in both pins and the rail', async () => {
+    const { doc, session, container } = mount();
+    fakeLayout(container);
+    act(() => {
+      setStyle(doc, 's1', 'title', { position: 'absolute', left: '300px', top: '400px', width: '400px', height: '100px' });
+      setText(doc, 's1', 'title', [{ type: 'p', inline: [{ text: 'One path', marks: {} }] }]);
+      for (const elementId of ['title', 'body']) addThread(doc, { threadId: elementId, slideId: 's1', elementId, quote: 'One path', by: { kind: 'human' }, at: 1, body: 'Change this one' });
+      session.setZoom(0.5);
+      session.toggleRail('comments');
+    });
+    await settle();
+    const pins = [...container.querySelectorAll<HTMLElement>('[data-comment-pin]')];
+    expect(pins).toHaveLength(2);
+    expect(new Set(pins.map((pin) => pin.getAttribute('aria-label'))).size).toBe(2);
+    const [a, b] = pins.map((pin) => ({ x: Number.parseFloat(pin.style.left), y: Number.parseFloat(pin.style.top) }));
+    expect(Math.max(Math.abs(a!.x - b!.x), Math.abs(a!.y - b!.y))).toBeGreaterThanOrEqual(28);
+    const targets = [...container.querySelectorAll('.deck-thread-quote')].map((node) => node.textContent);
+    expect(new Set(targets).size).toBe(2);
+  });
+
   it('a pin sits at its element’s top-right, follows a move, and is drawn active with its thread', async () => {
     const { doc, session, container } = mount();
     fakeLayout(container);
