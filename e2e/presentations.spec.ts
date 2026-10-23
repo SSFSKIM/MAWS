@@ -320,7 +320,7 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await drag(page, { x: firstThumb.x + firstThumb.width / 2, y: firstThumb.y + firstThumb.height / 2 }, { x: secondThumb.x + secondThumb.width / 2, y: secondThumb.y + secondThumb.height / 2 });
   await expect.poll(() => order(page, id)).toEqual([before[1], before[0], ...before.slice(2)]);
   await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: /dropped at position 2/ })).toHaveCount(1);
-  await inMain.getByRole('button', { name: 'Undo' }).click();
+  await page.keyboard.press('Meta+z');
   await expect.poll(() => order(page, id)).toEqual(before);
 
   // zoom: fit, then steps
