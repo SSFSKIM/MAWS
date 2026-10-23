@@ -132,8 +132,9 @@ export async function coldHttpDelivery(info: TestInfo): Promise<void> {
     const journal = join(userData, 'engine-host', 'journal');
     expect(existsSync(journal) ? readdirSync(journal) : [], 'no engine/session journal was ever created').toEqual([]);
     const calls = readLog(layout).filter((row) => row.method === 'tools/call');
-    expect(calls.map((row) => [row.server, row.tool]).sort((a, b) => a[0]!.localeCompare(b[0]!))).toEqual([['cold-app', NOTION_TOOL], ['cold-user', NOTION_TOOL]]);
-    await info.attach('cold-http-delivery.json', { body: JSON.stringify({ scopes: found.answer.sources.map((source) => source.scope), calls: calls.map((row) => ({ server: row.server, tool: row.tool })), sessions: 0, grants: 0 }), contentType: 'application/json' });
+    // The HTTP fixture logs request methods, not tool parameters; each receipt above pins the tool and exact payload.
+    expect(calls.map((row) => row.server).sort()).toEqual(['cold-app', 'cold-user']);
+    await info.attach('cold-http-delivery.json', { body: JSON.stringify({ scopes: found.answer.sources.map((source) => source.scope), calls: calls.map((row) => ({ server: row.server, method: row.method })), sessions: 0, grants: 0 }), contentType: 'application/json' });
   } finally {
     client?.close();
     for (const fixture of fixtures) fixture.close();
