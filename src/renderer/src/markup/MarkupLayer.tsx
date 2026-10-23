@@ -322,7 +322,7 @@ function Toolbar({ bounds, tool, ink: inkName, onTool, onInk, undo, clear, addin
   const current = () => {
     const box = self.current!.getBoundingClientRect();
     setSize({ width: box.width, height: box.height });
-    return { box, point: position ?? { x: box.left - bounds.left, y: box.top - bounds.top } };
+    return { box, point: position ? clamp(position, box) : { x: box.left - bounds.left, y: box.top - bounds.top } };
   };
   const placed = position && clamp(position);
   return (
