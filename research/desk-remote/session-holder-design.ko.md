@@ -4,6 +4,7 @@
 [web-maws-remote-research.ko.md](web-maws-remote-research.ko.md)
 §3.6–3.7 위에 선다.
 2026-10-22 비판 검토 한 차례를 거쳐 식별자·인증·복구 계약과 정리·이동의 fence를 보강했다.
+2026-10-23 웹 터미널 창을 설계에서 뺐다(F5, F6). 웹은 구조화된 제어만 하고, raw 프로세스 스트림은 기계를 떠나지 않는다.
 
 사실의 근거는 다음 다섯 측정 노트다(PTY·명령·handoff·정리 신호는 Claude Code 2.1.307–2.1.308, bridge bench는 2.1.304다).
 - [holder-tui-spike.md](holder-tui-spike.md): 우리 PTY 아래의 plain Claude, 엔진 PTY host 설계 발췌
@@ -15,14 +16,18 @@
 ## 0. 무엇을 위한 것인가
 
 - **장면.** 사람이 MacBook 터미널에서 `claude`로 일하다가 자리를 뜬다. 폰이나 다른 기계의 웹에서 같은 세션을 열어
-  흐름을 보고, 말을 걸고, 권한에 답하고, 모델·모드를 바꾸고, 필요하면 되감는다. 돌아와 터미널을 보면 아무것도
-  옮겨지지 않았고, 백그라운드 셸·서브에이전트·Monitor·MCP 작업이 그대로 돌고 있다.
+  흐름을 보고, 말을 걸고, 권한에 답하고, 모델·모드를 바꾼다. 돌아와 터미널을 보면 아무것도 옮겨지지 않았고,
+  백그라운드 셸·서브에이전트·Monitor·MCP 작업이 그대로 돌고 있다.
 - **조건.**
   - 진행 중인 세션을 원격에서 그대로 이어 쓴다. 프로세스를 옮기지 않는다(백그라운드 일을 잃지 않는 유일한 길).
-  - 제어 폭은 TUI가 할 수 있는 전부다. 프로그램으로 되는 것은 GUI로 주고, 키로만 되는 것은 웹의 터미널 창으로 준다.
-  - 터미널 사용감은 plain `claude`와 같아야 한다. 브라우저가 구현하지 않는 터미널 기능은 한계로 드러낸다.
+  - 제어 폭은 프로그램으로 되는 것 전부이고, 그것을 GUI로 준다. 키로만 되는 조작은 bridge가 보고하는 상태로 앞뒤를
+    확인할 수 있는 것만 기계 쪽 매크로로 준다. 되감기 지점 고르기처럼 화면에서 고르는 조작은 "GUI 모드로 이어 가기"로
+    다시 띄운 뒤 SDK 제어로 하거나 기계 앞에서 한다(F5, F6).
+  - 터미널 사용감은 plain `claude`와 같아야 한다.
 - **아니어야 하는 것.**
   - RC처럼 좁은 미러.
+  - raw 프로세스 스트림(PTY 바이트, SDK stdio)을 기계 밖으로 내보내는 것(F5). 웹이 받는 것은 bridge 행과 X1 이벤트이고,
+    보내는 것은 봉인된 명령이다.
   - 사람이 일하는 방식을 눈에 띄게 바꾸는 것. claude를 띄우기 전의 명시적 실패에만 plain `claude`로 돌아간다.
   - 다시 그리기에 실패했다고 멀쩡한 세션을 재시작하는 것(엔진 supervisor의 job 정책은 가져오지 않는다).
   - hub가 member 인증 없이 실행을 일으킬 수 있는 구조(연구 문서 §3.5와 이 문서 §6의 신뢰 결정을 따른다).
@@ -33,12 +38,15 @@
 2. PTY는 우리가 만든 holder가 쥔다(claude-ssh 방식). 엔진 supervisor(`runPtyHost`, `claude daemon`)는 참고만 한다.
 3. 경로는 세션이 어디서 시작됐는지로 정한다. 터미널에서 시작한 세션은 TUI로 holder 안에, MAWS 앱이나 웹에서 시작한
    세션은 SDK 경로로 간다. 그리고 웹에 "GUI 모드로 이어 가기 (세션을 다시 띄움)" 버튼을 두어 터미널 세션을 SDK 경로로 넘긴다(이름은 F4).
-4. 키로만 되는 조작은 웹의 터미널 창으로 하고, 검증된 몇 가지만 GUI 매크로로 만든다.
-5. 터미널 창을 닫으면 세션은 detach되어 계속 돈다(F1).
+4. 키로만 되는 조작은 원격에서 기계 쪽 매크로로 하되, bridge가 보고하는 상태로 앞뒤를 확인할 수 있는 것만 만든다.
+   나머지는 "GUI 모드로 이어 가기" 뒤의 SDK 제어로 하거나 원격에서 하지 않는다(2026-10-23 개정, F6). 처음 결정은
+   "웹의 터미널 창으로 한다"였다.
+5. 사람이 터미널 창을 닫으면 세션은 detach되어 계속 돈다(F1).
 6. detach된 세션은 클라이언트가 없고, 턴이 돌지 않고, 백그라운드 일과 예약된 cron이 없는 상태로 24시간이 지나면
    끝낸다. transcript로 다시 연다. 시간은 설정이다(F2, §3.2 정리).
 7. holder는 독립된 작은 서비스다. MAWS 저장소의 workspace app으로 두고 wrapper, sminos 데몬, MAWS 데몬이 그
    클라이언트가 된다. MAWS가 없는 기계에도 따로 설치된다(F3).
+8. 웹 터미널 창은 두지 않는다. 조작성은 좋지만 기존 sminos·MAWS 구조를 깨기 때문이다(F5, F6, 2026-10-23).
 
 ## 2. 구조
 
@@ -50,9 +58,9 @@
      │ 시작·직결   │ 입장 요청                         │
      ▼            ▼                                  │
   session host ◀── holder manager ◀── sminos 데몬 ────┘  (uplink, 신뢰 경계, plane)
-  (세션마다 하나:   (사용자당 하나: roster 재입양,      ▲
-   PTY master 또는  입장·lease 정책, 에뮬레이터,       │
-   stdio pipe,      checkpoint, 정리 정책)            bridge mod (모든 claude 안)
+  (세션마다 하나:   (사용자당 하나: roster 재입양,  ▲
+   PTY master 또는  lease·매크로 정책, 정리 정책,   │
+   stdio pipe,      경로 이동)                        bridge mod (모든 claude 안)
    job-control,                                     │
    ring, fence)                                     │
      │                                              │
@@ -61,7 +69,8 @@
 ```
 
 세션 종류는 둘이고, holder 한 가족이 둘 다 쥔다.
-- **PTY 종류**: plain `claude` TUI. 사람의 터미널, 웹 터미널 창이 붙는다. 구조화된 제어는 bridge mod.
+- **PTY 종류**: plain `claude` TUI. 사람의 터미널만 붙는다. 웹은 bridge mod로 구조화된 제어를 하고, 키 입력은
+  기계 쪽 매크로로만 넣는다.
 - **pipe 종류**: `claude -p --input-format stream-json --output-format stream-json …`. MAWS 데몬의 Query가 붙는다.
   claude-ssh의 `process.spawn`과 같은 모양이다.
 
@@ -90,7 +99,8 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
   된다. 이렇게 해야 Ctrl+Z가 claude를 실제로 멈추고 SIGCONT로 이어진다(spike B5에서 확인한 고침).
 - **ring.** 출력 바이트와 resize 이벤트를 종류가 있는 순서화된 기록으로 둔다. 절대 offset과 마지막 N MiB(예: 8 MiB)를
   보관한다. pipe 종류는 claude-ssh처럼 줄 단위 seq도 매긴다. stdin은 적용한 offset으로 중복을 제거한다.
-- **checkpoint 칸.** manager가 맡긴 터미널 상태 직렬화(§3.2)와 대응하는 ring offset을 함께 보관한다.
+- **checkpoint 칸.** manager가 맡긴 터미널 상태 직렬화(§3.2)와 대응하는 ring offset을 함께 보관한다. PTY 종류에서는
+  정확한 이어 붙기(§3.2의 개선 항목)를 켤 때만 쓴다.
 - **소켓과 인증.** 같은 uid의 0700 디렉터리에 Unix socket을 두고 경로의 소유권을 확인하며 symlink를 거절한다.
   5바이트 프레임(4바이트 길이 + 종류: 0 데이터, 1 JSON 제어)을 쓰되 엔진의 인증 의미론은 가져오지 않는다.
   - `hello`, ring 등 비공개 출력과 모든 제어보다 인증이 먼저다. 엔진은 인증 전에 hello·ring을 보내고 resize·kill을
@@ -108,20 +118,28 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
   다른 클라이언트의 답과 snapshot 재생 중 생긴 답을 버린다.
   - 원래 터미널에서 관찰한 정적 capability 답(DA, XTVERSION 등)을 cache한다. 살아 있는 responder가 없으면 host가 답한다.
   - 동적 질의(커서 위치, 크기 보고, DECRQM 모드 보고, 키보드 프로토콜 flag)는 현재의 권위 있는 상태에서 답한다.
-    크기는 host, 커서와 모드는 manager의 에뮬레이터가 기준이다. manager가 내려가 있는 동안 동적 질의는 답하지 않는다.
+    크기는 host가 답한다. 커서와 모드는 에뮬레이터가 있을 때(정확한 이어 붙기를 켠 뒤)만 답한다. 그 전에는 붙은
+    터미널이 없는 동안 답하지 않는다(§9).
 - **수명.** 스스로 세션을 끝내는 정책은 없다. 엔진의 "부모가 없고 클라이언트가 없으면 60초 뒤 kill" 규칙은 두지 않는다.
   manager의 정리 의도는 host의 reap fence를 거쳐 집행한다(§3.2). claude가 끝나면 종료 상태와 마지막 화면을 일정 시간 남긴다.
   경로 이동이 기다리는 정확한 종료 확인은 host의 `waitpid`다.
 - **구현.** 정적 native binary. Go가 유력하다(claude-ssh와 같은 선택, PTY와 process group을 다루기 쉽다).
-  §8의 복구 수락 시험을 통과하지 못하면 에뮬레이터를 host로 옮겨 host를 Node 프로세스로 만든다.
+  정확한 이어 붙기를 켤 때 §8의 복구 수락 시험을 통과하지 못하면 에뮬레이터를 host로 옮겨 host를 Node 프로세스로 만든다.
 
 ### 3.2 holder manager (사용자당 하나, 언제든 바꿀 수 있는 것)
 
 - **roster와 재입양.** host가 쓴 roster에서 pid, 프로세스 시작 시각, 소켓, 네 식별자, 종류와 capability 참조를 읽는다.
   pid·시작 시각을 확인하고 인증한 소켓의 `hello`와 맞춰 다시 잡는다. manager는 터미널 세션의 시작 경로에 없고,
   올라와 있을 때 roster 디렉터리의 host들을 입양한다. 재시작해도 세션과 직접 붙은 터미널은 유지된다.
-- **터미널 상태 계약.** PTY 세션마다 xterm headless에 host의 출력·resize 기록을 순서대로 먹인다. 정확한 복구는 모든
-  터미널 출력에 대한 약속이 아니다. spike로 열거할 Claude TUI의 제한된 출력 어휘와 아래 상태 집합에 대해 보장한다.
+- **다시 붙을 때의 화면.** 웹 터미널 창이 없으므로(F5) 다시 붙는 클라이언트는 사람의 터미널뿐이다. 창을 닫았다가(F1)
+  다른 터미널에서 이어 붙는 경우다.
+  - 처음에는 degraded repaint로 시작한다. 모드 preamble을 다시 보내고 폭을 jiggle해 viewport를 다시 그리게 한다.
+    측정에서 모드와 viewport는 맞았고, 제목과 그 전의 main-screen scrollback은 돌아오지 않았다
+    ([측정](holder-tui-spike.md#L94)). 이것을 `degraded`로 알린다. plain
+    `claude`였다면 창을 닫을 때 세션이 끝났다.
+- **정확한 이어 붙기 (개선 항목, 처음에는 켜지 않는다).** PTY 세션마다 xterm headless에 host의 출력·resize 기록을
+  순서대로 먹인다. 정확한 복구는 모든 터미널 출력에 대한 약속이 아니다. spike로 열거할 Claude TUI의 제한된 출력
+  어휘와 아래 상태 집합에 대해 보장한다. §8의 1을 통과한 뒤에만 켠다.
   - 새 클라이언트에는 직렬화 상태를 보낸 뒤 그 offset 다음의 live 기록을 잇는다. 화면, bounded scrollback(예: 10,000줄),
     현재 커서·rendition, 모드와 제목을 복원한다. 같은 크기 SIGWINCH만으로 다시 그리지 않는 문제를 피한다(spike B1).
   - checkpoint 지점은 고정한 xterm parser 자신의 내부 상태로 고른다. ground state이고 UTF-8 decoder가 비었으며,
@@ -150,13 +168,13 @@ host가 죽으면 세션이 죽는다(master가 닫히면 SIGHUP, exit 129; spik
 - **입장과 lease.** 정책은 manager, 집행과 기록은 host(§3.1)에 둔다.
   - 클라이언트는 세 등급이다: **owner**(입력과 크기를 가진다), **observer**(보기만, 크기를 바꾸지 않는다),
     **macro**(배타적인 fenced transaction으로 잠깐 입력을 가진다).
-  - 기본 owner는 세션을 연 사람의 터미널이다. 웹 터미널 창은 observer로 들어오고 "키보드 가져오기"로 owner가 된다.
-    그때 사람의 터미널에는 bridge mod가 `$.ui.status`로 "키보드: 웹"을 띄운다. owner가 떠나면 남은 사람의 터미널로
-    돌아간다. 크기는 owner를 따르고 observer는 그 크기로 그린 뒤 축소하거나 스크롤한다.
-  - macro는 화면 상태 precondition과 명시적 취소를 갖는다. owner가 N ms 조용했다는 사실은 실행 허가가 아니다.
-    macro가 겨냥한 UI를 바꾸는 구조화된 명령도 같은 중재에 참여한다.
-  - 브라우저가 입력을 가져갈 때 xterm.js가 구현하지 않는 원래 터미널의 kitty 키 인코딩, 일부 mouse 인코딩, 이미지
-    기능을 capability 한계로 표시한다. 사람의 터미널과 동등하다고 보이지 않는다.
+  - 기본 owner는 세션을 연 사람의 터미널이다. 같은 기계의 다른 터미널에서 `claude-holder attach`로 붙으면 observer로
+    들어오고, 명시적으로 넘겨받아야 owner가 된다. 크기는 owner를 따르고 observer는 그 크기로 그린다. 웹은 이 등급에
+    들어오지 않는다(F5).
+  - macro는 웹의 봉인된 명령으로 시작하고, 키 순서는 기계 쪽에 고정되어 있다. precondition과 결과는 bridge가 보고하는
+    상태(permission mode, 턴이 도는지)로 확인하고 명시적 취소를 갖는다. owner가 N ms 조용했다는 사실은 실행 허가가
+    아니다. macro가 겨냥한 UI를 바꾸는 구조화된 명령도 같은 중재에 참여한다. macro가 입력을 쥔 동안 사람의 터미널에는
+    bridge mod가 `$.ui.status`로 "원격 매크로 실행 중"을 띄운다.
 - **정리 (F2).** 클라이언트가 없고, 턴이 돌지 않고, 백그라운드 일과 cron이 없는 상태로 24시간(설정)이 지나면 끝낸다.
   manager의 시계는 다음이 모두 참인 동안만 간다.
   - PTY 클라이언트(owner, observer, macro)와 desk의 구독 화면이 없다.
@@ -244,20 +262,23 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. hol
 - 비밀이 아닌 holderId·processEpoch와 현재 `$.session.id()`를 보고한다. id 변경 때 host·manager가 generation을 바꾸고
   sminos 데몬이 제어·transcript·PTY를 원자적으로 다시 묶는다. 인증 token은 claude env로 전달하지 않는다.
 - turn start·Stop·background launch·재접속을 일 상태에 반영하고 reap fence의 `turn.step` 문을 집행한다.
-- 구조화된 UI 변경을 macro 중재에 참여시키고 "키보드: 웹" 같은 상태를 TUI에 표시한다.
+- 구조화된 UI 변경을 macro 중재에 참여시키고, macro가 앞뒤를 확인하는 상태(permission mode, 턴 여부)를 보고하며,
+  "원격 매크로 실행 중" 같은 상태를 TUI에 표시한다.
 
 ### 3.5 웹
 
-- **세션 화면.** GUI(desk-web의 presentation, MAWS 렌더러 이식)가 기본이다. 옆에 터미널 창(xterm.js)을 연다.
-  창은 observer로 들어오고 같은 세션의 진짜 TUI를 보여 준다.
-- **capability 목록.** 세션마다 명령별로 `gui | terminal | none`을 낸다. PTY 종류에서 GUI인 것: 보내기, steer,
+- **세션 화면.** GUI(desk-web의 presentation, MAWS 렌더러 이식)만 있다. 웹 터미널 창은 두지 않는다(F5). 웹이 받는
+  것은 bridge 행과 X1 이벤트이고, 보내는 것은 동작마다 봉인된 명령이다.
+- **capability 목록.** 세션마다 명령별로 `gui | macro | none`을 낸다. PTY 종류에서 GUI인 것: 보내기, steer,
   interrupt, 권한·질문 답, model, effort, compact, clear, rename, branch, `/mcp enable|disable|reconnect`, `/plan`,
-  `/config key=value`, `/background`. terminal인 것: rewind 지점 고르기, panel(`/usage`, `/permissions`, 인자 없는
-  `/mcp`), 일반 dialog 대부분, plan 모드에서 나오기다. plan으로 바꾸기는 mod의 `/plan`으로 한다.
-- **검증된 매크로.** 키 순서 + 화면 조건 + timeout을 배타적인 fenced transaction으로 실행한다. 화면 precondition과
-  결과를 확인하고 명시적으로 취소할 수 있다. 실패하면 터미널 창을 열어 사람에게 넘긴다.
+  `/config key=value`, `/background`. macro인 것: plan 모드에서 나오기. plan으로 바꾸기는 mod의 `/plan`으로 한다.
+  none인 것: rewind 지점 고르기, panel(`/usage`, `/permissions`, 인자 없는 `/mcp`), 일반 dialog 대부분이다. none 옆에는
+  "GUI 모드로 이어 가기"를 함께 보인다. pipe 종류에서는 SDK 제어 요청 96종과 dialog 37종을 GUI로 다룬다.
+- **검증된 매크로.** 키 순서 + bridge 상태 조건 + timeout을 배타적인 fenced transaction으로 실행한다. 상태 precondition과
+  결과를 확인하고 명시적으로 취소할 수 있다. 결과가 목표와 다르면 멈추고, bridge가 보고한 현재 상태와 함께 실패를 보인다.
   - Shift+Tab 순환은 턴이 없고 일이 verified-empty인 경계에서만 허용한다. 그 밖에는 이유와 함께 비활성화한다.
-  - footer가 목표 모드를 보일 때까지 최대 4번 누른다. 측정된 순환은 manual → accept edits → plan을 거친다
+  - bridge가 보고하는 permission mode가 목표가 될 때까지 최대 4번 누른다. 측정된 순환은
+    manual → accept edits → plan을 거친다
     ([키 측정](mod-command-run-probe.md#L96)). 도는 tool이 있을 때 이 경로로
     plan에 가면 잠깐 accept edits를 켜므로, 직접 `/plan`으로 가는 것과 같지 않다.
 - **이어 가기 버튼.** "GUI 모드로 이어 가기 (세션을 다시 띄움)"(F4). §3.6의 프로세스 재시작이다.
@@ -266,6 +287,11 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. hol
 
 - **pipe 종류 세션.** host가 pipe를 쥐고 MAWS 데몬의 Query가 쓰는 쪽 하나로 붙는다. host의 writer fence로 옛 Query의
   쓰기를 거절한다. Query 재시작은 claude 프로세스 재시작과 다르며 processEpoch를 바꾸지 않는다.
+- **Query의 자리.** Query는 브라우저가 아니라 기계의 MAWS 데몬에 둔다. Desktop SSH 모드에서 Desktop 앱이 하던 역할을
+  같은 기계의 MAWS 데몬이 맡고, 브라우저는 그 바깥의 클라이언트다. claude.ai는 브라우저가 Query를 직접 돌리지만
+  ([claude.ai 클라이언트](claude-ai-rc-client-protocol.md#L33)) 우리는 그렇게 하지 않는다.
+  아래의 MAWS 소유 일(in-process MCP, hook callback)이 Query와 같은 프로세스에 산다. Query는 엔진의 질문에 답하는
+  쓰는 쪽 하나라 잠드는 탭에 둘 수 없다. hub는 믿지 않는 중계라 SDK stdio를 통째로 지나게 하지 않는다(F5).
 - **살아남는 일의 경계.** CLI가 소유한 일은 MAWS 데몬 재시작을 견딘다. MAWS가 소유한 일은 그대로 살아남지 않는다.
   - in-process MCP tool call은 MAWS의 메모리에 있다
     ([server.ts의 calls](/Users/new/Developer/GitHub/MAWS/src/engine-host/tool-server/server.ts#L77),
@@ -302,8 +328,8 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. hol
 ## 4. 데이터 흐름
 
 - **사람의 키 입력.** 터미널 → wrapper → host(인증·역할·fence·offset 검사) → PTY다. manager는 이 한 홉 경로에 없다.
-- **웹 터미널 창.** 브라우저 ↔ hub ↔ sminos uplink ↔ manager(입장, 에뮬레이터 snapshot) → host(live 바이트)다.
-  바이트 입력은 연구 문서 §4의 첫째 갈래를 따른다(인증된 채널 안에서 offset으로 중복 제거).
+- **매크로.** 웹의 봉인된 명령 → hub → sminos 데몬(봉인 검증) → manager(정책, fence) → host(macro lease로 PTY 입력)다.
+  웹에서 PTY로 가는 바이트 경로는 없다(F5).
 - **구조화된 흐름.** claude 안의 bridge mod → bridge child → sminos 데몬 plane → hub → 웹이다. cursor의 맥락은
   `(holderId, processEpoch, engineSessionId, bindingGeneration)`이고 그 안에 seq를 둔다. host 자리와 processEpoch를
   같게 보지 않는다. id 변경은 세 채널에 함께 반영한다.
@@ -313,16 +339,16 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. hol
 
 | 일 | 결과 | 대응 |
 |---|---|---|
-| manager가 죽음 | 세션·직접 연결·lease 기록은 host에 남음. 웹 창은 끊김 | roster로 재입양하고 기존 fence를 읽음. checkpoint + ring이 계약을 만족할 때 exact 복구 |
-| manager가 오래 내려가 ring이 넘침 | checkpoint 이후 출력·resize에 gap | degraded를 알리고 모드 복원 + 폭 jiggle. 정확한 복구로 표시하지 않음 |
+| manager가 죽음 | 세션·직접 연결·lease 기록은 host에 남음. 진행 중인 매크로는 취소됨 | roster로 재입양하고 기존 fence를 읽음. 매크로는 다시 실행하지 않음 |
 | host가 죽음 | PTY 종류 claude는 SIGHUP으로 끝남(exit 129) | ended로 표시하고 새 host의 resume 제안. 끊긴 턴 재개 변수는 자동 설정하지 않음 |
 | claude가 죽음 | host의 waitpid가 종료를 확인함 | 마지막 화면을 남기고 ended. 웹과 다음 `claude`에서 resume 제안 |
 | 기계 재부팅 | 모두 끝남 | 재부팅 전에 열려 있던 세션을 목록으로 제안 |
-| holder 업데이트 | manager는 언제든 바꿈. host는 새 세션부터 새 binary | hello의 버전과 pinned checkpoint 버전을 확인. 호환되는 프로토콜·serializer로 재입양 |
-| Claude Code 업데이트 | 도는 TUI는 그대로. 새 세션은 새 버전 | 새 출력 어휘의 복구 수락 시험을 확인 |
+| holder 업데이트 | manager는 언제든 바꿈. host는 새 세션부터 새 binary | hello의 버전을 확인하고 호환되는 프로토콜로 재입양 |
+| Claude Code 업데이트 | 도는 TUI는 그대로. 새 세션은 새 버전 | 매크로의 키 순서·상태 보고와 `turn.step` 문을 다시 잼 |
 | commit 전 host 시작 실패 | claude는 아직 없음 | binary 없음·명시적 실패에만 plain 실행 |
 | commit 뒤 wrapper·host crash 또는 ack 유실 | 같은 host에 commit된 실행의 생존 여부를 확인해야 함 | roster·hello·종료 상태로 reconcile. timeout으로 plain을 중복 실행하지 않음 |
-| 에뮬레이터 재현 실패 | 계약 밖이거나 화면 상태가 어긋남 | degraded를 알리고 repaint. 세션은 재시작하지 않음 |
+| 다시 붙은 터미널의 화면이 어긋남 | degraded repaint는 모드와 viewport만 되살림 | degraded를 알리고 다시 repaint. 세션은 재시작하지 않음 |
+| 매크로가 목표 상태에 닿지 못함 | 키 일부만 적용됐을 수 있음 | 멈추고 bridge가 보고한 현재 상태를 보임. 자동 재시도 없음 |
 | MAWS 데몬이 죽음 | CLI 일은 유지되지만 MAWS의 in-flight call은 잃음 | Query 재입양과 ledger 복구. orphan은 결과 불명으로 답함 |
 | 정리 SIGTERM 뒤에도 살아 있음 | 종료 확인 없음 | SIGKILL 없이 unknown으로 돌리고 기록. 세션 유지 |
 
@@ -332,18 +358,19 @@ model·effort 덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. hol
 - private hello·ring·checkpoint 출력과 제어 전에 인증한다. owner-attach·observer-attach·manage를 분리하고 모든
   변경 프레임에 역할·맥락·fence를 적용한다. token은 fd/pipe로만 전달하며 argv·로그·claude env에 넣지 않는다.
   프레임·checkpoint chunk·전체 크기·queue를 제한한다. codec을 빌려도 엔진의 인증 구멍을 빌리지 않는다.
-- 웹의 PTY 입력은 실행 등급이다. member principal의 인증 채널에서만 받고, "키보드 가져오기"에 passkey step-up을 둔다.
-  grant는 principal, session, processEpoch와 해당 lease에 묶는다. observer는 읽기 전용이고 재결합 뒤 옛 grant로 쓰지 못한다.
-- hub를 믿지 않는다면 입력 서명만으로는 부족하다. 조작된 화면을 보고 사람이 키로 승인할 수 있으므로 표시 무결성도
+- 웹은 PTY 바이트를 보내지 않는다(F5). 웹이 일으키는 PTY 입력은 매크로뿐이다. 매크로는 이름과 인자가 정해진
+  봉인된 명령으로만 시작하고, 키 순서는 기계 쪽에 고정되어 있어 hub가 바꿀 수 없다. 명령은 principal, session,
+  processEpoch, bindingGeneration에 묶이고 재결합 뒤 옛 명령은 거절된다.
+- hub를 믿지 않는다면 명령 서명만으로는 부족하다. 조작된 GUI 표시를 보고 사람이 승인할 수 있으므로 표시 무결성도
   [연구 문서의 열린 신뢰 결정](web-maws-remote-research.ko.md#L259)에 포함한다.
-  hub가 내려주는 JS 자체의 신뢰 한계도 남는다. 이를 정하지 않고 키 입력 승인을 안전하다고 부르지 않는다.
+  hub가 내려주는 JS 자체의 신뢰 한계도 남는다. 이를 정하지 않고 원격 승인을 안전하다고 부르지 않는다.
 - 녹화는 꺼 둔다. 보존하는 launch descriptor의 env도 비밀 데이터로 다루고 출력·로그에 노출하지 않는다.
 
 ## 7. owner가 정한 갈림길 (2026-10-22)
 
-F1–F4 모두 정해졌다(§1의 3, 5–7).
+F1–F5는 정해졌다(§1의 3, 5–8). F6이 열려 있다.
 
-- **F1. 터미널 창을 닫으면?** 정함: detach되어 계속 돈다. 다음 `claude`에서 이어 붙기를 묻는다. 원격에서 이어
+- **F1. 사람이 터미널 창을 닫으면?** 정함: detach되어 계속 돈다. 다음 `claude`에서 이어 붙기를 묻는다. 원격에서 이어
   쓰는 것이 목적이기 때문이다. 버린 대안: plain과 같이 끝내고, 원격 이어 쓰기는 사람이 명시적으로 detach했을
   때만 한다.
 - **F2. detach된 세션의 수명.** Claude Code 프로세스 하나가 수백 MB를 쓴다(이 MacBook에서 24개 평균 281 MB, 최대
@@ -352,25 +379,46 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
 - **F3. holder는 어느 제품에 속하는가.** 정함: 독립된 작은 서비스(MAWS 저장소의 workspace app)로 두고 sminos
   데몬과 MAWS 데몬이 둘 다 클라이언트가 된다(§3.2 구현). 버린 대안: MAWS headless 데몬의 일부(설치가 하나로
   줄지만 MAWS 없는 기계에 MAWS 데몬을 깔아야 한다), sminos의 일부(Python이라 xterm.js 에뮬레이터를 쓰지 못한다).
+  (2026-10-23, F6 뒤: sminos 안에 두는 안을 버린 이유였던 xterm.js 에뮬레이터는 개선 항목으로 내려갔다. 그래도 독립
+  서비스로 둔다. MAWS 앱의 SDK 세션이 프로세스를 쥐는 일로 sminos 데몬에 기대지 않게 하기 위해서다.)
 - **F4. 이어 가기 버튼의 이름.** 정함: "GUI 모드로 이어 가기 (세션을 다시 띄움)". 버린 대안: 처음 이름인 "full-control 모드로
   이어 가기". TUI + 터미널 창도 이미 전체 제어를 주므로 "full-control 모드로 이어 가기"는 오해를 부를 수 있다. SDK 경로가 더하는 것은
-  다시 띄운 프로세스에서의 GUI-native 제어다. 이름이 그 대가(프로세스 재시작)를 드러낸다.
+  다시 띄운 프로세스에서의 GUI-native 제어다. 이름이 그 대가(프로세스 재시작)를 드러낸다. (F6 뒤에는 이 버튼이 화면에서
+  고르는 조작, 예를 들어 되감기의 원격 경로이기도 하다.)
+- **F5. 웹 터미널 창 (2026-10-23).** 정함: 조작성은 좋지만 비선호다. 기존 sminos·MAWS 구조를 깨기 때문이다. 설계에서는
+  뺐다(F6).
+  - **sminos·desk.** hub를 지나는 것은 동작마다 봉인되는 명령과 seq가 붙은 구조화된 행이다. 웹 터미널 창은 실행
+    등급의 raw 키 바이트를 hub로 보낸다. 그래서 자기 offset·lease·snapshot 프로토콜, passkey step-up, 화면 무결성
+    문제(§6)를 따로 데려온다.
+  - **MAWS.** GUI는 X1 이벤트로 상태를 그린다. 창에서 누른 키는 그 모델에 보이지 않고 결과로만 드러난다. 한 세션에
+    제어면이 둘이 되어 macro fence나 "키보드: 웹" 표시 같은 중재가 필요해진다.
+  - **같은 원칙.** raw 프로세스 스트림은 기계를 떠나지 않는다. PTY 바이트도, SDK stdio도 마찬가지다. 그래서 Query는
+    claude.ai처럼 브라우저에 두지 않고 기계의 MAWS 데몬에 둔다(§3.6). 웹이 받는 것은 X1 이벤트와 bridge 행이고,
+    보내는 것은 봉인된 명령이다.
+- **F6. F5를 설계에 어떻게 반영하는가 (2026-10-23).** 정함: 웹 터미널 창을 설계에서 뺀다.
+  - 키로만 되는 조작은 bridge가 보고하는 상태로 앞뒤를 확인할 수 있는 기계 쪽 매크로로 한다(plan 모드에서 나오기).
+    rewind 지점 고르기, panel, 일반 dialog 대부분은 "GUI 모드로 이어 가기" 뒤에 하거나 원격에서 하지 않는다(§3.5).
+  - PTY holder는 남는다. 사람이 터미널 창을 닫아도 세션이 남고(F1), 다시 붙을 수 있고, 이어 가기를 전환한다.
+  - 에뮬레이터와 정확한 화면 복구는 전제 조건에서 개선 항목으로 내려갔다(§3.2). 다시 붙을 때는 degraded repaint로 시작한다.
+  - 버린 대안: 마지막 수단으로 남기기(명시적으로 켜는 창이고 터미널 장치가 모두 남는다), PTY holder까지 빼기(터미널
+    세션은 오늘의 desk처럼 bridge mod로만 제어되고 창을 닫으면 끝난다).
 
 ## 8. 검증 계획 (구현할 때)
 
-1. **future-continuation 수락 시험.** Claude TUI의 열거된 출력 어휘에서 모든 출력 바이트·resize offset마다 중단을 걸고,
+1. **future-continuation 수락 시험 (정확한 이어 붙기를 켤 때).** Claude TUI의 열거된 출력 어휘에서 모든 출력 바이트·resize offset마다 중단을 걸고,
    그 지점까지의 유효 checkpoint + ring으로 복원한다. 동일한 suffix와 terminal query를 먹인 뒤 미래의 상태·출력·응답을
    비교한다. chunk 경계에 걸친 Unicode, saved cursor, 두 buffer, 링크·색·모드·DEC 2026을 포함한다. 화면 사진만 맞추는
    시험은 아니다. 통과하지 못하면 에뮬레이터를 host로 옮긴다.
-2. 두 layout 모두에서 사람이 붙어 있는 채로 웹 창을 붙였다 떼도 사람의 화면은 바뀌지 않는다. 웹의 bounded scrollback,
-   모드·제목·커서와 snapshot/live 경계가 계약에 맞다.
+2. 두 layout 모두에서 사람이 터미널 창을 닫았다가 다른 터미널에서 이어 붙으면 모드가 복원되고 viewport가 다시 그려지며
+   `degraded`가 알려진다. 두 번째 터미널이 observer로 붙었다 떨어져도 owner의 화면은 바뀌지 않는다.
 3. manager를 SIGKILL해도 사람의 직접 연결과 host의 lease·fence·input offset은 유지된다. 다시 뜬 manager가 이를
-   초기화하지 않는다. ring을 넘길 만큼 중단하면 exact가 아니라 알림을 동반한 degraded와 repaint로 간다.
+   초기화하지 않는다. 진행 중이던 매크로는 취소되고 다시 실행되지 않는다.
 4. Ctrl+Z / `fg`가 plain과 같다(멈춤 상태 `T+`, 이어짐, 같은 processEpoch·engineSessionId).
 5. owner·observer·macro의 역할을 검사한다. observer는 resize·입력을 못 하고, owner 교체 전 연결에서 늦게 온 프레임은
-   거절된다. macro의 precondition·취소와 구조화된 UI 명령의 경쟁도 검사한다.
+   거절된다. macro의 bridge 상태 precondition·결과 확인·취소와 구조화된 UI 명령의 경쟁도 검사한다. 웹에서 PTY로 가는
+   바이트 경로가 없다는 것도 확인한다.
 6. 정적·동적 query 답을 구분한다. responder 외 답과 replay 중 답은 버린다. responder가 없으면 static cache를 쓰고,
-   dynamic은 현재 host·에뮬레이터 상태를 쓴다. manager가 없으면 dynamic에는 답하지 않는다.
+   크기는 host가 답하며, 에뮬레이터가 없는 동안 커서·모드 질의에는 답하지 않는다.
 7. wrapper 우회 표와 `CLAUDE_HOLDER=0`, binary 탐색의 재귀 방지를 검사한다. prepare 뒤 commit 전 wrapper 종료는
    자식을 만들지 않는다. commit 직후 wrapper·host crash와 ack 유실은 plain 이중 spawn을 만들지 않는다.
 8. `/clear`, `/branch`, resume가 processEpoch는 유지하면서 engineSessionId와 bindingGeneration을 바꾼다. 제어·transcript·PTY는
@@ -390,8 +438,12 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
 
 ## 9. 남은 미지수 (spike로 풀 것)
 
-- **TUI 출력 어휘와 복구.** Claude TUI 두 layout의 출력·질의를 열거한다. 동기화 출력, OSC 8, 키보드 프로토콜,
-  넓은 문자·결합 문자와 resize를 포함해 §3.2의 bounded contract와 §8의 미래 동작 비교를 검증한다.
+- **TUI 출력 어휘와 복구 (개선 항목, F6 뒤로는 전제 조건이 아니다).** 정확한 이어 붙기를 켤 때 푼다. Claude TUI 두
+  layout의 출력·질의를 열거한다. 동기화 출력, OSC 8, 키보드 프로토콜, 넓은 문자·결합 문자와 resize를 포함해 §3.2의
+  bounded contract와 §8의 미래 동작 비교를 검증한다.
+- **붙은 터미널이 없을 때의 동적 질의.** detach된 동안 Claude TUI가 커서 위치나 모드를 물으면 host는 답하지 않는다.
+  그래도 TUI가 멈추거나 화면이 틀어지지 않는가.
+- **매크로의 상태 보고.** bridge가 permission mode의 변화를 바로 보고하는가. 매크로의 앞뒤 확인이 여기에 기댄다.
 - **정리 신호와 문 (2026-10-22 일부 해결, [reap-signal-spike.md](reap-signal-spike.md)).** SIGTERM은 graceful하고, `turn.step`이
   main-loop 모델 요청을 붙잡는 문이 된다는 것을 2.1.308에서 쟀다. 남은 것은 셋이다.
   - SDK, Remote Control, peer, channel origin은 같은 경로를 쓴다는 것을 코드로만 읽었다.
@@ -401,7 +453,7 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
 - **Linux scope와 lingering.** user transient scope가 logind session cgroup과 분리되고, KillUserProcesses와 로그아웃에서
   의도대로 살아남는가. lingering이 없는 경우의 설치·표시 동작을 확인한다.
 - **IDE 연동과 이미지 붙여넣기.** VS Code·JetBrains 터미널에서 `/ide` 연결과 macOS 클립보드 이미지 붙여넣기가
-  holder 아래에서도 되는가. spike에서 실행하지 못했다. 브라우저에서 못 하는 기능은 별도 한계로 표시한다.
+  holder 아래에서도 되는가. spike에서 실행하지 못했다.
 - **detach 동안의 사람 신호.** 터미널 창이 닫힐 때 wrapper가 받는 신호와 셸의 동작(SIGHUP, 셸 종료 순서).
 - **Windows.** ConPTY와 process group 의미가 다르다. 범위 밖으로 둘지 정한다.
 
@@ -413,7 +465,8 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
 - commit 뒤에는 plain fallback이 없다. Linux는 user scope와 lingering으로 로그아웃 수명을 다룬다.
 - holderId, processEpoch, engineSessionId, bindingGeneration을 구분한다. host 자리와 프로세스·대화 id를 같게 보지 않는다.
 - lease와 적용 offset은 host에 남고 정책은 manager에 둔다. macro는 quiet-time 추측이 아니라 배타 fenced transaction이다.
-- 에뮬레이터는 manager에, 안전한 parser 경계의 확장 checkpoint는 host에 둔다. 수락 시험 실패 시 에뮬레이터를 Node host로 옮긴다.
+- 다시 붙을 때는 모드 복원과 폭 jiggle의 degraded repaint로 시작한다. 정확한 이어 붙기(에뮬레이터는 manager, 안전한
+  parser 경계의 확장 checkpoint는 host)는 수락 시험을 통과한 뒤 켜는 개선이다. 통과하지 못하면 에뮬레이터를 Node host로 옮긴다.
 - gap은 알림을 동반한 degraded다. 다시 그리기 실패로 세션을 재시작하지 않는다.
 - 입력 owner와 query responder는 별개다. static capability는 cache하고 dynamic state를 cache 답으로 대신하지 않는다.
 - Ctrl+Z는 plain과 같이 멈춤이다. detach 키는 따로 두지 않는다. 녹화는 꺼 둔다.
@@ -436,3 +489,10 @@ F1–F4 모두 정해졌다(§1의 3, 5–7).
   보존과 맞지 않는다([엔진 정책](holder-tui-spike.md#L82)). claude-ssh helper 교체는
   옛 자식 전부를 죽인다([helper 교체](desktop-ssh-helper-protocol.md#L88)). 전송과
   adoption의 세부는 빌리되 수명 정책은 빌리지 않는다. dispatch, transcript 자동 respawn, spare, 예약 worker도 가져오지 않는다.
+- **웹 터미널 창 (2026-10-23, F5·F6).** 같은 TUI를 xterm.js로 보여 주고 passkey 확인 뒤 키보드를 넘겨받는 창이다.
+  조작성은 가장 좋다. 그러나 실행 등급의 raw 키 바이트가 hub를 지나고, MAWS GUI가 모르는 두 번째 제어면이 생긴다.
+  처음 설계의 세부(observer 입장, 키보드 가져오기와 passkey, 정확한 복구를 전제로 한 snapshot)는 PR #79의 커밋
+  3bc513ee1 판에 남아 있다.
+- **브라우저의 Query (claude.ai 모양).** 브라우저가 Agent SDK의 Query를 직접 돌리고 기계는 프로세스만 쥐는 길이다.
+  MAWS 소유 일이 Query와 같은 프로세스에 살고, Query는 쓰는 쪽 하나이며, SDK stdio 전체가 믿지 않는 hub를 지나게
+  되므로 버렸다(§3.6).

@@ -431,8 +431,9 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
   - **경로 B 세션은 프로세스를 holder가 쥐고 있는 한 이 문제가 없다.** 일은 같은 프로세스 안에서 계속된다.
     그래서 Query를 재시작해도 프로세스는 건드리지 않는 holder 분리가 중요하다.
   - **옮기지 않는 길 (설계 초안, 2026-10-22).** 사람이 치는 `claude`가 처음부터 우리 PTY holder 안에서 돌면
-    옮길 일이 없다. 사람의 터미널은 그 PTY에 붙은 클라이언트이고, 웹은 같은 프로세스에 bridge mod와 터미널
-    창으로 붙는다. 백그라운드 일은 프로세스가 그대로이므로 모두 남는다. 설계는
+    옮길 일이 없다. 사람의 터미널은 그 PTY에 붙은 클라이언트이고, 웹은 같은 프로세스에 bridge mod로만 붙는다.
+    웹 터미널 창은 두지 않는다. 조작성은 좋지만 raw 키 바이트가 hub를 지나 sminos·MAWS 구조를 깨기 때문이다
+    (owner 결정, 2026-10-23). 백그라운드 일은 프로세스가 그대로이므로 모두 남는다. 설계는
     [session-holder-design.ko.md](session-holder-design.ko.md),
     사실 근거는 [holder-tui-spike.md](holder-tui-spike.md)다.
     `/background` 절차는 holder 밖에서 시작된 세션에만 남는다.
