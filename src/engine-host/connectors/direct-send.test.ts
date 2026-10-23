@@ -100,7 +100,7 @@ const fences = () => (documents.store as unknown as { fences: Map<string, Set<un
 
 describe('WR 76/78: cold app-owned delivery', () => {
   const settings = (servers: { name: string; type: 'http'; url: string }[]) => writeFileSync(join(dir, 'data', 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V17, engine: { ...SETTINGS_DEFAULTS_V17.engine, mcpServers: servers } }));
-  const configured = () => new ConfiguredDeliverySources({ userData: join(dir, 'data'), environment: { CLAUDE_CONFIG_DIR: config, HOME: join(dir, 'home') } });
+  const configured = (captureEnv = async () => ({ CLAUDE_CONFIG_DIR: config, HOME: join(dir, 'home') })) => new ConfiguredDeliverySources({ userData: join(dir, 'data'), captureEnv });
   const inputOf = (source: Awaited<ReturnType<typeof located>>[number]): DirectSendInput => ({ operationId: nextId(), artifactId, directory: source.directory, server: source.server, sourceId: source.sourceId, generation: source.generation, tool: 'notion-create-pages', arguments: { pages: [{ content: '# Cold delivery' }] } });
 
   it('locates app and user HTTP entries without observations and sends exactly once using the app credential', async () => {
@@ -116,6 +116,25 @@ describe('WR 76/78: cold app-owned delivery', () => {
     expect(pool.acquires[0]?.credential?.accessToken).toBe('maws-owned-token');
     expect(await documents.store.connectorGrants(artifactId)).toEqual([]);
     expect(await cache.resolveSource(input.directory, input.server)).toEqual({ ok: false, why: 'unobserved' });
+  });
+
+  it('locates and sends overlapping user HTTP deliveries without treating another reader as a settings change', async () => {
+    writeFileSync(join(config, '.claude.json'), JSON.stringify({ mcpServers: {
+      one: { type: 'http', url: 'https://mcp.notion.com/mcp' },
+      two: { type: 'http', url: 'https://mcp.notion.com/mcp' },
+    } }));
+    calls = build({ deliverySources: configured() });
+    const [first, second] = await Promise.all([located(), located()]);
+    expect(first.map((s) => s.server)).toEqual(['one', 'two']);
+    expect(second).toEqual(first);
+    const inputs = first.map(inputOf);
+    for (const input of inputs) calls.send(input);
+    expect(await Promise.all(inputs.map((input) => sendOutcome(input.operationId)))).toEqual([
+      { ok: true, result: pool.result }, { ok: true, result: pool.result },
+    ]);
+    expect(toolCalls()).toEqual([
+      { kind: 'tools/call', name: 'notion-create-pages' }, { kind: 'tools/call', name: 'notion-create-pages' },
+    ]);
   });
 
   it('rejects a removed app entry before writing and never exposes it through page resolution', async () => {
@@ -144,6 +163,31 @@ describe('WR 76/78: cold app-owned delivery', () => {
     pool.startup.resolve();
     expect(await sendOutcome(input.operationId)).toMatchObject({ ok: false, reason: 'source' });
     expect(toolCalls()).toEqual([]);
+  });
+
+  it('does not send from an old config home when the shell capture refreshes during initialization, even at the same URL', async () => {
+    const text = JSON.stringify({ mcpServers: { personal: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
+    writeFileSync(join(config, '.claude.json'), text);
+    const refreshedHome = join(dir, 'refreshed-config');
+    mkdirSync(refreshedHome);
+    writeFileSync(join(refreshedHome, '.claude.json'), text);
+    let capturedHome = config;
+    calls = build({ deliverySources: configured(async () => ({ CLAUDE_CONFIG_DIR: capturedHome, HOME: join(dir, 'home') })) });
+    const source = (await located())[0]!;
+    const input = inputOf(source);
+    pool.startup = deferred();
+    calls.send(input);
+    await vi.waitFor(() => expect(pool.acquires).toHaveLength(1));
+    capturedHome = refreshedHome;
+    pool.startup.resolve();
+    expect(await sendOutcome(input.operationId)).toMatchObject({ ok: false, reason: 'source' });
+    expect(toolCalls()).toEqual([]);
+    const refreshed = (await located())[0]!;
+    expect(refreshed.sourceId).not.toBe(source.sourceId);
+    const retry = inputOf(refreshed);
+    calls.send(retry);
+    expect(await sendOutcome(retry.operationId)).toEqual({ ok: true, result: pool.result });
+    expect(toolCalls()).toEqual([{ kind: 'tools/call', name: 'notion-create-pages' }]);
   });
 
   it('discovers configured tools with no engine and revokes a pending write when the source authority clears', async () => {

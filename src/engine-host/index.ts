@@ -5,6 +5,7 @@
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
 import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
+import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
 import { join } from 'node:path';
 import { registerEngineIpc, type EngineIpc } from './ipc';
@@ -130,7 +131,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   table.startSampling();
   // C3 end
   // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when main's client goes
-  connectors = registerConnectors(on, emit, client, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, environment: process.env } }); // WR 76/78: cold owner delivery; E3: its registry
+  connectors = registerConnectors(on, emit, client, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   const rows = table;

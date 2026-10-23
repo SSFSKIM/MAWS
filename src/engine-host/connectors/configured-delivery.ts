@@ -21,22 +21,19 @@ export class ConfiguredDeliverySources {
   private readonly files: SourceFiles;
   private readonly directories: Record<Scope, string>;
   private readonly settingsFile: string;
-  private readonly userFile: string | null;
-  private readonly legacyFile: string | null;
+  private readonly captureEnv: () => Promise<Record<string, string>>;
   private readonly known: Record<Scope, Map<string, Known>> = { app: new Map(), user: new Map() };
-  private readonly sequence: Record<Scope, number> = { app: 0, user: 0 };
+  private pending: Record<Scope, Promise<void>> = { app: Promise.resolve(), user: Promise.resolve() };
   private key = randomBytes(32);
   private generation = 0;
   private epoch = 0;
 
-  constructor(options: { userData: string; environment: Readonly<Record<string, string | undefined>>; files?: SourceFiles }) {
+  constructor(options: { userData: string; captureEnv: () => Promise<Record<string, string>>; files?: SourceFiles }) {
     this.files = options.files ?? nodeSourceFiles;
     this.settingsFile = join(options.userData, 'settings.json');
+    this.captureEnv = options.captureEnv;
     // Private selectors, never session working directories or filesystem permissions.
     this.directories = { app: join(options.userData, 'connectors', 'configured-app'), user: join(options.userData, 'connectors', 'configured-user') };
-    const environment = Object.fromEntries(Object.entries(options.environment).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
-    this.userFile = configFileOf(environment);
-    this.legacyFile = legacyConfigFileOf(environment);
   }
 
   owns(directory: string): boolean { return Object.values(this.directories).includes(directory); }
@@ -63,8 +60,8 @@ export class ConfiguredDeliverySources {
 
   clear(): void {
     this.epoch += 1;
-    this.sequence.app += 1;
-    this.sequence.user += 1;
+    // New attachments must not wait behind a detached client's stalled filesystem read.
+    this.pending = { app: Promise.resolve(), user: Promise.resolve() };
     this.known.app.clear();
     this.known.user.clear();
     this.key = randomBytes(32);
@@ -75,14 +72,28 @@ export class ConfiguredDeliverySources {
     return scope === null ? undefined : (await this.load(scope)).get(server);
   }
 
-  private async load(scope: Scope): Promise<Map<string, Entry>> {
-    const seq = ++this.sequence[scope];
+  private load(scope: Scope): Promise<Map<string, Entry>> {
     const epoch = this.epoch;
+    // Every use gets a fresh read, in scope order. Another reader is not a configuration mutation; only a changed
+    // entry (below) or clear revokes a proof. Queue tails carry no launch entries or credentials.
+    const read = this.pending[scope].then(() => epoch === this.epoch ? this.readScope(scope, epoch) : new Map<string, Entry>());
+    this.pending[scope] = read.then(() => undefined);
+    return read;
+  }
+
+  private async userPaths() {
+    // Reuse the engines' lazy capture on each lookup, including its detached-client refresh. Only derived paths leave
+    // this step; neither a captured environment nor its unrelated secrets live in the delivery authority.
+    const environment = await this.captureEnv();
+    return { path: configFileOf(environment), legacyFile: legacyConfigFileOf(environment) };
+  }
+
+  private async readScope(scope: Scope, epoch: number): Promise<Map<string, Entry>> {
     const entries = new Map<string, Entry>();
     const next = new Map<string, Known>();
-    const path = scope === 'app' ? this.settingsFile : this.userFile;
     try {
-      if (!path || (scope === 'user' && (!this.legacyFile || await this.files.exists(this.legacyFile)))) throw new Error('unidentified');
+      const { path, legacyFile } = scope === 'app' ? { path: this.settingsFile, legacyFile: null } : await this.userPaths();
+      if (!path || (scope === 'user' && (!legacyFile || await this.files.exists(legacyFile)))) throw new Error('unidentified');
       const text = await this.files.read(path, CONFIG_FILE_MAX_BYTES);
       if (text === null) throw new Error('absent');
       const json: unknown = JSON.parse(text);
@@ -96,7 +107,7 @@ export class ConfiguredDeliverySources {
         if (!config || !['http', 'streamable-http'].includes(config.type as string)) continue;
         const made = await materializeEntry(config, {}, this.directories[scope], this.files);
         if (typeof made === 'string' || made.launch.transport !== 'http' || !httpUrl(made.launch.url)) continue;
-        const digest = createHmac('sha256', this.key).update(canonicalJson(made.launch)).digest('hex');
+        const digest = createHmac('sha256', this.key).update(canonicalJson({ path, launch: made.launch })).digest('hex');
         const old = this.known[scope].get(server);
         const source = old?.digest === digest ? old.source : {
           sourceId: randomUUID(), generation: ++this.generation, cwd: this.directories[scope], server, scope,
@@ -112,7 +123,7 @@ export class ConfiguredDeliverySources {
       entries.clear();
       next.clear(); // unreadable or invalid is not permission to keep an old entry
     }
-    if (epoch !== this.epoch || seq !== this.sequence[scope]) return new Map();
+    if (epoch !== this.epoch) return new Map();
     this.known[scope] = next;
     return entries;
   }

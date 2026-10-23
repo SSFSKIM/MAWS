@@ -48,7 +48,7 @@ export interface ConnectorsSurfaceDeps {
   datasetRefresh?: DatasetRefreshRequests; // E3: the agents' refresh requests a dataset start may name (absent: none)
   statusCache?: ConnectorStatusCache; // P3-HD: tests
   direct?: DirectCalls; // P3-HD M2: tests
-  deliveryConfig?: { userData: string; environment: Readonly<Record<string, string | undefined>> }; // WR 76/78: host-owned, never renderer input
+  deliveryConfig?: { userData: string; captureEnv: () => Promise<Record<string, string>> }; // WR 76/78: host-owned, never renderer input
 }
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}, code: 'invalid_input' | 'internal' = 'invalid_input'): HostCommandError {
