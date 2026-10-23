@@ -79,6 +79,26 @@ describe('MarkupLayer', () => {
     expect(screen.getByRole('button', { name: 'Add to chat' })).toHaveProperty('disabled', false); // an unmarked still is a screenshot
   });
 
+  it('moves the toolbar without drawing and keeps it inside the annotation surface', async () => {
+    await open();
+    const toolbar = document.querySelector<HTMLElement>('[data-markup-toolbar]')!;
+    vi.spyOn(toolbar, 'getBoundingClientRect').mockReturnValue({ left: 450, top: 560, width: 500, height: 40 } as DOMRect);
+    const handle = screen.getByRole('button', { name: 'Move mark-up toolbar' });
+    fireEvent.pointerDown(handle, { clientX: 460, clientY: 570, pointerId: 9, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 410, clientY: 270, pointerId: 9 });
+    fireEvent.pointerUp(handle, { pointerId: 9 });
+    expect(toolbar.style.left).toBe('100px');
+    expect(toolbar.style.top).toBe('140px');
+    expect(paths()).toEqual([]);
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(toolbar.style.top).toBe('130px');
+    fireEvent.pointerDown(handle, { clientX: 460, clientY: 570, pointerId: 10, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 10000, clientY: -10000, pointerId: 10 });
+    fireEvent.pointerUp(handle, { pointerId: 10 });
+    expect(toolbar.style.left).toBe('292px');
+    expect(toolbar.style.top).toBe('8px');
+  });
+
   it('draws a pen stroke in surface px, then a box in the ink chosen; Undo and Clear take them back', async () => {
     await open();
     drag([[310, 130], [320, 140], [330, 135]]);
@@ -193,7 +213,7 @@ describe('MarkupLayer', () => {
     await user.tab({ shift: true });
     expect(document.activeElement, 'from the overlay itself, to its last control').toBe(add);
     await user.tab();
-    expect(document.activeElement, 'from the last control, round to the first').toBe(screen.getByRole('radio', { name: 'Pen' }));
+    expect(document.activeElement, 'from the last control, round to the first').toBe(screen.getByRole('button', { name: 'Move mark-up toolbar' }));
     await user.tab({ shift: true });
     expect(document.activeElement, 'from the first control, round to the last').toBe(add);
     expect(layer.contains(document.activeElement)).toBe(true);
