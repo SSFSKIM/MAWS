@@ -238,6 +238,10 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await expect.poll(async () => await threadOf((t) => t.id === noteThread)).toMatchObject({ orphan: true, live: false, quote: 'Edit me, revised' });
     await toggleRail();
     const thread = rail.locator(`article[data-thread="${noteThread}"]`);
+    const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+    await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
+    await expect(thread).toHaveCount(0);
+    await showDeleted.click();
     await expect(thread).toHaveAttribute('data-orphan', '');
     await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Edit me, revised');
     await toggleRail();

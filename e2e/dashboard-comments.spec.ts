@@ -84,8 +84,15 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await expect(figures(record)).toHaveCount(0);
     const rail = await railOf(record);
     const item = rail.locator(`article[data-thread="${threadId}"]`);
+    const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+    await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
+    await expect(item).toHaveCount(0);
+    await showDeleted.click();
     await expect(item).toHaveAttribute('data-orphan', '');
     await expect(item.locator('.doc-thread-quote-text')).toHaveText(QUOTE);
+    // Back to the default filter: pasting the target must show its thread without revealing deleted targets.
+    await rail.getByRole('button', { name: 'Hide deleted-target comments', exact: true }).click();
+    await expect(item).toHaveCount(0);
 
     await record.getByRole('button', { name: 'Add tab' }).click();
     await expect(tabs.getByRole('tab')).toHaveCount(2);
@@ -114,6 +121,10 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await expect(figures(record)).toHaveCount(0);
     const rail = await railOf(record);
     const item = rail.locator(`article[data-thread="${threadId}"]`);
+    const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+    await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
+    await expect(item).toHaveCount(0);
+    await showDeleted.click();
     await expect(item).toHaveAttribute('data-orphan', '');
     await expect(item.locator('.doc-thread-quote-text')).toHaveText(QUOTE);
     await item.getByRole('button', { name: 'Resolve' }).click();
