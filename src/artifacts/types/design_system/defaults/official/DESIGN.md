@@ -50,6 +50,7 @@ hairlines: the one shape every official page shares, and the reason it survives 
 - **`color.accent` is the accent role, and it is the ink** (an alias of `color.text`). It is used only reversed: an
   accent fill with `color.accent.text` (white) on it, for the one thing the reader must do or decide. One reversed
   block per page or slide.
+- Exception for charts: bar data marks and their legend keys may use `color.accent`; chart text never does.
 - `color.border` (2.0 : 1) is the hairline between table rows and the cut line; never a control's only edge. A box to
   tick or a line to sign is drawn in `color.text`.
 - The status set is for a packet's status column only, always as symbol and word: ✓ Done (`ok`), ▲ Scheduled

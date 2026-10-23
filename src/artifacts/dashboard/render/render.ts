@@ -4,7 +4,8 @@
 // no href, no id or `url(...)` reference, no external resource; every text is escaped, every theme value validated
 // (`themeFrom`). Equal inputs give byte-equal output: nothing reads a DOM, the locale, the clock or randomness.
 //
-// The house law has no categorical palette, so a figure is drawn in text ink: series part by dash, marker shape and
+// WR 68: bars and their legend keys use the governing accent; labels retain text ink. Other figures keep ink.
+// There is no categorical palette: series part by dash, marker shape and
 // fill treatment, always with a legend (two or more series) or a direct label, never by colour alone; status colours
 // are never borrowed. There are six forms: a view whose unfiltered snapshot holds more series identities draws labelled
 // small multiples instead (parent Decision Log 27), one panel per series in the first form, named above it, in up to
@@ -676,11 +677,11 @@ function bars(series: Series[], band: { starts: number[]; bandwidth: number; key
 /** A bar or legend key in its series' treatment (BAR_FILLS): the shape, then any hatching inside its box. */
 function treated(d: string, box: { x0: number; y0: number; x1: number; y1: number }, style: number, theme: Theme, extra = ''): string {
   const fill = BAR_FILLS[style % BAR_FILLS.length];
-  if (fill.solid) return `<path d="${d}" fill="${theme.ink}" fill-opacity="${TINTS[0]}"${extra}/>`;
-  let out = `<path d="${d}" fill="${theme.ground}" stroke="${theme.ink}" stroke-width="1.5"${fill.dash ? ` stroke-dasharray="${fill.dash}"` : ''}${extra}/>`;
+  if (fill.solid) return `<path d="${d}" fill="${theme.barInk}" fill-opacity="${TINTS[0]}"${extra}/>`;
+  let out = `<path d="${d}" fill="${theme.ground}" stroke="${theme.barInk}" stroke-width="1.5"${fill.dash ? ` stroke-dasharray="${fill.dash}"` : ''}${extra}/>`;
   const lines = fill.hatch.map((angle) => hatch(box.x0 + 2, box.y0 + 2, box.x1 - 2, box.y1 - 2, angle)).join('');
   // the hatching decorates the bar beneath it and never takes the bar's pointer (its tip), its strokes included
-  if (lines !== '') out += `<path d="${lines}" fill="none" stroke="${theme.ink}" stroke-width="1" pointer-events="none"/>`;
+  if (lines !== '') out += `<path d="${lines}" fill="none" stroke="${theme.barInk}" stroke-width="1" pointer-events="none"/>`;
   return out;
 }
 
