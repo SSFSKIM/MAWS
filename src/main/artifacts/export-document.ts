@@ -13,7 +13,7 @@ import { exportDocx } from '@artifacts/document/export/docx';
 import { exportHtml } from '@artifacts/document/export/html';
 import { exportMarkdown } from '@artifacts/document/export/markdown';
 import { exportNotionMarkdown } from '@artifacts/document/export/notion'; // P4-B5
-import { exportSource, type ImageLoader, type ViewRenderer } from '@artifacts/document/export/source';
+import { defaultAuthorName, exportAuthorName, exportSource, type ImageLoader, type ViewRenderer } from '@artifacts/document/export/source';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { Exporter, ExportContext, ExportRequest } from './export';
 
@@ -27,7 +27,7 @@ export type DocumentExportRequest = ExportRequest;
 export interface DocumentExportContext extends ExportContext {
   /** The governing design system's export helpers (X28); the house system when absent. */
   system?: DesignSystemExport;
-  /** A comment's author as Word names it; the session's title or "Claude", and "Owner", when absent. */
+  /** A comment's author as Word names it; the session's title or "Claude", and the resolved human export name. */
   authorName?(actor: Actor): string;
   // P3-E start (E2 M5; E's Decision Log 32): a kind's drawn chart blocks (prepared before the run) and their page CSS
   renderView?: ViewRenderer;
@@ -65,16 +65,38 @@ const RUN: Record<DocumentExportFormat, (request: DocumentExportRequest, context
   // P4-B5: the delivery's Notion dialect (Notion's enhanced Markdown, a page's content) beside the GFM file
   md: async (request, context) => context.writeFile(request.path, (request.dialect === 'notion' ? exportNotionMarkdown : exportMarkdown)(await sourceOf(context), { renderView: context.renderView /* P3-E */ })),
   html: async (request, context) => context.writeFile(request.path, await html(request, context)),
-  docx: async (request, context) =>
-    context.writeFile(request.path, await exportDocx(await sourceOf(context), { system: context.system, pageSize: request.pageSize, loadImage: imagesOf(context), authorName: context.authorName, renderView: context.renderView /* P3-E */ })),
+  docx: async (request, context) => {
+    const authorName = (actor: Actor) => {
+      const name = (context.authorName ?? defaultAuthorName)(actor);
+      if (actor.kind === 'human') context.reportCommentAuthor?.(name);
+      return name;
+    };
+    await context.writeFile(request.path, await exportDocx(await sourceOf(context), { system: context.system, pageSize: request.pageSize, loadImage: imagesOf(context), authorName, renderView: context.renderView /* P3-E */ }));
+  },
   pdf: async (request, context) => context.writeFile(request.path, await context.printToPdf(await html(request, context))),
 };
 
 export const DOCUMENT_EXPORTERS: readonly DocumentExporter[] = DOCUMENT_EXPORT_FORMATS.map((format) => ({ kind: 'document', format, run: RUN[format] }));
 
+export interface DocumentAuthorDeps {
+  sessionTitle?: (appSessionId: string) => string | undefined;
+  humanAuthorName?: () => string | Promise<string>;
+}
+
+/** WR 73: capture the human identity once per export, shared by document and dashboard entry points. */
+export function withDocumentAuthors(exporter: DocumentExporter, deps: DocumentAuthorDeps): DocumentExporter {
+  return {
+    ...exporter,
+    run: async (request, context) => {
+      const authorName = context.authorName ?? exportAuthorName(deps.sessionTitle, await deps.humanAuthorName?.());
+      await exporter.run(request, { ...context, authorName });
+    },
+  };
+}
+
 /** Registers the four document exporters through the service's `register` (A's registry); returns their removal. */
-export function registerDocumentExporters(register: (exporter: DocumentExporter) => () => void): () => void {
-  const offs = DOCUMENT_EXPORTERS.map((exporter) => register(exporter));
+export function registerDocumentExporters(register: (exporter: DocumentExporter) => () => void, authors: DocumentAuthorDeps = {}): () => void {
+  const offs = DOCUMENT_EXPORTERS.map((exporter) => register(withDocumentAuthors(exporter, authors)));
   return () => {
     for (const off of offs) off();
   };

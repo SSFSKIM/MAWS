@@ -270,6 +270,18 @@ describe('a document tab’s state', () => {
     ]);
   });
 
+  it('reports the actual DOCX comment author beside the saved result, without guessing from current settings', async () => {
+    useNotices.setState({ notices: [] });
+    const w = world({
+      'artifacts.export': { path: '/u/x.docx', revision: 9, commentAuthorName: 'Kim Min' },
+      'library.saveAs': { saved: true, path: '/Downloads/Review.docx' },
+    });
+    const state = w.open();
+    await ready(state);
+    await state.export('docx', 'letter');
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Saved to /Downloads/Review.docx · Comments credited to Kim Min; change in Settings › Artifacts.']);
+  });
+
   it('exports nothing while two versions are compared', async () => {
     const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: true, path: '/d/x' } });
     const state = w.open();

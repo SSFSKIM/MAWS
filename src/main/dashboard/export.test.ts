@@ -48,14 +48,14 @@ function host(over: { readDataset?: (input: CommandInput<'artifacts.readDataset'
   return { call, pages, page };
 }
 
-function exporters(call: ReturnType<typeof host>['call'], pictures?: OpenPictures, sessionTitle?: DashboardExportDeps['sessionTitle']): Map<DocumentExportFormat, DocumentExporter> {
+function exporters(call: ReturnType<typeof host>['call'], pictures?: OpenPictures, sessionTitle?: DashboardExportDeps['sessionTitle'], humanAuthorName?: () => string): Map<DocumentExportFormat, DocumentExporter> {
   const out = new Map<DocumentExportFormat, DocumentExporter>();
   registerDashboardExporters(
     (exporter) => {
       out.set(exporter.format, exporter);
       return () => out.delete(exporter.format);
     },
-    { call: call as never, env: {}, ...(pictures && { pictures }), ...(sessionTitle && { sessionTitle }) },
+    { call: call as never, env: {}, ...(pictures && { pictures }), ...(sessionTitle && { sessionTitle }), ...(humanAuthorName && { humanAuthorName }) },
   );
   return out;
 }
@@ -199,31 +199,31 @@ describe('registerDashboardExporters', () => {
     }
   });
 
-  it('credits the data and the comments to a session by its title, "Claude" only without one, and the human "Owner" (P4 L287)', async () => {
+  it('credits data and comments to the named session and the configured human export author', async () => {
     const { call } = host();
     const titles: Record<string, string> = { 'session-a': 'Quarterly review' };
-    const titled = exporters(call, fakePictures(), (appSessionId) => titles[appSessionId]);
+    const titled = exporters(call, fakePictures(), (appSessionId) => titles[appSessionId], () => 'Kim Min');
     const md = context(captured());
     await titled.get('md')!.run(request('md'), md.ctx);
     expect(String(md.written.get('/exports/9-md'))).toContain('updated 2026-10-01 09:00 UTC by Quarterly review');
     expect(String(md.written.get('/exports/9-md'))).not.toContain('by Claude');
-    // Word's comments on the chart name the same session, and the human as "Owner"
+    // Word's comments on the chart name the same session and the explicit export author.
     const docx = context(captured());
     await titled.get('docx')!.run(request('docx'), docx.ctx);
     const comments = await (await JSZip.loadAsync(docx.written.get('/exports/9-docx') as Uint8Array)).file('word/comments.xml')!.async('string');
-    expect([...comments.matchAll(/w:author="([^"]*)"/g)].map((m) => m[1])).toEqual(['Owner', 'Quarterly review']);
+    expect([...comments.matchAll(/w:author="([^"]*)"/g)].map((m) => m[1])).toEqual(['Kim Min', 'Quarterly review']);
     // a session without a title (unknown to the index, or titled blank) is "Claude"
     for (const none of [{}, { 'session-a': '  ' }]) {
       const out = context(captured());
       await exporters(call, undefined, (appSessionId) => (none as Record<string, string>)[appSessionId]).get('md')!.run(request('md'), out.ctx);
       expect(String(out.written.get('/exports/9-md'))).toContain('updated 2026-10-01 09:00 UTC by Claude');
     }
-    // the human who bound the data is "Owner", never "You"
+    // The human who bound the data uses the same explicit name, never "You".
     const owned = exportDashboard().doc;
     setDataset(owned, 'sales', descriptor(OLD_REF, BOUND_AT, OWNER));
     const out = context(stateV2(owned));
     await titled.get('md')!.run(request('md'), out.ctx);
-    expect(String(out.written.get('/exports/9-md'))).toContain('updated 2026-10-01 09:00 UTC by Owner');
+    expect(String(out.written.get('/exports/9-md'))).toContain('updated 2026-10-01 09:00 UTC by Kim Min');
   });
 
   it('a view with no dataset and one that cannot be read export their named states; a dashboard with no view reads nothing', async () => {

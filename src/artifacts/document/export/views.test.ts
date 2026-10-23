@@ -118,7 +118,7 @@ describe('exportDocx with drawn views', () => {
     const comments = xml['word/comments.xml'];
     expect(comments).toContain('Why is West so high?');
     expect(comments).toContain('A one-off order.');
-    expect(comments).toMatch(/w:author="Owner"/);
+    expect(comments).toMatch(/w:author="Comment author"/);
   });
 
   it('writes B’s placeholder without a hook', async () => {

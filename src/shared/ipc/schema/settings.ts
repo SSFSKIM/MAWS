@@ -126,6 +126,8 @@ export const ArtifactsSettingsSchema = z.strictObject({
   // P4-B1 (X36; the P4 interface ledger's §6 slot): version 15, View › Comments for every document: Expand (cards in the
   // margin), Minimize (icons at the anchors), Hide (an empty margin); per user, so it lives here and not on the artifact
   commentsView: z.enum(['expand', 'minimize', 'hide']),
+  // WR 73: additive at v17; absent/null uses the routed account's name, or a neutral label, never the OS login.
+  exportAuthorName: z.string().trim().min(1).max(200).nullable().optional(),
 });
 export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
 // P3-D end

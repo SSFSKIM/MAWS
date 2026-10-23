@@ -12,6 +12,8 @@ import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { ArtifactsSection } from './ArtifactsSection';
+import { useUsage } from '../stores/usage';
+import { UsageSnapshotSchema } from '@shared/usage/types';
 
 const MAWS = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
 const CLASSROOM = '0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a';
@@ -44,12 +46,48 @@ const settings = () => useSettings.getState().state!.settings.artifacts;
 afterEach(() => {
   cleanup();
   resetLibrary();
+  useUsage.setState({ snapshot: null });
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
   delete (window as { maws?: MawsBridge }).maws;
 });
 
 describe('Settings › Artifacts', () => {
+  it('suggests the routed Claude name without saving it, and commits an explicit export name once', async () => {
+    useUsage.setState({ snapshot: UsageSnapshotSchema.parse({
+      available: true, dataDir: '/usage', readAt: '2026-10-23T12:00:00Z', error: null, drainTarget: 'routed', drainTargetIsManual: false, pinsFor: {}, gateway: null, codex: null, activity: null,
+      accounts: [{ uuid: 'routed', email: 'not-the-author@example.test', displayName: 'Kim Min', planLabel: null, rateLimitTier: null, needsReauthentication: false, lastSeenActive: null, pinnedSessionCount: 0, credentialOwnership: null, windows: { fiveHour: null, sevenDay: null, scoped: [] } }],
+    }) });
+    await renderSection(SETTINGS_DEFAULTS_V17.artifacts);
+    const field = screen.getByRole('textbox', { name: 'Export author name' });
+    expect((field as HTMLInputElement).value).toBe('');
+    expect((field as HTMLInputElement).placeholder).toBe('Kim Min');
+    expect(b.sets).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Use Kim Min' }));
+    await act(async () => {});
+    expect(b.sets).toEqual([{ artifacts: { exportAuthorName: 'Kim Min' } }]);
+    expect((field as HTMLInputElement).value).toBe('Kim Min');
+    fireEvent.change(field, { target: { value: '  K. Min  ' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    fireEvent.blur(field);
+    await act(async () => {});
+    expect(b.sets.at(-1)).toEqual({ artifacts: { exportAuthorName: 'K. Min' } });
+    expect(b.sets).toHaveLength(2);
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    await act(async () => {});
+    expect(b.sets.at(-1)).toEqual({ artifacts: { exportAuthorName: null } });
+  });
+
+  it('shows the neutral fallback without an account and preserves a saved name', async () => {
+    await renderSection({ ...SETTINGS_DEFAULTS_V17.artifacts, exportAuthorName: 'Lee Sun' });
+    const field = screen.getByRole('textbox', { name: 'Export author name' }) as HTMLInputElement;
+    expect(field.value).toBe('Lee Sun');
+    expect(screen.getByRole('group', { name: 'Export author name' }).textContent).toContain('Comment author');
+    expect(screen.queryByRole('button', { name: /^Use / })).toBeNull();
+    expect(b.sets).toEqual([]);
+  });
+
   it('lists the house system and the library’s systems, and writes the owner’s default alone', async () => {
     await renderSection({ defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ });
     const select = screen.getByRole('combobox', { name: 'Default design system' }) as HTMLSelectElement;

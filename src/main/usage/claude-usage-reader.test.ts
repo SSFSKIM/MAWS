@@ -58,6 +58,22 @@ describe('claude-usage reader parses the fixture directory', () => {
     expect(snapshot.accounts[1]!.windows.sevenDay).toEqual({ percent: 0, resetsAt: '2026-10-06T03:00:00Z', recordedAt: '2026-09-29T03:00:07Z' });
   });
 
+  it('reads the routed account’s display name without changing the usage subscriber’s requested pins', async () => {
+    const dir = copy();
+    const emitted: UsageSnapshot[] = [];
+    const r = reader(dir, emitted);
+    expect(await r.routedAccountName()).toBe('Account 3');
+    await r.snapshot([PINNED_TO_DRAIN]);
+    expect(await r.routedAccountName()).toBe('Account 3');
+    const accounts = JSON.parse(readFileSync(join(dir, 'accounts.json'), 'utf8')) as { uuid: string; displayName: string }[];
+    accounts.find((a) => a.uuid === DRAIN)!.displayName = 'Renamed account';
+    writeFileSync(join(dir, 'accounts.json'), JSON.stringify(accounts));
+    await r.refresh();
+    expect(emitted.at(-1)?.pinsFor).toEqual({ [PINNED_TO_DRAIN]: DRAIN });
+    expect(await r.routedAccountName()).toBe('Renamed account');
+    expect(await reader(join(scratch, 'absent')).routedAccountName()).toBeNull();
+  });
+
   it('answers pinsFor for exactly the ids asked, and reads nothing it is not asked to write', async () => {
     const before = readFileSync(join(FIXTURE, 'pins.json'), 'utf8');
     const r = reader(FIXTURE);

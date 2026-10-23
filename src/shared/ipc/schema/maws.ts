@@ -83,7 +83,7 @@ export type MawsArtifactExport = z.infer<typeof MawsArtifactExportSchema>;
 // export's file is its own, named by the `exportId` main minted (P3-H, P3 Decision Log 91; E's Decision Log 33). P3-E
 // (E1 M5; Decision Log 26): a failure an exporter named as an artifact refusal carries it (`refusal`, the IPC's shape).
 export const MawsArtifactExportAnswerSchema = z.discriminatedUnion('ok', [
-  z.strictObject({ ok: z.literal(true), revision: z.number().int().nonnegative(), path: AbsolutePathSchema, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() /* P3-E (Decision Log 33), P3-H (P3 Decision Log 91) */ }),
+  z.strictObject({ ok: z.literal(true), revision: z.number().int().nonnegative(), path: AbsolutePathSchema, commentAuthorName: z.string().min(1).optional(), blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() /* P3-E (Decision Log 33), P3-H (P3 Decision Log 91) */ }),
   z.strictObject({ ok: z.literal(false), unavailable: z.boolean().optional(), error: z.string(), refusal: ArtifactRefusalSchema.optional() /* P3-E */ }),
 ]);
 export type MawsArtifactExportAnswer = z.infer<typeof MawsArtifactExportAnswerSchema>;

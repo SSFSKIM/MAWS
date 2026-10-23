@@ -57,7 +57,7 @@ export function resetExportFormats(): void {
   asking.clear();
 }
 
-const savedToast = (path: string) => void toast({ level: 'info', text: VIEWERS_COPY.saved(path), actions: [], dismissible: true });
+const savedToast = (path: string, commentAuthorName?: string) => void toast({ level: 'info', text: VIEWERS_COPY.saved(path, commentAuthorName), actions: [], dismissible: true });
 
 // The artifact's live revision (or the version `versionId`) exported as `format`, then saved where the owner chooses.
 // The save dialog names the file by the artifact's title, which main reads itself. P4 (W1, L302): the export is a file
@@ -68,7 +68,7 @@ export async function exportArtifact(artifactId: string, format: ArtifactExportF
   const { revision, exportId } = exported.value;
   const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) /* P3-E (Decision Log 33) */ } } });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
-  if (saved.value.saved) savedToast(saved.value.path);
+  if (saved.value.saved) savedToast(saved.value.path, exported.value.commentAuthorName);
 }
 
 // A byte kind's stored file (at `revision`, else the latest) saved where the owner chooses.

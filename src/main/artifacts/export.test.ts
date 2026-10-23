@@ -315,6 +315,20 @@ describe('the export service', () => {
     expect(host.answered.map((a) => a.requestId).sort()).toEqual(['r1', 'r2', 'r3']);
   });
 
+  it('carries the actual comment author through the library result, but omits it when no human comment was exported', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    registry.register(writing('document', 'docx', (_req, ctx) => {
+      ctx.reportCommentAuthor?.('Kim Min');
+      return 'DOCX';
+    }));
+    registry.register(writing('document', 'pdf', () => 'PDF'));
+    const service = startExportService(host.deps(registry));
+    expect(await service.exportForLibrary({ artifactId: DOC, format: 'docx' })).toMatchObject({ revision: 7, commentAuthorName: 'Kim Min' });
+    expect(await service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).not.toHaveProperty('commentAuthorName');
+    service.stop();
+  });
+
   it('serves the library’s artifacts.export: the live revision or a version’s, a PNG’s size handed on, the path under the store', async () => {
     const host = fakeHost();
     const registry = new ExporterRegistry();

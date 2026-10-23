@@ -8,6 +8,8 @@ import { exportSource } from '@artifacts/document/export/source';
 import { schemaFor } from '@artifacts/document/schema';
 import { addTab, createDocument } from '@artifacts/document/tabs';
 import { newDoc, stateV2 } from '@artifacts/yjs';
+import { addThread, reply, resolve as resolveThread } from '@artifacts/document/threads';
+import { AGENT, HUMAN } from '@artifacts/document/convert.fixture';
 import { ExporterRegistry } from './export';
 import { DOCUMENT_EXPORTERS, registerDocumentExporters, type DocumentExportContext, type DocumentExportFormat, type DocumentExportRequest } from './export-document';
 
@@ -56,6 +58,50 @@ const exporter = (format: DocumentExportFormat) => DOCUMENT_EXPORTERS.find((e) =
 const request = (format: DocumentExportFormat, extra: Partial<DocumentExportRequest> = {}): DocumentExportRequest => ({ artifactId: 'a1', kind: 'document', format, revision: 7, path: `/exports/7-${format}`, ...extra });
 
 describe('the document exporters', () => {
+  it('captures the export name once per run, credits session names, and keeps resolved and removed-passage comments', async () => {
+    const doc = newDoc();
+    const tabId = createDocument(doc, { title: 'Review' });
+    addThread(doc, { threadId: 'removed', tabId, blockId: null, quote: 'Removed words', anchor: { kind: 'block' }, by: HUMAN, at: 1, body: 'Keep the reasoning.' });
+    reply(doc, 'removed', { id: 'reply', by: AGENT, at: 2, body: 'Preserved.' });
+    reply(doc, 'removed', { id: 'thanks', by: HUMAN, at: 3, body: 'Thank you.' });
+    resolveThread(doc, 'removed', HUMAN, 4);
+    const state = stateV2(doc);
+    doc.destroy();
+    const registry = new ExporterRegistry();
+    let savedName = 'Kim Min';
+    const humanAuthorName = vi.fn(() => savedName);
+    registerDocumentExporters((e) => registry.register(e), { humanAuthorName, sessionTitle: (id) => id === 'app-session-1' ? 'Review agent' : undefined });
+    for (const expected of ['Kim Min', 'Lee Sun']) {
+      savedName = expected;
+      const { ctx, written } = context(state);
+      const names: string[] = [];
+      ctx.reportCommentAuthor = (name) => names.push(name);
+      await registry.get('document', 'docx')!.run(request('docx', { versionId: 4 }), ctx);
+      const zip = await JSZip.loadAsync(written.get('/exports/7-docx') as Uint8Array);
+      const comments = await zip.file('word/comments.xml')!.async('string');
+      expect([...comments.matchAll(/w:author="([^"]*)"/g)].map((m) => m[1])).toEqual([expected, 'Review agent', expected]);
+      expect(comments.replace(/<[^>]*>/g, '')).toContain('Keep the reasoning.');
+      expect(comments.replace(/<[^>]*>/g, '')).toContain('Preserved.');
+      expect(await zip.file('word/commentsExtended.xml')!.async('string')).toContain('w15:done="1"');
+      expect(await zip.file('word/document.xml')!.async('string')).toContain('Removed words');
+      expect(names).toEqual([expected, expected]);
+    }
+    expect(humanAuthorName).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses a neutral name rather than Owner when no identity is available', async () => {
+    const doc = newDoc();
+    const tabId = createDocument(doc, { title: 'Review' });
+    addThread(doc, { threadId: 'orphan', tabId, blockId: null, quote: 'Gone', anchor: { kind: 'block' }, by: HUMAN, at: 1, body: 'Still relevant.' });
+    const { ctx, written } = context(stateV2(doc));
+    doc.destroy();
+    const registry = new ExporterRegistry();
+    registerDocumentExporters((e) => registry.register(e));
+    await registry.get('document', 'docx')!.run(request('docx'), ctx);
+    const comments = await (await JSZip.loadAsync(written.get('/exports/7-docx') as Uint8Array)).file('word/comments.xml')!.async('string');
+    expect([...comments.matchAll(/w:author="([^"]*)"/g)].map((m) => m[1])).toEqual(['Comment author']);
+  });
+
   it('are registered for document × {md, html, docx, pdf} through one call, and removed by its answer', () => {
     const removed: string[] = [];
     const registered: string[] = [];

@@ -85,6 +85,8 @@ export type ExportDialect = 'notion'; // P4-B5
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
 export interface ExportContext {
   title: string;
+  /** WR 73: report the human name actually written to a DOCX comment, for the export result's attribution note. */
+  reportCommentAuthor?(name: string): void;
   // A document kind's V2 state at the request's revision: the version's when the request names one, else the live
   // doc's as the export's snapshot took it. A byte kind has none (it rejects).
   state(): Promise<Uint8Array>;
@@ -213,8 +215,10 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
   const staged = new Map<string, string>(); // path → its staged temporary file
   const temps = new Set<string>(); // every temporary file made, tracked before it is written
   let blocked = 0;
+  let commentAuthorName: string | undefined;
   const context: ExportContext = {
     title: sources.title,
+    reportCommentAuthor: (name) => { commentAuthorName = name; },
     state: () => sources.state(),
     readAsset: (ref) => sources.readAsset(ref),
     assets: { list: () => sources.listAssets() },
@@ -254,7 +258,7 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
     // has given up on the export: its late success is dropped for the timeout (the file stays where it landed; a retried
     // export replaces it)
     if (time.expired) throw new Error(`the export did not finish within ${time.ms / 1000} s`);
-    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E, P3-H */ };
+    return { ok: true, revision: request.revision, path: request.path, ...(commentAuthorName !== undefined && { commentAuthorName }), ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E, P3-H */ };
   } catch (error) {
     // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
     const refusal = error instanceof CommandFailure ? artifactRefusalOf(error.error) : null;
@@ -446,7 +450,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       const result = await queued(request, time, ownFile === true || options.dialect !== undefined); // P3-H: ownFile; P4-B5: a dialect's file is its own, never the format's cache
       if (!result.ok && result.refusal) throw new CommandFailure(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
-      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E, P3-H */ };
+      return { path: result.path, revision: result.revision, ...(result.commentAuthorName !== undefined && { commentAuthorName: result.commentAuthorName }), ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E, P3-H */ };
     },
     stop,
   };

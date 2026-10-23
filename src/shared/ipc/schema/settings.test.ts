@@ -9,6 +9,15 @@ const issueCodes = (value: unknown) => {
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
 };
 
+describe('export author setting', () => {
+  it('accepts an additive explicit name or clearing it, and rejects blank and oversized identities', () => {
+    expect(SettingsPatchSchema.parse({ artifacts: { exportAuthorName: '  Kim Min  ' } })).toEqual({ artifacts: { exportAuthorName: 'Kim Min' } });
+    expect(SettingsPatchSchema.safeParse({ artifacts: { exportAuthorName: null } }).success).toBe(true);
+    expect(SettingsSchema.safeParse(base).success).toBe(true); // existing v17 files need no migration
+    for (const name of ['', '  ', 'x'.repeat(201)]) expect(SettingsPatchSchema.safeParse({ artifacts: { exportAuthorName: name } }).success).toBe(false);
+  });
+});
+
 describe('settings keymap is a partial record', () => {
   it('accepts no overrides, one override and an unbinding', () => {
     expect(SettingsSchema.safeParse(base).success).toBe(true);

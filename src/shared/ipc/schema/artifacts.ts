@@ -265,7 +265,7 @@ export const commands = {
     // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
     // PDF printer refused; `exportId`: the id of an export of its own file, the one `library.saveAs` names it by (P3-E,
     // E's Decision Log 33; P3-H, Decision Log 91)
-    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() }),
+    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional(), commentAuthorName: z.string().min(1).optional() }),
   ),
   // P3-E (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M3; ledger X23 as amended by E's Decision Log 18): a
   // dashboard's source sheet Download. Main resolves the artifact's own asset `ref` through `artifacts.content` (a ref

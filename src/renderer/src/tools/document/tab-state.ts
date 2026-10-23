@@ -304,7 +304,7 @@ export class DocumentTabState {
       const { revision, exportId } = exported.value;
       const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });
       if (!saved.ok) throw new Error(saved.error.message);
-      if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
+      if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path, exported.value.commentAuthorName), actions: [], dismissible: true });
       if (!this.disposed) this.set({ exporting: null });
     } catch (error) {
       this.deps.log(`document ${this.artifactId}: the ${format} export failed: ${messageOf(error)}`);
