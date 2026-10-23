@@ -22,6 +22,7 @@ Each direction cites the observation it comes from (O1, O2, …, below). A direc
 ## Architect's proposals
 
 - **P1 (2026-10-23, on Q1).** Today's panel tabs become the icon row of D2: a click opens that surface alone, a second click closes it. Tabs survive only inside a surface that holds several of the same thing (browser pages, open files), never to choose between surfaces. The default view is D3's folded floating cards, so the main area keeps its width until something is opened. Would change if supervising many sessions needs two surfaces visible at once (diff beside terminal); then a split inside the panel is the question, not tabs.
+  - *Evidence, 2026-10-23 23:48Z (lens 7's follow-up, hands-on):* Claude Desktop does keep tabs inside one surface, a tab per open file in its Files pane and terminal tabs in its terminal, so its rule is icons between tools and tabs within a tool, which is P1. Lens 7 recommends the same (its option B, `l7-shell-04`): each session remembers its open set (D-10), pinning becomes a right-click on the icon, ⌥-click stacks a second surface below.
 - **P2 (2026-10-23, on Q3).** Remove the section and put D5's dots on the rows; keep the cross-project reach without the space: ⌘⇧J still jumps to the next waiting session across projects, a collapsed project shows a dot on its header when a session inside it waits, and the waiting count stays on the dock badge (and, if wanted, as a small count beside the sidebar's title). Would change if the owner wants dots and nothing else.
 
 ## Observations
