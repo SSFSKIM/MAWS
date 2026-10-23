@@ -150,8 +150,17 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   const tab = await openFromLibrary(page, 'History lab', id);
   const header = page.locator('[data-region="main"] [data-editor-header]');
 
+  await test.step('WR #37: a narrow deck keeps a working slide beside its filmstrip', async () => {
+    const editor = tab.locator('[data-deck-editor]');
+    await editor.evaluate((el) => { (el as HTMLElement).style.width = '560px'; });
+    await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width).toBeGreaterThan(300);
+    await editor.evaluate((el) => { (el as HTMLElement).style.width = ''; });
+  });
+
   await test.step('the header’s Version history opens B’s rail, listing A’s versions', async () => {
+    const stageBefore = await tab.locator('[data-stage-slide]').boundingBox();
     await headerAction(page, 'Version history');
+    await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width).toBeCloseTo(stageBefore!.width, 0);
     const rail = tab.getByRole('complementary', { name: 'Version history' });
     await expect(rail).toBeVisible();
     await expect(tab.locator('[data-deck-rail="history"]')).toBeVisible();
@@ -179,8 +188,8 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     await expect(filmstrip.locator('[data-slide-thumb]')).toHaveCount(4); // the deleted slide at its earlier place
     expect(await filmstrip.locator('[data-slide-thumb]').evaluateAll((els) => els.map((e) => e.getAttribute('data-slide-thumb')))).toEqual(['s1', 's2', 's3', 's4']);
     // "N changes": the deck's cover, s1 removed, s4 added, s3's element cut, s2's title and its notes
-    await expect(bar.locator('[data-history-count]')).toHaveText('6 changes');
-    await expect(tab.locator('.deck-history-deck')).toContainText('cover');
+    await expect(bar.locator('[data-history-count]')).toContainText('of 6 changes');
+    await expect(tab.locator('.deck-history-deck')).toHaveCount(0);
 
     // ↓ from the first slide: the stage moves to each change; s2's title outlined, its notes' diff below
     await filmstrip.locator('[data-slide-thumb="s1"] button').click();
