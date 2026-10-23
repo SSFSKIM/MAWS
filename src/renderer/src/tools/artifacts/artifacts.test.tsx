@@ -168,7 +168,7 @@ function testEditor({ guarded = false } = {}) {
 }
 
 describe('the list', () => {
-  it('shows the session’s lineage grouped by kind in the kinds’ order, newest first, each row with its title and last edit', async () => {
+  it('shows the session’s lineage grouped by kind in the kinds’ order, newest first, each row with its title and session relationship', async () => {
     await mount();
     expect(listFilters()).toEqual([{ appSessionId: A, lineage: true }]);
     expect(groups()).toEqual([
@@ -179,8 +179,22 @@ describe('the list', () => {
     ]);
     expect(listed()).toEqual([NOTES.id, SPEC.id, DECK.id, PAGE.id, CSV.id]);
     expect(rowOf(1).textContent).toContain('Launch notes');
+    expect(rowOf(1).textContent).toContain('Created');
+    expect(rowOf(1).textContent).not.toContain('by You');
+    expect(rowOf(2).textContent).toContain('Created');
+  });
+
+
+  it('keeps read-only context distinct from the session’s edits, while All preserves real human authorship', async () => {
+    rows = [row(1, { sessions: [{ appSessionId: A, title: 'Agent', roles: ['viewed'], lastAt: NOW }] }),
+      row(2, { sessions: [{ appSessionId: A, title: 'Agent', roles: ['edited', 'viewed'], lastAt: NOW }] })];
+    await mount();
+    expect(rowOf(1).textContent).toContain('Read');
+    expect(rowOf(2).textContent).toContain('Edited');
+    expect(rowOf(1).textContent).not.toContain('You');
+    fireEvent.click(button('All')!);
+    await settle();
     expect(rowOf(1).textContent).toMatch(/Edited .+ by You/);
-    expect(rowOf(2).textContent).toMatch(/Edited .+ by Review the page/);
   });
 
   it('All lists every artifact in the library, and This session returns to the session’s', async () => {

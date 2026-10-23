@@ -98,7 +98,7 @@ function Groups({ filter, scope, initialOffset, onOpen }: { filter: LibraryFilte
   if (read.value === undefined) {
     return error === null ? <Quiet>{ARTIFACTS_TOOL_COPY.reading}</Quiet> : <Failure message={ARTIFACTS_TOOL_COPY.couldNotList(error)} />;
   }
-  return <Lines rows={read.value.rows} error={error} scope={scope} initialOffset={initialOffset} onOpen={onOpen} />;
+  return <Lines rows={read.value.rows} error={error} scope={scope} appSessionId={filter.appSessionId} initialOffset={initialOffset} onOpen={onOpen} />;
 }
 
 // A refused refresh above the last good rows, the empty note, then each kind's heading and its rows, newest first.
@@ -115,7 +115,7 @@ function linesOf(rows: readonly LibraryRow[], error: string | null, scope: Artif
 }
 
 // `initialOffset`: where the list is put back to (the tool state's scroll), so the first lines drawn are those there.
-function Lines({ rows, error, scope, initialOffset, onOpen }: { rows: readonly LibraryRow[]; error: string | null; scope: ArtifactsScope; initialOffset: number; onOpen(artifactId: string): void }) {
+function Lines({ rows, error, scope, appSessionId, initialOffset, onOpen }: { rows: readonly LibraryRow[]; error: string | null; scope: ArtifactsScope; appSessionId?: AppSessionId; initialOffset: number; onOpen(artifactId: string): void }) {
   const lines = useMemo(() => linesOf(rows, error, scope), [rows, error, scope]);
   // The lines' box sits in the list's scroller (its parent, whose ref is not attached yet when this mounts) below the
   // scope row: where it starts is the virtualiser's scroll margin, measured again when the box gets its size (a list
@@ -178,7 +178,7 @@ function Lines({ rows, error, scope, initialOffset, onOpen }: { rows: readonly L
       case 'heading':
         return <h3 className="m-0 px-3 py-1.5 text-ui-sm font-normal text-fg-muted">{KIND_PLURAL_LABELS[line.of]}</h3>;
       case 'row':
-        return <ListRow row={line.row} onOpen={onOpen} onFocus={(within) => setFocused((f) => (within ? line.row.id : f === line.row.id ? null : f))} />;
+        return <ListRow row={line.row} appSessionId={appSessionId} onOpen={onOpen} onFocus={(within) => setFocused((f) => (within ? line.row.id : f === line.row.id ? null : f))} />;
     }
   };
 
@@ -203,9 +203,12 @@ function Lines({ rows, error, scope, initialOffset, onOpen }: { rows: readonly L
   );
 }
 
-function ListRow({ row, onOpen, onFocus }: { row: LibraryRow; onOpen(artifactId: string): void; onFocus(within: boolean): void }) {
+function ListRow({ row, appSessionId, onOpen, onFocus }: { row: LibraryRow; appSessionId?: AppSessionId; onOpen(artifactId: string): void; onFocus(within: boolean): void }) {
   const now = useNow();
   const by = actorDisplay(row.lastEditor, row.lastEditorTitle).name;
+  const link = row.sessions.find((session) => session.appSessionId === appSessionId);
+  const relationship = link ? link.roles.includes('created') ? 'Created' : link.roles.includes('edited') ? 'Edited' : 'Read' : 'From a parent session';
+  const detail = appSessionId ? `${relationship}${link ? ` · ${formatAgo(Math.max(0, now - link.lastAt))}` : ''}` : LIBRARY_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by);
   return (
     <button
       type="button"
@@ -223,7 +226,7 @@ function ListRow({ row, onOpen, onFocus }: { row: LibraryRow; onOpen(artifactId:
           {row.title}
         </span>
         <span data-part="line" className="truncate text-ui-sm text-fg-muted">
-          {LIBRARY_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by)}
+          {detail}
         </span>
       </span>
     </button>
