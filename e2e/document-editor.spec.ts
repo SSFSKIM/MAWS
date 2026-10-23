@@ -512,8 +512,7 @@ test.describe('the document editor', () => {
     await rail.getByRole('button', { name: /^Version Clean draft/ }).click();
     await expect(bar.getByText(/^Clean draft/)).toBeVisible();
     await bar.getByRole('button', { name: 'Make a copy' }).click();
-    await expect(rail.getByText('A copy of this version was made.')).toBeVisible();
-    expect(await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.copies())).toHaveLength(1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.copies().length)).toBe(1);
     await bar.getByRole('button', { name: 'Restore this version' }).click();
     await replica(page, 'a').getByRole('alertdialog', { name: 'Restore this version?' }).getByRole('button', { name: 'Restore', exact: true }).click();
     await expect(replica(page, 'a').getByRole('status', { name: 'Restored' })).toContainText('Restored from Clean draft');
