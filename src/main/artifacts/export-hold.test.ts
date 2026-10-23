@@ -57,7 +57,10 @@ function world(run: Exporter['run']) {
       listeners.push(listener);
       return () => {};
     },
-    answer: async (input) => void answered.push(input),
+    answer: async (input) => {
+      answered.push(input);
+      return { ok: true, value: { outcome: 'delivered' } };
+    },
     print: async () => bytes('%PDF'),
   };
   return { deps, log, answered, emit: (request: MawsArtifactExport) => listeners.forEach((listener) => listener(request)) };
@@ -124,7 +127,7 @@ function restarting(run: Exporter['run'], options: { versionGone?: boolean } = {
   };
   const registry = new ExporterRegistry();
   registry.register({ kind: 'dashboard', format: 'md', run });
-  const deps: ExportServiceDeps = { registry, root, call: call as ExportServiceDeps['call'], onEvent: () => () => {}, answer: async () => {}, print: async () => bytes('%PDF'), hostGeneration: () => generation };
+  const deps: ExportServiceDeps = { registry, root, call: call as ExportServiceDeps['call'], onEvent: () => () => {}, answer: async () => ({ ok: true, value: { outcome: 'delivered' } }), print: async () => bytes('%PDF'), hostGeneration: () => generation };
   return { deps, log, restart: () => void (generation += 1), captures: () => captures };
 }
 

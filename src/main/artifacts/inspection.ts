@@ -30,7 +30,9 @@ export async function renderDocumentViewport(html: string, request: ExportReques
     await writeFile(page, html);
     signal.throwIfAborted();
     const width = request.width ?? 1280;
-    const win = openCaptureWindow(width, request.height ?? 800, env, { javascript: false });
+    // As in the deck renderer, host layout reads need JS enabled. The governed HTML's default-src 'none' CSP
+    // grants no script execution to authored content; sandbox and the request filter remain in force.
+    const win = openCaptureWindow(width, request.height ?? 800, env);
     destroy = () => { if (!win.isDestroyed()) win.destroy(); };
     signal.addEventListener('abort', destroy, { once: true });
     const url = pathToFileURL(page).href;
@@ -43,7 +45,8 @@ export async function renderDocumentViewport(html: string, request: ExportReques
       if (fullHeight > 8192) throw new Error('document PNG exceeds 8192 px; use artifact_screenshot with height and offsetY');
       win.setContentSize(width, Math.max(240, Math.ceil(fullHeight)));
     }
-    if ((request.offsetY ?? 0) >= fullHeight) throw new Error(`offsetY is outside the document (${fullHeight} px tall)`);
+    const maxOffset = await win.webContents.executeJavaScript('Math.max(0, document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight)') as number;
+    if ((request.offsetY ?? 0) > maxOffset) throw new Error(`offsetY is outside the document viewport (0 to ${maxOffset} px)`);
     await win.webContents.executeJavaScript(`window.scrollTo(0, ${JSON.stringify(request.offsetY ?? 0)})`);
     await settled(win);
     signal.throwIfAborted();

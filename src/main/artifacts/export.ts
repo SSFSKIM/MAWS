@@ -254,11 +254,12 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
       temps.delete(temp);
     }
     // P4 (W1, L131; Decision Log 44's residual): a rename issued in time can complete after the deadline, when the bridge
-    // has given up on the export: its late success is dropped for the timeout (the file stays where it landed; a retried
-    // export replaces it)
+    // has given up on the export: its late success is dropped for the timeout (an ordinary export's cache stays for a
+    // retry; inspection files have no cache consumer and are removed on failure below)
     if (time.expired) throw new Error(`the export did not finish within ${time.ms / 1000} s`);
     return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E, P3-H */ };
   } catch (error) {
+    if (request.inspection) await rm(request.path, { force: true }).catch((error: unknown) => console.error('[artifacts] could not remove an inspection image', error));
     // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
     const refusal = error instanceof CommandFailure ? artifactRefusalOf(error.error) : null;
     return { ok: false, error: messageOf(error), ...(refusal && { refusal }) };
@@ -273,7 +274,7 @@ export interface ExportServiceDeps {
   root: string; // `<userData>/artifacts`, the store's directory (the host's own path rule)
   call<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>; // the engine host's commands
   onEvent(name: 'maws.artifact.export', listener: (request: MawsArtifactExport) => void): () => void;
-  answer(input: CommandInput<'maws.artifact.exported'>): Promise<unknown>;
+  answer(input: CommandInput<'maws.artifact.exported'>): Promise<CommandResult<'maws.artifact.exported'>>;
   print?: PdfPrinter; // printHtmlToPdf in the app; a test's stand-in
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b, the restart ruling): how many times the engine
   // host's connection has gone, so a dashboard export whose snapshot holds a restart took captures once more
@@ -412,7 +413,17 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   const stop = onEvent('maws.artifact.export', (request) => {
     const { appSessionId, requestId, ...job } = request;
     void queued(job, new ExportBudget(EXPORT_BUDGET_MS), job.inspection === true)
-      .then((result) => answer({ appSessionId, requestId, answer: result }))
+      .then(async (result) => {
+        let delivered = false;
+        try {
+          const acknowledged = await answer({ appSessionId, requestId, answer: result });
+          delivered = acknowledged.ok && acknowledged.value.outcome === 'delivered';
+        } finally {
+          // Inspections have unique files and no cache consumer: ownership passes to the host only on delivery.
+          // A withdrawn, ended or timed-out request cannot remove its late result, so main keeps that responsibility.
+          if (job.inspection && result.ok && !delivered) await rm(result.path, { force: true });
+        }
+      })
       .catch((error: unknown) => console.error('[artifacts] could not answer an export', error));
   });
 

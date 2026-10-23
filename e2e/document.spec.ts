@@ -317,6 +317,26 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
     expect(html).toContain('Budget notes for October.');
     expect(html).not.toContain('var(--ds-');
 
+    await test.step('document inspection permits host layout reads but blocks authored script and event handlers', async () => {
+      const hostile = html.replace('</body>', `<script>console.log('maws-authored-script-ran')</script><img src="data:image/png;base64,bm90LXBuZw==" onerror="console.log('maws-authored-handler-ran')"></body>`);
+      const capture = await launch!.app.evaluate(async ({ app }, body) => {
+        const messages: string[] = [];
+        const watch = (_event: Electron.Event, contents: Electron.WebContents) => {
+          contents.on('console-message', (event) => messages.push(event.message));
+        };
+        app.on('web-contents-created', watch);
+        try {
+          const png = await (globalThis as unknown as { __maws_exports: { inspect(html: string): Promise<string> } }).__maws_exports.inspect(body);
+          return { png, executed: messages.filter((message) => message.startsWith('maws-authored-')), csp: messages.filter((message) => /Content Security Policy/i.test(message)) };
+        } finally {
+          app.off('web-contents-created', watch);
+        }
+      }, hostile);
+      expect(Buffer.from(capture.png, 'base64').subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+      expect(capture.executed).toEqual([]);
+      expect(capture.csp.length, 'the inline script and onerror handler are both refused by CSP').toBeGreaterThanOrEqual(2);
+    });
+
     const png = await exported('png');
     expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
     expect(png.readUInt32BE(16)).toBe(1280);

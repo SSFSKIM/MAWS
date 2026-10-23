@@ -490,7 +490,7 @@ export const MAWS_TOOLS = {
   artifact_screenshot: {
     title: 'Screenshot artifact',
     description:
-      'Capture a PNG of a MAWS HTML artifact, document or presentation without human GUI steps. Documents render their export layout in the actual governing system; use offsetY to inspect lower content. Presentations require slide (an id from artifact_read). HTML version is its ordinal; document and presentation version is a retained version id from artifact_read, otherwise the live state. Rendering is sandboxed with no network; without this tool, inspect the exported file. Names the artifact by id or handle and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.',
+      'Capture a PNG of a MAWS HTML artifact, document or presentation without human GUI steps; without this tool, inspect the exported file. Documents render their export layout in the actual governing system; use offsetY to inspect lower content. Presentations require slide (an id from artifact_read). HTML version is its ordinal; document and presentation version is a retained version id from artifact_read, otherwise the live state. Rendering is sandboxed with no network. Names the artifact by id or handle and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.',
     input: ArtifactScreenshotInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
