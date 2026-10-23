@@ -14,7 +14,9 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { editRowOf } from '../../composer/resubmit-seam'; // P2-F F-C1
 import { sendHumanPrompt, type HumanPromptResult } from '../../composer/submit/send-human-prompt';
-import { failureOf, useSetup } from '../../sessions/store';
+import { failureOf, isStarting, useSetup } from '../../sessions/store';
+import { TrustCard } from '../../sessions/TrustCard';
+import { continueSetup, releaseMessage } from '../../sessions/setup-actions';
 import { FIELD, PRIMARY, SECONDARY, QUIET } from '../../sessions/ui';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
@@ -86,6 +88,7 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
   const reply = useReply(serial, child, replies.track, onSending && ((text: string) => onSending(card, { text, destination: 'thread' })));
 
   const setupCard = useSetup((s) => s.cards.get(child));
+  const setupBusy = useSetup((s) => isStarting(s, child));
   const setupFailed = useSetup((s) => failureOf(s, child) !== null);
   const pending = useAttention((s) => selectPendingOf(s, child));
   const holder = record?.holder ?? null;
@@ -103,7 +106,14 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
         {!started && echo !== null && <Echo text={echo} />}
         {record !== null && <TranscriptSlot appSessionId={child} startAt={startAt} presentation="local" actions={actions} className="min-h-0 flex-1" />}
       </div>
-      {needs !== null && (
+      {setupCard?.kind === 'trust' ? (
+        <section aria-label="Trust this folder?" data-needs-you="setup-card" className="rounded-sm border border-warning px-2 py-1">
+          <TrustCard trust={setupCard.trust} busy={setupBusy}
+            onAccept={() => void continueSetup(child, { trust: 'accepted' }, setupCard.message)}
+            onStartWithoutTrusting={() => void continueSetup(child, { trust: 'declined' }, setupCard.message)}
+            onDecline={() => void releaseMessage(child, setupCard.message)} />
+        </section>
+      ) : needs !== null && (
         <div role="status" data-needs-you={needs.kind} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border border-warning px-2 py-1 text-ui-sm text-fg">
           {/* P2-E1 M5: a 10rem basis, so at the card's width the buttons wrap under the words rather than squeeze them */}
           <span className="min-w-0 grow basis-40">{needs.text}</span>
