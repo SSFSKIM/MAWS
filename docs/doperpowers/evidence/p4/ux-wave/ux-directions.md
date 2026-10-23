@@ -11,6 +11,7 @@ Each direction cites the observation it comes from (O1, O2, …, below). A direc
 - **D3. The default side view is a column of folded cards that floats over the main area** (O1). It belongs to the main area's right side rather than being a dedicated column: environment (machine, folder, branch, remote control), context, connectors (the MCP servers this session uses), each folded with a one-line summary.
 - **D4. Because the side view is cards, new capability arrives as a card** (O2). First candidate: an artifacts card below Connectors, the project's artifacts at a glance, with a way to look at another project's.
 - **D5. No Needs-you section; a waiting session is marked by a coloured dot on its own row** (O3). Claude Desktop has no gathered section and marks each session row instead (orange for waiting on the person, blue for running).
+- **D6. The sidebar's top carries the app's destinations** (O4). Today it holds only search above Needs you and the project tree. Following Claude Desktop (search, New, Projects, Artifacts, Customize, More): add Projects and a Customize page that gathers skills, plugins, marketplaces, connectors and the like, beside the existing Artifacts library. Lens 8 of the assessment found the same gap from the other side (l8-settings-02: plugins, skills and connectors open only as a modal over a session's composer, Settings has no section for them; it proposes a Customize tab reusing the library components, with a project picker).
 
 ## Open questions
 
@@ -50,3 +51,9 @@ Screenshot: `owner-notes/claude-side-panel-cards.png` (Image #7: Claude Desktop'
 > another: let's remove Need You. [Image #9] Claude App just replaces this with color dots on each sessions, and that seems better and efficient
 
 Screenshot: `owner-notes/claude-sidebar-status-dots.png` (Image #9: Claude Desktop's sidebar, sessions grouped by project with an orange or blue dot at the end of a row and no gathered section).
+
+### O4. The sidebar's top (2026-10-23, about 23:25Z)
+
+> they have 'customization' and Projects too on left top panel which I think is good too. Our left top panel has too-nothing, and adding 'Projects' and 'Customization' (loads Skills, Plugins, Marketplaces and more) could be good.[Image #10]
+
+Screenshot: `owner-notes/claude-sidebar-top-nav.png` (Image #10: Claude Desktop's sidebar top, search, New, Projects (beta), Artifacts, Customize and More, above the sessions grouped by project with status dots).
