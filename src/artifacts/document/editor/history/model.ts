@@ -197,10 +197,11 @@ export function authorOf(key: string, sessionTitle?: (appSessionId: string) => s
  * view, comparing the live document with the newest version at or before that view (`since`, null when none is: the
  * comparison is with nothing). Null when not offered, and when the artifact was never viewed.
  */
-export function newChangesBase(versions: readonly ArtifactVersion[], lastViewedAt: number | null): { since: ArtifactVersion | null } | null {
+export function newChangesBase(versions: readonly ArtifactVersion[], lastViewedAt: number | null, lastViewedSeq?: number | null): { since: ArtifactVersion | null } | null {
   if (lastViewedAt === null) return null;
-  const changed = versions.some((version) => version.at > lastViewedAt && version.actor.kind === 'session' && (version.kind === 'auto' || version.kind === 'turn'));
+  const unseen = (version: ArtifactVersion) => lastViewedSeq == null ? version.at > lastViewedAt : version.seq > lastViewedSeq;
+  const changed = versions.some((version) => unseen(version) && version.actor.kind === 'session' && (version.kind === 'auto' || version.kind === 'turn'));
   if (!changed) return null;
-  const since = versions.filter((version) => version.at <= lastViewedAt).sort((a, b) => b.at - a.at || b.seq - a.seq)[0] ?? null;
+  const since = versions.filter((version) => !unseen(version)).sort((a, b) => lastViewedSeq == null ? b.at - a.at || b.seq - a.seq : b.seq - a.seq || b.at - a.at)[0] ?? null;
   return { since };
 }

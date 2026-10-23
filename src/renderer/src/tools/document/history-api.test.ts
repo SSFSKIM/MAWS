@@ -47,6 +47,17 @@ function make(answers: Partial<Record<CommandName, unknown>> = {}, viewedBefore:
 afterEach(() => vi.useRealTimers());
 
 describe('the history api on A’s IPC', () => {
+  it('takes the seen revision and time from the committed host look, not the renderer clock', async () => {
+    const b = bridge({ 'artifacts.markViewed': undefined, 'artifacts.get': { artifact: { lastViewedAt: 1200, lastViewedSeq: 12 } } });
+    let at = 1000;
+    let seq = 10;
+    const api = createHistoryApi({ artifactId: A, ipc: b.ipc, host: { versionState: vi.fn(), attributions: vi.fn() }, viewedAt: { get: () => at, set: value => { at = value; } }, viewedSeq: { get: () => seq, set: value => { seq = value; } }, log: vi.fn() });
+    expect(await api.lastViewedSeq!()).toBe(10);
+    await api.markViewed();
+    expect(await api.lastViewedSeq!()).toBe(12);
+    expect(await api.lastViewedAt()).toBe(1200);
+  });
+
   it('reads the versions, a version’s state and the provenance between two seqs of this artifact', async () => {
     const { api, host, calls } = make({ 'artifacts.versions': { versions: [version] } });
     expect(await api.versions()).toEqual([version]);

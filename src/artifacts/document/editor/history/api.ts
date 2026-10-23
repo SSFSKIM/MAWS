@@ -12,6 +12,8 @@ export interface HistoryApi {
   versions(): Promise<ArtifactVersion[]>;
   /** When the owner last viewed the artifact (`Artifact.lastViewedAt`), null if never. */
   lastViewedAt(): Promise<number | null>;
+  /** The durable seen revision, independent of a version’s later metadata upgrade. */
+  lastViewedSeq?(): Promise<number | null>;
   /** A version's V2 state (`ArtifactHost.versionState`). */
   versionState(versionId: number): Promise<Uint8Array>;
   /** The merged provenance of the rows in [fromSeq, toSeq], an encoded ContentMap (`ArtifactHost.attributions`). */

@@ -31,6 +31,8 @@ export const ArtifactSchema = z.strictObject({
   createdAt: Time,
   updatedAt: Time,
   lastViewedAt: Time.nullable(),
+  /** Durable revision seen by the owner; absent for artifacts viewed before revision-based tracking. */
+  lastViewedSeq: z.number().int().nonnegative().optional(),
   pinned: z.boolean(),
   designSystemId: z.uuid().optional(),
   linkedPath: z.string().optional(),

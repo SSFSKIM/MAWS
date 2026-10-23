@@ -542,6 +542,10 @@ describe('ArtifactStore: versions (Decision Log 8)', () => {
     expect(store.listVersions(doc.id).map((v) => [v.kind, v.actor])).toEqual([['auto', agent]]);
     await store.markViewed(doc.id);
     expect(store.listVersions(doc.id)).toHaveLength(1);
+    const seen = store.listVersions(doc.id)[0].seq;
+    expect(store.get(doc.id)?.lastViewedSeq).toBe(seen);
+    reopen();
+    expect(store.get(doc.id)?.lastViewedSeq).toBe(seen);
   });
 
   it('names an existing version, any kind, keeping its origin, and renames it; an unknown one is notFound (Decision Log 37d)', async () => {

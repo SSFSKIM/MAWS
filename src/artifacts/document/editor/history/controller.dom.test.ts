@@ -122,6 +122,25 @@ describe('Name this version', () => {
 // return is a look, as the first showing is: the agent's changes since the last look raise the pill, and the look is
 // recorded, so a second away-edit is counted from the first return, not from the first showing.
 describe('a return to the document', () => {
+  it('offers the first away-edit before the agent finishes its turn', async () => {
+    let now = 1_000;
+    const host = new MemoryDocumentHost();
+    const history = new MemoryHistory(host, { now: () => now });
+    host.write((doc) => createDocument(doc, { id: 'main', title: 'Main', body: body('p1', 'First') }));
+    history.version('auto');
+    const handle = openMemoryHandle(host, { log: () => {} });
+    await whenSynced(handle);
+    cleanups.push(() => host.destroy(), () => history.destroy(), () => handle.close());
+    const controller = attach(handle, history);
+    await until(() => history.viewedAt !== null, 'first look');
+    now += 1_000;
+    host.write((doc) => void applyEdit(doc, [{ op: 'insert', after: 'p1', markdown: 'Mid-turn edit. ^p2' }]), AGENT);
+    await until(() => ynodeToPmnode(tabBody(handle.doc, 'main')!, schemaFor()).textContent.includes('Mid-turn'), 'live edit');
+    // No turn version yet: the return must capture and compare the live state itself.
+    history.returned();
+    await until(() => controller.getSnapshot().pill?.count === 1, 'first mid-turn change');
+  });
+
   it('raises the pill for each away-edit and records each look', async () => {
     let now = Date.now() - 60 * 60_000;
     const host = new MemoryDocumentHost();

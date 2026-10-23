@@ -106,6 +106,7 @@ export class DocumentTabState {
   private readonly stops: Array<() => void> = [];
   private rowRead = false;
   private viewedBefore: number | null = null;
+  private viewedSeqBefore: number | null = null;
   private holders = 0; // what still writes into the replica (`hold`)
   private readonly undo = new Map<YType, UndoManager>(); // P4-B3 M5: by tab body
   /** P4-B3 M6: the comment card host's id, the same for every body over this state, so a move keeps its draft. */
@@ -131,6 +132,7 @@ export class DocumentTabState {
       ipc: deps.ipc,
       host: deps.host,
       viewedAt: { get: () => this.viewedBefore, set: (at) => (this.viewedBefore = at) },
+      viewedSeq: { get: () => this.viewedSeqBefore, set: (seq) => (this.viewedSeqBefore = seq) },
       whenShown: () => this.whenShown,
       sessionTitle: deps.sessionTitle,
       log: deps.log,
@@ -240,7 +242,10 @@ export class DocumentTabState {
   }
 
   private adopt(row: ArtifactRow | null): void {
-    if (!this.rowRead) this.viewedBefore = row?.lastViewedAt ?? null;
+    if (!this.rowRead) {
+      this.viewedBefore = row?.lastViewedAt ?? null;
+      this.viewedSeqBefore = row?.lastViewedSeq ?? null;
+    }
     this.rowRead = true;
     if (this.disposed || !row) return;
     const placement = { ...(row.designSystemId ? { designSystemId: row.designSystemId } : {}), ...(row.spaceId ? { spaceId: row.spaceId } : {}) };

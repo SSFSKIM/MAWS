@@ -100,6 +100,13 @@ describe('a row', () => {
 });
 
 describe('See N new changes', () => {
+  it('uses the seen revision even when a seen auto version is upgraded with a later timestamp', () => {
+    const seen = v({ id: 1, seq: 10, at: at(12, 12), kind: 'turn', actor: { kind: 'session', appSessionId: SESSION } });
+    expect(newChangesBase([seen], at(12, 10), 10)).toBeNull();
+    const next = v({ id: 2, seq: 11, at: at(12, 13), kind: 'auto', actor: { kind: 'session', appSessionId: SESSION } });
+    expect(newChangesBase([seen, next], at(12, 10), 10)).toEqual({ since: seen });
+  });
+
   const session = { kind: 'session', appSessionId: SESSION } as const;
   it('is offered for an automatic or turn version by a session after the last view, from the version at that view', () => {
     const seen = v({ at: at(12, 9) });

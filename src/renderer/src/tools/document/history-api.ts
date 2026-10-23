@@ -27,6 +27,7 @@ export interface HistoryApiDeps {
   host: Pick<ArtifactHost, 'versionState' | 'attributions'>;
   /** The owner's last view of the artifact as the tab holds it (read from the row before this showing's view). */
   viewedAt: { get(): number | null; set(at: number): void };
+  viewedSeq?: { get(): number | null; set(seq: number): void };
   /** Settles once the document is first on screen: the rail's view (`markViewed`) waits for it (D10: "on open"). */
   whenShown?(): Promise<void>;
   sessionTitle?(appSessionId: string): string | undefined;
@@ -35,7 +36,7 @@ export interface HistoryApiDeps {
   extraChanges?: HistoryApi['extraChanges'];
 }
 
-export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, sessionTitle, log, extraChanges /* P3-E */ }: HistoryApiDeps): HistoryApi {
+export function createHistoryApi({ artifactId, ipc, host, viewedAt, viewedSeq, whenShown, sessionTitle, log, extraChanges /* P3-E */ }: HistoryApiDeps): HistoryApi {
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await ipc.invoke(name, input);
     if (!result.ok) throw new Error(result.error.message);
@@ -45,6 +46,7 @@ export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, s
   const api: HistoryApi = {
     versions: async () => (await call('artifacts.versions', { artifactId })).versions,
     lastViewedAt: async () => viewedAt.get(),
+    ...(viewedSeq && { lastViewedSeq: async () => viewedSeq.get() }),
     versionState: (versionId) => host.versionState(artifactId, versionId),
     attributions: (fromSeq, toSeq) => host.attributions(artifactId, fromSeq, toSeq),
     saveVersion: ({ label, note }) => call('artifacts.saveVersion', { artifactId, label, ...(note !== undefined ? { note } : {}) }),
@@ -56,7 +58,11 @@ export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, s
     markViewed: async () => {
       await whenShown?.();
       await call('artifacts.markViewed', { artifactId });
-      viewedAt.set(Date.now());
+      if (viewedSeq) {
+        const { artifact } = await call('artifacts.get', { artifactId });
+        if (artifact?.lastViewedSeq !== undefined) viewedSeq.set(artifact.lastViewedSeq);
+        viewedAt.set(artifact?.lastViewedAt ?? Date.now());
+      } else viewedAt.set(Date.now());
     },
     onVersions: (listener) => {
       let timer: ReturnType<typeof setTimeout> | null = null;

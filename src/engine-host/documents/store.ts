@@ -281,7 +281,9 @@ export class ArtifactStore {
 
   get(artifactId: string, options: { includeDeleted?: boolean } = {}): Artifact | null {
     const row = this.entity(artifactId);
-    return row && (options.includeDeleted || row.deletedAt === null) ? toArtifact(row) : null;
+    if (!row || (!options.includeDeleted && row.deletedAt !== null)) return null;
+    const seen = this.storage.getMeta(`viewed-seq:${artifactId}`);
+    return { ...toArtifact(row), ...(seen !== null && { lastViewedSeq: Number(seen) }) };
   }
 
   revision(artifactId: string): number {
@@ -1081,6 +1083,7 @@ export class ArtifactStore {
     await this.service.inBatch(() => {
       if (isDocKind(row.kind)) this.versionInFrame(row, { kind: 'auto', actor: this.lastWriter(artifactId) });
       this.storage.db.prepare('UPDATE artifacts SET lastViewedAt = ? WHERE id = ?').run(this.now(), artifactId);
+      this.storage.setMeta(`viewed-seq:${artifactId}`, String(this.service.revision(artifactId)));
     });
     this.emit(artifactId, 'updated');
   }
