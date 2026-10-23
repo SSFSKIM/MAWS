@@ -226,7 +226,7 @@ export const ArtifactScreenshotInputSchema = z.strictObject({
 });
 export type ArtifactScreenshotInput = z.infer<typeof ArtifactScreenshotInputSchema>;
 // P3-A (M6) start
-export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema });
+export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema, artifact: z.string().min(1).optional() });
 // P3-B's document read fields (ledger X25, the architect 2026-10-13): a tab, a block id to start from, how many blocks,
 // and the changes since a revision. B's reader serves them for a document; A's generic reader ignores them. A owns them
 // here, and B's `document-tools.ts` imports this export (it keeps no copy of its own; Decision Log 44d).
@@ -384,6 +384,7 @@ export type ArtifactScreenshotResult = z.infer<typeof ArtifactScreenshotResultSc
 // P3-A (M6) start
 export const ArtifactDescribeTypeResultSchema = z.strictObject({
   status: z.literal('described'), kind: ArtifactKindSchema, guide: z.string(), format: z.string(),
+  artifactId: z.uuid().optional(), home: z.string().optional(),
   designSystem: z.string().optional(), // a document, presentation or design: the governing design system's DESIGN.md (Decision Log 42)
 });
 export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
@@ -488,7 +489,7 @@ export const MAWS_TOOLS = {
   artifact_describe_type: {
     title: 'Describe artifact kind',
     description:
-      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs.",
+      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact.",
     input: ArtifactDescribeTypeInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it

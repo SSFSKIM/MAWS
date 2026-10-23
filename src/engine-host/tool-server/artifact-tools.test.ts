@@ -303,6 +303,25 @@ describe('artifact_list', () => {
 });
 
 describe('artifact_describe_type', () => {
+  it('inspects an existing artifact after a move, honoring explicit, Space and owner defaults rather than a new-create default', async () => {
+    const owner = await w.store.create({ kind: 'design_system', title: 'Owner' }, HUMAN);
+    const brand = await w.store.create({ kind: 'design_system', title: 'Space brand' }, HUMAN);
+    const explicit = await w.store.create({ kind: 'design_system', title: 'Explicit' }, HUMAN);
+    const space = await w.store.createSpace({ name: 'Launch' });
+    await w.store.setDefaults({ owner: owner.id, spaces: { [space.id]: brand.id } });
+    w.store.registerDesignSystemContext(async (system) => `LAW:${system.title}`);
+    const deck = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck', handle: 'deck' })));
+    const describe = () => artifactDescribeTypeTool(w.deps()).call({ kind: 'presentation', artifact: 'deck' }, w.ctx());
+    expect(jsonOf(await describe())).toMatchObject({ artifactId: deck.artifactId, designSystem: 'LAW:Owner', home: 'General' });
+    await w.store.update(deck.artifactId, { spaceId: space.id });
+    expect(jsonOf(await describe())).toMatchObject({ artifactId: deck.artifactId, designSystem: 'LAW:Space brand', home: 'Launch' });
+    await w.store.update(deck.artifactId, { designSystemId: explicit.id });
+    expect(jsonOf(await describe())).toMatchObject({ designSystem: 'LAW:Explicit' });
+    const wrong = await artifactDescribeTypeTool(w.deps()).call({ kind: 'document', artifact: deck.artifactId }, w.ctx());
+    expect(wrong.isError).toBe(true);
+    expect(textOf(wrong)).toContain('presentation');
+  });
+
   it('returns the kind’s guide and format reference, placeholders included', async () => {
     for (const kind of ['html', 'document', 'presentation'] as const) {
       expect(ArtifactDescribeTypeResultSchema.parse(jsonOf(await artifactDescribeTypeTool().call({ kind }, w.ctx())))).toEqual({ status: 'described', kind, ...KIND_GUIDES[kind] });
