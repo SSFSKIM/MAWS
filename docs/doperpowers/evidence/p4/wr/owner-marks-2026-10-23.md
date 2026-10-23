@@ -82,3 +82,6 @@ Verbatim from the owner's file `Sittings on 80 candidates.md`; the candidates ar
 78 fix — As I know, we already fixed it. Like we can directly export to Notion, right?
 79 fix — I think we addressed this?
 80 keep — Just delete the, "you approved the connector in this session, as for any tool."
+## The owner's taste, stated 2026-10-23 for the UX wave (one reference, not a rubric)
+
+"Human has to do least work as possible. They want to delegate things to agents. Human having to manually do things for agent is a UX friction (like open X for ~, do Y for ~..) Another negativity could be Unnecessarily 조잡한 design. Efficient use of Space and well organized an cleaned up UI is important. Componenets and texts that does not claim their space or could be placed/structured better for efficiency of space is what to improve." The owner adds: take these as one reference, not absolute criteria; the agents' observation matters more.
