@@ -314,12 +314,20 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await inMain.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => order(page, id)).toEqual(before);
 
-  // WR #38: a real held pointer gesture also reorders, with no internal IDs announced.
-  const firstThumb = (await thumbs(inMain).nth(0).boundingBox())!;
-  const secondThumb = (await thumbs(inMain).nth(1).boundingBox())!;
-  await drag(page, { x: firstThumb.x + firstThumb.width / 2, y: firstThumb.y + firstThumb.height / 2 }, { x: secondThumb.x + secondThumb.width / 2, y: secondThumb.y + secondThumb.height / 2 });
-  await expect.poll(() => order(page, id)).toEqual([before[1], before[0], ...before.slice(2)]);
-  await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: /dropped at position 2/ })).toHaveCount(1);
+  // WR #38: a held pointer gesture reorders; Undo works by click at human timing, and by keyboard.
+  const pointerReorder = async () => {
+    const firstThumb = (await thumbs(inMain).nth(0).boundingBox())!;
+    const secondThumb = (await thumbs(inMain).nth(1).boundingBox())!;
+    await drag(page, { x: firstThumb.x + firstThumb.width / 2, y: firstThumb.y + firstThumb.height / 2 }, { x: secondThumb.x + secondThumb.width / 2, y: secondThumb.y + secondThumb.height / 2 });
+    await expect.poll(() => order(page, id)).toEqual([before[1], before[0], ...before.slice(2)]);
+    await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: /dropped at position 2/ })).toHaveCount(1);
+  };
+  await pointerReorder();
+  // Deliberately model the next human click, not a zero-delay click inside dnd-kit's 50ms guard.
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  await inMain.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => order(page, id)).toEqual(before);
+  await pointerReorder();
   await page.keyboard.press('Meta+z');
   await expect.poll(() => order(page, id)).toEqual(before);
 

@@ -280,6 +280,31 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   });
 });
 
+test('WR #46: an open history card receives committed human and automatic agent versions without reopening', async () => {
+  channel = mkdtempSync(join(tmpdir(), 'maws-deck-history-'));
+  const page = await ready({ MAWS_PRESENTATIONS_HISTORY: channel });
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Live history' });
+  const id = artifact.id;
+  await seam(page, 'seed', id, DRAFT);
+  const tab = await openFromLibrary(page, 'Live history', id);
+  await headerAction(page, 'Version history');
+  const rail = tab.getByRole('complementary', { name: 'Version history' });
+  await expect(rail).toBeVisible();
+  const listed = async () => (await ok<{ versions: { id: number }[] }>(page, 'artifacts.versions', { artifactId: id })).versions;
+  const reaches = async (count: number) => {
+    await expect(async () => {
+      for (const fold of await rail.getByRole('button', { name: /^\d+ more versions?$/ }).all()) if (await fold.getAttribute('aria-expanded') === 'false') await fold.click();
+      await expect(rail.getByRole('button', { name: /^Version / })).toHaveCount(count);
+    }).toPass({ timeout: 15_000 });
+  };
+  await reaches((await listed()).length);
+  await seam(page, 'edit', id, { op: 'setNotes', slideId: 's1', text: 'A human update.' });
+  await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Human update' });
+  await expect(rail.getByRole('button', { name: /^Version Human update by You/ })).toBeVisible();
+  expect(await hostWrite({ cmd: 'write', artifactId: id, session: '00000000-0000-4000-8000-0000000000a7', edit: { op: 'setNotes', slideId: 's2', text: 'An agent update.' } })).toEqual(expect.objectContaining({ ok: true }));
+  await reaches((await listed()).length);
+});
+
 test('See N new changes: an agent session’s write between two views is offered as a pill, opening the changes since the last view', async () => {
   test.setTimeout(120_000);
   channel = mkdtempSync(join(tmpdir(), 'maws-deck-history-'));

@@ -196,7 +196,7 @@
   height: min(80%, 520px);
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--bg-raised);
   box-shadow: var(--shadow-float);
 }
