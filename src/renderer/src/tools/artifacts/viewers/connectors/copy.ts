@@ -118,7 +118,7 @@ export const SERVERS_COPY = {
   savedUnavailable: 'MAWS couldn’t read its saved connections (its encrypted storage isn’t available).',
   withdrawnUnattributed: 'An unreadable saved MAWS connection was forgotten, so until MAWS relaunches it won’t reach a server without its own MAWS sign-in. Connect signs a server in now; one that needs no sign-in works again after a relaunch.',
   transport: (transport: 'stdio' | 'http') => (transport === 'http' ? 'HTTP' : 'local command'),
-  origin: (scope: 'user' | 'local', path: string) => `${scope === 'user' ? 'User' : 'Project-local'} config · ${path}`,
+  origin: (scope: 'user' | 'local' | 'app', path: string) => `${scope === 'app' ? 'MAWS' : scope === 'user' ? 'User' : 'Project-local'} config · ${path}`,
   engineOnly: (why: Extract<ConnectorServerRow, { kind: 'engineOnly' }>['why']) => `Session only: ${ENGINE_ONLY[why]}`,
   // `unattributed`: the answer's withdrawnUnattributed (a withdrawn row may be paused by it rather than Disconnected)
   connection(row: SourceRow, unattributed = false): string {
@@ -141,7 +141,7 @@ export const SERVERS_COPY = {
   refused: (why: 'stale' | 'busy' | 'capacity' | 'stopped') => (why === 'busy' ? 'Already in progress' : why === 'capacity' ? 'Too many MAWS connections are busy; try again' : why === 'stopped' ? 'MAWS is quitting' : 'This row changed; it was read again'),
   disconnecting: 'Disconnecting…',
   forgetting: 'Forgetting…',
-  savedRow: 'Saved MAWS connection, not usable until a session reports this server again',
+  savedRow: 'Saved MAWS connection, not currently available to this page',
   unreadableRow: 'Unreadable saved MAWS connection',
   unreadableNote: 'It can’t be read, so MAWS won’t guess whose it is. Forget it to remove it.',
   retiringRow: (server: string | undefined) => (server === undefined ? 'MAWS connection being disconnected' : `${server} · MAWS connection being disconnected`),

@@ -130,7 +130,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   table.startSampling();
   // C3 end
   // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when main's client goes
-  connectors = registerConnectors(on, emit, client, { sessions: table, store, datasetRefresh }); // E3: its registry
+  connectors = registerConnectors(on, emit, client, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, environment: process.env } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   const rows = table;

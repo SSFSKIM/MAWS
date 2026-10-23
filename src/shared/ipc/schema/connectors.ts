@@ -145,14 +145,14 @@ export const DIRECT_REASONS = ['source', 'credential', 'unauthorized', 'connecti
 const Reason = z.enum(DIRECT_REASONS);
 export const DirectCredentialSchema = z.strictObject({ connectionId: z.uuid(), credentialEpoch: CredentialEpoch, accessToken: z.string().min(1).max(16_384), expiresAt: Time.optional() });
 export const DirectSourceSchema = z.strictObject({
-  directory: Directory, // the candidate directory it was observed in (the engine's attested spawn cwd)
+  directory: Directory, // observed source: engine cwd; configured delivery: host-private scope selector
   sourceId: SourceId,
   generation: Generation,
   server: ConnectorToolRefSchema.shape.server,
-  scope: z.enum(['user', 'local']),
+  scope: z.enum(['user', 'local', 'app']),
   transport: z.enum(['stdio', 'http']),
   path: z.string().min(1).max(4096), // the config file
-  entryPath: z.array(z.string().max(4096)).max(8), // the JSON location in it
+  entryPath: z.array(z.string().max(4096)).max(8), // JSON location; app settings' unique-name array uses a name= selector
   observedAt: z.iso.datetime(),
   resourceUrl: z.string().min(1).max(8192).optional(), // http: the resource a credential is bound to
 });
@@ -279,7 +279,7 @@ const Connection = z.strictObject({
   why: z.enum(['store', 'unknown', 'duplicate']).optional(),
   disconnecting: Disconnecting.optional(),
 });
-const Origin = { server: ConnectorToolRefSchema.shape.server, scope: z.enum(['user', 'local']), path: z.string().min(1).max(4096) };
+const Origin = { server: ConnectorToolRefSchema.shape.server, scope: z.enum(['user', 'local', 'app']), path: z.string().min(1).max(4096) };
 export const ConnectorServerRowSchema = z.discriminatedUnion('kind', [
   // a verified source the declared or granted tools select: HTTP coalesced by its saved identity, stdio by its source
   z.strictObject({

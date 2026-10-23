@@ -14,7 +14,7 @@ import type { DirectSource } from '@shared/ipc/schema/connectors';
 export interface ConnectorOAuthIdentity {
   readonly requestUrl: string;
   readonly server: string;
-  readonly scope: 'user' | 'local';
+  readonly scope: 'user' | 'local' | 'app';
   readonly configPath: string;
   readonly entryPath: readonly string[];
 }

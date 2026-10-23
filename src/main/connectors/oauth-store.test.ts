@@ -74,13 +74,14 @@ beforeEach(() => {
 afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
 describe('ConnectorOAuthStore', () => {
-  it('a saved grant reads back whole after a relaunch, sealed on disk, owner-only', async () => {
+  it.each(['user', 'app'] as const)('a saved %s grant reads back whole after a relaunch, sealed on disk, owner-only', async (scope) => {
+    const origin = identity(scope === 'app' ? { scope, configPath: '/app/settings.json', entryPath: ['engine', 'mcpServers', 'name=metrics'] } : {});
     const first = store();
-    const saved = await first.save(first.claim(A), identity(), grant());
+    const saved = await first.save(first.claim(A), origin, grant());
     expect(saved).toMatchObject({ connectionId: A, savedAt: 1_700_000_100_000 });
 
     const relaunched = store();
-    expect(await relaunched.read(A)).toEqual({ ...grant(), connectionId: A, identity: identity(), savedAt: 1_700_000_100_000 });
+    expect(await relaunched.read(A)).toEqual({ ...grant(), connectionId: A, identity: origin, savedAt: 1_700_000_100_000 });
     expect(sealedFiles()).toEqual([`${A}.sealed`]);
     const onDisk = readFileSync(join(dir, `${A}.sealed`), 'utf8');
     for (const secret of [ACCESS, REFRESH, CLIENT_SECRET, 'tenant=7', '.claude.json']) expect(onDisk).not.toContain(secret);
