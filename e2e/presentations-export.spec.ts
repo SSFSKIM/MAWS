@@ -32,6 +32,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { benchDeckFiles, benchShapes } from '../src/artifacts/slides/fixtures/bench';
 import { PerfSeam } from './support/document-scale';
+import { asDocumentReplay } from './support/document-replay';
+import { allowNext, idle, mcpCalls, mcpResultOf, PASS3, replay, scene, show } from './support/maws-tools';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { normalized, wordsAlong, wordsOfBox, type Extent, type Word } from './support/text-run';
 
@@ -137,6 +139,55 @@ const offsetOf = (xml: string, name: string) => {
   const m = /<a:off x="(-?\d+)" y="(-?\d+)"\/>\s*<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(xml.slice(at));
   return m ? m.slice(1, 5).map(Number) : null;
 };
+
+test('artifact_screenshot renders a named slide through the real export bridge and refuses an absent slide', async () => {
+  test.setTimeout(180_000);
+  const fixture = asDocumentReplay(`${PASS3}/p1-maws-artifacts.jsonl`, [
+    { name: 'artifact_create', input: { id: 'inspection-deck', kind: 'presentation', title: 'Inspection deck', files: {
+      'project/deck.json': JSON.stringify({ v: 4, title: 'Inspection deck', order: ['only'], cover: 'only' }),
+      'project/slides/only.html': '<section id="only" style="background:#123456"></section>',
+    } } },
+    { name: 'artifact_screenshot', input: { id: 'inspection-deck', slide: 'only', width: 640, height: 360 } },
+    { name: 'artifact_screenshot', input: { id: 'inspection-deck', slide: 'only', width: 960, height: 540 } },
+    { name: 'artifact_screenshot', input: { id: 'inspection-deck', slide: 'absent' } },
+    { name: 'artifact_read', input: { artifact: 'inspection-deck' } },
+  ], 'wr-merged-slide-inspection');
+  await scene({ titles: ['Deck screenshot integration'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    await replay(s, id, fixture);
+    // The recording has two file-tool permissions beside its five maws calls.
+    for (let i = 0; i < 7; i++) await allowNext(s, id);
+    await idle(s, id);
+    const rows = s.journal(id);
+    const calls = mcpCalls(rows);
+    const created = mcpResultOf(rows, calls[0]!.requestId)!;
+    expect(created.isError).toBeUndefined();
+    for (const [index, width, height] of [[1, 640, 360], [2, 960, 540]]) {
+      const result = mcpResultOf(rows, calls[index!]!.requestId)!;
+      expect(result.isError, JSON.stringify(result.content)).toBeUndefined();
+      const image = result.content.find((block) => block.type === 'image');
+      if (!image || image.type !== 'image') throw new Error('screenshot returned no image');
+      expect(image.mimeType).toBe('image/png');
+      const bytes = Buffer.from(image.data, 'base64');
+      expect(pngSize(bytes)).toEqual([width, height]);
+      const text = result.content.find((block) => block.type === 'text');
+      if (!text || text.type !== 'text') throw new Error('screenshot returned no metadata');
+      expect(JSON.parse(text.text)).toMatchObject({ status: 'captured', kind: 'presentation', slide: 'only', width, height, bytes: bytes.length });
+      const centre = await s.maws.app.evaluate(({ nativeImage }, base64) => {
+        const image = nativeImage.createFromBuffer(Buffer.from(base64, 'base64'));
+        const { width, height } = image.getSize();
+        const bitmap = image.toBitmap();
+        const at = (Math.floor(height / 2) * width + Math.floor(width / 2)) * 4;
+        return [bitmap[at + 2], bitmap[at + 1], bitmap[at]];
+      }, image.data);
+      expect(centre).toEqual([18, 52, 86]); // Authored slide pixels, not a blank capture or a mock PNG.
+    }
+    const missing = mcpResultOf(rows, calls[3]!.requestId)!;
+    expect(missing.isError).toBe(true);
+    expect(missing.content).toEqual([expect.objectContaining({ type: 'text', text: expect.stringContaining('No slide absent') })]);
+  });
+});
 
 test('every format through the export service: PPTX in three variants, PDF, standalone HTML, For Claude, PNG', async () => {
   test.setTimeout(300_000);
