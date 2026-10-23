@@ -74,7 +74,17 @@ async function pageInAndReturn(hub: HubDouble, view: Locator): Promise<void> {
   await expect
     .poll(
       async () => {
-        await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
+        await scroller.evaluate(async (el) => {
+          el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+          if (el.scrollTop !== 0) {
+            // The list's capture listener reads this scroll before the helper can issue its inverse command.
+            await new Promise<void>((resolve) => {
+              el.addEventListener('scroll', () => resolve(), { once: true });
+              el.scrollTo({ top: 0 });
+            });
+          } else el.scrollTo({ top: 0 });
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
         return first.count();
       },
       { timeout: 15_000 },

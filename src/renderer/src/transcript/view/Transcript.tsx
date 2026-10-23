@@ -115,17 +115,17 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     if (away) changeFollow(false);
     return away;
   }, [changeFollow]);
-  // Unwitnessed movement cannot release following: clamps, replacements and remeasurement move the offset without
-  // a reader. Scrollbar/key input witnesses actual movement; upward wheel/touch intent releases immediately below.
-  const readScroll = useCallback(() => {
+  // Movement releases only with a witness and a real gap: a key may be consumed elsewhere while this list clamps
+  // to its new end. Upward wheel/touch intent releases immediately below.
+  const readScroll = useCallback((measuredSize: number) => {
     const element = scrollRef.current;
     if (!element) return;
-    if ((scrollbarPointer.current !== null || movementWitness.current) && element.scrollTop < known.current.offset) changeFollow(false);
+    if ((scrollbarPointer.current !== null || movementWitness.current) && element.scrollTop < known.current.offset) leaveIfAway(measuredSize);
     const movedDown = element.scrollTop > known.current.offset;
     const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - SCROLL_END_THRESHOLD;
     remember();
     if (movedDown && reachedEnd) changeFollow(true);
-  }, [changeFollow, remember]);
+  }, [changeFollow, leaveIfAway, remember]);
   // P2-C end
   // A row's size as last measured, by id, which stays its first guess (W8): the virtualiser keeps a measurement only
   // where it differs from the guess, so a group measured closed at exactly its closed guess would be guessed at the open
@@ -138,7 +138,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const measure = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Parameters<typeof measureElement>[2]) => {
     // Notice a return or browser clamp to the DOM end before measurement moves it or anchoring replaces the offset.
     const scroller = scrollRef.current;
-    if (scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= SCROLL_END_THRESHOLD) readScroll();
+    if (scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= SCROLL_END_THRESHOLD) readScroll(instance.getTotalSize());
     const size = measureElement(element, entry, instance);
     const id = element.getAttribute('data-row-id');
     if (id !== null) measured.current.set(id, size);
@@ -163,7 +163,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     scrollEndThreshold: -1,
     // Anchoring and explicit row jumps remain the virtualiser's; remember their clamped DOM offset immediately.
     scrollToFn: (offset, options, instance) => {
-      readScroll();
+      readScroll(instance.getTotalSize());
       elementScroll(offset, options, instance);
       remember();
     },
@@ -177,7 +177,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const element = scrollRef.current;
     if (!element) return;
     remember();
-    const scrolled = () => { readScroll(); };
+    const scrolled = () => { readScroll(virtualizer.getTotalSize()); };
     // Growth before an input belongs to that input's current end, not an obsolete end from an earlier gesture.
     const observeEnd = () => { known.current.end = Math.max(0, element.scrollHeight - element.clientHeight); };
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -185,7 +185,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       movementWitness.current = true;
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
-        readScroll();
+        readScroll(virtualizer.getTotalSize());
         movementWitness.current = false;
         settleTimer = undefined;
       }, INPUT_SCROLL_SETTLE_MS);
@@ -200,7 +200,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const pointerEnd = (event: PointerEvent) => {
       if (scrollbarPointer.current !== event.pointerId) return;
       armMovement(); // pointerup can precede the final native offset, not just its scroll event
-      readScroll();
+      readScroll(virtualizer.getTotalSize());
       scrollbarPointer.current = null;
     };
     const wheel = (event: WheelEvent) => {
@@ -223,7 +223,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       observeEnd();
       armMovement(); // body/editor focus and nested containment do not tell us which list the browser will scroll
     };
-    const observer = new ResizeObserver(readScroll);
+    const observer = new ResizeObserver(() => { readScroll(virtualizer.getTotalSize()); });
     observer.observe(element);
     element.addEventListener('scroll', scrolled, { passive: true, capture: true });
     element.addEventListener('pointerdown', pointerDown, { passive: true, capture: true });
@@ -247,7 +247,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       element.removeEventListener('touchmove', touchMove, true);
       window.removeEventListener('keydown', key, true);
     };
-  }, [readScroll, releaseFollow, remember]);
+  }, [readScroll, releaseFollow, remember, virtualizer]);
 
   // Follow the committed DOM end with an absolute offset, not an index target that can chase later measurements.
   // This command accounts for current sizes, retiring any anchor compensation it already absorbed. Releasing follow
@@ -292,7 +292,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       else virtualizer.scrollToIndex(index, { align: 'start', behavior: 'instant' });
       return;
     }
-    readScroll();
+    readScroll(virtualizer.getTotalSize());
     if (followingRef.current) pinEnd();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per row list, reading the follow mode of the moment
   }, [rows]);
@@ -327,13 +327,13 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const changed = height !== null && next !== height;
       height = next;
       if (changed) {
-        readScroll();
+        readScroll(virtualizer.getTotalSize());
         if (followingRef.current) pinEnd();
       }
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [pinEnd, readScroll]);
+  }, [pinEnd, readScroll, virtualizer]);
 
   // Measured growth can happen without a new rows array (disclosures, fonts, asynchronous Markdown). Follow the
   // committed sizer only while the reader follows; virtual-core keeps ordinary anchoring independent of this policy.
@@ -346,13 +346,13 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const changed = height === null || next !== height;
       height = next;
       if (changed) {
-        readScroll();
+        readScroll(virtualizer.getTotalSize());
         if (followingRef.current) pinEnd();
       }
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [pinEnd, readScroll]);
+  }, [pinEnd, readScroll, virtualizer]);
 
   useImperativeHandle(handle, () => ({
     scrollToIndex: (index, align) => {

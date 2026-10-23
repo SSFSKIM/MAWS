@@ -197,6 +197,34 @@ for (const key of ['a', 'Enter']) {
   });
 }
 
+for (const origin of ['consumed-editor', 'other-pane'] as const) {
+  for (const report of [false, true]) {
+    for (const pendingSizer of [false, true]) {
+      it(`a ${origin} key and ${pendingSizer ? 'pending-sizer' : 'committed'} shrink keep following through ${report ? 'native scroll' : 'witness expiry'}`, async () => {
+        const s = await scene(false, true);
+        const editor = document.createElement('textarea');
+        Object.defineProperties(editor, { scrollHeight: { value: 1000 }, clientHeight: { value: 200 }, scrollTop: { value: 500 } });
+        (origin === 'consumed-editor' ? s.scroller.querySelector('[data-index]')! : s.scroller.parentElement!).appendChild(editor);
+        act(() => { fireEvent.keyDown(editor, { key: origin === 'consumed-editor' ? 'PageUp' : 'Home' }); });
+        if (pendingSizer) s.freezeDOMSize();
+        s.resizeRow('last', -40);
+        if (pendingSizer) s.move(-40, false); // the native clamp has reached the measured end before the smaller sizer commits
+        else void s.scroller.scrollTop; // let the browser clamp to its newly committed maximum
+        if (report) act(() => { fireEvent.scroll(s.scroller); });
+        else await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+        expect(s.handle.current!.following).toBe(true);
+        expect(s.changed.mock.calls).toEqual([]);
+        if (pendingSizer) s.commitDOMSize();
+        s.reportContentSize();
+        s.resizeRow('last', 40);
+        s.reportContentSize();
+        expect(s.handle.current!.following).toBe(true);
+        expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
+      });
+    }
+  }
+}
+
 it('a quiet keyboard witness expires before a later unwitnessed clamp', async () => {
   const s = await scene();
   act(() => { fireEvent.keyDown(document.body, { key: 'PageUp' }); });
