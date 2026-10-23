@@ -543,7 +543,9 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
   await pick('For Claude (zip)');
   await appears('Quarterly.zip', isZip);
   await pick('PNG (all slides)');
-  for (const name of ['slide-01.png', 'slide-02.png', 'slide-03.png']) await appears(`Quarterly slides/${name}`, (bytes) => bytes.length > 24 && pngSize(bytes).join('x') === '1920x1080');
+  const images = ['slide-01.png', 'slide-02.png', 'slide-03.png'];
+  for (const name of images) await appears(`Quarterly slides/${name}`, (bytes) => bytes.length > 24 && pngSize(bytes).join('x') === '1920x1080');
+  expect(new Set(images.map((name) => readFileSync(savedFile(`Quarterly slides/${name}`)).toString('base64'))).size).toBe(3);
 });
 
 // ---- P4-B2 D19: a named Google Fonts face, fetched once and drawn offline ----
