@@ -28,7 +28,8 @@ const human: Actor = { kind: 'human' };
 const SESSION = 'app-1';
 type Request = Record<string, unknown> & { subtype: string };
 type Envelope = { subtype: 'success'; response: unknown } | { subtype: 'error'; error: string };
-const ROWS = [{ t: 1, v: 107 }, { t: 2, v: 110 }];
+const ROW_SENTINEL = 'ROW_PAYLOAD_SENTINEL_107';
+const ROWS = [{ t: 1, v: ROW_SENTINEL }, { t: 2, v: 'ROW_PAYLOAD_SENTINEL_110' }];
 const success = (structuredContent: unknown): Envelope => ({ subtype: 'success', response: { content: JSON.stringify(structuredContent), structuredContent } });
 
 // The engine's stdin, each control request answered on a microtask: mcp_status with the fixture server, mcp_call as
@@ -154,8 +155,8 @@ describe('ConnectorCalls with a dataset sink', () => {
     expect(take(operationId)).toEqual(publishing(operationId));
     await announced(operationId, 2);
     const ended = take(operationId);
-    expect(ended).toEqual({ outcome: null, dataset: { status: 'dataset', artifactId, id: 'live', revision: store.revision(artifactId), columns: [{ name: 't', type: 'number' }, { name: 'v', type: 'number' }], rows: 2 } });
-    expect(JSON.stringify(ended)).not.toContain('107'); // no row value leaves the host
+    expect(ended).toEqual({ outcome: null, dataset: { status: 'dataset', artifactId, id: 'live', revision: store.revision(artifactId), columns: [{ name: 't', type: 'number' }, { name: 'v', type: 'string' }], rows: 2 } });
+    expect(JSON.stringify(ended)).not.toContain(ROW_SENTINEL); // no row value leaves the host
     expect(store.revision(artifactId)).toBeGreaterThan(revision);
     expect(store.listAssets(artifactId)).toHaveLength(1);
     expect(live()).toMatchObject({ rows: 2, updated: { by: human }, state: { status: 'ok' } });
