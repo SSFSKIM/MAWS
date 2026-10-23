@@ -5,7 +5,6 @@ import type { ArtifactStore } from '../documents/store';
 // Under the bridge's 10 s IPC timeout, leaving time to answer from the current committed store on timeout.
 const SEED_WAIT_MS = 8_000;
 const gates = new WeakMap<ArtifactStore, Promise<void>>();
-const ready = Promise.resolve();
 
 /** Installs the shared bounded wait; returns the actual seed's completion, failure-open and logged once. */
 export function holdForSeed(store: ArtifactStore, seeded: Promise<unknown>, log: (line: string) => void): Promise<void> {
@@ -28,5 +27,5 @@ export function holdForSeed(store: ArtifactStore, seeded: Promise<unknown>, log:
   );
 }
 
-/** An unheld or already settled store adds no timer or fixed delay. */
-export const seedSettled = (store: ArtifactStore): Promise<void> => gates.get(store) ?? ready;
+/** Only a pending gate: callers must not yield before admitting a request on an unheld or already settled store. */
+export const seedSettled = (store: ArtifactStore): Promise<void> | undefined => gates.get(store);

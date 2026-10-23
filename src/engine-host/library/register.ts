@@ -30,8 +30,11 @@ export function registerLibraryReads(on: HostOn, documents: LibraryDocuments | n
   const serve = <N extends LibraryHostCommand>(name: N, handler: (input: CommandInput<N>, documents: LibraryDocuments) => Promise<CommandOutput<N>>) =>
     on(name, async (input) => {
       if (!documents) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
-      // Parallel waits keep the combined readiness bound under the bridge's 10 s timeout.
-      await Promise.all([afterImport?.(documents.store), seedSettled(documents.store)]);
+      // Parallel waits keep the combined readiness bound under the bridge's 10 s timeout. Without a pending seed,
+      // preserve the original import-only scheduling rather than introducing an extra microtask barrier.
+      const seed = seedSettled(documents.store);
+      if (seed) await Promise.all([afterImport?.(documents.store), seed]);
+      else await afterImport?.(documents.store);
       try {
         return await handler(input, documents);
       } catch (error) {

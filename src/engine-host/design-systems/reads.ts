@@ -27,12 +27,14 @@ export function registerDesignSystemReads(on: HostOn, reads: { store: ArtifactSt
   };
   on('designSystems.house', async () => {
     const { store, chain } = opened();
-    await seedSettled(store);
+    const seed = seedSettled(store);
+    if (seed) await seed;
     return store.readCommitted(() => ({ houseId: chain.house() }));
   });
   on('designSystems.governing', async ({ artifactId, versionId }) => {
     const { store, chain } = opened();
-    await seedSettled(store);
+    const seed = seedSettled(store);
+    if (seed) await seed;
     return store.readCommitted(() => {
       const artifact = store.get(artifactId);
       if (!artifact) throw refused('notFound', `no artifact ${artifactId}`);

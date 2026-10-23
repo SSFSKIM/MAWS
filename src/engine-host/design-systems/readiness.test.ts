@@ -137,6 +137,19 @@ describe('design-system seed readiness', () => {
     expect(logs.filter((line) => /failed|timed out/.test(line))).toEqual([]);
   });
 
+  it('preserves synchronous create admission after the seed settles, so a later delete sees its dependency', async () => {
+    await start().seeded;
+    const systemId = systems!.chain!.house()!;
+    const creating = call('artifacts.create', { kind: 'document', title: 'Governed', designSystemId: systemId });
+    const batchOpenedSynchronously = documents.storage.batchOpen;
+    const dropping = call('artifacts.delete', { artifactId: systemId });
+    const [created, dropped] = await Promise.allSettled([creating, dropping]);
+    expect(batchOpenedSynchronously).toBe(true);
+    expect(created.status).toBe('fulfilled');
+    expect(dropped).toMatchObject({ status: 'rejected', reason: { ipcError: { issues: { reason: 'designSystemInUse' } } } });
+    expect(documents.store.get(systemId)).not.toBeNull();
+  });
+
   it('opens on a failed seed, logs it once and answers later calls without retrying or delaying them', async () => {
     documents.storage.setMeta(SEEDING_KEY, 'invalid JSON');
     start();

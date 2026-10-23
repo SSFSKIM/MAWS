@@ -18,6 +18,7 @@ import { commands, type CommandName, type CommandOutput, type EventName } from '
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { openDocuments, type Documents } from '.';
 import { ARTIFACTS_DEADLINE_SHAPES, registerArtifacts } from './register';
+import { registerDesignSystems } from '../design-systems';
 
 let dir: string;
 let documents: Documents | null;
@@ -481,6 +482,76 @@ describe('answers released after the batch they read (Decision Log 33)', () => {
 });
 
 describe('write refusals released after the batch they read (Decision Log 33)', () => {
+  // Real seeding has created the systems, but its bundled asset read is still outstanding.
+  async function pendingSeed() {
+    let release!: () => void;
+    let loading!: () => void;
+    const assets = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { loading = resolve; });
+    const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
+    const systems = registerDesignSystems({ on, documents, log: () => {}, loadAssets: async () => { loading(); await assets; return []; } });
+    await started;
+    const system = documents!.store.list({ kind: 'design_system' }).find((artifact) => artifact.title === 'Official')!;
+    return { systems, release, system };
+  }
+
+  it('holds a later system delete behind a governed create while seed assets are pending', async () => {
+    const { systems, release, system } = await pendingSeed();
+    const creating = call('artifacts.create', { kind: 'document', title: 'Governed', designSystemId: system.id });
+    const dropping = call('artifacts.delete', { artifactId: system.id });
+    const outcomes = Promise.allSettled([creating, dropping]);
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(documents!.store.list({ kind: 'document' })).toEqual([]);
+      expect(documents!.store.get(system.id)).not.toBeNull();
+    } finally {
+      release();
+      await systems.seeded;
+      await outcomes;
+      systems.close();
+    }
+    const [created, dropped] = await outcomes;
+    expect(created).toMatchObject({ status: 'fulfilled', value: { artifact: { designSystemId: system.id } } });
+    expect(dropped).toMatchObject({ status: 'rejected', reason: { ipcError: { issues: { reason: 'designSystemInUse' } } } });
+    expect(durable('SELECT COUNT(*) AS n FROM artifacts WHERE designSystemId = ?', system.id)).toBe(1);
+  });
+
+  it('holds later rebindings, defaults and space changes behind pending creates without invalidating their admission', async () => {
+    const from = (await call('spaces.create', { name: 'From' })).space;
+    const to = (await call('spaces.create', { name: 'To' })).space;
+    const existing = (await call('artifacts.create', { kind: 'document', title: 'Existing' })).artifact;
+    const { systems, release, system } = await pendingSeed();
+    const creating = call('artifacts.create', { kind: 'document', title: 'Governed', designSystemId: system.id, spaceId: from.id });
+    const moving = call('artifacts.update', { artifactId: existing.id, spaceId: to.id, designSystemId: system.id });
+    const renaming = call('spaces.update', { spaceId: to.id, name: 'Renamed' });
+    const defaults = call('artifacts.setDefaults', { owner: system.id, spaces: {} });
+    const dropping = call('spaces.delete', { spaceId: from.id });
+    const outcomes = Promise.allSettled([creating, moving, renaming, defaults, dropping]);
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(documents!.store.list({ kind: 'document' }).map((artifact) => artifact.id)).toEqual([existing.id]);
+      expect(documents!.store.get(existing.id)?.spaceId).toBeUndefined();
+      expect(documents!.store.get(existing.id)?.designSystemId).toBeUndefined();
+      expect(documents!.store.getSpace(from.id)).not.toBeNull();
+      expect(documents!.store.getSpace(to.id)?.name).toBe('To');
+      expect(documents!.store.defaults()).toEqual({ owner: null, spaces: {} });
+    } finally {
+      release();
+      await systems.seeded;
+      await outcomes;
+      systems.close();
+    }
+    const results = await outcomes;
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
+    const governed = documents!.store.list({ kind: 'document' }).find((artifact) => artifact.title === 'Governed')!;
+    expect(governed.spaceId).toBeUndefined();
+    expect(governed.designSystemId).toBe(system.id);
+    expect(documents!.store.get(existing.id)).toMatchObject({ spaceId: to.id, designSystemId: system.id });
+    expect(documents!.store.getSpace(from.id)).toBeNull();
+    expect(documents!.store.getSpace(to.id)?.name).toBe('Renamed');
+    expect(documents!.store.defaults()).toEqual({ owner: system.id, spaces: {} });
+  });
+
   it('answers a rename of an artifact whose delete is in the open batch with that batch’s failure, not notFound', async () => {
     const plan = (await call('artifacts.create', { kind: 'document', title: 'Plan' })).artifact;
     const commit = vi.spyOn(documents!.storage, 'commit').mockImplementationOnce(() => {

@@ -56,6 +56,12 @@ export interface ArtifactsSurfaceDeps {
   datasetRefresh?: Pick<DatasetRefreshRequests, 'read'>;
 }
 
+// All artifact-store admission shares the pending seed, so a later dependent mutation cannot overtake an earlier
+// create/read/pin. Diagnostics, the connector request registry and independent space reads/creation need no seed.
+const SEED_INDEPENDENT_COMMANDS = new Set<HostArtifactCommand>([
+  'artifacts.status', 'artifacts.testLoopDelay', 'artifacts.datasetRefreshRequest', 'spaces.list', 'spaces.create',
+]);
+
 const HUMAN: Actor = { kind: 'human' };
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}, code: 'invalid_input' | 'internal' = 'invalid_input'): HostCommandError {
@@ -86,8 +92,12 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   const serve = <N extends HostArtifactCommand>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) =>
     on(name, async (input) => {
       try {
-        // Wait before entering the store's write/commit barrier: seeding needs to commit its own writes first.
-        if (documents && (name === 'artifacts.list' || name === 'artifacts.create')) await seedSettled(documents.store);
+        // Wait before the store's commit barrier, and only while a gate exists. Even awaiting an already fulfilled
+        // promise would reorder ready-store requests: a later ungated delete could beat a create's validation/write.
+        if (documents && !SEED_INDEPENDENT_COMMANDS.has(name)) {
+          const seed = seedSettled(documents.store);
+          if (seed) await seed;
+        }
         const run = async () => handler(input);
         return await (documents ? documents.store.writeCommitted(run) : run());
       } catch (error) {

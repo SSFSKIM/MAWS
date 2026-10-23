@@ -50,7 +50,11 @@ export function mawsTools(deps: {
     ...tool,
     call: async (args, ctx) => {
       const store = deps.artifacts?.() ?? null;
-      if (store) await Promise.all([importSettled(store), seedSettled(store)]);
+      if (store) {
+        const seed = seedSettled(store);
+        if (seed) await Promise.all([importSettled(store), seed]);
+        else await importSettled(store);
+      }
       return tool.call(args, ctx);
     },
   });
