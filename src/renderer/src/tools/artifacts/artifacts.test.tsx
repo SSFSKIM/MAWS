@@ -197,6 +197,19 @@ describe('the list', () => {
     expect(rowOf(1).textContent).toMatch(/Edited .+ by You/);
   });
 
+  it('All suppresses installation attribution only, keeping built-in provenance alongside genuine edits', async () => {
+    rows = [row(1, { kind: 'design_system', builtIn: true, seedOnly: true }),
+      row(2, { kind: 'design_system', builtIn: true }),
+      row(3, { kind: 'design_system', builtIn: true, lastEditor: { kind: 'session', appSessionId: B }, lastEditorTitle: 'Improve house' })];
+    await mount();
+    fireEvent.click(button('All')!);
+    await settle();
+    expect(rowOf(1).textContent).toContain('Built in');
+    expect(rowOf(1).textContent).not.toContain('by You');
+    expect(rowOf(2).textContent).toMatch(/Built in.*Edited .+ by You/);
+    expect(rowOf(3).textContent).toMatch(/Built in.*Edited .+ by Improve house/);
+  });
+
   it('All lists every artifact in the library, and This session returns to the session’s', async () => {
     await mount();
     fireEvent.click(button('All')!);

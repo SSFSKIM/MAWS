@@ -275,11 +275,19 @@ describe('General home', () => {
 
 describe('a row', () => {
   it('shows built-in provenance instead of attributing installation to the owner', async () => {
-    rows = [row(1, { title: 'House', kind: 'design_system', builtIn: true })];
+    rows = [row(1, { title: 'House', kind: 'design_system', builtIn: true, seedOnly: true })];
     render(<Library />);
     const builtin = await screen.findByRole('article', { name: 'House' });
     expect(within(builtin).getByText('Built in')).toBeTruthy();
     expect(builtin.textContent).not.toContain('by You');
+  });
+
+  it.each(['human', 'session'] as const)('keeps built-in provenance alongside the real %s editor and time', async (kind) => {
+    rows = [row(1, { title: 'Edited house', kind: 'design_system', builtIn: true, lastEditor: kind === 'human' ? { kind } : { kind, appSessionId: S(1) }, lastEditorTitle: 'Improve the house', lastEditedAt: NOW - 3 * 60_000 })];
+    render(<Library />);
+    const builtin = await screen.findByRole('article', { name: 'Edited house' });
+    expect(builtin.textContent).toContain('Built in');
+    expect(builtin.textContent).toContain(`Edited 3 minutes ago by ${kind === 'human' ? 'You' : 'Improve the house'}`);
   });
 
   it('shows its kind, title, Space, project, last editor and time, and the sessions that touched it', async () => {

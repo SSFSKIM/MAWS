@@ -10,6 +10,7 @@ import { applyV2, newDoc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact, type DocKind } from '@shared/artifacts/entity';
 import type { LibraryEntry, LibraryEntryAnswer, LibrarySnapshot } from '@shared/ipc/schema/library';
+import { seedRevisionKey } from '../design-systems/seed';
 import { ArtifactStoreError } from '../documents/errors';
 import { timed } from '../documents/host-work'; // P4-R6
 import type { DocumentService } from '../documents/service';
@@ -42,7 +43,9 @@ function entryOf(store: ArtifactStore, artifact: Artifact): LibraryEntry {
       doc.destroy();
     }
   }
-  return { ...artifact, revision: store.revision(artifact.id), ...lastEdit(store, artifact), ...(builtIn && { builtIn }) };
+  const revision = store.revision(artifact.id);
+  const seedOnly = builtIn && store.storage.getMeta(seedRevisionKey(artifact.id)) === String(revision);
+  return { ...artifact, revision, ...lastEdit(store, artifact), ...(builtIn && { builtIn }), ...(seedOnly && { seedOnly }) };
 }
 
 // Every live artifact, their session links and the Spaces: §4.1's one host read at every connection.

@@ -5,7 +5,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeSystem, markCopied } from '@artifacts/design-system/model';
+import { writeSystem, markCopied, setLaw } from '@artifacts/design-system/model';
+import { seedDefaults } from '../design-systems/seed';
 import { defaultSystem } from '@artifacts/types/design_system/defaults';
 import type { Doc, Node } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
@@ -89,6 +90,18 @@ const file = (name: string, contents: string | Uint8Array) => {
 const node = (doc: Doc, name?: string): Node => new (doc.get('root').constructor as new (name?: string) => Node)(name);
 
 describe('the library reads (M2)', () => {
+  it('distinguishes installation from an owner edit at the same timestamp by durable revision', async () => {
+    const [id] = await seedDefaults({ store, service, defaults: [defaultSystem('maws')!], now: () => now, loadAssets: async () => [], log: () => {} });
+    const installed = (await call('library.entry', { artifactId: id! })).artifact!;
+    expect(installed).toMatchObject({ builtIn: true, seedOnly: true });
+    await service.writeAs(id!, human, (doc) => setLaw(doc, '# My changes'));
+    const edited = (await call('library.entry', { artifactId: id! })).artifact!;
+    expect(edited.lastEditedAt).toBe(installed.lastEditedAt);
+    expect(edited.revision).toBeGreaterThan(installed.revision);
+    expect(edited).toMatchObject({ builtIn: true, lastEditor: human });
+    expect(edited).not.toHaveProperty('seedOnly', true);
+  });
+
   it('carries built-in provenance without assigning it to copies or human-authored systems', async () => {
     const builtin = await store.create({ kind: 'design_system', title: 'MAWS', initial: (doc) => {
       writeSystem(doc, defaultSystem('maws')!.files, { route: 'default', key: 'maws', at: now });

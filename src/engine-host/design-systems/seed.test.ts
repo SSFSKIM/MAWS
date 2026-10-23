@@ -6,7 +6,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readSystem } from '@artifacts/design-system/model';
+import { readSystem, setLaw, writeSystem } from '@artifacts/design-system/model';
+import { readEntry } from '../library/reads';
 import { DEFAULT_SYSTEMS, type DefaultSystemSource } from '@artifacts/types/design_system/defaults';
 import type { DefaultAsset } from '@artifacts/types/design_system/default-assets';
 import { applyV2, newDoc } from '@artifacts/yjs';
@@ -52,6 +53,44 @@ const originOf = (id: string) => {
 const originKeyOf = (id: string) => originOf(id)?.key;
 const keys = () => ever().map((system) => originKeyOf(system.id)).sort();
 const assetNames = (key: string) => documents.store.listAssets(ever().find((system) => originKeyOf(system.id) === key)!.id).map((asset) => asset.name).sort();
+
+describe('installation attribution', () => {
+  const entry = async (id: string) => (await readEntry(documents.store, id)).artifact!;
+  it.each(['human', 'session'] as const)('keeps built-in provenance but credits a genuine %s edit, after restart and log pruning', async (kind) => {
+    const ids = await seed();
+    const id = ids[0]!;
+    expect(await entry(id)).toMatchObject({ builtIn: true, seedOnly: true });
+    const actor = kind === 'human' ? { kind } as const : { kind, appSessionId: 'owner-session' as import('@shared/graph/ids').AppSessionId } as const;
+    await documents.service.writeAs(id, actor, (doc) => setLaw(doc, '# Owner system\n\nA genuine edit.'));
+    expect(await entry(id)).toMatchObject({ builtIn: true, lastEditor: actor });
+    expect(await entry(id)).not.toHaveProperty('seedOnly', true);
+    restart();
+    documents.store.storage.pruneLog(Date.now() + 365 * 86_400_000, 0);
+    await seed();
+    expect(await entry(id)).toMatchObject({ builtIn: true, lastEditor: actor });
+    expect(await entry(id)).not.toHaveProperty('seedOnly', true);
+  });
+
+  it('backfills pre-marker systems only when canonical seed content matches, and preserves the boundary after restart', async () => {
+    const source = DEFAULT_SYSTEMS[0]!;
+    const legacy = async (title: string) => documents.store.create({ kind: 'design_system', title, initial: (doc) => {
+      writeSystem(doc, source.files, { route: 'default', key: source.key, at: 1 }, { name: source.name });
+    } }, { kind: 'human' });
+    const untouched = await legacy(source.name);
+    const edited = await legacy('Edited');
+    await documents.service.writeAs(edited.id, { kind: 'human' }, (doc) => setLaw(doc, '# Custom system\n\nOwner changes.'));
+    restart(); // a store written by the pre-marker installer, with neither installation boundary recorded
+    await seed();
+    expect(await entry(untouched.id)).toMatchObject({ builtIn: true, seedOnly: true });
+    expect(await entry(edited.id)).toMatchObject({ builtIn: true });
+    expect(await entry(edited.id)).not.toHaveProperty('seedOnly', true);
+    await documents.service.writeAs(untouched.id, { kind: 'human' }, (doc) => setLaw(doc, '# Later edit'));
+    restart();
+    await seed();
+    expect(await entry(untouched.id)).not.toHaveProperty('seedOnly', true);
+    expect(await entry(edited.id)).not.toHaveProperty('seedOnly', true);
+  });
+});
 
 describe('one transaction per default', () => {
   it('a default whose first write fails leaves no system at all, never an empty one', async () => {
