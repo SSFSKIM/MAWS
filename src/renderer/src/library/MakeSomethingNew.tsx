@@ -101,9 +101,10 @@ export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
   const space = spaceId === null ? undefined : spaces?.find((s) => s.id === spaceId);
   return (
     <section aria-labelledby="library-make" className="flex flex-col gap-2 pb-4">
-      <h2 id="library-make" className="m-0 px-2 text-ui-sm font-semibold text-fg-muted">
-        {P.makeNew}
-      </h2>
+      <div className="flex items-baseline gap-2 px-2 text-ui-sm text-fg-muted">
+        <h2 id="library-make" className="m-0 font-semibold">{P.makeNew}</h2>
+        <span>· {spaceId === null ? 'General' : space?.name ?? 'Loading Space…'}</span>
+      </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2">
         {ARTIFACT_KINDS.map((kind) => (
           <KindCard key={kind} kind={kind} spaceId={spaceId} space={space} />

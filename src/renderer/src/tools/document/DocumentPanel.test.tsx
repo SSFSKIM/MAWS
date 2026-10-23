@@ -17,6 +17,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { resetLibrary } from '../../library/store';
 import { useLayout } from '../../stores/layout';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { requestArtifactOpen, resetOpenRequests, takeOpenRequest } from '../artifacts/viewers/requests';
@@ -33,6 +34,7 @@ let memory: MemoryDocumentHost;
 let off = () => {};
 beforeEach(() => {
   resetShellStores();
+  resetLibrary();
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
@@ -223,6 +225,22 @@ describe('the document editor in L’s registry', () => {
     act(() => memory.write((doc) => createDocument(doc, { title: 'Launch plan' })));
     await shown();
     expect(screen.queryByText(/This document has no content yet/)).toBeNull();
+  });
+
+  it('names the document’s home and governing system without a manual inspection step', async () => {
+    const systemId = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
+    window.maws = fakeClient({
+      'session.intent.get': null,
+      'library.spaces': { spaces: [{ id: SPACE, name: 'Launch', createdAt: 1, count: 1 }] },
+      'library.get': { row: { id: systemId, kind: 'design_system', title: 'Launch brand', createdBy: { kind: 'human' }, createdAt: 1, updatedAt: 1, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 1, sessions: [] } },
+    }).client;
+    const stop = provideDocumentDesignSystem({ Scope: ({ children }) => children, systemFor: () => ({ id: systemId }) });
+    try {
+      mount();
+      await shown();
+      await until(() => editorHostOf(scope)?.breadcrumb?.includes('Design: Launch brand') === true, 'design name');
+      expect(editorHostOf(scope)?.breadcrumb).toEqual(['Launch', 'Design: Launch brand']);
+    } finally { stop(); }
   });
 
   it('registers the X32 header under the scope given: the title, the saved word, the rail the tab holds, the tab’s guard', async () => {

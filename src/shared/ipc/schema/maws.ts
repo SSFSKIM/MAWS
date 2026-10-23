@@ -68,6 +68,11 @@ export const MawsArtifactExportSchema = z.strictObject({
   format: z.enum(ARTIFACT_EXPORT_FORMATS),
   revision: z.number().int().nonnegative(), // the live revision, or the version's
   versionId: z.number().int().positive().optional(),
+  inspection: z.literal(true).optional(),
+  slide: z.string().min(1).max(64).optional(),
+  offsetY: z.number().int().min(0).max(200_000).optional(),
+  width: z.number().int().min(320).max(2560).optional(),
+  height: z.number().int().min(240).max(2560).optional(),
   path: AbsolutePathSchema, // where main writes the file
   pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(), // omitted: the exporter's own default (Decision Log 42)
   fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces; omitted, named

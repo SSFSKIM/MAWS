@@ -537,8 +537,8 @@ export const ARTIFACT_CELL = {
   listed: (n: number | null) => (n === null ? 'Listed artifacts' : n === 0 ? 'Listed no artifacts' : `Listed ${plural(n, 'artifact')}`),
   listFailed: (error: string) => `Could not list artifacts: ${error}`,
   screenshotting: (id: string) => `Taking a screenshot of ${id}`,
-  screenshot: (shot: { title: string; version: number; width: number; height: number } | null, id: string) =>
-    shot === null ? `Screenshot of ${id}` : `Screenshot of ${shot.title} v${shot.version} (${shot.width} × ${shot.height})`,
+  screenshot: (shot: { title: string; version?: number; revision?: number; width: number; height: number } | null, id: string) =>
+    shot === null ? `Screenshot of ${id}` : `Screenshot of ${shot.title}${shot.version === undefined ? ` · revision ${shot.revision ?? 0}` : ` v${shot.version}`} (${shot.width} × ${shot.height})`,
   screenshotFailed: (error: string) => `Could not screenshot: ${error}`,
 } as const;
 // E2 end

@@ -14,6 +14,12 @@ import { createHash } from 'node:crypto';
 import { readRoots } from '@artifacts/files';
 import { assetWarnings, heldSlides } from '@artifacts/slides/answer'; // P3-C
 import { boardAssetWarnings, heldBoards } from '@artifacts/design/answer'; // P3-E
+import { canonUnits, validateCanon } from '@artifacts/design-system/canon';
+import { checkHardDonts } from '@artifacts/design-system/check';
+import { parseLaw } from '@artifacts/design-system/law';
+import { readSystem } from '@artifacts/design-system/model';
+import { parse5Parser } from '@artifacts/design-system/parse5-parser';
+import { applyV2, newDoc } from '@artifacts/yjs';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import { isDocKind, type Artifact, type ArtifactKind, type Space } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
@@ -108,16 +114,34 @@ export function artifactListTool(deps: ArtifactToolDeps): McpToolDefinition {
 
 // The kind's guide and format reference; for a kind a design system styles, the guide of the system that would govern a
 // new artifact (the chain's answer for no system or Space of its own, Decision Log 42), when the store has one.
-export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts'> = {}): McpToolDefinition {
-  return defineMawsTool('artifact_describe_type', async (args) => {
+export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'artifactScope'> = {}): McpToolDefinition {
+  return defineMawsTool('artifact_describe_type', (args, ctx) => answering('artifact_describe_type', async () => {
     const parsed = parseToolArguments('artifact_describe_type', args);
     if (!parsed.ok) return toolError(parsed.error);
-    const { kind } = parsed.data;
-    const store = deps.artifacts?.() ?? null;
-    const designSystem = store && DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({}) : null;
-    const result: ArtifactDescribeTypeResult = { status: 'described', kind, ...KIND_GUIDES[kind], ...(designSystem !== null && { designSystem }) };
+    const { kind, artifact: ref } = parsed.data;
+    const store = ref === undefined ? deps.artifacts?.() ?? null : storeOf('artifact_describe_type', deps);
+    const id = ref !== undefined && store ? await resolveArtifact('artifact_describe_type', store, ref, lineageOf(ctx, deps)) : undefined;
+    const placement = id && store ? await store.readCommitted(() => {
+      const artifact = store.get(id);
+      if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_describe_type', ref!));
+      if (artifact.kind !== kind) throw refuse('artifact_describe_type', { reason: 'invalid' }, `artifact ${id} is a ${artifact.kind}, not a ${kind}`);
+      return { artifactId: id, home: artifact.spaceId ? store.listSpaces().find((space) => space.id === artifact.spaceId)!.name : 'General' };
+    }) : {};
+    const designSystem = store && DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor(id ?? {}) : null;
+    const designCheck = id && store && kind === 'design_system' ? await store.readCommitted(() => {
+      const doc = newDoc();
+      try {
+        applyV2(doc, store.service.readState(id).state);
+        const { law, tokens, files } = readSystem(doc);
+        const report = checkHardDonts(parseLaw(law), tokens, canonUnits(files, parse5Parser));
+        return { violations: report.violations.map(({ unit, element, rule, message }) => ({ unit, element, rule, message })),
+          checks: report.checks.map(({ rule, violations }) => ({ rule, violations })), manual: report.manual.map((dont) => dont.text),
+          unknown: report.unknown.map((tag) => `${tag.tag}: ${tag.message}`), problems: validateCanon(files, parse5Parser, tokens) };
+      } finally { doc.destroy(); }
+    }) : undefined;
+    const result: ArtifactDescribeTypeResult = { status: 'described', kind, ...KIND_GUIDES[kind], ...placement, ...(designCheck && { designCheck }), ...(designSystem !== null && { designSystem }) };
     return toolText(result);
-  });
+  }));
 }
 
 export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {

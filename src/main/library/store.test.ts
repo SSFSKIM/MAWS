@@ -48,6 +48,15 @@ describe('LibraryStore', () => {
   const link = (n: number, appSessionId: AppSessionId, role: ArtifactSessionLink['role'] = 'created', lastAt = 10): ArtifactSessionLink => ({ artifactId: uuid(n), appSessionId, role, lastAt });
   const ids = (rows: { id: string }[]) => rows.map((row) => row.id);
 
+  it('keeps built-in provenance through indexing and a reopen', () => {
+    index.library.reconcile({ artifacts: [entry(1, { kind: 'design_system', builtIn: true, seedOnly: true }), entry(2, { kind: 'design_system', builtIn: true })], links: [], spaces: [] });
+    index.close();
+    index = new Index(join(dir.path, 'index.sqlite'));
+    expect(index.library.get(uuid(1))).toMatchObject({ builtIn: true, seedOnly: true });
+    expect(index.library.get(uuid(2))).toMatchObject({ builtIn: true });
+    expect(index.library.get(uuid(2))).not.toHaveProperty('seedOnly', true);
+  });
+
   it('reconciles a snapshot into rows ordered by updatedAt, newest first, with their sessions, Space and project', () => {
     const maker = session('Make the deck');
     const reviewer = session('Review it');

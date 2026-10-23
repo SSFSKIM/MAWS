@@ -143,6 +143,8 @@ test('a fresh store holds the built-in systems; one opens from the library as th
   const official = (await systems(page)).find((s) => s.title === 'Official')!;
   const db = new DatabaseSync(join(launch!.userData, 'artifacts', 'store.sqlite'), { readOnly: true });
   try {
+    // Seed creation and bundled asset uploads commit separately; the system row alone does not signal completion.
+    await expect.poll(() => (db.prepare('SELECT name FROM artifact_assets WHERE artifactId = ? ORDER BY name').all(official.id) as { name: string }[]).map((asset) => asset.name), { timeout: 15_000 }).toEqual(['NotoSerifKR-Bold-full.woff2', 'NotoSerifKR-Regular-full.woff2', 'OFL.txt']);
     const assets = db.prepare('SELECT name, size FROM artifact_assets WHERE artifactId = ? ORDER BY name').all(official.id) as { name: string; size: number }[];
     expect(assets.map((a) => a.name)).toEqual(['NotoSerifKR-Bold-full.woff2', 'NotoSerifKR-Regular-full.woff2', 'OFL.txt']);
     for (const asset of assets) expect(asset.size, asset.name).toBeGreaterThan(1000);

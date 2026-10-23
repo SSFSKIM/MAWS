@@ -5,10 +5,12 @@
 // state is read, extracted and released (`DocumentService.readState` loads and destroys one that is not open).
 import { readFileSync, statSync } from 'node:fs';
 import { extractText, FILE_TEXT_MAX_BYTES } from '@artifacts/library/text';
+import { readOrigin } from '@artifacts/design-system/model';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact, type DocKind } from '@shared/artifacts/entity';
 import type { LibraryEntry, LibraryEntryAnswer, LibrarySnapshot } from '@shared/ipc/schema/library';
+import { seedRevisionKey } from '../design-systems/seed-provenance';
 import { ArtifactStoreError } from '../documents/errors';
 import { timed } from '../documents/host-work'; // P4-R6
 import type { DocumentService } from '../documents/service';
@@ -30,7 +32,20 @@ export function lastEdit(store: ArtifactStore, artifact: Artifact): { lastEditor
 
 // Inside a read: one live artifact as the library sees it.
 function entryOf(store: ArtifactStore, artifact: Artifact): LibraryEntry {
-  return { ...artifact, revision: store.revision(artifact.id), ...lastEdit(store, artifact) };
+  let builtIn = false;
+  if (artifact.kind === 'design_system') {
+    const doc = newDoc();
+    try {
+      applyV2(doc, store.service.readState(artifact.id).state);
+      const origin = readOrigin(doc);
+      builtIn = origin?.route === 'default' && !origin.copiedFrom;
+    } finally {
+      doc.destroy();
+    }
+  }
+  const revision = store.revision(artifact.id);
+  const seedOnly = builtIn && store.storage.getMeta(seedRevisionKey(artifact.id)) === String(revision);
+  return { ...artifact, revision, ...lastEdit(store, artifact), ...(builtIn && { builtIn }), ...(seedOnly && { seedOnly }) };
 }
 
 // Every live artifact, their session links and the Spaces: §4.1's one host read at every connection.

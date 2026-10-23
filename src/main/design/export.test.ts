@@ -226,7 +226,7 @@ describe('managed export names (Decision Log 33)', () => {
       if (name === 'designSystems.governing') return ok({ system: { builtin: 'maws' } }) as never;
       return { ok: false, error: { code: 'not_found', message: `no ${name}` } } as never;
     };
-    const service = startExportService({ registry, root, call: call as never, onEvent: (_n, l) => ((listener = l as never), () => {}), answer: async (input) => void answered.push(input as never) });
+    const service = startExportService({ registry, root, call: call as never, onEvent: (_n, l) => ((listener = l as never), () => {}), answer: async (input) => { answered.push(input as never); return { ok: true, value: { outcome: 'delivered' } }; } });
     try {
       const a = await service.exportForLibrary({ artifactId: ID, format: 'png' });
       const b = await service.exportForLibrary({ artifactId: ID, format: 'png' });

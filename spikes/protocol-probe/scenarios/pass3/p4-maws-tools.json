@@ -345,7 +345,7 @@
     {
       "name": "artifact_screenshot",
       "title": "Screenshot artifact",
-      "description": "Capture a PNG screenshot of a MAWS html artifact as the user sees it, rendered in a sandboxed frame with no network; without this tool, describe the page from its source. Names the artifact by id or handle and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.",
+      "description": "Capture a PNG of a MAWS HTML artifact, document or presentation without human GUI steps; without this tool, inspect the exported file. Documents render their export layout in the actual governing system; use offsetY to inspect lower content. Presentations require slide (an id from artifact_read). HTML version is its ordinal; document and presentation version is a retained version id from artifact_read, otherwise the live state. Rendering is sandboxed with no network. Names the artifact by id or handle and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -353,6 +353,16 @@
           "id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "slide": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "offsetY": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 200000
           },
           "version": {
             "type": "integer",
@@ -384,7 +394,7 @@
     {
       "name": "artifact_describe_type",
       "title": "Describe artifact kind",
-      "description": "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs.",
+      "description": "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -400,6 +410,10 @@
               "html",
               "file"
             ]
+          },
+          "artifact": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [

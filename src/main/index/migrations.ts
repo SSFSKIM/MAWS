@@ -234,6 +234,7 @@ CREATE VIRTUAL TABLE library_text USING fts5(artifact_id UNINDEXED, title, body,
 `,
   },
   // P3-L end
+  { version: 11, sql: 'ALTER TABLE library_artifacts ADD COLUMN built_in INTEGER NOT NULL DEFAULT 0; ALTER TABLE library_artifacts ADD COLUMN seed_only INTEGER NOT NULL DEFAULT 0;' },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

@@ -33,7 +33,7 @@ function linesOf(view: LibraryViewState, read: LibraryRead<LibraryList>, list: L
   const lines: Line[] = [];
   const searching = view.query.trim() !== '';
   const narrowed = view.view === 'bySpace' && view.spaceId !== null;
-  if ((view.view === 'all' || narrowed) && !searching) lines.push({ kind: 'make', key: 'make', spaceId: currentSpaceOf(view) });
+  if ((view.view === 'all' || view.view === 'general' || narrowed) && !searching) lines.push({ kind: 'make', key: 'make', spaceId: currentSpaceOf(view) });
   if (read.status === 'error') lines.push({ kind: 'note', key: 'error', text: P.readFailed(read.error ?? ''), retry: () => refreshLibrary(), tone: 'warning' });
   if (list === undefined) {
     if (read.status !== 'error') lines.push({ kind: 'note', key: 'reading', text: P.reading });

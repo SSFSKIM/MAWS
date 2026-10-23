@@ -11,6 +11,8 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import type { MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
 import { ARTIFACT_SCREENSHOT_DEFAULT, parseToolArguments, TOOL_ERRORS, type ArtifactScreenshotResult } from '@shared/maws/tools';
 import { answering, lineageOf, resolveArtifact, storeOf, type ArtifactToolDeps } from './artifact-context';
+import { inspectStructuredArtifact } from './artifact-inspection';
+import type { ExportBridge } from './artifact-export';
 import type { HostBridge } from './bridge';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
@@ -29,7 +31,7 @@ export type CaptureBridge = HostBridge<ArtifactCaptureRequest, MawsArtifactCaptu
 const WITHDRAWN = 'artifact_screenshot: the request was withdrawn';
 const ENDED = 'artifact_screenshot: the session ended';
 
-export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'artifactScope' | 'log'> & { capture: CaptureBridge }): McpToolDefinition {
+export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'artifactScope' | 'log'> & { capture: CaptureBridge; exporter?: ExportBridge }): McpToolDefinition {
   return defineMawsTool('artifact_screenshot', (args, ctx) =>
     answering('artifact_screenshot', async () => {
       const parsed = parseToolArguments('artifact_screenshot', args);
@@ -37,6 +39,9 @@ export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' 
       const { id: ref } = parsed.data;
       const store = storeOf('artifact_screenshot', deps);
       const artifactId = await resolveArtifact('artifact_screenshot', store, ref, lineageOf(ctx, deps));
+      const kind = await store.readCommitted(() => store.get(artifactId)?.kind);
+      if (kind === 'document' || kind === 'presentation') return inspectStructuredArtifact(store, artifactId, parsed.data, ctx, deps.exporter);
+      if (parsed.data.slide !== undefined || parsed.data.offsetY !== undefined) return toolError('artifact_screenshot: slide and offsetY apply only to structured artifacts');
       const page = await store.readCommitted(() => {
         const artifact = store.get(artifactId);
         if (artifact?.kind !== 'html') return null;

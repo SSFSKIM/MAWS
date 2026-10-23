@@ -24,6 +24,7 @@ import type { HostSupervisor } from '../hosts/supervisor';
 import type { registerMainHandler } from '../ipc/router';
 import { startArtifactDefaults } from './defaults';
 import { ExporterRegistry, printHtmlToPdf, registerHtmlExporters, startExportService } from './export';
+import { renderDocumentViewport } from './inspection';
 import { openDocument } from './open';
 import { appOriginOf, guardPermissions, installFramePolicies } from './policies';
 import { serveArtifacts, type ContentLookup } from './protocol';
@@ -94,7 +95,7 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
   const stopResync = hosts.onStreaming('engine-host', () => void emit('artifacts.resync', {})); // P3-A M5
   const seam = globalThis as {
     __maws_documents?: { openWindow(): number };
-    __maws_exports?: { print(html: string): Promise<{ head: string; blocked: string[] }> };
+    __maws_exports?: { print(html: string): Promise<{ head: string; blocked: string[] }>; inspect(html: string): Promise<string> };
     __maws_captures?: { capture(request: MawsArtifactCapture): ReturnType<typeof captureArtifact> }; // P3-L M6b
   };
   if (env.MAWS_E2E === '1') {
@@ -102,6 +103,8 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
     seam.__maws_captures = { capture: (request) => captureArtifact(request, { content, env }) };
     // M7 fix wave 1: the PDF printer alone, as an exporter's context calls it (the e2e proves its request filter)
     seam.__maws_exports = {
+      // The real document viewport path, so the e2e can inject hostile HTML and prove CSP beside host layout reads.
+      inspect: async (html) => (await renderDocumentViewport(html, { artifactId: 'e2e-inspection', kind: 'document', format: 'png', revision: 0, path: '', width: 640, height: 480 }, new AbortController().signal, env)).toString('base64'),
       print: async (html) => {
         const blocked: string[] = [];
         const pdf = await printHtmlToPdf(html, { signal: new AbortController().signal, blocked: (url) => blocked.push(url) });

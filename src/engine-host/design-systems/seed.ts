@@ -10,17 +10,46 @@
 // defaults still to create, and the systems whose bundled assets are not all uploaded yet. The next start goes on from
 // it, so a seeding cut short between defaults finishes, and an asset upload that failed is logged and retried. A store
 // with no record that holds a system was seeded before the record existed, or made by the owner: it is left alone.
-import { writeSystem } from '@artifacts/design-system/model';
+import { readFiles, readOrigin, readSystem, writeSystem } from '@artifacts/design-system/model';
+import { applyV2, newDoc } from '@artifacts/yjs';
 import { DEFAULT_SYSTEMS, type DefaultSystemSource } from '@artifacts/types/design_system/defaults';
 import type { DefaultAsset } from '@artifacts/types/design_system/default-assets';
 import type { Actor } from '@shared/artifacts/actor';
 import type { DocumentService } from '../documents/service';
 import type { ArtifactStore } from '../documents/store';
+import { seedRevisionKey } from './seed-provenance';
 
 const HUMAN: Actor = { kind: 'human' }; // the owner's: X29 has no system actor, and the defaults are the owner's to edit
 
 /** The store meta key of the seeding record. */
 export const SEEDING_KEY = 'designSystems.seeding';
+
+// Older installs have no boundary. Canonical file equality can prove they still hold the bundled seed; an unequal
+// system is marked -1 once, so a later edit back to the defaults cannot erase its attribution on a subsequent start.
+async function backfillSeedRevisions(store: ArtifactStore, service: DocumentService, defaults: readonly DefaultSystemSource[]): Promise<void> {
+  await service.inBatch(() => {
+    for (const artifact of store.list({ kind: 'design_system' })) {
+      if (store.storage.getMeta(seedRevisionKey(artifact.id)) !== null) continue;
+      const doc = newDoc();
+      const expected = newDoc();
+      try {
+        applyV2(doc, service.readState(artifact.id).state);
+        const origin = readOrigin(doc);
+        if (origin?.route !== 'default' || origin.copiedFrom) continue;
+        const source = defaults.find((source) => source.key === origin.key);
+        let matches = false;
+        if (source) {
+          writeSystem(expected, source.files, origin, { name: source.name });
+          matches = readSystem(doc).meta?.name === readSystem(expected).meta?.name && JSON.stringify(readFiles(doc)) === JSON.stringify(readFiles(expected));
+        }
+        store.storage.setMeta(seedRevisionKey(artifact.id), matches ? String(store.revision(artifact.id)) : '-1');
+      } finally {
+        doc.destroy();
+        expected.destroy();
+      }
+    }
+  });
+}
 /** What seeding has left to do: the default keys not yet created, and the seeded systems still owed their assets. */
 interface SeedingRecord {
   keys: string[];
@@ -54,6 +83,7 @@ function updateRecord(store: ArtifactStore, change: (record: SeedingRecord) => S
  */
 export async function seedDefaults({ store, service, defaults = DEFAULT_SYSTEMS, loadAssets, now = Date.now, log }: SeedDeps): Promise<string[]> {
   if (store.storage.readOnly) return [];
+  await backfillSeedRevisions(store, service, defaults);
   let pending = readRecord(store)?.keys;
   if (pending === undefined) {
     const ever = store.list({ kind: 'design_system' }).length + store.list({ kind: 'design_system', deleted: true }).length;
@@ -72,7 +102,10 @@ export async function seedDefaults({ store, service, defaults = DEFAULT_SYSTEMS,
     const system = await store.create(
       { kind: 'design_system', title: source.name, initial: (doc) => void writeSystem(doc, source.files, { route: 'default', key, at: now() }, { name: source.name }) },
       HUMAN,
-      (artifact) => updateRecord(store, (r) => ({ keys: r.keys.filter((k) => k !== key), assets: [...r.assets, { id: artifact.id, key }] })),
+      (artifact) => {
+        store.storage.setMeta(seedRevisionKey(artifact.id), String(store.revision(artifact.id)));
+        updateRecord(store, (r) => ({ keys: r.keys.filter((k) => k !== key), assets: [...r.assets, { id: artifact.id, key }] }));
+      },
     );
     created.push(system.id);
   }

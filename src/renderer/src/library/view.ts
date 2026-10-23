@@ -5,7 +5,7 @@ import { create } from 'zustand';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { LibraryFilter } from '@shared/ipc/schema/library';
 
-export type LibraryViewName = 'all' | 'pinned' | 'bySpace';
+export type LibraryViewName = 'all' | 'general' | 'pinned' | 'bySpace';
 
 export interface LibraryViewState {
   view: LibraryViewName;
@@ -29,6 +29,7 @@ export function filterOf({ view, query, kind, spaceId }: LibraryViewState): Libr
     ...(kind !== null && { kind }),
     ...(query.trim() !== '' && { query: query.trim() }),
     ...(view === 'pinned' && { pinned: true }),
+    ...(view === 'general' && { spaceId: null }),
     ...(view === 'bySpace' && spaceId !== null && { spaceId }),
   };
 }

@@ -60,7 +60,7 @@ export function mawsTools(deps: {
     afterImport(sendFileTool(artifacts)), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
     // P3-E (E2 M2 fix wave): a dashboard made from files before E2 is held, read raw and never written
     ...legacyDashboardTools(artifacts, [
-      documentCreateTool(documents, artifactCreateTool(artifacts)), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
+      documentCreateTool(documents, artifactCreateTool(artifacts)), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture, exporter: deps.exporter }), // E2
       // P3-A (M6)
       artifactDescribeTypeTool(artifacts), documentReadTool(documents, genericRead), artifactPublishTool({ ...artifacts, provisional: deps.provisional /* P4-A2 */ }), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
       artifactExportTool({ ...artifacts, exporter: deps.exporter }),

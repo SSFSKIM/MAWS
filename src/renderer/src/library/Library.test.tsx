@@ -171,7 +171,7 @@ describe('the views and the groups', () => {
     expect(screen.queryByRole('heading', { name: 'Make something new' })).toBeNull();
 
     await user.click(screen.getByRole('radio', { name: 'By Space' }));
-    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'No Space']));
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'General']));
     expect(screen.getByText('Nothing in this Space yet')).toBeTruthy();
     expect(screen.getByText('Mirrored to /Users/me/work/artifacts')).toBeTruthy();
   });
@@ -190,7 +190,7 @@ describe('the views and the groups', () => {
     await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document', spaceId: WORK }]));
 
     await user.click(screen.getByRole('button', { name: 'All Spaces' }));
-    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'No Space']));
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'General']));
   });
 
   it('says what puts artifacts here when a view is empty', async () => {
@@ -259,7 +259,37 @@ describe('search and the type filter', () => {
   });
 });
 
+describe('General home', () => {
+  it('filters to artifacts without a Space and creates there, as All does', async () => {
+    registerArtifactEditor('document', { Panel: () => null, createState: vi.fn() });
+    render(<Library />);
+    await screen.findByRole('article', { name: 'Launch plan' });
+    fireEvent.click(screen.getByRole('radio', { name: 'General' }));
+    await waitFor(() => expect(libraryCalls()).toContainEqual({ spaceId: null }));
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Launch plan' })).toBeNull());
+    expect(screen.getByRole('article', { name: 'Pricing page' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document' }]));
+  });
+});
+
 describe('a row', () => {
+  it('shows built-in provenance instead of attributing installation to the owner', async () => {
+    rows = [row(1, { title: 'House', kind: 'design_system', builtIn: true, seedOnly: true })];
+    render(<Library />);
+    const builtin = await screen.findByRole('article', { name: 'House' });
+    expect(within(builtin).getByText('Built in')).toBeTruthy();
+    expect(builtin.textContent).not.toContain('by You');
+  });
+
+  it.each(['human', 'session'] as const)('keeps built-in provenance alongside the real %s editor and time', async (kind) => {
+    rows = [row(1, { title: 'Edited house', kind: 'design_system', builtIn: true, lastEditor: kind === 'human' ? { kind } : { kind, appSessionId: S(1) }, lastEditorTitle: 'Improve the house', lastEditedAt: NOW - 3 * 60_000 })];
+    render(<Library />);
+    const builtin = await screen.findByRole('article', { name: 'Edited house' });
+    expect(builtin.textContent).toContain('Built in');
+    expect(builtin.textContent).toContain(`Edited 3 minutes ago by ${kind === 'human' ? 'You' : 'Improve the house'}`);
+  });
+
   it('shows its kind, title, Space, project, last editor and time, and the sessions that touched it', async () => {
     const sessions = [1, 2, 3, 4].map((n) => ({ appSessionId: S(n), title: `Session ${n}`, roles: n === 1 ? (['created', 'edited'] as const) : (['viewed'] as const), lastAt: NOW - n * HOUR }));
     rows = [
@@ -382,7 +412,7 @@ describe('the row actions', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Home' }));
     await waitFor(() => expect(main.callsOf('artifacts.update')).toContainEqual({ artifactId: id(2), spaceId: HOME }));
     await user.click(within(await openMenu(user, 'Launch plan')).getByRole('menuitem', { name: 'Move to Space' }));
-    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'No Space' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'General' }));
     await waitFor(() => expect(main.callsOf('artifacts.update')).toContainEqual({ artifactId: id(1), spaceId: null }));
   });
 

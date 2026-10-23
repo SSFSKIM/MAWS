@@ -79,12 +79,12 @@ export const GROUP_COPY = {
   today: 'Today',
   yesterday: 'Yesterday',
   older: 'Older',
-  noSpace: 'No Space',
+  noSpace: 'General',
 };
 
 export const LIBRARY_PAGE = {
   title: 'Artifacts',
-  views: { all: 'All', pinned: 'Pinned', bySpace: 'By Space' },
+  views: { all: 'All', general: 'General', pinned: 'Pinned', bySpace: 'By Space' },
   viewLabel: 'View',
   search: 'Search artifacts',
   typeFilter: 'Filter by type',
@@ -123,7 +123,7 @@ export const ROW_COPY = {
   unpin: 'Unpin',
   rename: 'Rename…',
   moveToSpace: 'Move to Space',
-  noSpace: 'No Space',
+  noSpace: 'General',
   newSpace: 'New Space…',
   duplicate: 'Duplicate',
   export: 'Export', // M5b

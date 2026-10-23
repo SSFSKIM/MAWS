@@ -195,6 +195,15 @@ describe('the design_system question', () => {
   });
 
   // F's L176: the system was deleted between the pick and Submit (its row still on screen until the library's re-read)
+  it('does not call an untouched answer skipped, but reflects an intentional Skip', async () => {
+    await mountWith([PICK]);
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeTruthy();
+    fireEvent.click(within(section('s1')).getByRole('button', { name: 'Skip' }));
+    expect(screen.getByRole('button', { name: 'Submit · 1 skipped' })).toBeTruthy();
+    fireEvent.click(within(section('s1')).getByRole('button', { name: 'Skip' }));
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeTruthy();
+  });
+
   it('sends nothing for a pick deleted since, unpicks it and names it in the sheet’s notice', async () => {
     await mountWith([PICK]);
     fireEvent.click(within(section('s1')).getByRole('radio', { name: 'Acme web' }));
@@ -203,7 +212,7 @@ describe('the design_system question', () => {
     expect(fake.invoked('maws.ask.answer')).toEqual([]);
     expect(screen.getAllByRole('status').map((status) => status.textContent)).toContain('Acme web was deleted. Choose another design system.');
     expect(within(section('s1')).getByRole('radio', { name: 'Acme web' }).getAttribute('aria-checked')).toBe('false');
-    expect(screen.getByRole('button', { name: 'Submit · 1 skipped' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeTruthy();
   });
 
   it('answers create for "Build one with me", and has no such row when the question does not allow it', async () => {

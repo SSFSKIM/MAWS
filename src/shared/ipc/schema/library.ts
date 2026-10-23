@@ -23,7 +23,8 @@ const Seq = z.number().int().nonnegative();
 
 // An artifact as the host's library reads answer it: the row and who last edited it, when (the actor and time of its
 // last write; its creator and `createdAt` when there is none).
-export const LibraryEntrySchema = ArtifactRowSchema.extend({ lastEditor: ActorSchema, lastEditedAt: Time });
+// Built-in is provenance, not edit status. seedOnly means the durable installation revision is still current.
+export const LibraryEntrySchema = ArtifactRowSchema.extend({ lastEditor: ActorSchema, lastEditedAt: Time, builtIn: z.boolean().optional(), seedOnly: z.boolean().optional() });
 export type LibraryEntry = z.infer<typeof LibraryEntrySchema>;
 
 export const LibrarySnapshotSchema = z.strictObject({

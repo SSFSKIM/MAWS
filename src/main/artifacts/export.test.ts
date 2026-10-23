@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs';
+import { HostBridge } from '../../engine-host/tool-server/bridge';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import type { MawsArtifactExport } from '@shared/ipc/schema/maws';
+import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
@@ -141,6 +143,19 @@ describe('runExport', () => {
     expect(slowRename.path).toBeNull(); // the rename ran
   });
 
+  it('removes an inspection image whose publication completes after the export deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const registry = new ExporterRegistry();
+    registry.register(writing('document', 'png', () => 'inspection image'));
+    const job = request({ kind: 'document', format: 'png', inspection: true });
+    const budget = new ExportBudget(60_000);
+    slowRename.path = job.path;
+    slowRename.wait = async () => { await vi.advanceTimersByTimeAsync(60_001); };
+    expect(await runExport(registry, job, sources(), budget)).toEqual({ ok: false, error: 'the export did not finish within 60 s' });
+    expect(slowRename.path).toBeNull(); // the image really was published before the simulated completion delay
+    expect(existsSync(job.path)).toBe(false);
+  });
+
   it('puts nothing in place when the exporter fails after a write, and answers the blocked requests its printer counted', async () => {
     const registry = new ExporterRegistry();
     registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => {
@@ -222,7 +237,10 @@ function fakeHost() {
         listeners.push(listener);
         return () => void listeners.splice(listeners.indexOf(listener), 1);
       },
-      answer: async (input) => void answered.push(input),
+      answer: async (input) => {
+        answered.push(input);
+        return { ok: true, value: { outcome: 'delivered' } };
+      },
       print: async (html) => bytes(`%PDF ${html}`),
     }),
   };
@@ -243,6 +261,57 @@ const until = async (test: () => boolean) => {
 };
 
 describe('the export service', () => {
+  it.each(['withdrawn', 'ended', 'timeout'] as const)('removes a late inspection image after the host request is %s', async (outcome) => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    let finish!: () => void;
+    registry.register(writing('document', 'png', async () => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return 'inspection image';
+    }));
+    const bridge = new HostBridge<MawsArtifactExport, MawsArtifactExportAnswer>({ send: host.emit, answerMs: 100 });
+    const deps = host.deps(registry);
+    const acknowledgments: string[] = [];
+    const service = startExportService({ ...deps, answer: async (input) => {
+      host.answered.push(input);
+      const outcome = bridge.answer(input.requestId as RequestId, input.answer);
+      acknowledgments.push(outcome);
+      return { ok: true, value: { outcome } };
+    } });
+    const controller = new AbortController();
+    const pending = bridge.request(hostRequest({ artifactId: DOC, kind: 'document', format: 'png', path: join(root, DOC, 'exports', 'inspect.png'), inspection: true }), controller.signal);
+    await until(() => finish !== undefined);
+    if (outcome === 'withdrawn') controller.abort();
+    if (outcome === 'ended') bridge.processExited();
+    expect(await pending).toEqual({ kind: outcome });
+    finish();
+    await until(() => host.answered.length === 1);
+    expect(acknowledgments).toEqual(['not_pending']);
+    const answer = host.answered[0]!.answer;
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) throw new Error(answer.error);
+    await until(() => !existsSync(answer.path));
+    expect(await readdir(join(root, DOC, 'exports'))).toEqual([]);
+    service.stop();
+  });
+
+  it.each([true, false])('retains a delivered inspection or an ordinary abandoned export (inspection=%s)', async (inspection) => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    registry.register(writing('document', 'png', () => 'export image'));
+    const deps = host.deps(registry);
+    const service = startExportService({ ...deps, answer: async (input) => {
+      host.answered.push(input);
+      return { ok: true, value: { outcome: inspection ? 'delivered' : 'not_pending' } };
+    } });
+    host.emit(hostRequest({ artifactId: DOC, kind: 'document', format: 'png', ...(inspection && { inspection: true }) }));
+    await until(() => host.answered.length === 1);
+    const answer = host.answered[0]!.answer;
+    if (!answer.ok) throw new Error(answer.error);
+    expect(await readFile(answer.path, 'utf8')).toBe('export image');
+    service.stop();
+  });
+
   it('answers the host’s export request through maws.artifact.exported, the file written where the host named, its page size handed on', async () => {
     const host = fakeHost();
     const registry = new ExporterRegistry();

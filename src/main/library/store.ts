@@ -41,6 +41,8 @@ interface ArtifactRow {
   revision: number;
   last_editor: string;
   last_edited_at: number;
+  built_in: number;
+  seed_only: number;
 }
 
 interface ListedRow extends ArtifactRow {
@@ -236,6 +238,8 @@ export class LibraryStore {
       revision: artifact.revision,
       last_editor: actorKey(artifact.lastEditor),
       last_edited_at: artifact.lastEditedAt,
+      built_in: artifact.builtIn === true,
+      seed_only: artifact.seedOnly === true,
     };
     const indexed = this.db.get<{ title: string; revision: number; text_rowid: number }>('SELECT title, revision, text_rowid FROM library_artifacts WHERE id = ?', artifact.id);
     if (indexed === null) {
@@ -380,6 +384,8 @@ export class LibraryStore {
       revision: row.revision,
       lastEditor,
       lastEditedAt: row.last_edited_at,
+      ...(row.built_in === 1 && { builtIn: true }),
+      ...(row.seed_only === 1 && { seedOnly: true }),
       ...(lastEditor.kind === 'session' ? { lastEditorTitle: titleOf(lastEditor.appSessionId) } : {}), // linked or not (DL 27f)
       sessions,
       ...(row.space_id !== null && row.space_name !== null ? { space: { id: row.space_id, name: row.space_name } } : {}),

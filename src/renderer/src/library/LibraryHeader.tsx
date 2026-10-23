@@ -13,7 +13,7 @@ import { openLibraryDialog } from './dialogs';
 import { KindIcon } from './icons';
 import { setLibraryView, useLibraryView, type LibraryViewName } from './view';
 
-const VIEWS: readonly LibraryViewName[] = ['all', 'pinned', 'bySpace'];
+const VIEWS: readonly LibraryViewName[] = ['all', 'general', 'pinned', 'bySpace'];
 export const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
 export const MENU_ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 const ALL = 'all'; // the radio value of All types (no kind is it)
