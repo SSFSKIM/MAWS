@@ -150,7 +150,7 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   await page.getByRole('menuitemradio', { name: 'Research' }).click();
   await expect(row('budget.csv').getByRole('button', { name: 'Research' })).toBeVisible();
   await library.getByRole('radio', { name: 'By Space' }).click();
-  await expect.poll(headings).toEqual(['Research', 'No Space']);
+  await expect.poll(headings).toEqual(['Research', 'General']);
   await library.getByRole('heading', { name: 'Research' }).getByRole('button').click();
   await expect(page.getByRole('button', { name: 'All Spaces' })).toBeVisible();
   await expect.poll(titles).toEqual(['budget.csv']);
@@ -222,7 +222,7 @@ function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
 function rewindIndexTo9(path: string): void {
   const db = new DatabaseSync(path);
   try {
-    expect(schemaOf(db).version, 'the first launch left the index at 10').toBe(10);
+    expect(schemaOf(db).version, 'the first launch left the index at 11').toBe(11);
     db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 9;');
     const template = new DatabaseSync(':memory:');
     try {
@@ -311,7 +311,7 @@ test('an index at version 9 beside a populated host store migrates to 10 at laun
   launch = null;
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
-    expect(schemaOf(db).version, 'the index is at 10 again').toBe(10);
+    expect(schemaOf(db).version, 'the index is at 11 again').toBe(11);
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
