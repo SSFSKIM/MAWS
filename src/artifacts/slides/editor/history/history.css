@@ -184,3 +184,23 @@
   flex-shrink: 0;
   min-height: 0;
 }
+
+/* WR #45: history floats over the work, never takes width away from the slide. */
+.deck-editor-body .deck-history-rail[data-deck-rail] {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: auto;
+  z-index: 20;
+  width: min(calc(var(--space) * 76), calc(100% - 16px));
+  height: min(80%, 520px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-float);
+}
+.deck-history-rail > .doc-rail {
+  width: 100%;
+  border: 0;
+}

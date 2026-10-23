@@ -16,8 +16,9 @@ describe('the deck’s Export menu', () => {
   it('offers PowerPoint in three font variants, PDF, HTML, For Claude and PNG', () => {
     const picked: string[] = [];
     const entries = deckExports(A, null, (entry) => picked.push(entry.id));
-    expect(entries.map((e) => e.label)).toEqual(['PowerPoint (fonts by name)', 'PowerPoint (basic fonts)', 'PowerPoint (slides as pictures)', 'PDF', 'HTML (one page)', 'For Claude (zip)', 'PNG (cover slide)']);
-    entries[2]!.onSelect();
+    expect(entries.map((e) => e.label)).toEqual(['PowerPoint', 'PDF', 'HTML (one page)', 'For Claude (zip)', 'PNG (all slides)']);
+    expect(entries[0]!.children?.map((e) => e.id)).toEqual(['pptx-basic', 'pptx-named', 'pptx-pictures']);
+    entries[0]!.children![2]!.onSelect();
     expect(picked).toEqual(['pptx-pictures']);
   });
 

@@ -20,8 +20,6 @@ import type { SlideCanvas } from '../../canvas';
 import { apply, applyLinear, HANDLES, union, type Box, type Guide, type Handle, type Pt } from '../../geometry';
 import { isPinned } from '../../ir';
 import { ROOT } from '../../model';
-import type { ElementWrites } from '../../writers-elements';
-import { writeElements } from '../../writers-elements';
 import { CommentPins } from '../comments/Pins';
 import { DECK_COPY as C } from '../copy';
 import { armedBox } from '../armed';
@@ -510,10 +508,10 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       } else if ((key === 'Delete' || key === 'Backspace') && cmds.canEdit) {
         cmds.remove();
         done();
-      } else if (key.startsWith('Arrow') && !mod && cmds.canZ) {
+      } else if (key.startsWith('Arrow') && !mod && (cmds.canZ || cmds.canDetach)) {
         const step = e.shiftKey ? 10 : 1;
         const d = { x: key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0, y: key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0 };
-        nudge(c, sel, d, (writes: Record<string, ElementWrites>) => session.typing('nudge', (origin) => writeElements(session.doc, slideId, writes, origin)));
+        notice(nudge(c, sel, d));
         done();
       } else if (mod && key.toLowerCase() === 'd' && cmds.canEdit) {
         notice(cmds.duplicate());

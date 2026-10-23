@@ -3,6 +3,7 @@
 // (front, back, forward, backward), group and ungroup, Detach (a flow child to pinned at its rendered box). Each is one
 // gesture (one transaction or one undo step) with the editor's origin; what the slide's limits refuse comes back as a
 // reason to show.
+import { freePlacement } from './free-placement';
 import type { Box } from '../../geometry';
 import { CELL_TAGS, TEXT_TAGS, isPinned } from '../../ir';
 import { deleteElementTree, ROOT, zOrder } from '../../model';
@@ -125,6 +126,10 @@ export function selectionCommands(ctx: GestureContext, selection: readonly strin
     },
     detach() {
       if (!canDetach || !one) return null;
+      if (!ctx.canvas.isBoard) return attempt(() => {
+        const placement = freePlacement(ctx);
+        session.edit((origin) => placement.write(origin));
+      });
       const m = measure(ctx.canvas, one.id, ctx.scale);
       if (!m) return null;
       const box = { left: m.inHost.x, top: m.inHost.y, width: m.w, ...(TEXT_TAGS.has(one.tag) ? {} : { height: m.h }) };

@@ -510,12 +510,12 @@ test.describe('the document editor', () => {
     await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('named', 'owner', { label: 'Clean draft' }));
     await page.evaluate((text) => (window as unknown as HarnessWindow).__maws_document.agentAppend('para0002', text), ADDED);
     await expect.poll(() => blockText(page, 'a', 'para0002')).toBe(`The river runs north; the river is cold.${ADDED}`);
-    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('turn', 'agent', { summary: 'Added a sentence' }));
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('turn', 'agent', { label: 'Agent revision' }));
 
     await toolbar(page, 'a').getByRole('button', { name: 'Version history' }).click();
     const rail = replica(page, 'a').getByRole('complementary', { name: 'Version history' });
     const today = rail.getByRole('region', { name: 'Today' });
-    await today.getByRole('button', { name: /Added a sentence/ }).click();
+    await today.getByRole('button', { name: /^Version Agent revision by / }).click();
     const bar = replica(page, 'a').getByRole('toolbar', { name: 'Version preview' });
     await expect(bar.getByText('1 change', { exact: true })).toBeVisible();
     const inserted = previewContent(page, 'a').locator('.doc-change-ins');
@@ -531,8 +531,7 @@ test.describe('the document editor', () => {
     await rail.getByRole('button', { name: /^Version Clean draft/ }).click();
     await expect(bar.getByText(/^Clean draft/)).toBeVisible();
     await bar.getByRole('button', { name: 'Make a copy' }).click();
-    await expect(rail.getByText('A copy of this version was made.')).toBeVisible();
-    expect(await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.copies())).toHaveLength(1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.copies().length)).toBe(1);
     await bar.getByRole('button', { name: 'Restore this version' }).click();
     await replica(page, 'a').getByRole('alertdialog', { name: 'Restore this version?' }).getByRole('button', { name: 'Restore', exact: true }).click();
     await expect(replica(page, 'a').getByRole('status', { name: 'Restored' })).toContainText('Restored from Clean draft');

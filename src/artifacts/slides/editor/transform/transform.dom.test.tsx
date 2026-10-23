@@ -160,15 +160,29 @@ describe('the gestures', () => {
     reload(doc);
   });
 
-  it('drags a flow child below its sibling: one re-order on the drop', () => {
+  it('first human movement fixes the slide layout without moving siblings, in one undo step', () => {
     const doc = deck();
     const ctx = gestureContext(doc, { title: [128, 128, 1664, 80], body: [128, 240, 1664, 45] });
+    const before = slideFile(doc, 's');
     const g = startFlowMove(ctx, 'title', { x: 300, y: 150 });
-    const f = g.frame({ x: 300, y: 300 }, NO);
-    expect(f.insertion).toBeDefined();
-    g.end(true);
-    expect(childLists(readFlat(doc, 's', false)).get(ROOT)!.filter((e) => e.tag !== 'div').map((e) => e.id)).toEqual(['body', 'title']);
+    g.frame({ x: 350, y: 300 }, { ...NO, meta: true });
+    g.end();
+    expect(styleOf(doc, 'title')).toMatchObject({ position: 'absolute', left: '178px', top: '278px', width: '1664px', height: '80px' });
+    expect(styleOf(doc, 'body')).toMatchObject({ position: 'absolute', left: '128px', top: '240px', width: '1664px', height: '45px' });
+    reload(doc);
+    ctx.session.undoStep();
+    expect(slideFile(doc, 's')).toBe(before);
   });
+
+  it('detach freezes every sibling at its measured position instead of leaving a reflow gap', () => {
+    const doc = deck();
+    const ctx = gestureContext(doc, { title: [128, 128, 1664, 80], body: [128, 240, 1664, 45] });
+    expect(selectionCommands(ctx, ['title'], false).detach()).toBeNull();
+    expect(styleOf(doc, 'title')).toMatchObject({ position: 'absolute', top: '128px' });
+    expect(styleOf(doc, 'body')).toMatchObject({ position: 'absolute', top: '240px' });
+    reload(doc);
+  });
+
 });
 
 describe('the stage’s keys and clipboard', () => {

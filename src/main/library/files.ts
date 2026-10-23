@@ -8,7 +8,9 @@
 // document kind only, never a program (the files service's rule). Under MAWS_E2E=1 the seams the rest of the app
 // uses stand in for the OS: MAWS_E2E_OPEN_LOG takes an open or a reveal as a line, MAWS_E2E_SAVE_PATH is the folder a
 // save lands in without the dialog.
-import { appendFile, copyFile, lstat, rename, rm } from 'node:fs/promises';
+import { appendFile, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
+import JSZip from 'jszip';
 import { basename, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SaveDialogOptions, WebContents } from 'electron';
@@ -25,6 +27,7 @@ export interface LibraryFilesDeps {
   root: string; // `<userData>/artifacts`, where the export service writes the library's exports
   downloads(): string; // app.getPath('downloads')
   showSaveDialog(options: SaveDialogOptions, sender: WebContents | undefined): Promise<{ canceled: boolean; filePath?: string }>;
+  confirmReplaceFolder(path: string, sender: WebContents | undefined): Promise<boolean>;
   openPath(path: string): Promise<string>; // shell.openPath: '' on success, else the error text
   readFile(input: Omit<CommandInput<'files.read'>, 'appSessionId'>): Promise<CommandOutput<'files.read'>>; // M6b fix wave 2: the files service's `readResolved`
   showItemInFolder(path: string): void;
@@ -59,11 +62,13 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
     return target !== null && target.isFile() && (target.mode & 0o111) === 0 && opensExternally(name);
   };
 
+  let lastExportDirectory: string | null = null;
+
   // Where the copy goes: the e2e seam's folder, else the dialog's choice (null when cancelled).
   const destination = async (defaultName: string, sender: WebContents | undefined): Promise<string | null> => {
     const seamDir = deps.env.MAWS_E2E === '1' ? deps.env.MAWS_E2E_SAVE_PATH : undefined;
     if (seamDir) return join(seamDir, defaultName);
-    const { canceled, filePath } = await deps.showSaveDialog({ defaultPath: join(deps.downloads(), defaultName) }, sender);
+    const { canceled, filePath } = await deps.showSaveDialog({ defaultPath: join(lastExportDirectory ?? deps.downloads(), defaultName) }, sender);
     return canceled || !filePath ? null : filePath;
   };
 
@@ -115,7 +120,7 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
         const name = artifactExportName(source.export.revision, source.export.format, source.export.exportId); // P3-E: the managed name, the id a UUID (the schema's)
         from = join(deps.root, artifactId, 'exports', name);
         if (!(await lstat(from).catch(() => null))?.isFile()) throw new CommandFailure(ipcError('invalid_input', `no export ${name} of ${artifactId}; export it again`));
-        defaultName = `${fileNameOf(artifact.title)}${extname(name)}`;
+        defaultName = source.export.format === 'pngs' ? `${fileNameOf(artifact.title)} slides` : `${fileNameOf(artifact.title)}${extname(name)}`;
       } else {
         const stored = await content({ artifactId, ...(source.content.revision !== undefined && { revision: source.content.revision }) });
         from = stored.path;
@@ -128,20 +133,89 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
       try {
         const to = await destination(defaultName, sender);
         if (to === null) return { saved: false };
-        const temp = join(dirname(to), `.${randomUUID()}.tmp`);
-        try {
-          await copyFile(from, temp);
-          await rename(temp, to);
-        } catch (error) {
-          await rm(temp, { force: true }).catch(() => {});
-          throw error;
+        if ('export' in source && source.export.format === 'pngs') {
+          if (!(await savePngFolder(from, to, () => deps.confirmReplaceFolder(to, sender)))) return { saved: false };
+        } else {
+          const temp = join(dirname(to), `.${randomUUID()}.tmp`);
+          try {
+            await copyFile(from, temp);
+            await rename(temp, to);
+          } catch (error) {
+            await rm(temp, { force: true }).catch(() => {});
+            throw error;
+          }
         }
+        lastExportDirectory = dirname(to);
         return { saved: true, path: to };
       } finally {
         if (own !== null) await rm(own, { force: true }).catch(() => {});
       }
     },
   };
+}
+
+/** Stage the whole bundle, then ask about the directory actually present, not what the save dialog saw. */
+async function savePngFolder(from: string, to: string, confirmReplace: () => Promise<boolean>): Promise<boolean> {
+  const zip = await JSZip.loadAsync(await readFile(from), { checkCRC32: true });
+  const entries = Object.values(zip.files);
+  if (!entries.length || entries.some((entry) => entry.dir || !/^slide-\d+\.png$/.test(entry.name) || ((entry as typeof entry & { unsafeOriginalName?: string }).unsafeOriginalName ?? entry.name) !== entry.name)) {
+    throw new Error('The slide export contains invalid file names; export it again.');
+  }
+  // An exclusively-created private directory owns both names; an un-restorable backup is kept here, never collected.
+  const temp = await mkdtemp(join(dirname(to), '.maws-slides-'));
+  const staged = join(temp, 'staged');
+  const backup = join(temp, 'previous');
+  const changed = () => new Error('The destination folder changed while saving; save again to review it.');
+  const at = async (path: string): Promise<BigIntStats | null> => {
+    try { return await lstat(path, { bigint: true }); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  };
+  const same = (a: BigIntStats | null, b: BigIntStats | null) => a === null || b === null ? a === b : a.dev === b.dev && a.ino === b.ino;
+  let moved = false;
+  try {
+    await mkdir(staged);
+    for (const entry of entries) await writeFile(join(staged, entry.name), await entry.async('nodebuffer'));
+    const approved = await at(to);
+    if (approved !== null && !approved.isDirectory()) throw new Error('Choose a folder, not a file or symbolic link, for the slides.');
+    if (approved !== null && !(await confirmReplace())) return false;
+    if (!same(approved, await at(to))) throw changed();
+    if (approved !== null) {
+      await rename(to, backup);
+      moved = true;
+      // A swap in the check-to-move interval must never become permission to recursively remove another folder.
+      if (!same(approved, await at(backup))) throw changed();
+    }
+    if (await at(to) !== null) throw changed();
+    // Node has no exclusive directory rename: a creator in this last syscall window can still lose an empty folder.
+    // POSIX refuses a nonempty directory; the vacancy checks also protect rollback from known intervening writers.
+    await rename(staged, to);
+    if (moved) {
+      if (!same(approved, await at(backup))) throw changed();
+      await rm(backup, { recursive: true });
+      moved = false;
+    }
+    return true;
+  } catch (error) {
+    if (moved) {
+      try {
+        if (await at(to) === null) {
+          await rename(backup, to);
+          moved = false;
+        }
+      } catch { /* Keep the backup if restoration fails; never remove an intervening destination to restore it. */ }
+      if (moved) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${message} The previous folder is preserved at ${backup}.`, { cause: error });
+      }
+    }
+    throw error;
+  } finally {
+    await rm(staged, { recursive: true, force: true }).catch(() => {});
+    // Non-recursive cleanup cannot collect a retained backup or any unexpected entry beside the staging folder.
+    await rmdir(temp).catch(() => {});
+  }
 }
 
 export function registerLibraryFiles(register: typeof registerMainHandler, deps: LibraryFilesDeps): void {

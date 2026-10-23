@@ -124,14 +124,14 @@ describe('the preview’s font-token overrides (fix wave 3)', () => {
 // P4 W1-B (the tracker's "P4 version history lines"; sitting candidate 54): the banner over a version whose deck
 // settings changed named deck.json's raw keys ("Deck settings changed: cover, createdOnFiles, sections, title, v").
 describe('the deck’s own changes', () => {
-  it('are named as the owner reads them, the file-format keys as one', () => {
+  it('remain in the comparison without a redundant settings banner', () => {
     const { preview, destroy } = previewOf(undefined, (replica) =>
       transact(replica, () => writeDeckKeys(replica, { v: 5, createdOnFiles: { v: 1, at: '2026-10-19T09:00:00Z' }, title: 'Q4 review', cover: 's', sections: { intro: { description: 'Intro', start: 's' } }, order: ['s'] })),
     );
     try {
       const { container } = render(<HistoryPreview controller={controller} preview={preview} liveSystem={null} assets={{ shown: () => null, earlier: () => null }} faces={{ shown: new Map(), earlier: new Map() }} zoom={1} thumbnailWidth={240} />);
       expect(preview.changes.deck?.keys.map((k) => k.key)).toEqual(['cover', 'createdOnFiles', 'sections', 'title', 'v']);
-      expect(container.querySelector('.deck-history-deck')?.textContent).toBe('Deck settings changed: title, cover slide, sections, file format');
+      expect(container.querySelector('.deck-history-deck')).toBeNull();
     } finally {
       destroy();
     }

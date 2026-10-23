@@ -380,5 +380,16 @@ describe('P4-B2 (D14, tracker row 253): F6 and ⇧F6 cycle the editor’s region
     expect(document.activeElement).toBe(heading.querySelector('.deck-textbox'));
     f6({ shiftKey: true });
     expect(document.activeElement?.closest('[data-design-rail="boards"] [data-current]')).not.toBeNull();
+    f6({ shiftKey: true });
+    expect(within('.deck-toolbar')).toBe(true);
+    f6({ shiftKey: true }); // no open rail: the inspector is the last region, not a second copy of it
+    expect(within('[data-design-rail="inspector"]')).toBe(true);
+    f6();
+    expect(within('.deck-toolbar')).toBe(true);
+    act(() => session.toggleRail('theme'));
+    f6({ shiftKey: true });
+    expect(within('[data-deck-rail="theme"]')).toBe(true);
+    f6();
+    expect(within('.deck-toolbar')).toBe(true);
   });
 });

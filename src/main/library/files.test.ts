@@ -1,7 +1,8 @@
 // The viewers' and the library's reach to a byte kind's stored file (files.ts): the formats the exporter registry
 // serves, the stored file resolved through the host, Open externally and Reveal (with the e2e seam's log), and Save as…
 // of an export or of the stored file (with the e2e seam's folder).
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import JSZip from 'jszip';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +10,27 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
+import { zipFiles } from '../design-systems/zip';
 import { createLibraryFiles, type LibraryFilesDeps } from './files';
+
+// Run real filesystem operations, interleaving another writer at the asynchronous boundaries.
+const diskRace = vi.hoisted(() => ({
+  afterLstat: null as ((path: string) => void) | null,
+  beforeRename: null as ((from: string, to: string) => void) | null,
+  afterRename: null as ((from: string, to: string) => void) | null,
+}));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const lstat = (async (...args: Parameters<typeof actual.lstat>) => {
+    try { return await actual.lstat(...args); } finally { diskRace.afterLstat?.(String(args[0])); }
+  }) as typeof actual.lstat;
+  const rename: typeof actual.rename = async (from, to) => {
+    diskRace.beforeRename?.(String(from), String(to));
+    await actual.rename(from, to);
+    diskRace.afterRename?.(String(from), String(to));
+  };
+  return { ...actual, lstat, rename };
+});
 
 const ID = '00000000-0000-4000-8000-000000000001';
 let dir: string;
@@ -17,7 +38,11 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'maws-library-files-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  diskRace.afterLstat = diskRace.beforeRename = diskRace.afterRename = null;
+  vi.restoreAllMocks();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 interface Stored {
   kind: ArtifactKind;
@@ -43,6 +68,7 @@ function deps(stored: Stored, over: Partial<LibraryFilesDeps> = {}): LibraryFile
     root: join(dir, 'artifacts'),
     downloads: () => join(dir, 'Downloads'),
     showSaveDialog: vi.fn(async () => ({ canceled: true })),
+    confirmReplaceFolder: vi.fn(async () => false),
     openPath: vi.fn(async () => ''),
     showItemInFolder: vi.fn(),
     readFile: vi.fn(async ({ path, offset = 0 }) => ({ encoding: 'utf8' as const, content: readFileSync(path, 'utf8').slice(offset), bytes: 0, offset, length: 0, truncated: false, mime: 'text/plain', hash: null, utf8: null })),
@@ -55,6 +81,16 @@ function put(name: string, text: string): string {
   const path = join(dir, name);
   writeFileSync(path, text);
   return path;
+}
+
+function ownedPngExport() {
+  const exports = join(dir, 'artifacts', ID, 'exports');
+  mkdirSync(exports, { recursive: true });
+  const exportId = '00000000-0000-4000-8000-0000000000e1';
+  writeFileSync(join(exports, artifactExportName(7, 'pngs', exportId)), zipFiles({ 'slide-01.png': Uint8Array.from([1, 2]), 'slide-02.png': Uint8Array.from([3, 4]) }));
+  const parent = join(dir, 'chosen');
+  mkdirSync(parent);
+  return { exports, parent, chosen: join(parent, 'Quarterly slides'), input: { artifactId: ID, source: { export: { revision: 7, format: 'pngs', exportId } } } satisfies CommandInput<'library.saveAs'> };
 }
 
 describe('library files', () => {
@@ -114,12 +150,298 @@ describe('library files', () => {
     expect(exec.openPath).not.toHaveBeenCalled();
   });
 
+  it('saves all-slide PNGs as one named folder only after explicit replacement approval, remembering its parent', async () => {
+    const exported = join(dir, 'artifacts', ID, 'exports', artifactExportName(7, 'pngs'));
+    mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
+    writeFileSync(exported, zipFiles({ 'slide-01.png': Uint8Array.from([1, 2]), 'slide-02.png': Uint8Array.from([3, 4]) }));
+    const parent = join(dir, 'chosen');
+    const chosen = join(parent, 'Quarterly slides');
+    mkdirSync(chosen, { recursive: true });
+    writeFileSync(join(chosen, 'old.png'), 'old');
+    const showSaveDialog = vi.fn<LibraryFilesDeps['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
+    const confirmReplaceFolder = vi.fn(async () => {
+      expect(readdirSync(chosen)).toEqual(['old.png']);
+      expect(readFileSync(join(chosen, 'old.png'), 'utf8')).toBe('old');
+      return true;
+    });
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, { showSaveDialog, confirmReplaceFolder }));
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).resolves.toEqual({ saved: true, path: chosen });
+    expect(confirmReplaceFolder).toHaveBeenCalledExactlyOnceWith(chosen, undefined);
+    expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
+    expect([...readFileSync(join(chosen, 'slide-01.png'))]).toEqual([1, 2]);
+    expect([...readFileSync(join(chosen, 'slide-02.png'))]).toEqual([3, 4]);
+    expect(showSaveDialog.mock.calls[0]![0]).toMatchObject({ defaultPath: join(dir, 'Downloads', 'Quarterly slides') });
+    showSaveDialog.mockResolvedValueOnce({ canceled: true, filePath: chosen });
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).resolves.toEqual({ saved: false });
+    expect(showSaveDialog.mock.calls[1]![0]).toMatchObject({ defaultPath: chosen });
+    expect(readdirSync(parent)).toEqual(['Quarterly slides']);
+  });
+
+  it.each(['save dialog', 'replacement prompt'] as const)('cancelling the PNG %s preserves every existing file and removes the owned export and staging files', async (cancelAt) => {
+    const exports = join(dir, 'artifacts', ID, 'exports');
+    mkdirSync(exports, { recursive: true });
+    const exportId = '00000000-0000-4000-8000-0000000000e1';
+    const own = join(exports, artifactExportName(7, 'pngs', exportId));
+    const cached = join(exports, artifactExportName(7, 'pngs'));
+    const pngs = zipFiles({ 'slide-01.png': Uint8Array.from([1, 2]), 'slide-02.png': Uint8Array.from([3, 4]) });
+    writeFileSync(own, pngs);
+    writeFileSync(cached, pngs);
+    const parent = join(dir, 'chosen');
+    const chosen = join(parent, 'Quarterly slides');
+    mkdirSync(join(chosen, 'nested'), { recursive: true });
+    writeFileSync(join(chosen, 'old.png'), 'old');
+    writeFileSync(join(chosen, 'nested', 'keep.txt'), 'Keep this');
+    const confirmReplaceFolder = vi.fn(async () => false);
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: cancelAt === 'save dialog', filePath: chosen }),
+      confirmReplaceFolder,
+    }));
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs', exportId } } })).resolves.toEqual({ saved: false });
+    expect(confirmReplaceFolder).toHaveBeenCalledTimes(cancelAt === 'save dialog' ? 0 : 1);
+    expect(readdirSync(parent)).toEqual(['Quarterly slides']);
+    expect(readdirSync(chosen)).toEqual(['nested', 'old.png']);
+    expect(readFileSync(join(chosen, 'old.png'), 'utf8')).toBe('old');
+    expect(readdirSync(join(chosen, 'nested'))).toEqual(['keep.txt']);
+    expect(readFileSync(join(chosen, 'nested', 'keep.txt'), 'utf8')).toBe('Keep this');
+    expect(readdirSync(exports)).toEqual([artifactExportName(7, 'pngs')]);
+    expect([...readFileSync(cached)]).toEqual([...pngs]);
+  });
+
+  it('publishes a complete PNG folder at a new destination without a replacement prompt', async () => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    const confirmReplaceFolder = vi.fn(async () => false);
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
+    }));
+    await expect(files.saveAs(input)).resolves.toEqual({ saved: true, path: chosen });
+    expect(confirmReplaceFolder).not.toHaveBeenCalled();
+    expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
+    expect([...readFileSync(join(chosen, 'slide-01.png'))]).toEqual([1, 2]);
+    expect([...readFileSync(join(chosen, 'slide-02.png'))]).toEqual([3, 4]);
+    expect(readdirSync(parent)).toEqual(['Quarterly slides']);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it.each(['file', 'symbolic link'] as const)('refuses an existing %s as a PNG folder destination without replacing it', async (kind) => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    const target = join(parent, 'important.txt');
+    writeFileSync(target, 'Keep this');
+    if (kind === 'file') writeFileSync(chosen, 'Original file');
+    else symlinkSync(target, chosen);
+    const confirmReplaceFolder = vi.fn(async () => true);
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
+    }));
+    await expect(files.saveAs(input)).rejects.toThrow(/folder/i);
+    expect(confirmReplaceFolder).not.toHaveBeenCalled();
+    expect(readFileSync(target, 'utf8')).toBe('Keep this');
+    expect(readFileSync(chosen, 'utf8')).toBe(kind === 'file' ? 'Original file' : 'Keep this');
+    expect(lstatSync(chosen).isSymbolicLink()).toBe(kind === 'symbolic link');
+    expect(readdirSync(parent)).toEqual(['Quarterly slides', 'important.txt']);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it.each([false, true])('asks about a folder created while loading the PNG bundle, honoring Replace=%s', async (replace) => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    const loadAsync = JSZip.loadAsync;
+    vi.spyOn(JSZip, 'loadAsync').mockImplementationOnce(async (data, options) => {
+      const zip = await loadAsync(data, options);
+      mkdirSync(chosen);
+      writeFileSync(join(chosen, 'important.txt'), 'Created while staging');
+      return zip;
+    });
+    const sender = {} as Parameters<LibraryFilesDeps['showSaveDialog']>[1];
+    const confirmReplaceFolder = vi.fn(async () => {
+      expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Created while staging');
+      return replace;
+    });
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
+    }));
+    await expect(files.saveAs(input, sender)).resolves.toEqual(replace ? { saved: true, path: chosen } : { saved: false });
+    expect(confirmReplaceFolder).toHaveBeenCalledExactlyOnceWith(chosen, sender);
+    if (replace) {
+      expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
+      expect([...readFileSync(join(chosen, 'slide-01.png'))]).toEqual([1, 2]);
+      expect([...readFileSync(join(chosen, 'slide-02.png'))]).toEqual([3, 4]);
+    } else {
+      expect(readdirSync(chosen)).toEqual(['important.txt']);
+      expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Created while staging');
+    }
+    expect(readdirSync(parent)).toEqual(['Quarterly slides']);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it.each(['directory', 'symbolic link'] as const)('refuses a destination swapped for another %s during replacement approval', async (replacement) => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    mkdirSync(chosen);
+    writeFileSync(join(chosen, 'old.png'), 'Original');
+    const original = join(parent, 'original');
+    const incoming = join(parent, 'incoming');
+    mkdirSync(incoming);
+    writeFileSync(join(incoming, 'important.txt'), 'Not approved');
+    const confirmReplaceFolder = vi.fn(async () => {
+      renameSync(chosen, original);
+      if (replacement === 'directory') renameSync(incoming, chosen);
+      else symlinkSync(incoming, chosen);
+      return true;
+    });
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
+    }));
+    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Not approved');
+    expect(lstatSync(chosen).isSymbolicLink()).toBe(replacement === 'symbolic link');
+    expect(readFileSync(join(original, 'old.png'), 'utf8')).toBe('Original');
+    expect(readdirSync(parent)).toEqual(replacement === 'directory' ? ['Quarterly slides', 'original'] : ['Quarterly slides', 'incoming', 'original']);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it('refuses a folder created just after the destination was observed absent', async () => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    diskRace.afterLstat = (path) => {
+      if (path !== chosen) return;
+      diskRace.afterLstat = null;
+      mkdirSync(chosen);
+      writeFileSync(join(chosen, 'important.txt'), 'Not approved');
+    };
+    const confirmReplaceFolder = vi.fn(async () => true);
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
+    }));
+    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    expect(confirmReplaceFolder).not.toHaveBeenCalled();
+    expect(readdirSync(chosen)).toEqual(['important.txt']);
+    expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Not approved');
+    expect(readdirSync(parent)).toEqual(['Quarterly slides']);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it('checks the moved folder identity, preserving a swap between the last check and the move', async () => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    mkdirSync(chosen);
+    writeFileSync(join(chosen, 'old.png'), 'Original');
+    const original = join(parent, 'original');
+    diskRace.beforeRename = (from) => {
+      if (from !== chosen) return;
+      diskRace.beforeRename = null;
+      renameSync(chosen, original);
+      mkdirSync(chosen);
+      writeFileSync(join(chosen, 'important.txt'), 'Not approved');
+    };
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
+    }));
+    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Not approved');
+    expect(readFileSync(join(original, 'old.png'), 'utf8')).toBe('Original');
+    expect(readdirSync(parent)).toEqual(['Quarterly slides', 'original']);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it.each([false, true])('preserves a folder created after moving the approved destination, with contents=%s', async (withContents) => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    mkdirSync(chosen);
+    writeFileSync(join(chosen, 'old.png'), 'Original');
+    let backup = '';
+    let incomingInode = 0;
+    diskRace.afterRename = (from, to) => {
+      if (from !== chosen) return;
+      diskRace.afterRename = null;
+      backup = to;
+      mkdirSync(chosen);
+      if (withContents) writeFileSync(join(chosen, 'important.txt'), 'Not approved');
+      incomingInode = lstatSync(chosen).ino;
+    };
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
+    }));
+    const saving = files.saveAs(input);
+    await expect(saving).rejects.toThrow(/changed/i);
+    await expect(saving).rejects.toThrow(backup);
+    expect(lstatSync(chosen).ino).toBe(incomingInode);
+    expect(readdirSync(chosen)).toEqual(withContents ? ['important.txt'] : []);
+    if (withContents) expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Not approved');
+    expect(readFileSync(join(backup, 'old.png'), 'utf8')).toBe('Original');
+    expect(readdirSync(parent).filter((name) => name !== 'Quarterly slides')).toHaveLength(1);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it('never recursively removes a backup swapped after publication', async () => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    mkdirSync(chosen);
+    writeFileSync(join(chosen, 'old.png'), 'Original');
+    const original = join(parent, 'original');
+    let backup = '';
+    diskRace.afterRename = (from, to) => {
+      if (from === chosen) backup = to;
+      else if (to === chosen) {
+        diskRace.afterRename = null;
+        renameSync(backup, original);
+        mkdirSync(backup);
+        writeFileSync(join(backup, 'important.txt'), 'Not approved');
+      }
+    };
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
+    }));
+    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    expect(readFileSync(join(backup, 'important.txt'), 'utf8')).toBe('Not approved');
+    expect(readFileSync(join(original, 'old.png'), 'utf8')).toBe('Original');
+    expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it.each([false, true])('a failed publication restores only a vacant destination, with a concurrent creator=%s', async (concurrentCreator) => {
+    const { exports, parent, chosen, input } = ownedPngExport();
+    mkdirSync(chosen);
+    writeFileSync(join(chosen, 'old.png'), 'Original');
+    let backup = '';
+    let incomingInode = 0;
+    diskRace.afterRename = (from, to) => { if (from === chosen) backup = to; };
+    diskRace.beforeRename = (from, to) => {
+      if (to !== chosen || from === backup) return;
+      diskRace.beforeRename = null;
+      if (concurrentCreator) {
+        mkdirSync(chosen);
+        incomingInode = lstatSync(chosen).ino;
+      }
+      throw new Error('Publication failed');
+    };
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
+      showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
+    }));
+    await expect(files.saveAs(input)).rejects.toThrow(/Publication failed/);
+    if (concurrentCreator) {
+      expect(lstatSync(chosen).ino).toBe(incomingInode);
+      expect(readdirSync(chosen)).toEqual([]);
+      expect(readFileSync(join(backup, 'old.png'), 'utf8')).toBe('Original');
+    } else {
+      expect(readdirSync(chosen)).toEqual(['old.png']);
+      expect(readFileSync(join(chosen, 'old.png'), 'utf8')).toBe('Original');
+      expect(readdirSync(parent)).toEqual(['Quarterly slides']);
+    }
+    expect(readdirSync(exports)).toEqual([]);
+  });
+
+  it('refuses malformed PNG bundles before replacing an existing folder', async () => {
+    const exported = join(dir, 'artifacts', ID, 'exports', artifactExportName(7, 'pngs'));
+    mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
+    writeFileSync(exported, zipFiles({ '../escape.png': Uint8Array.from([1]) }));
+    const chosen = join(dir, 'keep');
+    mkdirSync(chosen);
+    writeFileSync(join(chosen, 'keep.txt'), 'Keep this');
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, { showSaveDialog: async () => ({ canceled: false, filePath: chosen }) }));
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).rejects.toThrow();
+    expect(readFileSync(join(chosen, 'keep.txt'), 'utf8')).toBe('Keep this');
+  });
+
   it('saves an export under the artifact’s title through the dialog at Downloads, and nothing when cancelled', async () => {
     const exported = join(dir, 'artifacts', ID, 'exports', artifactExportName(7, 'pdf'));
     mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
     writeFileSync(exported, '%PDF-1.7 export');
     const chosen = join(dir, 'chosen.pdf');
-    const showSaveDialog = vi.fn(async () => ({ canceled: false, filePath: chosen }));
+    const showSaveDialog = vi.fn<LibraryFilesDeps['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
     const files = createLibraryFiles(deps({ kind: 'html', title: 'Q3: plans / review', files: {} }, { showSaveDialog }));
     await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } })).resolves.toEqual({ saved: true, path: chosen });
     expect(showSaveDialog).toHaveBeenCalledWith({ defaultPath: join(dir, 'Downloads', 'Q3- plans - review.pdf') }, undefined);

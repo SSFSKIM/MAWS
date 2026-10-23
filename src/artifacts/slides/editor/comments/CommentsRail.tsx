@@ -17,6 +17,7 @@ import { COMMENTS_ORIGIN, type DeckCommentsApi } from './controller';
 import { COMMENTS_COPY as C } from './copy';
 import { useReplyDrafts } from './drafts';
 import { useDeckThreadStates } from './use-threads';
+import { targetNumber } from './targets';
 import './comments.css';
 
 /**
@@ -47,6 +48,7 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
     <ThreadItem
       key={thread.id}
       thread={thread}
+      number={labels ? undefined : targetNumber(doc, threads, thread)}
       slide={numbers.get(thread.slideId) ?? null}
       copy={labels?.target(thread, numbers.get(thread.slideId) ?? null)} // P3-E
       selected={thread.id === active}
@@ -88,6 +90,7 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
 }
 
 interface ItemProps {
+  number?: number;
   thread: DeckThreadState;
   slide: number | null;
   /** P3-E: the thread's words from the rail's labels, else C's. */
@@ -103,7 +106,7 @@ interface ItemProps {
   onReopen(): void;
 }
 
-function ThreadItem({ thread, slide, copy, selected, readOnly, draft, onDraftChange, onShow, onReply, onResolve, onReopen }: ItemProps) {
+function ThreadItem({ thread, slide, copy, number, selected, readOnly, draft, onDraftChange, onShow, onReply, onResolve, onReopen }: ItemProps) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
@@ -113,7 +116,7 @@ function ThreadItem({ thread, slide, copy, selected, readOnly, draft, onDraftCha
       ref={ref}
       className="deck-thread"
       aria-current={selected ? 'true' : undefined}
-      aria-label={C.thread(thread.quote)}
+      aria-label={`${C.thread(thread.quote)}${number === undefined ? '' : ` · Element ${number}`}`}
       data-thread={thread.id}
       data-status={thread.status}
       data-orphan={thread.orphan ? '' : undefined}
@@ -121,7 +124,7 @@ function ThreadItem({ thread, slide, copy, selected, readOnly, draft, onDraftCha
     >
       <button type="button" className="deck-thread-quote" aria-label={copy?.show ?? C.show(thread.quote) /* P3-E */} onClick={onShow}>
         <span className="deck-thread-slide">{copy?.location ?? C.slide(slide) /* P3-E */}</span>
-        <span className="deck-thread-quote-text">{thread.quote}</span>
+        <span className="deck-thread-quote-text">{thread.quote}{number === undefined ? '' : ` · Element ${number}`}</span>
       </button>
       {thread.orphan && <p className="deck-thread-note">{copy?.orphan ?? C.orphan /* P3-E */}</p>}
       {thread.messages.length > 0 && (

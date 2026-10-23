@@ -174,7 +174,7 @@ test('history per board: the rail, two versions’ changes in the world and list
     // the face's mapping, the phone's size, the desktop's frame, its heading, the move (once; C reads it as two), the cut,
     // the deleted board
     await expect(bar.locator('[data-history-count]')).toHaveText('7 changes');
-    await expect(tab.locator('.deck-history-deck')).toContainText('faces');
+    await expect(tab.locator('.deck-history-deck')).toHaveCount(0);
     for (const [board, kind] of [['phone', 'changed'], ['desktop', 'changed'], ['spare', 'removed']] as const) {
       await expect(world.locator(`[data-history-board="${board}"]`)).toHaveAttribute('data-history-change', kind);
       await expect(list.locator(`[data-history-board-row="${board}"]`)).toHaveAttribute('data-history-change', kind);
@@ -201,7 +201,7 @@ test('history per board: the rail, two versions’ changes in the world and list
 
     // ↓: the design's settings first, then the phone's size, then the desktop's frame, its board brought into view
     await bar.getByRole('button', { name: 'Next change' }).click();
-    await expect(tab.locator('.deck-history-deck')).toHaveAttribute('data-focused', 'true');
+    await expect(tab.locator('.deck-history-deck')).toHaveCount(0);
     await bar.getByRole('button', { name: 'Next change' }).click();
     await expect(phoneBoard).toHaveAttribute('data-focused', 'true');
     await bar.getByRole('button', { name: 'Next change' }).click();

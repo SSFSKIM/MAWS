@@ -57,7 +57,14 @@ function deckDoc() {
   return doc;
 }
 
-const PREVIEW = { title: 'Version of 19 October, 09:12 (named “Before the review”)', showChanges: true, changes: { count: 3 }, versionId: 'v1' } as unknown as DeckPreview;
+const PREVIEW = {
+  title: 'Version of 19 October, 09:12 (named “Before the review”)',
+  showChanges: true,
+  changes: { count: 3 },
+  stops: [{ part: 'deck', slideId: null }, { part: 'slide', slideId: 's' }, { part: 'element', slideId: 's', elementId: 'title' }],
+  focus: 0,
+  versionId: 1,
+} as unknown as DeckPreview;
 const CONTROLLER = { canName: true, setShowChanges() {}, step() {}, duplicate: async () => {}, name: async () => {}, restore: async () => {} } as unknown as DeckHistoryController;
 const noop = () => {};
 

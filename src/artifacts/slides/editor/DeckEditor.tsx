@@ -232,6 +232,18 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     }
   };
   const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const read = () => { if (node.clientWidth > 0) setNarrow(node.clientWidth < 720); };
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  const thumbnailWidth = narrow ? 80 : compact ? 120 : SLIDE_W / 8;
+
   useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
   // M5: what the slide's limits refused, an upload in progress: shown in the toolbar for a while
@@ -286,7 +298,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               current={slide?.id ?? null}
               assetUrl={assetUrl}
               faces={liveFaces.aliases}
-              width={compact ? 120 : SLIDE_W / 8}
+              width={thumbnailWidth}
               readOnly={readOnly}
               onDrawn={onThumbnailsDrawn}
               provisional={written}
@@ -379,12 +391,12 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           </Toolbar>
       )}
       <div className="deck-editor-body">
-        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assets={previewAssets} faces={versionFaces!} zoom={state.zoom} thumbnailWidth={compact ? 120 : SLIDE_W / 8} onDrawn={previewDrawn} /> : live}
+        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assets={previewAssets} faces={versionFaces!} zoom={state.zoom} thumbnailWidth={thumbnailWidth} onDrawn={previewDrawn} /> : live}
         {historyRail}
         {!preview &&
           inspectorOpen &&
           slide &&
-          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} />)}
+          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} overlayRail />)}
       </div>
     </div>
   );

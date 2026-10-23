@@ -150,8 +150,22 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   const tab = await openFromLibrary(page, 'History lab', id);
   const header = page.locator('[data-region="main"] [data-editor-header]');
 
+  await test.step('WR #37: a narrow deck keeps a working slide beside its filmstrip', async () => {
+    const editor = tab.locator('[data-deck-editor]');
+    await editor.evaluate((el) => { (el as HTMLElement).style.width = '560px'; });
+    await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width).toBeGreaterThan(300);
+    await editor.evaluate((el) => { (el as HTMLElement).style.width = ''; });
+    // The width reset and its ResizeObserver fit are separate frames: take the history baseline only after both.
+    await expect.poll(() => tab.locator('[data-stage-surface]').evaluate((el) => {
+      const fittedWidth = 1920 * Math.max(0.05, Math.min((el.clientWidth - 48) / 1920, (el.clientHeight - 48) / 1080));
+      return Math.abs(el.querySelector('[data-stage-slide]')!.getBoundingClientRect().width - fittedWidth);
+    }), { message: 'the wide stage has fitted its restored viewport' }).toBeLessThan(1);
+  });
+
   await test.step('the header’s Version history opens B’s rail, listing A’s versions', async () => {
+    const stageBefore = await tab.locator('[data-stage-slide]').boundingBox();
     await headerAction(page, 'Version history');
+    await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width).toBeCloseTo(stageBefore!.width, 0);
     const rail = tab.getByRole('complementary', { name: 'Version history' });
     await expect(rail).toBeVisible();
     await expect(tab.locator('[data-deck-rail="history"]')).toBeVisible();
@@ -179,8 +193,8 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     await expect(filmstrip.locator('[data-slide-thumb]')).toHaveCount(4); // the deleted slide at its earlier place
     expect(await filmstrip.locator('[data-slide-thumb]').evaluateAll((els) => els.map((e) => e.getAttribute('data-slide-thumb')))).toEqual(['s1', 's2', 's3', 's4']);
     // "N changes": the deck's cover, s1 removed, s4 added, s3's element cut, s2's title and its notes
-    await expect(bar.locator('[data-history-count]')).toHaveText('6 changes');
-    await expect(tab.locator('.deck-history-deck')).toContainText('cover');
+    await expect(bar.locator('[data-history-count]')).toContainText('of 6 changes');
+    await expect(tab.locator('.deck-history-deck')).toHaveCount(0);
 
     // ↓ from the first slide: the stage moves to each change; s2's title outlined, its notes' diff below
     await filmstrip.locator('[data-slide-thumb="s1"] button').click();
@@ -269,6 +283,31 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     await expect(tab.getByRole('status', { name: 'Restored' })).toContainText('Restored from Draft');
     expect(reviewed.versionId).toBeGreaterThan(draft.versionId);
   });
+});
+
+test('WR #46: an open history card receives committed human and automatic agent versions without reopening', async () => {
+  channel = mkdtempSync(join(tmpdir(), 'maws-deck-history-'));
+  const page = await ready({ MAWS_PRESENTATIONS_HISTORY: channel });
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Live history' });
+  const id = artifact.id;
+  await seam(page, 'seed', id, DRAFT);
+  const tab = await openFromLibrary(page, 'Live history', id);
+  await headerAction(page, 'Version history');
+  const rail = tab.getByRole('complementary', { name: 'Version history' });
+  await expect(rail).toBeVisible();
+  const listed = async () => (await ok<{ versions: { id: number }[] }>(page, 'artifacts.versions', { artifactId: id })).versions;
+  const reaches = async (count: number) => {
+    await expect(async () => {
+      for (const fold of await rail.getByRole('button', { name: /^\d+ more versions?$/ }).all()) if (await fold.getAttribute('aria-expanded') === 'false') await fold.click();
+      await expect(rail.getByRole('button', { name: /^Version / })).toHaveCount(count);
+    }).toPass({ timeout: 15_000 });
+  };
+  await reaches((await listed()).length);
+  await seam(page, 'edit', id, { op: 'setNotes', slideId: 's1', text: 'A human update.' });
+  await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Human update' });
+  await expect(rail.getByRole('button', { name: /^Version Human update by You/ })).toBeVisible();
+  expect(await hostWrite({ cmd: 'write', artifactId: id, session: '00000000-0000-4000-8000-0000000000a7', edit: { op: 'setNotes', slideId: 's2', text: 'An agent update.' } })).toEqual(expect.objectContaining({ ok: true }));
+  await reaches((await listed()).length);
 });
 
 test('See N new changes: an agent session’s write between two views is offered as a pill, opening the changes since the last view', async () => {

@@ -166,8 +166,6 @@ describe('the notes under a composition and the dialect’s limits (findings 1 a
     expect(notesField().value).toBe('Opening: Notes a, shorter');
   });
 
-  // P3-F (L203, fix wave): kept text that fits only because the notes changed elsewhere meanwhile is still unwritten:
-  // shown as not saved until the owner saves or edits it, never written by the field mounting, never shown as saved
   const keptOverModel = (doc: Doc) => {
     const model = 'm'.repeat(4_000);
     act(() => setNotes(doc, 'a', model, 'remote'));
@@ -177,61 +175,42 @@ describe('the notes under a composition and the dialect’s limits (findings 1 a
   };
   const editor = (session: DeckSession, readOnly = false) => render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={readOnly} />);
 
-  it('kept notes that fit after a change made while the field was away mount as not saved, and only the owner’s Save writes them', () => {
+  it('autosaves retained notes when returning to a field whose rebased draft now fits', () => {
     const { doc, session, unmount } = mount();
     keptOverModel(doc);
     unmount();
-    act(() => setNotes(doc, 'a', '', 'remote')); // the other writer removes the 4,000 characters the owner added to
+    act(() => setNotes(doc, 'a', '', 'remote'));
     editor(session);
     expect(notesField().value).toBe('ZZ');
-    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
-    expect(notesField().getAttribute('aria-invalid')).toBeNull(); // within the limit: unsaved, not refused
-    expect(readSlide(doc, 'a').notes).toBe('');
-    cleanup();
-    editor(session);
-    expect(readSlide(doc, 'a').notes).toBe(''); // mounting again writes nothing either
-    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
-    fireEvent.click(screen.getByRole('button', { name: 'Save notes' }));
     expect(readSlide(doc, 'a').notes).toBe('ZZ');
-    expect(screen.queryByRole('alert')).toBeNull();
-    cleanup();
-    editor(session);
-    expect(notesField().value).toBe('ZZ');
+    expect(session.hasUnwrittenNotes()).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('with the field shown, a remote change re-counts refused notes and, once they fit, says they are not saved until the owner edits', () => {
-    const { doc } = mount();
+  it('autosaves a refused draft once a remote edit brings the merged notes within the limit', () => {
+    const { doc, session } = mount();
     keptOverModel(doc);
     act(() => setNotes(doc, 'a', 'm'.repeat(3_999), 'remote'));
-    expect(notesField().value).toBe(`${'m'.repeat(3_999)}ZZ`);
     expect(screen.getByRole('alert').textContent).toMatch(/4,001/);
     act(() => setNotes(doc, 'a', '', 'remote'));
     expect(notesField().value).toBe('ZZ');
-    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
-    expect(notesField().getAttribute('aria-invalid')).toBeNull();
-    expect(readSlide(doc, 'a').notes).toBe('');
-    notesField().value = 'ZZ!';
-    fireEvent.input(notesField());
-    expect(readSlide(doc, 'a').notes).toBe('ZZ!');
+    expect(readSlide(doc, 'a').notes).toBe('ZZ');
+    expect(session.hasUnwrittenNotes()).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('read-only, kept notes that fit are shown as not saved with no Save, neither written nor dropped', () => {
+  it('retains a recovered draft while read-only and autosaves when editing becomes available', () => {
     const { doc, session, unmount } = mount();
     keptOverModel(doc);
     unmount();
     act(() => setNotes(doc, 'a', '', 'remote'));
-    editor(session, true);
-    expect(notesField().readOnly).toBe(true);
+    const view = editor(session, true);
     expect(notesField().value).toBe('ZZ');
-    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
-    expect(screen.queryByRole('button', { name: 'Save notes' })).toBeNull();
     expect(readSlide(doc, 'a').notes).toBe('');
-    cleanup();
-    editor(session);
-    fireEvent.click(screen.getByRole('button', { name: 'Save notes' }));
+    expect(session.hasUnwrittenNotes()).toBe(true);
+    view.rerender(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
     expect(readSlide(doc, 'a').notes).toBe('ZZ');
+    expect(session.hasUnwrittenNotes()).toBe(false);
   });
 
   it('a composition whose rebased text passes the limit is refused too', () => {
@@ -504,6 +483,22 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
   // (w − 48) / 1920 against (h − 48) / 1080: 1200 × 800 fits at 60 %, 900 × 800 at 44 %
   const WIDE = { w: 1200, h: 800 };
   const NARROW = { w: 900, h: 800 };
+
+  it('history Fit preserves its last usable size while hidden and refits when shown again', async () => {
+    const { session, container } = withHistory();
+    act(() => session.toggleRail('history'));
+    fireEvent.click(await screen.findByRole('button', { name: /^Version Draft 1 by/ }));
+    await waitFor(() => expect(container.querySelector('[data-history-stage]')).not.toBeNull());
+    const width = () => container.querySelector<HTMLElement>('[data-history-stage] .deck-slide-frame')!.style.width;
+    layout(WIDE);
+    const wide = width();
+    expect(Number.parseFloat(wide)).toBeGreaterThan(1000);
+    layout({ w: 0, h: 0 });
+    expect(width()).toBe(wide);
+    layout(NARROW);
+    expect(Number.parseFloat(width())).toBeLessThan(Number.parseFloat(wide));
+    expect(Number.parseFloat(width())).toBeGreaterThan(800);
+  });
 
   it('refits as a rail opens and closes beside the stage', () => {
     const { session } = withHistory();

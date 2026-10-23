@@ -91,6 +91,22 @@ describe('publishDeck: S6’s §3 table', () => {
     expect(el(doc, 'plan', footer)!.style).toMatchObject({ left: '200px', bottom: '80px', color: '#c0392b' });
   });
 
+  it('WR #42 keeps human position and wording when an agent publishes typography over the same stale slide', () => {
+    const doc = created({
+      [DECK_PATH]: JSON.stringify({ v: 4, title: 'Co-editing', order: ['s1'] }),
+      [P('s1')]: '<section id="s1"><h1 id="title" style="position:absolute;left:128px;top:128px;width:800px;font-size:64px">Before review</h1></section>',
+    });
+    const base = deckFiles(doc);
+    setStyle(doc, 's1', 'title', { left: '320px', top: '240px' }, 'human');
+    setText(doc, 's1', 'title', [{ type: 'p', inline: [{ text: 'Ready for review', marks: {} }] }], 'human');
+    const outcome = publish(doc, base, { [P('s1')]: base[P('s1')]!.replace('font-size:64px', 'font-size:72px') });
+    expect(outcome.conflicts).toEqual([]);
+    expect(el(doc, 's1', 'title')!.style).toMatchObject({ left: '320px', top: '240px', 'font-size': '72px' });
+    expect(textOf(doc, 's1', 'title')).toContain('Ready for review');
+    const roundTrip = created(deckFiles(doc));
+    expect(readSlide(roundTrip, 's1')).toEqual(readSlide(doc, 's1'));
+  });
+
   it('removes an element (its anchor orphaned) and re-adds it with the same id (the anchor live again)', () => {
     const doc = created();
     let files = deckFiles(doc);

@@ -314,6 +314,23 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await inMain.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => order(page, id)).toEqual(before);
 
+  // WR #38: a held pointer gesture reorders; Undo works by click at human timing, and by keyboard.
+  const pointerReorder = async () => {
+    const firstThumb = (await thumbs(inMain).nth(0).boundingBox())!;
+    const secondThumb = (await thumbs(inMain).nth(1).boundingBox())!;
+    await drag(page, { x: firstThumb.x + firstThumb.width / 2, y: firstThumb.y + firstThumb.height / 2 }, { x: secondThumb.x + secondThumb.width / 2, y: secondThumb.y + secondThumb.height / 2 });
+    await expect.poll(() => order(page, id)).toEqual([before[1], before[0], ...before.slice(2)]);
+    await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: /dropped at position 2/ })).toHaveCount(1);
+  };
+  await pointerReorder();
+  // Deliberately model the next human click, not a zero-delay click inside dnd-kit's 50ms guard.
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  await inMain.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => order(page, id)).toEqual(before);
+  await pointerReorder();
+  await page.keyboard.press('Meta+z');
+  await expect.poll(() => order(page, id)).toEqual(before);
+
   // zoom: fit, then steps
   const frame = inMain.locator('[data-stage-slide]');
   const fitWidth = (await frame.boundingBox())!.width;
@@ -450,6 +467,47 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 const selected = (tab: Locator) => tab.locator('[data-overlay] [data-selected]');
 const px = (v: string | undefined) => Number.parseFloat(v ?? 'NaN');
 
+test('WR #35: first movement preserves a real SVG and flow-only-styled siblings inside a transformed flow container', async () => {
+  const page = await ready();
+  const id = await createDeck(page, 'SVG placement', {
+    'project/deck.json': JSON.stringify({ v: 4, title: 'SVG placement', cover: 'svg', order: ['svg'] }),
+    'project/slides/svg.html': `<section id="svg" style="background:#ffffff;padding:100px;gap:32px">
+<div id="group" style="width:600px;height:400px;gap:32px;transform:translate(40px, 30px) rotate(90deg)">
+<svg id="drawing" viewBox="0 0 100 50" style="width:200px;height:100px;transform:translate(10px, 20px)"><rect width="100" height="50" fill="#2b7a78"/></svg>
+<p id="caption" style="font-size:32px;flex:1;align-self:center;min-width:120px;max-width:500px">A stationary caption</p></div>
+<div id="target" style="position:absolute;left:1300px;top:600px;width:200px;height:100px;background:#ee7733"></div></section>`,
+  });
+  const tab = await openFromLibrary(page, 'SVG placement', id);
+  const node = (eid: string) => tab.locator(`[data-stage-slide="svg"] [data-eid="${eid}"]`);
+  await expect(node('drawing')).toBeVisible();
+  expect(await node('drawing').evaluate((el) => el instanceof SVGSVGElement && !('offsetWidth' in el))).toBe(true);
+  const target = (await node('target').boundingBox())!;
+  const start = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
+  await page.mouse.click(start.x, start.y);
+  await expect(tab.locator('[data-overlay] [data-selected="target"]')).toBeVisible();
+  const stationary = ['group', 'drawing', 'caption'];
+  const before = await Promise.all(stationary.map((eid) => node(eid).boundingBox()));
+  const { scale } = await stageAt(tab);
+  await page.keyboard.down('Meta');
+  await drag(page, start, { x: start.x + 60 * scale, y: start.y + 40 * scale });
+  await page.keyboard.up('Meta');
+  await expect.poll(async () => (await elementOf(page, id, 'svg', 'target'))?.style.left).toBe('1360px');
+  expect((await elementOf(page, id, 'svg', 'target'))?.style.top).toBe('640px');
+  for (const [i, eid] of stationary.entries()) {
+    await expect(node(eid)).toHaveCSS('position', 'absolute');
+    const after = (await node(eid).boundingBox())!;
+    // HTML layout offsets round to slide px before pinning; their error at this fitted zoom stays below one screen px.
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[key] - before[i]![key]), `${eid}: ${key}`).toBeLessThan(1);
+  }
+  const afterTarget = (await node('target').boundingBox())!;
+  expect(afterTarget.x - target.x).toBeCloseTo(60 * scale, 1);
+  expect(afterTarget.y - target.y).toBeCloseTo(40 * scale, 1);
+  const caption = (await elementOf(page, id, 'svg', 'caption'))!;
+  expect(['flex', 'align-self', 'min-width', 'max-width'].filter((key) => caption.style[key] !== undefined)).toEqual([]);
+  expect((await elementOf(page, id, 'svg', 'group'))?.style.transform).toBe('translate(40px, 30px) rotate(90deg)');
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
 test('the transform layer: select, move with guides, resize, rotate, nudge, flow re-order and Detach, z-order, group, duplicate and delete', async () => {
   test.setTimeout(180_000);
   const page = await ready();
@@ -506,19 +564,16 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   await page.keyboard.press('Shift+ArrowDown');
   await expect.poll(async () => [(await element('b'))?.style.left, (await element('b'))?.style.top]).toEqual(['701px', '510px']);
 
-  // a flow child dragged below its sibling re-orders, an insertion bar drawn meanwhile
+  // WR #35: the first move already fixed the structured elements. A later drag moves only its target.
   const head = (await tab.locator('[data-stage-slide] [data-eid="head"]').boundingBox())!;
   const para = (await tab.locator('[data-stage-slide] [data-eid="para"]').boundingBox())!;
   await page.mouse.click(head.x + 40, head.y + head.height / 2);
-  await drag(page, { x: head.x + 40, y: head.y + head.height / 2 }, { x: para.x + 40, y: para.y + para.height - 2 }, { during: async () => await expect(tab.locator('[data-insertion]')).toBeVisible() });
-  await expect.poll(async () => (await slideOf(page, id, 'lab')).children.filter((c) => c.style.position !== 'absolute').map((c) => c.id)).toEqual(['para', 'head']);
-
-  // Detach: the paragraph pinned where it is drawn
+  await drag(page, { x: head.x + 40, y: head.y + head.height / 2 }, { x: head.x + 40 + 60 * scale, y: head.y + head.height / 2 + 40 * scale });
+  await expect.poll(async () => (await element('head'))?.style.position).toBe('absolute');
   const paraNow = (await tab.locator('[data-stage-slide] [data-eid="para"]').boundingBox())!;
-  await page.mouse.click(paraNow.x + 20, paraNow.y + paraNow.height / 2);
-  await tab.getByRole('button', { name: 'Detach' }).click();
-  await expect.poll(async () => (await element('para'))?.style.position).toBe('absolute');
-  expect(px((await element('para'))!.style.left)).toBeCloseTo(128, -1);
+  expect(paraNow.x).toBeCloseTo(para.x, 0);
+  expect(paraNow.y).toBeCloseTo(para.y, 0);
+  await expect(tab.getByRole('button', { name: 'Detach' })).toBeDisabled();
 
   // z-order: a sent to back sits under the flow layer (listed before the first flow child)
   await page.mouse.click(at(310, 510).x, at(310, 510).y);

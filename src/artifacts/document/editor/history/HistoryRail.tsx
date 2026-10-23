@@ -10,7 +10,7 @@ import './version-export.css';
 import { actorKey } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { HistoryController, HistorySnapshot } from './controller';
-import { authorOf, groupVersions, versionSummary, versionTitle, type Entry, type SummaryWords } from './model';
+import { authorOf, groupVersions, versionTitle, type Entry } from './model';
 
 export interface HistoryExport {
   id: string;
@@ -38,13 +38,10 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
   const [namedOnly, setNamedOnly] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const groups = useMemo(() => groupVersions(snapshot.versions ?? [], { now: controller.now(), namedOnly }), [controller, snapshot.versions, namedOnly]);
-  // the document's words as of this list (a new list reads them again)
-  const words = controller.words;
-  const read = useMemo(() => (snapshot.versions && words ? words() : undefined), [snapshot.versions, words]);
   const select = (version: ArtifactVersion, event: MouseEvent) => void controller.select(version.id, { extend: event.shiftKey });
   const row = (version: ArtifactVersion) => (
     <div key={version.id} className="doc-version-card">
-      <VersionRow version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} words={read} onSelect={select} />
+      <VersionRow version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} onSelect={select} />
       {versionExports && <VersionExportMenu version={version} entries={versionExports(version.id)} />}
     </div>
   );
@@ -90,9 +87,9 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
         </label>
       </div>
       {saving && <SaveForm onSave={(version) => controller.save(version)} onDone={() => setSaving(false)} />}
-      {(snapshot.status || snapshot.error || snapshot.loading) && (
+      {(snapshot.error || snapshot.loading) && (
         <p className="doc-history-status" role="status" data-error={snapshot.error ? '' : undefined}>
-          {snapshot.error ?? (snapshot.loading ? 'Loading the version…' : snapshot.status)}
+          {snapshot.error ?? 'Loading the version…'}
         </p>
       )}
       <div className="doc-rail-body">
@@ -113,10 +110,10 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
   );
 }
 
-function VersionRow({ version, selected, sessionTitle, words, onSelect }: { version: ArtifactVersion; selected: boolean; sessionTitle?: (id: string) => string | undefined; words?: SummaryWords; onSelect(version: ArtifactVersion, event: MouseEvent): void }) {
+function VersionRow({ version, selected, sessionTitle, onSelect }: { version: ArtifactVersion; selected: boolean; sessionTitle?: (id: string) => string | undefined; onSelect(version: ArtifactVersion, event: MouseEvent): void }) {
   const author = authorOf(actorKey(version.actor), sessionTitle);
   const title = versionTitle(version);
-  const summary = versionSummary(version, words);
+  const summary = version.note;
   return (
     <button
       type="button"

@@ -12,8 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeSystem } from '@artifacts/design-system/model';
 import { officeThemeXml } from '@artifacts/design-system/office';
 import { resolveDsVars } from '@artifacts/design-system/resolve-vars';
+import { exportDeckOf } from '@artifacts/slides/export/standalone';
 import { loadSlide } from '@artifacts/slides/parse';
-import { FIXTURE_FILES, fixtureDoc } from '@artifacts/slides/export/deck.test-support';
+import { FIXTURE_FILES, fixtureDoc, MEASURED } from '@artifacts/slides/export/deck.test-support';
 import { DEFAULT_SYSTEMS } from '@artifacts/types/design_system/defaults';
 import { newDoc, stateV2 } from '@artifacts/yjs';
 import type { CommandName } from '@shared/ipc/schema';
@@ -42,7 +43,7 @@ vi.mock('../artifacts/policies', async (actual) => {
 import { openCaptureWindow } from '../artifacts/capture';
 import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../artifacts/export';
 import { readZip } from '../design-systems/read-zip.test-support';
-import { deckSystem, registerPresentationExporters, STAGE, systemFacesCss, withDeckWindow, type PresentationExportDeps } from './export';
+import { deckSystem, renderAllSlidePngs, registerPresentationExporters, STAGE, systemFacesCss, withDeckWindow, type PresentationExportDeps } from './export';
 
 const DECK = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const OWN = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
@@ -91,6 +92,18 @@ describe('the presentation’s exporters', () => {
     off();
     expect(registry.get('presentation', 'pptx')).toBeUndefined();
   });
+});
+
+it('exports every slide, including hidden ones, as distinct numbered PNGs in deck order', async () => {
+  const doc = fixtureDoc();
+  try {
+    const deck = exportDeckOf(doc, 'Quarterly');
+    const captured: string[] = [];
+    const win = { load: async () => {}, measure: async () => MEASURED, capture: async (job: { slideId: string }) => { captured.push(job.slideId); return Buffer.from(`PNG:${job.slideId}`); } };
+    const files = await renderAllSlidePngs(win, { deck, page: { resolveVar: () => undefined, asset: () => null, facesCss: '' } });
+    expect(captured).toEqual(['cover', 'body', 'gone']);
+    expect(Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, Buffer.from(bytes).toString()]))).toEqual({ 'slide-01.png': 'PNG:cover', 'slide-02.png': 'PNG:body', 'slide-03.png': 'PNG:gone' });
+  } finally { doc.destroy(); }
 });
 
 // fix wave 1: the window's staging script is sent as text; each of its forms parses

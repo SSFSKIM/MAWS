@@ -144,7 +144,7 @@ test('every format through the export service: PPTX in three variants, PDF, stan
   const id = await createDeck(page, 'Quarterly', DECK);
 
   // ---- PPTX, faces named ----
-  const named = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
+  const named = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx', { fonts: 'named' })).path));
   const [one, two, three] = await Promise.all([1, 2, 3].map((n) => slideXml(named, n)));
   expect(namesIn(one!)).toEqual(expect.arrayContaining(['title', 'sub', 'logo']));
   expect(namesIn(two!)).toEqual(expect.arrayContaining(['badge', 'link', 'star', 'chart', 'heading', 'points', 'grid', 'live']));
@@ -179,7 +179,7 @@ test('every format through the export service: PPTX in three variants, PDF, stan
   expect(pngSize(Buffer.from(await named.file(`ppt/media/${pngTarget}`)!.async('uint8array')))).toEqual([64, 64]);
 
   // ---- PPTX, basic faces; slides as pictures; embedded refused ----
-  const basic = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx', { fonts: 'basic' })).path));
+  const basic = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
   const basicFaces = typefaces(await slideXml(basic, 1));
   expect(basicFaces).toContain('Georgia');
   expect([...basicFaces].every((face) => ['Arial', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Georgia', 'Times New Roman', 'Courier New', 'Brush Script MT'].includes(face))).toBe(true);
@@ -514,6 +514,7 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
   const header = page.locator('[data-region="main"] [data-editor-header]');
   const pick = async (label: string) => {
     await header.getByRole('button', { name: 'Export', exact: true }).click();
+    if (['Fonts by name', 'Basic fonts (default)', 'Slides as pictures'].includes(label)) await page.getByRole('menuitem', { name: 'PowerPoint', exact: true }).click();
     await page.getByRole('menuitem', { name: label, exact: true }).click();
   };
   const savedFile = (name: string) => join(saved, name);
@@ -523,16 +524,16 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
 
   await expect(async () => {
     await header.getByRole('button', { name: 'Export', exact: true }).click();
-    await expect(page.getByRole('menuitem')).toHaveText(['PowerPoint (fonts by name)', 'PowerPoint (basic fonts)', 'PowerPoint (slides as pictures)', 'PDF', 'HTML (one page)', 'For Claude (zip)', 'PNG (cover slide)']);
+    await expect(page.getByRole('menuitem')).toHaveText(['PowerPoint›', 'PDF', 'HTML (one page)', 'For Claude (zip)', 'PNG (all slides)']);
   }).toPass({ timeout: 15_000 });
   await page.keyboard.press('Escape');
 
-  await pick('PowerPoint (fonts by name)');
+  await pick('Fonts by name');
   await appears('Quarterly.pptx', isZip);
   expect(namesIn(await slideXml(await JSZip.loadAsync(readFileSync(savedFile('Quarterly.pptx'))), 1))).toContain('title');
   await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${savedFile('Quarterly.pptx')}`).first()).toBeVisible();
   rmSync(savedFile('Quarterly.pptx'));
-  await pick('PowerPoint (slides as pictures)');
+  await pick('Slides as pictures');
   await appears('Quarterly.pptx', isZip);
   expect((await slideXml(await JSZip.loadAsync(readFileSync(savedFile('Quarterly.pptx'))), 1)).split('<p:pic>').length - 1).toBe(1);
   await pick('PDF');
@@ -541,8 +542,10 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
   await appears('Quarterly.html', (bytes) => bytes.toString('utf8').includes('class="maws-slide"'));
   await pick('For Claude (zip)');
   await appears('Quarterly.zip', isZip);
-  await pick('PNG (cover slide)');
-  await appears('Quarterly.png', (bytes) => bytes.length > 24 && pngSize(bytes).join('x') === '1920x1080');
+  await pick('PNG (all slides)');
+  const images = ['slide-01.png', 'slide-02.png', 'slide-03.png'];
+  for (const name of images) await appears(`Quarterly slides/${name}`, (bytes) => bytes.length > 24 && pngSize(bytes).join('x') === '1920x1080');
+  expect(new Set(images.map((name) => readFileSync(savedFile(`Quarterly slides/${name}`)).toString('base64'))).size).toBe(3);
 });
 
 // ---- P4-B2 D19: a named Google Fonts face, fetched once and drawn offline ----
@@ -659,7 +662,7 @@ test('a named Google Fonts face with no network: Lora fetched once and drawn off
   // Skia/PDF writes a web face as a Type 3 font (its glyphs' outlines, with a ToUnicode map), whose dictionary has no
   // /BaseFont; its name is in its descriptor, where an embedded TrueType face carries it too
   expect(pdf).toMatch(/\/FontName\s*\/(?:[A-Z]{6}\+)?Lora/);
-  const pptx = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
+  const pptx = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx', { fonts: 'named' })).path));
   expect(typefaces(await slideXml(pptx, 1))).toContain('Lora');
 });
 

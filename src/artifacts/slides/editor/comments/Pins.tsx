@@ -17,6 +17,7 @@ import { measure } from '../transform/measure';
 import { samePin, useDeckCommentsApi, type DeckCommentsApi } from './controller';
 import { COMMENTS_COPY as C } from './copy';
 import { useOpenDeckThreads } from './use-threads';
+import { separatePins, targetNumber } from './targets';
 import './comments.css';
 
 interface Props {
@@ -65,12 +66,13 @@ function Pins({ api, canvas, slideId, scale, version }: Props & { api: DeckComme
   }, [canvas, byElement, scale, version, laidOut]);
   const { pinMoves } = api;
   useLayoutEffect(() => pinMoves.placed(), [boxes, pinMoves]);
+  const positions = separatePins(boxes.map(([, box]) => ({ x: (box.x + box.w) * scale, y: box.y * scale })), canvas.size.h * scale);
   return (
     <>
-      {boxes.map(([elementId, box]) => {
+      {boxes.map(([elementId], index) => {
         const threads = byElement.get(elementId);
         if (!threads) return null;
-        return <PinButton key={elementId} api={api} slideId={slideId} elementId={elementId} threads={threads} style={{ left: (box.x + box.w) * scale, top: box.y * scale }} data={{ 'data-comment-pin': elementId }} />;
+        return <PinButton key={elementId} api={api} slideId={slideId} elementId={elementId} threads={threads} number={targetNumber(api.session.doc, open, threads[0]!)} style={{ left: positions[index]!.x, top: positions[index]!.y }} data={{ 'data-comment-pin': elementId }} />;
       })}
     </>
   );
@@ -80,9 +82,9 @@ function Pins({ api, canvas, slideId, scale, version }: Props & { api: DeckComme
  * One pin (P4-B2): its element's open threads (a count past one), the key the popover finds it by (`data-pin-key`),
  * whether its popover is open, and a press that opens or closes it. The deck's and the design's.
  */
-export function PinButton({ api, slideId, elementId, threads, style, data }: { api: DeckCommentsApi; slideId: string; elementId: string; threads: readonly DeckThread[]; style: CSSProperties; data: Record<`data-${string}`, string> }) {
+export function PinButton({ api, slideId, elementId, threads, style, data, number }: { number?: number; api: DeckCommentsApi; slideId: string; elementId: string; threads: readonly DeckThread[]; style: CSSProperties; data: Record<`data-${string}`, string> }) {
   const latest = threads[threads.length - 1]!;
-  const label = C.pin(latest.quote, threads.length);
+  const label = `${C.pin(latest.quote, threads.length)}${number === undefined ? '' : ` · Element ${number}`}`;
   const target = { slideId, elementId };
   return (
     <button
@@ -109,7 +111,7 @@ export function PinButton({ api, slideId, elementId, threads, style, data }: { a
         if (did !== 'card') pin.focus({ preventScroll: true });
       }}
     >
-      {threads.length > 1 ? threads.length : ''}
+      {number === undefined ? (threads.length > 1 ? threads.length : '') : number}
     </button>
   );
 }

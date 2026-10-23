@@ -344,19 +344,59 @@ const pdf: Run = async (request, context, prepared, deps) => {
   await context.writeFile(request.path, await context.printToPdf(page));
 };
 
+type PngSize = { width: number; height?: number };
+const pngSize = (request: ExportRequest): PngSize | undefined => request.width === undefined ? undefined : { width: request.width, ...(request.height !== undefined && { height: request.height }) };
+
+/** A named slide of the loaded, measured deck. Shared by inspection and all-slide export. */
+export async function renderSlidePng(win: DeckWindow, deck: ExportDeck, slideId: string, size?: PngSize): Promise<Buffer> {
+  if (!deck.slides.some((slide) => slide.id === slideId)) throw new Error(`No slide ${slideId} in this presentation`);
+  return win.capture({ slideId, elementId: null, mode: 'slide', box: { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }, size);
+}
+
+async function loadPngDeck(win: DeckWindow, prepared: Pick<Prepared, 'deck' | 'page'>): Promise<void> {
+  const measured = await measurePass(win, prepared);
+  await win.load(deckPage(prepared.deck, { ...prepared.page, mode: 'measure', measured }));
+}
+
+/** Render one named slide at the request's captured revision/version, releasing its document and window. */
+export async function renderPresentationSlide(request: ExportRequest, context: ExportContext, deps: PresentationExportDeps, slideId: string): Promise<Buffer> {
+  const prepared = await prepare(request, context, deps);
+  try {
+    return await withDeckWindow(deps.env, context.signal, async (win) => {
+      await loadPngDeck(win, prepared);
+      return renderSlidePng(win, prepared.deck, slideId, pngSize(request));
+    });
+  } finally { prepared.doc.destroy(); }
+}
+
+/** One preparation/window for every slide, including hidden slides; names sort in deck order. */
+export async function renderAllSlidePngs(win: DeckWindow, prepared: Pick<Prepared, 'deck' | 'page'>, size?: PngSize): Promise<Record<string, Uint8Array>> {
+  if (!prepared.deck.slides.length) throw new Error('the presentation has no slide to picture');
+  await loadPngDeck(win, prepared);
+  const digits = Math.max(2, String(prepared.deck.slides.length).length);
+  const files: Record<string, Uint8Array> = {};
+  for (const [index, slide] of prepared.deck.slides.entries()) files[`slide-${String(index + 1).padStart(digits, '0')}.png`] = await renderSlidePng(win, prepared.deck, slide.id, size);
+  return files;
+}
+
 const png: Run = async (request, context, prepared, deps) => {
-  const slideId = coverSlide(prepared.deck);
+  const slideId = request.board ?? coverSlide(prepared.deck);
   if (!slideId) throw new Error('the presentation has no slide to picture');
   const bytes = await withDeckWindow(deps.env, context.signal, async (win) => {
-    const measured = await measurePass(win, prepared);
-    await win.load(deckPage(prepared.deck, { ...prepared.page, mode: 'measure', measured }));
-    return win.capture({ slideId, elementId: null, mode: 'slide', box: { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }, request.width === undefined ? undefined : { width: request.width, ...(request.height !== undefined && { height: request.height }) });
+    await loadPngDeck(win, prepared);
+    return renderSlidePng(win, prepared.deck, slideId, pngSize(request));
   });
   await context.writeFile(request.path, bytes);
 };
 
+// The managed bundle stays in the store; library.saveAs publishes its PNGs as one folder, not a ZIP.
+const pngs: Run = async (request, context, prepared, deps) => {
+  const files = await withDeckWindow(deps.env, context.signal, (win) => renderAllSlidePngs(win, prepared, pngSize(request)));
+  await context.writeFile(request.path, zipFiles(files));
+};
+
 const pptx: Run = async (request, context, prepared, deps) => {
-  const variant = request.fonts ?? 'named';
+  const variant = request.fonts ?? 'basic';
   if (variant === 'embedded') throw new Error('embedding uploaded fonts in a PPTX is not available yet; export with fonts "named" (the faces by name), "basic" or "pictures"');
   const { measured, pictures } = await withDeckWindow(deps.env, context.signal, async (win) => {
     const measured = await measurePass(win, prepared);
@@ -389,7 +429,7 @@ const claude: Run = async (request, context, prepared, deps) => {
   await context.writeFile(request.path, zipFiles(files));
 };
 
-const RUNS = { html, pdf, png, pptx, claude } as const;
+const RUNS = { html, pdf, png, pngs, pptx, claude } as const;
 
 /** Registers the presentation's exporters (X31); the answer withdraws them. */
 export function registerPresentationExporters(registry: Pick<ExporterRegistry, 'register'>, deps: PresentationExportDeps): () => void {

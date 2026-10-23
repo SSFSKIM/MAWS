@@ -27,6 +27,7 @@ function deckHost(ids: string[]) {
   const rows: { seq: number; map: ContentMap }[] = [];
   const stored: (ArtifactVersion & { state: Uint8Array })[] = [];
   const calls: string[] = [];
+  const versionListeners = new Set<() => void>();
   const restoredListeners = new Set<(e: { versionId: number }) => void>();
   let viewedAt: number | null = null;
   const write = (actor: Actor, edit: (d: Doc) => void) => {
@@ -46,6 +47,7 @@ function deckHost(ids: string[]) {
   const version = (kind: ArtifactVersion['kind'], actor: Actor = HUMAN, fields: Partial<ArtifactVersion> = {}) => {
     const v = { id: stored.length + 1, seq: rows.length, at: now, actor, kind, assetRefs: [], ...fields, state: stateV2(doc) } as ArtifactVersion & { state: Uint8Array };
     stored.push(v);
+    versionListeners.forEach((listener) => listener());
     return v;
   };
   write(HUMAN, (d) =>
@@ -59,6 +61,7 @@ function deckHost(ids: string[]) {
     }),
   );
   const api: HistoryApi = {
+    onVersions: (listener) => { versionListeners.add(listener); return () => versionListeners.delete(listener); },
     versions: async () =>
       stored.map((v) => {
         const listed: Partial<typeof v> = { ...v };
@@ -104,6 +107,38 @@ const until = async (check: () => boolean) => {
 };
 
 describe('the deck’s history controller (D11)', () => {
+  it('keeps open history current through automatic human and agent-turn versions', async () => {
+    const h = deckHost(['a']);
+    h.version('auto');
+    const controller = attach(h);
+    await until(() => controller.getSnapshot().versions?.length === 1);
+    h.write(HUMAN, (d) => setNotes(d, 'a', 'Human notes'));
+    const human = h.version('auto');
+    await until(() => controller.getSnapshot().versions?.some((v) => v.id === human.id) === true);
+    h.write(AGENT, (d) => setStyle(d, 'a', 'title', { color: '#123456' }));
+    const agent = h.version('turn', AGENT);
+    await until(() => controller.getSnapshot().versions?.some((v) => v.id === agent.id) === true);
+    expect(controller.getSnapshot().versions?.map((v) => v.id)).toEqual([1, human.id, agent.id]);
+  });
+
+  it('does not let an older history refresh hide a newly committed version', async () => {
+    const h = deckHost(['a']);
+    h.version('auto');
+    const controller = attach(h);
+    await until(() => controller.getSnapshot().versions?.length === 1);
+    const old = await h.api.versions();
+    const read = h.api.versions;
+    let finish!: (versions: ArtifactVersion[]) => void;
+    h.api.versions = () => new Promise((resolve) => { finish = resolve; });
+    const pending = controller.refresh();
+    h.api.versions = read;
+    h.version('turn', AGENT);
+    await until(() => controller.getSnapshot().versions?.length === 2);
+    finish(old);
+    await pending;
+    expect(controller.getSnapshot().versions).toHaveLength(2);
+  });
+
   it('offers “See N new changes” counting what an agent changed since the last view, then marks the deck viewed', async () => {
     const h = deckHost(['a', 'b']);
     h.version('auto');
@@ -159,8 +194,8 @@ describe('the deck’s history controller (D11)', () => {
     expect(controller.getSnapshot().selected).toEqual([last.id, first.id]);
     expect(preview.versionId).toBeNull();
     expect(preview.changes.count).toBe(2);
-    expect(controller.step(1)).toEqual({ part: 'element', slideId: 'a', elementId: 'title' });
-    expect(controller.getSnapshot().preview!.slideId).toBe('a');
+    expect(preview.focus).toBe(0);
+    expect(preview.stops[preview.focus!]).toEqual({ part: 'element', slideId: 'a', elementId: 'title' });
     expect(controller.step(1)).toEqual({ part: 'element', slideId: 'c', elementId: 'body' });
     expect(controller.getSnapshot().preview!.slideId).toBe('c');
     expect(controller.step(1)).toEqual({ part: 'element', slideId: 'a', elementId: 'title' });

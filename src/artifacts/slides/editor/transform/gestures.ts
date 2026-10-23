@@ -54,7 +54,8 @@ import {
   type Pt,
   type SnapContext,
 } from '../../geometry';
-import type { Doc } from '../../../yjs';
+import { freePlacement } from './free-placement';
+import { transact, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
 import { isMissingSource } from '../../../design/model';
 import { isPinned, TEXT_TAGS } from '../../ir';
@@ -225,8 +226,13 @@ function movedBy(bases: readonly MoveBase[], d: Pt, first: boolean): Record<stri
 /** Moves pinned elements (and pinned connectors) together. */
 export function startMove(ctx: GestureContext, ids: readonly string[], p0: Pt): Gesture {
   const tree = slideTree(ctx.session.doc, ctx.slideId);
-  const ms = ids.map((id) => measure(ctx.canvas, id, ctx.scale)).filter((m): m is Measured => m !== null);
-  const bases = ms.map((m) => moveBase(tree, m));
+  let placement: ReturnType<typeof freePlacement>;
+  try { placement = freePlacement(ctx); } catch (error) { return refusal(String(error)); }
+  const ms = ids.map((id) => placement.measured.get(id) ?? measure(ctx.canvas, id, ctx.scale)).filter((m): m is Measured => m !== null);
+  const bases = ms.map((m) => {
+    const base = moveBase(tree, m);
+    return placement.measured.has(m.id) && !m.points ? { ...base, left: m.inHost.x, top: m.inHost.y, conv: placement.writes[m.id]?.style ?? {} } : base;
+  });
   const start = union(ms.map((m) => m.bounds));
   const siblings = siblingBounds(ctx, tree, ids);
   const { lines, extent } = canvasLines(ctx); // P3-E
@@ -255,7 +261,11 @@ export function startMove(ctx: GestureContext, ids: readonly string[], p0: Pt): 
       const key = `${dx},${dy}`;
       if (key === last) return { guides };
       last = key;
-      drag.write(movedBy(bases, { x: dx, y: dy }, first));
+      transact(ctx.session.doc, () => {
+        if (first) placement.write(ctx.session.origin);
+        // Freezing an unselected sibling is not a drag of it: only the selected elements win conflicts on drop.
+        drag.write(movedBy(bases, { x: dx, y: dy }, first));
+      }, ctx.session.origin);
       first = false;
       return { guides };
     },
@@ -266,23 +276,31 @@ export function startMove(ctx: GestureContext, ids: readonly string[], p0: Pt): 
 }
 
 /** Nudges pinned elements by `d` slide px (an arrow key): one write, converting a right/bottom pin first. */
-export function nudge(ctx: GestureContext, ids: readonly string[], d: Pt, write: (writes: Record<string, ElementWrites>) => void): void {
-  const tree = slideTree(ctx.session.doc, ctx.slideId);
-  const bases = ids
-    .filter((id) => {
-      const e = tree.element(id);
-      return e !== undefined && isPinned(e.tag, e.style, e.attrs);
-    })
-    .map((id) => measure(ctx.canvas, id, ctx.scale))
-    .filter((m): m is Measured => m !== null)
-    .map((m) => moveBase(tree, m));
-  if (bases.length) write(movedBy(bases, d, true));
+export function nudge(ctx: GestureContext, ids: readonly string[], d: Pt): string | null {
+  try {
+    const tree = slideTree(ctx.session.doc, ctx.slideId);
+    const placement = freePlacement(ctx);
+    const bases = ids
+      .filter((id) => { const e = tree.element(id); return e !== undefined && (placement.measured.has(id) || isPinned(e.tag, e.style, e.attrs)); })
+      .map((id) => placement.measured.get(id) ?? measure(ctx.canvas, id, ctx.scale))
+      .filter((m): m is Measured => m !== null)
+      .map((m) => {
+        const base = moveBase(tree, m);
+        return placement.measured.has(m.id) && !m.points ? { ...base, left: m.inHost.x, top: m.inHost.y, conv: placement.writes[m.id]?.style ?? {} } : base;
+      });
+    if (bases.length) ctx.session.typing('nudge', (origin) => transact(ctx.session.doc, () => {
+      placement.write(origin);
+      writeElements(ctx.session.doc, ctx.slideId, movedBy(bases, d, true), origin);
+    }, origin));
+    return null;
+  } catch (error) { return String(error); }
 }
 
 // ---------------------------------------------------------------- flow re-order
 
 /** Drags a flow child among its flow siblings; the drop re-orders it. */
 export function startFlowMove(ctx: GestureContext, id: string, p0: Pt): Gesture {
+  if (!ctx.canvas.isBoard) return startMove(ctx, [id], p0);
   const tree = slideTree(ctx.session.doc, ctx.slideId);
   const parent = tree.parentOf(id);
   const flow = tree.childrenOf(parent).filter((s) => {
@@ -291,7 +309,7 @@ export function startFlowMove(ctx: GestureContext, id: string, p0: Pt): Gesture 
   });
   const others = flow.filter((s) => s !== id);
   // the slots in the parent's own px, the pointer read back into them (the parent may be turned)
-  const boxes = others.map((s) => boxInParent(ctx.canvas, parent, s)).filter((b): b is Box => b !== null);
+  const boxes = others.map((s) => boxInParent(ctx.canvas, parent, s, ctx.scale)).filter((b): b is Box => b !== null);
   const frame = containerMatrix(ctx.canvas, parent)?.box ?? null;
   const me = measure(ctx.canvas, id, ctx.scale);
   const axis = flowAxis(ctx.canvas, parent);

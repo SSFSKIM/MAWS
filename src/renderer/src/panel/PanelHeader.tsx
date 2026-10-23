@@ -270,11 +270,7 @@ function MoreMenu({ actions, exports }: { actions: readonly EditorHostAction[]; 
         <DropdownMenu.Group>
           {actions.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
           <DropdownMenu.Label className="px-2 py-1 text-ui-sm text-fg-muted">{HEADER_COPY.export}</DropdownMenu.Label>
-          {exports.map((entry) => (
-            <DropdownMenu.Item key={entry.id} disabled={entry.disabled} onSelect={() => entry.onSelect()} className={ITEM}>
-              {entry.label}
-            </DropdownMenu.Item>
-          ))}
+          <ExportEntries exports={exports} />
         </DropdownMenu.Group>
       )}
     </HeaderMenu>
@@ -284,13 +280,24 @@ function MoreMenu({ actions, exports }: { actions: readonly EditorHostAction[]; 
 function ExportMenu({ exports }: { exports: readonly EditorHostExport[] }) {
   return (
     <HeaderMenu label={HEADER_COPY.export} icon={<ExportIcon />}>
-      {exports.map((entry) => (
-        <DropdownMenu.Item key={entry.id} disabled={entry.disabled} onSelect={() => entry.onSelect()} className={ITEM}>
-          {entry.label}
-        </DropdownMenu.Item>
-      ))}
+      <ExportEntries exports={exports} />
     </HeaderMenu>
   );
+}
+
+function ExportEntries({ exports }: { exports: readonly EditorHostExport[] }) {
+  return exports.map((entry) => entry.children ? (
+    <DropdownMenu.Sub key={entry.id}>
+      <DropdownMenu.SubTrigger disabled={entry.disabled} className={ITEM}>{entry.label}<span aria-hidden className="ml-auto">›</span></DropdownMenu.SubTrigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.SubContent sideOffset={4} className={MENU}><ExportEntries exports={entry.children} /></DropdownMenu.SubContent>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Sub>
+  ) : (
+    <DropdownMenu.Item key={entry.id} disabled={entry.disabled} onSelect={() => entry.onSelect()} className={ITEM} aria-label={entry.label}>
+      <span>{entry.label}{entry.description && <span className="block max-w-64 whitespace-normal text-ui-sm text-fg-muted">{entry.description}</span>}</span>
+    </DropdownMenu.Item>
+  ));
 }
 
 function HeaderMenu({ label, icon, children, more = false }: { label: string; icon: ReactNode; children: ReactNode; more?: boolean }) {

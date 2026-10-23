@@ -1,9 +1,9 @@
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
-import { app, BrowserWindow, dialog, screen, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, screen, type MessageBoxOptions, type WebContents } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -663,6 +663,20 @@ void startWithProfileLock(app, () => {
       showSaveDialog: (options, sender) => {
         const win = sender ? BrowserWindow.fromWebContents(sender) : null;
         return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+      },
+      confirmReplaceFolder: async (path, sender) => {
+        const win = sender ? BrowserWindow.fromWebContents(sender) : null;
+        const options: MessageBoxOptions = {
+          type: 'warning',
+          message: `Replace “${basename(path)}”?`,
+          detail: `The folder at ${path} and everything in it will be replaced with the exported slides.`,
+          buttons: ['Replace', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        };
+        const { response } = await (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
+        return response === 0;
       },
       openPath: (path) => shell.openPath(path),
       showItemInFolder: (path) => shell.showItemInFolder(path),

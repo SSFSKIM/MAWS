@@ -132,10 +132,13 @@ export class DeckHistoryController {
     };
   }
 
+  private versionRead = 0;
+
   private async begin(): Promise<void> {
+    const read = ++this.versionRead;
     try {
       const [versions, lastViewedAt] = await Promise.all([this.api.versions(), this.api.lastViewedAt()]);
-      this.set({ versions });
+      if (read === this.versionRead) this.set({ versions });
       const base = newChangesBase(versions, lastViewedAt);
       if (base) {
         this.set({ pill: { since: base.since, count: null, failed: null } });
@@ -154,11 +157,12 @@ export class DeckHistoryController {
 
   /** Reads the list again (a previewed version's heading with it), and counts the new changes again if counting them failed. */
   async refresh(): Promise<void> {
+    const read = ++this.versionRead;
     try {
       const versions = await this.api.versions();
-      this.set({ versions, ...this.headingFrom(versions) });
+      if (read === this.versionRead) this.set({ versions, ...this.headingFrom(versions) });
     } catch (error) {
-      this.set({ error: message(error) });
+      if (read === this.versionRead) this.set({ error: message(error) });
     }
     if (this.snapshot.pill?.failed != null) await this.recount();
   }
@@ -367,7 +371,10 @@ export class DeckHistoryController {
           showChanges: true,
           changes,
           stops,
-          focus: null,
+          focus: (() => {
+            const at = stops.findIndex((stop) => stop.slideId === slideId || stop.slideId === null);
+            return at < 0 ? null : at;
+          })(),
           slideId,
           system: next ? (next.designSystemRef ?? { builtin: 'maws' }) : null,
           versionId: target.kind === 'version' ? target.versionId : null,
