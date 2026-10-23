@@ -37,6 +37,7 @@ const WORDS_MAX = 300;
 const MIME: Record<ArtifactExportFormat, string> = {
   pdf: 'application/pdf',
   png: 'image/png',
+  pngs: 'application/zip',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   md: 'text/markdown',

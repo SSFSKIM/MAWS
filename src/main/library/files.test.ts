@@ -9,6 +9,7 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
+import { zipFiles } from '../design-systems/zip';
 import { createLibraryFiles, type LibraryFilesDeps } from './files';
 
 const ID = '00000000-0000-4000-8000-000000000001';
@@ -114,12 +115,44 @@ describe('library files', () => {
     expect(exec.openPath).not.toHaveBeenCalled();
   });
 
+  it('saves all-slide PNGs as one named folder, replacing the approved folder and remembering its parent', async () => {
+    const exported = join(dir, 'artifacts', ID, 'exports', artifactExportName(7, 'pngs'));
+    mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
+    writeFileSync(exported, zipFiles({ 'slide-01.png': Uint8Array.from([1, 2]), 'slide-02.png': Uint8Array.from([3, 4]) }));
+    const parent = join(dir, 'chosen');
+    const chosen = join(parent, 'Quarterly slides');
+    mkdirSync(chosen, { recursive: true });
+    writeFileSync(join(chosen, 'old.png'), 'old');
+    const showSaveDialog = vi.fn<LibraryFilesDeps['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, { showSaveDialog }));
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).resolves.toEqual({ saved: true, path: chosen });
+    expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
+    expect([...readFileSync(join(chosen, 'slide-02.png'))]).toEqual([3, 4]);
+    expect(showSaveDialog.mock.calls[0]![0]).toMatchObject({ defaultPath: join(dir, 'Downloads', 'Quarterly slides') });
+    showSaveDialog.mockResolvedValueOnce({ canceled: true, filePath: chosen });
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).resolves.toEqual({ saved: false });
+    expect(showSaveDialog.mock.calls[1]![0]).toMatchObject({ defaultPath: chosen });
+    expect(readdirSync(parent)).toEqual(['Quarterly slides']);
+  });
+
+  it('refuses malformed PNG bundles before replacing an existing folder', async () => {
+    const exported = join(dir, 'artifacts', ID, 'exports', artifactExportName(7, 'pngs'));
+    mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
+    writeFileSync(exported, zipFiles({ '../escape.png': Uint8Array.from([1]) }));
+    const chosen = join(dir, 'keep');
+    mkdirSync(chosen);
+    writeFileSync(join(chosen, 'keep.txt'), 'Keep this');
+    const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, { showSaveDialog: async () => ({ canceled: false, filePath: chosen }) }));
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).rejects.toThrow();
+    expect(readFileSync(join(chosen, 'keep.txt'), 'utf8')).toBe('Keep this');
+  });
+
   it('saves an export under the artifact’s title through the dialog at Downloads, and nothing when cancelled', async () => {
     const exported = join(dir, 'artifacts', ID, 'exports', artifactExportName(7, 'pdf'));
     mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
     writeFileSync(exported, '%PDF-1.7 export');
     const chosen = join(dir, 'chosen.pdf');
-    const showSaveDialog = vi.fn(async () => ({ canceled: false, filePath: chosen }));
+    const showSaveDialog = vi.fn<LibraryFilesDeps['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
     const files = createLibraryFiles(deps({ kind: 'html', title: 'Q3: plans / review', files: {} }, { showSaveDialog }));
     await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } })).resolves.toEqual({ saved: true, path: chosen });
     expect(showSaveDialog).toHaveBeenCalledWith({ defaultPath: join(dir, 'Downloads', 'Q3- plans - review.pdf') }, undefined);

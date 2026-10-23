@@ -24,13 +24,13 @@ export interface DeckExport {
 }
 
 export const DECK_EXPORTS: readonly DeckExport[] = [
-  { id: 'pptx-named', label: 'PowerPoint (fonts by name)', format: 'pptx', fonts: 'named' },
-  { id: 'pptx-basic', label: 'PowerPoint (basic fonts)', format: 'pptx', fonts: 'basic' },
-  { id: 'pptx-pictures', label: 'PowerPoint (slides as pictures)', format: 'pptx', fonts: 'pictures' },
+  { id: 'pptx-basic', label: 'Basic fonts (default)', format: 'pptx', fonts: 'basic' },
+  { id: 'pptx-named', label: 'Fonts by name', format: 'pptx', fonts: 'named' },
+  { id: 'pptx-pictures', label: 'Slides as pictures', format: 'pptx', fonts: 'pictures' },
   { id: 'pdf', label: 'PDF', format: 'pdf' },
   { id: 'html', label: 'HTML (one page)', format: 'html' },
   { id: 'claude', label: VIEWERS_COPY.exportFormats.claude, format: 'claude' },
-  { id: 'png', label: 'PNG (cover slide)', format: 'png' },
+  { id: 'png', label: 'PNG (all slides)', format: 'pngs' },
 ];
 
 /** The deck as `shown` (L233: the version previewed, else the live deck) exported as `entry` asks, then saved where the owner chooses. */
@@ -49,5 +49,6 @@ export async function exportDeck(artifactId: string, entry: DeckExport, shown: D
 /** The header's Export entries for a deck as the editor shows it; none is offered while two versions are compared. */
 export function deckExports(artifactId: string, shown: DeckShown, run: (entry: DeckExport) => void = (entry) => void exportDeck(artifactId, entry, shown)): EditorHostExport[] {
   const disabled = shown === 'compare';
-  return DECK_EXPORTS.map((entry) => ({ id: entry.id, label: entry.label, onSelect: () => run(entry), ...(disabled && { disabled }) }));
+  const item = (entry: DeckExport): EditorHostExport => ({ id: entry.id, label: entry.label, onSelect: () => run(entry), ...(disabled && { disabled }), ...(entry.fonts === 'named' && { description: 'Displays correctly only where the same fonts are installed.' }) });
+  return [{ id: 'pptx', label: 'PowerPoint', onSelect: () => {}, disabled, children: DECK_EXPORTS.filter((entry) => entry.format === 'pptx').map(item) }, ...DECK_EXPORTS.filter((entry) => entry.format !== 'pptx').map(item)];
 }

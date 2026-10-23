@@ -16,7 +16,7 @@ export type SavedState = 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'read
 // P4-B5: `pinned`, drawn in the row beside the first three rather than counted among them (the header's Send to); folded
 // into "More actions" only under the narrow header, as every action is.
 export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; pressed?: boolean; pinned?: boolean }
-export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean }
+export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean; children?: readonly EditorHostExport[]; description?: string }
 export interface EditorHostRegistration {
   title: string;
   breadcrumb?: readonly string[];

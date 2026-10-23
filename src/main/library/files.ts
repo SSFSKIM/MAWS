@@ -8,7 +8,8 @@
 // document kind only, never a program (the files service's rule). Under MAWS_E2E=1 the seams the rest of the app
 // uses stand in for the OS: MAWS_E2E_OPEN_LOG takes an open or a reveal as a line, MAWS_E2E_SAVE_PATH is the folder a
 // save lands in without the dialog.
-import { appendFile, copyFile, lstat, rename, rm } from 'node:fs/promises';
+import { appendFile, copyFile, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import JSZip from 'jszip';
 import { basename, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SaveDialogOptions, WebContents } from 'electron';
@@ -59,11 +60,13 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
     return target !== null && target.isFile() && (target.mode & 0o111) === 0 && opensExternally(name);
   };
 
+  let lastExportDirectory: string | null = null;
+
   // Where the copy goes: the e2e seam's folder, else the dialog's choice (null when cancelled).
   const destination = async (defaultName: string, sender: WebContents | undefined): Promise<string | null> => {
     const seamDir = deps.env.MAWS_E2E === '1' ? deps.env.MAWS_E2E_SAVE_PATH : undefined;
     if (seamDir) return join(seamDir, defaultName);
-    const { canceled, filePath } = await deps.showSaveDialog({ defaultPath: join(deps.downloads(), defaultName) }, sender);
+    const { canceled, filePath } = await deps.showSaveDialog({ defaultPath: join(lastExportDirectory ?? deps.downloads(), defaultName) }, sender);
     return canceled || !filePath ? null : filePath;
   };
 
@@ -115,7 +118,7 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
         const name = artifactExportName(source.export.revision, source.export.format, source.export.exportId); // P3-E: the managed name, the id a UUID (the schema's)
         from = join(deps.root, artifactId, 'exports', name);
         if (!(await lstat(from).catch(() => null))?.isFile()) throw new CommandFailure(ipcError('invalid_input', `no export ${name} of ${artifactId}; export it again`));
-        defaultName = `${fileNameOf(artifact.title)}${extname(name)}`;
+        defaultName = source.export.format === 'pngs' ? `${fileNameOf(artifact.title)} slides` : `${fileNameOf(artifact.title)}${extname(name)}`;
       } else {
         const stored = await content({ artifactId, ...(source.content.revision !== undefined && { revision: source.content.revision }) });
         from = stored.path;
@@ -128,20 +131,51 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
       try {
         const to = await destination(defaultName, sender);
         if (to === null) return { saved: false };
-        const temp = join(dirname(to), `.${randomUUID()}.tmp`);
-        try {
-          await copyFile(from, temp);
-          await rename(temp, to);
-        } catch (error) {
-          await rm(temp, { force: true }).catch(() => {});
-          throw error;
+        if ('export' in source && source.export.format === 'pngs') {
+          await savePngFolder(from, to);
+        } else {
+          const temp = join(dirname(to), `.${randomUUID()}.tmp`);
+          try {
+            await copyFile(from, temp);
+            await rename(temp, to);
+          } catch (error) {
+            await rm(temp, { force: true }).catch(() => {});
+            throw error;
+          }
         }
+        lastExportDirectory = dirname(to);
         return { saved: true, path: to };
       } finally {
         if (own !== null) await rm(own, { force: true }).catch(() => {});
       }
     },
   };
+}
+
+/** Stage the whole managed PNG bundle before replacing the folder the save dialog approved. */
+async function savePngFolder(from: string, to: string): Promise<void> {
+  const zip = await JSZip.loadAsync(await readFile(from), { checkCRC32: true });
+  const entries = Object.values(zip.files);
+  if (!entries.length || entries.some((entry) => entry.dir || !/^slide-\d+\.png$/.test(entry.name) || ((entry as typeof entry & { unsafeOriginalName?: string }).unsafeOriginalName ?? entry.name) !== entry.name)) {
+    throw new Error('The slide export contains invalid file names; export it again.');
+  }
+  const temp = join(dirname(to), `.${randomUUID()}.slides`);
+  const backup = join(dirname(to), `.${randomUUID()}.previous`);
+  let moved = false;
+  try {
+    await mkdir(temp);
+    for (const entry of entries) await writeFile(join(temp, entry.name), await entry.async('nodebuffer'));
+    const existing = await lstat(to).catch(() => null);
+    if (existing?.isSymbolicLink()) throw new Error('Choose a folder, not a symbolic link, for the slides.');
+    if (existing) { await rename(to, backup); moved = true; }
+    try { await rename(temp, to); } catch (error) {
+      if (moved) { await rename(backup, to); moved = false; }
+      throw error;
+    }
+    if (moved) await rm(backup, { recursive: true, force: true });
+  } finally {
+    await rm(temp, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 export function registerLibraryFiles(register: typeof registerMainHandler, deps: LibraryFilesDeps): void {

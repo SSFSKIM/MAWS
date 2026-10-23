@@ -263,19 +263,19 @@ export type ArtifactPublishInput = z.infer<typeof ArtifactPublishInputSchema>;
 export const ArtifactUploadAssetInputSchema = z.strictObject({ artifact: ArtifactIdSchema, path: PathSchema, name: z.string().min(1).max(200).optional() });
 export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSchema>;
 export const ArtifactListAssetsInputSchema = z.strictObject({ artifact: ArtifactIdSchema });
-export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'docx', 'pptx', 'md', 'html', 'claude' /* P3-D: a design system in Claude's shape */] as const;
+export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'pngs', 'docx', 'pptx', 'md', 'html', 'claude' /* P3-D: a design system in Claude's shape */] as const;
 export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
 // The paper an export prints on when asked (P3-A Decision Log 42, P3-B's M8); omitted, the exporter's own default.
 export const ARTIFACT_EXPORT_PAGE_SIZES = ['letter', 'a4'] as const;
 export type ArtifactExportPageSize = (typeof ARTIFACT_EXPORT_PAGE_SIZES)[number];
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D12, H2-4; the parent's Decision Log 53 (4)): a deck's
-// PPTX faces: named (the default), basic faces, slides as pictures, or uploaded faces embedded where their licence allows.
+// PPTX faces: basic (the default), named faces, slides as pictures, or uploaded faces embedded where their licence allows.
 export const ARTIFACT_EXPORT_FONTS = ['named', 'basic', 'pictures', 'embedded'] as const; // P3-C
 export type ArtifactExportFonts = (typeof ARTIFACT_EXPORT_FONTS)[number]; // P3-C
 export const ArtifactExportInputSchema = z.strictObject({
   artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional(),
   pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
-  fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces; omitted, named
+  fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces; omitted, basic
   // P3-E (E1 M5; X23): a design's PNG board (the first by default), its PDF's boards (all by default), the output's scale
   board: z.string().min(1).max(64).optional(),
   boards: z.array(z.string().min(1).max(64)).max(200).optional(),
@@ -285,7 +285,7 @@ export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
 // How long the host waits for main's export service to answer (P3-A M7, X31) before the call answers an error; main's
 // own guard and queue keep its answer inside it.
 export const EXPORT_ANSWER_MS = 60_000;
-const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html', claude: 'zip' /* P3-D */ };
+const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', pngs: 'zip', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html', claude: 'zip' /* P3-D */ };
 // An export's file name under `<userData>/artifacts/<id>/exports/` (the tool's and the library's alike). P3-E (E1 M5;
 // E's Decision Log 33) and P3-H (P3 Decision Log 91): an export that is a file of its own (a design's, or one asked as
 // `ownFile`) names the opaque `exportId` main minted for it, so no later export of the same revision and format
@@ -525,7 +525,7 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: named (the default: the deck\'s faces by name), basic (faces every Office has) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (its cover slide) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Needs the MAWS app open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Needs the MAWS app open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },

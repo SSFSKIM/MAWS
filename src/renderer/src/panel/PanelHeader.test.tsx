@@ -156,6 +156,24 @@ describe('the panel header', () => {
     expect(header().textContent).toContain('All changes saved'); // and the remounted body's registration replaces it
   });
 
+  it('opens a PowerPoint submenu without exporting, then invokes only the chosen variant', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    const { tool } = editorTool('editor', () => ({ title: 'Deck', exports: [{ id: 'pptx', label: 'PowerPoint', onSelect: () => calls.push('parent'), children: [
+      { id: 'basic', label: 'Basic fonts (default)', onSelect: () => calls.push('basic') },
+      { id: 'named', label: 'Fonts by name', description: 'Matching fonts must be installed.', onSelect: () => calls.push('named') },
+    ] }] }));
+    offs.push(registerPanelTool(tool));
+    mount();
+    add('editor');
+    await user.click(within(header()).getByRole('button', { name: 'Export' }));
+    await user.click(screen.getByRole('menuitem', { name: 'PowerPoint' }));
+    expect(calls).toEqual([]);
+    (await screen.findByRole('menuitem', { name: 'Basic fonts (default)' })).focus();
+    await user.keyboard('{Enter}');
+    expect(calls).toEqual(['basic']);
+  });
+
   it('returns to the tool’s plain title when the registration is disposed', () => {
     offs.push(registerPanelTool(probeTool('t', { title: 'Plain' }).tool));
     mount();
