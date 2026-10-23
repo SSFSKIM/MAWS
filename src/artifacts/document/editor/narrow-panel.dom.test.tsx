@@ -5,6 +5,8 @@
 // under their buttons, kept inside the toolbar, and the strip says which way it has more. happy-dom lays nothing out,
 // so the geometry each rule reads is given here (a body width, the page frame's top, a button's place) and the observers
 // the shell follows are driven by hand.
+import type { AppSessionId } from '@shared/graph/ids';
+import { applyEdit } from '../patch-writer';
 import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -42,6 +44,7 @@ const BUTTON_AT: Record<string, number> = { Insert: 400, Link: 250 };
 const POPOVER_WIDTH = 160;
 function rect(this: Element): DOMRect {
   const box = (x: number, y: number, w: number, h: number) => new DOMRect(x, y, w, h);
+  if (this.classList.contains('doc-pill')) return box(180, 85, 240, 32);
   if (this.classList.contains('doc-editor-body')) return box(0, 40, width, 760);
   if (this.classList.contains('doc-page-frame')) {
     const top = 40 + 37 + (this.parentElement?.querySelector('.doc-find') ? 36 : 0);
@@ -106,6 +109,24 @@ const resizeTo = (next: number) => {
 };
 
 describe('the rail in the body’s width', () => {
+  it.each(['Comments', 'Version history'])('keeps a new-changes pill above the %s drawer rather than straddling it', async (name) => {
+    width = 600;
+    const container = await mount({ withHistory: true });
+    await until(() => history!.viewedAt !== null, 'first look');
+    await until(() => handles[0].state().unsaved === 0, 'comment saved');
+    act(() => world!.host.write(doc => void applyEdit(doc, [{ op: 'insert', after: 'p1', markdown: 'A new agent paragraph. ^newp' }]), { kind: 'session', appSessionId: 'agent' as AppSessionId }));
+    await until(() => editor!.getText().includes('A new agent paragraph.'), 'agent edit');
+    act(() => history!.version('turn', { kind: 'session', appSessionId: 'agent' as AppSessionId }));
+    await act(async () => { history!.returned(); });
+    await until(() => container.querySelector('.doc-pill') !== null, 'new changes pill');
+    press(new RegExp(`^${name}`));
+    resized();
+    const pill = container.querySelector<HTMLElement>('.doc-pill')!.getBoundingClientRect();
+    const drawerTop = body(container).getBoundingClientRect().top + Number.parseFloat(body(container).style.getPropertyValue('--doc-drawer-top'));
+    expect(drawerTop).toBeGreaterThanOrEqual(pill.bottom);
+    expect(screen.getByRole('complementary', { name })).toBeTruthy();
+  });
+
   it('sits beside the page from 720 px up and is a drawer below; with no rail open there is no rail layout', async () => {
     const container = await mount();
     expect(layout(container)).toBeNull();

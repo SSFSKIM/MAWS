@@ -729,6 +729,10 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await expect(olderItem.getByRole('listitem'), 'the reply posted after the version stays').toHaveText(['YouPosted after the version.']);
   await expect(olderItem).not.toHaveAttribute('data-orphan');
   const newerItem = rail.locator(`article[data-thread="${newer}"]`);
+  const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+  await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
+  await expect(newerItem, 'the thread whose passage is gone is hidden by default').toHaveCount(0);
+  await showDeleted.click();
   await expect(newerItem, 'the thread made after the version stays, its passage gone').toHaveAttribute('data-orphan', '');
   await expect(newerItem).toContainText('The commented passage was removed.');
   await tabs.getByRole('tab', { name: 'Tab 2' }).click();

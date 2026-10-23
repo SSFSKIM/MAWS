@@ -33,6 +33,8 @@ export class MemoryHistory implements HistoryApi {
   /** The artifacts "Make a copy" made, by the version each copied. */
   readonly copies: number[] = [];
   viewedAt: number | null = null;
+  private viewedSeq: number | null = null;
+  private lastWriter: Actor = HUMAN;
   /** Attribution rows over the seqs they span (one update's seq until `compact` merges rows, as A's tiers do). */
   private readonly rows: Array<{ fromSeq: number; toSeq: number; map: ContentMap }> = [];
   private readonly stored: Stored[] = [];
@@ -48,6 +50,7 @@ export class MemoryHistory implements HistoryApi {
   ) {
     this.now = options.now ?? Date.now;
     this.offLanded = host.onLanded(({ update, actor, revision }) => {
+      this.lastWriter = actor;
       const key = actorKey(actor);
       this.rows.push({ fromSeq: revision, toSeq: revision, map: attributionMap(contentIdsOf(update), { insertActor: key, deleteActor: key, at: this.now() }) });
     });
@@ -95,6 +98,8 @@ export class MemoryHistory implements HistoryApi {
   async versions(): Promise<ArtifactVersion[]> {
     return this.stored.map(strip);
   }
+
+  async lastViewedSeq(): Promise<number | null> { return this.viewedSeq; }
 
   async lastViewedAt(): Promise<number | null> {
     return this.viewedAt;
@@ -147,6 +152,7 @@ export class MemoryHistory implements HistoryApi {
   async markViewed(): Promise<void> {
     this.autoVersion();
     this.viewedAt = this.now();
+    this.viewedSeq = this.host.revision;
   }
 
   onVersions(listener: () => void): () => void {
@@ -161,7 +167,7 @@ export class MemoryHistory implements HistoryApi {
 
   private autoVersion(): void {
     const last = this.stored[this.stored.length - 1];
-    if (!last || last.seq < this.host.revision) this.version('auto');
+    if (!last || last.seq < this.host.revision) this.version('auto', this.lastWriter);
   }
 
   private get(versionId: number): Stored {

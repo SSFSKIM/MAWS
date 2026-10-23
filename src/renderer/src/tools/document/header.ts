@@ -51,6 +51,12 @@ const EXPORTS: ReadonlyArray<{ format: DocumentExportFormat; pageSize: PageSize;
   { format: 'pdf', pageSize: 'letter', label: 'PDF (.pdf)' },
   { format: 'pdf', pageSize: 'a4', label: 'PDF, A4 (.pdf)' },
 ];
+/** The same formats in the header and on a history card; the caller binds their export subject. */
+export function documentExports(shown: DocumentShown, running: boolean, run: DocumentHeaderCommands['export']): EditorHostExport[] {
+  const disabled = running || shown === 'compare';
+  return EXPORTS.map(({ format, pageSize, label }) => ({ id: `${format}-${pageSize}`, label, disabled, onSelect: () => run(format, pageSize) }));
+}
+
 const LABEL_MAX = 80; // an action's label is drawn whole in the header
 
 export function savedOf(document: DocumentState | null, previewing: boolean, saving: boolean): SavedState | null {
@@ -86,7 +92,6 @@ export function documentHeader(state: DocumentHeaderState, commands: DocumentHea
     disabled: state.suggestions === null,
     onSelect: () => state.suggestions !== null && commands.setSuggestions(!state.suggestions),
   });
-  const held = state.exporting?.phase === 'running' || state.shown === 'compare'; // P3-F (F7): comparing, nothing to export
-  const exports: EditorHostExport[] = EXPORTS.map(({ format, pageSize, label }) => ({ id: `${format}-${pageSize}`, label, disabled: held, onSelect: () => commands.export(format, pageSize) }));
+  const exports = documentExports(state.shown, state.exporting?.phase === 'running', (format, pageSize) => commands.export(format, pageSize));
   return { title: state.title, saved: savedOf(state.document, state.previewing, state.saving), unresolved: state.unresolved, actions, exports, closeGuard: commands.closeGuard };
 }

@@ -2,6 +2,7 @@
 // colour in the editor's stylesheets; the page reads only the design system's names, each falling back to an app
 // token; with no `--ds-*` defined every computed colour of a rendered document is an app token's, and a design
 // system's value, once defined, wins over it.
+import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import type { JSONContent } from '@tiptap/core';
 import { DOMSerializer } from '@tiptap/pm/model';
 import { cleanup, render } from '@testing-library/react';
@@ -132,15 +133,38 @@ describe('the rendered page without a design system', () => {
     world?.destroy();
   });
 
-  async function mountPage(content: JSONContent, ready: string): Promise<HTMLElement> {
+  async function mountPage(content: JSONContent, ready: string, pageScope?: ComponentType<{ children: ReactNode }>): Promise<HTMLElement> {
     world = new World(content);
     handle = openMemoryHandle(world.host, { log: () => {} });
     await whenSynced(handle);
     const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
-    const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={host} renderDiagram={async () => '<svg></svg>'} />);
+    const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={host} pageScope={pageScope} renderDiagram={async () => '<svg></svg>'} />);
     await until(() => container.querySelector(ready) !== null, 'the page');
     return container;
   }
+
+  it('highlights the full text background and samples the live governing color in the toolbar', async () => {
+    const Scope = ({ children }: { children: ReactNode }) => <span data-test-system="" style={{ '--ds-color-accent': '#2266bb', '--ds-color-bg': '#ffffff' } as CSSProperties}>{children}</span>;
+    const container = await mountPage(doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Important', marks: [{ type: 'highlight' }] }] }), '.ds-doc mark', Scope);
+    const mark = container.querySelector<HTMLElement>('.ds-doc mark')!;
+    const sample = container.querySelector<HTMLElement>('[aria-label="Highlight"] [data-highlight-sample]');
+    expect(sample).not.toBeNull();
+    // happy-dom does not evaluate color-mix; verify the live inputs here, real paint in the Mac document gate.
+    const color = (element: HTMLElement) => {
+      const probe = element.appendChild(document.createElement('span'));
+      probe.style.color = 'var(--ds-color-accent)';
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    };
+    const first = color(mark);
+    expect(getComputedStyle(mark).boxShadow).not.toContain('inset');
+    expect(first).toBe('#2266bb');
+    expect(color(sample!)).toBe(first);
+    for (const scope of container.querySelectorAll<HTMLElement>('[data-test-system]')) scope.style.setProperty('--ds-color-accent', '#8855aa');
+    expect(color(mark)).not.toBe(first);
+    expect(color(sample!)).toBe(color(mark));
+  });
 
   function mountEveryKind(): Promise<HTMLElement> {
     return mountPage(

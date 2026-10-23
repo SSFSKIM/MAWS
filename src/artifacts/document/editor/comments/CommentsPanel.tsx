@@ -14,6 +14,7 @@
 // section; Open; Resolved), by tab (All tabs; This tab) and by a search over the messages, the quotes and the authors'
 // names. Each card's reply draft is the editor's (DocumentEditor holds one per thread, the margin draws the same), so a
 // filter hiding the card or the panel closing loses none. J and K move the focus between the cards.
+// WR 49: deleted-target conversations are hidden in every status filter until explicitly revealed.
 import { useEffect, useId, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { ThreadCard } from '../../../comments/ThreadCard';
@@ -64,6 +65,7 @@ function matches(thread: ThreadState, needle: string): boolean {
 export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, readOnly = false, drafts, onDraftChange, onShow, onClose }: Props) {
   const threads = useThreadStates(doc);
   const [showResolved, setShowResolved] = useState(true);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [status, setStatus] = useState<StatusFilter>('all');
   const [scope, setScope] = useState<ScopeFilter>('all');
   const [query, setQuery] = useState('');
@@ -71,7 +73,8 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   const name = useId();
 
   const needle = query.trim().toLowerCase();
-  const shown = threads.filter((thread) => (scope === 'all' || thread.tabId === activeTab) && matches(thread, needle));
+  // WR 49: a resolved thread can also have a missing target, so filter by liveness, not just `orphan`.
+  const shown = threads.filter((thread) => (showDeleted || thread.live) && (scope === 'all' || thread.tabId === activeTab) && matches(thread, needle));
   const open = status === 'resolved' ? [] : shown.filter((thread) => thread.status === 'open');
   const resolved = status === 'open' ? [] : shown.filter((thread) => thread.status === 'resolved');
   const listed = [...open, ...(status === 'all' && !showResolved ? [] : resolved)];
@@ -127,6 +130,11 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
         <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder="Search comments" value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div ref={body} className="doc-rail-body">
+        {threads.some((thread) => !thread.live) && (
+          <button type="button" className="doc-rail-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+            {showDeleted ? 'Hide deleted-target comments' : 'Show deleted-target comments'}
+          </button>
+        )}
         {empty && <p className="doc-rail-empty">{emptyText}</p>}
         {open.map(card)}
         {status === 'resolved' && resolved.map(card)}

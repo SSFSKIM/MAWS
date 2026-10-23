@@ -462,12 +462,16 @@ describe('needs you', () => {
     expect(within(strip).getByRole('button', { name: 'Open as tab' })).toBeTruthy();
   });
 
-  it('a start waiting on a trust card shows the strip alone, its words the card’s', async () => {
+  it('a start waiting on trust offers the folder decision inside the comment and continues its pending operation', async () => {
     await intoThread();
     act(() => useSetup.getState().dock(child, { kind: 'trust', trust: trustState(), message: null }));
     const strip = card()!.querySelector<HTMLElement>('[data-needs-you]')!;
     expect(strip.dataset.needsYou).toBe('setup-card');
-    expect(strip.textContent).toContain('Waiting for you to trust this folder');
+    expect(strip.textContent).toContain(trustState().directory);
+    expect(within(strip).getByRole('button', { name: 'Start without trusting' })).toBeTruthy();
+    await userEvent.click(within(strip).getByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.invoked('session.start')).toContainEqual({ appSessionId: child, message: null, options: { trust: 'accepted' } }));
+    expect(card()).not.toBeNull();
   });
 
   it('a terminal holding the thread: “Held by …” with Open as tab only, and Reply disabled', async () => {

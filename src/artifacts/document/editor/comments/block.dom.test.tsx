@@ -144,11 +144,20 @@ describe('commenting a block (P3-E)', () => {
 
     act(() => void editor().commands.deleteSelection());
     await quiet();
+    expect(within(rail()).queryByRole('group')).toBeNull();
+    expect(within(toolbar()).getByRole('button', { name: 'Comments (0 open)' })).toBeTruthy();
+    const before = getThread(handle.doc, id);
+    const reveal = within(rail()).getByRole('button', { name: /^(Show|Hide) deleted-target comments$/ });
+    act(() => fireEvent.click(reveal));
+    expect(getThread(handle.doc, id)).toEqual(before);
     expect(item().dataset.orphan).toBe('');
     expect(item().textContent).toContain('chart: Sales by region');
     act(() => fireEvent.click(within(item()).getByRole('button', { name: 'Resolve' })));
     await quiet();
     expect(getThread(handle.doc, id)!.status).toBe('resolved');
+    act(() => fireEvent.click(reveal));
+    expect(within(rail()).queryByRole('group')).toBeNull();
+    act(() => fireEvent.click(reveal));
     act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Reopen' })));
     await quiet();
     expect(getThread(handle.doc, id)!.status).toBe('open');

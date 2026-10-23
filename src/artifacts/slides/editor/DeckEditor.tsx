@@ -36,6 +36,7 @@ import { CommentsRail } from './comments/CommentsRail';
 import { ShowEditorsMenu } from '../../document/editor/history/ShowEditors';
 import type { ShownEditor } from '../../document/editor/history/controller';
 import { DeckHistoryRail } from './history/DeckHistoryRail';
+import type { VersionExports } from '../../document/editor/history/HistoryRail';
 import { HistoryBar } from './history/HistoryBar';
 import { aliasOverrides, previewFaces } from './history/faces';
 import { historyAssets, HistoryPreview } from './history/HistoryPreview';
@@ -85,6 +86,7 @@ export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked
   commentAuthor?: CommentAuthor;
   /** M8: the deck's version history (B's api on A's IPC, the replica); without it, no history. */
   history?: DeckHistorySource;
+  versionExports?: VersionExports;
   /** M8: a session's title for the history's author chips. */
   sessionTitle?: (appSessionId: string) => string | undefined;
   /** M8 fix wave 1 (R2): an asset's URL at a revision (a version's), for a preview drawn with the version's assets. */
@@ -104,7 +106,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey, provisional = null }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, versionExports, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey, provisional = null }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -273,7 +275,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const earlierDoc = preview?.earlier ?? null;
   const versionFaces = useMemo(() => (shownDoc && earlierDoc ? previewFaces({ shown: shownDoc, earlier: earlierDoc }, previewAssets) : null), [shownDoc, earlierDoc, previewAssets]);
   const faces = versionFaces ? versionFaces.css : liveFaces.css;
-  const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
+  const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} versionExports={versionExports} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
   // one tree in both modes, so B's rail keeps its place (and its open folds) while a version shows
   const live = (
     <>

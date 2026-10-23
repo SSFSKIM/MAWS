@@ -5,12 +5,26 @@
 // shift-click compares it with the selected one. App chrome, so it reads the app's tokens (chrome.css). P4 W1-B: a
 // turn's line names its blocks and comments by the controller's `words`, the live document's, read once per list.
 import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
+import { DropdownMenu } from 'radix-ui';
+import './version-export.css';
 import { actorKey } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { HistoryController, HistorySnapshot } from './controller';
 import { authorOf, groupVersions, versionSummary, versionTitle, type Entry, type SummaryWords } from './model';
 
+export interface HistoryExport {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  description?: string;
+  children?: readonly HistoryExport[];
+  onSelect(): void;
+}
+/** The host's existing export formats, bound to this card's retained version, not the editor's current view. */
+export type VersionExports = (versionId: number) => readonly HistoryExport[];
+
 interface Props {
+  versionExports?: VersionExports;
   controller: Pick<HistoryController, 'select' | 'save' | 'now'> & Partial<Pick<HistoryController, 'words'>>; // P3-C (M8): what the rail drives, so a deck's controller drives it too; `now` names the list's days (gate-offload Decision Log 41); `words` the lines' blocks and comments (P4 W1-B; without it "a block", "a comment")
   snapshot: Pick<HistorySnapshot, 'versions' | 'selected' | 'loading' | 'status' | 'error'>; // P3-C (M8): the list fields it reads
   sessionTitle?: (appSessionId: string) => string | undefined;
@@ -20,7 +34,7 @@ interface Props {
   onClose(): void;
 }
 
-export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSaving: setSaving, onClose }: Props) {
+export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSaving: setSaving, onClose, versionExports }: Props) {
   const [namedOnly, setNamedOnly] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const groups = useMemo(() => groupVersions(snapshot.versions ?? [], { now: controller.now(), namedOnly }), [controller, snapshot.versions, namedOnly]);
@@ -28,7 +42,12 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
   const words = controller.words;
   const read = useMemo(() => (snapshot.versions && words ? words() : undefined), [snapshot.versions, words]);
   const select = (version: ArtifactVersion, event: MouseEvent) => void controller.select(version.id, { extend: event.shiftKey });
-  const row = (version: ArtifactVersion) => <VersionRow key={version.id} version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} words={read} onSelect={select} />;
+  const row = (version: ArtifactVersion) => (
+    <div key={version.id} className="doc-version-card">
+      <VersionRow version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} words={read} onSelect={select} />
+      {versionExports && <VersionExportMenu version={version} entries={versionExports(version.id)} />}
+    </div>
+  );
   const entry = (item: Entry) => {
     if (item.kind === 'version') return row(item.version);
     const [newest, ...rest] = item.versions;
@@ -116,6 +135,39 @@ function VersionRow({ version, selected, sessionTitle, words, onSelect }: { vers
       {summary && <span className="doc-version-summary">{summary}</span>}
     </button>
   );
+}
+
+function VersionExportMenu({ version, entries }: { version: ArtifactVersion; entries: readonly HistoryExport[] }) {
+  const label = `Export version ${versionTitle(version)}`;
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" className="doc-tool doc-version-export" aria-label={label} title={label}>Export</button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="doc-tab-menu" align="end" sideOffset={4} aria-label={label}>
+          {entries.map((entry) => <VersionExportItem key={entry.id} entry={entry} />)}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+function VersionExportItem({ entry }: { entry: HistoryExport }) {
+  const label = <span className="doc-version-export-label">{entry.label}{entry.description && <span className="doc-version-export-description">{entry.description}</span>}</span>;
+  if (entry.children?.length) return (
+    <DropdownMenu.Sub>
+      <DropdownMenu.SubTrigger className="doc-tab-menu-item doc-version-export-group" disabled={entry.disabled}>
+        {label}<span aria-hidden="true">›</span>
+      </DropdownMenu.SubTrigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.SubContent className="doc-tab-menu" sideOffset={4} aria-label={entry.label}>
+          {entry.children.map(child => <VersionExportItem key={child.id} entry={child} />)}
+        </DropdownMenu.SubContent>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Sub>
+  );
+  return <DropdownMenu.Item className="doc-tab-menu-item" disabled={entry.disabled} onSelect={() => entry.onSelect()}>{label}</DropdownMenu.Item>;
 }
 
 // Save version: a name (required) and what changed.

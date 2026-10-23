@@ -21,7 +21,7 @@ import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests';
 import { useArtifactCommentTarget } from './comment-session'; // P3-F1
 import { forgetCardActivation, useDocumentComments } from './comments'; // P4-B3: forgetCardActivation
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
-import { documentHeader, type DocumentHeaderCommands } from './header';
+import { documentExports, documentHeader, type DocumentHeaderCommands } from './header';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
 import { setCommentsView } from './comments-view'; // P4-B1
 import { useSettings } from '../../stores/settings'; // P4-B1
@@ -169,6 +169,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         host={state.host}
         comments={target === null ? undefined : comments /* P3-F1 */}
         history={state.history}
+        versionExports={(versionId) => documentExports({ versionId }, snapshot.exporting?.phase === 'running', (format, pageSize) => void state.export(format, pageSize, versionId))}
         suggestions={state.host}
         rail={snapshot.rail}
         onRailChange={onRailChange}

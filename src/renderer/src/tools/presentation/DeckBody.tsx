@@ -160,6 +160,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         theme={theme}
         comments={target === null ? undefined : comments /* P3-F1 */}
         history={history}
+        versionExports={(versionId) => deckExports(artifactId, { versionId })}
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
         onPreviewDrawn={onPreviewDrawn}

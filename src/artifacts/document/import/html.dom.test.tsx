@@ -1,7 +1,7 @@
 // The HTML import (M6 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D12): ProseMirror's DOMParser over the
 // schema, on a sanitised inert document (scripts, styles and handlers gone, addresses `https:` and `maws-artifact:`
 // only for what loads), in the renderer as paste is. Equivalent Markdown and HTML read to the same content, and the
-// HTML and Markdown exports of the every-kind fixture read back to it.
+// HTML and mirror-mode Markdown exports of the every-kind fixture read back to it; reader Markdown flattens chips.
 import { describe, expect, it } from 'vitest';
 import corpus from '../../../../test/fixtures/document/corpus.md?raw';
 import page from '../../../../test/fixtures/document/page.html?raw';
@@ -75,11 +75,11 @@ describe('importHtml', () => {
     }
   });
 
-  it('reads the Markdown and HTML exports of the every-kind fixture to the same content', async () => {
+  it('reads the mirror-mode Markdown and HTML exports of the every-kind fixture to the same content', async () => {
     const source = everyKindSource();
     for (const tab of ['tab-1', 'tab-2']) {
       const fromHtml = await importHtml(await exportHtml(source, { tab, images: 'reference' }));
-      const fromMarkdown = importMarkdown(exportMarkdown(source, { tab }));
+      const fromMarkdown = importMarkdown(exportMarkdown(source, { tab, mode: 'mirror' }));
       expect(comparable(fromHtml)).toEqual(comparable(fromMarkdown));
     }
     expect((await importHtml(await exportHtml(source, { tab: 'tab-2' }))).textContent).toContain('안녕하세요, 팀 여러분.');

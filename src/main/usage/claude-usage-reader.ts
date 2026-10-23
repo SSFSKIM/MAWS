@@ -13,6 +13,7 @@ import { watch, type FSWatcher } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AccountUsage, UsageActivity, UsageCodex, UsageGateway, UsageSnapshot, UsageWindow } from '@shared/usage/types';
+import { routedAccountName } from '@shared/artifacts/export-author';
 import { jsonLines, readTail } from '../files/read-tail';
 import { RequestLedger } from './request-ledger';
 
@@ -98,6 +99,11 @@ export class ClaudeUsageReader {
     const snapshot = this.compose(read);
     this.lastEmitted = signature(snapshot); // what the caller now holds: only a change from it is an event
     return snapshot;
+  }
+
+  // WR 73: share the cached account read without replacing settings.usage's subscriber ids or event signature.
+  async routedAccountName(): Promise<string | null> {
+    return routedAccountName(this.last ?? (await this.read()));
   }
 
   // C11 start: whether ClaudeUsage's files are there (settings.claudeUsage.status's dataDirPresent): the last read, or one

@@ -1,0 +1,36 @@
+/* Adopt the source sheet's quiet chrome: muted words, a hairline, and the existing tool button. No document ink or
+   chart series colour carries local file state. */
+.dash-file-sources {
+  flex: 0 0 auto;
+  padding: var(--space) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.dash-file-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space) calc(var(--space) * 2);
+}
+.dash-file-source > span,
+.dash-file-source-issue {
+  overflow-wrap: anywhere;
+}
+.dash-file-source-issue {
+  margin: var(--space) 0;
+}
+.dash-file-source .doc-tool {
+  flex: 0 0 auto;
+}
+.dash-file-source .doc-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+@media (max-width: 600px) {
+  .dash-file-source {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}

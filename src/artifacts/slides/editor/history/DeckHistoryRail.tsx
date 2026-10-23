@@ -4,16 +4,16 @@
 // the deck's comments in the rows' lines (P4 W1-B). Inside the deck's rail slot (`data-deck-rail`), so under 720 px it
 // overlays the stage as a sheet like the deck's other rails.
 import { useState } from 'react';
-import { HistoryRail } from '../../../document/editor/history/HistoryRail';
+import { HistoryRail, type VersionExports } from '../../../document/editor/history/HistoryRail';
 import type { DeckHistoryController, DeckHistorySnapshot } from './controller';
 import '../../../document/editor/chrome.css'; // the rail's own look is B's
 import './history.css';
 
-export function DeckHistoryRail({ controller, snapshot, sessionTitle, onClose }: { controller: DeckHistoryController; snapshot: DeckHistorySnapshot; sessionTitle?: (appSessionId: string) => string | undefined; onClose(): void }) {
+export function DeckHistoryRail({ controller, snapshot, sessionTitle, onClose, versionExports }: { controller: DeckHistoryController; snapshot: DeckHistorySnapshot; sessionTitle?: (appSessionId: string) => string | undefined; onClose(): void; versionExports?: VersionExports }) {
   const [saving, setSaving] = useState(false);
   return (
     <div className="deck-history-rail" data-deck-rail="history">
-      <HistoryRail controller={controller} snapshot={snapshot} sessionTitle={sessionTitle} saving={saving} onSaving={setSaving} onClose={onClose} />
+      <HistoryRail controller={controller} snapshot={snapshot} versionExports={versionExports} sessionTitle={sessionTitle} saving={saving} onSaving={setSaving} onClose={onClose} />
     </div>
   );
 }

@@ -54,7 +54,7 @@ import type { ExportView, ExportViewTable, ViewRenderer } from './source'; // P3
 export interface DocxExportOptions<T> extends ExportOptions<T> {
   /** Reads a picture's bytes; a picture it cannot read is written as its alt text. */
   loadImage?: ImageLoader;
-  /** A comment's author as Word shows it; the session's title or "Claude", and "Owner" for the human, by default. */
+  /** A comment's author as Word shows it; "Claude" and the neutral "Comment author" without a resolver. */
   authorName?: (actor: Actor) => string;
 }
 

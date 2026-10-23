@@ -70,11 +70,11 @@ describe('exportDocx', () => {
     const comments = xml['word/comments.xml'];
     const authored = [...comments.matchAll(/<w:comment w:id="(\d+)"[^>]*w:author="([^"]*)"[^>]*>(.*?)<\/w:comment>/gs)].map(([, id, author, body]) => [Number(id), author, body.replace(/<[^>]+>/g, '')]);
     expect(authored).toEqual([
-      [0, 'Owner', 'Is quarterly right?'],
+      [0, 'Comment author', 'Is quarterly right?'],
       [1, 'Claude', 'Quarterly matches the release train.'],
       [2, 'Claude', 'Linked the review notes.'],
-      [3, 'Owner', 'Drop the log before shipping.'],
-      [4, 'Owner', 'An orphaned thread.'], // its passage gone: on its quote in the note at the end (P4 L288)
+      [3, 'Comment author', 'Drop the log before shipping.'],
+      [4, 'Comment author', 'An orphaned thread.'], // its passage gone: on its quote in the note at the end (P4 L288)
     ]);
     const extended = xml['word/commentsExtended.xml'];
     expect(extended.match(/w15:paraIdParent=/g)).toHaveLength(1); // the reply
@@ -108,11 +108,11 @@ describe('exportDocx', () => {
     const xml = await parts(bytes);
     const authored = [...xml['word/comments.xml'].matchAll(/<w:comment w:id="(\d+)"[^>]*w:author="([^"]*)"[^>]*>(.*?)<\/w:comment>/gs)].map(([, id, author, body]) => [Number(id), author, body.replace(/<[^>]+>/g, '')]);
     expect(authored).toEqual([
-      [0, 'Owner', 'On the kept words.'],
-      [1, 'Owner', 'Was this cut on purpose?'],
+      [0, 'Comment author', 'On the kept words.'],
+      [1, 'Comment author', 'Was this cut on purpose?'],
       [2, 'Claude', 'Yes, it repeated the intro.'],
       [3, 'Claude', 'Settled.'],
-      [4, 'Owner', 'Where did the chart go?'],
+      [4, 'Comment author', 'Where did the chart go?'],
     ]);
     // the body is the file without those threads, comment for comment; the note follows it, before the section's end
     const document = xml['word/document.xml'];

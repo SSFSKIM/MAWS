@@ -35,6 +35,6 @@ describe('exportSource', () => {
     expect(tabsOf(source, first).map(({ title }) => title)).toEqual(['Overview']);
 
     expect(exportMarkdown(source).startsWith('# Notes\n\n## 회의 메모')).toBe(true);
-    expect(await exportHtml(source)).toMatch(/\.ds-doc mark \{[^}]*box-shadow: inset 0 -0\.4em 0 #0b5fff;/);
+    expect(await exportHtml(source)).toMatch(/\.ds-doc mark[^{]*\{[^}]*background: color-mix\(in srgb, #0b5fff 25%, #faf9f6\);[^}]*color: inherit;/);
   });
 });

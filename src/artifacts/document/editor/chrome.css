@@ -540,9 +540,6 @@
   max-width: 100%;
   box-shadow: var(--shadow-float);
 }
-.doc-editor-body[data-rail-layout='drawer'] .doc-pill {
-  z-index: 6; /* the new-changes pill, centred on the page, over the drawer */
-}
 .doc-rail-header {
   display: flex;
   align-items: center;

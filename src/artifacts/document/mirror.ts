@@ -31,7 +31,7 @@ export const documentMirrorWriter: MirrorWriter = ({ artifact, doc, assets = [],
       return `${slug}/${src}`;
     }),
   }));
-  return { files: { [`${slug}.md`]: exportMarkdown({ ...source, tabs }), ...copies } };
+  return { files: { [`${slug}.md`]: exportMarkdown({ ...source, tabs }, { mode: 'mirror' }), ...copies } };
 };
 
 // `body` with the `src` of each image that `to` answers for replaced: the export's own tree, the document untouched.

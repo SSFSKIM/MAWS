@@ -22,7 +22,7 @@
 // A replica never initialises its document: the host writes a new document's first tab in the create's own commit (the
 // document adapter's `initial`, A's seed hook), and the editor shows "Loading…" until that tab has arrived, then binds it.
 import { listTabs } from '@artifacts/document/tabs';
-import { listThreads, observeThreads } from '@artifacts/document/threads';
+import { documentCommentCounts } from '@artifacts/document/comment-counts';
 import { onUpdate, type Node as YType } from '@artifacts/yjs';
 import { UndoManager } from '@artifacts/yjs/document'; // P4-B3 M5
 import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
@@ -106,6 +106,7 @@ export class DocumentTabState {
   private readonly stops: Array<() => void> = [];
   private rowRead = false;
   private viewedBefore: number | null = null;
+  private viewedSeqBefore: number | null = null;
   private holders = 0; // what still writes into the replica (`hold`)
   private readonly undo = new Map<YType, UndoManager>(); // P4-B3 M5: by tab body
   /** P4-B3 M6: the comment card host's id, the same for every body over this state, so a move keeps its draft. */
@@ -131,6 +132,7 @@ export class DocumentTabState {
       ipc: deps.ipc,
       host: deps.host,
       viewedAt: { get: () => this.viewedBefore, set: (at) => (this.viewedBefore = at) },
+      viewedSeq: { get: () => this.viewedSeqBefore, set: (seq) => (this.viewedSeqBefore = seq) },
       whenShown: () => this.whenShown,
       sessionTitle: deps.sessionTitle,
       log: deps.log,
@@ -196,15 +198,18 @@ export class DocumentTabState {
     }
     const handle = opened.value;
     if (this.disposed) return void handle.close();
-    const openThreads = () => listThreads(handle.doc).filter((thread) => thread.status === 'open').length;
+    const comments = documentCommentCounts(handle.doc);
     this.stops.push(
       handle.subscribe((document) => this.follow(handle, document)),
       () => this.stopSavingTimer(),
-      observeThreads(handle.doc, () => this.set({ unresolved: openThreads() })),
+      comments.subscribe(() => {
+        const unresolved = comments.getSnapshot().total;
+        if (unresolved !== this.current.unresolved) this.set({ unresolved });
+      }),
       handle.onRestored(() => this.undo.forEach((manager) => manager.clear())), // P4-B3 M5
       this.awaitFirstTab(handle),
     );
-    this.set({ handle, document: handle.state(), unresolved: openThreads(), ready: true });
+    this.set({ handle, document: handle.state(), unresolved: comments.getSnapshot().total, ready: true });
   }
 
   // A document's first tab is the host's, written with the creation (A's seed hook); only a document made before that
@@ -240,7 +245,10 @@ export class DocumentTabState {
   }
 
   private adopt(row: ArtifactRow | null): void {
-    if (!this.rowRead) this.viewedBefore = row?.lastViewedAt ?? null;
+    if (!this.rowRead) {
+      this.viewedBefore = row?.lastViewedAt ?? null;
+      this.viewedSeqBefore = row?.lastViewedSeq ?? null;
+    }
     this.rowRead = true;
     if (this.disposed || !row) return;
     const placement = { ...(row.designSystemId ? { designSystemId: row.designSystemId } : {}), ...(row.spaceId ? { spaceId: row.spaceId } : {}) };
@@ -283,9 +291,9 @@ export class DocumentTabState {
     }
   }
 
-  /** P3-F (F7): the document as shown exported as `format` on `pageSize`, then saved where the owner chooses. */
-  async export(format: DocumentExportFormat, pageSize: PageSize): Promise<void> {
-    const { shown } = this.current;
+  /** The document as shown, or WR 66's explicit history-card version, saved where the owner chooses. */
+  async export(format: DocumentExportFormat, pageSize: PageSize, versionId?: number): Promise<void> {
+    const shown = versionId === undefined ? this.current.shown : { versionId };
     if (this.current.exporting?.phase === 'running' || shown === 'compare') return; // two versions compared: nothing is exported
     this.set({ exporting: { phase: 'running', format } });
     try {
@@ -296,7 +304,7 @@ export class DocumentTabState {
       const { revision, exportId } = exported.value;
       const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });
       if (!saved.ok) throw new Error(saved.error.message);
-      if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
+      if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path, exported.value.commentAuthorName), actions: [], dismissible: true });
       if (!this.disposed) this.set({ exporting: null });
     } catch (error) {
       this.deps.log(`document ${this.artifactId}: the ${format} export failed: ${messageOf(error)}`);

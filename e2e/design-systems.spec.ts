@@ -37,7 +37,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { accentBand, ACCENT_DECK, deckHeadline, headerAction, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
+import { accentBand, ACCENT_DECK, deckHeadline, headerAction, highlightMix, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
@@ -274,10 +274,15 @@ test('the real document and deck editors restyle with their system’s live toke
     ([id, files]) => (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<unknown> } }).__maws_presentations.seed(id, files),
     [deck.id, ACCENT_DECK] as const,
   );
-  const BEFORE = rgbOf(bundledHex('classroom', 'accent'));
+  const BEFORE_HEX = bundledHex('classroom', 'accent');
+  const BEFORE = rgbOf(BEFORE_HEX);
   const AFTER_HEX = '#2e8b57';
   const AFTER = rgbOf(AFTER_HEX);
+  const paper = bundledHex('classroom', 'bg');
+  const BEFORE_BAND = await highlightMix(page, BEFORE_HEX, paper);
+  const AFTER_BAND = await highlightMix(page, AFTER_HEX, paper);
   expect(BEFORE).not.toBe(AFTER);
+  expect(BEFORE_BAND).not.toBe(AFTER_BAND);
   const revision = async (artifactId: string) => (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId })).artifact.revision;
 
   // the owner writes the reading list in the real document editor, its highlight's band drawn in the system's accent
@@ -289,7 +294,7 @@ test('the real document and deck editors restyle with their system’s live toke
   const docBand = docTab.locator('.ds-doc [data-editor="live"] mark', { hasText: 'the course reader' });
   await expect(docBand).toBeVisible();
   await expect.poll(() => unacknowledged(docEditor), { timeout: 10_000, message: 'the passage reached the store' }).toBe(0);
-  await expect.poll(() => accentBand(docBand), { message: 'the document’s highlight draws the system’s accent' }).toBe(BEFORE);
+  await expect.poll(() => accentBand(docBand), { message: 'the document’s full highlight background mixes its system’s accent with its paper' }).toBe(BEFORE_BAND);
   // each artifact's version now pins the system as it is (X29), the document's holding the passage
   for (const artifactId of [doc.id, deck.id]) expect((await saveVersion(page, artifactId, 'Handed out')).designSystemRef).toEqual({ id: system.id, versionSeq: expect.any(Number) });
   const deckTab = await openFromLibrary(page, 'Lecture', deck.id, DECK_DRAWN);
@@ -308,12 +313,12 @@ test('the real document and deck editors restyle with their system’s live toke
     await expect(headline).toBeVisible();
     await markElement(docBand, 'doc-band');
     await markElement(headline, 'deck-headline');
-    expect(await markedBand(docBand, 'doc-band')).toEqual({ marked: true, color: BEFORE });
+    expect(await markedBand(docBand, 'doc-band')).toEqual({ marked: true, color: BEFORE_BAND });
     expect(await markedColor(headline, 'deck-headline')).toEqual({ marked: true, color: BEFORE });
     // the accent written as the system's page writes it, by a replica of the system that no pane shows: both panes keep
     // their tabs while the host brings the token to the editors' scopes
     await recolourThroughReplica(page, system.id, AFTER_HEX);
-    await expect.poll(() => markedBand(docBand, 'doc-band'), { timeout: 10_000, message: 'the document’s highlight, the one drawn before, restyles' }).toEqual({ marked: true, color: AFTER });
+    await expect.poll(() => markedBand(docBand, 'doc-band'), { timeout: 10_000, message: 'the document’s highlight, the one drawn before, restyles' }).toEqual({ marked: true, color: AFTER_BAND });
     await expect.poll(() => markedColor(headline, 'deck-headline'), { timeout: 10_000, message: 'the deck’s title, the one drawn before, restyles' }).toEqual({ marked: true, color: AFTER });
     expect({ doc: await revision(doc.id), deck: await revision(deck.id) }).toEqual(before);
     // one pane again for the version steps: the deck's tab, focused in the second pane, goes back to the first, and the
@@ -340,10 +345,10 @@ test('the real document and deck editors restyle with their system’s live toke
     await expect(docTab.getByRole('toolbar', { name: 'Version preview' })).toBeVisible({ timeout: 10_000 });
     const versionBand = docTab.locator('.ds-doc[data-preview] [data-editor="preview"] mark', { hasText: 'the course reader' });
     await expect(versionBand).toBeVisible({ timeout: 10_000 });
-    await expect.poll(() => accentBand(versionBand), { timeout: 10_000, message: 'the version’s highlight keeps the accent it pinned' }).toBe(BEFORE);
+    await expect.poll(() => accentBand(versionBand), { timeout: 10_000, message: 'the version’s highlight keeps the mixed background it pinned' }).toBe(BEFORE_BAND);
     // the live passage, back in view, still follows the live system
     await docTab.getByRole('toolbar', { name: 'Version preview' }).getByRole('button', { name: 'Back to document' }).click();
-    await expect.poll(() => accentBand(docBand), { timeout: 10_000, message: 'the live highlight is in the live accent again' }).toBe(AFTER);
+    await expect.poll(() => accentBand(docBand), { timeout: 10_000, message: 'the live highlight is in the live mixed background again' }).toBe(AFTER_BAND);
   });
   expect(launch!.consoleErrors()).toEqual([]);
 });

@@ -157,16 +157,18 @@ export class HistoryController {
   // viewed.
   private async look(): Promise<void> {
     try {
-      const [versions, lastViewedAt] = await Promise.all([this.api.versions(), this.api.lastViewedAt()]);
+      const [lastViewedAt, lastViewedSeq] = await Promise.all([this.api.lastViewedAt(), this.api.lastViewedSeq?.()]);
+      // Capture the live state before reading versions: an unfinished turn may not have made one yet.
+      await this.api.markViewed();
+      const versions = await this.api.versions();
       this.set({ versions, ...this.headingFrom(versions) });
       const offered = this.snapshot.pill;
-      const base = offered ? null : newChangesBase(versions, lastViewedAt);
+      const base = offered ? null : newChangesBase(versions, lastViewedAt, lastViewedSeq);
       if (offered) void this.count(offered.since);
       else if (base) {
         this.set({ pill: { since: base.since, count: null, failed: null } });
         void this.count(base.since);
       }
-      await this.api.markViewed();
     } catch (error) {
       this.set({ error: message(error) });
     }

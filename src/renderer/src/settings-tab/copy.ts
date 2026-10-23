@@ -315,6 +315,9 @@ export const BROWSER = {
 // P3-D start (2026-10-13): Settings › Artifacts (settings version 14; docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md
 // D9): the design-system defaults
 export const ARTIFACTS = {
+  exportAuthorName: 'Export author name',
+  exportAuthorNote: (fallback: string) => `Name on your DOCX comments. When blank, use “${fallback}”. Agent comments keep their session name.`,
+  suggestedAuthor: (name: string) => `Use ${name}`,
   defaultSystem: 'Default design system',
   house: 'House system',
   defaultSystemNote: 'Documents, decks and designs that name no system of their own, in no Space with a default, use it. The house system is MAWS.',

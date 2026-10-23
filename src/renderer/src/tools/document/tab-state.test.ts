@@ -140,13 +140,20 @@ describe('a document tab’s state', () => {
     await until(() => !state.snapshot().noContent, 'the tab to clear it');
   });
 
-  it('counts the open threads and follows the replica’s saved state', async () => {
+  it('counts only live-target open threads, follows replaced and restored targets and the replica’s saved state (WR 49)', async () => {
     const w = world();
     const state = w.open();
     await ready(state);
     const handle = w.handles[0];
-    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: null, quote: 'q', anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    createDocument(handle.doc, { title: 'Launch', id: 'tab00001', generateID: () => 'p1' });
+    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: 'p1', quote: 'q', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1 });
+    addThread(handle.doc, { threadId: 'th2', tabId: 'tab00001', blockId: 'gone', quote: 'Gone', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 2 });
     expect(state.snapshot().unresolved).toBe(1);
+    const block = tabBody(handle.doc, 'tab00001')!.get(0) as import('@artifacts/yjs').Node;
+    block.setAttr('id', 'replacement');
+    await until(() => state.snapshot().unresolved === 0, 'the target replacement to hide the count');
+    block.setAttr('id', 'p1');
+    await until(() => state.snapshot().unresolved === 1, 'the restored target to count again');
     w.memory.dropConnections();
     await until(() => state.snapshot().document?.phase !== 'live', 'the replica to see its port go');
   });
@@ -245,6 +252,34 @@ describe('a document tab’s state', () => {
     state.setPreviewing(false, null);
     await state.export('html', 'letter');
     expect(exporting().slice(4)[0]).toEqual(['artifacts.export', { artifactId: A, format: 'html', pageSize: 'letter', ownFile: true }]);
+  });
+
+  it('exports the history card’s explicit version without changing the live, preview or comparison view', async () => {
+    const w = world({ 'artifacts.export': { path: '/u/x', revision: 5 }, 'library.saveAs': { saved: false } });
+    const state = w.open();
+    await ready(state);
+    for (const shown of [null, { versionId: 3 }, 'compare'] as const) {
+      state.setPreviewing(shown !== null, shown);
+      await state.export('pdf', 'a4', 7);
+      expect(state.snapshot().shown).toEqual(shown);
+    }
+    expect(w.calls.filter(([name]) => name === 'artifacts.export')).toEqual([
+      ['artifacts.export', { artifactId: A, format: 'pdf', versionId: 7, pageSize: 'a4', ownFile: true }],
+      ['artifacts.export', { artifactId: A, format: 'pdf', versionId: 7, pageSize: 'a4', ownFile: true }],
+      ['artifacts.export', { artifactId: A, format: 'pdf', versionId: 7, pageSize: 'a4', ownFile: true }],
+    ]);
+  });
+
+  it('reports the actual DOCX comment author beside the saved result, without guessing from current settings', async () => {
+    useNotices.setState({ notices: [] });
+    const w = world({
+      'artifacts.export': { path: '/u/x.docx', revision: 9, commentAuthorName: 'Kim Min' },
+      'library.saveAs': { saved: true, path: '/Downloads/Review.docx' },
+    });
+    const state = w.open();
+    await ready(state);
+    await state.export('docx', 'letter');
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Saved to /Downloads/Review.docx · Comments credited to Kim Min; change in Settings › Artifacts.']);
   });
 
   it('exports nothing while two versions are compared', async () => {

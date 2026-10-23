@@ -38,7 +38,7 @@ export const dashboardMirrorWriter: MirrorWriter = ({ artifact, doc, assets = []
   const held = legacyDashboardFiles(doc);
   if (held) return { files: { [`${slug}.md`]: `This dashboard is held and is not mirrored as content: ${legacyDashboardReason(held)}.\n` } };
 
-  const files: Record<string, string | MirrorCopy> = { [`${slug}.md`]: exportMarkdown(exportSource(doc, artifact.title)) };
+  const files: Record<string, string | MirrorCopy> = { [`${slug}.md`]: exportMarkdown(exportSource(doc, artifact.title), { mode: 'mirror' }) };
   const datasets: Record<string, unknown> = {};
   for (const { id, descriptor } of listDatasets(doc)) {
     const snapshot = snapshotOf(descriptor); // E3: null for a query never fetched, which has no file to copy

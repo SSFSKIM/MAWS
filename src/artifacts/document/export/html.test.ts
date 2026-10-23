@@ -56,7 +56,7 @@ describe('exportHtml', () => {
     expect(html).not.toContain('var(');
     expect(html).toMatch(/\.ds-doc h1 \{[^}]*font-size: 26px;/); // the house system's h1
     expect(html).toMatch(/\.ds-doc \{[^}]*color: #1f1e1b;/);
-    expect(html).toMatch(/\.ds-doc mark \{[^}]*box-shadow: inset 0 -0\.4em 0 #0b5fff;/); // the override wins
+    expect(html).toMatch(/\.ds-doc mark[^{]*\{[^}]*background: color-mix\(in srgb, #0b5fff 25%, #faf9f6\);[^}]*color: inherit;/); // full background, the override wins, text keeps its ink
     // P3-F (sitting candidate 11, F18): an exported link is its text's colour too, the accent's override not on it
     expect(html).toMatch(/\.ds-doc a \{[^}]*color: inherit;/);
     expect(html).not.toMatch(/\.ds-doc a \{[^}]*color: #0b5fff/);

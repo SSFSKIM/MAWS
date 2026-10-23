@@ -79,6 +79,25 @@ test.describe('the document editor', () => {
     await expect(content(page, 'b')).toContainText('Typed by hand.');
   });
 
+  test('highlight fills the text background and its toolbar sample follows the same live colors', async () => {
+    const { page } = maws;
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.selectText('a', 'para0001', 'owner'));
+    await toolbar(page, 'a').getByRole('button', { name: 'Highlight', exact: true }).click();
+    const paint = () => replica(page, 'a').evaluate((root) => {
+      const mark = root.querySelector('mark')!;
+      const sample = root.querySelector('[data-highlight-sample]')!;
+      return { background: getComputedStyle(mark).backgroundColor, shadow: getComputedStyle(mark).boxShadow, sample: getComputedStyle(sample).backgroundColor };
+    });
+    const before = await paint();
+    expect(before.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(before.shadow).toBe('none');
+    expect(before.sample).toBe(before.background);
+    await replica(page, 'a').evaluate(root => (root as HTMLElement).style.setProperty('--ds-color-accent', '#2864bb'));
+    const after = await paint();
+    expect(after.background).not.toBe(before.background);
+    expect(after.sample).toBe(after.background);
+  });
+
   test('the toolbar inserts every block kind, each drawn and edited in place', async () => {
     const { page } = maws;
     const bar = toolbar(page, 'a');

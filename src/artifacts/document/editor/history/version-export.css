@@ -1,0 +1,28 @@
+/* WR 66: export is a sibling control, never a button nested in the version's preview button. */
+.doc-version-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space);
+}
+.doc-version-card > .doc-version {
+  flex: 1;
+  min-width: 0;
+}
+.doc-version-export {
+  flex-shrink: 0;
+  margin-top: var(--space);
+}
+.doc-version-export-group {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(var(--space) * 3);
+}
+.doc-version-export-label {
+  display: flex;
+  flex-direction: column;
+}
+.doc-version-export-description {
+  max-width: 32ch;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}

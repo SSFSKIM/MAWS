@@ -1,6 +1,6 @@
 // P3-F's S-RESTYLE (the P3-D document's Acceptance 10 and 11 on B's and C's real editors, not the fixture): what
-// design-systems.spec.ts reads off a real document page and a real deck stage. A colour is compared as the window paints
-// it (`rgb(…)`), whatever form a token's value was written in.
+// design-systems.spec.ts reads off a real document page and a real deck stage. Colours are compared as the browser
+// computes them, whatever form a token's value was written in.
 import { expect, type Locator, type Page } from '@playwright/test';
 import { colorFromHex } from '@artifacts/design-system/color';
 import { documents } from './documents';
@@ -18,18 +18,19 @@ export const deckHeadline = (stage: Locator) => stage.locator('[data-stage-slide
 /** The colour an element paints its text in. */
 export const paintedColor = (element: Locator) => element.evaluate((node) => getComputedStyle(node).color);
 
-/**
- * The colour of a highlighted passage's band (theme.css: `.ds-doc mark`'s inset box-shadow, in the system's accent),
- * where a document page paints its system's accent now that a link takes its text's colour (P3-F, F18). A band that
- * names no colour fails here rather than reading as some colour.
- */
-export const accentBand = (element: Locator) =>
-  element.evaluate((node) => {
-    const shadow = getComputedStyle(node).boxShadow;
-    const colour = /rgba?\([^)]*\)/.exec(shadow)?.[0];
-    if (!colour) throw new Error(`the highlight's band names no colour (box-shadow: ${shadow || 'none'})`);
+/** The highlighted passage's actual full background (WR9), not the accent token or the former inset shadow. */
+export const accentBand = (element: Locator) => element.evaluate((node) => getComputedStyle(node).backgroundColor);
+
+/** WR9's expected tint from literal colours, resolved by the browser independently of the artifact's token scope. */
+export const highlightMix = (page: Page, accent: string, ground: string) =>
+  page.evaluate(([ink, paper]) => {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = `color-mix(in srgb, ${ink} 25%, ${paper})`;
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).backgroundColor;
+    probe.remove();
     return colour;
-  });
+  }, [accent, ground] as const);
 
 type Marked = Element & { __mawsRestyleMark?: string };
 /**
@@ -64,8 +65,8 @@ export async function recolourThroughReplica(page: Page, systemId: string, hex: 
 
 /**
  * A reading-list passage with a highlighted link, as the document editor's `insertContent` takes it: the document's theme
- * draws the highlight's band in the system's accent (theme.css: `.ds-doc mark`), while the link takes its text's colour
- * (P3-F, F18).
+ * draws the full highlight background in the system's accent mixed with its paper (theme.css: `.ds-doc mark`, WR9),
+ * while the link takes its text's colour (P3-F, F18).
  */
 export const READING_PASSAGE = [
   {

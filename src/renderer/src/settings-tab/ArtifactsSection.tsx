@@ -11,17 +11,30 @@ import type { ArtifactsSettings } from '@shared/ipc/schema/settings';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { useLibraryList, useLibrarySpaces } from '../library/store';
 import { ARTIFACTS } from './copy';
-import { INPUT, Setting, writeSettings } from './parts';
+import { INPUT, TEXT_ACTION, Setting, useCommittedDraft, writeSettings } from './parts';
+import { routedAccountName, resolveExportHumanName } from '@shared/artifacts/export-author';
+import { useUsage } from '../stores/usage';
 
 const NONE = ''; // a select's value for null (the house system) or no Space entry (my default)
 
 export function ArtifactsSection({ artifacts }: { artifacts: ArtifactsSettings }) {
+  const accountName = useUsage((state) => routedAccountName(state.snapshot));
+  const savedName = artifacts.exportAuthorName ?? null;
+  const [, authorField] = useCommittedDraft(savedName, (exportAuthorName) => writeSettings({ artifacts: { exportAuthorName } }));
   const systems = useLibraryList({ kind: 'design_system' });
   const spaces = useLibrarySpaces();
   const rows = [...(systems.value?.rows ?? [])].sort((a, b) => a.title.localeCompare(b.title, 'en') || a.id.localeCompare(b.id));
   const note = systems.status === 'error' && systems.value === undefined ? ARTIFACTS.readFailed(systems.error ?? '') : ARTIFACTS.defaultSystemNote;
   return (
     <>
+      <Setting label={ARTIFACTS.exportAuthorName} note={ARTIFACTS.exportAuthorNote(resolveExportHumanName(null, accountName))}>
+        <input {...authorField} aria-label={ARTIFACTS.exportAuthorName} placeholder={resolveExportHumanName(null, accountName)} maxLength={200} className={`${INPUT} max-w-[260px]`} />
+        {savedName === null && accountName && (
+          <button type="button" className={TEXT_ACTION} onClick={() => void writeSettings({ artifacts: { exportAuthorName: accountName } })}>
+            {ARTIFACTS.suggestedAuthor(accountName)}
+          </button>
+        )}
+      </Setting>
       <Setting label={ARTIFACTS.defaultSystem} note={note}>
         <SystemSelect
           label={ARTIFACTS.defaultSystem}

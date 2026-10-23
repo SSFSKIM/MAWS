@@ -18,6 +18,7 @@ import { DocumentTabState, type DocumentTabDeps } from '../document/tab-state';
 import { LiveDatasetsController } from './live-datasets'; // E3
 import type { DashboardLiveDeps } from './live-start'; // E3
 import { PreviewHold } from './preview-hold'; // E3 panel
+import { datasetFileApi, type DatasetFileApi } from './file-source-api'; // WR 67
 
 /** E3: how long an open source sheet whose hold the host's restart took waits for the displayed document to sync again
  * before it says the snapshot is unavailable (the host has not come back). */
@@ -33,6 +34,7 @@ export class DashboardTabState {
   readonly reader: SnapshotReader;
   readonly renderChart: ReturnType<typeof createChartRenderer>;
   readonly live: LiveDatasetsController; // E3 M3
+  readonly fileSources: DatasetFileApi; // WR 67
   private bodyShown = false; // E3 M3: the body on screen and its window's document visible
   private shown: SheetDataset[] = [];
   private shownDoc: Doc | null = null; // P3-F: the document `shown` is of
@@ -51,6 +53,7 @@ export class DashboardTabState {
     liveDeps: DashboardLiveDeps = NO_START, // E3 M3
   ) {
     this.artifactId = target.artifactId;
+    this.fileSources = datasetFileApi(target.artifactId, deps.ipc);
     this.live = new LiveDatasetsController({
       artifactId: target.artifactId,
       host: deps.host,

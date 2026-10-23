@@ -42,6 +42,12 @@ describe('the export formats', () => {
 });
 
 describe('exporting', () => {
+  it('reports the DOCX comment author returned by main beside the saved result', async () => {
+    installFakeMain((name) => name === 'artifacts.export' ? ok({ path: '/x.docx', revision: 7, commentAuthorName: 'Kim Min' }) : ok({ saved: true, path: '/Downloads/Review.docx' }));
+    await act(() => exportArtifact(A, 'docx'));
+    expect(toasts()).toEqual([['info', 'Saved to /Downloads/Review.docx · Comments credited to Kim Min; change in Settings › Artifacts.']]);
+  });
+
   it('exports the version asked and saves that export where the owner chooses', async () => {
     // P4 (W1, tracker 2026-10-19 L302): the export is a file of its own, which the save names by its id
     const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: `/store/x/exports/7-pdf-${E}.pdf`, revision: 7, exportId: E }) : ok({ saved: true, path: '/Users/me/Downloads/Plan.pdf' })));

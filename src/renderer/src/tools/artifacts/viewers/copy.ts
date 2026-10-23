@@ -26,7 +26,7 @@ export const VIEWERS_COPY = {
   exportFormats: { pdf: 'PDF', png: 'PNG', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML', claude: 'For Claude (zip)' /* P3-D: a design system in Claude's shape */ },
   saveCopy: 'Save a copy…',
   exporting: (title: string, format: string) => `Exporting ${title} as ${format}…`,
-  saved: (path: string) => `Saved to ${path}`,
+  saved: (path: string, commentAuthorName?: string) => `Saved to ${path}${commentAuthorName ? ` · Comments credited to ${commentAuthorName}; change in Settings › Artifacts.` : ''}`,
   exportFailed: (message: string) => `Couldn’t export: ${message}`,
   saveFailed: (message: string) => `Couldn’t save a copy: ${message}`,
 } as const;

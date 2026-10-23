@@ -18,6 +18,28 @@ const gdp = table(GDP_CSV);
 const penguins = table(PENGUINS_CSV);
 const theme = themeFrom(HOUSE_TOKENS.properties).theme;
 
+it('does not borrow an accent when the governing system has not authorized it for figures', () => {
+  const props = { '--ds-color-bg-raised': '#ffffff', '--ds-color-text': '#405569', '--ds-color-accent': '#bb22cc' };
+  const draw = (values: Record<string, string>) => renderView({ view: 'bar', x: 'k', y: 'v' }, table('k,v\nNorth,12'), themeFrom(values).theme, 'sales').svg!;
+  expect(draw(props)).not.toContain('#bb22cc');
+  expect(draw(props)).toMatch(/<path [^>]*fill="#405569"[^>]*data-tip=/);
+  expect(draw({ ...props, '--ds-color-figure': '#2864bb' })).toMatch(/<path [^>]*fill="#2864bb"[^>]*data-tip=/);
+});
+
+it('draws repeated bars in the governing accent while keeping labels in text ink', () => {
+  const data = table('k,v\nNorth,12\nNorth,7\nSouth,9');
+  const render = (accent: string) => renderView({ view: 'bar', x: 'k', y: 'v' }, data, themeFrom({ ...HOUSE_TOKENS.properties, '--ds-color-figure': accent }).theme, 'sales').svg!;
+  const first = render('#2864bb');
+  const marks = [...first.matchAll(/<path [^>]*data-tip="[^"]*"[^>]*>/g)].map(match => match[0]);
+  expect(marks).toHaveLength(3);
+  expect(marks.every(mark => mark.includes('fill="#2864bb"'))).toBe(true);
+  expect(first).toContain(`fill="${theme.ink}"`);
+  const next = render('#8952a4');
+  expect(next).not.toContain('#2864bb');
+  expect(next).toContain('#8952a4');
+});
+
+
 const LONG: ViewTable = {
   columns: [{ name: '지역 이름이 아주 긴 행정 구역의 공식 명칭', type: 'string' }, { name: '값', type: 'number' }],
   rows: [['서울특별시 종로구 세종대로 이백구 정부서울청사 별관', 12], ['부산광역시 해운대구', 7], ['제주특별자치도 서귀포시 대정읍 마라도 등대 앞 선착장', 3]],
@@ -393,7 +415,7 @@ describe('renderView', () => {
   });
 
   it('refuses a hostile theme value and keeps the house value', () => {
-    const hostile = themeFrom({ '--ds-color-text': 'red" onload="alert(1)', '--ds-font-body': 'x;}</style><script>', '--ds-color-border': 'url(https://e.example/x)', '--ds-type-caption-size': '0px', '--ds-type-body-size': '16px' });
+    const hostile = themeFrom({ ...HOUSE_TOKENS.properties, '--ds-color-text': 'red" onload="alert(1)', '--ds-font-body': 'x;}</style><script>', '--ds-color-border': 'url(https://e.example/x)', '--ds-type-caption-size': '0px', '--ds-type-body-size': '16px' });
     expect(hostile.warnings).toEqual(['theme value --ds-color-text refused', 'theme value --ds-color-border refused', 'theme value --ds-font-body refused', 'theme value --ds-type-caption-size refused']);
     expect(hostile.theme).toEqual(theme);
     const c = byId('bar-gdp-2024');

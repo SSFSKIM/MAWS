@@ -347,6 +347,8 @@ describe('closing on its own (V8, V9)', () => {
     fireEvent.click(within(toolbar).getByRole('button', { name: /^Comments/ }));
     await settle();
     const rail = screen.getByRole('complementary', { name: 'Comments' });
+    expect(rail.querySelector('article[data-thread="tb2"]')).toBeNull();
+    fireEvent.click(within(rail).getByRole('button', { name: 'Show deleted-target comments' }));
     expect(rail.querySelector('article[data-thread="tb2"]')!.hasAttribute('data-orphan')).toBe(true);
     act(() => session.undoStep());
     fakeLayout(document.body);

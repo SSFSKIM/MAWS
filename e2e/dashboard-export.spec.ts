@@ -358,6 +358,9 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
   test.setTimeout(180_000);
   app = await startApp(PROOF);
   const { page, launch } = app;
+  // WR73: export identity is explicit, never inferred from the OS login or a generic owner role.
+  const authorName = 'Morgan Rivera';
+  await ok(page, 'settings.set', { artifacts: { exportAuthorName: authorName } });
   await pinArtifactsTool(page);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title: 'Commented board' });
   const id = artifact.id;
@@ -396,7 +399,8 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
     return { document, comments: await zip.file('word/comments.xml')!.async('string'), extended: await zip.file('word/commentsExtended.xml')?.async('string') };
   };
   const open = await word();
-  expect(open.comments).toMatch(/<w:comment w:id="0"[^>]*w:author="Owner"[^>]*>.*Why does the west dip\?.*<\/w:comment>/s);
+  expect(open.comments.match(/w:author="[^"]*"/g)).toEqual([`w:author="${authorName}"`]);
+  expect(open.comments).toMatch(/<w:comment w:id="0"[^>]*>.*Why does the west dip\?.*<\/w:comment>/s);
   expect(open.document).toMatch(/<w:commentRangeStart w:id="0"\/><w:r><w:rPr>.*?<\/w:rPr><w:t[^>]*>Sales by region<\/w:t><\/w:r><w:commentRangeEnd w:id="0"\/><w:r><w:commentReference w:id="0"\/><\/w:r>/s);
   expect(open.extended).toMatch(/w15:done="0"/);
 
@@ -405,6 +409,8 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
   await expect(rail.getByRole('region', { name: /Resolved/ }).locator(`article[data-thread="${threadId}"]`)).toHaveAttribute('data-status', 'resolved');
   await durable(record);
   const resolved = await word();
+  expect(resolved.comments.match(/w:author="[^"]*"/g)).toEqual([`w:author="${authorName}"`]);
+  expect(resolved.comments).toMatch(/<w:comment w:id="0"[^>]*>.*Why does the west dip\?.*<\/w:comment>/s);
   expect(resolved.extended).toMatch(/w15:done="1"/);
   expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });

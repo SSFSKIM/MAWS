@@ -133,6 +133,46 @@ describe('comments on a deck’s elements (D9)', () => {
     expect(screen.queryByRole('button', { name: 'Comment' })).toBeNull();
   });
 
+  it('hides deleted-target comments and badges until explicitly revealed, keeping conversations and reply drafts through hide and undo (WR 49)', async () => {
+    const { doc, session, toolbar } = mount();
+    act(() => {
+      addThread(doc, { threadId: 'live', slideId: 's1', elementId: 'body', quote: 'One path', by: { kind: 'human' }, at: 1, body: 'Keep this path.' });
+      addThread(doc, { threadId: 'deleted', slideId: 's1', elementId: 'title', quote: 'Plan', by: { kind: 'human' }, at: 2, body: 'Shorter title?' });
+    });
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments (2 open)' }));
+    const rail = screen.getByRole('complementary', { name: 'Comments' });
+    const item = () => rail.querySelector<HTMLElement>('article[data-thread="deleted"]');
+    act(() => session.edit((origin) => deleteElementTree(doc, 's1', 'title', origin)));
+    await settle();
+    expect(item()).toBeNull();
+    expect(within(toolbar).getByRole('button', { name: 'Comments (1 open)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Slide 1, 1 open comment/ })).toBeTruthy();
+    const reveal = () => within(rail).getByRole('button', { name: /^(Show|Hide) deleted-target comments$/ });
+    const before = listThreads(doc);
+    fireEvent.click(reveal());
+    expect(reveal().getAttribute('aria-pressed')).toBe('true');
+    expect(item()!.textContent).toContain('Shorter title?');
+    fireEvent.change(within(item()!).getByRole('textbox', { name: 'Reply' }), { target: { value: 'Unsent reply' } });
+    fireEvent.click(reveal());
+    expect(item()).toBeNull();
+    expect(listThreads(doc)).toEqual(before);
+    fireEvent.click(reveal());
+    expect(within(item()!).getByRole('textbox', { name: 'Reply' })).toHaveProperty('value', 'Unsent reply');
+    fireEvent.click(within(item()!).getByRole('button', { name: 'Resolve' }));
+    await settle();
+    fireEvent.click(reveal());
+    expect(item()).toBeNull(); // a deleted target stays hidden even after resolving its thread
+    expect(within(rail).queryByRole('region', { name: /Resolved/ })).toBeNull();
+    fireEvent.click(reveal());
+    fireEvent.click(within(item()!).getByRole('button', { name: 'Reopen' }));
+    await settle();
+    fireEvent.click(reveal());
+    act(() => session.undo.undo());
+    await settle();
+    expect(item()!.textContent).toContain('Shorter title?');
+    expect(within(toolbar).getByRole('button', { name: 'Comments (2 open)' })).toBeTruthy();
+  });
+
   it('the rail: open threads with their slide and quote, an orphan with its last text, Reply, Resolve and Reopen, and Show', async () => {
     const { doc, session, toolbar } = mount();
     act(() => session.select(['body']));
@@ -164,6 +204,8 @@ describe('comments on a deck’s elements (D9)', () => {
     // the element deleted: orphaned, with its last text; a resolve moves it under Resolved, Reopen brings it back
     act(() => deleteElementTree(doc, 's1', 'title'));
     await settle();
+    expect(item(title!)).toBeNull();
+    fireEvent.click(within(rail).getByRole('button', { name: 'Show deleted-target comments' }));
     expect(item(title!).hasAttribute('data-orphan')).toBe(true);
     expect(item(title!).textContent).toContain('The commented element was deleted.');
     expect(item(title!).textContent).toContain('Plan');

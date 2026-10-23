@@ -15,10 +15,10 @@ import { DATASET_LIMITS } from '@artifacts/dashboard/datasets';
 import { exportTheme, prepareViews, VIEW_CSS } from '@artifacts/dashboard/export';
 import { SnapshotReader } from '@artifacts/dashboard/snapshots';
 import { dsOverrides } from '@artifacts/document/meta';
-import { exportAuthorName } from '@artifacts/document/export/source';
+import { defaultAuthorName } from '@artifacts/document/export/source';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { ArtifactHost, DatasetPage } from '@artifacts/host';
-import { DOCUMENT_EXPORTERS, type DocumentExportContext, type DocumentExporter, type DocumentExportRequest } from '../artifacts/export-document';
+import { DOCUMENT_EXPORTERS, withDocumentAuthors, type DocumentAuthorDeps, type DocumentExportContext, type DocumentExporter, type DocumentExportRequest } from '../artifacts/export-document';
 import type { SeamEnv } from '../artifacts/policies';
 import { governDocumentExporter, type HostCall } from '../design-systems/documents';
 import { deckSystem, systemFacesCss } from '../presentations/export';
@@ -26,15 +26,12 @@ import { openFigurePictures, type OpenPictures } from './pictures';
 
 export type { OpenPictures } from './pictures';
 
-export interface DashboardExportDeps {
+export interface DashboardExportDeps extends DocumentAuthorDeps {
   /** The engine host's commands (the governing system, the snapshots' pages, the system's faces). */
   call: HostCall;
   env: SeamEnv;
   /** Word's picture window; the protected capture window by default. */
   pictures?: OpenPictures;
-  /** A session's title as the UI names it (main's index): a file credits a session by it, "Claude" only without one
-   * (every session, when absent). */
-  sessionTitle?: (appSessionId: string) => string | undefined;
 }
 
 const cancelled = () => new Error('the export was cancelled');
@@ -55,7 +52,6 @@ function pagesOf(call: HostCall, signal: AbortSignal): Pick<ArtifactHost, 'readD
 /** B's `exporter` run for a dashboard: the captured state's views prepared, then B's run with them. */
 function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps): DocumentExporter {
   const pictures = deps.pictures ?? openFigurePictures(deps.env);
-  const titled = exportAuthorName(deps.sessionTitle);
   return {
     kind: 'dashboard',
     format: exporter.format,
@@ -69,7 +65,7 @@ function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps
       // Word's pictures: the window opened at the first chart, closed when the run ends
       const window = exporter.format === 'docx' ? pictures({ signal: context.signal, facesCss }) : null;
       // P4 L287: the data's updater in every label, and a comment's author in Word, a session named by its title
-      const authorName = context.authorName ?? titled;
+      const authorName = context.authorName ?? defaultAuthorName;
       try {
         applyV2(doc, await context.state());
         const now = request.versionId === undefined ? Date.now() : undefined; // E3 M3 fix: the export's one clock
@@ -95,6 +91,6 @@ function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps
 
 /** Registers the dashboard's four exporters, each governed by D, through `register` (A's registry); returns their removal. */
 export function registerDashboardExporters(register: (exporter: DocumentExporter) => () => void, deps: DashboardExportDeps): () => void {
-  const offs = DOCUMENT_EXPORTERS.map((exporter) => register(governDocumentExporter(dashboardExporter(exporter, deps), deps.call)));
+  const offs = DOCUMENT_EXPORTERS.map((exporter) => register(governDocumentExporter(withDocumentAuthors(dashboardExporter(exporter, deps), deps), deps.call)));
   return () => offs.forEach((off) => off());
 }

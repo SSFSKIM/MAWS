@@ -13,10 +13,8 @@
 //      the session's `edited` link, the descriptor and the op's answer, all in one savepoint. The commit is the
 //      operation's linearization point; a refusal or a failure leaves no asset, descriptor or op.
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
-import { lstat, open, realpath, stat } from 'node:fs/promises';
-import { basename, isAbsolute, relative } from 'node:path';
-import { DATASET_LIMITS, readDataset, removeDataset, setDataset, datasetSlotProblem, snapshotOf, type DatasetDescriptor, type DatasetFormat } from '@artifacts/dashboard/datasets';
+import { basename, relative } from 'node:path';
+import { readDataset, removeDataset, setDataset, datasetSlotProblem, snapshotOf, type DatasetDescriptor, type DatasetFormat } from '@artifacts/dashboard/datasets';
 import { DatasetError, parseDataset, rowKeyProblem, type ParsedDataset } from '@artifacts/dashboard/parse';
 import { DATASET_STATES } from '@artifacts/dashboard/states';
 import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy';
@@ -27,87 +25,13 @@ import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; //
 import { sameQueryIdentity } from '../dashboards/refresh'; // E3
 import { parseToolArguments, TOOL_ERRORS } from '@shared/maws/tools';
 import { dashboardAdapterOf } from '../dashboards';
-import { actorOf, answering, lineageOf, opIdOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, lineageOf, opIdOf, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
 import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
+import { datasetFileUnder, datasetFormatOf, readDatasetFile } from './dataset-file';
+import { rememberDatasetFile } from '../dashboards/file-sources';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
 const TOOL = 'artifact_dataset';
-const FORMATS: Record<string, DatasetFormat> = { csv: 'csv', tsv: 'tsv', tab: 'tsv', json: 'json' };
-
-/** The format a file's name gives it, by extension. */
-function formatOf(name: string): DatasetFormat | null {
-  const dot = name.lastIndexOf('.');
-  return dot === -1 ? null : (FORMATS[name.slice(dot + 1).toLowerCase()] ?? null);
-}
-
-// A path under the working directory once every symlink on it and on the directory is resolved (`pathUnderCwd` checks
-// the words; this checks where they lead), with the identity of the regular file found there.
-interface ValidatedFile {
-  named: string;
-  real: string;
-  root: string;
-  dev: number;
-  ino: number;
-}
-const outsideCwd = (file: Pick<ValidatedFile, 'named' | 'real' | 'root'>) =>
-  refuse(TOOL, { reason: 'invalid', path: file.named }, `${file.named} leads to ${file.real}, outside the working directory ${file.root}`);
-const tooLarge = (named: string, size: number) =>
-  refuse(TOOL, { reason: 'tooLarge', size, limit: DATASET_LIMITS.bytes }, `${named} is ${size} bytes; a dataset is at most ${DATASET_LIMITS.bytes}`);
-
-async function realFileUnder(cwd: string, path: string): Promise<ValidatedFile> {
-  const named = pathUnderCwd(TOOL, cwd, path);
-  const found = await stat(named).catch(() => null);
-  if (!found?.isFile()) throw new ToolRefusal(TOOL_ERRORS.artifactNotAFile(TOOL, named));
-  const [real, root] = await Promise.all([realpath(named), realpath(cwd)]);
-  const inside = relative(root, real);
-  if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw outsideCwd({ named, real, root });
-  // the resolved path itself, not followed: what the read must open
-  const validated = await lstat(real).catch(() => null);
-  if (!validated?.isFile()) throw outsideCwd({ named, real, root });
-  if (validated.size > DATASET_LIMITS.bytes) throw tooLarge(named, validated.size);
-  return { named, real, root, dev: validated.dev, ino: validated.ino };
-}
-
-// macOS 11 and later: the kernel refuses a symlink anywhere on the path it walks, not only in its last component (as
-// src/main/files/service.ts:109-116 opens a session's files). Node's fs.constants does not carry it, so it is passed
-// numerically; it replaces O_NOFOLLOW, since macOS answers EINVAL for the two together, and refuses a last-component
-// link with ELOOP as well. Linux ignores the bit, so there the open guards the last component alone and a directory
-// above the file turned into a link after the containment check is a documented gap of the Linux unit lane (MAWS ships
-// on macOS; E's Decision Log 41). O_NONBLOCK: a FIFO put in the file's place opens at once and is refused as not a
-// regular file, never holding a thread.
-const O_NOFOLLOW_ANY = 0x20000000;
-const OPEN_FLAGS = process.platform === 'darwin' ? constants.O_RDONLY | constants.O_NONBLOCK | O_NOFOLLOW_ANY : constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
-
-// E2 M6 (panel P1, E's Decision Logs 40 and 41): the validated file's bytes read through one descriptor, never the path
-// again. The real path is opened through no link (OPEN_FLAGS), and the opened file must be the regular file validated
-// (its device and inode), so a file replaced since validation, by a link out of the working directory, by another file
-// or by a FIFO, is refused as the containment refusal; the read stops one byte past the cap, so a file grown since is
-// refused by size.
-async function readValidated(file: ValidatedFile): Promise<Uint8Array> {
-  const handle = await open(file.real, OPEN_FLAGS).catch(() => null);
-  if (!handle) throw outsideCwd(file);
-  try {
-    const opened = await handle.stat();
-    if (!opened.isFile() || opened.dev !== file.dev || opened.ino !== file.ino) throw outsideCwd(file);
-    // sized by the opened file, one byte over to see it grow; a file that did grow is read on, never past the cap
-    const chunks: Uint8Array[] = [];
-    let length = 0;
-    let room = Math.min(opened.size, DATASET_LIMITS.bytes) + 1;
-    while (length <= DATASET_LIMITS.bytes) {
-      const chunk = new Uint8Array(Math.min(room, DATASET_LIMITS.bytes + 1 - length));
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
-      if (bytesRead === 0) break;
-      chunks.push(chunk.subarray(0, bytesRead));
-      length += bytesRead;
-      room = 1024 * 1024;
-    }
-    if (length > DATASET_LIMITS.bytes) throw tooLarge(file.named, Math.max(opened.size, length));
-    return chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks);
-  } finally {
-    await handle.close();
-  }
-}
-
 // E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): what a refresh answers when nothing was
 // published, by main's closed outcome (never its words) or by how the request ended.
 const NOT_PUBLISHED: Record<string, (tool: string, server: string) => string> = {
@@ -199,7 +123,7 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
         }
 
         // what the write stands on, read and validated first
-        let source: { bytes: Uint8Array; name: string; format: DatasetFormat; ref?: string } | null = null;
+        let source: { bytes: Uint8Array; name: string; format: DatasetFormat; ref?: string; origin?: { cwd: string; path: string } } | null = null;
         let table: ParsedDataset | null = null;
         // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1): a bound asset is held from its lookup to the
         // end of the write, so a query snapshot retired meanwhile keeps its bytes for the descriptor that names it (which
@@ -226,11 +150,11 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
           }
           if (!input.remove && !input.source /* E3: a query reads nothing */) {
             if (input.path !== undefined) {
-              const validated = await realFileUnder(ctx.cwd, input.path);
+              const validated = await datasetFileUnder(ctx.cwd, input.path);
               const name = basename(input.path);
-              const format = formatOf(name);
+              const format = datasetFormatOf(name);
               if (!format) throw refuse(TOOL, { reason: 'invalid', path: validated.real }, `${name} is not a .csv, .tsv or .json file`);
-              source = { bytes: await readValidated(validated), name, format };
+              source = { bytes: await readDatasetFile(validated), name, format, origin: { cwd: validated.root, path: relative(ctx.cwd, validated.named) } };
             } else {
               const asset = await store.readCommitted(() => {
                 const found = store.listAssets(artifactId).find((candidate) => candidate.ref === input.ref);
@@ -238,7 +162,7 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
                 return found;
               });
               if (!asset) throw refuse(TOOL, { reason: 'notFound', ref: input.ref }, `${input.artifact} holds no asset ${input.ref}; artifact_list_assets lists them`);
-              const format = formatOf(asset.name);
+              const format = datasetFormatOf(asset.name);
               if (!format) throw refuse(TOOL, { reason: 'invalid', ref: input.ref }, `${input.ref} is not a .csv, .tsv or .json asset`);
               source = { bytes: store.files.readAsset(artifactId, asset.sha256), name: asset.name, format, ref: asset.ref };
             }
@@ -329,6 +253,10 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
                         : table
                         ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
                         : { status: 'dataset', artifactId, id: input.id, revision };
+                      if (source?.origin) {
+                        const descriptor = readDataset(store.service.live(artifactId), input.id);
+                        if (descriptor?.source.kind === 'file') rememberDatasetFile(store, artifactId, input.id, descriptor, source.origin);
+                      }
                       op.record(recorded);
                       if (ctx.toolUseId !== null) {
                         // P4-A2 (X35 rule 2): the dataset's own row; a descriptor as it was wrote none, and the layer goes now
