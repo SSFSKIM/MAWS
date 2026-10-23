@@ -10,6 +10,9 @@ import { digest } from 'lib0/hash/sha256';
 import type { Artifact } from '@shared/artifacts/entity';
 import { isMirrorCopy, mirrorSlug, type MirrorAsset, type MirrorInput } from '../library/mirror';
 import { newDoc } from '../yjs';
+import { comparable, sourceOf } from '../document/convert.fixture';
+import { importMarkdown } from '../document/import/markdown';
+import { createDocument } from '../document/tabs';
 import { setDataset } from './datasets';
 import { BOUND_AT, descriptor, exportDashboard, NEW_REF, OLD_REF, REPLACED_AT } from './fixtures/export';
 import { dashboardMirrorWriter, snapshotFileName } from './mirror';
@@ -56,6 +59,17 @@ describe('snapshotFileName', () => {
 });
 
 describe('dashboardMirrorWriter', () => {
+  it('keeps prose chip metadata and trailing paragraphs instead of flattening them for a reader export', () => {
+    const doc = newDoc();
+    const body = sourceOf([
+      { type: 'paragraph', content: [{ type: 'mention', attrs: { kind: 'session', ref: 'session-1', label: 'Planning' } }] },
+      { type: 'paragraph' },
+    ]).tabs[0].body;
+    createDocument(doc, { title: 'Board', body });
+    const markdown = mirrored(doc, []).files[`${slug}.md`] as string;
+    expect(comparable(importMarkdown(markdown))).toEqual(comparable(body));
+  });
+
   it('writes the dialect, the binding manifest and each bound snapshot as a copy of its asset', () => {
     const { files, readAsset } = mirrored();
     const md = files[`${slug}.md`] as string;

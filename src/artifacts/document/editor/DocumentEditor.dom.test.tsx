@@ -770,8 +770,9 @@ describe('the page for the shell', () => {
     const { unmount } = render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} pageScope={Scope} onPage={(element) => pages.push(element)} />);
     await until(() => document.querySelector('.ds-doc .ProseMirror')?.textContent === 'one', 'the page');
     const page = document.querySelector<HTMLElement>('.ds-doc')!;
-    expect(screen.getByTestId('scope').contains(page)).toBe(true);
-    expect(screen.getByTestId('scope').classList.contains('ds-doc')).toBe(false); // `.ds-doc` is the page's alone
+    const pageScope = page.closest('[data-testid="scope"]');
+    expect(pageScope).not.toBeNull(); // the toolbar sample may have its own scope too
+    expect(pageScope!.classList.contains('ds-doc')).toBe(false); // `.ds-doc` is the page's alone
     expect(document.querySelector('.ds-doc-page')!.parentElement).toBe(page);
     expect(pages.at(-1)).toBe(page);
     unmount();
@@ -959,6 +960,8 @@ describe('a read-only document', () => {
     // a thread to resolve, and the rail open on it
     act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
     press('Comment');
+    // The thread is written before its passage mark; the live-target count follows after the document settles.
+    await until(() => within(toolbar()).queryByRole('button', { name: 'Comments (1 open)' }) !== null, 'the live-target comment count');
     press('Comments (1 open)');
 
     act(() => set(true));
