@@ -28,22 +28,22 @@ export function ComposerColumn({ children }: { children: ReactNode }) {
   return <div className="thread-column flex flex-col gap-3">{children}</div>;
 }
 
-export function SessionPane({ appSessionId, paneIndex }: { appSessionId: AppSessionId; paneIndex: PaneIndex }) {
+export function SessionPane({ appSessionId, paneIndex, compact = false }: { appSessionId: AppSessionId; paneIndex: PaneIndex; compact?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const envelope = useRef<HTMLDivElement>(null);
   return <div ref={envelope} className="h-full min-h-0 min-w-0"><SurfaceViewportProvider element={envelope}>
-    {record ? <StartedPane record={record} paneIndex={paneIndex} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} />}
+    {record ? <StartedPane record={record} paneIndex={paneIndex} compact={compact} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} compact={compact} />}
   </SurfaceViewportProvider></div>;
 }
 
-function UnstartedPane({ appSessionId, paneIndex }: { appSessionId: AppSessionId; paneIndex: PaneIndex }) {
+function UnstartedPane({ appSessionId, paneIndex, compact }: { appSessionId: AppSessionId; paneIndex: PaneIndex; compact: boolean }) {
   const NewSession = useSlot('newSession');
   const Composer = useSlot('composer');
   return (
-    <div className="flex h-full flex-col justify-center overflow-auto py-6">
+    <div className={`flex h-full flex-col justify-center overflow-auto ${compact ? "py-2" : "py-6"}`}>
       <ComposerColumn>
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-        <NewSession appSessionId={appSessionId} />
+        {!compact && <NewSession appSessionId={appSessionId} />}
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         <Composer appSessionId={appSessionId} paneIndex={paneIndex} />
       </ComposerColumn>
@@ -51,7 +51,7 @@ function UnstartedPane({ appSessionId, paneIndex }: { appSessionId: AppSessionId
   );
 }
 
-function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: PaneIndex }) {
+function StartedPane({ record, paneIndex, compact }: { record: SessionRecord; paneIndex: PaneIndex; compact: boolean }) {
   const id = record.appId;
   const Transcript = useSlot('transcript');
   const Composer = useSlot('composer');
@@ -66,12 +66,12 @@ function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: 
   return (
     <div className="flex h-full flex-col">
       {/* P2-C (2026-10-09): while the session's owner-channel lane is on, the header with the view toggle */}
-      <ReportBar appSessionId={id} />
-      <div className="min-h-0 flex-1 overflow-auto">
+      {!compact && <ReportBar appSessionId={id} />}
+      {!compact && <div className="min-h-0 flex-1 overflow-auto">
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} />
-      </div>
-      <div className="shrink-0 pt-4 pb-4">
+      </div>}
+      <div className={`shrink-0 ${compact ? "py-2" : "pt-4 pb-4"}`}>
         <ComposerColumn>
           {docked && <DockedRequest item={docked} paneIndex={paneIndex} />}
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}

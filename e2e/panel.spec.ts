@@ -1112,7 +1112,7 @@ test.describe('the floating session card (P3-G)', () => {
         await card.getByRole('button', { name: 'Close session card' }).click();
         await expect(card).toHaveCount(0);
         await expect(pill).toHaveText(USAGE);
-        await expect(composers, 'no composer behind the pill').toHaveCount(0);
+        await expect(composers, 'the compact composer remains usable').toHaveCount(1);
         await menu(app, 'panel.float');
         await expect(card).toBeVisible();
         await card.getByRole('button', { name: 'Close session card' }).click();
@@ -1403,8 +1403,8 @@ test.describe('the main split’s float (P4-B3)', () => {
         await card.getByRole('button', { name: 'Close session card' }).click();
         await expect(card).toHaveCount(0);
         await expect(pill).toBeVisible();
-        expect(await corner(pill, area)).toEqual({ right: 16, bottom: 16 });
-        await expect(composers, 'no composer behind the pill').toHaveCount(0);
+        expect(await corner(main.getByRole('region', { name: 'Compact session composer' }), area)).toEqual({ right: 16, bottom: 16 });
+        await expect(composers, 'the compact composer remains usable').toHaveCount(1);
         await pill.click();
         await expect(card).toBeVisible();
         await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();

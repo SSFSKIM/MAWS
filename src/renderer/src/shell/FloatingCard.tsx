@@ -290,16 +290,29 @@ function Card({ host, appSessionId, area, bounds, column }: { host: CardHost; ap
         <SessionPane appSessionId={appSessionId} paneIndex={paneIndex} />
       </div>
       {EDGES.filter((edge) => !column || edge.name === 'left').map((edge) => (
-        <div
+        <button
+          type="button"
           key={edge.name}
-          aria-hidden
+          aria-label={`Resize session card ${edge.name}`}
+          title="Drag to resize; arrow keys to adjust"
           data-card-resize={edge.name}
           onPointerDown={(event) => begin(edge, event)}
           onPointerMove={move}
           onPointerUp={end}
           onPointerCancel={end}
-          className={`absolute ${edge.className}`}
-        />
+          onKeyDown={(event) => {
+            const dw = edge.left ? ({ ArrowLeft: 20, ArrowRight: -20 }[event.key] ?? 0) : 0;
+            const dh = edge.top ? ({ ArrowUp: 20, ArrowDown: -20 }[event.key] ?? 0) : 0;
+            if (!dw && !dh) return;
+            event.preventDefault();
+            const base = column ? { w: column.rect.width, h: size.h } : size;
+            useLayout.getState().setFloatingCardSize(sizeKey, placeCard({ w: base.w + dw, h: base.h + dh }, bounds, host));
+          }}
+          className={`absolute flex items-center justify-center p-0 text-fg-muted outline-accent focus-visible:outline-2 ${edge.className}`}
+        >
+          {edge.name === 'top-left' && <svg aria-hidden viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor"><path d="M2 8V2h6M5 8V5h3" /></svg>}
+          {column && <span aria-hidden className="h-8 w-0.5 rounded-full bg-fg-muted" />}
+        </button>
       ))}
     </div>
   );

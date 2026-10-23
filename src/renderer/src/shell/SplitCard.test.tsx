@@ -234,11 +234,12 @@ describe('the split’s floating card in the Shell', () => {
     dragTo(150);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     expect(card()).toBeNull();
-    expect(composers()).toEqual([]);
+    expect(composers()).toEqual([A]);
     expect(set().focusedPane, 'the pill is no pane: A is what is on screen').toBe(1);
     const shown = pill()!;
     expect(document.activeElement).toBe(shown);
-    expect([shown.dataset.floatingPill, shown.style.right, shown.style.bottom]).toEqual(['floating', '16px', '16px']);
+    const compact = screen.getByRole('region', { name: 'Compact session composer' });
+    expect([shown.dataset.floatingPill, compact.style.right, compact.style.bottom]).toEqual(['floating', '16px', '16px']);
     expect(mainRegion().contains(shown)).toBe(true);
     expect(shown.querySelector('[aria-label="Unread"]')).toBeNull();
     act(() => useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));

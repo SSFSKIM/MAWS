@@ -380,6 +380,9 @@ export function expandPane(pane: 0 | 1 = currentSet(layout().main).focusedPane):
 export function focusSplitCard(): void {
   const split = splitFloat(layout().main);
   if (split === null) return;
+  // A compact composer is still registered until React swaps it for the expanded pane.
+  // Let openCard's mount handoff focus the replacement, not the departing composer.
+  if (useFloatingCard.getState().closed) return openCard();
   layout().focusPane(split.pane);
   useComposerStore.getState().focusTargets.get(split.appSessionId)?.focusFrame();
 }
