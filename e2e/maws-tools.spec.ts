@@ -234,7 +234,8 @@ test('a reload mid-ask: the sheet lists the ask again from the host and Submit a
     await sectionOf(sheet, 'q3').getByRole('textbox').fill('Release notes');
     await sectionOf(sheet, 'q5').getByRole('radio', { name: 'repo' }).click();
     await clearToasts(s.page);
-    await sheet.getByRole('button', { name: 'Submit · 2 skipped' }).click();
+    // Untouched answers still serialize as skipped; only an intentional Skip appears in the button's count.
+    await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
     const text = (questionId: string) => pending!.questions.find((q) => q.id === questionId)!.question;
     expect(await answersWritten(s, id, pending!.requestId)).toEqual([
       { id: 'q1', question: text('q1'), status: 'decide_for_me' },
@@ -315,7 +316,7 @@ test('an ask from a session not shown never switches the main view; its sheet op
     await expect(sheetOf(s)).toHaveAttribute('data-ask-id', opened!.askId);
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'pending');
     await clearToasts(s.page);
-    await sheetOf(s).getByRole('button', { name: 'Submit · 5 skipped' }).click();
+    await sheetOf(s).getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
     await idle(s, asking);
   });

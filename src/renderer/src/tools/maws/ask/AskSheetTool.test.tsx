@@ -143,14 +143,18 @@ describe('the sections', () => {
 });
 
 describe('Submit', () => {
-  it('names how many it skips, and waits while an Other answer is blank', async () => {
+  it('counts only intentional skips, and waits while an Other answer is blank', async () => {
     await mountWithAsk();
-    expect(submitButton().textContent).toBe('Submit · 5 skipped');
+    expect(submitButton().textContent).toBe('Submit');
     fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Other…' }));
     expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(within(section('q1')).getByRole('textbox'), { target: { value: 'Teal' } });
     expect((submitButton() as HTMLButtonElement).disabled).toBe(false);
-    expect(submitButton().textContent).toBe('Submit · 4 skipped');
+    expect(submitButton().textContent).toBe('Submit');
+    fireEvent.click(within(section('q3')).getByRole('button', { name: 'Skip' }));
+    expect(submitButton().textContent).toBe('Submit · 1 skipped');
+    fireEvent.click(within(section('q3')).getByRole('button', { name: 'Skip' }));
+    expect(submitButton().textContent).toBe('Submit');
   });
 
   it('sends the answers through maws.ask.answer, then shows the resting state', async () => {
