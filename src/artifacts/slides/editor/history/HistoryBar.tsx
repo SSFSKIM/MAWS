@@ -22,7 +22,7 @@ export function HistoryBar({ preview, controller, onBack }: { preview: DeckPrevi
         {preview.showChanges && (
           <>
             <span className="deck-history-count" aria-live="polite" data-history-count={count}>
-              {C.count(count)}
+              {preview.focus === null ? C.count(count) : `${preview.focus + 1} of ${preview.stops.length} changes`}
             </span>
             <Button label={C.previous} disabled={count === 0} onClick={() => controller.step(-1)}>
               ↑

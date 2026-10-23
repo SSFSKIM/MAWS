@@ -367,7 +367,10 @@ export class DeckHistoryController {
           showChanges: true,
           changes,
           stops,
-          focus: null,
+          focus: (() => {
+            const at = stops.findIndex((stop) => stop.slideId === slideId || stop.slideId === null);
+            return at < 0 ? null : at;
+          })(),
           slideId,
           system: next ? (next.designSystemRef ?? { builtin: 'maws' }) : null,
           versionId: target.kind === 'version' ? target.versionId : null,

@@ -159,8 +159,8 @@ describe('the deck’s history controller (D11)', () => {
     expect(controller.getSnapshot().selected).toEqual([last.id, first.id]);
     expect(preview.versionId).toBeNull();
     expect(preview.changes.count).toBe(2);
-    expect(controller.step(1)).toEqual({ part: 'element', slideId: 'a', elementId: 'title' });
-    expect(controller.getSnapshot().preview!.slideId).toBe('a');
+    expect(preview.focus).toBe(0);
+    expect(preview.stops[preview.focus!]).toEqual({ part: 'element', slideId: 'a', elementId: 'title' });
     expect(controller.step(1)).toEqual({ part: 'element', slideId: 'c', elementId: 'body' });
     expect(controller.getSnapshot().preview!.slideId).toBe('c');
     expect(controller.step(1)).toEqual({ part: 'element', slideId: 'a', elementId: 'title' });
