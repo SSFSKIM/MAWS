@@ -14,9 +14,8 @@
 // (another slide and back, a version shown and left, a tab switch) shows it again with its refusal, carried onto the
 // notes as they are now.
 //
-// Fix wave: carried onto a change made elsewhere, kept text may come within the limit; it is still not written (no
-// write is the field's own doing, mounted or not), so it shows as not saved, with Save, until the owner saves or edits
-// it. Over the limit it reads as refused, counted as it is now.
+// WR #39: retained text autosaves once its rebased value fits, including on return to the field.
+// Read-only keeps the draft intact until editing becomes available; over-limit text remains refused.
 import { useEffect, useRef, useState } from 'react';
 import * as Y from '../../yjs/slides';
 import { mapCaret, rebaseText } from '../caret';
@@ -56,6 +55,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
     shownFrom.current = notes;
     setUnwritten(kept === null ? null : kept.length);
     composingFrom.current = null;
+    if (kept !== null && kept.length <= SLIDE_LIMITS.notes) write(kept);
     const stop = Y.observeSlide(doc, slideId, (changes, origin) => {
       if (composingFrom.current !== null || origin === session.origin) return;
       if (!changes.some((c) => c.kind === 'notes')) return;
@@ -64,7 +64,10 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
       // text the model refused stays the owner's, carried onto the change
       const shown = before === shownFrom.current ? next : rebaseText(shownFrom.current, before, next);
       shownFrom.current = next;
-      if (session.notesDraft(slideId)) keep(shown); // L203: kept as carried, and counted again
+      if (session.notesDraft(slideId)) {
+        keep(shown);
+        if (shown.length <= SLIDE_LIMITS.notes) write(shown);
+      }
       if (shown === before) return;
       const focused = el.ownerDocument.activeElement === el;
       const [start, end] = [el.selectionStart, el.selectionEnd];
@@ -72,7 +75,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
       if (focused) el.setSelectionRange(mapCaret(before, shown, start), mapCaret(before, shown, end));
     });
     return stop;
-  }, [doc, slideId, token, session]);
+  }, [doc, slideId, token, session, readOnly]);
 
   const refused = unwritten !== null && unwritten > SLIDE_LIMITS.notes;
   return (
@@ -107,14 +110,6 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
       {unwritten !== null && (
         <p role="alert" className="deck-notes-refused">
           {refused ? C.notesTooLong(unwritten, SLIDE_LIMITS.notes) : C.notesNotSaved}
-          {!refused && !readOnly && (
-            <>
-              {' '}
-              <button type="button" className="deck-button" onClick={() => write(field.current!.value)}>
-                {C.saveNotes}
-              </button>
-            </>
-          )}
         </p>
       )}
     </div>
