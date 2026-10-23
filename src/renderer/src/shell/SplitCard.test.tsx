@@ -249,10 +249,26 @@ describe('the split’s floating card in the Shell', () => {
     expect(card()).not.toBeNull();
     expect(focused).toEqual([A]);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(document.activeElement).toBe(pill());
     focused.splice(0);
     act(() => useAttention.setState({ bySession: new Map([[A, [attention('app-a', 'permission', T0)]]]) }));
     expect(card()).not.toBeNull();
-    expect(focused, 'the raise never takes the keyboard').toEqual([]);
+    expect(focused, 'the raise hands the compact surface’s keyboard to its replacement').toEqual([A]);
+  });
+
+  it('a new request raises the card without taking keyboard focus held in the other pane', async () => {
+    const user = userEvent.setup();
+    shell();
+    dragTo(150);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    const elsewhere = within(mainRegion().querySelector<HTMLElement>('[data-pane="1"]')!).getByRole('tab');
+    act(() => elsewhere.focus());
+    expect(document.activeElement).toBe(elsewhere);
+    focused.splice(0);
+    act(() => useAttention.setState({ bySession: new Map([[A, [attention('app-a', 'permission', T0)]]]) }));
+    expect(card()).not.toBeNull();
+    expect(focused, 'a request must not move the keyboard out of another surface').toEqual([]);
+    expect(document.activeElement).toBe(elsewhere);
   });
 
   it('a window resize re-clamps the card inside the content and writes no size; a resize of its edges writes it on release, keyed by A’s tab', () => {
