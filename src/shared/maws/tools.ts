@@ -220,6 +220,8 @@ export const ArtifactListInputSchema = z.strictObject({
 export type ArtifactListInput = z.infer<typeof ArtifactListInputSchema>;
 export const ArtifactScreenshotInputSchema = z.strictObject({
   id: ArtifactIdSchema,
+  slide: z.string().min(1).max(64).optional(),
+  offsetY: z.number().int().min(0).max(200_000).optional(),
   version: z.number().int().min(1).optional(), // the latest by default
   width: z.number().int().min(320).max(2560).optional(),
   height: z.number().int().min(240).max(2560).optional(),
@@ -376,15 +378,23 @@ export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
 export const ArtifactListResultSchema = z.strictObject({ status: z.literal('listed'), artifacts: z.array(ListedArtifactSchema) });
 export type ArtifactListResult = z.infer<typeof ArtifactListResultSchema>;
 export const ArtifactScreenshotResultSchema = z.strictObject({
-  status: z.literal('captured'), id: z.string(), deliverableId: z.uuid(), title: z.string(), version: z.number().int().min(1),
+  status: z.literal('captured'), id: z.string(), deliverableId: z.uuid(), title: z.string(), version: z.number().int().min(1).optional(),
+  kind: ArtifactKindSchema.optional(), revision: z.number().int().nonnegative().optional(), slide: z.string().optional(), offsetY: z.number().int().nonnegative().optional(),
   width: z.number().int(), height: z.number().int(), bytes: z.number().int().min(0), consoleErrors: z.array(z.string()),
   ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
 });
 export type ArtifactScreenshotResult = z.infer<typeof ArtifactScreenshotResultSchema>;
 // P3-A (M6) start
+export const DesignCheckSchema = z.strictObject({
+  violations: z.array(z.strictObject({ unit: z.string(), element: z.string(), rule: z.string(), message: z.string() })),
+  checks: z.array(z.strictObject({ rule: z.string(), violations: z.number().int().nonnegative() })),
+  manual: z.array(z.string()), unknown: z.array(z.string()),
+  problems: z.array(z.strictObject({ path: z.string(), message: z.string() })),
+});
 export const ArtifactDescribeTypeResultSchema = z.strictObject({
   status: z.literal('described'), kind: ArtifactKindSchema, guide: z.string(), format: z.string(),
   artifactId: z.uuid().optional(), home: z.string().optional(),
+  designCheck: DesignCheckSchema.optional(),
   designSystem: z.string().optional(), // a document, presentation or design: the governing design system's DESIGN.md (Decision Log 42)
 });
 export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
@@ -480,7 +490,7 @@ export const MAWS_TOOLS = {
   artifact_screenshot: {
     title: 'Screenshot artifact',
     description:
-      'Capture a PNG screenshot of a MAWS html artifact as the user sees it, rendered in a sandboxed frame with no network; without this tool, describe the page from its source. Names the artifact by id or handle and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.',
+      'Capture a PNG of a MAWS HTML artifact, document or presentation without human GUI steps. Documents render their export layout in the actual governing system; use offsetY to inspect lower content. Presentations require slide (an id from artifact_read). HTML version is its ordinal; document and presentation version is a retained version id from artifact_read, otherwise the live state. Rendering is sandboxed with no network; without this tool, inspect the exported file. Names the artifact by id or handle and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.',
     input: ArtifactScreenshotInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -489,7 +499,7 @@ export const MAWS_TOOLS = {
   artifact_describe_type: {
     title: 'Describe artifact kind',
     description:
-      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact.",
+      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment.",
     input: ArtifactDescribeTypeInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it

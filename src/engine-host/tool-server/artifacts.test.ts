@@ -1,5 +1,5 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import type { MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
@@ -10,6 +10,7 @@ import { artifactCreateTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, textOf, type World } from './artifact-world.fixture';
 import { artifactScreenshotTool, externalReferenceCount, type ArtifactCaptureRequest } from './artifacts';
 import { HostBridge } from './bridge';
+import type { ExportBridge, ArtifactExportRequest } from './artifact-export';
 import type { McpToolResult } from './server';
 
 // a 1×1 PNG
@@ -121,6 +122,30 @@ describe('artifact_screenshot (G4, host half; P3-A: resolved through the store; 
     capture.answer('r-thread' as RequestId, { ok: true, png: PNG, width: 1280, height: 800, consoleErrors: [] });
     const result = await pending;
     expect(JSON.parse((result.content[1] as { text: string }).text)).toMatchObject({ deliverableId: page.artifactId, ownerAppSessionId: PARENT });
+  });
+});
+
+describe('structured artifact screenshots', () => {
+  it('returns a document image from a revision-aware export and removes its temporary output', async () => {
+    const doc = await w.store.create({ kind: 'document', title: 'Brief' }, HUMAN);
+    const sent: ArtifactExportRequest[] = [];
+    let exported = '';
+    const exporter: ExportBridge = new HostBridge({ answerMs: 1000, send: (job) => {
+      sent.push(job);
+      exported = job.path;
+      mkdirSync(dirname(exported), { recursive: true });
+      writeFileSync(exported, Buffer.from(PNG, 'base64'));
+      queueMicrotask(() => exporter.answer(job.requestId, { ok: true, path: exported, revision: 7 }));
+    } });
+    const { capture } = screenshot();
+    const tool = artifactScreenshotTool({ ...w.deps(), capture, exporter });
+    const result = await tool.call({ id: doc.id, offsetY: 600 }, w.ctx());
+    expect(result.isError).not.toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'document', format: 'png', inspection: true, offsetY: 600 });
+    expect(result.content[0]).toEqual({ type: 'image', data: PNG, mimeType: 'image/png' });
+    expect(JSON.parse((result.content[1] as { text: string }).text)).toMatchObject({ kind: 'document', revision: 7, width: 1, height: 1 });
+    expect(existsSync(exported)).toBe(false);
   });
 });
 

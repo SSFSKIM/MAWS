@@ -59,6 +59,9 @@ const PNG_MAX_SIDE = 8_192; // EXPORT_SIZE_MAX: what an offscreen window renders
 // written to `path`. `pageSize`: the paper when asked (omitted, the exporter's own default: an html page's CSS, else A4;
 // a document's design-system page token, else Letter). `width` and `height`: a picture's size in CSS px when asked.
 export interface ExportRequest {
+  inspection?: true;
+  slide?: string;
+  offsetY?: number;
   artifactId: string;
   kind: ArtifactKind;
   format: ArtifactExportFormat;
@@ -408,7 +411,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
 
   const stop = onEvent('maws.artifact.export', (request) => {
     const { appSessionId, requestId, ...job } = request;
-    void queued(job, new ExportBudget(EXPORT_BUDGET_MS))
+    void queued(job, new ExportBudget(EXPORT_BUDGET_MS), job.inspection === true)
       .then((result) => answer({ appSessionId, requestId, answer: result }))
       .catch((error: unknown) => console.error('[artifacts] could not answer an export', error));
   });

@@ -317,6 +317,12 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
     expect(html).toContain('Budget notes for October.');
     expect(html).not.toContain('var(--ds-');
 
+    const png = await exported('png');
+    expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(png.readUInt32BE(16)).toBe(1280);
+    expect(png.readUInt32BE(20)).toBeGreaterThan(240);
+    await test.info().attach('document-visual-inspection', { body: png, contentType: 'image/png' });
+
     const docx = await exported('docx');
     expect(docx.subarray(0, 2).toString('latin1')).toBe('PK');
 

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeSystem } from '@artifacts/design-system/model';
+import { defaultSystem } from '@artifacts/types/design_system/defaults';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import {
@@ -303,6 +305,13 @@ describe('artifact_list', () => {
 });
 
 describe('artifact_describe_type', () => {
+  it('runs a system’s canon checks for the agent and identifies violations without human GUI work', async () => {
+    const files = { ...defaultSystem('maws')!.files, 'DESIGN.md': '# Review style\n\n## 8. Hard don’ts\n- No gradients. [check: no-gradient]', 'components/card.html': '<div style="background: linear-gradient(red, blue)">Review</div>' };
+    const system = await w.store.create({ kind: 'design_system', title: 'Review style', initial: (doc) => { writeSystem(doc, files, { route: 'blank', at: 1 }); } }, HUMAN);
+    const result = ArtifactDescribeTypeResultSchema.parse(jsonOf(await artifactDescribeTypeTool(w.deps()).call({ kind: 'design_system', artifact: system.id }, w.ctx())));
+    expect(result.designCheck?.violations).toContainEqual(expect.objectContaining({ unit: 'components/card.html', rule: 'no-gradient' }));
+  });
+
   it('inspects an existing artifact after a move, honoring explicit, Space and owner defaults rather than a new-create default', async () => {
     const owner = await w.store.create({ kind: 'design_system', title: 'Owner' }, HUMAN);
     const brand = await w.store.create({ kind: 'design_system', title: 'Space brand' }, HUMAN);

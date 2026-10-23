@@ -125,6 +125,7 @@ import { startLibrary } from './library';
 import { fileAdmission } from './library/admission'; // M6b
 // P3-L end
 // P3-B start
+import { registerInspectionExporters } from './artifacts/inspection';
 import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
 // P3-B end
 // P3-D start
@@ -633,6 +634,7 @@ void startWithProfileLock(app, () => {
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
   registerPresentationExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude; the governing system from D's `designSystems.governing` (Decision Log 27 (2))
+  shutdown.add('inspection-exporters', registerInspectionExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }));
   // P3-E (E2 M5; E's Decision Log 32): `dashboard` as md, html, docx, pdf: B's four, governed by D, over the captured views
   shutdown.add('dashboard-exporters', registerDashboardExporters((exporter) => artifacts.exporters.register(exporter), { call: engineHostCall(hosts.dispatch), env: process.env, sessionTitle: (appSessionId) => index.sessions.get(appSessionId as AppSessionId)?.title.text })); // P4 L287: a session credited by its title, as the library names it
   registerDesignExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-E (E1's M5): `design` as png and pdf over C's capture window, never cropped (XE9)

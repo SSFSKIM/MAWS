@@ -68,7 +68,7 @@ export async function captureArtifact(request: MawsArtifactCapture, { content, e
 }
 
 // The capture window (P3-A M7: the export service's too, `../artifacts/export.ts`).
-export function openCaptureWindow(width: number, height: number, env: SeamEnv): BrowserWindow {
+export function openCaptureWindow(width: number, height: number, env: SeamEnv, options: { javascript?: boolean } = {}): BrowserWindow {
   const win = new BrowserWindow({
     show: false,
     width,
@@ -76,6 +76,7 @@ export function openCaptureWindow(width: number, height: number, env: SeamEnv): 
     useContentSize: true,
     webPreferences: {
       offscreen: true,
+      javascript: options.javascript ?? true,
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
