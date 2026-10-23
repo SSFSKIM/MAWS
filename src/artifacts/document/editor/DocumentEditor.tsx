@@ -645,6 +645,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         <HistoryBar editor={shown} preview={preview} controller={historyController} onBack={() => historyController.close()} />
       ) : (
         <Toolbar
+          highlightScope={pageScope}
           editor={editor}
           artifactId={artifactId}
           host={host}

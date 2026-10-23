@@ -9,7 +9,7 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode, type Ref } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode, type Ref } from 'react';
 import { actorKey } from '@shared/artifacts/actor';
 import { nanoid8 } from '../schema';
 import type { EditorHost } from './host-types';
@@ -111,7 +111,7 @@ export interface HistoryControls {
   toggle(): void;
 }
 
-export function Toolbar({ editor, artifactId, host, onFind, comments, history, mentions }: { editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls; history?: HistoryControls; mentions?: MentionSource }) {
+export function Toolbar({ editor, artifactId, host, onFind, comments, history, mentions, highlightScope: HighlightScope }: { highlightScope?: ComponentType<{ children: ReactNode }>; editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls; history?: HistoryControls; mentions?: MentionSource }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -275,7 +275,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
           {'</>'}
         </Tool>
         <Tool label="Highlight" active={state.highlight} disabled={disabled} onClick={write(() => run().toggleHighlight().run())}>
-          ▍
+          {HighlightScope ? <HighlightScope><span className="doc-highlight-sample" data-highlight-sample="" aria-hidden="true">H</span></HighlightScope> : <span className="doc-highlight-sample" data-highlight-sample="" aria-hidden="true">H</span>}
         </Tool>
         <span ref={linkAnchor} className="doc-menu-anchor">
           <Tool label="Link" active={state.link} disabled={disabled} expanded={menu === 'link'} onClick={() => setMenu(menu === 'link' ? null : 'link')}>
