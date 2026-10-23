@@ -256,6 +256,22 @@ export function duplicateWithin(doc: Doc, slideId: string, ids: string[], offset
   return new Map(roots.map((r) => [r, copies.get(r)!]));
 }
 
+/** Freeze a measured layout atomically; the loader validates all pins before any write. */
+export function preparePinnedLayout(doc: Doc, slideId: string, writes: Record<string, ElementWrites>): (origin: unknown) => void {
+  const plan = newPlan();
+  for (const [id, write] of Object.entries(writes)) {
+    if (write.style) putStyle(plan, id, write.style);
+    for (const [key, value] of Object.entries(write.attrs ?? {})) put(plan, id, `attr:${key}`, value);
+    put(plan, id, 'order', null);
+  }
+  for (const children of childLists(readFlat(doc, slideId, false)).values()) {
+    const ids = children.filter((child) => writes[child.id]).map((child) => child.id);
+    for (const [id, key] of rekey(ids, new Map(), OVER)) put(plan, id, 'z', key);
+  }
+  preflight(doc, slideId, plan);
+  return (origin) => commit(doc, slideId, plan, origin);
+}
+
 /** "Detach" (D8): a flow child pinned over the flow layer at the box the editor measured; refused past the host's limit. */
 export function detachWithin(doc: Doc, slideId: string, id: string, box: { left: number; top: number; width?: number; height?: number }, origin?: unknown): void {
   const els = readFlat(doc, slideId, false);
