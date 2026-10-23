@@ -11,7 +11,7 @@ import { createDocument } from '@artifacts/document/tabs';
 import { FILES_ROOT } from '@artifacts/files';
 import type { ArtifactHost, DatasetPage } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -38,6 +38,8 @@ const PAGE: DatasetPage = { columns: sales.columns, rows: [['North', 12], ['Sout
 let memory: MemoryDocumentHost;
 let off = () => {};
 let readDataset: ReturnType<typeof vi.fn>;
+let fileChecks: ReturnType<typeof vi.fn<(input: unknown) => Promise<CommandOutput<'artifacts.datasetFiles'>>>>;
+let rereads: ReturnType<typeof vi.fn<(input: unknown) => Promise<CommandOutput<'artifacts.rereadDatasetFile'>>>>;
 beforeEach(() => {
   resetShellStores();
   resetEditorHosts();
@@ -46,6 +48,8 @@ beforeEach(() => {
   window.maws = fakeClient({ 'session.intent.get': null }).client;
   memory = new MemoryDocumentHost();
   readDataset = vi.fn(async () => PAGE);
+  fileChecks = vi.fn<(input: unknown) => Promise<CommandOutput<'artifacts.datasetFiles'>>>().mockResolvedValue({ revision: 12, files: [] });
+  rereads = vi.fn<(input: unknown) => Promise<CommandOutput<'artifacts.rereadDatasetFile'>>>().mockResolvedValue({ revision: 13, versionId: 4 });
 });
 afterEach(() => {
   cleanup();
@@ -65,7 +69,7 @@ const until = async (check: () => boolean, what: string) => {
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'dashboard', title: 'Sales board', lastViewedAt: null, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName, input: unknown) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'dashboard', title: 'Sales board', lastViewedAt: null, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : name === 'artifacts.datasetFiles' ? await fileChecks(input) : name === 'artifacts.rereadDatasetFile' ? await rereads(input) : undefined })) as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const editor = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
@@ -130,6 +134,38 @@ describe('the dashboard editor in L’s registry', () => {
     expect(within(screen.getByRole('dialog')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['North', '12', 'South', '7']);
     act(() => void fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('signals a changed source on the dashboard and rereads it with one action, without requiring an agent', async () => {
+    memory.write((doc) => {
+      createDocument(doc, { title: 'Sales board' });
+      setDataset(doc, 'sales', sales);
+    });
+    fileChecks.mockResolvedValue({ revision: 12, files: [{ id: 'sales', ref: 'assets/sales.csv', state: 'changed' }] });
+    mount();
+    await until(() => screen.queryByRole('button', { name: 'Reread Regional sales' }) !== null, 'changed source action');
+    expect(screen.getByRole('status').textContent).toContain('sales.csv changed');
+    let finish!: (result: { revision: number; versionId: number }) => void;
+    rereads.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    act(() => screen.getByRole('button', { name: 'Reread Regional sales' }).click());
+    expect(rereads).toHaveBeenCalledWith({ artifactId: A, id: 'sales', baseRevision: 12 });
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reread Regional sales' }).disabled).toBe(true);
+    expect(screen.getByRole('status').textContent).toContain('Rereading');
+    fileChecks.mockResolvedValue({ revision: 13, files: [{ id: 'sales', ref: 'assets/new-sales.csv', state: 'current' }] });
+    await act(async () => finish({ revision: 13, versionId: 4 }));
+    await until(() => screen.queryByRole('button', { name: 'Reread Regional sales' }) === null, 'stale signal cleared');
+  });
+
+  it('shows an unavailable source without replacing the last good dataset or offering an unsafe reread', async () => {
+    memory.write((doc) => {
+      createDocument(doc, { title: 'Sales board' });
+      setDataset(doc, 'sales', sales);
+    });
+    fileChecks.mockResolvedValue({ revision: 12, files: [{ id: 'sales', ref: 'assets/sales.csv', state: 'unavailable' }] });
+    mount();
+    await until(() => screen.queryByText(/sales.csv is unavailable/) !== null, 'missing source signal');
+    expect(screen.queryByRole('button', { name: 'Reread Regional sales' })).toBeNull();
+    expect(rereads).not.toHaveBeenCalled();
   });
 
   it('shows a held legacy dashboard as held: its files and the way forward, no editor', async () => {

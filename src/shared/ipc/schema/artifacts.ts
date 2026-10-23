@@ -189,6 +189,16 @@ export const commands = {
       truncated: z.boolean(),
     }),
   ),
+  // Local file origins remain in the host. Checks never alter the document; rereads are explicit human writes,
+  // guarded by the dataset's change revision and captured as a new attributed version.
+  'artifacts.datasetFiles': host(
+    z.strictObject({ artifactId: Id }),
+    z.strictObject({ revision: Seq, files: z.array(z.strictObject({ id: z.string(), ref: z.string(), state: z.enum(['current', 'changed', 'unavailable']) })) }),
+  ),
+  'artifacts.rereadDatasetFile': host(
+    z.strictObject({ artifactId: Id, id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/), baseRevision: Seq }),
+    z.strictObject({ revision: Seq, versionId: z.number().int().positive() }),
+  ),
   // The host's event-loop delay in ms since the last reset (Decision Log 23h); refused unless the host runs under MAWS_E2E=1.
   'artifacts.testLoopDelay': host(
     z.strictObject({ reset: z.boolean().optional() }),

@@ -16,6 +16,7 @@ import { useEditorHost, type EditorHostAction } from '../../panel/editor-host';
 import { DocumentBody } from '../document/DocumentPanel';
 import { useDocumentVisible } from '../artifacts/viewers/connectors/use-document-visible'; // E3: H's trusted document visibility
 import { DatasetsIcon } from './icons';
+import { FileSources } from './FileSources';
 import type { DashboardTabState } from './tab-state';
 
 export type DashboardEditorProps = ArtifactEditorProps<DashboardTabState>;
@@ -67,6 +68,7 @@ function DashboardBody({ state, surface, ...props }: DashboardEditorProps & { su
   if (held) return <HeldDashboard {...props} state={state} files={held} />;
   return (
     <div className="dash-shell">
+      <FileSources doc={document.handle?.doc ?? null} shown={shown && !document.previewing && !document.document?.readOnly} api={state.fileSources} />
       <DocumentBody {...props} state={state.document} surface={surface} renderChart={state.renderChart} artifactKind="dashboard" additionalActions={actions} onDisplayedDocument={state.displayed} blockCommentQuote={blockCommentQuote} />
       <SourceSheet artifactId={props.artifactId} sheet={state.sheet} reader={state.reader} host={state.document.host} actorName={state.actorName} live={state.live} onReopen={state.reopenSheet} />
     </div>

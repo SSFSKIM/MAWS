@@ -29,6 +29,7 @@ import { suggestionKey, type DocumentService } from './service';
 import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
 import { datasetReaderOf } from '../dashboards/read'; // P3-E
+import { datasetFilesOf } from '../dashboards/file-sources'; // WR 67
 import { ConnectionHolds } from '../dashboards/holds'; // E3
 import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; // E3
 
@@ -41,6 +42,7 @@ export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShap
   'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.copyAsset': 'immediate' /* P3-C */, 'artifacts.readDataset': 'immediate' /* P3-E */, 'artifacts.testLoopDelay': 'immediate',
   'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'artifacts.captureDatasetState': 'immediate', 'artifacts.holdAssets': 'immediate', 'artifacts.releaseAssets': 'immediate', 'artifacts.datasetRefreshRequest': 'immediate', // E3
+  'artifacts.datasetFiles': 'immediate', 'artifacts.rereadDatasetFile': 'immediate', // WR 67
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
 
@@ -211,6 +213,8 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     const store = storeOf();
     return store.readCommitted(() => datasetReaderOf(store).read(artifactId, ref, { format, offset, limit }));
   });
+  serve('artifacts.datasetFiles', ({ artifactId }) => datasetFilesOf(storeOf()).check(artifactId));
+  serve('artifacts.rereadDatasetFile', ({ artifactId, id, baseRevision }) => datasetFilesOf(storeOf()).reread(artifactId, id, baseRevision));
   serve('artifacts.testLoopDelay', ({ reset }) => {
     e2eOnly('artifacts.testLoopDelay');
     return loopDelay!.read({ reset });

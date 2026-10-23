@@ -9,6 +9,7 @@ export const commands = [
   'artifacts.uploadAsset',
   'artifacts.copyAsset', // P3-C (Decision Log 25)
   'artifacts.readDataset', // P3-E (E2 M2)
+  'artifacts.datasetFiles', 'artifacts.rereadDatasetFile', // WR 67
   'artifacts.testLoopDelay', 'artifacts.status', 'artifacts.testWrite', 'artifacts.open',
   'artifacts.export', // P3-A M7: main's
   'artifacts.downloadAsset', // P3-E (E2 M3): main's
