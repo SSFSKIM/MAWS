@@ -124,7 +124,7 @@ describe('the list', () => {
         h.version('auto', HUMAN);
         at.value = now - DAY;
         await agentWrites(agentAppends(' One.'));
-        h.version('turn', AGENT, { summary: 'Appended one sentence' });
+        h.version('turn', AGENT, { label: 'Appended one sentence' });
         at.value = now - 60_000;
         h.version('auto', HUMAN);
         h.version('auto', HUMAN);
@@ -185,7 +185,7 @@ describe('a row’s line', () => {
     ],
   };
 
-  it('names the blocks and the comment a turn touched by their words, not their ids', async () => {
+  it('keeps version identity without generated block and comment chatter', async () => {
     const clock = { value: new Date(2026, 9, 15, 12).getTime() };
     await setup(
       ({ host: h, history: hist }) => {
@@ -202,13 +202,8 @@ describe('a row’s line', () => {
     );
     await openHistory();
     const rows = within(rail()).getAllByRole('button', { name: /^Version / });
-    expect(rows.map((button) => button.querySelector('.doc-version-summary')?.textContent)).toEqual([
-      'Edited a block in 2 places',
-      'Replied to the comment on “The first paragraph.”',
-      'Edited row 2, column 1 of the table “Region, Q1”',
-      'Edited “The second paragraph.”',
-    ]);
-    expect(rows[0].getAttribute('aria-label')).toMatch(/ by Fix the build: Edited a block in 2 places$/);
+    expect(rows.every((button) => !button.querySelector('.doc-version-summary'))).toBe(true);
+    expect(rows[0].getAttribute('aria-label')).toMatch(/ by Fix the build$/);
   });
 });
 
@@ -266,7 +261,7 @@ describe('the preview', () => {
       h.version('named', HUMAN, { label: 'Before' });
       await agentWrites(agentAppends(' The agent adds this.'));
       await agentWrites((agent) => (tabBody(agent.doc, TAB)!.get(0) as { delete(i: number, n: number): void }).delete(0, 4));
-      h.version('turn', AGENT, { summary: 'Two edits' });
+      h.version('turn', AGENT, { label: 'Two edits' });
     });
     await openHistory();
     click(row('.*Two edits'));
@@ -325,7 +320,7 @@ describe('the preview', () => {
       await agentWrites((agent) => (carries = applyEdit(agent.doc, [{ op: 'replace_block', id: 'p2', markdown: '## The second paragraph. ^p2' }]).carries));
       hist.carryLast(carries);
       expect(ynodeToPmnode(tabBody(h.doc, TAB)!, schemaFor()).textContent).toBe('The second paragraph.The third paragraph.The first paragraph.');
-      hist.version('turn', AGENT, { summary: 'Moved and retyped' });
+      hist.version('turn', AGENT, { label: 'Moved and retyped' });
     });
     await openHistory();
     click(row('.*Moved and retyped'));
@@ -347,9 +342,9 @@ describe('the preview', () => {
       let carries: ReturnType<typeof applyEdit>['carries'] = [];
       await agentWrites((agent) => (carries = applyEdit(agent.doc, [{ op: 'move', id: 'p1', after: 'p3' }]).carries));
       hist.carryLast(carries);
-      hist.version('turn', AGENT, { summary: 'Moved the first' });
+      hist.version('turn', AGENT, { label: 'Moved the first' });
       await agentWrites(agentAppends(' Later.')); // the third paragraph, second after the move
-      hist.version('turn', AGENT, { summary: 'Added a word' });
+      hist.version('turn', AGENT, { label: 'Added a word' });
       if (compacted) hist.compact(0, h.revision);
     });
     await openHistory();
@@ -534,7 +529,7 @@ describe('the owner’s actions', () => {
     await until(() => h.copies.length === 1, 'the copy');
     const kept = (await h.versions()).find((v) => v.label === 'Keep this')!;
     expect(h.copies).toEqual([kept.id]);
-    expect(screen.getByText('A copy of this version was made.')).toBeTruthy();
+    expect(screen.queryByText('A copy of this version was made.')).toBeNull();
   });
 
   // M8 (§4.7: any automatic version nameable; A's `artifacts.nameVersion`, Decision Log 28): the previewed version is
@@ -579,7 +574,7 @@ describe('the owner’s actions', () => {
         t.value += 10 * 60_000;
         await agentWrites(agentAppends(' The agent was here.'));
         await agentWrites((agent) => (tabBody(agent.doc, TAB)!.get(2) as { insert(i: number, s: string): void }).insert(0, 'Also: '));
-        hist.version('turn', AGENT, { summary: 'Two additions' });
+        hist.version('turn', AGENT, { label: 'Two additions' });
         t.value += 10 * 60_000;
       },
       { now: () => t.value },
@@ -695,7 +690,7 @@ describe('a deleted tab and a failed count', () => {
       h.write((doc) => addTab(doc, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'x1' }, content: [{ type: 'text', text: 'Raw numbers live here.' }] }] }) }));
       hist.version('named', HUMAN, { label: 'Two tabs' });
       h.write((doc) => deleteTab(doc, 'tab2'), AGENT);
-      hist.version('turn', AGENT, { summary: 'Deleted the appendix' });
+      hist.version('turn', AGENT, { label: 'Deleted the appendix' });
     });
     await openHistory();
     click(row('.*Deleted the appendix'));
@@ -717,7 +712,7 @@ describe('a deleted tab and a failed count', () => {
         await hist.markViewed();
         t.value += 10 * 60_000;
         await agentWrites(agentAppends(' The agent was here.'));
-        hist.version('turn', AGENT, { summary: 'One addition' });
+        hist.version('turn', AGENT, { label: 'One addition' });
         const versionState = hist.versionState.bind(hist);
         hist.versionState = (id) => (failing-- > 0 ? Promise.reject(new Error('the host is unavailable')) : versionState(id));
       },
@@ -737,7 +732,7 @@ describe('the bar’s count', () => {
     await setup(async ({ host: h, history: hist }) => {
       hist.version('named', HUMAN, { label: 'Before the rename' });
       h.write((doc) => renameTab(doc, TAB, 'Field notes'), AGENT);
-      hist.version('turn', AGENT, { summary: 'Renamed the tab' });
+      hist.version('turn', AGENT, { label: 'Renamed the tab' });
     });
     await openHistory();
     click(row('.*Renamed the tab'));
@@ -758,7 +753,7 @@ describe('the bar’s count', () => {
         (tabBody(doc, TAB)!.get(0) as { insert(i: number, s: string): void }).insert(0, 'First. ');
         (tabBody(doc, 'tab2')!.get(0) as { insert(i: number, s: string): void }).insert(0, 'Second. ');
       }, AGENT);
-      hist.version('turn', AGENT, { summary: 'Two tabs edited' });
+      hist.version('turn', AGENT, { label: 'Two tabs edited' });
     });
     await openHistory();
     click(row('.*Two tabs edited'));

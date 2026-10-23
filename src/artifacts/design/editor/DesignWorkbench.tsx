@@ -54,7 +54,7 @@ import { BoardList } from './BoardList';
 import { boardLabel, keepEqualBoards, readBoards, type BoardView, type DesignBoards } from './boards';
 import { DESIGN_COPY as C, type BoardPreset } from './copy';
 import { DesignCommentButtons, DesignCommentFrame, designRailLabels, useDesignComments } from './comments';
-import { boardKeyLabel, DesignHistoryBar, HistoryBoardList, historyBoards, HistoryWorld, useDesignFocus } from './history';
+import { DesignHistoryBar, HistoryBoardList, historyBoards, HistoryWorld, useDesignFocus } from './history';
 import { boardElement } from './insert';
 import { MoveToBoard } from './MoveToBoard';
 import { BOARD_FIT_MAX, DesignView, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, type Rect } from './viewport';
@@ -495,11 +495,6 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
         <span className="deck-toolbar-spacer" />
         <ZoomControls view={view} onFitAll={fitAll} onFitSelection={fitSelection} />
       </div>
-      )}
-      {preview?.showChanges && projected?.deck && (
-        <p className="deck-history-deck" role="status" data-focused={focusStop?.part === 'deck' || undefined}>
-          {C.historyDeck(projected.deck.keys.map((k) => boardKeyLabel(k.key)).join(', '))}
-        </p>
       )}
       {!preview && active?.held && (
         <div role="status" className="deck-held-banner" data-held-banner>
