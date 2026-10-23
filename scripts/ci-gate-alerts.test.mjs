@@ -201,7 +201,7 @@ test("gate.yml's env: scalars and folded lists are read, anything else throws", 
   const own = workflowEnv(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'));
   assert.equal(own.POOL_E2E, 'desk-web');
   assert.ok(own.CLASS1_E2E.split(' ').includes('library'));
-  assert.equal(own.MAC_VM_E2E, '');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human');
 });
 
 test('a runs-on label set is the guest, the trial slot, no Mac, or a host', () => {
