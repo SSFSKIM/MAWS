@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeSystem, markCopied } from '@artifacts/design-system/model';
+import { defaultSystem } from '@artifacts/types/design_system/defaults';
 import type { Doc, Node } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -87,6 +89,18 @@ const file = (name: string, contents: string | Uint8Array) => {
 const node = (doc: Doc, name?: string): Node => new (doc.get('root').constructor as new (name?: string) => Node)(name);
 
 describe('the library reads (M2)', () => {
+  it('carries built-in provenance without assigning it to copies or human-authored systems', async () => {
+    const builtin = await store.create({ kind: 'design_system', title: 'MAWS', initial: (doc) => {
+      writeSystem(doc, defaultSystem('maws')!.files, { route: 'default', key: 'maws', at: now });
+    } }, human);
+    expect((await call('library.entry', { artifactId: builtin.id })).artifact).toMatchObject({ builtIn: true });
+    const copy = await store.create({ kind: 'design_system', title: 'My copy', initial: (doc) => {
+      writeSystem(doc, defaultSystem('maws')!.files, { route: 'default', key: 'maws', at: now });
+      markCopied(doc, 'MAWS');
+    } }, human);
+    expect((await call('library.entry', { artifactId: copy.id })).artifact).not.toHaveProperty('builtIn', true);
+  });
+
   it('has a handler and exactly one deadline shape for every library read the engine host owns, each immediate (M6b: and the e2e import, bounded, registered by the module)', () => {
     const owned = Object.entries(commands).filter(([name, spec]) => name.startsWith('library.') && spec.owner === 'engine-host').map(([name]) => name);
     expect(owned.sort()).toEqual(['library.entry', 'library.snapshot', 'library.testImport', 'library.text']);

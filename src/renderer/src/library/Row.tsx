@@ -157,7 +157,7 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, o
             </>
           )}
           <Dot />
-          <span className="truncate">{ROW_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by)}</span>
+          <span className="truncate">{row.builtIn ? 'Built in' : ROW_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by)}</span>
           <Receipt artifactId={row.id} now={now} tabIndex={tabIndex} />
         </span>
         {row.snippet && (

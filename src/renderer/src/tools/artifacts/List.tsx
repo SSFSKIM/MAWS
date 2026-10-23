@@ -208,7 +208,7 @@ function ListRow({ row, appSessionId, onOpen, onFocus }: { row: LibraryRow; appS
   const by = actorDisplay(row.lastEditor, row.lastEditorTitle).name;
   const link = row.sessions.find((session) => session.appSessionId === appSessionId);
   const relationship = link ? link.roles.includes('created') ? 'Created' : link.roles.includes('edited') ? 'Edited' : 'Read' : 'From a parent session';
-  const detail = appSessionId ? `${relationship}${link ? ` · ${formatAgo(Math.max(0, now - link.lastAt))}` : ''}` : LIBRARY_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by);
+  const detail = appSessionId ? `${relationship}${link ? ` · ${formatAgo(Math.max(0, now - link.lastAt))}` : ''}` : row.builtIn ? 'Built in' : LIBRARY_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by);
   return (
     <button
       type="button"

@@ -260,6 +260,14 @@ describe('search and the type filter', () => {
 });
 
 describe('a row', () => {
+  it('shows built-in provenance instead of attributing installation to the owner', async () => {
+    rows = [row(1, { title: 'House', kind: 'design_system', builtIn: true })];
+    render(<Library />);
+    const builtin = await screen.findByRole('article', { name: 'House' });
+    expect(within(builtin).getByText('Built in')).toBeTruthy();
+    expect(builtin.textContent).not.toContain('by You');
+  });
+
   it('shows its kind, title, Space, project, last editor and time, and the sessions that touched it', async () => {
     const sessions = [1, 2, 3, 4].map((n) => ({ appSessionId: S(n), title: `Session ${n}`, roles: n === 1 ? (['created', 'edited'] as const) : (['viewed'] as const), lastAt: NOW - n * HOUR }));
     rows = [
