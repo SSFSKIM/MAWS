@@ -38,6 +38,8 @@ export interface InspectorProps {
   measure?: (elementId: string) => { x: number; y: number; w: number; h: number } | null;
   /** P4-B2 (D13): the slide's canvas on the stage, whose layout passes (geometry moving with no write) refresh the panel. */
   canvas?: SlideCanvas | null;
+  /** The deck shell overlays this panel at narrow widths; the design shell owns its inspector's layout instead. */
+  overlayRail?: boolean;
 }
 
 /**
@@ -56,7 +58,7 @@ function measureAt(measure: InspectorProps['measure'], version: number): Inspect
   return measure && ((id) => measure(id));
 }
 
-export function Inspector({ session, slideId, readOnly, faces, uploadAsset, measure: measureNow, canvas = null }: InspectorProps) {
+export function Inspector({ session, slideId, readOnly, faces, uploadAsset, measure: measureNow, canvas = null, overlayRail = false }: InspectorProps) {
   const doc = session.doc;
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   const version = useSettledVersion(session, canvas);
@@ -106,7 +108,7 @@ export function Inspector({ session, slideId, readOnly, faces, uploadAsset, meas
   const slide = picked.length === 1 && picked[0]!.id === ROOT;
   const title = picked.length === 0 ? '' : slide ? C.slide : picked.length > 1 ? C.selected(picked.length) : elementName(picked[0]!);
   return (
-    <aside aria-label={C.panel} className="deck-inspector" data-deck-inspector data-deck-rail="inspector">
+    <aside aria-label={C.panel} className="deck-inspector" data-deck-inspector data-deck-rail={overlayRail ? 'inspector' : undefined}>
       {picked.length > 0 && (
         <InspectorContext.Provider value={api}>
           {/* keyed by what is edited, so a field's unsaved text never carries to another element */}
