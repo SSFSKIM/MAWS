@@ -261,7 +261,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const columns = (table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
       expect(columns('library_artifacts')).toEqual([
         'id', 'kind', 'title', 'handle', 'space_id', 'project_id', 'created_by', 'created_at', 'updated_at', 'last_viewed_at', 'pinned',
-        'design_system_id', 'linked_path', 'agent_edits_as_suggestions', 'revision', 'last_editor', 'last_edited_at', 'text_revision', 'text_rowid', 'built_in',
+        'design_system_id', 'linked_path', 'agent_edits_as_suggestions', 'revision', 'last_editor', 'last_edited_at', 'text_revision', 'text_rowid', 'built_in', 'seed_only',
       ]);
       expect(columns('library_links')).toEqual(['artifact_id', 'app_session_id', 'role', 'last_at']);
       expect(columns('library_spaces')).toEqual(['id', 'name', 'linked_dir', 'created_at']);
