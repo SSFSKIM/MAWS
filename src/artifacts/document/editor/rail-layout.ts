@@ -31,7 +31,10 @@ export function useRailLayout(body: RefObject<HTMLElement | null>, open: boolean
       const frames = [...element.querySelectorAll<HTMLElement>('.doc-page-frame')];
       for (const frame of frames) observer?.observe(frame); // observing one already observed does nothing
       const shown = frames.map((frame) => frame.getBoundingClientRect()).find((frame) => frame.height > 0);
-      const next: RailLayout = box.width > 0 && box.width < RAIL_BESIDE_FROM_PX ? { mode: 'drawer', top: Math.max(0, Math.round((shown?.top ?? box.top) - box.top)) } : BESIDE;
+      const pills = [...element.querySelectorAll<HTMLElement>('.doc-pill')];
+      for (const pill of pills) observer?.observe(pill);
+      const pillBottom = Math.max(0, ...pills.map(pill => pill.getBoundingClientRect()).filter(rect => rect.height > 0).map(rect => rect.bottom + 8));
+      const next: RailLayout = box.width > 0 && box.width < RAIL_BESIDE_FROM_PX ? { mode: 'drawer', top: Math.max(0, Math.ceil(Math.max(shown?.top ?? box.top, pillBottom) - box.top)) } : BESIDE;
       setLayout((now) => (now.mode === next.mode && now.top === next.top ? now : next));
     };
     observer?.observe(element);
