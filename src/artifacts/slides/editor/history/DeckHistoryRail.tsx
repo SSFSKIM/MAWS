@@ -2,7 +2,7 @@
 // stage, as B's document shows it (src/artifacts/document/editor/history/HistoryRail.tsx, reused unchanged: the list by
 // day with runs folded, author chips, Named only, Save version), driving the deck's own controller, which also names
 // the deck's comments in the rows' lines (P4 W1-B). Inside the deck's rail slot (`data-deck-rail`), so under 720 px it
-// overlays the stage as a sheet like the deck's other rails.
+// floats over the stage at every width (WR #45), retaining the working slide’s dimensions.
 import { useState } from 'react';
 import { HistoryRail } from '../../../document/editor/history/HistoryRail';
 import type { DeckHistoryController, DeckHistorySnapshot } from './controller';
