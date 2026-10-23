@@ -484,6 +484,22 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
   const WIDE = { w: 1200, h: 800 };
   const NARROW = { w: 900, h: 800 };
 
+  it('history Fit preserves its last usable size while hidden and refits when shown again', async () => {
+    const { session, container } = withHistory();
+    act(() => session.toggleRail('history'));
+    fireEvent.click(await screen.findByRole('button', { name: /^Version Draft 1 by/ }));
+    await waitFor(() => expect(container.querySelector('[data-history-stage]')).not.toBeNull());
+    const width = () => container.querySelector<HTMLElement>('[data-history-stage] .deck-slide-frame')!.style.width;
+    layout(WIDE);
+    const wide = width();
+    expect(Number.parseFloat(wide)).toBeGreaterThan(1000);
+    layout({ w: 0, h: 0 });
+    expect(width()).toBe(wide);
+    layout(NARROW);
+    expect(Number.parseFloat(width())).toBeLessThan(Number.parseFloat(wide));
+    expect(Number.parseFloat(width())).toBeGreaterThan(800);
+  });
+
   it('refits as a rail opens and closes beside the stage', () => {
     const { session } = withHistory();
     expect(shown()).toBe('Fit (60%)');

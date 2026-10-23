@@ -161,7 +161,11 @@ function HistoryStage({ controller, preview, change, focus, assets, faces, zoom,
   useLayoutEffect(() => {
     const el = viewport.current;
     if (!el) return;
-    const read = () => setRoom({ w: el.clientWidth, h: el.clientHeight });
+    const read = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setRoom({ w, h });
+    };
     read();
     const observer = new ResizeObserver(read);
     observer.observe(el);
