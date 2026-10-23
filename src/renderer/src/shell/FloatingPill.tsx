@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { displayTitle } from '../sessions/title';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { CARD_MARGIN, cardOver, cardSession, openCard, splitFloat, useFloatingCard } from './floating';
+import { CARD_MARGIN, cardOver, cardSession, focusCompactCard, openCard, splitFloat, useFloatingCard } from './floating';
 import { currentSet } from '../stores/layout-model';
 import { SessionPane } from '../session/SessionPane';
 
@@ -49,11 +49,14 @@ export function Pill({ appSessionId, placement }: { appSessionId: AppSessionId; 
     role="region"
     aria-label="Compact session composer"
     data-pane="card"
+    data-compact-session={appSessionId}
     className="pointer-events-auto absolute flex max-h-[calc(100%-32px)] flex-col overflow-hidden rounded-lg border border-border-strong bg-bg shadow-float"
     style={{ right: CARD_MARGIN, bottom: CARD_MARGIN, width: 420, maxWidth: `calc(100% - ${2 * CARD_MARGIN}px)` }}
   >
     {titleButton}
-    <div className="min-h-0 overflow-y-auto"><SessionPane appSessionId={appSessionId} paneIndex={paneIndex} compact /></div>
+    <div className="min-h-0 overflow-y-auto" onPointerDownCapture={focusCompactCard} onFocusCapture={focusCompactCard}>
+      <SessionPane key={appSessionId} appSessionId={appSessionId} paneIndex={paneIndex} compact />
+    </div>
   </section>;
 }
 
