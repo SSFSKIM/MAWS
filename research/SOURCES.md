@@ -8,8 +8,8 @@ toolchain. This page says where everything is and how to cite it.
 
 | | location | current build | older builds kept |
 |---|---|---|---|
-| ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.1016.51333` (published 2026-10-21 02:19Z, runtime 0.0.33; acquired from the appcast, not installed) | `chatgpt-26.1013.40934` (published 2026-10-16; installed build at acquisition), `chatgpt-26.1013.31256` (published 2026-10-15; incomplete conversion, see below), `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5), `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
-| Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-2.42304.0` (2026-10-18, Electron 44.7.2) | `app-2.16120.0`, `app-2.9939.2` |
+| ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.1016.62342` (published 2026-10-22 17:33Z, runtime 0.0.33; acquired from the appcast, not installed) | `chatgpt-26.1016.51333` (published 2026-10-21 02:19Z, runtime 0.0.33), `chatgpt-26.1013.40934` (published 2026-10-16; installed build at acquisition), `chatgpt-26.1013.31256` (published 2026-10-15; incomplete conversion, see below), `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5), `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
+| Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-3.6556.2` (published 2026-10-23, Electron 44.9.3; acquired from the update feed's stable channel, not installed) | `app-2.42304.2` (installed build at acquisition; Electron 44.7.2), `app-2.42304.0` (2026-10-18, Electron 44.7.2), `app-2.16120.0`, `app-2.9939.2` |
 | claude.ai web app | inside `app-2.42304.0/web/` (shipped with the app from 2.16120 on) | | `app-2.16120.0/web/`, `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
 | T3 Code (open source, MIT) | `~/t3code-src` (git clone of `pingdotgg/t3code`) | `148e6dee` (2026-10-01) | `git -C ~/t3code-src log` holds the history; cite `<path>:<line>` at a named commit |
 | toolchain | `~/app-source-tools` (git) | | |
