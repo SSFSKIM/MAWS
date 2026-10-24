@@ -9,7 +9,8 @@
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
 // card is `ProjectHoverCard.tsx`.
 import { HoverCard as Radix } from 'radix-ui';
-import { useEffect, type FocusEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { QuickReply } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -35,13 +36,27 @@ export interface SidebarHoverCardProps {
 }
 
 export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const changeOpen = (next: boolean) => {
+    if (!next && contentRef.current?.contains(document.activeElement)) return;
+    setInternalOpen(next);
+    onOpenChange?.(next);
+  };
   return (
-    <Radix.Root openDelay={300} closeDelay={150} open={open} onOpenChange={onOpenChange}>
+    <Radix.Root openDelay={300} closeDelay={150} open={open ?? internalOpen} onOpenChange={changeOpen}>
       <Radix.Trigger asChild onFocus={guardPointerFocus}>
         {children}
       </Radix.Trigger>
       <Radix.Portal>
         <Radix.Content
+          ref={contentRef}
+          onBlurCapture={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setInternalOpen(false);
+              onOpenChange?.(false);
+            }
+          }}
           role="dialog"
           aria-label={label}
           data-hover-card
@@ -73,7 +88,8 @@ export function focusVisible(element: HTMLElement): boolean {
 }
 
 export function SessionHoverCard({ record, children }: { record: SessionRecord; children: ReactNode }) {
-  return <SidebarHoverCard label={displayTitle(record)} content={<Body appSessionId={record.appId} />}>{children}</SidebarHoverCard>;
+  const [reply, setReply] = useState('');
+  return <SidebarHoverCard label={displayTitle(record)} content={<Body appSessionId={record.appId} reply={reply} setReply={setReply} />}>{children}</SidebarHoverCard>;
 }
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -89,7 +105,7 @@ function placeOf(record: SessionRecord): { text: string; title: string | null } 
   return branch ? { text: `⎇ ${branch}`, title: null } : null;
 }
 
-function Body({ appSessionId }: { appSessionId: AppSessionId }) {
+function Body({ appSessionId, reply, setReply }: { appSessionId: AppSessionId; reply: string; setReply(value: string): void }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
@@ -143,6 +159,8 @@ function Body({ appSessionId }: { appSessionId: AppSessionId }) {
           <Request item={waiting.oldest} />
         </div>
       )}
+      {!record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
+        <QuickReply record={record} value={reply} onChange={setReply} />}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId, RequestId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { item } from '../../../../test/support/builders';
+import { item, status, humanTurn } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useAttention } from '../stores/attention';
@@ -325,4 +325,49 @@ describe('request preview', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Open session' }));
   });
+});
+
+describe('hover quick reply', () => {
+  it.each([false, true])('sends to the hovered session, preserving the composer queue policy (busy=%s)', async (busy) => {
+    const id = idOf('Charter + research');
+    fake = fakeClient({
+      'attention.request': { event: null },
+      'session.queue.list': { entries: [], paused: false },
+      'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: '11111111-1111-4111-8111-111111111111' },
+      'session.steer': { messageUuid: '11111111-1111-4111-8111-111111111111' },
+    });
+    window.maws = fake.client;
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: busy ? humanTurn : null }) });
+    render(<Sidebar />);
+    await userEvent.hover(needsRow('Charter + research'));
+    const card = await screen.findByRole('dialog', { name: 'Charter + research' });
+    const reply = within(card).getByRole('textbox', { name: 'Reply to Charter + research' });
+    await userEvent.type(reply, 'Please use the smaller layout');
+    await userEvent.click(within(card).getByRole('button', { name: 'Send reply' }));
+    await waitFor(() => expect(fake.invoked(busy ? 'session.steer' : 'session.send')).toEqual([
+      { appSessionId: id, content: 'Please use the smaller layout', ...(busy ? { priority: 'next' } : {}) },
+    ]));
+    expect(fake.invoked(busy ? 'session.send' : 'session.steer')).toEqual([]);
+    await waitFor(() => expect((reply as HTMLInputElement).value).toBe(''));
+  });
+});
+
+it('keeps a refused hover reply for correction and retry, including across closing the card', async () => {
+  const id = idOf('Charter + research');
+  fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
+  window.maws = fake.client;
+  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+  render(<Sidebar />);
+  await userEvent.hover(needsRow('Charter + research'));
+  let card = await screen.findByRole('dialog', { name: 'Charter + research' });
+  await userEvent.type(within(card).getByRole('textbox'), 'Keep this reply');
+  await userEvent.click(within(card).getByRole('button', { name: 'Send reply' }));
+  await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+  await act(() => fake.fail('session.send', 'Connection lost'));
+  expect((await within(card).findByRole('alert')).textContent).toBe('Connection lost');
+  await userEvent.click(screen.getByRole('searchbox'));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Charter + research' })).toBeNull());
+  await userEvent.hover(needsRow('Charter + research'));
+  card = await screen.findByRole('dialog', { name: 'Charter + research' });
+  expect((within(card).getByRole('textbox') as HTMLInputElement).value).toBe('Keep this reply');
 });
