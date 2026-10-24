@@ -39,6 +39,18 @@ describe('l2-transcript-15: stopping closes the turn at the engine evidence', ()
     expect(list.filter((row) => row.kind === 'user').map((row) => row.text)).toEqual(['prompt u1']);
   });
 
+  it('keeps a human’s marker-word prompt open and visible rather than treating its text as engine evidence', () => {
+    const b = builder();
+    b.turn('typed', '[Request interrupted by user]');
+    const state = reduce(b.events);
+    expect(state.current).toBe(turnId.ofMessage(uuid('typed')));
+    expect(state.turns.get(state.current!)!).toMatchObject({ state: 'open', closedBy: null });
+    expect(rowsOf(state).filter((row) => row.kind === 'user').map((row) => row.text)).toEqual(['[Request interrupted by user]']);
+    b.turn('next');
+    const next = applyEvents(state, b.events.slice(2));
+    expect(next.turns.get(turnId.ofMessage(uuid('typed')))).toMatchObject({ state: 'closed', closedBy: 'completed' });
+  });
+
   it('attaches the result after a marker to the stopped turn, never to a newer running turn', () => {
     const b = builder();
     b.turn('u1');
