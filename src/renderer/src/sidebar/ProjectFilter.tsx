@@ -24,7 +24,6 @@ export function ProjectFilter({ projects, current, selected, onChange }: {
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Anchor asChild>
       <IconButton label="Filter projects" aria-haspopup="dialog" aria-expanded={open} aria-pressed={selected !== null}
-        title={selected ? 'Show all projects' : 'Show the current session’s project; hover to choose projects'}
         onPointerEnter={enter} onPointerLeave={leave}
         onKeyDown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); enter(); requestAnimationFrame(() => content.current?.querySelector<HTMLInputElement>('input')?.focus()); } }}
         onClick={() => { if (selected) onChange(null); else if (current) onChange(new Set([current])); else enter(); }} className="size-[22px]">

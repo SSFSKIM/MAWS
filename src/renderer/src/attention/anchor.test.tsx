@@ -122,7 +122,7 @@ describe('the surfaces', () => {
     act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('essential_unread', 'Must read — The README is unverified.')] }));
     render(<Sidebar />);
     const row = within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!;
-    expect(row.textContent).toContain('Must read — The README is unverified.');
+    expect(row.getAttribute('aria-label')).toContain('Must read — The README is unverified.');
     fireEvent.click(row);
     expect(active()).toMatchObject({ appSessionId: APP });
     expect(useTranscriptStore.getState().entries[APP]!.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
