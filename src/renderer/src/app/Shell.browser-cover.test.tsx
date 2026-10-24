@@ -46,9 +46,10 @@ beforeEach(() => {
   offs.push(registerPanelTool(probeTool('review').tool));
   offs.push(registerPanelTool(probeTool('browser', { render: () => <BrowserPane tab={browserTab(T2, A)} surface="panel" /> }).tool));
   useLayout.getState().openTab({ kind: 'browser', appSessionId: A, browserTabId: T1 });
-  // happy-dom has no layout; provide the real native pane's measured boundary only.
+  // happy-dom has no layout; provide the native pane's measured boundary, with no room in a collapsed panel.
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    const rect = this.matches('[data-browser-pane]') ? { x: 30, y: 90, width: 500, height: 400 } : { x: 0, y: 0, width: 0, height: 0 };
+    const visiblePane = this.matches('[data-browser-pane]') && !this.closest('[data-region="panel"][inert]');
+    const rect = visiblePane ? { x: 30, y: 90, width: 500, height: 400 } : { x: 0, y: 0, width: 0, height: 0 };
     return { ...rect, left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, toJSON: () => rect } as DOMRect;
   });
 });
@@ -134,7 +135,8 @@ describe('native Browser views under shell overlays', () => {
     expect(covers()).toEqual([]);
   });
 
-  it('releases only the occluded main view for a narrow sheet, keeps a Browser sheet live, and restores main placement when closed', async () => {
+  it.each(['Escape', 'backdrop'] as const)('keeps a narrow Browser sheet live across %s dismissal and reopening, releasing only the occluded main view', async (dismissal) => {
+    const user = userEvent.setup();
     renderShell();
     await frames();
     const originalPane = mainPlaces()[0]!.paneId;
@@ -148,8 +150,18 @@ describe('native Browser views under shell overlays', () => {
     await frames();
     expect(main.callsOf('browser.view.place').filter((call) => call.surface === 'panel').at(-1)).toMatchObject({ tabId: T2, claim: true, rect: { width: 500 } });
     expect(covers()).toEqual([]); // a blanket cover would freeze the very sheet the person opened
-    act(() => useLayout.getState().setPanel({ collapsed: true }));
+    if (dismissal === 'Escape') await user.keyboard('{Escape}');
+    else await user.click(screen.getByRole('button', { name: 'Close surface sheet' }));
     await frames();
+    expect(screen.queryByRole('button', { name: 'Close surface sheet' })).toBeNull();
     expect(mainPlaces().at(-1)).toMatchObject({ paneId: originalPane, claim: true, rect: { width: 500 } });
+    expect(main.callsOf('browser.view.place').filter((call) => call.surface === 'panel').at(-1)).toMatchObject({ tabId: T2, rect: null, claim: false });
+    expect(covers()).toEqual([]);
+    act(() => useLayout.getState().setPanel({ collapsed: false }));
+    await frames();
+    expect(screen.getByRole('button', { name: 'Close surface sheet' })).toBeTruthy();
+    expect(mainPlaces().at(-1)).toMatchObject({ paneId: originalPane, rect: null, claim: false });
+    expect(main.callsOf('browser.view.place').filter((call) => call.surface === 'panel').at(-1)).toMatchObject({ tabId: T2, claim: true, rect: { width: 500 } });
+    expect(covers()).toEqual([]);
   });
 });

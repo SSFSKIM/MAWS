@@ -8,7 +8,6 @@
 // the region (header and body) is covered by one drop target, which moves in an artifact the panel can take and refuses
 // (no drop cursor) everything else.
 import { useEffect, useRef } from 'react';
-import { holdCover } from '../tools/browser/covering';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { runAction } from '../keymap/actions-runtime';
@@ -40,14 +39,13 @@ export function PanelRegion() {
 
   useEffect(() => {
     if (!geometry.sheet) return;
-    const release = holdCover();
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       event.preventDefault();
       useLayout.getState().setPanel({ collapsed: true });
     };
     window.addEventListener('keydown', escape);
-    return () => { window.removeEventListener('keydown', escape); release(); };
+    return () => window.removeEventListener('keydown', escape);
   }, [geometry.sheet]);
 
   return (<>
