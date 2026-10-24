@@ -253,6 +253,13 @@ test('UX2: at 900 the sidebar yields; at 620 a surface is a dismissible sheet', 
   await expect(panel(page)).toHaveCSS('position', 'relative');
   expect(await layout(page, 'regions')).toEqual(remembered);
   await size(maws, 620, 820);
+  // Native resize completion is not the sheet's React commit or its keyboard-focus boundary.
+  await expect(page.getByRole('button', { name: 'Close surface sheet', exact: true })).toBeVisible();
+  await expect(panel(page)).toHaveCSS('position', 'absolute');
+  await expect(main(page)).toHaveJSProperty('inert', true);
+  const sheetControl = surface(page, 'files').getByRole('button', { name: 'Refresh', exact: true });
+  await sheetControl.focus();
+  await expect(sheetControl).toBeFocused();
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await box(panel(page))).width).toBe(0);
   await openSurface(page, 'Files');
@@ -446,9 +453,16 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
   await withProduct(async (p) => {
     const { maws, page, scratch } = p;
     await size(maws, 1280, 820);
+    // restoreWithTab reads persisted layout; a selected DOM tab can precede that write.
+    await expect.poll(async () => {
+      const saved = value(await invoke(page, 'layout.get', { key: 'main.tabs' })).value as import('../src/shared/ipc/schema/layout').LayoutMain | null;
+      if (!saved) return false;
+      return saved.sets[saved.current]?.panes.some((pane) => pane.tabs.some((tab) => tab.id === `session:${scratch.appSessionId}`)) ?? false;
+    }, { message: 'the scratch session reached the persisted current tab set before restoring file tabs' }).toBe(true);
     await restoreWithTab(p, names.map((name) => ({ id: `file:${scratch.path(name)}`, kind: 'file', appSessionId: scratch.appSessionId, path: scratch.path(name), pinned: true })));
     const name = names.at(-1)!;
     const tab = page.locator('[data-chrome-tabs]').getByRole('tab', { name, exact: true });
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
     const viewer = main(page).locator(`[data-file-viewer][data-path="${scratch.path(name)}"]`);
     await expect(viewer).toHaveAttribute('data-editable', 'true');
     await viewer.locator('.cm-content .cm-line').first().click({ position: { x: 3, y: 4 } });
