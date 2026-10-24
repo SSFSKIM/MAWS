@@ -259,6 +259,17 @@ async function openArtifact(page: Page, title: string, id: string): Promise<Loca
   return main(page).locator(`[data-artifact-tab="${id}"]`);
 }
 
+async function deckFilmstripPlacement(deck: Locator, horizontal: boolean): Promise<void> {
+  const filmstrip = deck.locator('.deck-filmstrip');
+  const stage = deck.locator('.deck-stage');
+  await expect(filmstrip).toHaveAttribute('data-direction', horizontal ? 'horizontal' : 'vertical');
+  // Check the rendered boxes, not just orientation state: the filmstrip is wrapped in a display:contents scope.
+  await expect.poll(async () => {
+    const [stripBox, stageBox] = await Promise.all([box(filmstrip), box(stage)]);
+    return horizontal ? stripBox.y - (stageBox.y + stageBox.height) : stageBox.x - (stripBox.x + stripBox.width);
+  }, { message: horizontal ? 'the horizontal filmstrip sits below the stage' : 'the vertical filmstrip sits left of the stage' }).toBeGreaterThanOrEqual(0);
+}
+
 test('UX2: real Library document and deck editors use main without an empty panel', async ({ maws }, info) => {
   test.setTimeout(120_000);
   const { page } = maws;
@@ -289,6 +300,11 @@ test('UX2: real Library document and deck editors use main without an empty pane
     await size(maws, width, height);
     const documentTab = await openArtifact(page, 'UX2 working notes', document.id);
     await expect(documentTab.locator('.ds-doc .ProseMirror')).toContainText('The main area is the main thing.');
+    const documentTools = documentTab.getByRole('toolbar', { name: 'Formatting', exact: true });
+    await expect(documentTools.getByRole('button', { name: 'Version history', exact: true })).toHaveCount(1);
+    await expect(documentTools.getByRole('button', { name: /^Comments(?: |$)/ })).toHaveCount(1);
+    await expect(documentTools.getByRole('button', { name: 'Add comment', exact: true })).toBeVisible();
+    await expect(main(page).locator('[data-editor-header]').getByRole('button', { name: /^(Version history|Comments|\d+ open comments?)$/ })).toHaveCount(0);
     await noReservedPanel(page);
     await singleChromeRow(page);
     await shot(maws, info, 'document-main');
@@ -297,8 +313,14 @@ test('UX2: real Library document and deck editors use main without an empty pane
     await expect(deckTab.locator('[data-deck-editor]')).toContainText('Main is the main thing');
     await noReservedPanel(page);
     await singleChromeRow(page);
+    await deckFilmstripPlacement(deckTab, width === 1280);
     await shot(maws, info, 'deck-main');
     const toolbar = deckTab.getByRole('toolbar', { name: 'Deck', exact: true });
+    await expect(toolbar.getByRole('button', { name: 'Inspector', exact: true })).toHaveText('Inspector');
+    await expect(toolbar.getByRole('button', { name: 'Version history', exact: true })).toHaveCount(1);
+    await expect(toolbar.getByRole('button', { name: /^Comments(?: |$)/ })).toHaveCount(1);
+    await expect(toolbar.getByRole('button', { name: 'Add comment', exact: true })).toBeVisible();
+    await expect(main(page).locator('[data-editor-header]').getByRole('button', { name: /^(Inspector|Version history|Comments|\d+ open comments?)$/ })).toHaveCount(0);
     await toolbar.getByRole('button', { name: 'Inspector', exact: true }).click();
     await toolbar.getByRole('button', { name: 'Version history', exact: true }).click();
     await expect(deckTab.locator('.deck-tool-card')).toHaveCount(2);
@@ -308,6 +330,7 @@ test('UX2: real Library document and deck editors use main without an empty pane
       const cards = await box(deckTab.locator('.deck-tool-cards'));
       return slide.x + slide.width <= cards.x + 1;
     }, { message: 'the fitted slide stays visible beside its document tools' }).toBe(true);
+    await deckFilmstripPlacement(deckTab, width === 1280);
     await shot(maws, info, 'deck-tools');
     await toolbar.getByRole('button', { name: 'Version history', exact: true }).click();
     await toolbar.getByRole('button', { name: 'Inspector', exact: true }).click();

@@ -1,6 +1,6 @@
 // The document's X32 header (M8 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D13): the saved state mapped
-// from the replica's DocumentState, the open-thread count, the actions in importance order (History, Export's word,
-// Save version, Comments, Agent edits as suggestions) so the 360 px fold keeps the first, the four formats with Letter
+// from the replica's DocumentState, the open-thread count badge, the non-card actions in importance order
+// (Export's word, Save version, Agent edits as suggestions), the four formats with Letter
 // and A4 for the paged ones, an export's progress and failure said in the header's own action, and the close guard.
 import { describe, expect, it, vi } from 'vitest';
 import type { DocumentState } from '@artifacts/host';
@@ -45,22 +45,22 @@ describe('documentHeader', () => {
     expect(header).toMatchObject({ title: 'Launch plan', saved: 'saving', unresolved: 3 });
   });
 
-  it('orders the actions by importance, the comments action under the id the header counts on', () => {
-    const header = documentHeader(state(), commands());
+  it('keeps card toggles in the document toolbar while retaining the title header’s other actions', () => {
+    const c = commands();
+    const header = documentHeader(state({ unresolved: 3 }), c);
     expect(header.actions!.map((a) => [a.id, a.label])).toEqual([
-      ['history', 'Version history'],
       ['save-version', 'Save version'],
-      ['comments', 'Comments'],
       ['suggestions', 'Agent edits as suggestions'],
     ]);
+    for (const action of header.actions!) action.onSelect();
+    expect(c.toggleRail).not.toHaveBeenCalled();
+    expect(header.unresolved).toBe(3); // no registered Comments action: the header renders a non-interactive count badge
     expect(header.actions!.find((a) => a.id === 'suggestions')!.pressed).toBe(false);
-    expect(documentHeader(state({ rail: 'history' }), commands()).actions![0].pressed).toBe(true);
-    expect(documentHeader(state({ rail: 'comments' }), commands()).actions!.find((a) => a.id === 'comments')!.pressed).toBe(true);
   });
 
   it('offers no history actions without a history, and nothing to toggle while the setting is unknown', () => {
     const header = documentHeader(state({ history: false, suggestions: null }), commands());
-    expect(header.actions!.map((a) => a.id)).toEqual(['comments', 'suggestions']);
+    expect(header.actions!.map((a) => a.id)).toEqual(['suggestions']);
     expect(header.actions!.find((a) => a.id === 'suggestions')!.disabled).toBe(true);
   });
 
@@ -68,8 +68,7 @@ describe('documentHeader', () => {
     const c = commands();
     const header = documentHeader(state({ rail: 'history', suggestions: true }), c);
     for (const action of header.actions!) action.onSelect();
-    expect(c.toggleRail).toHaveBeenNthCalledWith(1, 'history');
-    expect(c.toggleRail).toHaveBeenNthCalledWith(2, 'comments');
+    expect(c.toggleRail).not.toHaveBeenCalled();
     expect(c.saveVersion).toHaveBeenCalledOnce();
     expect(c.setSuggestions).toHaveBeenCalledWith(false);
     expect(header.closeGuard).toBe(c.closeGuard);
@@ -90,18 +89,18 @@ describe('documentHeader', () => {
     ]);
   });
 
-  it('says an export’s progress and its failure in the header’s action, second, and holds the menu while one runs', () => {
+  it('says an export’s progress and its failure first in the header’s actions, and holds the menu while one runs', () => {
     const c = commands();
     const running = documentHeader(state({ exporting: { phase: 'running', format: 'pdf' } }), c);
-    expect(running.actions![1]).toMatchObject({ id: 'export', label: 'Exporting PDF…', disabled: true });
+    expect(running.actions![0]).toMatchObject({ id: 'export', label: 'Exporting PDF…', disabled: true });
     expect(running.exports!.every((e) => e.disabled)).toBe(true);
     const failed = documentHeader(state({ exporting: { phase: 'failed', format: 'docx', message: 'exporting an artifact is not available yet' } }), c);
-    expect(failed.actions![1]).toMatchObject({ id: 'export', label: 'Word export failed: exporting an artifact is not available yet' });
-    failed.actions![1].onSelect();
+    expect(failed.actions![0]).toMatchObject({ id: 'export', label: 'Word export failed: exporting an artifact is not available yet' });
+    failed.actions![0].onSelect();
     expect(c.dismissExport).toHaveBeenCalledOnce();
     expect(failed.exports!.every((e) => !e.disabled)).toBe(true);
     const long = documentHeader(state({ exporting: { phase: 'failed', format: 'md', message: 'x'.repeat(200) } }), c);
-    expect(long.actions![1].label.length).toBeLessThanOrEqual(80);
+    expect(long.actions![0].label.length).toBeLessThanOrEqual(80);
   });
 
   // P3-F (8.2, F7; c65): an export saved says where in a toast (the tab's), so the header keeps no "Exported …" item that

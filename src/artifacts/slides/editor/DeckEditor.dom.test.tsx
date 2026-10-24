@@ -2,7 +2,7 @@
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { HistoryApi } from '../../document/editor/history/api';
 import { applyV1, diffV1, encodeMap, mergeMaps, newDoc, stateV2, stateVector, transact, type Doc } from '../../yjs';
@@ -13,6 +13,7 @@ import { DECK_LIMITS } from '../deck';
 import { loadSlide } from '../parse';
 import { addThread } from '../threads';
 import { DeckEditor } from './DeckEditor';
+import chromeCss from './chrome.css?raw';
 import type { DeckReveal } from './reveal';
 import { DeckSession } from './session';
 
@@ -44,7 +45,9 @@ describe('the deck editor', () => {
   it('keeps the inspector closed until its own toolbar action is used, then closes it from the card', () => {
     mount();
     expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
-    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Inspector' }));
+    const inspector = within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Inspector' });
+    expect(inspector.textContent).toBe('Inspector');
+    fireEvent.click(inspector);
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
     expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
@@ -521,18 +524,29 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
   });
 
   it('moves the filmstrip below the stage when the editor narrows, keeping the selected slide', () => {
+    const sheet = document.createElement('style');
+    sheet.textContent = chromeCss;
+    document.head.append(sheet);
+    onTestFinished(() => sheet.remove());
     const { session, container } = withHistory();
     act(() => session.show('b'));
     const strip = () => container.querySelector<HTMLElement>('.deck-filmstrip')!;
+    const order = (element: Element) => Number(getComputedStyle(element).order || 0);
+    const stage = container.querySelector('.deck-editor-main')!;
     expect(strip().dataset.direction).toBe('vertical');
+    expect(order(strip())).toBe(order(stage));
     editorWidth = 1000;
     layout();
     expect(strip().dataset.direction).toBe('horizontal');
+    // The real scope wrapper is display:contents. The stylesheet must order its filmstrip after the stage, not merely
+    // change the data attribute or match a direct-child nav that the editor never renders. Pixel bounds live in UX2 e2e.
+    expect(order(strip())).toBeGreaterThan(order(stage));
     expect(session.snapshot().currentSlide).toBe('b');
     expect(strip().querySelector('[data-current]')!.getAttribute('data-slide-thumb')).toBe('b');
     editorWidth = 1100;
     layout();
     expect(strip().dataset.direction).toBe('vertical');
+    expect(order(strip())).toBe(order(stage));
   });
 
   it('remeasures the card reservation while a preview narrows into a sheet', async () => {

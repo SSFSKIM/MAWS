@@ -139,7 +139,7 @@ async function commentSent(): Promise<void> {
     editor.commands.insertContent('Quarterly plans ship on time.');
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1, 10)));
   });
-  await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Add comment' }));
   await waitFor(() => expect(field()).toBeTruthy());
   await userEvent.type(field(), 'Monthly?{Enter}');
   expect(fake.invoked('side.thread.open')).toHaveLength(1);
@@ -222,7 +222,7 @@ describe('an unsent comment when its document moves onto a view of it already op
       editor.commands.insertContent('Quarterly plans ship on time.');
       editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1, 10)));
     });
-    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     await waitFor(() => expect(field()).toBeTruthy());
     await userEvent.type(field(), TEXT);
     expect(commentDraftOf(DOC)?.text).toBe(TEXT);

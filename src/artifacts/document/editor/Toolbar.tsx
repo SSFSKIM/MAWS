@@ -383,8 +383,8 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
       </div>
       <div className="doc-toolbar-end">
         {comments.comment && (
-          <Tool label="Comment" disabled={disabled || !state.selected} onClick={comments.comment}>
-            Comment
+          <Tool label="Add comment" disabled={disabled || !state.selected} onClick={comments.comment}>
+            Add comment
           </Tool>
         )}
         <Tool label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail}>

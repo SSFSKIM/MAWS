@@ -50,7 +50,7 @@ export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert
       {button(C.deleteElements, cmds?.canEdit ?? false, () => cmds?.remove(), '⌫')}
       <span className="deck-toolbar-divider" aria-hidden />
       <button type="button" className="deck-button" aria-label={C.inspector} aria-pressed={inspectorOpen} title={C.inspector} onClick={onToggleInspector}>
-        ☰
+        {C.inspector}
       </button>
     </div>
   );

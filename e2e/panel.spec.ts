@@ -1020,8 +1020,8 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       for (const name of ['Subagents', 'Background work']) await expect(context.getByRole('button', { name, exact: true })).toBeEnabled();
       for (const name of ['Terminal', 'Review', 'Files', 'Browser']) await expect(surfaceRow(page).getByRole('button', { name, exact: true })).toBeEnabled();
       await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-      // UX2: non-primary product tools stay in overflow. Artifacts is the project Library card; Log is internal.
-      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Subagents', 'Background work', 'Session info', 'Tasks', 'Source control', 'Side'].sort());
+      // UX2: non-primary tools and the Session actions submenu share one More menu. Artifacts is the project Library card; Log is internal.
+      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Subagents', 'Background work', 'Session info', 'Tasks', 'Source control', 'Side', 'Session actions'].sort());
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

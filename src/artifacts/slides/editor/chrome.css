@@ -86,7 +86,7 @@
 .deck-editor-body[data-filmstrip='horizontal'] {
   flex-direction: column;
 }
-.deck-editor-body[data-filmstrip='horizontal'] > .deck-filmstrip {
+.deck-editor-body[data-filmstrip='horizontal'] .deck-filmstrip {
   order: 2;
 }
 .deck-editor-body[data-filmstrip='horizontal'] > .deck-tool-cards {

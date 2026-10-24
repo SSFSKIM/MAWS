@@ -58,7 +58,7 @@ async function mount(content: JSONContent, { surface = true } = {}): Promise<Mou
 
 const content = () => doc(para('p1', 'The plan ships quarterly.'), para('p2', 'Owners track the budget.'));
 const toolbar = () => screen.getByRole('toolbar', { name: 'Formatting' });
-const commentButton = () => within(toolbar()).getByRole('button', { name: 'Comment' }) as HTMLButtonElement;
+const commentButton = () => within(toolbar()).getByRole('button', { name: 'Add comment' }) as HTMLButtonElement;
 const rail = () => screen.getByRole('complementary', { name: 'Comments' }); // P4-B1: each thread in it is X36's card, a group (K1)
 // the rail's list follows the document after a quiet moment (use-threads.ts)
 const quiet = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80)));
@@ -97,7 +97,7 @@ describe('commenting a selection', () => {
   it('is not offered without a surface', async () => {
     const { editor } = await mount(content(), { surface: false });
     act(() => void select(editor(), 'ships'));
-    expect(within(toolbar()).queryByRole('button', { name: 'Comment' })).toBeNull();
+    expect(within(toolbar()).queryByRole('button', { name: 'Add comment' })).toBeNull();
     act(() => void editor().commands.keyboardShortcut('Mod-Alt-m'));
     expect(covered(editor())).toEqual({});
   });

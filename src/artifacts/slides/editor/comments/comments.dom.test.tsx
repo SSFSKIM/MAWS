@@ -82,7 +82,7 @@ function mount({ withSurface = true, readOnly = false } = {}) {
 describe('comments on a deck’s elements (D9)', () => {
   it('Comment writes a thread on the one selected element and hands it to the surface with the slide’s number and title', () => {
     const { doc, session, surface: s, toolbar } = mount();
-    const button = within(toolbar).getByRole('button', { name: 'Comment' });
+    const button = within(toolbar).getByRole('button', { name: 'Add comment' });
     expect(button).toHaveProperty('disabled', true);
     act(() => session.select(['body']));
     fireEvent.click(button);
@@ -100,7 +100,7 @@ describe('comments on a deck’s elements (D9)', () => {
   it('the card’s reach records the sent comment, resolves and reopens, withdraws an unsent draft, and locates the element on the slide shown', () => {
     const { doc, session, surface: s } = mount();
     act(() => session.select(['body']));
-    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     const reach = s.reach.current!;
     const id = listThreads(doc)[0]!.id;
     // P4-B2: the card stands at the element's pin: where it will be (the element's top-right, the 20 px pin above it) until drawn
@@ -113,7 +113,7 @@ describe('comments on a deck’s elements (D9)', () => {
     act(() => reach.discard(id)); // spoken in: kept
     expect(getThread(doc, id)).not.toBeNull();
     act(() => session.select(['title']));
-    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     const draft = listThreads(doc)[1]!.id;
     act(() => s.reach.current!.discard(draft));
     expect(getThread(doc, draft)).toBeNull();
@@ -124,13 +124,13 @@ describe('comments on a deck’s elements (D9)', () => {
 
   it('offers no Comment without a surface or on a read-only store; the rail still lists', async () => {
     const { session } = mount({ withSurface: false });
-    expect(screen.queryByRole('button', { name: 'Comment' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add comment' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Comments' }));
     expect(session.snapshot().rail).toBe('comments');
     expect(screen.getByRole('complementary', { name: 'Comments' }).textContent).toContain('No open comments');
     cleanup();
     mount({ readOnly: true });
-    expect(screen.queryByRole('button', { name: 'Comment' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add comment' })).toBeNull();
   });
 
   it('hides deleted-target comments and badges until explicitly revealed, keeping conversations and reply drafts through hide and undo (WR 49)', async () => {
@@ -176,9 +176,9 @@ describe('comments on a deck’s elements (D9)', () => {
   it('the rail: open threads with their slide and quote, an orphan with its last text, Reply, Resolve and Reopen, and Show', async () => {
     const { doc, session, toolbar } = mount();
     act(() => session.select(['body']));
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comment' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     act(() => session.select(['title']));
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comment' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments (2 open)' }));
     await settle();
     const rail = screen.getByRole('complementary', { name: 'Comments' });
@@ -250,7 +250,7 @@ describe('comments on a deck’s elements (D9)', () => {
     const { doc, session, container } = mount();
     fakeLayout(container);
     act(() => session.select(['body']));
-    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     await settle();
     act(() => session.setZoom(0.5));
     const scale = 0.5;
@@ -272,7 +272,7 @@ describe('comments on a deck’s elements (D9)', () => {
     fakeLayout(container);
     act(() => session.setZoom(0.5));
     act(() => session.select(['body']));
-    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     await settle();
     const pin = () => container.querySelector<HTMLElement>('[data-comment-pin="body"]')!;
     expect(Number.parseFloat(pin().style.left)).toBe((300 + 400) * 0.5);
