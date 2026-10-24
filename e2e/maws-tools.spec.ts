@@ -213,6 +213,42 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
   });
 });
 
+test('a waiting question is answered in its sidebar hover card, never queued as a follow-up', async () => {
+  await scene({ titles: ['Acceptance: hover answer'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    const args = { blocking: true, title: 'Release setup', questions: [
+      { id: 'filename', question: 'Should the new file be named hello.txt or hi.txt?', modality: 'choice', options: [{ label: 'hello.txt' }, { label: 'hi.txt' }] },
+      { id: 'title', question: 'What title?', modality: 'text' },
+    ] };
+    await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, args));
+    // This old recording contains the redundant approval; launch.test.ts covers its omission on new launches.
+    await allowNext(s, id);
+    const row = sidebarOf(s.page).locator(`button[data-needs-you="${id}"]`);
+    await expect(row).toHaveAccessibleName(/ · Question$/);
+    const card = s.page.locator('[data-hover-card]');
+    await expect(async () => {
+      await s.page.mouse.move(700, 20);
+      await row.hover();
+      await expect(card).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 10_000 });
+    await expect(card.getByText(args.questions[0]!.question)).toBeVisible();
+    await expect(card.getByRole('textbox', { name: /^Reply to / })).toHaveCount(0);
+    await card.getByRole('radio', { name: 'hi.txt', exact: true }).click();
+    await card.getByRole('textbox', { name: 'What title?' }).fill('Release notes');
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    await card.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([
+      { id: 'filename', question: args.questions[0]!.question, status: 'answered', value: ['hi.txt'] },
+      { id: 'title', question: 'What title?', status: 'answered', value: 'Release notes' },
+    ]);
+    await expect(row).toHaveCount(0);
+    expect(value(await invoke(s.page, 'session.queue.list', { appSessionId: id })).entries.filter((entry) => entry.content === 'Release notes' || entry.content === 'hi.txt')).toEqual([]);
+    expect(s.journal(id).filter((row) => row.direction === 'out' && (row.frame as Frame).type === 'user')).toHaveLength(1);
+    await idle(s, id);
+  });
+});
+
 // ---- G6: the host holds the ask across a renderer reload ------------------------------------------------------------
 
 test('a reload mid-ask: the sheet lists the ask again from the host and Submit answers it; after another reload View answers reopens it read-only', async () => {

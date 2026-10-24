@@ -17,6 +17,10 @@ import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
 import { formatAgo } from '@shared/app/date-format';
+import { registerSlot, resetSlots } from '../app/slots';
+import { RequestCard } from '../request-card/RequestCard';
+import { askItemFor, askOpened } from '../request-card/test-requests';
+import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
@@ -324,6 +328,91 @@ describe('request preview', () => {
     render(<RequestPreview item={itemFor(foreign as AppSessionId, 'permission', 'req_1')} request={read} placement="hover" paneIndex={null} />);
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Open session' }));
+  });
+});
+
+describe('answering a waiting question from the hover card', () => {
+  const title = 'Charter + research';
+  const id = idOf(title);
+  const event = askOpened();
+  const attention = askItemFor(event, id);
+
+  beforeEach(() => {
+    resetAskSheets();
+    registerSlot('requestCard', RequestCard);
+    useAttention.getState().applyChanged({ appSessionId: id, items: [attention] });
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: humanTurn }) });
+    fake = fakeClient({
+      'attention.request': { event },
+      'maws.asks.list': { asks: [{ askId: event.askId, toolUseId: event.toolUseId, requestId: event.requestId, title: event.title, context: event.context, blocking: event.blocking, questions: event.questions, openedAt: event.at }] },
+    });
+    window.maws = fake.client;
+  });
+  afterEach(() => {
+    resetSlots();
+    resetAskSheets();
+  });
+
+  const open = async () => {
+    render(<Sidebar />);
+    await userEvent.hover(needsRow(title));
+    return screen.findByRole('dialog', { name: title });
+  };
+
+  it.each(['delivered', 'write_failed', 'not_pending'] as const)('shows the actual choices and text, answers the ask once, and handles %s without queueing a follow-up', async (outcome) => {
+    const card = await open();
+    const blue = await within(card).findByRole('radio', { name: 'Blue' });
+    expect(within(card).getByText('Which colour?')).toBeTruthy();
+    expect(within(card).queryByRole('textbox', { name: `Reply to ${title}` })).toBeNull();
+    await userEvent.click(blue);
+    const text = within(card).getByRole('textbox', { name: 'What title?' });
+    await userEvent.type(text, 'Release notes');
+    const submit = within(card).getByRole('button', { name: 'Submit', exact: true });
+    await userEvent.click(submit);
+    await waitFor(() => expect(fake.invoked('maws.ask.answer')).toEqual([{
+      appSessionId: id, askId: event.askId, answers: [
+        { id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] },
+        { id: 'q2', question: 'What title?', status: 'answered', value: 'Release notes' },
+      ],
+    }]));
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(submit);
+    expect(fake.invoked('maws.ask.answer')).toHaveLength(1);
+    await act(() => fake.reply('maws.ask.answer', { outcome }));
+    if (outcome === 'write_failed') {
+      expect((within(card).getByRole('textbox', { name: 'What title?' }) as HTMLTextAreaElement).value).toBe('Release notes');
+      expect(within(card).getByRole('alert')).toBeTruthy();
+      expect(within(card).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    } else {
+      await waitFor(() => expect(within(card).queryByRole('button', { name: 'Submit', exact: true })).toBeNull());
+    }
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(fake.invoked('session.steer')).toEqual([]);
+    expect(fake.invoked('session.answer')).toEqual([]);
+  });
+
+  it('keeps the question draft when the card closes, sharing it with the question sheet', async () => {
+    applyAskEvents(id, [event]);
+    let card = await open();
+    await userEvent.click(await within(card).findByRole('radio', { name: 'Blue' }));
+    await userEvent.type(within(card).getByRole('textbox', { name: 'What title?' }), 'Keep this answer');
+    await userEvent.click(screen.getByRole('searchbox'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: title })).toBeNull());
+    await userEvent.hover(needsRow(title));
+    card = await screen.findByRole('dialog', { name: title });
+    expect(within(card).getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe('true');
+    expect((within(card).getByRole('textbox', { name: 'What title?' }) as HTMLTextAreaElement).value).toBe('Keep this answer');
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
+  });
+
+  it('does not offer a follow-up reply while a native question is waiting either', async () => {
+    const native = ev('question.requested', { questions: [{ header: 'Colour', question: 'Which colour?', multiSelect: false, options: [{ label: 'Blue', description: 'Calm', preview: null }] }] });
+    fake = fakeClient({ 'attention.request': { event: native } });
+    window.maws = fake.client;
+    const card = await open();
+    expect(await within(card).findByText('Which colour?')).toBeTruthy();
+    expect(within(card).queryByRole('textbox', { name: `Reply to ${title}` })).toBeNull();
+    expect(within(card).getByRole('button', { name: 'Open session' })).toBeTruthy();
   });
 });
 

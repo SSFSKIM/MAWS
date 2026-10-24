@@ -189,7 +189,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
           <Request item={waiting.oldest} />
         </div>
       )}
-      {!record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
+      {!pending.some((item) => item.kind === 'question') && !record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
         <QuickReply record={record} reply={reply} />}
     </div>
   );
