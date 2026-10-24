@@ -183,6 +183,7 @@ export const ProjectRecordSchema = z.strictObject({
   order: z.number().int(),
   createdAt: z.string(),
   hidden: z.boolean().optional(),
+  discovered: z.boolean().optional(), // UX1: discovered, not explicitly added to the sidebar
 });
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 

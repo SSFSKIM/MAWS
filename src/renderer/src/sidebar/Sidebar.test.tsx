@@ -173,7 +173,7 @@ describe('Needs you across projects', () => {
     expect(useLayout.getState().main.current).toBe('proj-maws');
     expect(fake.invoked('session.answer')).toEqual([]);
     await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sort sessions' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter projects' }));
     search.focus();
     await user.keyboard('{ArrowDown}');
     expect(document.activeElement).toBe(buttons()[1]);
@@ -872,7 +872,7 @@ describe('sidebar states', () => {
     const { rerender } = render(<Sidebar />);
     expect(screen.getByText('No projects yet')).toBeTruthy();
     expect(screen.queryByText('No projects match')).toBeNull();
-    expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(false);
     const create = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     offs.push(registerSessionCreator(async () => 'app-new-2' as AppSessionId));
@@ -994,3 +994,53 @@ describe('the sidebar’s lineage nesting', () => {
   });
 });
 // E3 end
+
+describe('deliberately selected projects', () => {
+  it('keeps discovered projects out of the tree, but offers them from Add project and preserves cross-project attention', async () => {
+    fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: p.name === 'MAWS' })), sessions: nine.sessions.map((r) => r.projectId === 'proj-maws' ? { ...r, pinned: false, holder: { kind: 'none' as const } } : r), digests: [], engine: [], attention: nine.attention.filter((a) => !nine.sessions.some((r) => r.appId === a.appSessionId && r.projectId === 'proj-maws')) });
+    const fake = fakeClient({ 'session.projects.add': ({ directory }: { directory: string }) => {
+      const projects = nine.projects.map((p) => ({ ...p, ...(p.directory === directory ? { discovered: false } : {}) }));
+      useSessions.getState().applyProjects({ projects, revision: useSessions.getState().revision + 1 });
+      return projects.find((p) => p.directory === directory)!;
+    } });
+    window.maws = fake.client;
+    render(<Sidebar />);
+    expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
+    expect(within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: /Quota reset recovery/ })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Add project' }));
+    const chooser = await screen.findByRole('dialog', { name: 'Add project' });
+    await userEvent.click(within(chooser).getByRole('button', { name: /Add MAWS/ }));
+    await waitFor(() => expect(screen.getByRole('treeitem', { name: 'MAWS' })).toBeTruthy());
+    expect(fake.invoked('session.projects.add')).toEqual([{ directory: nine.projects.find((p) => p.name === 'MAWS')!.directory }]);
+  });
+});
+
+it('keeps a discovered project with pinned, running or waiting work, but explicit removal wins', () => {
+  fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: true })) });
+  render(<Sidebar />);
+  expect(screen.getByRole('treeitem', { name: 'MAWS' })).toBeTruthy();
+  act(() => useSessions.getState().applyProjects({ projects: nine.projects.map((p) => ({ ...p, discovered: true, hidden: p.name === 'MAWS' })), revision: useSessions.getState().revision + 1 }));
+  expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
+  expect(within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: /Fix sidebar drag/ })).toBeTruthy();
+});
+
+it('filters to the current session project, toggles back, and supports a chosen project set without filtering Needs you', async () => {
+  fillStores(nine);
+  useLayout.getState().openSession(idOf('Charter + research'));
+  render(<Sidebar />);
+  const filter = screen.getByRole('button', { name: 'Filter projects' });
+  await userEvent.click(filter);
+  expect(projectRows()).toEqual(['MAWS']);
+  expect(within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button')).toHaveLength(3);
+  await userEvent.click(filter);
+  expect(projectRows()).toHaveLength(4);
+  await userEvent.hover(filter);
+  const chooser = await screen.findByRole('dialog', { name: 'Filter projects' });
+  await userEvent.click(within(chooser).getByRole('checkbox', { name: 'MAWS' }));
+  await userEvent.click(within(chooser).getByRole('checkbox', { name: 'claude-usage-menubar' }));
+  expect(projectRows().sort()).toEqual(['MAWS', 'claude-usage-menubar']);
+  await userEvent.click(screen.getByRole('searchbox'));
+  await toggle(userEvent.setup(), 'MAWS');
+  expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
+  expect(projectRows()).toHaveLength(2);
+});

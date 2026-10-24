@@ -1,6 +1,6 @@
 // M2 (§2 O1): cross-project attention stays above the tree, independent of its search and hidden projects.
 // The attention store supplies one wait-ordered row per session; the existing hover card supplies the request preview.
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AppSessionId } from '@shared/graph/ids'; // P2-C
 import { openAnchor, ownerAnchorOf } from '../attention/anchor'; // P2-C
@@ -10,11 +10,13 @@ import { useLayout } from '../stores/layout';
 import type { OpenSessionOptions } from '../stores/layout-model'; // P2-C
 import { useSessions } from '../stores/sessions';
 import { SessionHoverCard } from './HoverCard';
+import { projectLabels } from './project-labels';
 import { SectionHeading } from './SectionHeading';
 
 export function NeedsYou({ rows, selected, onEmptyFocus }: { rows: NeedsYouRow[]; selected: string | null; onEmptyFocus(): void }) {
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
+  const labels = useMemo(() => projectLabels([...projects.values()]), [projects]);
   const [focused, setFocused] = useState<string | null>(null);
   const list = useRef<HTMLUListElement>(null);
   const focusOwner = useRef<{ id: string; index: number } | null>(null);
@@ -48,7 +50,7 @@ export function NeedsYou({ rows, selected, onEmptyFocus }: { rows: NeedsYouRow[]
       <ul ref={list} aria-label="Needs you" className="m-0 flex list-none flex-col gap-px p-0">
         {rows.map((row, index) => {
           const record = records.get(row.appSessionId)!; // needsYou excludes missing and archived records.
-          const project = record.projectId === null ? 'Other sessions' : (projects.get(record.projectId)?.name ?? 'Other sessions');
+          const project = record.projectId === null ? 'Other sessions' : (labels.get(record.projectId) ?? 'Other sessions');
           const title = displayTitle(record);
           const anchor = ownerAnchorOf(row.oldest); // P2-C: a question left or a must-read reads its summary and opens at its mark
           const reason = anchor !== null ? row.oldest.summary : ATTENTION_HEADINGS[row.oldest.kind].text;
