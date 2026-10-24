@@ -252,7 +252,7 @@ describe('a capture window is not an app window (Decision Log 21)', () => {
     expect(emit).toHaveBeenCalledWith('attention.navigate', navigation); // delivered to the page, not queued
     const app = new electron.BrowserWindow({});
     registerAppWindow(app as never);
-    app.webContents.emit('did-start-loading'); // the app's page reloads
+    app.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false }); // the app's page reloads
     relay.deliver(navigation);
     expect(emit).toHaveBeenCalledTimes(1);
     expect(relay.take()).toBe(navigation); // queued for the page to pull

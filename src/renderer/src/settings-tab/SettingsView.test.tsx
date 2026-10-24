@@ -153,7 +153,7 @@ describe('settings tab writes one field per row', () => {
 
   it('Notifications: enabled, one kind at a time, sound and no retired near-limit control; held peer messages never notify', async () => {
     renderView();
-    const when = row('When a session needs you');
+    const when = row('When a session finishes or needs you');
     expect(within(when).queryByText(/^macOS:/)).toBeNull();
     act(() => useAttention.setState({ notificationDelivery: 'fallback' }));
     expect(within(when).getByText('macOS: not delivered · MAWS falls back to a dock bounce and a toast')).toBeTruthy();
@@ -161,9 +161,13 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets).toEqual([{ notifications: { enabled: false } }]));
 
     const kinds = row('For');
+    const finished = within(kinds).getByRole('checkbox', { name: 'Turn finished' }) as HTMLInputElement;
+    expect(finished.checked).toBe(true);
+    fireEvent.click(finished);
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { turnFinished: false } } }));
     fireEvent.click(within(kinds).getByRole('checkbox', { name: /^errors/ }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { errors: false } } }));
-    expect(settings().notifications.kinds).toEqual({ approvals: true, questions: true, planReviews: true, errors: false, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ });
+    expect(settings().notifications.kinds).toEqual({ turnFinished: false, approvals: true, questions: true, planReviews: true, errors: false, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ });
     const held = within(kinds).getByRole('checkbox', { name: /^held peer messages/ }) as HTMLInputElement;
     expect(held.disabled).toBe(true);
     expect(kinds.textContent).toContain('Never notifies in this version');
@@ -172,7 +176,7 @@ describe('settings tab writes one field per row', () => {
     fireEvent.click(within(row('Sound')).getByRole('switch'));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { sound: true } }));
     expect(screen.queryByText('Near-limit banner')).toBeNull();
-    expect(b.sets).toHaveLength(3);
+    expect(b.sets).toHaveLength(4);
   });
 
   // P2-C start (2026-10-10; the P2-C document, §9 and G7): the to-human mod's app switch and the owner channel's two groups
@@ -187,7 +191,7 @@ describe('settings tab writes one field per row', () => {
 
     const kinds = row('For');
     expect(within(kinds).getAllByRole('checkbox').map((box) => box.closest('label')!.textContent)).toEqual([
-      'approvals· permission requests, dialogs and MCP elicitations', 'questions', 'plan reviews', 'errors', 'questions an agent left for you', 'must-read messages', 'held peer messages· Never notifies in this version',
+      'Turn finished', 'approvals· permission requests, dialogs and MCP elicitations', 'questions', 'plan reviews', 'errors', 'questions an agent left for you', 'must-read messages', 'held peer messages· Never notifies in this version',
     ]);
     fireEvent.click(within(kinds).getByRole('checkbox', { name: 'must-read messages' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { essential: false } } }));

@@ -45,7 +45,7 @@ const LOOSE = 'app-loose' as AppSessionId;
 const T = '2026-09-28T10:00:00Z';
 const SETTINGS: Settings = SETTINGS_DEFAULTS_V17;
 
-function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void } = {}) {
+function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void; actions?: import('./actions').NotificationActions } = {}) {
   const model = new SessionReadModel('index');
   let writer!: Writer;
   model.register({ start: (w) => ((writer = w), () => {}) });
@@ -57,9 +57,10 @@ function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Wr
   const emit = vi.fn(() => true);
   const focusWindow = vi.fn();
   const navigate = vi.fn();
-  const stop = startNotifier(model, { isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, focusWindow, navigate, settings: () => state.settings, emit });
+  const failure = vi.fn();
+  const stop = startNotifier(model, { actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, focusWindow, navigate, settings: () => state.settings, emit });
   const set = (appSessionId: AppSessionId, items: AttentionItem[]) => writer.observeAttention(appSessionId, items);
-  return { model, writer, state, emit, focusWindow, navigate, stop, set };
+  return { model, writer, state, emit, focusWindow, navigate, failure, stop, set };
 }
 
 const posted = () => electron.FakeNotification.instances;
@@ -259,6 +260,30 @@ describe('dock badge', () => {
     expect(posted()).toHaveLength(1);
     expect(posted()[0].options.body).toBe('All tests pass.');
   });
+  it('hands a failed reply to the ready-page relay rather than emitting it to a just-created window', async () => {
+    const actions = { reply: vi.fn().mockRejectedValue(new Error('Session unavailable')), canAllow: vi.fn(), allow: vi.fn() };
+    const h = harness({ actions });
+    h.writer.setDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
+    h.writer.setDigest(digest(CHARTER, { lastTurnEndedAt: '2026-09-28T10:01:00Z' }));
+    posted()[0].fire('reply', 'Do not lose these words');
+    await vi.waitFor(() => expect(h.focusWindow).toHaveBeenCalledOnce());
+    expect(h.navigate).toHaveBeenCalledWith({ appSessionId: CHARTER, attentionId: null, source: 'notification' });
+    expect(h.failure).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: null, delivery: 'in-app', at: expect.any(String), error: 'Session unavailable', reply: 'Do not lose these words' });
+    expect(emitted(h.emit, 'attention.notified')).toEqual([]);
+  });
+
+  it('hands a failed Allow once action to the same ready-page relay', async () => {
+    const actions = { reply: vi.fn(), canAllow: vi.fn().mockResolvedValue(true), allow: vi.fn().mockRejectedValue(new Error('Request expired')) };
+    const h = harness({ actions });
+    const request = item(CHARTER, 'permission', T);
+    h.set(CHARTER, [request]);
+    await vi.waitFor(() => expect(posted()).toHaveLength(1));
+    posted()[0].fire('action', 0);
+    await vi.waitFor(() => expect(h.focusWindow).toHaveBeenCalledOnce());
+    expect(h.failure).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: request.id, delivery: 'in-app', at: expect.any(String), error: 'Request expired' });
+    expect(emitted(h.emit, 'attention.notified')).toEqual([]);
+  });
+
   it('withdraws a request banner when the request resolves', () => {
     const h = harness();
     const request = item(CHARTER, 'permission', T);

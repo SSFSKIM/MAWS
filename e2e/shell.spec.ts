@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
+import type { EventPayload } from '../src/shared/ipc/schema';
 import { formatChord } from '../src/shared/keymap/chord';
 import { activateForScene, traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -31,7 +32,7 @@ const NORTH = 'Workstation north star';
 const USAGE_PROJECT = 'claude-usage-menubar';
 
 interface Captured {
-  notified: { appSessionId: string; attentionId: string; delivery: 'os' | 'fallback'; at: string; receivedAt: number }[];
+  notified: (EventPayload<'attention.notified'> & { receivedAt: number })[];
   navigate: unknown[];
 }
 declare global {

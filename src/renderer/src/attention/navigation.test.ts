@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId } from '@shared/graph/ids';
@@ -10,6 +10,7 @@ import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
+import { registerFocusTarget, resetComposerStore, useComposerStore } from '../stores/composer';
 import { hideSideChild, showSideChild } from '../side/store';
 import { hideCardThread, showCardThread } from '../side/card/store'; // P2-E1
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
@@ -25,6 +26,7 @@ let disconnect: () => void;
 
 beforeEach(() => {
   resetShellStores();
+  resetComposerStore();
   fillStores(nine);
   useNotices.setState({ notices: [] });
   fake = fakeClient({ 'attention.pendingNavigate': { navigate: null } });
@@ -92,6 +94,27 @@ describe('a navigation queued while no page could hear it (attention.pendingNavi
     disconnect = connectAttention(late.client);
     await late.reply('attention.pendingNavigate', { navigate: null });
     expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main); // still the empty pane: no tab opened
+  });
+});
+
+describe('failed notification actions', () => {
+  it('retains an unsent reply after dismissing its error and adds it to the restored draft without replacing it', async () => {
+    const appSessionId = idOf('Charter + research');
+    fake.event('attention.notified', { appSessionId, attentionId: null, delivery: 'in-app', at: '2026-10-23T00:00:00Z', error: 'Session unavailable', reply: 'Continue with the next task' });
+    const [notice] = useNotices.getState().notices;
+    expect(notice).toMatchObject({ level: 'danger', text: expect.stringContaining('Session unavailable') });
+    useNotices.getState().dismiss(notice.id);
+    expect(useComposerStore.getState().attachmentQueue.get(appSessionId)).toEqual([{ files: [], text: 'Continue with the next task' }]);
+    let draft = 'Existing draft';
+    const off = registerFocusTarget(appSessionId, {
+      focusEditor() {}, focusFrame() {}, attachFiles: async () => true,
+      insertText: (text, options) => { draft += `${options?.separated ? ' ' : ''}${text}`; },
+    });
+    try {
+      await vi.waitFor(() => expect(draft).toBe('Existing draft Continue with the next task'));
+      expect(useComposerStore.getState().attachmentQueue.has(appSessionId)).toBe(false);
+      expect(useComposerStore.getState().prefills.has(appSessionId)).toBe(false);
+    } finally { off(); }
   });
 });
 

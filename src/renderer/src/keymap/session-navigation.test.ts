@@ -26,7 +26,7 @@ describe('session stepping follows rendered sidebar rows', () => {
   const off = registerShellActions();
   try {
     const layout = () => useLayout.getState();
-    layout().openTab({ kind: 'file', path: '/work/readme.md', appSessionId: null });
+    layout().openTab({ kind: 'file', path: '/work/readme.md', line: null, appSessionId: null });
     layout().closeTab(activeTab(layout().main)!.id);
     layout().openSession('closed-session' as never);
     layout().closeTab(activeTab(layout().main)!.id);

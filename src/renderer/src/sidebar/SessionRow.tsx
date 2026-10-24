@@ -49,7 +49,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const branch = rowBranch(record); // W9 (H2): a branch the record does not name is left out, never guessed as "detached"
   const offered = sessionActionsFor(record);
   const hoverActions = HOVER_ACTIONS.filter((action) => offered.includes(action));
-  // While the actions show, the age and the dot give them the row's end.
+  // Only the age yields to hover actions; the unread toggle keeps the rightmost hit target.
   const yields = hoverActions.length > 0 ? 'group-hover/session:invisible group-focus-visible/session:invisible' : '';
 
   return (
@@ -100,12 +100,13 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
             <PinIcon className="size-[11px]" />
           </span>
         )}
+        <span className={`shrink-0 text-ui-sm text-fg-muted tabular-nums ${yields}`}>{sessionAge(record, digest, now)}</span>
         <button type="button" tabIndex={-1} aria-label={record.unread ? 'Mark read' : 'Mark unread'}
           onClick={(event) => { event.stopPropagation(); void setSessionUnread(id, !record.unread); }}
           className="flex size-4 shrink-0 items-center justify-center rounded-sm outline-accent focus-visible:outline-2">
-          <span aria-hidden className={`size-[5px] rounded-full ${record.unread ? 'bg-info' : 'bg-fg-faint opacity-0 group-hover/session:opacity-100'}`} />
+          <span role={record.unread ? 'img' : undefined} aria-label={record.unread ? 'Unread' : undefined} aria-hidden={!record.unread}
+            className={`size-[5px] rounded-full ${record.unread ? 'bg-info' : 'bg-fg-faint opacity-0 group-hover/session:opacity-100'}`} />
         </button>
-        <span className={`shrink-0 text-ui-sm text-fg-muted tabular-nums ${yields}`}>{sessionAge(record, digest, now)}</span>
         {hoverActions.length > 0 && <RowActions actions={hoverActions} appSessionId={id} title={title} pinned={record.pinned} />}
       </div>
     </SessionHoverCard>
@@ -123,7 +124,7 @@ function RowActions({ actions, appSessionId, title, pinned }: { actions: HoverAc
   const button =
     'inline-flex size-[23px] items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
   return (
-    <span className="absolute top-1/2 right-[5px] hidden -translate-y-1/2 rounded-sm bg-bg-overlay group-hover/session:flex group-focus-visible/session:flex">
+    <span className="absolute top-1/2 right-[28px] hidden -translate-y-1/2 rounded-sm bg-bg-overlay group-hover/session:flex group-focus-visible/session:flex">
       {actions.includes('pin') && (
         <button
           type="button"

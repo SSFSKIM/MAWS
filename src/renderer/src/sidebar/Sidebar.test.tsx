@@ -440,14 +440,42 @@ describe('an expanded project', () => {
     expect(fake.invoked('git.worktree.list')).toEqual([]);
   });
 
-  it('offers a foreign-live session only the opens in its context menu, and no hover actions', async () => {
+  it('offers a foreign-live session only the opens in its context menu and a local read toggle, never holder actions', async () => {
     expand('proj-codex-somersault');
     render(<Sidebar />);
     const foreign = row('Somersault terminal run');
-    expect(within(foreign).queryByRole('button')).toBeNull();
+    expect(within(foreign).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Mark unread']); // local read state, no holder actions
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
+  });
+
+  it('toggles an unread row on hover without opening or pinning it, retaining an accessible unread marker', async () => {
+    const user = userEvent.setup();
+    const pin = vi.fn();
+    offs.push(registerSessionAction('pin', pin));
+    const fake = fakeClient({ 'session.update': ({ appSessionId, patch }: { appSessionId: AppSessionId; patch: { unread: boolean } }) => {
+      const record = { ...useSessions.getState().records.get(appSessionId)!, ...patch };
+      useSessions.getState().applyChanged({ record, cause: 'update', revision: useSessions.getState().revision + 1 });
+      return record;
+    } });
+    window.maws = fake.client;
+    expand('proj-maws');
+    render(<Sidebar />);
+    const session = row('Fix sidebar drag');
+    expect(within(session).getByRole('img', { name: 'Unread' })).toBeTruthy();
+    await user.hover(session);
+    await user.click(within(session).getByRole('button', { name: 'Mark read' }));
+    expect(fake.invoked('session.update')).toEqual([{ appSessionId: idOf('Fix sidebar drag'), patch: { unread: false } }]);
+    expect(within(session).queryByRole('img', { name: 'Unread' })).toBeNull();
+    await user.click(within(session).getByRole('button', { name: 'Mark unread' }));
+    expect(fake.invoked('session.update')).toEqual([
+      { appSessionId: idOf('Fix sidebar drag'), patch: { unread: false } },
+      { appSessionId: idOf('Fix sidebar drag'), patch: { unread: true } },
+    ]);
+    expect(within(session).getByRole('img', { name: 'Unread' })).toBeTruthy();
+    expect(activeTab(useLayout.getState().main)).toBeNull();
+    expect(pin).not.toHaveBeenCalled();
   });
 
   it('offers §5.1’s session actions in a session’s context menu, disabled until a handler registers', async () => {

@@ -4,7 +4,7 @@ import { app, Notification } from 'electron';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
-import type { NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';
+import type { EventPayload, NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';
 import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import { isActionable, isOpen } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
@@ -23,6 +23,7 @@ export interface NotifierDeps {
   isViewing(appSessionId: AppSessionId): boolean;
   focusWindow(): void;
   navigate(navigation: AttentionNavigate): void;
+  failure(notified: EventPayload<'attention.notified'>): void;
   settings(): Settings;
   emit: typeof emitEvent;
   actions?: NotificationActions;
@@ -42,7 +43,7 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
     const message = error instanceof Error ? error.message : String(error);
     deps.focusWindow();
     deps.navigate({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, source: 'notification' });
-    deps.emit('attention.notified', { appSessionId: notice.appSessionId, attentionId: notice.attentionId, delivery: 'in-app', at: new Date().toISOString(), error: `${message}${reply ? ` Reply not sent: ${reply}` : ''}` });
+    deps.failure({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, delivery: 'in-app', at: new Date().toISOString(), error: message, ...(reply !== undefined ? { reply } : {}) });
   };
   const post = (notice: Notice, allowOnce = false, checked = false) => {
     if (deps.isViewing(notice.appSessionId)) return;

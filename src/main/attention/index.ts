@@ -3,7 +3,7 @@
 // the dock's `activate` uses when none is open. The navigation goes through the relay (`navigation.ts`), which emits it
 // to a page that is listening or keeps it for `attention.pendingNavigate`; any page load or window close makes the page
 // un-announced again.
-import { app, type App, type BrowserWindow } from 'electron';
+import { app, type App, type BrowserWindow, type WebContentsDidStartNavigationEventParams } from 'electron';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { emit } from '../ipc/events';
@@ -15,15 +15,29 @@ import type { NotificationActions } from './actions';
 import { startNotifier } from './notifier';
 
 export function startAttention(model: SessionReadModel, deps: { actions?: NotificationActions; restoredIds: ReadonlySet<AttentionId>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
-  const viewing = new Map<number, AppSessionId | null>();
+  const viewing = new Map<number, { appSessionId: AppSessionId | null; release(): void }>();
   registerMainHandler('attention.viewing', ({ appSessionId }, { sender }) => {
-    if (!viewing.has(sender.id)) {
-      sender.on('did-start-loading', () => viewing.delete(sender.id));
-      sender.once('destroyed', () => viewing.delete(sender.id));
+    if (sender.isDestroyed()) return;
+    let page = viewing.get(sender.id);
+    if (!page) {
+      const release = () => {
+        viewing.delete(sender.id);
+        sender.removeListener('destroyed', release);
+        sender.removeListener('render-process-gone', release);
+        sender.removeListener('did-start-navigation', navigating);
+      };
+      const navigating = (details: WebContentsDidStartNavigationEventParams) => {
+        if (details.isMainFrame && !details.isSameDocument) release();
+      };
+      page = { appSessionId: null, release };
+      viewing.set(sender.id, page);
+      sender.on('destroyed', release);
+      sender.on('render-process-gone', release);
+      sender.on('did-start-navigation', navigating);
     }
-    viewing.set(sender.id, appSessionId as AppSessionId | null);
+    page.appSessionId = appSessionId as AppSessionId | null;
   });
-  const isViewing = (id: AppSessionId) => appWindows().some((win) => win.isFocused() && viewing.get(win.webContents.id) === id);
+  const isViewing = (id: AppSessionId) => appWindows().some((win) => win.isFocused() && viewing.get(win.webContents.id)?.appSessionId === id);
   const relay = createNavigationRelay(emit);
   registerMainHandler('attention.pendingNavigate', () => ({ navigate: relay.take() }));
   followAppPages(app, relay.pageGone);
@@ -36,7 +50,8 @@ export function startAttention(model: SessionReadModel, deps: { actions?: Notifi
     win.focus();
   };
   // Listen immediately, including during store retries; only restored arrivals are silent.
-  return startNotifier(model, { actions: deps.actions, restoredIds: deps.restoredIds, isFocused, isViewing, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
+  const stop = startNotifier(model, { actions: deps.actions, restoredIds: deps.restoredIds, isFocused, isViewing, focusWindow, navigate: relay.deliver, failure: relay.failure, settings: deps.settings, emit });
+  return () => { stop(); for (const page of viewing.values()) page.release(); };
 }
 
 // E2 start (E2 execution document, Design §7, Decision Log 21): only an app window's page load or close makes the page
@@ -44,8 +59,8 @@ export function startAttention(model: SessionReadModel, deps: { actions?: Notifi
 // when the event fires: a capture window's load (`deliverables/capture.ts`) leaves a pending navigation deliverable.
 export function followAppPages(source: Pick<App, 'on'>, pageGone: () => void): void {
   const watch = (win: BrowserWindow) => {
-    win.webContents.on('did-start-loading', () => {
-      if (isAppWindow(win)) pageGone();
+    win.webContents.on('did-start-navigation', (details: WebContentsDidStartNavigationEventParams) => {
+      if (isAppWindow(win) && details.isMainFrame && !details.isSameDocument) pageGone();
     });
     win.on('closed', () => {
       if (isAppWindow(win)) pageGone();

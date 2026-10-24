@@ -17,6 +17,7 @@ import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
+import { queueComposerAttachment } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown } from '../side/store';
 import { useCommentCard } from '../side/card/store'; // P2-E1
@@ -103,9 +104,15 @@ const toastId = (attentionId: AttentionId) => `attention:${attentionId}`;
 // the session's list has held it yet (main may announce an item before the page's list carries it).
 type ToastedItems = Map<AttentionId, { appSessionId: AppSessionId; held: boolean }>;
 
-function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery, error }: EventPayload<'attention.notified'>): void {
+function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery, error, reply }: EventPayload<'attention.notified'>): void {
   if (delivery === 'os') return;
-  if (error) { useNotices.getState().toast({ level: 'danger', text: error, actions: [], dismissible: true }); return; }
+  if (error) {
+    // Add to the restored draft, never replace it. A busy or unmounted composer
+    // keeps this queue until it can take the text; dismissing the toast loses nothing.
+    if (reply !== undefined) queueComposerAttachment(appSessionId, { files: [], text: reply });
+    useNotices.getState().toast({ level: 'danger', text: `${error}${reply !== undefined ? ' Reply not sent; kept in the session composer.' : ''}`, actions: [], dismissible: true });
+    return;
+  }
   if (attentionId === null) {
     const record = useSessions.getState().records.get(appSessionId);
     const digest = useSessions.getState().digests.get(appSessionId);

@@ -2,7 +2,7 @@
 // `../schema/attention.ts`, pinned at compile time in `../schema.ts` and per namespace in `../schema.test.ts`: an entry
 // added there adds its name here.
 export const commands = [
-  'attention.viewing', 'attention.list', 'attention.request', 'attention.pendingNavigate', 'attention.acknowledge',
+  'attention.list', 'attention.request', 'attention.viewing', 'attention.pendingNavigate', 'attention.acknowledge',
 ] as const;
 
 export const events = [
