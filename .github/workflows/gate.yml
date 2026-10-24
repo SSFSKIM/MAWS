@@ -139,13 +139,18 @@ env:
   # 40095523463, 40099706584 and 40107391110, matching host references 40095523499 and 40077708930. tools matched the
   # host's two stale failures in all three guest runs, its other 11 cases green; UX2 fixed those on master (f645666ee),
   # and tools now passes on the host. side had been held: the post-Reload pinned-card predicate failed in guest 40112861862
-  # and host control 40118458114. design and presentations stay held.
+  # and host control 40118458114. design stays held.
   # Wave 2b (V4, CI-opt): dashboard was 3/3 green on maws-vm-golden-20261024a in guest runs 40114501885,
   # 40120234172 and 40121336786 (5.4, 5.2 and 4.6 min, against the host's 4.2 min).
   # Wave 2c (V4, CI-opt wave 2d): side was 3/3 green in guest runs 40123319856, 40124224867 and 40127753336 at master
   # 8757bfb90, after the re-pin fix (PR #139, merge 0acb77912), with no post-Reload pin failure (2.3, 2.9 and 3.1 min).
+  # Wave 2d (V4, CI-opt wave 2e): presentations was 3/3 green at master 5495cea3b in guest runs 40129639783,
+  # 40131644227 and 40132498574 (4.8, 5.3 and 5.4 min), after the history race fix (PR #141, merge 81011dd09).
+  # Earlier, wave 2b was 2/3, one run hanging for 180 s at presentations.spec.ts:965; wave 2c was otherwise 3/3 green
+  # at c38cfea0c except one presentations-history.spec.ts:137 red, the product race fixed by #141. The :965 hang was
+  # 1 in 12 guest runs, never on the host; it stays known debt for the architect to record, not a timeout change here.
   MAC_VM_E2E: >-
-    document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side
+    document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations
 
 defaults:
   run:
