@@ -44,6 +44,7 @@ async function expandRow(page: Page, row: Locator): Promise<void> {
 
 // Expands a project in place by its name on the list.
 export async function openProject(page: Page, name: string): Promise<void> {
+  await selectDiscoveredProject(page, name);
   await showProjectList(page);
   await expandRow(page, projectRow(page, name));
 }
@@ -61,6 +62,7 @@ export async function closeProject(page: Page, name: string): Promise<void> {
 
 // The "+" on a project's row, revealed on hover: New chat in that project.
 export async function newChatIn(page: Page, name: string): Promise<void> {
+  await selectDiscoveredProject(page, name);
   await showProjectList(page);
   const row = projectRow(page, name);
   await clickRevealed(projectLine(row), row.getByRole('button', { name: `New chat in ${name}`, exact: true }));
@@ -76,7 +78,12 @@ export async function sidebarRow(page: Page, match: SessionMatch): Promise<Locat
     if (!sessions.ok || !projects.ok) throw new Error('session.list or session.projects.list failed');
     const record = sessions.value.sessions.find((r) => (typeof match === 'string' ? r.title.text === match : r.appId === match.appSessionId));
     if (!record) throw new Error(`no session ${JSON.stringify(match)}`);
-    return record.projectId !== null && projects.value.projects.some((p) => p.id === record.projectId) ? record.projectId : 'other';
+    const project = projects.value.projects.find((p) => p.id === record.projectId);
+    if (project?.discovered && !project.hidden) {
+      const added = await window.maws.invoke('session.projects.add', { directory: project.directory });
+      if (!added.ok) throw new Error(added.error.message);
+    }
+    return project ? project.id : 'other';
   }, match);
   await showProjectList(page);
   const project = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${key}"]`);
@@ -91,4 +98,18 @@ export async function sidebarRow(page: Page, match: SessionMatch): Promise<Locat
     await settled(page);
   }
   return row;
+}
+
+// A test deliberately navigating a discovered folder makes the same selection as Add project. Pure-discovery
+// assertions do not call this helper; those must still prove the folder stays out until chosen.
+async function selectDiscoveredProject(page: Page, name: string): Promise<void> {
+  await page.evaluate(async (name) => {
+    const result = await window.maws.invoke('session.projects.list', undefined);
+    if (!result.ok) throw new Error(result.error.message);
+    const project = result.value.projects.find((p) => p.name === name);
+    if (project?.discovered && !project.hidden) {
+      const added = await window.maws.invoke('session.projects.add', { directory: project.directory });
+      if (!added.ok) throw new Error(added.error.message);
+    }
+  }, name);
 }
