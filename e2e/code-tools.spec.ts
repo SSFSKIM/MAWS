@@ -362,9 +362,16 @@ test.describe('the product in stub mode over a scratch repository', () => {
       await expect(roots).toHaveAttribute('data-path', p.scratch.dir);
       await expect(roots).toContainText('repo');
       await expect(roots).toContainText('directory');
-      await roots.click();
-      await expect(treeRow(p, p.scratch.path('.editorconfig')), 'dotfiles shown').toBeVisible();
+      await expect(roots).toHaveAttribute('aria-expanded', 'true');
+      const dotfile = treeRow(p, p.scratch.path('.editorconfig'));
+      await expect(dotfile, 'dotfiles shown without an opening click').toBeVisible();
       await expect(treeRow(p, p.scratch.path('.git')), '.git hidden').toHaveCount(0);
+      await roots.click();
+      await expect(roots).toHaveAttribute('aria-expanded', 'false');
+      await expect(dotfile).not.toBeVisible();
+      await roots.click();
+      await expect(roots).toHaveAttribute('aria-expanded', 'true');
+      await expect(dotfile).toBeVisible();
       await treeRow(p, p.scratch.path('src')).click();
       const children = p.panel.locator(`[data-tool="files"] [role="treeitem"][aria-level="3"]`);
       await expect(children).toHaveCount(3);

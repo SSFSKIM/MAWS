@@ -348,12 +348,13 @@ test("@layout a session's channel on the phone is its session view: its working 
   await expect(view).not.toContainText('Run the phone layout cases in WebKit');
   await fitsTheWidth(page);
 
-  // Unfolded in place: the turn as the transcript draws it, as on a desktop — its work behind MAWS's "Worked for"
-  // divider, with each tool summary directly visible and its detail one tap away.
-  await record.getByRole('button').click();
-  await expect(record).toContainText('Fold to report');
-  const divider = view.locator(`[data-row-id="divider:${turn}"]`);
-  await divider.getByRole('button', { name: /Worked for/ }).click();
+  // One record disclosure unfolds directly to the tool summaries; each call's detail stays one tap away.
+  const disclosure = record.locator('button.transcript-disclosure');
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+  await expect(disclosure).toContainText('Worked for');
+  await expect(disclosure).toContainText('3 tool calls');
+  await expect(view.locator(`[data-row-id="divider:${turn}"]`)).toHaveCount(0);
   // UX1-C exposes tool summaries directly; there is no second group disclosure.
   await expect(view.locator(`[data-turn-id="${turn}"] .transcript-tool-block`)).toBeVisible();
   await expect(view.locator(`[data-turn-id="${turn}"] .transcript-group-header`)).toHaveCount(0);
@@ -389,7 +390,8 @@ test("@layout a session's channel on the phone is its session view: its working 
   await expect(bash).toHaveAttribute('aria-expanded', 'false');
 
   // Folded again to the report.
-  await record.getByRole('button', { name: 'Fold to report' }).click();
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
   await expect(record).toContainText('Working record · 3 tool calls');
   await expect(view).not.toContainText('Run the phone layout cases in WebKit');
 });

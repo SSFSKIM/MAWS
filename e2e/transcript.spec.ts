@@ -1292,7 +1292,7 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(toggle.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'false');
 
     // Level 0: whole work rows fold, but a marked text block keeps all of its authored words (UX1 l2-transcript-03).
-    const record = pane.getByRole('button', { name: /^Working record/ });
+    const record = pane.locator('[data-kind="owner_record"] .transcript-disclosure');
     await expect(record).toHaveText('Working record · 1 tool call · 1 message');
     await expect(record).toHaveAttribute('aria-expanded', 'false');
     const report = pane.locator('[data-kind="assistant_text"]').filter({ hasText: "I haven't opened any files" });
@@ -1307,16 +1307,14 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
     await captureReportShot(page, 'report-level0');
 
-    // Level 1: the turn as the full transcript draws it folded, the record above it
+    // One stable record disclosure opens directly onto the work, with the turn's own summary as its label.
     await record.click();
-    const fold = pane.getByRole('button', { name: 'Fold to report' });
-    await expect(fold).toHaveAttribute('aria-expanded', 'true');
-    const divider = pane.locator('[data-kind="divider"] .transcript-divider > .transcript-disclosure');
-    await expect(divider).toHaveAttribute('aria-expanded', 'false');
-    await expect(divider).toContainText('1 tool call');
+    await expect(record).toHaveAttribute('aria-expanded', 'true');
+    await expect(record).toContainText('Worked for');
+    await expect(record).toContainText('1 tool call');
+    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
-    // Level 2 exposes the l2-transcript-01 summary row; the command remains on demand inside its detail.
-    await divider.click();
+    // The tool summary appears immediately; the command remains on demand inside its own detail.
     const tool = pane.locator('[data-cell-id="cell:toolu_01P2cM5Bash01"]');
     const detailToggle = tool.getByRole('button', { name: 'Check the tree', exact: true });
     await expect(detailToggle).toBeVisible();
@@ -1328,8 +1326,9 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(command).toBeVisible();
     await expect(command).toHaveText('$ git status --short');
     await captureReportShot(page, 'report-level2');
-    await fold.click();
+    await record.click();
     await expect(record).toHaveAttribute('aria-expanded', 'false');
+    await expect(tool).toHaveCount(0);
     await expect(report.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible(); // UX1: part of this same authored block
 
     // The full transcript: no record, every word, still no cards
