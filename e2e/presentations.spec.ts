@@ -35,7 +35,7 @@ import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { withNativeClipboard } from './support/clipboard';
 import { newChatIn, openProject } from './support/sidebar';
-import { resizePanel, squeezedControls } from './support/toolbar-controls';
+import { openArrange, resizePanel, squeezedControls } from './support/toolbar-controls';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -570,11 +570,12 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   const paraNow = (await tab.locator('[data-stage-slide] [data-eid="para"]').boundingBox())!;
   expect(paraNow.x).toBeCloseTo(para.x, 0);
   expect(paraNow.y).toBeCloseTo(para.y, 0);
-  await expect(tab.getByRole('button', { name: 'Detach' })).toBeDisabled();
+  await expect((await openArrange(page, tab)).getByRole('menuitem', { name: 'Detach', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
 
   // z-order: a sent to back sits under the flow layer (listed before the first flow child)
   await page.mouse.click(at(310, 510).x, at(310, 510).y);
-  await tab.getByRole('button', { name: 'Send to back' }).click();
+  await (await openArrange(page, tab)).getByRole('menuitem', { name: 'Send to back', exact: true }).click();
   await expect.poll(async () => (await slideOf(page, id, 'lab')).children[0]!.id).toBe('a');
 
   // group a and b (⌘G), then ungroup (⇧⌘G)

@@ -27,7 +27,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
-import { resizePanel, squeezedControls } from './support/toolbar-controls';
+import { openArrange, resizePanel, squeezedControls } from './support/toolbar-controls';
 import {
   armFrameProbe,
   boardAt,
@@ -496,10 +496,10 @@ test('elements on boards: an inactive board’s press activates and selects with
 
   // Detach pins the paragraph where it is drawn; Bring to front puts the green box last
   await page.mouse.click(...((b) => [b.x + 20, b.y + b.height / 2] as const)((await tab.locator('[data-board-id="desktop"] [data-eid="para"]').boundingBox())!));
-  await tab.getByRole('button', { name: 'Detach' }).click();
+  await (await openArrange(page, tab)).getByRole('menuitem', { name: 'Detach', exact: true }).click();
   await expect.poll(async () => (await element('para'))?.style.position).toBe('absolute');
   await page.mouse.click(d.at(700, 560).x, d.at(700, 560).y);
-  await tab.getByRole('button', { name: 'Bring to front' }).click();
+  await (await openArrange(page, tab)).getByRole('menuitem', { name: 'Bring to front', exact: true }).click();
   await expect.poll(async () => (await boardOf(page, id, 'desktop')).children.at(-1)!.id).toBe('b');
 
   // group a and b (⌘G), then ungroup (⇧⌘G)

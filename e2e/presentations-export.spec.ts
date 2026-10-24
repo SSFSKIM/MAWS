@@ -55,7 +55,8 @@ const POPPLER = '/opt/homebrew/bin';
 let launch: MawsLaunch | null = null;
 let scratch: string | null = null;
 let exportMenuTrace = false;
-test.afterEach(async ({}, testInfo) => {
+test.afterEach(async () => {
+  const testInfo = test.info();
   try {
     if (exportMenuTrace && launch) {
       try {

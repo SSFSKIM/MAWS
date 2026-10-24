@@ -1,8 +1,8 @@
-// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Transform layer", "Insert"; M5): the toolbar's
-// element controls: Insert, the selection's arrange commands (front, back, forward, backward on pinned elements; group,
-// ungroup; Detach a flow child; duplicate; delete) and the inspector's toggle. Each arrange button is one gesture; the
-// commands are the stage keys' own (transform/commands.ts).
-import { useSyncExternalStore } from 'react';
+// The shared deck/design element tools: Insert, text-style controls supplied by the editor, one stable Arrange menu,
+// and Inspector. Arrange uses the stage keys' own selection commands (transform/commands.ts), with one undo gesture
+// per action. Shortcut hints are the existing bindings in transform/Overlay.tsx; Detach has no key binding.
+import { DropdownMenu } from 'radix-ui';
+import { useSyncExternalStore, type ReactNode } from 'react';
 import type { SlideCanvas } from '../canvas';
 import type { NewKind } from '../writers-elements';
 import { DECK_COPY as C } from './copy';
@@ -22,33 +22,45 @@ export interface ElementBarProps {
   onNotice: (text: string) => void;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
+  /** Text style belongs between Insert and Arrange in both editors. */
+  children?: ReactNode;
 }
 
-export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert, uploadAsset, onNotice, inspectorOpen, onToggleInspector }: ElementBarProps) {
+export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert, uploadAsset, onNotice, inspectorOpen, onToggleInspector, children }: ElementBarProps) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
-  useDocVersion(session); // the commands read the model: render again on its updates
+  useDocVersion(session);
   const cmds = slideId && canvas?.slideId === slideId ? selectionCommands({ session, slideId, canvas, scale }, state.selection, readOnly) : null;
   const notice = (reason: string | null) => reason && onNotice(reason);
-  const button = (label: string, enabled: boolean, run: () => void, glyph: string) => (
-    <button type="button" className="deck-button" aria-label={label} title={label} disabled={!enabled} onClick={run}>
-      {glyph}
-    </button>
+  const item = (label: string, enabled: boolean, run: () => void, shortcut?: string) => (
+    <DropdownMenu.Item className="deck-menu-item" aria-label={label} disabled={!enabled} onSelect={run}>
+      {label}
+      {shortcut && <span className="deck-menu-shortcut" aria-hidden>{shortcut}</span>}
+    </DropdownMenu.Item>
   );
   return (
     <div className="deck-element-bar" role="group" aria-label={C.arrange}>
       <InsertMenu session={session} disabled={readOnly || slideId === null} onInsert={onInsert} uploadAsset={uploadAsset} onNotice={onNotice} />
-      <span className="deck-toolbar-divider" aria-hidden />
-      {button(C.bringToFront, cmds?.canZ ?? false, () => cmds?.z('front'), '⤒')}
-      {button(C.bringForward, cmds?.canZ ?? false, () => cmds?.z('forward'), '↑')}
-      {button(C.sendBackward, cmds?.canZ ?? false, () => cmds?.z('backward'), '↓')}
-      {button(C.sendToBack, cmds?.canZ ?? false, () => cmds?.z('back'), '⤓')}
-      <span className="deck-toolbar-divider" aria-hidden />
-      {button(C.group, cmds?.canGroup ?? false, () => notice(cmds?.group() ?? null), '▣')}
-      {button(C.ungroup, cmds?.canUngroup ?? false, () => notice(cmds?.ungroup() ?? null), '▢')}
-      {button(C.detach, cmds?.canDetach ?? false, () => notice(cmds?.detach() ?? null), '⇱')}
-      {button(C.duplicateElements, cmds?.canEdit ?? false, () => notice(cmds?.duplicate() ?? null), '⧉')}
-      {button(C.deleteElements, cmds?.canEdit ?? false, () => cmds?.remove(), '⌫')}
-      <span className="deck-toolbar-divider" aria-hidden />
+      {children}
+      <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger asChild>
+          <button type="button" className="deck-button" aria-label={C.arrange}>{C.arrange} ▾</button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content className="deck-menu" aria-label={C.arrange} align="start" sideOffset={4}>
+            {item(C.bringToFront, cmds?.canZ ?? false, () => cmds?.z('front'), '⌥⌘]')}
+            {item(C.bringForward, cmds?.canZ ?? false, () => cmds?.z('forward'), '⌘]')}
+            {item(C.sendBackward, cmds?.canZ ?? false, () => cmds?.z('backward'), '⌘[')}
+            {item(C.sendToBack, cmds?.canZ ?? false, () => cmds?.z('back'), '⌥⌘[')}
+            <DropdownMenu.Separator className="deck-menu-separator" />
+            {item(C.group, cmds?.canGroup ?? false, () => notice(cmds?.group() ?? null), '⌘G')}
+            {item(C.ungroup, cmds?.canUngroup ?? false, () => notice(cmds?.ungroup() ?? null), '⇧⌘G')}
+            {item(C.detach, cmds?.canDetach ?? false, () => notice(cmds?.detach() ?? null))}
+            <DropdownMenu.Separator className="deck-menu-separator" />
+            {item(C.duplicateElements, cmds?.canEdit ?? false, () => notice(cmds?.duplicate() ?? null), '⌘D')}
+            {item(C.deleteElements, cmds?.canEdit ?? false, () => cmds?.remove(), '⌫')}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
       <button type="button" className="deck-button" aria-label={C.inspector} aria-pressed={inspectorOpen} title={C.inspector} onClick={onToggleInspector}>
         {C.inspector}
       </button>

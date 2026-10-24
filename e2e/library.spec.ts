@@ -64,7 +64,8 @@ let scratch: string | null = null;
 const cleanups: (() => Promise<void>)[] = []; // M5b: a session case's
 let libraryListTrace = false;
 
-test.afterEach(async ({}, testInfo) => {
+test.afterEach(async () => {
+  const testInfo = test.info();
   try {
     if (libraryListTrace && launch) {
       try {

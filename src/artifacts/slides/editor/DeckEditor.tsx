@@ -398,8 +398,9 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               onNotice={setNotice}
               inspectorOpen={inspectorOpen}
               onToggleInspector={() => setInspectorOpen((open) => !open)}
-            />
-            <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
+            >
+              <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
+            </ElementBar>
             {history && <button type="button" className="deck-button" aria-label="Version history" aria-pressed={historyOpen} onClick={() => session.toggleRail('history')}>History</button>}
             <CommentButtons api={commentsApi} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
             <span role="status" className="deck-notice" data-deck-notice>
@@ -445,26 +446,28 @@ function Toolbar({ session, zoom, scale, fit, canUndo, canRedo, children }: { se
       <span className="deck-toolbar-divider" aria-hidden />
       {children}
       <span className="deck-toolbar-spacer" />
-      <button type="button" className="deck-button" aria-label={C.zoomOut} disabled={scale <= ZOOM_STEPS[0] + 0.001} onClick={() => step(-1)}>
-        −
-      </button>
-      <select
-        className="deck-zoom"
-        aria-label={C.zoom}
-        value={zoom === 'fit' ? 'fit' : String(zoom)}
-        onChange={(event) => session.setZoom(event.target.value === 'fit' ? 'fit' : Number(event.target.value))}
-      >
-        {/* the percentage beside Fit whether it is chosen or not: what it draws at, and a label that never changes with the choice */}
-        <option value="fit">{`${C.fit} (${C.percent(fit)})`}</option>
-        {ZOOM_STEPS.map((s) => (
-          <option key={s} value={String(s)}>
-            {C.percent(s)}
-          </option>
-        ))}
-      </select>
-      <button type="button" className="deck-button" aria-label={C.zoomIn} disabled={scale >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.001} onClick={() => step(1)}>
-        +
-      </button>
+      <div className="deck-zoom-controls" role="group" aria-label={C.zoomControls}>
+        <button type="button" className="deck-button" aria-label={C.zoomOut} disabled={scale <= ZOOM_STEPS[0] + 0.001} onClick={() => step(-1)}>
+          −
+        </button>
+        <select
+          className="deck-zoom"
+          aria-label={C.zoom}
+          value={zoom === 'fit' ? 'fit' : String(zoom)}
+          onChange={(event) => session.setZoom(event.target.value === 'fit' ? 'fit' : Number(event.target.value))}
+        >
+          {/* the percentage beside Fit whether it is chosen or not: what it draws at, and a label that never changes with the choice */}
+          <option value="fit">{`${C.fit} (${C.percent(fit)})`}</option>
+          {ZOOM_STEPS.map((s) => (
+            <option key={s} value={String(s)}>
+              {C.percent(s)}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="deck-button" aria-label={C.zoomIn} disabled={scale >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.001} onClick={() => step(1)}>
+          +
+        </button>
+      </div>
     </div>
   );
 }

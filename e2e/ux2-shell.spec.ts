@@ -270,6 +270,37 @@ async function deckFilmstripPlacement(deck: Locator, horizontal: boolean): Promi
   }, { message: horizontal ? 'the horizontal filmstrip sits below the stage' : 'the vertical filmstrip sits left of the stage' }).toBeGreaterThanOrEqual(0);
 }
 
+async function deckToolbarPlacement(deck: Locator): Promise<void> {
+  const toolbar = deck.getByRole('toolbar', { name: 'Deck', exact: true });
+  await expect(toolbar.getByRole('button', { name: 'Arrange', exact: true })).toBeVisible();
+  await expect.poll(() => toolbar.evaluate((bar) => {
+    const row = bar.getBoundingClientRect();
+    const controls = [...bar.querySelectorAll('button, select')].map((control) => control.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
+    const height = Math.max(...controls.map((rect) => rect.height));
+    return {
+      oneRow: Math.max(...controls.map((rect) => rect.bottom)) - Math.min(...controls.map((rect) => rect.top)) <= height + 1,
+      inside: controls.every((rect) => rect.left >= row.left - 1 && rect.right <= row.right + 1),
+    };
+  }), { message: 'every deck toolbar control fits one row without overflowing' }).toEqual({ oneRow: true, inside: true });
+  const zoom = toolbar.getByRole('group', { name: 'Zoom controls', exact: true });
+  await expect(zoom.locator('button, select')).toHaveCount(3);
+  const [out, fit, plus, group, row] = await Promise.all([
+    box(zoom.getByRole('button', { name: 'Zoom out', exact: true })),
+    box(zoom.getByRole('combobox', { name: 'Zoom', exact: true })),
+    box(zoom.getByRole('button', { name: 'Zoom in', exact: true })),
+    box(zoom), box(toolbar),
+  ]);
+  expect(out.x + out.width, 'minus precedes Fit in the same group').toBeLessThanOrEqual(fit.x);
+  expect(fit.x + fit.width, 'Fit precedes plus in the same group').toBeLessThanOrEqual(plus.x);
+  expect(Math.abs(out.y + out.height / 2 - (plus.y + plus.height / 2)), 'minus and plus share a row').toBeLessThan(1);
+  expect(plus.x + plus.width).toBeLessThanOrEqual(group.x + group.width + 1);
+  expect(row.x + row.width - (group.x + group.width), 'the zoom group stays at the toolbar’s right inset').toBeGreaterThanOrEqual(0);
+  expect(row.x + row.width - (group.x + group.width)).toBeLessThanOrEqual(12);
+  const names = ['Undo', 'Redo', 'Insert', 'Text style', 'Arrange'];
+  const x = await Promise.all(names.map(async (name) => (await box(toolbar.getByRole('button', { name, exact: true }))).x));
+  expect(x, 'undo/redo stay left, followed by Insert, Text style and Arrange').toEqual([...x].sort((a, b) => a - b));
+}
+
 test('UX2: real Library document and deck editors use main without an empty panel', async ({ maws }, info) => {
   test.setTimeout(120_000);
   const { page } = maws;
@@ -314,6 +345,7 @@ test('UX2: real Library document and deck editors use main without an empty pane
     await noReservedPanel(page);
     await singleChromeRow(page);
     await deckFilmstripPlacement(deckTab, width === 1280);
+    await deckToolbarPlacement(deckTab);
     await shot(maws, info, 'deck-main');
     const toolbar = deckTab.getByRole('toolbar', { name: 'Deck', exact: true });
     await expect(toolbar.getByRole('button', { name: 'Inspector', exact: true })).toHaveText('Inspector');
@@ -331,7 +363,13 @@ test('UX2: real Library document and deck editors use main without an empty pane
       return slide.x + slide.width <= cards.x + 1;
     }, { message: 'the fitted slide stays visible beside its document tools' }).toBe(true);
     await deckFilmstripPlacement(deckTab, width === 1280);
+    await deckToolbarPlacement(deckTab);
     await shot(maws, info, 'deck-tools');
+    await toolbar.getByRole('button', { name: 'Arrange', exact: true }).click();
+    await expect(page.getByRole('menu', { name: 'Arrange', exact: true }).getByRole('menuitem')).toHaveCount(9);
+    await shot(maws, info, 'deck-arrange-menu');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu', { name: 'Arrange', exact: true })).toHaveCount(0);
     await toolbar.getByRole('button', { name: 'Version history', exact: true }).click();
     await toolbar.getByRole('button', { name: 'Inspector', exact: true }).click();
   }

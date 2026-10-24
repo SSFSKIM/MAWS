@@ -195,6 +195,17 @@
   border-color: var(--border);
   color: var(--fg);
 }
+/* Fit and its two step controls travel as one unit, including when a genuinely narrow toolbar wraps. */
+.deck-zoom-controls {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space);
+  margin-left: auto;
+}
+.deck-zoom-controls > * {
+  flex-shrink: 0;
+}
 
 /* filmstrip */
 .deck-filmstrip {
@@ -358,6 +369,16 @@
 }
 .deck-menu-item[data-disabled] {
   color: var(--fg-faint);
+}
+.deck-menu-shortcut {
+  margin-left: auto;
+  padding-left: calc(var(--space) * 4);
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  white-space: nowrap;
+}
+.deck-menu-item[data-disabled] .deck-menu-shortcut {
+  color: inherit;
 }
 .deck-menu-item[data-danger] {
   color: var(--danger);

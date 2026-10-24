@@ -134,6 +134,17 @@ describe('P3-F F3: the deck family’s toolbars wrap by whole controls', () => {
       expect(getComputedStyle(trigger).minWidth).toBe('84px');
     });
 
+    it(`the deck’s minus, Fit and plus stay in one non-shrinking group, sheets in the order ${order.join(', ')}`, () => {
+      sheets(order);
+      const { container } = render(TOOLBARS['the deck’s toolbar']!());
+      const zoom = container.querySelector<HTMLElement>('[role="group"][aria-label="Zoom controls"]')!;
+      expect([...zoom.querySelectorAll('button, select')].map((control) => control.getAttribute('aria-label'))).toEqual(['Zoom out', 'Zoom', 'Zoom in']);
+      expect(getComputedStyle(zoom).display).toBe('inline-flex');
+      expect(getComputedStyle(zoom).flexWrap).toBe('nowrap');
+      expect(getComputedStyle(zoom).flexShrink).toBe('0');
+      for (const control of zoom.children) expect(getComputedStyle(control).flexShrink).toBe('0');
+    });
+
     // P3-F F3 reviews 2 and 4: a wrapping row places each item at its flex basis, so a notice at its text's width ("A deck
     // holds at most 100 slides: delete one to add another.") would take a row of its own whenever it shows, the zoom with
     // it, and the stage would jump: its basis is zero. Beside the spacer (grow 1) it takes nearly all the row's free
