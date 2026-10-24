@@ -15,7 +15,8 @@ import { displayNameOf, GROUP_ORDER, SKILLS_DIR, type PluginIdentity, type Sourc
 import type { ObservedPlugin } from '@shared/engine/observed-facts';
 
 export interface SkillRow {
-  name: string; // the engine's name, which `/<name>` invokes (a plugin's qualified)
+  name: string; // the engine's qualified name for live rows; display metadata for disk rows
+  invocation?: string | null; // without the slash; undefined keeps the live engine name, null means unverified
   plugin: string | null; // the plugin's display name: the row's badge
   description: string;
   source: string; // the engine's source word; '' from the catalogue
@@ -50,9 +51,11 @@ function pluginOf(prefix: string, loaded: readonly ObservedPlugin[], identities:
   return { plugin: displayNameOf(prefix, null), group };
 }
 
-// What the row shows as its name: the part after `plugin:` when the badge names the plugin.
+export const invocationOf = (row: SkillRow): string | null => row.invocation === undefined ? row.name : row.invocation;
+
+// A live plugin's engine-qualified name omits its prefix beside the badge. Disk metadata remains verbatim.
 export const labelOf = (row: SkillRow): string => {
-  const prefix = row.plugin !== null ? prefixOf(row.name) : null;
+  const prefix = row.invocation !== null && row.plugin !== null ? prefixOf(row.name) : null;
   return prefix !== null ? row.name.slice(prefix.length + 1) : row.name;
 };
 

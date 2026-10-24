@@ -28,6 +28,9 @@ const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover
 type Inventory = CommandOutput<'customization.inventory'>;
 
 export function CustomizeView({ section }: { section: CustomizeSection }) {
+  // Once visited, keep cwd-scoped plugin operations and their confirmation sheets alive across section switches.
+  const [visitedPlugins, setVisitedPlugins] = useState(section === 'plugins');
+  if (section === 'plugins' && !visitedPlugins) setVisitedPlugins(true);
   const projects = useSessions((s) => s.projects);
   const records = useSessions((s) => s.records);
   const engine = useSessions((s) => s.engine);
@@ -77,7 +80,7 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
         </select>
       </label>}
     </header>
-    <Tabs.Content value="plugins" className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
+    <Tabs.Content value="plugins" forceMount={visitedPlugins ? true : undefined} className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
       <DirectoryPlugins key={cwd ?? 'user'} cwd={cwd} appSessionId={attached?.appSessionId ?? null} />
     </Tabs.Content>
     <Tabs.Content value="skills" className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
@@ -112,7 +115,7 @@ function DiskSkills({ inventory, refresh }: { inventory: Inventory; refresh(): v
   const groups = useMemo(() => {
     const result: SkillGroup[] = [];
     for (const [source, group] of [['project', 'here'], ['user', 'yours'], ['plugin', 'added']] as const) {
-      const rows = inventory.skills.filter((skill) => skill.source === source).map((skill) => ({ name: skill.name, description: skill.description, source, plugin: skill.plugin, path: skill.path }));
+      const rows = inventory.skills.filter((skill) => skill.source === source).map((skill) => ({ name: skill.name, invocation: null, description: skill.description, source, plugin: skill.plugin, path: skill.path }));
       if (rows.length) result.push({ group, rows });
     }
     return result;

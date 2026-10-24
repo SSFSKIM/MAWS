@@ -14,6 +14,9 @@ import { useCustomizeProject } from './open';
 import { PlusMenu } from '../composer/plus-menu/PlusMenu';
 import { activeTab } from '../stores/layout-model';
 import userEvent from '@testing-library/user-event';
+import { SkillsWidget } from '../widgets/SkillsWidget';
+import { resetCatalogStore } from '../stores/catalog';
+import { useReadLoads } from '../widgets/read';
 
 const P = 'project-one' as ProjectId;
 const Q = 'project-two' as ProjectId;
@@ -31,6 +34,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  resetCatalogStore();
+  useReadLoads.setState({ loads: new Map() });
   useSessions.setState({ projects: new Map(), records: new Map(), engine: new Map() });
   useLayout.setState({ main: LAYOUT_DEFAULTS.main });
   useLibraryStore.setState(useLibraryStore.getInitialState());
@@ -47,6 +52,63 @@ it('reads the focused project without a session and switches the disk inventory 
   await screen.findByRole('button', { name: 'View translate' });
   expect(screen.queryByRole('button', { name: 'View review' })).toBeNull();
   expect(backend.calls.filter((call) => call.command.startsWith('session.'))).toEqual([]);
+});
+
+it('keeps the visited plugin library mounted when another Customize section is selected', async () => {
+  backend.script('plugins.list', () => ({ plugins: [] }));
+  backend.script('marketplaces.list', () => ({ marketplaces: [] }));
+  backend.script('plugins.available', () => ({ plugins: [] }));
+  backend.script('mods.list', () => []);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = (section: 'plugins' | 'skills') => <QueryClientProvider client={client}><CustomizeView section={section} /></QueryClientProvider>;
+  const mounted = render(view('plugins'));
+  const browse = await screen.findByRole('radio', { name: 'Browse' });
+  fireEvent.click(browse);
+  expect(browse.getAttribute('aria-checked')).toBe('true');
+  mounted.rerender(view('skills'));
+  await screen.findByRole('button', { name: 'View review' });
+  mounted.rerender(view('plugins'));
+  expect(screen.getByRole('radio', { name: 'Browse' })).toBe(browse);
+  expect(browse.getAttribute('aria-checked')).toBe('true');
+});
+
+it('keeps disk skill names as display metadata without inventing user or plugin invocations', async () => {
+  backend.script('customization.inventory', () => ({ skills: [
+    { name: 'Quarterly Review', description: 'A user skill display name', source: 'user', path: '/config/skills/review/SKILL.md', plugin: null },
+    { name: 'Plugin: Quarterly Review', description: 'A plugin skill display name', source: 'plugin', path: '/plugins/reports/skills/review/SKILL.md', plugin: 'reports@market' },
+  ], servers: [], warnings: [] }));
+  mount('skills');
+  for (const name of ['Quarterly Review', 'Plugin: Quarterly Review']) {
+    const open = await screen.findByRole('button', { name: `View ${name}` });
+    const label = open.closest('li')!.querySelector('[data-skill-name]')!;
+    expect(label.textContent).toBe(name);
+    expect(label.getAttribute('title')).toBeNull();
+    fireEvent.click(open);
+    const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
+    expect(within(detail).getByRole('heading', { name })).toBeTruthy();
+    expect(within(detail).queryByText('Type')).toBeNull();
+    expect(within(detail).queryByText(`/${name}`)).toBeNull();
+    expect(within(detail).queryByRole('button', { name: 'Use in chat' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Skills' }));
+  }
+});
+
+it('retains the engine-qualified invocation and Use in chat for the live Skills widget', async () => {
+  const live = status('live-skills');
+  backend = createWidgetBackend({ root: process.cwd(), statuses: [live] });
+  backend.script('session.getSkillsDialog', () => ({ skills: [{ name: 'reports:review', display_name: 'reports:review', description: 'A loaded plugin skill', source: 'plugin', tokens: 20, state: 'on', advertised: true, handles: {} }] }));
+  backend.script('plugins.list', () => ({ plugins: [] }));
+  backend.script('marketplaces.list', () => ({ marketplaces: [] }));
+  window.maws = backend.bridge();
+  useSessions.setState({ engine: new Map([[live.appSessionId, backend.status(live.appSessionId)]]) });
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={live.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
+  const open = await screen.findByRole('button', { name: 'View review' });
+  expect(open.closest('li')!.querySelector('[data-skill-name]')!.getAttribute('title')).toBe('/reports:review');
+  fireEvent.click(open);
+  const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
+  expect(within(detail).getByText('Type')).toBeTruthy();
+  expect(within(detail).getByText('/reports:review')).toBeTruthy();
+  expect(within(detail).getByRole('button', { name: 'Use in chat' })).toBeTruthy();
 });
 
 it('opens the connector Manage footer for the composer project even when no session exists', async () => {

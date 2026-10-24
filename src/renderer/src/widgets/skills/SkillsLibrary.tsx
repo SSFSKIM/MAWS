@@ -12,7 +12,7 @@ import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
 import { useLibraryStore } from '../plugins/library-store';
 import { GroupHeading } from '../plugins/PluginRow';
-import { badgeOf, labelOf, type SkillGroup, type SkillRow, type SkillsSort } from './skills';
+import { badgeOf, invocationOf, labelOf, type SkillGroup, type SkillRow, type SkillsSort } from './skills';
 
 const setSkills = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['skills']>) => useLibraryStore.setState((s) => ({ skills: { ...s.skills, ...patch } }));
 const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default';
@@ -59,6 +59,7 @@ const ownControl = (target: EventTarget): boolean => target instanceof Element &
 function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow): void; onUse?(name: string): void }) {
   const label = labelOf(row);
   const badge = badgeOf(row);
+  const invocation = invocationOf(row);
   return (
     <li
       data-skill-row={row.name}
@@ -71,7 +72,7 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
       <SkillTile />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span data-skill-name className="truncate font-medium text-fg" title={`/${row.name}`}>
+          <span data-skill-name className="truncate font-medium text-fg" title={invocation === null ? undefined : `/${invocation}`}>
             {label}
           </span>
           {badge !== null && (
@@ -82,7 +83,7 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
         </span>
         {row.description !== '' && <span className="truncate text-ui-sm text-fg-muted">{row.description}</span>}
       </div>
-      {onUse && <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(row.name)}>
+      {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(invocation)}>
         {S.useInChat}
       </button>}
     </li>
@@ -92,8 +93,9 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
 function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; onUse?(name: string): void }) {
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => root.current?.focus(), []);
+  const invocation = invocationOf(row);
   const facts: { label: string; value: ReactNode }[] = [
-    { label: S.invoke, value: <code className="font-mono text-ui-sm">/{row.name}</code> },
+    ...(invocation !== null ? [{ label: S.invoke, value: <code className="font-mono text-ui-sm">/{invocation}</code> }] : []),
     ...(row.plugin !== null ? [{ label: S.plugin, value: row.plugin }] : []),
     ...(row.source !== '' ? [{ label: S.source, value: row.source }] : []),
     ...(row.path ? [{ label: 'File', value: row.path }] : []),
@@ -106,7 +108,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>
-        {onUse && <button type="button" className={PRIMARY} onClick={() => onUse(row.name)}>
+        {onUse && invocation !== null && <button type="button" className={PRIMARY} onClick={() => onUse(invocation)}>
           {S.useInChat}
         </button>}
       </div>
