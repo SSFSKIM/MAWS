@@ -1,19 +1,38 @@
 import type { Locator } from '@playwright/test';
 
-/** UX1 preserves authored line breaks, so earlier answers can be outside the mounted window after a reload. */
+/** UX1 preserves authored line breaks; seek from the top regardless of the initial or asynchronously loaded position. */
 export async function revealEarlier(view: Locator, target: Locator): Promise<void> {
   const scroller = view.locator('[data-transcript-scroller]').first();
-  await scroller.dispatchEvent('wheel', { deltaY: -200 });
+  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   for (let i = 0; i < 100; i++) {
+    await view.page().waitForTimeout(60);
     const found = await target.evaluateAll((nodes) => {
       const node = nodes.find((candidate) => candidate.isConnected);
       if (!node) return false;
       node.scrollIntoView({ block: 'nearest' });
-      return true;
+      return node.isConnected;
     });
     if (found) return;
-    await scroller.evaluate((el) => el.scrollBy({ top: -el.clientHeight * 0.6 }));
-    await view.page().waitForTimeout(60);
+    await scroller.evaluate((el) => el.scrollBy({ top: el.clientHeight * 0.6 }));
   }
   throw new Error('the earlier transcript row was not reached in 100 windows');
+}
+
+/** Compare the whole logical history, not an overscan window whose mounted rows vary with measurement. */
+export async function allTranscriptRowIds(view: Locator, timeout = 15_000): Promise<string[]> {
+  const scroller = view.locator('[data-transcript-scroller]').first();
+  const ids = new Set<string>();
+  const deadline = Date.now() + timeout;
+  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
+  for (let i = 0; i < 100 && Date.now() < deadline; i++) {
+    await view.page().waitForTimeout(60);
+    for (const id of await view.locator('[data-row-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-row-id')!))) ids.add(id);
+    const atEnd = await scroller.evaluate((el) => {
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) return true;
+      el.scrollBy({ top: el.clientHeight * 0.8 });
+      return false;
+    });
+    if (atEnd) return [...ids];
+  }
+  throw new Error(`the transcript's end was not reached in 100 windows within ${timeout}ms (${ids.size} rows taken)`);
 }

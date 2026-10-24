@@ -50,19 +50,27 @@ const streamed = (rows: readonly Row[]) => rows.filter((row) => row.id.startsWit
 const texts = (rows: readonly Row[]) => rows.flatMap((row) => (row.kind === 'assistant_text' ? [row.markdown] : []));
 
 describe('streaming in the report', () => {
-  it('a marked block folds its turn, its mark in view, before its first row is written', async () => {
+  it.each(['<message>\nBoth started; I will repo', '<message>\nBoth started; I will report.</message>'])('a marked block folds its turn before its first row is written, keeping its authored text: %s', async (text) => {
     const store = await storeOf(FIRST_TURN);
     const before = report(store, []);
     expect(record(before)).toEqual([]); // no mark yet: the turn draws whole
     expect(texts(before).some((text) => text.startsWith('Both subagents are running'))).toBe(true);
 
-    const rows = report(store, [block(0, '<message>\nBoth started; I will repo')]);
+    const rows = report(store, [block(0, text)]);
     const turn = latestTurn(store.getState().entries[KEY]!.rows);
     expect(record(rows)).toMatchObject([{ turnId: turn, open: false, working: true }]);
-    expect(streamed(rows)).toMatchObject([{ kind: 'assistant_text', turnId: turn }]); // the live mark stays in view
+    expect(streamed(rows)).toMatchObject([{ kind: 'assistant_text', turnId: turn, markdown: text, live: true }]); // folding never repairs the display
     expect(texts(rows).some((text) => text.startsWith('Both subagents are running'))).toBe(false); // folded into the record
     expect(rows.filter((row) => row.kind === 'subagent')).toEqual([]); // so are the Agent calls
     expect(rows.findIndex((row) => row.kind === 'owner_record')).toBe(rows.findIndex((row) => row.kind === 'user') + 1); // right after its prompt
+  });
+
+  it('a partial opening tag stays literal without folding its turn before a mark arrives', async () => {
+    const store = await storeOf(FIRST_TURN);
+    const rows = report(store, [block(0, '<mess')]);
+    expect(record(rows)).toEqual([]);
+    expect(streamed(rows)).toMatchObject([{ kind: 'assistant_text', markdown: '<mess', live: true }]);
+    expect(texts(rows).some((text) => text.startsWith('Both subagents are running'))).toBe(true);
   });
 
   it("a message tool's call folds its turn as a mark does, its message in view as it streams", async () => {

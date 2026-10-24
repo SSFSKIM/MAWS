@@ -120,14 +120,20 @@ test("a streaming message stays authored text until closed, then receives unboxe
     await page.waitForTimeout(20);
   }
   // UX1-C preserves unfinished output tags literally instead of repairing them into a card.
-  await expect(stream.last()).toContainText('<message>Both subagents rep');
+  await expect(stream.last()).toContainText('<message>\nBoth subagents rep');
   await expect(stream.last().locator('.owner-message-ink')).toHaveCount(0);
 
   player.advance(player.script.length);
   await expect(stream).toHaveCount(0);
-  const settled = view.locator('.owner-message-ink');
-  await expect(settled).toHaveCount(1);
-  await expect(settled).toContainText('Both subagents reported back.');
+  const settled = view.locator('[data-kind="assistant_text"]').filter({ hasText: 'Both subagents reported back.' });
+  await expect(settled).toHaveCount(1); // one answer row, not one ink span per Markdown leaf
+  await expect(settled).toContainText('Both subagents reported back. The kettle is on the second shelf, and the last word in words.txt is "gamma".');
+  await expect(settled.locator('p .owner-message-ink').first()).toContainText('Both subagents reported back.');
+  await expect(settled.locator('li')).toHaveText([
+    'notes.md: the kettle is on the second shelf.',
+    'words.txt: the file lists alpha, beta, gamma, then an empty trailing line, so the last word is "gamma".',
+  ]);
+  await expect(settled.locator('[data-streamdown="strong"] .owner-message-ink')).toHaveText(['notes.md:', 'words.txt:']);
   await expect(view.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
   expect(await view.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
   await expect(view).not.toContainText('Peer session worked');

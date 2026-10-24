@@ -5,7 +5,8 @@
 // marked texts, which the report module draws as cards with their unmarked parts hidden. Opened (level 1), the turn
 // draws exactly as the full transcript does, the record row above it as the way back; its divider expanded is level 2.
 // A turn with no mark draws as the full transcript, so untagged history and a turn the model forgot to mark are never
-// hidden. A streaming block is told apart by its live buffer (`liveMarkedRowIds`), which the rows do not carry.
+// hidden. A native streaming block is read from its live buffer (`liveMarkedRowIds`); external live rows carry their
+// current text inline. Both use the live grammar for folding, independently of closed-only message ink.
 // P4-R7: a message tool's message (a `to_human` row) is a mark as a span is: it marks its turn and draws at level 0, at
 // its place among the marked texts.
 import { expandedTurnRows, isPersistentRow, turnRows } from '../../transcript/model/derive';
@@ -44,10 +45,15 @@ export function liveMarkedRowIds(state: TranscriptState | undefined): string {
 // the turn it happened in (`withBrowserActivityRows`). So a turn's marks and fold are read over all of its rows, its
 // record is drawn once, and a turnless row keeps its place.
 export function reportRows(rows: readonly Row[], state: TranscriptState, ui: Pick<TranscriptUi, 'reportOpenTurns'>, liveMarked = ''): Row[] {
-  const live: ReadonlySet<string> = liveMarked === '' ? NONE : new Set(liveMarked.split('\n'));
+  const live = new Set(liveMarked === '' ? [] : liveMarked.split('\n'));
   const turns = new Map<TurnId, Row[]>();
   for (const row of rows) {
     if (row.turnId === null) continue;
+    if (row.kind === 'assistant_text' && row.live) {
+      const native = [...(state.turns.get(row.turnId)?.live.values() ?? [])].some((block) => block.rowId === row.id);
+      // Native row markdown can be stale: its current mark decision belongs to liveMarkedRowIds alone.
+      if (!native && marksOfText(row.markdown, true).marked) live.add(row.id);
+    }
     const own = turns.get(row.turnId);
     if (own) own.push(row);
     else turns.set(row.turnId, [row]);

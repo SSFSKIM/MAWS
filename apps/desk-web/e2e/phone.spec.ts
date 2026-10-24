@@ -337,6 +337,7 @@ test("@layout a session's channel on the phone is its session view: its working 
   const subagents = view.locator(`[data-turn-id="${launchTurn}"] .transcript-subagent`);
   await expect(subagents).toHaveCount(1);
   await expect(subagents.locator('button')).toHaveCount(0);
+  await revealEarlier(view, launchDivider); // expansion can recycle the divider outside the mounted window
   await launchDivider.click();
 
   // The added turn: its prompt, one closed record, its message.
@@ -406,7 +407,11 @@ test('@layout the running turn streams on the phone: the answer draws as it is w
     fm.step(1);
     await page.waitForTimeout(20);
   }
-  // UX1-C decorates a closed tag, never repairs an unfinished one.
+  // An open mark already folds the working turn, but its unfinished text remains literal and without ink.
+  await expect(streaming.last()).toContainText('<message>You chose blue');
+  await expect(streaming.last().locator('.owner-message-ink')).toHaveCount(0);
+  await expect(view.locator('[data-row-id^="owner-record:"] .transcript-working-dots')).toHaveCount(1);
+  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
   const lastText = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === answerBlock.body.turnId && s.step === answerBlock.body.step && s.chunk.index === answerBlock.body.index && s.chunk.kind === 'text');

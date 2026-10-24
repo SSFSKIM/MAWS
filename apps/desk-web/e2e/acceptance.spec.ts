@@ -10,7 +10,7 @@
 // a message tool: its landing, and its drawing while its input streams.
 //
 // With DESK_SHOTS set to a directory, the report and the transcript at one point are saved there at desktop width.
-import { revealEarlier } from './transcript-history';
+import { allTranscriptRowIds, revealEarlier } from './transcript-history';
 import type { Locator, Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -30,7 +30,6 @@ const BRIDGE = { kind: 'plugin', name: 'doperpowers', asUser: true };
 
 const streamingRows = (scope: Locator) => scope.locator('[data-row-id^="desk-stream:"]');
 const records = (scope: Locator) => scope.locator('[data-row-id^="owner-record:"]');
-const rowIds = (scope: Locator) => scope.locator('[data-row-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-row-id')));
 const occurrences = (scope: Locator, text: string) => scope.evaluate((el, t) => (el.textContent ?? '').split(t).length - 1, text);
 const toggle = (page: Page, view: 'Report' | 'Transcript') => page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: view });
 const tailSends = (view: Locator) => view.getByTestId('tail-send');
@@ -173,32 +172,23 @@ test("G1: the report over the session's rows — marked turns folded to one reco
   }
 
   // The toggle: the transcript has no records and more dividers, and back to the same rows.
-  await scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-  await page.waitForTimeout(300);
-  const report = await rowIds(view);
+  const report = await allTranscriptRowIds(view);
   await toggle(page, 'Transcript').click();
   await expect(toggle(page, 'Transcript')).toHaveAttribute('aria-pressed', 'true');
-  await scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  const transcript = await allTranscriptRowIds(view);
+  expect(transcript.filter((id) => id.startsWith('owner-record:'))).toEqual([]);
+  expect(transcript.filter((id) => id.startsWith('divider:')).length).toBeGreaterThan(report.filter((id) => id.startsWith('divider:')).length);
   await expect(records(view)).toHaveCount(0);
   await expect(view.locator('[data-row-id^="divider:"]').first()).toBeVisible();
   await toggle(page, 'Report').click();
-  await scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-  await expect.poll(() => rowIds(view)).toEqual(report);
+  expect(await allTranscriptRowIds(view)).toEqual(report);
 
   // A reload draws the same rows.
   await page.reload();
   await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
   await expect(view.locator('.owner-message-ink').filter({ hasText: ANSWER })).toBeVisible();
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
-  await expect
-    .poll(
-      async () => {
-        await scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-        return rowIds(view);
-      },
-      { timeout: 15_000 },
-    )
-    .toEqual(report);
+  expect(await allTranscriptRowIds(view, 15_000)).toEqual(report);
 });
 
 test('G1: a marked answer streams per block into its folded turn, its record working; it settles with no double; its turn_duration reads the turn finished', async ({ page, hub }) => {
@@ -213,7 +203,11 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
     fm.step(1);
     await page.waitForTimeout(20);
   }
-  // UX1-C decorates a closed tag, never repairs an unfinished one.
+  // Native MAWS already folds an open mark, but UX1-C leaves its unfinished text literal and without ink.
+  await expect(streamingRows(view).last()).toContainText(`<message>${ANSWER}`);
+  await expect(streamingRows(view).last().locator('.owner-message-ink')).toHaveCount(0);
+  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
+  await expect(workingDots(records(view))).toHaveCount(1);
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
   const lastText = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === answerBlock.body.turnId && s.step === answerBlock.body.step && s.chunk.index === answerBlock.body.index && s.chunk.kind === 'text');

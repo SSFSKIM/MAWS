@@ -264,6 +264,11 @@ test('a marked response folds its turn and shows its mark while it streams, befo
     fm.step(1);
     await page.waitForTimeout(20);
   }
+  await expect(streamingRows(view).last()).toContainText(`<message>${ANSWER}`);
+  await expect(streamingRows(view).last().locator('.owner-message-ink')).toHaveCount(0);
+  await expect(records(view)).toHaveCount(1); // an open mark folds independently of its closed-only ink
+  await expect(records(view).locator('.transcript-working-dots')).toHaveCount(1);
+  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
   const named = fm.recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (named.k !== 'block-row') throw new Error('no block-row');
   const lastText = fm.recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === named.body.turnId && s.step === named.body.step && s.chunk.index === named.body.index && s.chunk.kind === 'text');
