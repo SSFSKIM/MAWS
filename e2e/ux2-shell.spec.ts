@@ -418,8 +418,10 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-panel-content]') !== null)).toBe(true);
   await closeSurface(page, 'Files');
 
-  for (let i = 0; i < 12; i++) await menu(maws.app, 'session.new');
+  for (let i = 0; i < 20; i++) await menu(maws.app, 'session.new');
+  await expect(page.locator('[data-chrome-tabs]').getByRole('tab')).toHaveCount(21);
   await menu(maws.app, 'settings.open');
+  await expect(page.locator('[data-chrome-tabs]').getByRole('tab')).toHaveCount(22);
   for (const dimensions of [...SIZES, { width: 900, height: 820 }, { width: 620, height: 820 }]) {
     await size(maws, dimensions.width, dimensions.height);
     const all = page.getByRole('button', { name: 'All tabs', exact: true });
