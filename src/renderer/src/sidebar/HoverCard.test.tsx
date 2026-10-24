@@ -367,7 +367,7 @@ describe('answering a waiting question from the hover card', () => {
     await userEvent.click(blue);
     const text = within(card).getByRole('textbox', { name: 'What title?' });
     await userEvent.type(text, 'Release notes');
-    const submit = within(card).getByRole('button', { name: 'Submit', exact: true });
+    const submit = within(card).getByRole('button', { name: 'Submit' });
     await userEvent.click(submit);
     await waitFor(() => expect(fake.invoked('maws.ask.answer')).toEqual([{
       appSessionId: id, askId: event.askId, answers: [
@@ -384,7 +384,7 @@ describe('answering a waiting question from the hover card', () => {
       expect(within(card).getByRole('alert')).toBeTruthy();
       expect(within(card).getByRole('button', { name: 'Retry' })).toBeTruthy();
     } else {
-      await waitFor(() => expect(within(card).queryByRole('button', { name: 'Submit', exact: true })).toBeNull());
+      await waitFor(() => expect(within(card).queryByRole('button', { name: 'Submit' })).toBeNull());
     }
     expect(fake.invoked('session.send')).toEqual([]);
     expect(fake.invoked('session.steer')).toEqual([]);
