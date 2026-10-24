@@ -135,13 +135,16 @@ describe('synthetic journals', () => {
     expect(ofKind(rows, 'user')).toHaveLength(1);
   });
 
-  it('transcript/exploration-and-web: a merged read cell with six paths and the web, skill, tool-search and MCP cells', () => {
+  it('transcript/exploration-and-web: six individual read cells and the web, skill, tool-search and MCP cells', () => {
     const rows = rowsFor(journal('exploration-and-web'));
     const cells = cellsOf(rows);
-    const reads = cells.find((c) => c.id === 'cell:reads:toolu_synth_x_read1')!;
-    expect(reads.paths).toHaveLength(6);
-    expect(reads.label).toBe('Read 6 files');
-    expect(reads.detail).toMatchObject({ kind: 'read', files: expect.arrayContaining([{ path: expect.stringContaining('reduce.ts'), range: [10, 49] }]) });
+    const reads = cells.filter((c) => c.toolName === 'Read');
+    const paths = ['derive', 'reduce', 'rows', 'keys', 'copy', 'time'].map((name) => `/tmp/maws-synth-exploration-and-web/src/model/${name}.ts`);
+    expect(reads).toHaveLength(6);
+    reads.forEach((read, index) => expect(read).toMatchObject({
+      id: `cell:toolu_synth_x_read${index + 1}`, toolUseId: `toolu_synth_x_read${index + 1}`, paths: [paths[index]], label: `Read ${paths[index]}`,
+      detail: { kind: 'read', files: [{ path: paths[index], range: index === 1 ? [10, 49] : null }] },
+    }));
     expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual([
       'Read 6 files, searched for `rowsOf`, searched for `src/model/**/*.ts`',
       'Used docs, loaded test-driven-development skill, loaded 2 tools, searched the web for tanstack virtual followOnAppend, fetched tanstack.com',

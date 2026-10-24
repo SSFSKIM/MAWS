@@ -46,17 +46,19 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.textContent).toBe('to human\nHello');
   });
 
-  it('keeps the group count line when its mod draws nothing; an expansion rewrite mounts member ToolUse sites', async () => {
+  it('keeps individual call rows when its group mod draws nothing and honors an expansion rewrite', async () => {
     const b = builder(); b.turn('u'); b.toolUse('t1', 'Bash', { command: 'first' }); b.result('t1', 'ok'); b.toolUse('t2', 'Bash', { command: 'second' });
     const store = await mounted(b); const row = rowOf(store.rows(), 'group');
     const view = renderRow(row, { storeKey: store.key });
+    expect(view.container.querySelectorAll('[data-cell-id]')).toHaveLength(2);
     const asked = asks()[0];
     expect(asked).toMatchObject({ component: 'ToolGroup', instanceId: 'group:t1' });
     await act(() => fake.reply('session.ui.render', answer({ ...asked.props, isExpanded: true }, { type: 'Box', children: [] }, true)));
     await waitFor(() => expect(rowOf(store.rows(), 'group').expanded).toBe(true));
     view.rerenderRow(rowOf(store.rows(), 'group'));
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
-    expect(view.container.querySelector('.transcript-group-header')).not.toBeNull();
+    expect(Array.from(view.container.querySelectorAll('[data-cell-id]'), (cell) => cell.getAttribute('data-cell-id'))).toEqual(['cell:t1', 'cell:t2']);
+    expect(view.container.querySelector('.transcript-group-header')).toBeNull();
     await waitFor(() => expect(asks().filter((x) => x.component === 'ToolUse').map((x) => x.instanceId)).toEqual(['t1', 't2']));
     expect(asks().filter((x) => x.component === 'ToolResult')).toHaveLength(0);
   });
@@ -66,7 +68,7 @@ describe('mounted transcript surface integration', () => {
     const store = await mounted(b); act(() => useTranscriptStore.getState().expandAll(store.key));
     const row = rowOf(store.rows(), 'cell'); const view = renderRow(row, { storeKey: store.key });
     await act(() => fake.reply('session.ui.render', { ...answer({}), hooked: false }));
-    fireEvent.click(screen.getByRole('button', { name: /pwd/ })); view.rerenderRow(rowOf(store.rows(), 'cell'));
+    fireEvent.click(screen.getByRole('button', { name: 'Ran Bash' })); view.rerenderRow(rowOf(store.rows(), 'cell'));
     await waitFor(() => expect(asks().some((x) => x.component === 'ToolResult')).toBe(true));
     const props = asks().find((x) => x.component === 'ToolResult')!.props;
     await act(() => fake.reply('session.ui.render', answer({ ...props, output: BASH_RESULT('rewritten output') }, engine, true)));
