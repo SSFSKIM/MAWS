@@ -124,14 +124,15 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   if (opts.ownerConfigHome) delete env.CLAUDE_CONFIG_DIR; // P4-A1
 
   let app: ElectronApplication | null = null;
+  let child: ReturnType<ElectronApplication['process']> | null = null;
   let closed = false;
   const cleanup = async () => {
     // P3-F (the terminal e2e's ENOTEMPTY, tracker 2026-10-17): a shell the app started saves its history into the shell
     // home as it exits on its terminal's hang-up, which can come after the app has closed, so the removal waits for the
     // shells it found before the close (never signalling one) and retries a directory that filled meanwhile.
-    const shells = app && !closed ? shellsUnder(app.process().pid!) : [];
+    const shells = child && !closed ? shellsUnder(child.pid!) : [];
     try {
-      if (app && !closed) await closeOrKill(app);
+      if (app && child && !closed) await closeOrKill(app, child);
     } finally {
       const left = await untilExited(shells, SHELL_EXIT_MS);
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
@@ -146,6 +147,9 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     app = executable
       ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
       : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: REPO_ROOT });
+    // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
+    // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
+    child = app.process();
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
@@ -244,11 +248,10 @@ const SHELL_EXIT_MS = 5_000;
 
 // `close()` waits for the app to exit; if it fails, the process is killed so no Electron outlives the test, and the
 // failure is still thrown, since an app that will not close is itself a defect.
-async function closeOrKill(app: ElectronApplication): Promise<void> {
+async function closeOrKill(app: ElectronApplication, child: ReturnType<ElectronApplication['process']>): Promise<void> {
   try {
     await app.close();
   } catch (error) {
-    const child = app.process();
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     throw new Error(`MAWS did not close cleanly (pid ${child.pid}; killed)`, { cause: error });
   }
