@@ -9,7 +9,7 @@
 // new ones; Make a copy draws the copy's own snapshot; Restore brings the old data back as a new version, which a closed
 // and reopened tab keeps. Evidence shots go to test-results/dashboard-proof/.
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { bindCsv, chart, durable, insertBlocks, ok, openInMain, openInPanel, paragraph, selectPanelSession, railOf, reply, restartHost, selectChart, SESSION_A, startApp, tipsOf, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, durable, insertBlocks, ok, openInMain, openInPanel, paragraph, selectPanelSession, railOf, reply, restartHost, selectChart, SESSION_A, startApp, tipsOf, toggleDatasets, type DashboardApp } from './support/dashboards';
 import { launchMaws } from './support/launch';
 
 const PROOF = 'test-results/dashboard-proof';
@@ -134,8 +134,7 @@ test('a replacement-only agent change counts, marks and steps after a host resta
     // M6 (the displayed document, E2's Decision Log 12 and 17): the header's Datasets inspects the version shown, its
     // old snapshot's rows, not the live one's; back on the document it inspects the live snapshot
     const sourceRows = async () => {
-      await page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'More actions' }).click();
-      await page.getByRole('menuitemcheckbox', { name: 'Datasets' }).click();
+      await toggleDatasets(page.locator('[data-region="main"] [data-editor-header]'));
       const sheet = page.getByRole('dialog').filter({ has: page.getByRole('combobox', { name: 'Dataset' }) });
       await expect(sheet).toBeVisible();
       await sheet.getByRole('combobox', { name: 'Dataset' }).selectOption({ label: 'Sales (sales)' });

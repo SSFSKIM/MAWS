@@ -207,7 +207,7 @@ test('the four exports draw the editor’s figure and native table with snapshot
   await test.step('P3-F (8.2, F7): during a version’s preview the menu saves that version’s data and time, while two are compared nothing, and the live data once history is left', async () => {
     await durable(main);
     await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'New data' });
-    await header.getByRole('button', { name: 'Version history' }).click();
+    await main.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Version history' }).click();
     const rail = main.getByRole('complementary', { name: 'Version history' });
     await rail.getByRole('button', { name: /^Version Old data/ }).click();
     const bar = main.getByRole('toolbar', { name: 'Version preview' });
@@ -227,7 +227,7 @@ test('the four exports draw the editor’s figure and native table with snapshot
     for (const item of await items.all()) await expect(item, 'two versions compared: nothing to export').toBeDisabled();
     await page.keyboard.press('Escape');
 
-    await header.getByRole('button', { name: 'Version history' }).click();
+    await bar.getByRole('button', { name: 'Back to document' }).click();
     await expect(bar).toBeHidden();
     rmSync(savedFile('Export board.md'));
     await pick('Markdown (.md)');

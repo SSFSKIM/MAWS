@@ -23,7 +23,7 @@ import { GDP_CSV, PENGUINS_CSV } from '../src/artifacts/dashboard/fixtures/datas
 import { DatasetError, parseDataset } from '../src/artifacts/dashboard/parse';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, selectPanelSession, railOf, refusalOf, reply, revisionOf, selectChart, startApp, watchSelection, type DashboardApp } from './support/dashboards'; // M6
+import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, selectPanelSession, railOf, refusalOf, reply, revisionOf, selectChart, startApp, toggleDatasets, watchSelection, type DashboardApp } from './support/dashboards'; // M6
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -397,11 +397,8 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await page.keyboard.press('Escape');
   });
 
-  await test.step('the header\'s Datasets (after B\'s actions, in More actions) opens the sheet on every dataset of the shown document', async () => {
-    const datasets = async () => {
-      await mainHeader.getByRole('button', { name: 'More actions' }).click();
-      await page.getByRole('menuitemcheckbox', { name: 'Datasets' }).click();
-    };
+  await test.step('the header\'s Datasets opens the sheet on every dataset of the shown document', async () => {
+    const datasets = () => toggleDatasets(mainHeader);
     await datasets();
     const picker = page.getByRole('dialog').getByRole('combobox', { name: 'Dataset' });
     await expect(picker.locator('option')).toHaveText(['세계은행 GDP 성장률 (gdp)', 'Palmer penguins (penguins)', '마라도 관측소 (합성) (sites)']);

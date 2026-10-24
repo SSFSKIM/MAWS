@@ -139,6 +139,16 @@ export async function openInMain(page: Page, artifactId: string): Promise<Locato
   return main;
 }
 
+/** The dashboard's Datasets action, direct when it fits or through the header's real overflow menu. */
+export async function toggleDatasets(header: Locator): Promise<void> {
+  const direct = header.getByRole('button', { name: 'Datasets', exact: true });
+  if (await direct.isVisible()) await direct.click();
+  else {
+    await header.getByRole('button', { name: 'More actions', exact: true }).click();
+    await header.page().getByRole('menuitemcheckbox', { name: 'Datasets', exact: true }).click();
+  }
+}
+
 /** The durability barrier: the replica behind the editor under `scope` has nothing the host has not acknowledged. */
 export async function durable(scope: Locator): Promise<void> {
   const unsaved = () =>
