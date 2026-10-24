@@ -35,7 +35,9 @@ it.each(['/bin/bash', '/bin/zsh'].flatMap((shell) => ['start', 'middle', 'end'].
       pty.write(`${shell.endsWith('bash') ? 'set -o emacs' : 'bindkey -e'}; /bin/sleep 60\n`);
       await wait(async () => {
         const table = await readProcesses();
-        holder = [...table.values()].find((p) => p.ppid === pty.pid && p.pgid === table.get(pty.pid)?.foreground);
+        // A fork can still share the shell's group before zsh sets up the job. Wait for sleep's own group
+        // to own the terminal, not just for a child whose inherited group matches the shell's foreground.
+        holder = [...table.values()].find((p) => p.ppid === pty.pid && p.pgid === p.pid && p.pgid === table.get(pty.pid)?.foreground);
         return holder !== undefined;
       });
       const target = { pane: { pid: pty.pid, ptyId: 'scratch', alive: true, label: 'Scratch' } as PtyInfo, holder: holder! };
@@ -60,7 +62,7 @@ it.each(['/bin/bash', '/bin/zsh'].flatMap((shell) => ['start', 'middle', 'end'].
         },
         waitMs: READY_MS, pollMs: 25,
       }, { appSessionId: 'scratch' as AppSessionId, engineSessionId: 'scratch' as SessionId }, target);
-      expect(result).toMatchObject({ status: 'refused', message: expect.stringContaining('back in the foreground') });
+      expect(result).toMatchObject({ status: 'refused', reason: 'resume_failed', message: expect.stringContaining('back in the foreground') });
       const restored = (await readProcesses()).get(holder!.pid)!;
       expect(restored.state).not.toContain('T');
       expect(restored.foreground).toBe(holder!.pgid);
