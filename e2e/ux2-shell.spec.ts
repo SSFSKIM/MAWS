@@ -435,3 +435,51 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   }
   expect(maws.consoleErrors()).toEqual([]);
 });
+
+test('Acceptance: compact inactive file tabs contain their extension, pin, dirty mark and close hit target', async () => {
+  test.setTimeout(90_000);
+  const { writeFileSync } = await import('node:fs');
+  const { restoreWithTab, withProduct } = await import('./support/code-product');
+  const names = Array.from({ length: 10 }, (_, index) => `adornment-heavy-context-${index}.typescript`);
+  await withProduct(async (p) => {
+    const { maws, page, scratch } = p;
+    await size(maws, 1280, 820);
+    await restoreWithTab(p, names.map((name) => ({ id: `file:${scratch.path(name)}`, kind: 'file', appSessionId: scratch.appSessionId, path: scratch.path(name), pinned: true })));
+    const name = names.at(-1)!;
+    const tab = page.locator('[data-chrome-tabs]').getByRole('tab', { name, exact: true });
+    const viewer = main(page).locator(`[data-file-viewer][data-path="${scratch.path(name)}"]`);
+    await expect(viewer).toHaveAttribute('data-editable', 'true');
+    await viewer.locator('.cm-content .cm-line').first().click({ position: { x: 3, y: 4 } });
+    await page.keyboard.type('// unsaved tab');
+    await page.keyboard.press('Enter');
+    await expect(tab).toHaveAttribute('data-dirty', 'true');
+    await menu(maws.app, 'settings.open');
+    await expect(tab).toHaveAttribute('aria-selected', 'false');
+    await expect(tab.getByRole('img', { name: 'Pinned', exact: true })).toBeVisible();
+    await expect(tab.getByRole('img', { name: 'Unsaved changes', exact: true })).toBeVisible();
+    for (const dimensions of [...SIZES, { width: 900, height: 820 }]) {
+      await size(maws, dimensions.width, dimensions.height);
+      await tab.hover(); // reveals Close without activating the inactive tab
+      await expect(tab.getByRole('button', { name: `Close ${name}`, exact: true })).toBeVisible();
+      expect((await box(tab)).width, 'decorated tabs stay compact instead of retaining their full title width').toBeLessThanOrEqual(160);
+      await expect.poll(() => tab.evaluate((node) => {
+        const bounds = node.getBoundingClientRect();
+        const children = Array.from(node.children).map((child) => child.getBoundingClientRect());
+        const close = node.querySelector<HTMLButtonElement>('button')!;
+        const target = close.getBoundingClientRect();
+        const title = node.querySelector<HTMLElement>(':scope > span.truncate:last-of-type')!.getBoundingClientRect();
+        return {
+          inside: children.every((child) => child.left >= bounds.left && child.right <= bounds.right),
+          noOverlap: children.every((child, index) => index === 0 || child.left >= children[index - 1]!.right),
+          titleHasRoom: title.width >= 8,
+          closeHit: close.contains(document.elementFromPoint(target.x + target.width / 2, target.y + target.height / 2)),
+        };
+      }), { message: 'each adornment and the visible Close target stays inside its own inactive tab, without overlap' }).toEqual({ inside: true, noOverlap: true, titleHasRoom: true, closeHit: true });
+    }
+    await tab.click();
+    await menu(maws.app, 'file.save');
+    await expect(tab).not.toHaveAttribute('data-dirty');
+  }, (scratch) => {
+    for (const name of names) writeFileSync(scratch.path(name), 'export const value = 1;\n');
+  });
+});

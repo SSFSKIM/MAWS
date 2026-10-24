@@ -119,6 +119,8 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
   const name = label.secondary ? `${label.title} · ${label.secondary}` : label.title;
   const closeChord = useChordHint('tab.close');
   const dirty = useFileTabDirty(tab); // E5
+  // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title.
+  const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.fileType ? 8 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0));
 
   const onAuxClick = (event: MouseEvent) => {
     if (event.button === 1) void requestCloseTab(tab.id);
@@ -142,12 +144,13 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       onMouseDown={(event) => event.button === 1 && event.preventDefault()} // no autoscroll on a middle press
       onAuxClick={onAuxClick}
       onKeyDown={onKeyDown}
-      className={`group/tab relative flex ${active ? 'min-w-24' : 'min-w-16'} max-w-60 shrink cursor-default items-center gap-1.5 border-r border-border px-2.5 text-ui-sm whitespace-nowrap outline-accent select-none focus-visible:outline-2 focus-visible:-outline-offset-2 ${
+      style={{ minWidth: `calc(var(--spacing) * ${minWidth})` }}
+      className={`group/tab relative flex max-w-60 shrink cursor-default items-center gap-1.5 border-r border-border px-2.5 text-ui-sm whitespace-nowrap outline-accent select-none focus-visible:outline-2 focus-visible:-outline-offset-2 ${
         active ? 'bg-bg-raised text-fg shadow-[inset_0_-2px_0_0_var(--accent)]' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'
       }`}
     >
-      {label.glyph && <GlyphMark glyph={label.glyph} />}
-      {label.fileType && <span className="font-mono text-info">{label.fileType}</span>}
+      {label.glyph && <GlyphMark glyph={label.glyph} className="shrink-0" />}
+      {label.fileType && <span className="max-w-8 shrink-0 truncate font-mono text-info">{label.fileType}</span>}
       {/* E11 F2b (plan 2.5): a pin you can see, saying what it does */}
       {tab.pinned && (
         <span aria-label="Pinned" role="img" title={PINNED_HINT} className="inline-flex shrink-0 text-fg-muted">
@@ -156,7 +159,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       )}
       {dirty && <DirtyMark />}{/* E5 */}
       <span className="truncate">{label.title}</span>
-      {label.secondary && <small className="shrink-0 text-fg-muted">{label.secondary}</small>}
+      {label.secondary && <small className="max-w-16 shrink-0 truncate text-fg-muted">{label.secondary}</small>}
       <button
         type="button"
         tabIndex={-1}
