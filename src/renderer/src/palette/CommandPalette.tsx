@@ -27,6 +27,7 @@ import { useNow } from '../app/use-now';
 import { sessionAge } from '../sidebar/derive';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { displayTitle } from '../sessions/title';
+import { conversationSnippet } from './snippet';
 
 export const usePalette = create<{ open: boolean; scope: 'all' | 'sessions'; query: string }>()(() => ({ open: false, scope: 'all', query: '' }));
 export const openPalette = (query = '') => usePalette.setState({ open: true, scope: 'all', query });
@@ -213,7 +214,7 @@ function SessionItem({ record, project, snippet, onOpen }: { snippet?: string | 
   return (
     <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
       <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-4 shrink-0" />
-      <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{snippet}</span>}</span>
+      <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       {project && <span className="ml-auto max-w-[30%] shrink-0 truncate text-ui-sm text-fg-muted">{project.name}</span>}
       <span className="shrink-0 text-ui-sm text-fg-faint">{sessionAge(record, digest ?? undefined, now)}</span>
     </Command.Item>

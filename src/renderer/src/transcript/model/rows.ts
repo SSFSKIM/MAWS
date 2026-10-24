@@ -141,7 +141,7 @@ export type Row = RowBase &
     // (`owner/report/project.ts`). `open` once the reader opened it (the turn then draws as the full transcript does);
     // `working` while the turn runs; the counts are the divider's tool calls and the turn's assistant text blocks with
     // text outside any mark
-    | { kind: 'owner_record'; open: boolean; working: boolean; toolCalls: number; messages: number }
+    | { kind: 'owner_record'; open: boolean; working: boolean; toolCalls: number; messages: number; divider?: Extract<Row, { kind: 'divider' }> }
     // P2-C end
     // P4-R7: a call of a message tool the host reads (`@shared/owner/message-call`; classify.ts, `presentationOf`) as the
     // to-human message it sends, at the call's place among the turn's rows, drawn as a message and never as an MCP row:

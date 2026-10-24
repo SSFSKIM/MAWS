@@ -223,3 +223,18 @@ it('opens conversation matches from the sidebar query with a snippet, without mi
     expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${id}`);
   } finally { invoke.mockRestore(); }
 });
+
+it.each([
+  ['...red apple <message>green pear</message> blue plum...', '...red apple green pear blue plum...'],
+  ['...<message>green pear', '...green pear'],
+  ['green pear</message>...', 'green pear...'],
+  ['Use `<message>` for green pear, not <example>.', 'Use `<message>` for green pear, not <example>.'],
+])('conversation snippets hide owner wrappers without hiding words: %s', async (snippet, shown) => {
+  const id = idOf('Quota reset recovery');
+  const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { hits: [{ appSessionId: id, snippet }], indexing: false } } as never);
+  try {
+    render(<CommandPalette />);
+    act(() => openConversationSearch('green pear'));
+    expect(await screen.findByText(shown)).toBeTruthy();
+  } finally { invoke.mockRestore(); }
+});

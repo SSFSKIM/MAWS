@@ -70,7 +70,7 @@ function session() {
   return b.events;
 }
 
-const record = () => screen.queryByRole('button', { name: /^(Working record|Fold to report)/ });
+const record = () => document.querySelector<HTMLElement>('[data-kind="owner_record"] .transcript-disclosure');
 const dividers = () => [...document.querySelectorAll('[data-kind="divider"] .transcript-divider > .transcript-disclosure')] as HTMLElement[];
 
 describe('the report view', () => {
@@ -92,7 +92,22 @@ describe('the report view', () => {
     expect(critical.querySelector('code')?.textContent).toContain('Critical');
   });
 
-  it('folds a marked turn to its prompt, one working record and its marks, and opens it to level 1 and level 2', async () => {
+  it('a resting report reuses the projected completed summary, not a stale running divider', async () => {
+    const b = builder();
+    b.turn('resting-user');
+    b.toolUse('resting-tool', 'Bash', { command: 'ls' });
+    b.result('resting-tool', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('resting-text', 0, '<message>Done.</message>');
+    const { source } = pushSource(b.events);
+    render(<Transcript source={source} variant="session" ownerLane atRest />);
+    await waitFor(() => expect(record()).not.toBeNull());
+    fireEvent.click(record()!);
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
+    expect(record()?.textContent).toMatch(/^Worked for/);
+    expect(document.querySelector('[data-plugin-spinner]')).toBeNull();
+  });
+
+  it('opens a marked turn’s working record to the work in one click, without a second turn fold', async () => {
     await mounted(session());
     // level 0
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));
@@ -102,18 +117,15 @@ describe('the report view', () => {
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
     expect(dividers()).toHaveLength(1); // the unmarked turn's own divider: drawn as the full transcript
     expect(screen.getByText('A plain answer.')).toBeTruthy();
-    // level 1: the turn as the full transcript draws it folded, the record above it as the way back
+    // One disclosure opens the work; the unmarked turn keeps its own divider.
     fireEvent.click(record()!);
-    await waitFor(() => expect(record()?.textContent).toBe('Fold to report'));
-    expect(dividers()).toHaveLength(2);
-    expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
-    expect(dividers()[0].textContent).toMatch(/1 tool call/);
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
+    expect(record()?.textContent).toMatch(/Worked for .*1 tool call/);
+    expect(document.querySelector('[data-kind="owner_record"] [aria-label="Turn summary"]')).not.toBeNull();
+    expect(dividers()).toHaveLength(1);
     expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
     expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy(); // the marked text's own unmarked words
-    expect(document.querySelector('[data-kind="group"], [data-kind="cell"]')).toBeNull();
-    // level 2: the divider expanded shows the work rows
-    fireEvent.click(dividers()[0]);
-    await waitFor(() => expect(document.querySelectorAll('[data-kind="group"], [data-kind="cell"]').length).toBeGreaterThan(0));
+    expect(document.querySelectorAll('[data-kind="group"], [data-kind="cell"]').length).toBeGreaterThan(0);
     // back to the report
     fireEvent.click(record()!);
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));

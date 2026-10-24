@@ -52,7 +52,7 @@ function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[]
   return ids;
 }
 
-export function DividerRow({ row }: { row: DividerRowData }) {
+export function DividerRow({ row, onToggle }: { row: DividerRowData; onToggle?: () => void }) {
   const { storeKey, idPrefix, variant } = useTranscriptContext();
   const durationMs = useDuration(row, storeKey);
   const motion = useWorkMotion();
@@ -77,6 +77,7 @@ export function DividerRow({ row }: { row: DividerRowData }) {
           aria-expanded={open}
           aria-controls={controls || undefined}
           onClick={() => {
+            if (onToggle) return onToggle(); // Report's working record owns this turn-level disclosure.
             const target = !row.expanded;
             motion.toggle(turn, row.expanded, () => {
               const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);

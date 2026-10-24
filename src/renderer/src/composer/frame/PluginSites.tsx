@@ -48,7 +48,7 @@ export function PluginModeSlot({ appSessionId }: { appSessionId: AppSessionId })
       instanceId="session-mode"
       props={{ modes: NO_MODES }}
       frame={(tree) => (
-        <span aria-label={PLUGIN_SITES.mode} data-plugin-mode="" className="inline-flex h-6 max-w-64 min-w-0 shrink items-center overflow-hidden px-1.5 text-ui-sm whitespace-nowrap text-fg-muted">
+        <span aria-label={PLUGIN_SITES.mode} data-plugin-mode="" className="inline-flex h-6 max-w-64 min-w-0 shrink-0 items-center overflow-hidden px-1.5 text-ui-sm whitespace-nowrap text-fg-muted">
           {tree}
         </span>
       )}

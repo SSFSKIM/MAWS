@@ -38,15 +38,9 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Location ${path}`} title={`${path} · ${note}`} className={`${CHIP} font-mono`}>
-        <span className="truncate">{directoryName(path)}</span>
-        {/* W9 (H2): no branch to name (a non-repository, or git has not answered) shows no label, not a placeholder */}
-        {branch !== null && (
-          <>
-            <span className="shrink-0 text-fg-faint">·</span>
-            <span className="shrink-0 truncate">⎇ {branch}</span>
-          </>
-        )}
+      <Popover.Trigger aria-label={`Location ${path}`} title={`${path}${branch !== null ? ` · ${branch}` : ''} · ${note}`} className={`${CHIP} shrink-0 font-mono`}>
+        {/* Truncate the location as one label, never an empty project followed by an orphan separator and branch. */}
+        <span className="truncate">{directoryName(path)}{branch !== null ? ` · ⎇ ${branch}` : ''}</span>
         {dirty && (
           <span aria-label="uncommitted changes" className="shrink-0 text-warning">
             ●

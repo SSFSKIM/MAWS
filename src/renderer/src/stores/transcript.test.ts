@@ -464,14 +464,26 @@ describe('transcript store: the report view', () => {
     expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
   });
 
-  it('opening a record shows the turn folded (level 1), whatever its divider was', async () => {
+  it('opening a record shows its work directly, whatever its divider was', async () => {
     const store = createTranscriptStore();
     await store.getState().attach(KEY, pushSource(markedTurn().events).source);
     store.getState().setOwnerLane(KEY, true);
     store.getState().toggleTurn(KEY, T1); // the reader had opened its work in the transcript
     expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: true });
     store.getState().toggleReportRecord(KEY, T1);
+    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: true });
+  });
+
+  it('returning to Report keeps an open record open even if its transcript work was folded', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setOwnerLane(KEY, true);
+    store.getState().toggleReportRecord(KEY, T1);
+    store.getState().setView(KEY, 'transcript');
+    store.getState().toggleTurn(KEY, T1);
     expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: false });
+    store.getState().setView(KEY, 'report');
+    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: true });
   });
 
   it('a jump in the report to a row the closed record holds opens the record', async () => {

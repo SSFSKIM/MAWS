@@ -62,7 +62,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   line-height: var(--lh-prose);
   overflow-wrap: anywhere;
 }
-.transcript-user-bubble p { white-space: pre-wrap; } /* the user's line breaks are theirs */
+/* Markdown's remark-breaks supplies each single newline as <br>; pre-wrap would render its following text newline too. */
 .transcript-user-bubble:not([data-open]) > .transcript-user-content { max-height: calc(19 * var(--lh-prose) * var(--text-prose)); overflow: hidden; }
 .transcript-user-bubble[data-collapsed] > .transcript-user-content { mask-image: linear-gradient(to bottom, var(--fg) 80%, transparent); }
 .transcript-user-content > div > * + * { margin-top: 8px; }

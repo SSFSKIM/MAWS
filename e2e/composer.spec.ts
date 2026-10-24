@@ -865,6 +865,73 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(editor.consoleErrors()).toEqual([]);
 });
 
+// Acceptance 3: main-column widths with a side surface open, not a mobile viewport.
+test('narrow composer tools wrap without overlap, lost labels or clipped hit targets', async ({ editor }) => {
+  const { page, app } = editor;
+  const id = 'acceptance-footer';
+  await openComposerPage(page);
+  await launchReady(page, id, turnsJournal(scratch, id, 1), { cwd: repo });
+  await showPanes(page, [{ composer: id }, null]);
+  const toolbar = pane(page, 0).getByRole('toolbar', { name: 'Composer tools' });
+  for (const width of [1280, 900, 700]) {
+    await app.evaluate(({ BrowserWindow }, w) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.setMinimumSize(0, 0);
+      window.setContentSize(w, 820);
+    }, width);
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
+    const controls = await toolbar.getByRole('button').evaluateAll((buttons) => buttons.map((button) => {
+      const r = button.getBoundingClientRect();
+      const parent = button.closest('[role="toolbar"]')!.getBoundingClientRect();
+      return { label: button.getAttribute('aria-label'), x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width,
+        contained: r.x >= parent.x - 1 && r.right <= parent.right + 1 && r.y >= parent.y - 1 && r.bottom <= parent.bottom + 1,
+        clipped: button.scrollWidth > button.clientWidth + 1 };
+    }));
+    for (const [i, control] of controls.entries()) {
+      expect(control.contained, `${width}: ${control.label} stays inside the footer`).toBe(true);
+      expect(control.width, `${width}: ${control.label} keeps a hit target`).toBeGreaterThan(16);
+      expect(control.clipped, `${width}: ${control.label} is not cut off`).toBe(false);
+      for (const other of controls.slice(i + 1)) {
+        const overlap = Math.min(control.right, other.right) - Math.max(control.x, other.x) > 1 && Math.min(control.bottom, other.bottom) - Math.max(control.y, other.y) > 1;
+        expect(overlap, `${width}: ${control.label} and ${other.label} do not overlap`).toBe(false);
+      }
+    }
+    await toolbar.getByRole('button', { name: /^Location / }).click();
+    await expect(page.getByRole('dialog', { name: 'Location', exact: true })).toContainText(repo);
+    await page.keyboard.press('Escape');
+  }
+});
+
+test('sending while reading old work follows the new turn and preserves tight user line breaks', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'acceptance-send-follow';
+  await openComposerPage(page);
+  await launchReady(page, id, turnsJournal(scratch, id, 2), { cwd: repo });
+  await showPanes(page, [{ composer: id, transcript: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.insertText(Array.from({ length: 24 }, (_, i) => `Earlier instruction ${i + 1}`).join('\n'));
+  await messageIn(page, 0).press('Enter');
+  await expect.poll(() => sent(page, id)).toHaveLength(1);
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  const scroller = pane(page, 0).locator('[data-transcript-scroller]');
+  await scroller.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(pane(page, 0).getByRole('button', { name: 'Jump to latest' })).toBeVisible();
+  await messageIn(page, 0).click();
+  await page.keyboard.insertText('red apple\ngreen pear\nblue plum');
+  await messageIn(page, 0).press('Enter');
+  await expect.poll(() => sent(page, id)).toHaveLength(2);
+  await expect(pane(page, 0).getByRole('button', { name: 'Jump to latest' })).toHaveCount(0);
+  await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1);
+  const paragraph = pane(page, 0).locator('.transcript-user-bubble p').filter({ hasText: 'red apple' });
+  await expect(paragraph).toBeVisible();
+  expect(await paragraph.evaluate((el) => el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight))).toBeCloseTo(3, 1);
+  await expect(paragraph.locator('br')).toHaveCount(2);
+});
+
 // R5: the light composer elevation follows the window, not the pane; the dark edge stays inset.
 test('R5: composer shadow switches below 640px and keeps the dark edge', async ({ editor }) => {
   const { page, app } = editor;

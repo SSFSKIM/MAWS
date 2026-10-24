@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipcError } from '@shared/ipc/errors';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { useTranscriptStore } from '../../stores/transcript';
 import { useNotices } from '../../stores/notices';
 import { memoryTargetLabel, memoryTargetOptions } from '../modes/memory';
 import type { Serialized } from './serialize';
@@ -28,6 +29,21 @@ const toasts = () => useNotices.getState().notices.map((n) => n.text);
 beforeEach(() => useNotices.setState({ notices: [] }));
 
 describe('the editor submits by mode and records history', () => {
+  it('only an accepted prompt restores transcript follow, not a refusal or a memory save', async () => {
+    const store = useTranscriptStore.getState();
+    await store.attach(APP, { key: APP, snapshot: async () => [], subscribe: () => () => {} });
+    const { bridge } = client();
+    try {
+      store.setFollowing(APP, false);
+      await submitSerialized(bridge, APP, serialized({}), 'send', null, { dispatch: async () => 'refused' });
+      expect(useTranscriptStore.getState().entries[APP].following).toBe(false);
+      await submitSerialized(bridge, APP, serialized({ mode: 'memory' }), 'send', null);
+      expect(useTranscriptStore.getState().entries[APP].following).toBe(false);
+      await submitSerialized(bridge, APP, serialized({}), 'send', null);
+      expect(useTranscriptStore.getState().entries[APP].following).toBe(true);
+    } finally { store.drop(APP); }
+  });
+
   it('sends, steers into the running turn, and appends the display to history', async () => {
     const { bridge, calls } = client();
     expect(await submitSerialized(bridge, APP, serialized({ pastedContents: { '1': { id: 1, type: 'text', content: 'b', contentHash: null, mediaType: null, filename: null } } }), 'send', null)).toBe(true);

@@ -15,6 +15,7 @@ import { dispatchHumanPrompt, sendHumanPrompt } from '../submit/send-human-promp
 import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
 import { useSessions } from '../../stores/sessions'; // P2-A
+import { useTranscriptStore } from '../../stores/transcript';
 import { sendSizeRefusal } from './attachments';
 import type { Serialized } from './serialize';
 
@@ -59,6 +60,8 @@ export async function dispatchByMode(client: MawsBridge, appSessionId: AppSessio
 
 // After the host accepted: what was left out is said, and the prompt goes into MAWS's history.
 export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, project: string | null = null): void {
+  // A new instruction returns to the conversation's live end; a refusal or a memory save leaves the reader alone.
+  if (s.mode === 'send') useTranscriptStore.getState().setFollowing(appSessionId, true);
   if (s.omitted > 0) warn(s.omitted === 1 ? '1 pasted segment was unavailable and was left out' : `${s.omitted} pasted segments were unavailable and were left out`);
   appendHistory(client, appSessionId, s, project);
 }

@@ -73,7 +73,7 @@ export interface TranscriptStore {
   toggleBoundary(key: string, boundary: RowId): void; // a rewind boundary reveals or hides the branch it hid
   // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane as main reports it (a
   // marked commentary then stays in view when its turn folds); the view the reader chose for the tab; and a marked
-  // turn's working record in the report, opened at level 1 (its divider folded) or closed again
+  // turn's working record in the report, opened directly to the work or closed again
   setOwnerLane(key: string, on: boolean): void;
   setView(key: string, view: 'report' | 'transcript'): void;
   toggleReportRecord(key: string, turn: TurnId): void;
@@ -449,17 +449,18 @@ export function createTranscriptStore() {
         if ((entry(key)?.state.ui.ownerLane ?? false) !== on) changeUi(key, () => 'all', (ui) => void (ui.ownerLane = on));
       },
       setView(key, view) {
-        if (entry(key)?.state.ui.view !== view) changeUi(key, () => [], (ui) => void (ui.view = view));
+        if (entry(key)?.state.ui.view === view) return;
+        changeUi(key, (current) => view === 'report' ? current.state.ui.reportOpenTurns ?? [] : [], (ui) => {
+          ui.view = view;
+          if (view === 'report') for (const turn of ui.reportOpenTurns ?? []) expandTurn(ui, turn);
+        });
       },
       toggleReportRecord(key, turn) {
-        changeUi(key, () => [turn], (ui, state) => {
+        changeUi(key, () => [turn], (ui) => {
           if (ui.reportOpenTurns!.delete(turn)) return;
           ui.reportOpenTurns!.add(turn);
-          // Opened at level 1: the turn as the full transcript draws it folded, its divider the next disclosure.
-          if (isExpanded(state, turn)) {
-            ui.expandedTurns.delete(turn);
-            ui.collapsedTurns.add(turn);
-          }
+          // The record is the turn's disclosure in Report; opening it reveals the work directly.
+          expandTurn(ui, turn);
         });
       },
       jumpToMessage(key, { messageUuid, blockIndex }) {

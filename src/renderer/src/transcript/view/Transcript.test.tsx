@@ -57,6 +57,15 @@ async function mounted(events: SessionEvent[]) {
 }
 
 describe('Transcript', () => {
+  it('a requested return to following reaches the list after the reader scrolled up', async () => {
+    const key = await mounted(deniedThenAnswer());
+    fireEvent.wheel(document.querySelector('[data-transcript-scroller]')!, { deltaY: -100 });
+    expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
+    expect(useTranscriptStore.getState().entries[key].following).toBe(false);
+    act(() => useTranscriptStore.getState().setFollowing(key, true));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull());
+  });
+
   it('a jump to a standalone cell in a collapsed turn opens the turn and focuses the cell', async () => {
     const key = await mounted(deniedThenAnswer());
     const target = cellId.tool(tool('t1'));
