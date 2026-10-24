@@ -16,6 +16,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { anchoredMessage } from '../src/shared/anchor/message';
 import { ScratchRepo } from '../test/support/scratch-repo';
+import { collectBestEffortEvidence } from './support/best-effort-evidence';
 import { StoreFixture } from '../test/support/store-fixture';
 import { menu, otherThemeColours } from './support/code-product';
 import { clickRevealed } from './support/hover';
@@ -922,22 +923,29 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // Capture this boundary explicitly: the custom Electron launch has no fixture-managed tracing.
     await maws.app.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
-    cleanups.push(async () => {
-      const path = test.info().outputPath('reload-trace.zip');
-      await maws.app.context().tracing.stop({ path });
-      await test.info().attach('reload-trace', { path, contentType: 'application/zip' });
-      await test.info().attach('reload-pin-geometry', {
-        body: JSON.stringify({
-          heading: await hero.boundingBox(),
-          card: await redocked.boundingBox(),
-          host: await viewer.locator('[data-card-host]').boundingBox(),
-          frame: await viewer.locator('[data-artifact-frame="html"]').boundingBox(),
-          cardStyle: await redocked.getAttribute('style'),
-        }, null, 2),
-        contentType: 'application/json',
-      });
-      await test.info().attach('reload-screenshot', { body: await page.screenshot(), contentType: 'image/png' });
-    });
+    // Evidence runs first in afterEach; a missing locator or closed context must not skip app/scratch cleanup.
+    cleanups.push(() => collectBestEffortEvidence({
+      'reload-trace': async () => {
+        const path = test.info().outputPath('reload-trace.zip');
+        await maws.app.context().tracing.stop({ path });
+        await test.info().attach('reload-trace', { path, contentType: 'application/zip' });
+      },
+      'reload-pin-geometry': async () => {
+        await test.info().attach('reload-pin-geometry', {
+          body: JSON.stringify({
+            heading: await hero.boundingBox({ timeout: 1_000 }),
+            card: await redocked.boundingBox({ timeout: 1_000 }),
+            host: await viewer.locator('[data-card-host]').boundingBox({ timeout: 1_000 }),
+            frame: await viewer.locator('[data-artifact-frame="html"]').boundingBox({ timeout: 1_000 }),
+            cardStyle: await redocked.getAttribute('style', { timeout: 1_000 }),
+          }, null, 2),
+          contentType: 'application/json',
+        });
+      },
+      'reload-screenshot': async () => {
+        await test.info().attach('reload-screenshot', { body: await page.screenshot({ timeout: 5_000 }), contentType: 'image/png' });
+      },
+    }, 5_000));
     await page.evaluate(() => {
       window.addEventListener('message', (event) => {
         if (event.data?.type === 'maws:located') console.log('reload-located', JSON.stringify(event.data));
