@@ -234,7 +234,21 @@ test('a waiting question is answered in its sidebar hover card, never queued as 
       await expect(card).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
     await expect(card.getByText(args.questions[0]!.question)).toBeVisible();
-    await test.info().attach('acceptance-hover-question.png', { body: await s.page.screenshot(), contentType: 'image/png' });
+    for (const [width, height] of [[1280, 820], [1512, 982], [900, 820], [620, 820]] as const) {
+      await s.maws.app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0]!.setContentSize(width, height), [width, height]);
+      await expect.poll(() => s.page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+      if (await sidebarOf(s.page).evaluate((node) => node.hasAttribute('inert'))) await s.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+      await expect(async () => {
+        await s.page.mouse.move(width - 5, 20);
+        await row.hover();
+        await expect(card).toBeVisible({ timeout: 2_000 });
+      }).toPass({ timeout: 10_000 });
+      await expect(card.getByRole('button', { name: 'Submit', exact: true })).toBeInViewport();
+      await test.info().attach(`acceptance-hover-question-${width}x${height}.png`, { body: await s.page.screenshot(), contentType: 'image/png' });
+    }
+    await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1280, 820));
+    await row.hover();
+    await expect(card).toBeVisible();
     await expect(card.getByRole('textbox', { name: /^Reply to / })).toHaveCount(0);
     await card.getByRole('radio', { name: 'hi.txt', exact: true }).click();
     await card.getByRole('textbox', { name: 'What title?' }).fill('Release notes');
