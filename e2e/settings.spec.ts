@@ -507,7 +507,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await page.screenshot({ path });
         await testInfo.attach(name, { path, contentType: 'image/png' });
       };
-      for (const [width, height] of [[1280, 820], [1512, 982], [900, 760], [600, 760]] as const) {
+      for (const [width, height] of [[1280, 820], [1512, 982], [900, 820], [620, 820]] as const) {
         await app.evaluate(({ BrowserWindow }, [width, height]) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(600, 600); win.setContentSize(width, height); }, [width, height]);
         await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, [width, height]);
         await page.getByRole('tab', { name: 'Plugins', exact: true }).click();
@@ -515,6 +515,8 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await shot(`ux2k-plugins-${width}x${height}`);
         await page.getByRole('tab', { name: 'Skills', exact: true }).click();
         await expect(page.getByRole('button', { name: 'View review-quarterly' })).toBeVisible();
+        await expect(page.getByText('Inventory coverage', { exact: true })).toBeVisible();
+        await expect(page.getByText('Some configuration could not be read', { exact: true })).toHaveCount(0);
         await shot(`ux2k-skills-${width}x${height}`);
         await page.getByRole('tab', { name: 'MCP servers', exact: true }).click();
         await expect(page.getByText('documents', { exact: true })).toBeVisible();
