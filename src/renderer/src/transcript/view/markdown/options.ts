@@ -1,12 +1,13 @@
 // The Streamdown props every transcript markdown surface shares (residue *Streamdown configuration*), used by the
 // Markdown wrapper and by the per-fence mermaid renderer's nested Streamdown alike.
+import remarkBreaks from 'remark-breaks';
 import { TranscriptImage } from './Image';
 import { TranscriptLink } from './Link';
 import { remarkMermaidFences } from './plugins';
 import type { Pluggable } from 'unified';
 import { rehypePlugins, remarkPlugins, transcriptUrlTransform } from './sanitize';
 
-const remark: Pluggable[] = [...remarkPlugins, remarkMermaidFences]; // plugins.ts: marks each mermaid fence that has not closed
+const remark: Pluggable[] = [...remarkPlugins, remarkBreaks, remarkMermaidFences]; // plugins.ts: marks each mermaid fence that has not closed
 
 export const STREAMDOWN_OPTIONS = {
   remarkPlugins: remark,
