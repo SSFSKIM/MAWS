@@ -1,57 +1,68 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
-import { assistantPresentation } from './Presenter';
+import { assistantPresentation, messagePresentation } from './Presenter';
 
 afterEach(cleanup);
-const draw = (text: string, showRecord = false) => assistantPresentation(text)?.render({ showRecord, live: false, recordKey: 'test' });
+const draw = (text: string, live = false) => assistantPresentation(text)?.render({ live });
 
-it.each([
-  ['to-human', 'to human'], ['essential', 'essential'], ['insight', 'insight'], ['need-input', 'need input'],
-])('draws %s with a label over its Markdown body', (tag, label) => {
-  const view = render(draw(`<${tag}>First **span**.\n\n<unknown>literal</unknown></${tag}>`));
-  expect(screen.getByText(label)).toBeTruthy();
-  expect(view.container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('span');
-  expect(view.container.textContent).toContain('<unknown>literal</unknown>');
-  expect(view.container.querySelector('unknown')).toBeNull();
-  if (tag === 'insight') expect(screen.getByRole('complementary')).toBeTruthy();
-  if (tag === 'essential') expect(view.container.querySelector('[data-owner-span="essential"]')?.className).toContain('font-semibold');
+it('keeps a message in its authored paragraph without hiding surrounding text or adding labels', () => {
+  const view = render(draw('Before <message>for **you**</message> after.'));
+  expect(view.container.textContent).toBe('Before for you after.');
+  expect(view.container.querySelectorAll('p')).toHaveLength(1);
+  expect(view.container.querySelector('.owner-message-ink')?.textContent).toContain('for ');
+  expect(view.container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('you');
+  expect(view.container.querySelector('[data-owner-card], [data-owner-report], button')).toBeNull();
 });
-it('puts a question above inert choices, marks the recommendation and explains resuming', () => {
-  const view = render(draw('<need-input>Which path?\n<choice recommended>One **fast** path</choice>\n<choice>Two</choice></need-input>'));
-  expect(view.container.querySelectorAll('button, input, [role="button"]')).toHaveLength(0);
-  expect(screen.getByRole('list').textContent).toContain('Recommended');
-  expect(screen.getByText(/Resume this session to answer/)).toBeTruthy();
-  expect(screen.getByText('Which path?').compareDocumentPosition(screen.getByRole('list')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(view.container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('fast');
+
+it.each([false, true])('preserves lists and backtick Critical/Insight rules across a closed message (live=%s)', (live) => {
+  const text = '<message>\n1. First\n2. Second\n\n`⚠ Critical ─────────`\nKeep a backup.\n`──────────────────`\n\n`★ Insight ─────────`\nWhy it works.\n`──────────────────`\n</message>\n\nAfter.';
+  const view = render(draw(text, live));
+  expect([...view.container.querySelectorAll('li')].map((node) => node.textContent)).toEqual(['First', 'Second']);
+  expect([...view.container.querySelectorAll('code')].map((node) => node.textContent)).toEqual(['⚠ Critical ─────────', '──────────────────', '★ Insight ─────────', '──────────────────']);
+  expect(view.container.textContent).toContain('Keep a backup.');
+  expect(view.container.textContent).toContain('Why it works.');
+  expect(view.container.textContent).toContain('After.');
+  expect(view.container.textContent).not.toContain('<message>');
+  expect(view.container.querySelector('[data-owner-card], aside, button')).toBeNull();
 });
-it('renders choice-only questions beside a report without losing their options', () => {
-  render(draw('<to-human>Report.</to-human><need-input><choice recommended>A</choice><choice>B</choice></need-input>'));
-  expect(screen.getByText('Report.')).toBeTruthy();
-  expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['ARecommended', 'B']);
-  expect(screen.getByText('Resume this session to answer.')).toBeTruthy();
+
+it('hides closed legacy marks without cards or tint, and keeps quoted message tags literal', () => {
+  const view = render(draw('<message>Report.</message>\n\n<essential>Risk.</essential>\n<insight>Reason.</insight>\n\n`<message>example</message>`'));
+  expect(view.container.textContent).toContain('Risk.');
+  expect(view.container.textContent).not.toContain('<essential>');
+  expect(view.container.textContent).toContain('Reason.');
+  expect(view.container.textContent).not.toContain('<insight>');
+  expect([...view.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent).join('')).toBe('Report.');
+  expect(view.container.querySelector('code')?.textContent).toBe('<message>example</message>');
+  expect(view.container.querySelector('code .owner-message-ink')).toBeNull();
 });
-it('passes malformed choice markup through Markdown as literal text', () => {
-  const view = render(draw('<need-input>Pick.\n<choice>A<choice>B</choice></need-input>'));
-  expect(view.container.textContent).toContain('<choice>A<choice>B</choice>');
-  expect(view.container.querySelector('choice')).toBeNull();
-  expect(screen.queryByRole('list')).toBeNull();
+
+it('declines ordinary text, quoted tags, and unfinished messages', () => {
+  for (const text of ['Ordinary **answer**.', '<message>unfinished', '`<message>example</message>`', '```xml\n<message>example</message>\n```']) {
+    expect(assistantPresentation(text)).toBeNull();
+  }
 });
-it('keeps mixed-body commentary inside the work fold and reveals it in source order', () => {
-  const text = 'Before.\n<to-human>Report.</to-human>\nAfter.\n<insight>Because.</insight>';
-  const view = render(draw(text));
-  expect(view.container.textContent).not.toContain('Before.');
-  expect(view.container.textContent).not.toContain('After.');
-  view.rerender(draw(text, true));
-  expect([...view.container.querySelectorAll('.transcript-prose')].map((el) => el.textContent)).toEqual(['Before.', 'Report.', 'After.', 'Because.']);
-  expect([...view.container.querySelectorAll('.transcript-commentary')].map((el) => el.textContent)).toEqual(['Before.', 'After.']);
+
+it('leaves an unfinished message literal beside a closed one, even while streaming', () => {
+  const view = render(draw('<message>Done.</message>\n\n<message>Not done', true));
+  expect(view.container.textContent).toContain('Done.');
+  expect(view.container.textContent).toContain('<message>Not done');
 });
-it('declines ordinary text and unfinished tags', () => {
-  expect(assistantPresentation('Ordinary **answer**.')).toBeNull();
-  expect(assistantPresentation('<to-human>unfinished')).toBeNull();
+
+it('supports historical to-human messages without adding structure for nested legacy marks', () => {
+  const view = render(draw('<to-human>Before <insight>Why.</insight> after.</to-human>'));
+  expect(view.container.textContent).toBe('Before Why. after.');
 });
-// P2-E1: a presentation with a Reply field under it (the comment card's) answers there, so it does not say to resume
-it('leaves the resume line out when the drawing is answerable', () => {
-  render(assistantPresentation('<need-input>Which path?\n<choice>A</choice></need-input>')!.render({ showRecord: false, live: false, recordKey: 'test', answerable: true }));
-  expect(screen.getByText('Which path?')).toBeTruthy();
-  expect(screen.queryByText(/Resume this session to answer/)).toBeNull();
+
+it('message-tool content has the same unboxed ink and authored Markdown', () => {
+  const view = render(messagePresentation('Stage **one** done.'));
+  expect(view.container.textContent).toBe('Stage one done.');
+  expect(view.container.querySelector('.owner-message-ink')).not.toBeNull();
+  expect(view.container.querySelector('[data-owner-card], [data-owner-report]')).toBeNull();
+});
+
+it('legacy questions keep their written options without adding controls or recommendation labels', () => {
+  const view = render(draw('<need-input>Which?\n<choice recommended>One</choice>\n<choice>Two</choice></need-input>'));
+  expect(view.container.textContent).toBe('Which?\nOne\nTwo');
+  expect(view.container.querySelector('button, input, .owner-message-ink')).toBeNull();
 });

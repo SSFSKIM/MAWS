@@ -1,6 +1,6 @@
 // The session pane's header while the session's owner-channel lane is on (the P2-C document, Design §7 and §8; the
 // parent's Decision Log 19): at its trailing end the two-state control "Report · Transcript", the tab's view; before it,
-// in the report, what its top says: how many must-reads wait (with Mark all read, once there are two) and, when the
+// in the report, what its top says: how many legacy marks wait, with Mark read even for one and, when the
 // engine reported another output style than MAWS read, that notice. Nothing draws while the lane is off: P1's pane.
 // The channel is followed by the session's transcript slot, which the pane always mounts with it.
 // `toggleReportView` is the unbound action `transcript.toggleReport`, on the focused pane's session.
@@ -10,7 +10,7 @@ import { toast } from '../../stores/notices';
 import { useOwnerChannelStore } from '../../stores/owner-channel';
 import { useTranscriptStore } from '../../stores/transcript';
 import { markRead } from './answering';
-import { REPORT } from './copy';
+import { ESSENTIAL, REPORT } from './copy';
 import { reportViewOf } from './project';
 import './report.css';
 
@@ -25,17 +25,17 @@ export function ReportBar({ appSessionId, markAllRead = () => void markAllReadOr
   const key = appSessionId; // the session transcript's store key (`ipcSource`)
   const report = useTranscriptStore((s) => reportViewOf(s.entries[key]?.state?.ui));
   if (!owner?.lane.on) return null;
-  const unread = owner.marks.filter((mark) => mark.item && mark.essential?.state === 'unread').length;
+  const unread = owner.marks.filter((mark) => mark.item && (mark.essential?.state === 'unread' || mark.question?.state === 'unanswered')).length;
   const mismatch = owner.lane.mismatch;
   return (
     <div className="owner-bar" data-owner-bar="">
       <div className="owner-bar-notes">
-        {report && unread >= 2 && (
+        {report && unread >= 1 && (
           <span className="owner-bar-unread">
-            {REPORT.mustRead(unread)}
+            {REPORT.unread(unread)}
             <span aria-hidden="true"> · </span>
             <button type="button" className="owner-bar-link" disabled={!markAllRead} onClick={() => markAllRead?.()}>
-              {REPORT.markAllRead}
+              {unread === 1 ? ESSENTIAL.markRead : REPORT.markAllRead}
             </button>
           </span>
         )}

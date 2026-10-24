@@ -351,7 +351,7 @@ describe('TranscriptSlot', () => {
     expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(1);
     expect(document.body.textContent).toContain('The thread’s own prompt');
     expect(document.body.textContent).not.toContain('The parent’s copied');
-    expect(document.querySelector('[data-owner-report]')).not.toBeNull(); // the local presenter
+    expect(document.querySelector('.owner-message-ink')).not.toBeNull(); // the local presenter
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(override).toHaveBeenCalledWith('src/a.ts', undefined);
     expect(registered).not.toHaveBeenCalled();

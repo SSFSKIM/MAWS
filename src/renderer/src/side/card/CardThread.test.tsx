@@ -184,7 +184,7 @@ describe('the card becomes the thread', () => {
     snapshot = b.events;
     await intoThread();
     withRecord();
-    await waitFor(() => expect(card()!.querySelector('[data-owner-report]')).not.toBeNull());
+    await waitFor(() => expect(within(card()!).getByText('Larger by how much?')).toBeTruthy());
     expect(card()!.textContent).not.toContain('<need-input>');
     expect(card()!.textContent).not.toContain('Resume this session to answer.');
   });

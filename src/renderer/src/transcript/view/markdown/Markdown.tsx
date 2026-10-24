@@ -3,6 +3,8 @@
 // parsed once in static mode, and loses its caret.
 import { useMemo } from 'react';
 import { Streamdown } from 'streamdown';
+import type { Root } from 'hast';
+import type { Plugin } from 'unified';
 import { MermaidFence } from './MermaidFence';
 import { STREAMDOWN_OPTIONS } from './options';
 import { code, math } from './plugins';
@@ -15,13 +17,19 @@ const PLUGINS = { code, math, renderers: [{ language: 'mermaid', component: Merm
 export interface MarkdownProps {
   markdown: string;
   live: boolean;
+  decorate?: Plugin<[], Root>; // trusted presentation after the HTML/URL gates, over one complete document
 }
 
-export function Markdown({ markdown: text, live }: MarkdownProps) {
+const wholeDocument = (text: string) => [text];
+
+export function Markdown({ markdown: text, live, decorate }: MarkdownProps) {
   const markdown = useMemo(() => (live ? holdBackTable(text) : text), [text, live]);
+  const rehypePlugins = useMemo(() => decorate ? [...STREAMDOWN_OPTIONS.rehypePlugins, decorate] : STREAMDOWN_OPTIONS.rehypePlugins, [decorate]);
   return (
     <Streamdown
       {...STREAMDOWN_OPTIONS}
+      rehypePlugins={rehypePlugins}
+      parseMarkdownIntoBlocksFn={decorate ? wholeDocument : undefined}
       mode={live ? 'streaming' : 'static'}
       isAnimating={live}
       caret={live ? 'block' : undefined}
