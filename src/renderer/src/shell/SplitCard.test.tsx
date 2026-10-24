@@ -357,7 +357,8 @@ describe('the split’s floating card in the Shell', () => {
     const header = () => mainRegion().querySelector<HTMLElement>('[data-pane="1"] [data-editor-header]')!;
     await user.click(within(header()).getByRole('button', { name: 'Expand pane', pressed: false }));
     expect(set()).toMatchObject({ floating: { sessionTabId: S.id }, splitRatio: 0.4 });
-    expect(card()).not.toBeNull();
+    expect(card()).toBeNull();
+    expect(screen.getByRole('region', { name: 'Compact session composer' })).toBeTruthy();
     expect(focused).toEqual([A]);
     await user.click(within(header()).getByRole('button', { name: 'Restore split', pressed: true }));
     expect(set().floating).toBeUndefined();
@@ -516,7 +517,10 @@ describe('the round trip with the real transcript and composer', () => {
     scrollTo(410);
     const inPane = rowAt(410);
     act(() => useLayout.getState().focusPane(1));
-    act(() => runAction('main.expandArtifactPane')); // float from the editor beside it
+    act(() => runAction('main.expandArtifactPane')); // compress from the editor beside it
+    expect(card()).toBeNull();
+    await waitFor(() => expect(editor().editor.getText()).toBe('kept across the round trip'));
+    await userEvent.click(screen.getByRole('button', { name: 'Show session card' }));
     expect(card()).not.toBeNull();
     await waitFor(() => expect(editor().editor.getText()).toBe('kept across the round trip'));
     await waitFor(() => expect(scrolls.at(-1)).toBe(shownAt(inPane)));
