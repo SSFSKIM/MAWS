@@ -83,8 +83,11 @@ it('keeps conversation search beside the input and keyboard-reachable with all 7
   const field = screen.getByRole('searchbox', { name: 'Search projects and sessions' });
   act(() => field.focus());
   fireEvent.change(field, { target: { value: 'test' } });
-  expect(sessionRows(row('chosen'))).toHaveLength(785);
-  expect(within(row('chosen')).getByLabelText('785 matching sessions')).toBeTruthy();
+  const chosenRow = row('chosen');
+  expect(sessionRows(chosenRow)).toHaveLength(785);
+  // The count belongs to the header: a label query over all 785 rows needlessly traverses every descendant's text.
+  const header = chosenRow.querySelector<HTMLElement>('[data-project-line]')!;
+  expect(within(header).getByLabelText('785 matching sessions')).toBeTruthy();
   const search = within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name: 'Search in conversations for ‘test’' });
   await userEvent.tab();
   expect(document.activeElement).toBe(search);

@@ -38,7 +38,7 @@ async function attachSidebarStates(maws: MawsLaunch, info: TestInfo, state: 'row
   await size(maws, 1280, 820);
 }
 
-test('UX1: titles keep their width on hover and conversation search stays reachable above 785 uncapped results', async ({}, info) => {
+test('UX1: titles keep their width on hover and conversation search stays reachable above 785 uncapped results', async ({ mawsEnv }, info) => {
   test.setTimeout(120_000);
   const root = mkdtempSync(join(tmpdir(), 'maws-sidebar-acceptance-'));
   const directory = join(root, 'chosen');
@@ -60,7 +60,7 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     version: 1, projects: [chosen, other], sessions: [...sessions, elsewhere], digests: [], engine: [], attention: [],
     timeline: [{ at: 1000, op: 'session', record: { ...elsewhere, updatedAt: new Date(Date.now() + 86_400_000).toISOString() } }],
   })));
-  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_E2E_FOREGROUND: '0', MAWS_SESSION_SOURCE: `stub:${fixture}`, MAWS_SCENARIO_CLOCK: 'manual' } });
+  const maws = await launchMaws({ env: { ...mawsEnv, MAWS_HARNESS: '0', MAWS_E2E_FOREGROUND: '0', MAWS_SESSION_SOURCE: `stub:${fixture}`, MAWS_SCENARIO_CLOCK: 'manual' } });
   try {
     const { page } = maws;
     await size(maws, 1280, 820);

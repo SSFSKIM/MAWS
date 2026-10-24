@@ -91,7 +91,10 @@ describe('Transcript', () => {
       Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => void (top = value) });
       Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 20_000 });
       Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 2_000 });
-      const scroll = vi.fn((options: ScrollToOptions) => { top = Math.min(options.top ?? top, 18_000); });
+      const scroll = vi.fn((options?: ScrollToOptions | number, y?: number) => {
+        const offset = typeof options === 'number' ? y : options?.top;
+        top = Math.min(offset ?? top, 18_000);
+      });
       scroller.scrollTo = scroll;
       const moveTo = (offset: number) => act(() => { top = offset; fireEvent.scroll(scroller); });
       moveTo(18_000);

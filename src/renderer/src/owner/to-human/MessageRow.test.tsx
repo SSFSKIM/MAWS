@@ -78,14 +78,27 @@ describe('a message tool’s call in a mounted transcript', () => {
   it('the report draws unboxed message ink at level 0, and down to the work rows never as an MCP row', async () => {
     await mounted(turn(), true);
     const cards = () => [...document.querySelectorAll('[data-kind="to_human"] .owner-message-ink')].map((element) => element.textContent);
-    const record = () => screen.getByRole('button', { name: /^(Working record|Fold to report)/ });
+    const cells = () => [...document.querySelectorAll('[data-kind="cell"] [data-cell-id]')].map((element) => element.getAttribute('data-cell-id'));
     await waitFor(() => expect(cards()).toEqual(['Stage 1 is done.']));
-    expect(record().textContent).toBe('Working record · 1 tool call'); // the call is the message, not one of the calls
-    // level 1, then level 2: the command's cell appears; the call never becomes one
-    fireEvent.click(record());
-    await waitFor(() => expect(record().textContent).toBe('Fold to report'));
-    fireEvent.click(document.querySelector('[data-kind="divider"] .transcript-divider > .transcript-disclosure')!);
-    await waitFor(() => expect([...document.querySelectorAll('[data-kind="cell"]')].map((element) => element.id.replace(/^.*-cell:/, ''))).toEqual(['t1']));
+    const record = screen.getByRole('button', { name: 'Working record · 1 tool call' }); // the call is the message, not one of the calls
+    expect(record.getAttribute('aria-expanded')).toBe('false');
+    expect(cells()).toEqual([]);
+    expect(document.querySelector('[data-kind="to_human"] [data-to-human-call="c1"]')).not.toBeNull();
+
+    // The record opens directly onto the command, without a second turn-level disclosure or an MCP cell for the ink.
+    fireEvent.click(record);
+    await waitFor(() => expect(cells()).toEqual(['cell:t1']));
+    expect(record.getAttribute('aria-expanded')).toBe('true');
+    expect(record.textContent).toMatch(/^Worked for .* · 1 tool call$/);
+    expect(document.querySelectorAll('[data-kind="owner_record"] .transcript-disclosure')).toHaveLength(1);
+    expect(document.querySelector('[data-kind="divider"]')).toBeNull();
+    expect(cards()).toEqual(['Stage 1 is done.']);
+    expect(document.querySelector('[data-kind="to_human"] [data-to-human-call="c1"]')).not.toBeNull();
+
+    fireEvent.click(record);
+    await waitFor(() => expect(cells()).toEqual([]));
+    expect(record.getAttribute('aria-expanded')).toBe('false');
+    expect(record.textContent).toBe('Working record · 1 tool call');
     expect(cards()).toEqual(['Stage 1 is done.']);
   });
 
