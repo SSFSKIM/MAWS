@@ -358,7 +358,9 @@ describe('shell actions', () => {
     expect(useLayout.getState().regions.panel).toMatchObject({ maximized: false, collapsed: false });
     runAction('panel.toggle'); // and toggles the cards closed
     expect(useLayout.getState().regions.panel.collapsed).toBe(true);
-    runAction('panel.maximize'); // maximizing a hidden panel shows it
+    runAction('surface.terminal'); // select a real surface again: cards themselves never maximize
+    useLayout.getState().setPanel({ collapsed: true });
+    runAction('panel.maximize'); // maximizing a hidden selected surface shows it
     expect(useLayout.getState().regions.panel).toMatchObject({ maximized: true, collapsed: false });
     runAction('panel.maximize');
     expect(useLayout.getState().regions.panel).toMatchObject({ maximized: false, collapsed: false });
