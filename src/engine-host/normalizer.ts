@@ -31,6 +31,7 @@ import {
   type SystemFrame,
   type SystemInitFrame,
   type ToolProgressFrame,
+  type ToolUseSummaryFrame,
   type UserFrame,
   type UserInputFrame,
 } from '@shared/wire/frames';
@@ -222,7 +223,11 @@ export class Normalizer {
       case 'control_cancel_request':
         mapInboundCancel(this.state.inbound, (frame as ControlCancelRequestFrame).request_id as RequestId, out);
         return;
-      case 'tool_use_summary':
+      case 'tool_use_summary': {
+        const f = frame as ToolUseSummaryFrame;
+        if (f.preceding_tool_use_ids.length > 0) out.emit({ kind: 'tool.summary', toolUseIds: f.preceding_tool_use_ids as ToolUseId[], summary: f.summary }, attribution);
+        return;
+      }
       case 'prompt_suggestion':
       case 'rate_limit_event':
       case 'auth_status':
@@ -363,14 +368,14 @@ export class Normalizer {
       return;
     }
     const uuid = (frame.uuid ?? null) as MessageUuid | null;
-    const marker = engineUserMarkerOf(content);
+    if (uuid !== null && this.state.pendingHumanUuids.has(uuid)) {
+      this.state.pendingHumanUuids.delete(uuid); // the engine's --replay-user-messages echo of our own frame
+      return;
+    }
+    const marker = frame.origin?.kind === 'human' ? null : engineUserMarkerOf(content);
     if (marker) {
       // engine-authored, never a human prompt: opens nothing and dedupes against no outgoing frame
       out.emit({ kind: 'user.message', messageUuid: uuid, content: marker.content, isReplay: frame.isReplay ?? false, isSynthetic: frame.isSynthetic ?? false, origin: marker.origin, bash: null }, attribution);
-      return;
-    }
-    if (uuid !== null && this.state.pendingHumanUuids.has(uuid)) {
-      this.state.pendingHumanUuids.delete(uuid); // the engine's --replay-user-messages echo of our own frame
       return;
     }
     const bash = bashPartOf(content);

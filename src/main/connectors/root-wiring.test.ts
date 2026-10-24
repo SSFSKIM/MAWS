@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { SessionServiceDeps } from '../sessions/context';
-import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 import type { ConnectorsDeps } from '.';
 
@@ -28,10 +28,10 @@ vi.mock('electron', () => ({
 vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), interceptCommand: vi.fn(), CommandFailure: class extends Error {} }));
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home'), CLAUDE_CONFIG_DIR: state.shellConfig }) }));
 vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3 (merge): the dataset holds follow the host's state */ }) }));
-vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }) }) }));
+vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
 vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; } }));
-vi.mock('../index/source', () => ({ IndexSessionSource: class {} }));
+vi.mock('../index/source', () => ({ IndexSessionSource: class { onScanned = () => () => {}; discoveryCurrent = () => false; } }));
 vi.mock('../index/attention-service', () => ({ startIndexAttention: () => ({ stop: vi.fn() }) }));
 vi.mock('../index/register', () => ({ registerIndexHandlers: vi.fn() }));
 vi.mock('../index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
@@ -72,7 +72,7 @@ describe('the application root’s connector composition', () => {
     vi.resetModules();
     state.handlers.clear();
     state.connectorDeps = null;
-    state.settings = SETTINGS_DEFAULTS_V17;
+    state.settings = SETTINGS_DEFAULTS_V18;
     state.root = mkdtempSync(join(tmpdir(), 'maws-root-wiring-'));
     state.shellConfig = join(state.root, 'shell-config');
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));

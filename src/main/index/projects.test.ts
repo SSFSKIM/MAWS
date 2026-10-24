@@ -43,11 +43,40 @@ describe('projects and the membership rule', () => {
     return path;
   };
 
+  it('discovery stays available without selecting the project for the sidebar, until an explicit add', () => {
+    const directory = repo('discovered');
+    const { record } = index.sessions.upsertFromSummary(summary({ directory }));
+    expect(index.projects.listWithRemoved().find((p) => p.id === record.projectId)).toMatchObject({ discovered: true });
+    const added = index.projects.add(directory);
+    expect(added.id).toBe(record.projectId);
+    expect(added.discovered).not.toBe(true);
+    index.projects.hide(added.id);
+    index.sessions.upsertFromSummary(summary({ directory }));
+    expect(index.projects.listWithRemoved().find((p) => p.id === record.projectId)).toMatchObject({ hidden: true });
+  });
+
+  it('an upgrade preserves a discovered project used by MAWS without undoing an explicit removal', () => {
+    const directory = repo('used-in-maws');
+    const { record } = index.sessions.upsertFromSummary(summary({ directory }));
+    index.sessions.applyEngineStatus(record.appId, { holder: { kind: 'self' }, gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' } });
+    index.sessions.applyEngineStatus(record.appId, { holder: { kind: 'none' } });
+    const raw = new DatabaseSync(join(dir.path, 'index.sqlite'));
+    raw.prepare("UPDATE projects SET origin = 'discovered' WHERE id = ?").run(record.projectId);
+    raw.close();
+    index.close();
+    index = new Index(join(dir.path, 'index.sqlite'));
+    expect(index.projects.listWithRemoved().find((p) => p.id === record.projectId)?.discovered).not.toBe(true);
+    index.projects.hide(record.projectId!);
+    index.close();
+    index = new Index(join(dir.path, 'index.sqlite'));
+    expect(index.projects.listWithRemoved().find((p) => p.id === record.projectId)?.hidden).toBe(true);
+  });
+
   it('discovery auto-creates a project for an existing directory with a session that has messages, named by its basename', () => {
     const directory = repo('alpha');
     const { record } = index.sessions.upsertFromSummary(summary({ directory }));
     const projects = index.projects.list();
-    expect(projects).toEqual([{ id: expect.any(String), name: 'alpha', directory, order: 0, createdAt: expect.any(String) }]);
+    expect(projects).toEqual([{ id: expect.any(String), name: 'alpha', directory, order: 0, createdAt: expect.any(String), discovered: true }]);
     expect(record.projectId).toBe(projects[0].id);
     expect(record.directory).toBe(directory);
     expect(projectChanges).toBe(1);
@@ -62,7 +91,7 @@ describe('projects and the membership rule', () => {
   it('a ProjectRecord projected from a row has exactly C5\'s five fields', () => {
     index.sessions.upsertFromSummary(summary({ directory: repo('alpha') }));
     const [project] = index.projects.list();
-    expect(Object.keys(project).sort()).toEqual(['createdAt', 'directory', 'id', 'name', 'order']);
+    expect(Object.keys(project).sort()).toEqual(['createdAt', 'directory', 'discovered', 'id', 'name', 'order']);
     expect(ProjectRecordSchema.parse(project)).toEqual(project);
   });
 

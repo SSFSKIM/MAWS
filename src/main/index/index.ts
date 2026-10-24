@@ -11,6 +11,7 @@ import { DraftStore } from './drafts';
 import { MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore } from './projects';
 import { ReplayFixtureStore } from './replay-fixtures';
+import { SessionSearchStore } from './session-search';
 import { SessionStore } from './sessions';
 import { SideThreadStore } from './side-threads'; // E3
 import { BrowserHistoryStore } from './browser-history'; // E4a
@@ -21,6 +22,7 @@ import { LibraryStore } from '../library/store'; // P3-L
 
 export class Index {
   readonly sessions: SessionStore;
+  readonly sessionSearch: SessionSearchStore;
   readonly projects: ProjectStore;
   readonly attention: AttentionStore;
   readonly drafts: DraftStore;
@@ -40,7 +42,9 @@ export class Index {
     // transaction that may still roll back), so revisions are distinct and in commit order.
     const stamp = () => ++this.stamped;
     this.projects = new ProjectStore(this.db, stamp, (projectId, directory) => this.sessions.attachOrphans(projectId, directory));
+    this.sessionSearch = new SessionSearchStore(this.db);
     this.sessions = new SessionStore(this.db, this.projects, stamp);
+    this.projects.preserveUsedProjects();
     this.attention = new IndexAttentionStore(this.db);
     this.drafts = new DraftStore(this.db);
     this.fixtures = new ReplayFixtureStore(this.db);

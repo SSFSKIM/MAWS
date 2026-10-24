@@ -1,16 +1,5 @@
-// P2-C (the P2-C document, M6; G4, G5's actions, G6's surfaces) end to end over the replay transport: no engine runs.
-// A session leaves a must-read, then a question whose turn goes on running a tool (e2e/support/to-human-replay.ts).
-// Leaving its tab, the sidebar row shows the question's glyph and Needs you reads the oldest item's summary; the row
-// opens the session at the mark, in the report. Mark read reads the must-read, and Needs you moves on to the question. A
-// click on the recommended choice while the tool runs sends the answer through the seam as a `next` steer: the card
-// reads Queued with Cancel until the engine starts that prompt (its `command_lifecycle` `started`), then Answered, and
-// the composer's draft is untouched.
-// P2-C2: a user output style declaring contract 4 (`<message>` the one mark, questions through a tool) gets MAWS's
-// supplement once and the full contract never, the launch advertising MAWS_NATIVE_TO_HUMAN and recording the decision;
-// a `<message>` draws as the message card, an async `mcp__maws__ask` waits as an `async_input` item and is answered
-// from its sheet. The launch withdraws the native AskUserQuestion from the model (`--disallowedTools`, Decision Log 33),
-// while a native ask on the wire, as an imported or taken-over transcript or a launch without the server carries one,
-// still arrives as MAWS's question request.
+// UX1: output-style text stays unboxed while extraction, attention, navigation and answer delivery remain independent.
+// The legacy owner-channel lifecycle is exercised through its commands, not retired transcript-card controls.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,9 +14,7 @@ import { clearToasts, metaEvents } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
 import { SUPPLEMENT, supplementJournal, TO_HUMAN, toHumanJournal, toHumanSessionId } from './support/to-human-replay';
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-test('M6 a question answered from its card: queued while the agent works, answered when the engine starts it; the must-read read; Needs you opens the mark', async () => {
+test('legacy mark text stays unboxed; attention jumps and owner-channel read/answer lifecycle remain intact', async () => {
   test.setTimeout(150_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c-answer-')));
   const repo = join(root, 'repo');
@@ -59,6 +46,7 @@ test('M6 a question answered from its card: queued while the agent works, answer
     const asking = await appOf(askingEngine);
     const other = await appOf(otherEngine);
     const turn = async () => value(await invoke(page, 'session.status', { appSessionId: asking as never })).turn;
+    const ownerState = async () => value(await invoke(page, 'ownerChannel.state', { appSessionId: asking as never }));
 
     await (await sidebarRow(page, { appSessionId: asking })).click();
     await page.mouse.move(700, 450);
@@ -70,25 +58,28 @@ test('M6 a question answered from its card: queued while the agent works, answer
     await composer.click();
     await page.keyboard.type(TO_HUMAN.first);
     await page.keyboard.press('Enter');
-    const must = pane.locator('[data-owner-card="essential"]');
-    await expect(must).toHaveAttribute('data-state', 'unread', { timeout: 20_000 });
+    const must = pane.locator('[data-kind="assistant_text"]').filter({ hasText: TO_HUMAN.essential });
+    await expect(must).toContainText(TO_HUMAN.essential, { timeout: 20_000 });
+    await expect(pane.getByRole('button', { name: 'Mark read', exact: true })).toBeVisible();
+    await expect(pane.locator('[data-owner-card]')).toHaveCount(0);
     await expect.poll(turn, { timeout: 20_000 }).toBeNull();
     // Turn 2: a question, and its tool goes on running.
     await composer.click();
     await page.keyboard.type(TO_HUMAN.second);
     await page.keyboard.press('Enter');
-    const question = pane.locator('[data-owner-card="need-input"]');
+    const question = pane.locator('[data-kind="assistant_text"]').filter({ hasText: TO_HUMAN.question });
     await expect(question).toContainText(TO_HUMAN.question);
     await expect.poll(turn).not.toBeNull();
 
-    // Leaving the tab: the row's glyph is the question's; Needs you reads the oldest item, turn 1's must-read.
+    // Leaving the tab: the row's glyph is the question's; the compact Needs-you row names the oldest item for assistive tech.
     await (await sidebarRow(page, { appSessionId: other })).click();
     await page.mouse.move(700, 450);
     await expect(pane.locator(`[data-composer="${other}"]`)).toBeVisible();
     await expect((await sidebarRow(page, { appSessionId: asking })).getByRole('img', { name: 'Question waiting' })).toBeVisible();
     await page.mouse.move(700, 450);
     const needs = page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${asking}"]`);
-    await expect(needs).toContainText(`Must read — ${TO_HUMAN.essential}`);
+    await expect(needs).toHaveAccessibleName(`repo · a session that asks · Must read — ${TO_HUMAN.essential}`);
+    await expect(needs).not.toContainText(TO_HUMAN.essential);
 
     // The Needs-you row opens the session at the mark, in the report. P3-F (tracker row 199, the must-read): a focus that
     // never lands reports the page's focus timeline, its frame rate and the window's state.
@@ -100,32 +91,33 @@ test('M6 a question answered from its card: queued while the agent works, answer
         await page.mouse.move(700, 450);
         await expect(pane.locator(`[data-composer="${asking}"]`)).toBeVisible();
         await expect(pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
-        await expect.poll(() => page.evaluate(() => document.activeElement?.querySelector('[data-owner-card="essential"]') !== null)).toBe(true);
+        await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.includes('The migration drops the legacy_users table.') === true)).toBe(true);
       },
       () =>
         page.evaluate(() => {
-          const card = document.querySelector('[data-owner-card="essential"]');
+          const card = Array.from(document.querySelectorAll('[data-kind="assistant_text"]')).find((node) => node.textContent?.includes('The migration drops the legacy_users table.'));
           const row = card?.closest('[id]');
-          return { card: card !== null, row: row ? `${row.tagName.toLowerCase()}#${row.id} tabindex=${row.getAttribute('tabindex')}` : null, rowConnected: row?.isConnected ?? null, cardInView: card ? card.getBoundingClientRect().top : null };
+          return { card: card != null, row: row ? `${row.tagName.toLowerCase()}#${row.id} tabindex=${row.getAttribute('tabindex')}` : null, rowConnected: row?.isConnected ?? null, cardInView: card ? card.getBoundingClientRect().top : null };
         }),
     );
 
-    // Mark read: the must-read reads Read, and Needs you moves on to the question.
-    await must.getByRole('button', { name: 'Mark read' }).click();
-    await expect(must).toHaveAttribute('data-state', 'read');
-    await expect(must).toContainText('Read');
-    await expect(needs).toContainText(`Question — ${TO_HUMAN.question}`);
+    // Preserve per-mark acknowledgement and answer-state coverage independently of transcript presentation.
+    const essential = (await ownerState()).marks.find((mark) => mark.kind === 'essential')!;
+    const asked = (await ownerState()).marks.find((mark) => mark.kind === 'need-input')!;
+    value(await invoke(page, 'ownerChannel.markRead', { appSessionId: asking as never, markIds: [essential.id] }));
+    await expect.poll(async () => (await ownerState()).marks.find((mark) => mark.id === essential.id)?.essential?.state).toBe('read');
+    await expect(needs).toHaveAccessibleName(`repo · a session that asks · Question — ${TO_HUMAN.question}`);
+    await expect(question.getByRole('button')).toHaveCount(0);
 
-    // A choice while the tool runs: Queued with Cancel, the draft untouched; Answered once the engine starts the prompt.
     await composer.click();
     await page.keyboard.type('my own draft');
-    await question.getByRole('group', { name: 'Choices' }).getByRole('button', { name: new RegExp(`^${escape(TO_HUMAN.recommended)}`) }).click();
-    await expect(question).toContainText('Queued — sends when the agent reaches a pause');
-    await expect(question.getByRole('button', { name: 'Cancel' })).toBeVisible();
-    await expect(needs).toHaveCount(0); // nothing waits on the person any more
-    value(await invoke(page, 'session.getContextUsage', { appSessionId: asking as never, detail: 'summary' })); // the engine goes on
-    await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${TO_HUMAN.recommended}`);
-    await expect(question.getByRole('group', { name: 'Choices' })).toHaveCount(0);
+    const content = `Answering "${TO_HUMAN.question}": ${TO_HUMAN.recommended}`;
+    const sent = value(await invoke(page, 'session.steer', { appSessionId: asking as never, content, priority: 'next' }));
+    value(await invoke(page, 'ownerChannel.answered', { appSessionId: asking as never, markId: asked.id, text: content, origin: 'answer', disposition: 'steered', started: false, messageUuid: sent.messageUuid! }));
+    await expect.poll(async () => (await ownerState()).marks.find((mark) => mark.id === asked.id)?.question?.state).toBe('queued');
+    await expect(needs).toHaveCount(0);
+    value(await invoke(page, 'session.getContextUsage', { appSessionId: asking as never, detail: 'summary' }));
+    await expect.poll(async () => (await ownerState()).marks.find((mark) => mark.id === asked.id)?.question?.state).toBe('delivered');
     await expect(pane.getByText(TO_HUMAN.reply)).toBeVisible();
     await expect(composer).toHaveText('my own draft');
     expect(maws.consoleErrors()).toEqual([]);
@@ -136,7 +128,7 @@ test('M6 a question answered from its card: queued while the agent works, answer
 });
 
 // P2-C2 start
-test('a style declaring contract 4: the supplement once and never contract 1, the native ask withdrawn, a <message> card, a message tool’s call as a card at its place, an async maws ask answered from its sheet, and a native ask on the wire still drawn', async () => {
+test('a style declaring contract 4: the supplement once and never contract 1, the native ask withdrawn, unboxed <message> text and a message tool’s call in source order, an async maws ask answered from its sheet, and a native ask on the wire still drawn', async () => {
   test.setTimeout(150_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c2-supplement-')));
   const repo = join(root, 'repo');
@@ -173,17 +165,17 @@ test('a style declaring contract 4: the supplement once and never contract 1, th
     // Before any launch, the lane reads what the next launch would do.
     expect(await lane()).toMatchObject({ source: 'external-style-plus-supplement', pending: 'next-launch' });
 
-    // Turn 1, the first Send starting the session: a message card.
+    // Turn 1, the first Send starting the session: an unboxed message.
     await composer.click();
     await page.keyboard.type(SUPPLEMENT.first);
     await page.keyboard.press('Enter');
-    const message = (text: string) => pane.locator('[data-owner-card="to-human"]').filter({ hasText: text });
+    const message = (text: string) => pane.locator('.owner-message-ink').filter({ hasText: text });
     await expect(message(SUPPLEMENT.message)).toBeVisible({ timeout: 20_000 });
 
-    // P4-R7: the message tool's call is a message card at its place, between the span's card and the ask, never the
+    // P4-R7: the message tool's call stays in flow, between the authored span and the ask, never the
     // MCP call's row; the host answered it `sent`
     const called = pane.locator(`[data-row-id="to-human:${SUPPLEMENT.toolMessageId}"]`);
-    await expect(called.locator('[data-owner-card="to-human"]')).toHaveText(new RegExp(SUPPLEMENT.toolMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { timeout: 20_000 });
+    await expect(called.locator('.owner-message-ink')).toHaveText(new RegExp(SUPPLEMENT.toolMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { timeout: 20_000 });
     await expect(pane.locator(`[data-cell-id="cell:${SUPPLEMENT.toolMessageId}"]`)).toHaveCount(0);
     const order = await pane.locator('[data-row-id]').evaluateAll((drawn) => drawn.map((row) => row.getAttribute('data-row-id')!));
     const at = (prefix: string) => order.findIndex((rowId) => rowId.startsWith(prefix));

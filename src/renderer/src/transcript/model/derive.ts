@@ -575,6 +575,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null, messageTools
         if (rec) rec.safeguard = event.verdict;
         break;
       }
+      case 'tool.summary': {
+        // A batch summary belongs to its final named call, even when emitted after the final assistant answer.
+        const last = event.toolUseIds.at(-1);
+        const rec = last ? toolRecord(last) : undefined;
+        if (rec && event.summary.trim()) rec.summary = event.summary.trim();
+        break;
+      }
       case 'tool.progress': {
         const rec = toolRecord(event.toolUseId);
         if (rec) rec.elapsedSeconds = Math.max(rec.elapsedSeconds, event.elapsedSeconds);
@@ -857,8 +864,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null, messageTools
   if (user) rows.push(user);
   // The divider summarises a work area. A turn the owner did not start (engine, peer) always has one, because it is
   // what tells the reader whose turn it was ("Continued for …"; pass2/workflow's engine turn is a single answer); a
-  // turn the engine accepted has one while it runs ("Working"), and a pending prompt has none until it starts.
-  if (workRows.length > 0 || turn.origin !== 'human' || (turn.state === 'open' && turn.accepted)) {
+  // turn the engine accepted keeps one when stopped, even with only partial text or no output. A pending prompt
+  // has none until it starts.
+  if (workRows.length > 0 || turn.origin !== 'human' || (turn.accepted && (turn.state === 'open' || dividerState === 'stopped'))) {
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
     rows.push({

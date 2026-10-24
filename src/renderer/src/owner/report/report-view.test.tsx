@@ -1,8 +1,4 @@
-// The report view in a mounted transcript (the P2-C document, Design §7; acceptance G3): a marked turn folds into one
-// working record that opens to the full transcript's folded turn and then to its work rows; an unmarked turn draws as
-// the full transcript; the transcript view draws the marks as cards with every word; with the lane off it is P1's
-// drawing; and with an engine surface attached, a marked text is still MAWS's to draw while an unmarked one keeps the
-// surface's path.
+// Turn-level report folding stays intact; individual messages remain in authored Markdown flow and attached mods draw them.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -102,7 +98,7 @@ describe('the report view', () => {
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));
     expect(record()!.getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByText('The plan is to add the table.')).toBeTruthy();
-    expect(screen.queryByText('Checking the tree.', { exact: false })).toBeNull();
+    expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy(); // no within-message fold
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
     expect(dividers()).toHaveLength(1); // the unmarked turn's own divider: drawn as the full transcript
     expect(screen.getByText('A plain answer.')).toBeTruthy();
@@ -124,18 +120,18 @@ describe('the report view', () => {
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
   });
 
-  it('the transcript view draws every turn in full, the marks still as cards', async () => {
+  it('the transcript view draws every turn in full, the marks unboxed', async () => {
     const { key } = await mounted(session());
     await waitFor(() => expect(record()).not.toBeNull());
     act(() => useTranscriptStore.getState().setView(key, 'transcript'));
     await waitFor(() => expect(record()).toBeNull());
     expect(dividers()).toHaveLength(2);
     expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
-    expect(document.querySelector('[data-owner-card="to-human"]')?.textContent).toBe('MessageThe plan is to add the table.');
+    expect(document.querySelector('.owner-message-ink')?.textContent).toBe('The plan is to add the table.');
     expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy();
   });
 
-  it('nested marks draw as their cards in order (U2 S13’s shape)', async () => {
+  it('nested marks retain authored order without cards (U2 S13’s shape)', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'git status' });
@@ -144,7 +140,8 @@ describe('the report view', () => {
     b.end(['u1']);
     await mounted(b.events);
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call'));
-    expect([...document.querySelectorAll('.owner-card-label')].map((label) => label.textContent)).toEqual(['Message', 'Insight', 'Must read', 'Question']);
+    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('The README plan. The branch is master. Unverified. Which tone? Concise Friendly');
+    expect(document.querySelector('[data-owner-card], .owner-card-label')).toBeNull();
   });
 
   it('an open turn: the record runs, and a streaming message fills in as it arrives', async () => {
@@ -157,14 +154,16 @@ describe('the report view', () => {
     push([delta('<to-human>Halfway')]);
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call'));
     expect(record()!.querySelector('[aria-label="Working"]')).not.toBeNull();
-    expect(document.querySelector('[data-owner-card="to-human"]')?.textContent).toContain('Halfway');
+    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('<to-human>Halfway');
     push([delta(' there.')]);
-    await waitFor(() => expect(document.querySelector('[data-owner-card="to-human"]')?.textContent).toContain('Halfway there.'));
+    await waitFor(() => expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('<to-human>Halfway there.'));
+    push([delta('</to-human>')]);
+    await waitFor(() => expect(document.querySelector('.owner-message-ink')?.textContent).toBe('Halfway there.'));
   });
 
   it('with the lane off, a marked turn is P1’s drawing: R4’s presenter, the turn folded by its divider', async () => {
     await mounted(session(), false);
-    await waitFor(() => expect(document.querySelector('[data-owner-span="to-human"]')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('.owner-message-ink')).not.toBeNull());
     expect(record()).toBeNull();
     expect(document.querySelector('[data-owner-card]')).toBeNull();
     expect(dividers()).toHaveLength(2);
@@ -181,10 +180,11 @@ describe('the lane with an engine surface attached', () => {
   }
   const assistantAsks = (fake: ReturnType<typeof fakeClient>) => (fake.invoked('session.ui.render') as { component: string; props: { text: string } }[]).filter((a) => a.component === 'AssistantMessage').map((a) => a.props.text);
 
-  it('a marked text is drawn by the report module and never asked of the surface; an unmarked one is, as before', async () => {
+  it('both marked and unmarked texts are offered to the attached surface', async () => {
     const { fake } = await attached(session());
-    await waitFor(() => expect(document.querySelector('[data-owner-card="to-human"]')).not.toBeNull());
+    await waitFor(() => expect(assistantAsks(fake)).toContain(MARKED));
+    expect(document.querySelector('[data-owner-card]')).toBeNull();
     await waitFor(() => expect(assistantAsks(fake)).toContain('A plain answer.'));
-    expect(assistantAsks(fake)).not.toContain(MARKED);
+    expect(assistantAsks(fake)).toContain(MARKED);
   });
 });

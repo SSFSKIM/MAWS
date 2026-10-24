@@ -34,7 +34,7 @@ async function expandedCell(build: (b: Builder) => void, id: string, options: { 
 }
 
 describe('cell line', () => {
-  it('shows the label with code spans, and its disclosure opens and closes the detail through the store', async () => {
+  it('shows the named tool, and its disclosure opens and closes the detail through the store', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'pnpm test' });
@@ -45,8 +45,8 @@ describe('cell line', () => {
     const row = store.rows().find((r) => r.kind === 'cell')!;
     const view = renderRow(row, { storeKey: store.key });
     const line = screen.getByRole('button', { expanded: false });
-    expect(line.textContent).toMatch(/^Ran pnpm test in /);
-    expect(line.querySelector('code')?.textContent).toBe('pnpm test');
+    expect(line.textContent).toBe('Ran Bash');
+    expect(line.querySelector('code')).toBeNull();
     fireEvent.click(line);
     view.rerenderRow(store.rows().find((r) => r.kind === 'cell')!);
     expect(screen.getByRole('button', { expanded: true })).toBe(line);
@@ -133,13 +133,12 @@ describe('read detail', () => {
       b.result('t2', '1\tconst b = 2;');
       b.toolUse('t3', 'Bash', { command: 'ls' });
       b.result('t3', 'a', { structured: BASH_RESULT('a') });
-    }, cellId.reads(tool('t1')));
-    const chips = within(cell).getAllByRole('button', { name: /\.ts/ });
-    expect(chips.map((chip) => chip.textContent)).toEqual(['a.ts:10–14', 'b.ts']);
+    }, cellId.tool(tool('t1')));
+    const chips = within(cell.querySelector('.transcript-cell-detail') as HTMLElement).getAllByRole('button', { name: /\.ts/ });
+    expect(chips.map((chip) => chip.textContent)).toEqual(['a.ts:10–14']);
     fireEvent.click(chips[0]);
     expect(actions.openFile).toHaveBeenCalledWith('/p/a.ts', 10);
-    fireEvent.click(chips[1]);
-    expect(actions.openFile).toHaveBeenLastCalledWith('/p/b.ts', undefined);
+    expect(cell.textContent).not.toContain('const b = 2;');
   });
 });
 

@@ -10,6 +10,7 @@ import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title'; // E3
+import { projectLabels } from './project-labels';
 import { SIDE_COPY } from '../side/copy'; // E3
 
 // "Other sessions": the pseudo-project at the end of the list, for sessions without a (known) project.
@@ -58,6 +59,7 @@ const OTHER_NAME = 'Other sessions';
 // project), a project without sessions by when it was added; ties by the project order, then the name.
 export function projectList({ records, digests, projects, rows, hidden }: ProjectListInput): ProjectEntry[] {
   const byId = new Map(projects.map((p) => [p.id, p]));
+  const labels = projectLabels(projects);
   const waiting = new Set(rows.map((row) => row.appSessionId));
   const grouped = new Map<ProjectKey, { live: SessionRecord[]; activity: number }>();
   for (const record of records.values()) {
@@ -74,7 +76,7 @@ export function projectList({ records, digests, projects, rows, hidden }: Projec
     return {
       key,
       project,
-      name: project?.name ?? OTHER_NAME,
+      name: project ? labels.get(project.id)! : OTHER_NAME,
       sessions,
       rollup: { waiting: sessions.filter((r) => waiting.has(r.appId)).length, working: sessions.filter((r) => isWorking(digests.get(r.appId))).length },
       lastActivity: group && Number.isFinite(group.activity) ? group.activity : null,

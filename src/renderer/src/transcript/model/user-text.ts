@@ -176,6 +176,7 @@ export const INTERRUPT_MARKER = '[Request interrupted by user]';
 export const INTERRUPT_MARKERS: readonly string[] = [INTERRUPT_MARKER, '[Request interrupted by user for tool use]']; // the engine's two (M6: the second, untagged, in `pass2/per-task-stop-off` seq 71)
 
 export function isInterruptionMarker(origin: string | null, content: string | ContentBlock[]): boolean {
+  if (origin === 'human') return false; // a typed prompt or human steer is not engine evidence, whatever its words
   if (origin === 'interrupt-marker') return true;
   const text = typeof content === 'string' ? content : content.length === 1 && content[0].type === 'text' ? String(content[0].text ?? '') : '';
   return INTERRUPT_MARKERS.includes(text.trim()); // a complete marker only: a prompt that begins with one and continues is a bubble

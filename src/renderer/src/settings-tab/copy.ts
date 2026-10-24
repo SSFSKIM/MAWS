@@ -10,6 +10,7 @@ export const SECTIONS = {
   voice: 'Voice', // E9
   appearance: 'Appearance',
   notifications: 'Notifications',
+  sessions: 'Sessions',
   browser: 'Browser', // E4a: Settings › Browser (settings version 11)
   artifacts: 'Artifacts', // P3-D: Settings › Artifacts (settings version 14), last in the index
 } as const;
@@ -243,11 +244,12 @@ export const APPEARANCE = {
 };
 
 export const NOTIFICATIONS = {
-  when: 'When a session needs you',
-  enabledLabel: 'Notify while MAWS is not focused',
+  when: 'When a session finishes or needs you',
+  enabledLabel: 'Notify when I am not looking at that session',
   delivery: { os: 'macOS: allowed', fallback: 'macOS: not delivered · MAWS falls back to a dock bounce and a toast' },
   kinds: 'For',
   kind: {
+    turnFinished: 'Turn finished',
     approvals: 'approvals',
     questions: 'questions',
     planReviews: 'plan reviews',

@@ -263,6 +263,7 @@ const project = (row: ProjectRow): ProjectRecord => ({
   directory: row.directory,
   order: row.sort_order,
   createdAt: row.created_at,
+  ...(row.origin !== 'user' ? { discovered: true } : {}),
   ...(row.hidden ? { hidden: true } : {}), // W11: carried on the renderer's list, which hides it
 });
 
@@ -280,6 +281,27 @@ export class ProjectStore {
     private readonly stamp: () => number, // the index-wide revision, taken once per committed change
     private readonly attachOrphans: (projectId: ProjectId, directory: string) => void, // sessions already in a new project's directory
   ) {}
+
+  // UX1 upgrade: these fields are written by MAWS engine launches/resumes, not discovery.
+  // Older databases did not promote origin when a discovered session ran. Explicit hiding still wins.
+  preserveUsedProjects(): void {
+    if (this.db.readOnly) return;
+    this.db.exec(`UPDATE projects SET origin = 'user' WHERE origin = 'discovered' AND EXISTS (
+      SELECT 1 FROM sessions s WHERE s.project_id = projects.id AND (
+        s.gateway_routed IS NOT NULL OR s.model_requested IS NOT NULL OR s.lineage_source = 'intent'
+        OR json_extract(s.holder, '$.kind') = 'self'
+        OR EXISTS (SELECT 1 FROM owner_channel_sessions o WHERE o.app_session_id = s.app_id AND o.launch_id IS NOT NULL)
+      ))`);
+  }
+
+  // Starting/resuming chooses a project, but never reverses Remove from sidebar.
+  usedByMaws(id: ProjectId): void {
+    this.db.transaction(() => {
+      if (this.row(id).origin === 'user') return;
+      this.db.update('projects', 'id', id, { origin: 'user' });
+      this.changed();
+    });
+  }
 
   // Visible projects in their order (then by creation).
   list(opts: { includeHidden?: boolean } = {}): ProjectRecord[] {

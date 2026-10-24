@@ -54,6 +54,8 @@ const locatedDirectory = (s: TranscriptSummary) => s.relocatedCwd ?? s.directory
 
 // A record's change waiting for the tick: its latest committed state and that change's revision.
 type Pending = { t: 'changed'; record: SessionRecord; cause: Exclude<ChangeCause, 'removed'>; revision: number } | { t: 'removed'; revision: number };
+type SearchJob = { summary: TranscriptSummary; failures: number; retryAt: number };
+const SEARCH_RETRY_MS = [250, 1000]; // three attempts per transcript stamp, then an explicit incomplete state
 
 export class IndexSessionSource implements SessionSource {
   private readonly tickMs: number;
@@ -74,7 +76,16 @@ export class IndexSessionSource implements SessionSource {
   private unavailableLogged = false;
   private discoveries: TranscriptSummary[] = []; // E11: fs.sessionChanged summaries not yet applied
   private draining = false; // E11: a warm-up for the queue is out
+  private searchQueue = new Map<AppSessionId, SearchJob>();
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private searchGeneration = 0;
+  private indexingGeneration: number | null = null;
   private stopped = false; // E11: a drain that resumes after the stop applies nothing
+  // l1-sessions-13: whether a scan has answered since the engine host's latest transition (a scan's discoveries all
+  // precede its answer), the generation that transition started, and who waits to hear of the next answered scan
+  private scanned = false;
+  private generation = 0;
+  private readonly scanListeners = new Set<() => void>();
 
   constructor(
     private readonly index: Index,
@@ -92,6 +103,8 @@ export class IndexSessionSource implements SessionSource {
       this.logUnavailable();
       return () => {};
     }
+    this.stopped = false;
+    this.searchGeneration += 1;
     this.writer = writer;
     const projects = this.index.projects.list();
     for (const project of projects) writer.observeProject(project);
@@ -131,7 +144,10 @@ export class IndexSessionSource implements SessionSource {
       }),
       // E10: the reset at every transition, `ready` included; a kept session's burst status re-marks it self after it
       this.host.onState('engine-host', () => {
+        this.generation += 1; // l1-sessions-13: what the store holds is unknown again until the next scan answers
+        this.scanned = false;
         this.applyBefore([...this.holders.keys()]); // E11: what the host sent before it went (P4 W2-B: a record made later would miss the holder forgotten here)
+        this.resetSearch(); // the new host's scan requeues every unfinished stamp
         this.live.clear(); // a host that went away took its processes with it
         this.holders.clear();
         this.write('engine-host generation', () => this.index.sessions.resetSelfHolders());
@@ -154,10 +170,11 @@ export class IndexSessionSource implements SessionSource {
       })
       .catch((error: unknown) => console.error('[index] linked-worktree warm-up failed:', error instanceof Error ? error.message : error));
 
-    this.stopped = false;
     return () => {
       stopped = true;
       this.stopped = true;
+      this.scanned = false;
+      this.resetSearch();
       this.discoveries = []; // W-B review M3: the next launch's fs.scan reports them again
       for (const off of this.offs) off();
       this.offs = [];
@@ -168,6 +185,22 @@ export class IndexSessionSource implements SessionSource {
       this.unfollows = [];
       this.writer = null;
     };
+  }
+
+  // l1-sessions-13: whether the index holds what the store said of a session as of a scan answered since the engine
+  // host's latest transition: false before that scan's answer (or when it failed, or the source is inert or stopped),
+  // and while a summary of the session's transcript (`engineSessionId`; null asks only about the scan) still waits in
+  // the queue. A decision that reads a session's last activity (the inactivity archive) waits for this, since the index
+  // otherwise still holds what an earlier run saw.
+  discoveryCurrent(engineSessionId: SessionId | null): boolean {
+    if (!this.scanned || this.stopped) return false;
+    return engineSessionId === null || !this.discoveries.some((s) => s.sessionId === engineSessionId);
+  }
+
+  // Called after each scan that answers (every host start's sync), once its discoveries are queued.
+  onScanned(listener: () => void): () => void {
+    this.scanListeners.add(listener);
+    return () => void this.scanListeners.delete(listener);
   }
 
   // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.
@@ -254,6 +287,15 @@ export class IndexSessionSource implements SessionSource {
   private discovered(summary: TranscriptSummary): void {
     this.index.transaction(() => {
       const { record, created, advanced } = this.index.sessions.upsertFromSummary(summary);
+      if (!this.index.sessionSearch.current(record.appId, summary.sessionId, summary.size, summary.mtimeMs)
+        && !this.index.sessionSearch.failed(record.appId, summary.sessionId, summary.size, summary.mtimeMs)) {
+        const queued = this.searchQueue.get(record.appId)?.summary;
+        if (!queued || queued.sessionId !== summary.sessionId || queued.size !== summary.size || queued.mtimeMs !== summary.mtimeMs) {
+          this.searchQueue.set(record.appId, { summary, failures: 0, retryAt: 0 });
+        }
+        // Leave the discovery transaction before IPC or a text-index transaction.
+        queueMicrotask(() => void this.indexText());
+      }
       const holder = this.holders.get(summary.sessionId);
       if (created && holder !== undefined) this.index.sessions.setHolder(summary.sessionId, holder);
       if (!advanced) return;
@@ -312,13 +354,83 @@ export class IndexSessionSource implements SessionSource {
     );
   }
 
+  private resetSearch(): void {
+    this.searchGeneration += 1;
+    this.searchQueue.clear();
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = null;
+  }
+
+  private async indexText(): Promise<void> {
+    const generation = this.searchGeneration;
+    if (this.indexingGeneration === generation || this.stopped) return;
+    this.indexingGeneration = generation;
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = null;
+    const running = () => !this.stopped && generation === this.searchGeneration;
+    try {
+      while (this.searchQueue.size > 0 && running()) {
+        let next: [AppSessionId, SearchJob] | undefined;
+        for (const entry of this.searchQueue) if (entry[1].retryAt <= Date.now()) { next = entry; break; }
+        if (!next) break;
+        const [appId, job] = next;
+        const { summary } = job;
+        const current = () => running() && this.searchQueue.get(appId) === job;
+        try {
+          let cursor: string | undefined;
+          do {
+            const result = await this.command('fs.sessionText', { sessionId: summary.sessionId, ...(cursor ? { cursor } : {}) });
+            if (!current()) break;
+            if (!result) throw new Error('Conversation text read failed');
+            if (result.size !== summary.size || result.mtimeMs !== summary.mtimeMs) throw new Error('Transcript changed while indexing');
+            this.applyBefore([summary.sessionId]);
+            if (!current()) break;
+            // Do not swallow a failed DB write and call the job successful.
+            if (!cursor) this.index.sessionSearch.replace(appId, summary.sessionId, result.size, result.mtimeMs, result.text, result.cursor === null);
+            else this.index.sessionSearch.append(appId, summary.sessionId, result.text, result.cursor === null);
+            cursor = result.cursor ?? undefined;
+          } while (cursor && current());
+          if (current()) this.searchQueue.delete(appId);
+        } catch (error) {
+          if (!current()) continue;
+          const delay = SEARCH_RETRY_MS[job.failures++];
+          if (delay !== undefined) {
+            job.retryAt = Date.now() + delay;
+            this.searchQueue.delete(appId);
+            this.searchQueue.set(appId, job); // ready jobs do not wait behind a failed one
+          } else {
+            this.searchQueue.delete(appId);
+            try { this.index.sessionSearch.fail(appId, summary.sessionId, summary.size, summary.mtimeMs); }
+            catch (failure) { console.error('[index] could not persist conversation search failure:', failure); }
+            console.error('[index] conversation search incomplete:', error instanceof Error ? error.message : error);
+          }
+        }
+      }
+    } finally {
+      if (this.indexingGeneration === generation) this.indexingGeneration = null;
+      if (running() && this.searchQueue.size > 0) {
+        const delay = Math.max(0, Math.min(...[...this.searchQueue.values()].map((job) => job.retryAt)) - Date.now());
+        this.searchTimer = setTimeout(() => { this.searchTimer = null; void this.indexText(); }, delay);
+      }
+    }
+  }
+
   private sync(): Promise<unknown> {
     this.syncs = this.syncs.then(async () => {
+      if (this.stopped) return;
+      this.index.sessionSearch.retryFailures();
       const bindings = this.index.sessions.bindings();
       const bare = bindings.filter((b) => b.size === null || b.mtimeMs === null).map(({ sessionId, appSessionId }) => ({ sessionId, appSessionId }));
       const known = bindings.flatMap(({ sessionId, appSessionId, size, mtimeMs }) => (size === null || mtimeMs === null ? [] : [{ sessionId, appSessionId, size, mtimeMs }]));
+      const generation = this.generation;
       if (bare.length > 0) await this.command('fs.bind', { bindings: bare });
-      await this.command('fs.scan', { known });
+      // Keep missing transcripts in known so scan still reports removals; a stale text
+      // stamp forces a summary without losing the app/engine binding.
+      const scan = await this.command('fs.scan', { known: known.map((entry) => this.index.sessionSearch.current(entry.appSessionId, entry.sessionId, entry.size, entry.mtimeMs) ? entry : { ...entry, size: -1, mtimeMs: -1 }) });
+      if (scan !== null && generation === this.generation && !this.stopped) {
+        this.scanned = true;
+        for (const listener of [...this.scanListeners]) listener();
+      }
       const state = await this.command('fs.state', undefined);
       if (state !== null) this.foldHolders(state.holders);
     });
@@ -337,7 +449,11 @@ export class IndexSessionSource implements SessionSource {
     } else {
       this.writer?.observeRecord(record);
       if (cause === 'discovered' || cause === 'facts' || cause === 'holder') this.digest(record);
-      this.pending.set(appId, { t: 'changed', record, cause: previous?.t === 'changed' ? previous.cause : cause, revision });
+      // l1-sessions-13: except an archive, which goes out under its own cause, since the renderer closes the session's
+      // tabs on the owner's (`update`) and not on a transcript gone from disk (`facts`, perhaps a move): an earlier
+      // change in the tick lends it neither. A record discovered this tick stays news of its discovery.
+      const archives = record.archived && previous?.t === 'changed' && !previous.record.archived && previous.cause !== 'discovered';
+      this.pending.set(appId, { t: 'changed', record, cause: previous?.t === 'changed' && !archives ? previous.cause : cause, revision });
     }
     this.schedule();
   }

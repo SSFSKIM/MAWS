@@ -644,6 +644,37 @@ test.describe('sessions', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
+  for (const entry of ['title bar', 'tab strip', 'project plus', 'sidebar New chat', 'File menu (⌘N)'] as const) {
+    test(`new chat takes typing from ${entry}, without Space opening more tabs`, async () => {
+      const { page, maws, trustedRepos } = await begin({ fixtures: [] });
+      const project = await addProject(page, trustedRepos[0].root);
+      await plus(page, project.name);
+      await expect(editor(page)).toBeFocused();
+      const tabs = page.locator('[data-region="main"] [role="tab"]');
+      const before = await tabs.count();
+      if (entry === 'title bar') await page.getByRole('banner').getByRole('button', { name: `New chat in ${project.name}` }).click();
+      else if (entry === 'tab strip') await page.locator('[data-region="main"]').getByRole('button', { name: 'New chat', exact: true }).click();
+      else if (entry === 'project plus') await newChatIn(page, project.name);
+      else if (entry === 'sidebar New chat') await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
+      else {
+        // Menu-sink chords belong to AppKit, not Playwright's renderer keyboard injection (shell.spec.ts).
+        const accelerator = await maws.app.evaluate(({ Menu }) => {
+          const item = Menu.getApplicationMenu()?.getMenuItemById('session.new');
+          if (!item?.enabled) throw new Error('File › New chat is not enabled');
+          item.click();
+          return item.accelerator;
+        });
+        expect(accelerator).toBe('Cmd+N');
+      }
+      await expect(tabs).toHaveCount(before + 1);
+      await expect(editor(page)).toBeFocused();
+      await page.keyboard.type('A prompt with several spaces');
+      await expect(editor(page)).toHaveText('A prompt with several spaces');
+      await expect(tabs).toHaveCount(before + 1);
+      expect(maws.consoleErrors()).toEqual([]);
+    });
+  }
+
   test('Overview New chat on an empty board closes the panel and hands typing to the new composer', async () => {
     const { page, maws } = await begin({ fixtures: [] });
     await page.getByRole('button', { name: 'Overview', exact: true }).click();
@@ -706,10 +737,17 @@ test.describe('sessions', () => {
     assertPickSeamBuilt(maws);
     const repo = trustedRepos[0]!;
     expect(value(await invoke(page, 'layout.pickFiles', { kind: 'directory', directory: null, multiple: false })), 'unset: answered as cancelled').toEqual({ files: [] });
-    await page.getByRole('button', { name: 'Add project' }).first().click();
+    const addDialog = page.getByRole('dialog', { name: 'Add project', exact: true });
+    await page.getByRole('button', { name: 'Add project', exact: true }).first().click();
+    await expect(addDialog).toBeVisible();
+    await addDialog.getByRole('button', { name: 'Choose folder…', exact: true }).click();
+    await expect(addDialog).toHaveCount(0);
     await expect.poll(async () => value(await invoke(page, 'session.projects.list', undefined)).projects.length, { message: 'a cancelled pick adds nothing' }).toBe(0);
     await maws.app.evaluate((_electron, dir) => void (process.env.MAWS_E2E_PICK_PATHS = dir), repo.root);
-    await page.getByRole('button', { name: 'Add project' }).first().click();
+    await page.getByRole('button', { name: 'Add project', exact: true }).first().click();
+    await expect(addDialog).toBeVisible();
+    await addDialog.getByRole('button', { name: 'Choose folder…', exact: true }).click();
+    await expect(addDialog).toHaveCount(0);
     await expect.poll(async () => value(await invoke(page, 'session.projects.list', undefined)).projects.map((p) => p.directory)).toEqual([repo.root]);
     const [added] = value(await invoke(page, 'session.projects.list', undefined)).projects;
     await expect(projectRow(page, added!.name)).toBeVisible();

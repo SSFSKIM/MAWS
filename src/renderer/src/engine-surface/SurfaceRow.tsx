@@ -25,7 +25,7 @@ export interface SurfaceRowProps<C extends TranscriptSite> {
   frameInkOnly?: boolean;
   drawingOnly?: boolean;
   onRewrite?: (props: TranscriptProps[C]) => void;
-  onInk?: (ink: boolean) => void; // applied drawing, after any gesture hold; pending remounts report nothing
+  onInk?: (ink: boolean, native: { visible: boolean; props: TranscriptProps[C] }) => void; // applied drawing; pending remounts report nothing
   client?: MawsBridge;
 }
 
@@ -36,7 +36,7 @@ function equal(a: unknown, b: unknown): boolean {
   const left = a as Record<string, unknown>, right = b as Record<string, unknown>;
   return Object.keys(left).length === Object.keys(right).length && Object.keys(left).every((key) => Object.hasOwn(right, key) && equal(left[key], right[key]));
 }
-const hasClient = (tree: SurfaceNode | null): boolean => tree !== null && typeof tree !== 'string' && (tree.type === 'Client' || ('children' in tree && tree.children.some(hasClient)));
+const hasClient = (tree: SurfaceNode | null): boolean => tree !== null && typeof tree !== 'string' && (tree.type === 'Client' || ('children' in tree && tree.type !== 'Button' && tree.children.some(hasClient)));
 
 export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, instanceId, props, enabled = true, children, placeholder = '…', onlyRewrites = false, frameInkOnly = false, drawingOnly = false, onRewrite, onInk, client = ipc }: SurfaceRowProps<C>) {
   const attached = useSurfaceAttached(appSessionId);
@@ -68,9 +68,6 @@ export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, 
 
   const tree = accepted?.tree ?? null;
   const ink = hasInk(tree);
-  useEffect(() => {
-    if (!active || drawn.answer !== null) onInk?.(ink);
-  }, [active, drawn.answer, ink, onInk]);
   const slot = firstEngineRef(tree) !== null || hasClient(tree);
   const nativeOnly = accepted === null || drawsEngine(tree) || (frameInkOnly && slot && !ink);
   const pending = useInitialPending(active && drawn.pending && !drawingOnly, `${appSessionId}:${component}:${instanceId}`);
@@ -83,6 +80,10 @@ export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, 
   });
   const own = <NativeMount host={host} />;
   const effective = active && parsed !== null && accepted ? parsed : props;
+  const nativeVisible = !drawingOnly && !concealed;
+  useEffect(() => {
+    if (!active || drawn.answer !== null) onInk?.(ink, { visible: nativeVisible, props: effective });
+  }, [active, drawn.answer, ink, onInk, nativeVisible, effective]);
   const showDrawing = active && accepted !== null && !nativeOnly && (!drawingOnly || ink);
   // A drawing-only ToolGroup has its native group beside this mount. Engine slots in that drawing stay empty.
   return (

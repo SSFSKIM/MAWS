@@ -546,6 +546,10 @@ function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
 }
 
 // The value a key's slice is written as: P4-B3's two keys wrap theirs in a versioned value, every other key is its slice.
+// The sessions a tab holds open in any project's set: their own tab or an agent's (the tabs an archive closes).
+const openSessionsOf = (main: LayoutMain): AppSessionId[] =>
+  model.allTabs(main).flatMap((tab) => (tab.kind === 'session' || tab.kind === 'agent' ? [tab.appSessionId] : []));
+
 function storedValue(key: LayoutKey, slice: unknown): unknown {
   if (key === 'panelTools.params') return { version: 1, params: slice };
   if (key === 'panelTools.activeNoSession') return { version: 1, activeTabId: slice };
@@ -555,11 +559,15 @@ function storedValue(key: LayoutKey, slice: unknown): unknown {
 // Writes each changed key through `layout.set`, 250 ms after that key's last change, and every pending key at once on
 // `beforeunload` and on stop. Nothing is written before hydration (the persisted values are not known yet, so a write
 // would clobber them) or for hydration itself.
+// l1-sessions-13: main's inactivity sweep keeps every session `main.tabs` holds open, so a session tab (or one of its
+// agents') joining the tabs is written at once rather than after the delay; a tab leaving waits as any change does.
 export function persistLayout(client: MawsBridge, store = useLayout): () => void {
   const pending = new Map<LayoutKey, { timer: ReturnType<typeof setTimeout>; value: unknown }>();
   let written: Map<LayoutKey, unknown> | null = store.getState().hydrated ? persistedKeys(store.getState()) : null;
+  let published = new Set(written ? openSessionsOf(store.getState().main) : []); // the sessions main's `main.tabs` holds open
 
   const write = (key: LayoutKey, slice: unknown) => {
+    if (key === 'main.tabs') published = new Set(openSessionsOf(slice as LayoutMain));
     void client.invoke('layout.set', { key, value: storedValue(key, slice) }).then((result) => {
       if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
     });
@@ -584,7 +592,16 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
   const unsubscribe = store.subscribe((state) => {
     if (!state.hydrated) return;
     const now = persistedKeys(state);
-    if (written) for (const [key, value] of now) if (written.get(key) !== value) schedule(key, value);
+    if (written) {
+      for (const [key, value] of now) {
+        if (written.get(key) === value) continue;
+        if (key === 'main.tabs' && openSessionsOf(state.main).some((id) => !published.has(id))) {
+          clearTimeout(pending.get(key)?.timer);
+          pending.delete(key);
+          write(key, value);
+        } else schedule(key, value);
+      }
+    } else published = new Set(openSessionsOf(state.main)); // hydration wrote what differs from layout.json, open tabs included
     // A key that left the state (a removed session's `panel.<id>`, which main deletes) must not be written back by a
     // write still pending from before.
     for (const [key, { timer }] of pending) {

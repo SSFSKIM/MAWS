@@ -5,10 +5,12 @@
 // page subscribes to the event, then calls the command, and that call is its announcement. A reload or a new window
 // starts un-announced (`pageGone`).
 import type { AttentionNavigate } from '@shared/ipc/schema/attention';
+import type { EventPayload } from '@shared/ipc/schema';
 import type { emit as emitEvent } from '../ipc/events';
 
 export interface NavigationRelay {
   deliver(navigation: AttentionNavigate): void; // emit to a listening page, or queue (the latest only)
+  failure(notified: EventPayload<'attention.notified'>): void; // keep every failed action until the page can recover it
   take(): AttentionNavigate | null; // answers attention.pendingNavigate: marks the page announced, returns and clears the queue
   pageGone(): void; // the page is reloading or its window closed: queue from now on until it asks again
 }
@@ -16,13 +18,20 @@ export interface NavigationRelay {
 export function createNavigationRelay(emit: typeof emitEvent): NavigationRelay {
   let announced = false;
   let pending: AttentionNavigate | null = null;
+  const failures: EventPayload<'attention.notified'>[] = [];
   return {
     deliver(navigation) {
       if (announced) emit('attention.navigate', navigation);
       else pending = navigation;
     },
+    failure(notified) {
+      if (announced) emit('attention.notified', notified);
+      else failures.push(notified);
+    },
     take() {
       announced = true;
+      // connectAttention subscribes to notified before announcing this page, too.
+      for (const failure of failures.splice(0)) emit('attention.notified', failure);
       const navigation = pending;
       pending = null;
       return navigation;

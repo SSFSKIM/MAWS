@@ -6,7 +6,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId, RequestId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { item } from '../../../../test/support/builders';
+import { item, status, humanTurn } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useAttention } from '../stores/attention';
@@ -324,5 +324,121 @@ describe('request preview', () => {
     render(<RequestPreview item={itemFor(foreign as AppSessionId, 'permission', 'req_1')} request={read} placement="hover" paneIndex={null} />);
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Open session' }));
+  });
+});
+
+describe('hover quick reply', () => {
+  it.each([false, true])('sends to the hovered session, preserving the composer queue policy (busy=%s)', async (busy) => {
+    const id = idOf('Charter + research');
+    fake = fakeClient({
+      'attention.request': { event: null },
+      'session.queue.list': { entries: [], paused: false },
+      'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: '11111111-1111-4111-8111-111111111111' },
+      'session.steer': { messageUuid: '11111111-1111-4111-8111-111111111111' },
+    });
+    window.maws = fake.client;
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: busy ? humanTurn : null }) });
+    render(<Sidebar />);
+    await userEvent.hover(needsRow('Charter + research'));
+    const card = await screen.findByRole('dialog', { name: 'Charter + research' });
+    const reply = within(card).getByRole('textbox', { name: 'Reply to Charter + research' });
+    await userEvent.type(reply, 'Please use the smaller layout');
+    await userEvent.click(within(card).getByRole('button', { name: 'Send reply' }));
+    await waitFor(() => expect(fake.invoked(busy ? 'session.steer' : 'session.send')).toEqual([
+      { appSessionId: id, content: 'Please use the smaller layout', ...(busy ? { priority: 'next' } : {}) },
+    ]));
+    expect(fake.invoked(busy ? 'session.send' : 'session.steer')).toEqual([]);
+    await waitFor(() => expect((reply as HTMLInputElement).value).toBe(''));
+  });
+});
+
+it('keeps a refused hover reply for correction and retry, including across closing the card', async () => {
+  const id = idOf('Charter + research');
+  fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
+  window.maws = fake.client;
+  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+  render(<Sidebar />);
+  await userEvent.hover(needsRow('Charter + research'));
+  let card = await screen.findByRole('dialog', { name: 'Charter + research' });
+  await userEvent.type(within(card).getByRole('textbox'), 'Keep this reply');
+  await userEvent.click(within(card).getByRole('button', { name: 'Send reply' }));
+  await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+  await act(() => fake.fail('session.send', 'Connection lost'));
+  expect((await within(card).findByRole('alert')).textContent).toBe('Connection lost');
+  await userEvent.click(screen.getByRole('searchbox'));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Charter + research' })).toBeNull());
+  await userEvent.hover(needsRow('Charter + research'));
+  card = await screen.findByRole('dialog', { name: 'Charter + research' });
+  expect((within(card).getByRole('textbox') as HTMLInputElement).value).toBe('Keep this reply');
+});
+
+// l1-sessions-13 review: the send belongs with the draft, which outlives the card.
+it('a reply still sending when the card closes is still sending when it reopens: no second send, and its answer clears only that draft', async () => {
+  const id = idOf('Charter + research');
+  fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
+  window.maws = fake.client;
+  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+  render(<Sidebar />);
+  await userEvent.hover(needsRow('Charter + research'));
+  let card = await screen.findByRole('dialog', { name: 'Charter + research' });
+  await userEvent.type(within(card).getByRole('textbox'), 'Only once');
+  await userEvent.click(within(card).getByRole('button', { name: 'Send reply' }));
+  await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+  await userEvent.click(screen.getByRole('searchbox'));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Charter + research' })).toBeNull());
+  await userEvent.hover(needsRow('Charter + research'));
+  card = await screen.findByRole('dialog', { name: 'Charter + research' });
+  const input = within(card).getByRole('textbox') as HTMLInputElement;
+  expect(input.value).toBe('Only once');
+  expect(input.readOnly).toBe(true);
+  expect((within(card).getByRole('button', { name: 'Send reply' }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.type(input, ' more{Enter}');
+  expect(fake.invoked('session.send')).toHaveLength(1);
+  await act(() => fake.reply('session.send', { disposition: 'sent', queueId: 'q1', messageUuid: '11111111-1111-4111-8111-111111111111' }));
+  await waitFor(() => expect(input.value).toBe(''));
+  expect(within(card).getByRole('status').textContent).toBe('Sent');
+  expect(fake.invoked('session.send')).toHaveLength(1);
+});
+
+// l1-sessions-13 review: a focused reply holds the card open against the pointer leaving, not against the owner's own
+// dismissal.
+describe('a hover card with its reply focused', () => {
+  const openWithReplyFocused = async () => {
+    fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
+    window.maws = fake.client;
+    const id = idOf('Charter + research');
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+    render(<Sidebar />);
+    const user = userEvent.setup();
+    await user.hover(needsRow('Charter + research'));
+    const card = await screen.findByRole('dialog', { name: 'Charter + research' });
+    await user.click(within(card).getByRole('textbox'));
+    await user.keyboard('draft');
+    return { user, card };
+  };
+  const closed = () => waitFor(() => expect(screen.queryByRole('dialog', { name: 'Charter + research' })).toBeNull());
+
+  it('stays open when the pointer leaves', async () => {
+    const { user, card } = await openWithReplyFocused();
+    await user.unhover(card);
+    await user.unhover(needsRow('Charter + research'));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.getByRole('dialog', { name: 'Charter + research' })).toBeTruthy();
+    expect(document.activeElement).toBe(within(card).getByRole('textbox'));
+  });
+
+  it('closes on Escape, handing focus back to its row without reopening', async () => {
+    const { user } = await openWithReplyFocused();
+    await user.keyboard('{Escape}');
+    await closed();
+    expect(document.activeElement).toBe(needsRow('Charter + research'));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.queryByRole('dialog', { name: 'Charter + research' })).toBeNull();
+  });
+
+  it('closes on a press outside it', async () => {
+    await openWithReplyFocused();
+    fireEvent.pointerDown(document.body);
+    await closed();
   });
 });

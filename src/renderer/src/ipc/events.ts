@@ -63,6 +63,24 @@ export function connectShell(
   let hostState: EventPayload<'engine.hostState'>['state'] | null = null; // E10: the engine host's last state heard
   let departures = 0; // E10: how often the engine host was heard leaving ready; a table read before the latest is stale
 
+  // l1-sessions-13: an archive main made on its own (the project command's, the inactivity sweep's) closes the session's
+  // tabs as the renderer's own archive does, when the store took the change (a stale one leaves the record and its tabs)
+  // and it is the owner's archive (`update`; a transcript gone from disk archives as `facts`, and keeps its tab open).
+  // Only an archive of a record held unarchived counts, so hydration's snapshot and the archived records it lists keep
+  // their tabs as before.
+  const closeArchived = (events: EventPayload<'session.changed'>[], before: ReadonlyMap<AppSessionId, { archived: boolean }>) => {
+    const after = sessions().records;
+    const closed = new Set<AppSessionId>();
+    for (const { record, cause } of events) {
+      const id = record.appId;
+      if (cause !== 'update' || !record.archived || closed.has(id)) continue;
+      if (before.get(id)?.archived === false && after.get(id)?.archived === true) {
+        closed.add(id);
+        stores.layout.getState().dropSession(id);
+      }
+    }
+  };
+
   // In arrival order; consecutive changes and consecutive digests go to the store as one call each.
   const apply = (queue: Queued[]) => {
     for (let i = 0; i < queue.length; ) {
@@ -71,8 +89,12 @@ export function connectShell(
         let j = i;
         while (j < queue.length && queue[j].t === item.t) j++;
         const run = queue.slice(i, j);
-        if (item.t === 'changed') sessions().applyChangedMany(run.map((q) => (q as Extract<Queued, { t: 'changed' }>).e));
-        else sessions().applyDigests(run.map((q) => (q as Extract<Queued, { t: 'digest' }>).d));
+        if (item.t === 'changed') {
+          const events = run.map((q) => (q as Extract<Queued, { t: 'changed' }>).e);
+          const before = sessions().records;
+          sessions().applyChangedMany(events);
+          closeArchived(events, before);
+        } else sessions().applyDigests(run.map((q) => (q as Extract<Queued, { t: 'digest' }>).d));
         i = j;
         continue;
       }

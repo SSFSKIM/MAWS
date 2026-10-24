@@ -325,8 +325,13 @@ export class OwnerChannelService {
     const at = this.now();
     let read = false;
     for (const mark of this.deps.store.marks(appSessionId)) {
-      if (mark.kind !== 'essential' || mark.state !== 'unread' || (input.markIds !== 'all' && !input.markIds.includes(mark.id as MarkId))) continue;
-      this.deps.store.updateMark(mark.id, { state: 'read', readAt: at, stateChangedAt: at });
+      if (input.markIds !== 'all' && !input.markIds.includes(mark.id as MarkId)) continue;
+      const essential = mark.kind === 'essential' && mark.state === 'unread';
+      const question = mark.kind === 'need-input' && mark.state === 'unanswered';
+      if (!essential && !question) continue;
+      // Legacy questions no longer have transcript cards. Dismissal retires their attention item, never an answer
+      // already on its way; modern async asks have their own sheet and are not marks in this store.
+      this.deps.store.updateMark(mark.id, { state: essential ? 'read' : 'retired', readAt: at, stateChangedAt: at });
       read = true;
     }
     if (read) this.changed(appSessionId);

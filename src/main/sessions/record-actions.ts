@@ -28,17 +28,27 @@ const authorityOf = (s: Setup, record: SessionRecord) => holderAuthority({ dispa
 // `session.archive`: never a foreign holder's process; under `onlyIfIdle` (the cleanup dialog's step, whose snapshot
 // may be stale) any live session is skipped, nothing stopped. The store file is kept (C3's archive deletes only the
 // journal), so an unarchived session resumes with its queue and grants.
-export async function archiveRecord(s: Setup, appSessionId: AppSessionId, opts: { onlyIfIdle?: boolean }): Promise<ArchiveOutcome> {
+export async function archiveRecord(s: Setup, appSessionId: AppSessionId, opts: { onlyIfIdle?: boolean; eligible?: () => Promise<boolean>; stillEligible?: () => boolean }): Promise<ArchiveOutcome> {
   const record = recordOf(s, appSessionId);
   const verdict = await authorityOf(s, record);
   if (verdict.live === 'foreign') return { status: 'held', holder: verdict.holder };
   if (opts.onlyIfIdle && verdict.live !== 'none') return { status: 'skipped_live', holder: verdict.holder };
-  if ((await reservationOf(s.dispatch, appSessionId)) !== null) await hostCall(s.dispatch, 'session.stop', { appSessionId, reason: 'archive' });
+  if (opts.eligible && !(await opts.eligible())) return { status: 'skipped_ineligible' };
+  if ((await reservationOf(s.dispatch, appSessionId)) !== null) {
+    if (opts.onlyIfIdle) return { status: 'skipped_live', holder: { kind: 'self' } };
+    await hostCall(s.dispatch, 'session.stop', { appSessionId, reason: 'archive' });
+  }
   // C12 start: a session released under the memory budget is archived as the live session it reads as: the host drops
   // its journal and its row as for a live archive, and with the row the released id, so the unarchived session's next
   // launch is a fresh one, not a resume after a release (C12 execution document, Decision Log: the released id on archive)
   else if (await releasedByHost(s, appSessionId)) await hostCall(s.dispatch, 'session.stop', { appSessionId, reason: 'archive' });
   // C12 end
+  if (opts.eligible) {
+    if (!(await opts.eligible())) return { status: 'skipped_ineligible' };
+    const latest = await authorityOf(s, recordOf(s, appSessionId));
+    if (latest.live !== 'none') return { status: 'skipped_live', holder: latest.holder };
+    if (opts.stillEligible && !opts.stillEligible()) return { status: 'skipped_ineligible' };
+  }
   s.sessions.update(appSessionId, { archived: true });
   return { archived: true };
 }

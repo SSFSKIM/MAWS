@@ -9,6 +9,7 @@ import { addFolder } from './add-folder'; // New chat
 import type { Index } from './index';
 
 export function registerIndexHandlers(index: Index): void {
+  registerMainHandler('session.search', ({ query }) => ({ hits: index.sessionSearch.search(query), indexing: index.sessionSearch.indexing(), incomplete: index.sessionSearch.incomplete() }));
   registerMainHandler('session.list', ({ includeArchived }) => ({ sessions: index.sessions.list({ includeArchived }), revision: index.revision }));
   // An app session id with no row (an unstarted tab) is an answer, not an error.
   registerMainHandler('session.get', ({ appSessionId }) => index.sessions.get(appSessionId as AppSessionId));

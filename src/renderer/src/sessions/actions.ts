@@ -98,6 +98,11 @@ export function registerSessionActions(): () => void {
     registerSessionAction('attach', (id) => attachOrSay(id)),
     registerProjectAction('removeProject', removeProject),
     registerProjectAction('archiveSessions', archiveProjectSessions),
+    registerProjectAction('archiveOlder', async (projectId) => {
+      const result = await ipc.invoke('session.archiveOlder', { projectId, days: 7 });
+      if (!result.ok) fail(result.error.message);
+      else toast({ level: 'info', text: `${result.value.archived} sessions archived; ${result.value.skipped} kept`, actions: [], dismissible: true });
+    }),
     registerProjectAction('revealInFinder', revealProject),
     registerProjectAction('archivedSessions', (projectId) => openDialog({ kind: 'archived', projectId })),
     registerProjectAction('worktrees', (projectId) => openDialog({ kind: 'worktrees', projectId })), // C12

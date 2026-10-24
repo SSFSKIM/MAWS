@@ -1,7 +1,7 @@
 // A plugin's Box and Text props as CSS (R2): Ink's vocabulary (d.ts BoxProps, TextProps), laid out in the DOM in MAWS's
 // UI font. Numbers are character cells: a column is `1ch`, a row `1lh`. Colours are the terminal's names, drawn with
 // MAWS's ANSI tokens (theme-aware), grey as the muted text; any other spelling (hex, rgb, ansi256) draws the default,
-// since the surface's colours are its tokens. Hover styles, absolute placement and hover groups are not drawn in R2.
+// since the surface's colours are its tokens. Nearest-keyed-Box hover is applied by SurfaceTree; absolute placement and named hover scopes remain unsupported.
 import type { CSSProperties } from 'react';
 import type { StyleProps } from './tree';
 
@@ -10,6 +10,8 @@ const ANSI = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'whi
 export function colorOf(name: unknown): string | undefined {
   if (typeof name !== 'string') return undefined;
   const lower = name.toLowerCase();
+  // Engine 2.1.309 cli.pretty.js:889886: the theme's Claude orange, mapped to the app's semantic accent.
+  if (lower === 'claude') return 'var(--accent)';
   if (lower === 'gray' || lower === 'grey' || lower === 'blackbright') return 'var(--fg-muted)';
   const bright = lower.endsWith('bright') ? lower.slice(0, -'bright'.length) : null;
   const base = bright ?? lower;

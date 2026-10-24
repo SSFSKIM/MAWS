@@ -2,7 +2,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
 import { ACTIONS, ACTION_IDS, type ActionId } from '@shared/keymap/actions';
-import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 
 interface Contents {
   id: number;
@@ -32,7 +32,7 @@ const { menuTemplate, registerMenuHandlers, startMenu } = await import('./menu')
 const { eventChannel } = await import('@shared/ipc/schema'); // P4-B2 K6
 
 type Item = MenuItemConstructorOptions;
-const SETTINGS: Settings = SETTINGS_DEFAULTS_V17;
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V18;
 const ALL = new Set<ActionId>(ACTION_IDS);
 const MENU_SINK = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
 

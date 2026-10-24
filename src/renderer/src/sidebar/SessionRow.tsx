@@ -1,25 +1,19 @@
-// One session in an expanded project (§5.1 as amended 2026-10-01, W5, D2 and W11, I4; Codex's and Claude Desktop's 30px
-// rows): one line of 13px text, the status glyph, the title, a worktree session's ⎇ branch (Codex marks those rows with
-// an environment icon; MAWS names the branch, the flat list having no worktree groups), a pin mark when pinned, the
-// unread dot and the age, with pin and archive taking the age's place on hover and on keyboard focus. Everything else
-// (the worktree's folder, holder or activity, the last answer, the pending request, context) is in the hover card. A
-// click shows it in place of the focused pane's session, ⌘-click or a middle-click in a new tab (I2); dragging carries
-// its id to a tab strip (`application/x-maws-session`, residue *Tab strip*). A foreign-live session shows no actions
-// (D-12). E3: a side thread or fork drawn under its parent is indented a step and marked `↳`.
-import type { AppSessionId } from '@shared/graph/ids';
+// UX1 D7: titles own the row; worktree at left, status and age at right, detail in the hover card.
 import type { SessionRecord } from '@shared/graph/session';
-import { ArchiveIcon, PinIcon } from '../app/IconButton';
-import { runSessionAction, sessionActionsFor, useSessionActionEnabled } from '../app/session-actions';
+import { PinIcon } from '../app/IconButton';
+import { sessionActionsFor } from '../app/session-actions';
+import { SessionOverflow } from './menus';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { lineageCaption, rowBranch, sessionAge } from './derive';
+import { lineageCaption, sessionAge } from './derive';
 import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
+import { setSessionUnread } from '../keymap/session-navigation';
 import { displayTitle } from '../sessions/title';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
@@ -45,11 +39,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const glyph = glyphFor(record, digest ?? null, pending, ended, now);
   const selected = tree.selected === id;
   const title = displayTitle(record);
-  const branch = rowBranch(record); // W9 (H2): a branch the record does not name is left out, never guessed as "detached"
-  const offered = sessionActionsFor(record);
-  const hoverActions = HOVER_ACTIONS.filter((action) => offered.includes(action));
-  // While the actions show, the age and the dot give them the row's end.
-  const yields = hoverActions.length > 0 ? 'group-hover/session:invisible group-focus-visible/session:invisible' : '';
+  const hasActions = sessionActionsFor(record).includes('rename');
 
   return (
     <SessionHoverCard record={record}>
@@ -73,84 +63,38 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(id, { how: 'tab' })}
         className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm ${nested ? 'pr-[9px] pl-[30px]' : 'px-[9px]'} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
-        <GlyphMark glyph={glyph} className="w-[14px] shrink-0" />
+        {record.worktree !== null && <span data-testid="row-branch" role="img" aria-label="Worktree" className="shrink-0 text-ui-sm text-fg-faint">⎇</span>}
         {/* E3 */}
         {nested && (
           <span aria-hidden data-testid="row-nested" className="-mr-[3px] shrink-0 text-ui text-fg">
             ↳
           </span>
         )}
-        <span className={`min-w-0 flex-1 truncate text-ui text-fg ${hoverActions.length > 0 ? 'group-hover/session:pr-7 group-focus-visible/session:pr-7' : ''}`}>{title}</span>
+        <span className="min-w-0 flex-1 truncate text-ui text-fg">{title}</span>
         {/* E3: the lineage caption takes the branch's place; a nested side thread shares its parent's branch */}
         {caption !== null && (
-          <span data-testid="row-lineage" title={caption} className={`max-w-[45%] shrink-0 truncate text-ui-sm text-fg-muted ${yields}`}>
+          <span data-testid="row-lineage" title={caption} className={`max-w-[45%] shrink-0 truncate text-ui-sm text-fg-muted`}>
             {caption}
-          </span>
-        )}
-        {branch !== null && caption === null && !(nested && record.lineage?.kind === 'side-thread') && (
-          <span data-testid="row-branch" title={record.worktree?.path} className={`max-w-[40%] shrink-0 truncate text-ui-sm text-fg-faint ${yields}`}>
-            ⎇ {branch}
           </span>
         )}
         {/* C12: the memory budget's released mark */}
         <ReleasedMark released={digest?.released} />
         {record.pinned && (
-          <span role="img" aria-label="Pinned" className={`shrink-0 text-fg-faint ${yields}`}>
+          <span role="img" aria-label="Pinned" className={`shrink-0 text-fg-faint`}>
             <PinIcon className="size-[11px]" />
           </span>
         )}
-        {record.unread && <span aria-label="Unread" role="img" className={`block size-[5px] shrink-0 rounded-full bg-info ${yields}`} />}
-        <span className={`shrink-0 text-ui-sm text-fg-muted tabular-nums ${yields}`}>{sessionAge(record, digest, now)}</span>
-        {hoverActions.length > 0 && <RowActions actions={hoverActions} appSessionId={id} title={title} pinned={record.pinned} />}
+        <GlyphMark glyph={glyph} className="w-[14px] shrink-0" />
+        <span className={`shrink-0 text-ui-sm text-fg-muted tabular-nums`}>{sessionAge(record, digest, now)}</span>
+        {hasActions && <SessionOverflow appSessionId={id} title={title} />}
+        {/* The overflow stays in flow to the left: the unread target is never covered on hover. */}
+        <button type="button" tabIndex={-1} aria-label={record.unread ? 'Mark read' : 'Mark unread'}
+          onClick={(event) => { event.stopPropagation(); void setSessionUnread(id, !record.unread); }}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm outline-accent focus-visible:outline-2">
+          <span role={record.unread ? 'img' : undefined} aria-label={record.unread ? 'Unread' : undefined} aria-hidden={!record.unread}
+            className={`size-[5px] rounded-full ${record.unread ? 'bg-info' : 'bg-fg-faint opacity-0 group-hover/session:opacity-100'}`} />
+        </button>
       </div>
     </SessionHoverCard>
-  );
-}
-
-type HoverAction = 'pin' | 'archive';
-const HOVER_ACTIONS: HoverAction[] = ['pin', 'archive'];
-
-// Pin and archive (§5.1 hover actions), those of them the session's menus offer (`sessionActionsFor`): out of the tab
-// order, since the row is the tree's stop and its context menu carries the same actions for the keyboard.
-function RowActions({ actions, appSessionId, title, pinned }: { actions: HoverAction[]; appSessionId: AppSessionId; title: string; pinned: boolean }) {
-  const canPin = useSessionActionEnabled('pin');
-  const canArchive = useSessionActionEnabled('archive');
-  const button =
-    'inline-flex size-[23px] items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
-  return (
-    <span className="absolute top-1/2 right-[5px] hidden -translate-y-1/2 rounded-sm bg-bg-overlay group-hover/session:flex group-focus-visible/session:flex">
-      {actions.includes('pin') && (
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={`${pinned ? 'Unpin' : 'Pin'} ${title}`}
-          title={canPin ? (pinned ? 'Unpin' : 'Pin') : 'Not available here'}
-          disabled={!canPin}
-          onClick={(event) => {
-            event.stopPropagation();
-            runSessionAction('pin', appSessionId);
-          }}
-          className={button}
-        >
-          <PinIcon className="size-[13px]" />
-        </button>
-      )}
-      {actions.includes('archive') && (
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={`Archive ${title}`}
-          title={canArchive ? 'Archive' : 'Not available here'}
-          disabled={!canArchive}
-          onClick={(event) => {
-            event.stopPropagation();
-            runSessionAction('archive', appSessionId);
-          }}
-          className={button}
-        >
-          <ArchiveIcon className="size-[13px]" />
-        </button>
-      )}
-    </span>
   );
 }

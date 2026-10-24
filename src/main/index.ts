@@ -1,3 +1,7 @@
+import type { ProjectId } from '@shared/graph/ids';
+import { InactiveArchive, scheduleInactiveArchive } from './sessions/inactive-archive';
+import { openSessionTabs } from './layout/open-session-tabs';
+import { isActionable as archiveActionable, isOpen as archiveOpen } from '@shared/attention/kinds';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
@@ -27,6 +31,7 @@ import { registerGitHandlers } from './git/register';
 import { GitService } from './git/service';
 // C4 end
 // C5 start (emit comes with C3's imports)
+import { notificationActions } from './attention/actions';
 import { startAttention } from './attention';
 import { LayoutFileStore } from './layout/store';
 import { registerChatPanels } from './sessions/panel-lifetime';
@@ -438,6 +443,20 @@ void startWithProfileLock(app, () => {
     acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
   });
   registerSessionServiceHandlers(sessionService);
+  const inactiveArchive = new InactiveArchive({
+    index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
+    waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
+    archive: (id, eligible, stillEligible) => sessionService.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
+    discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
+    open: openSessionTabs(layout, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab
+    activity: (id) => {
+      const digest = sessions.model.digest(id);
+      const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
+      return times.length ? Math.max(...times) : null;
+    },
+  });
+  registerMainHandler('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
+  shutdown.add('inactive archive', scheduleInactiveArchive(inactiveArchive, () => settings.state().settings.sessions.archiveInactiveDays, (changed) => settings.onChange(changed), (scanned) => indexSource.onScanned(scanned)));
   registerObservedFacts(hosts.dispatch); // P2-A (X17): the engine host's observed facts, beside session.digests
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
@@ -720,7 +739,7 @@ void startWithProfileLock(app, () => {
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(sessions.model, { restoredIds: attention.restoredIds, settings: () => settings.state().settings, openWindow });
+  startAttention(sessions.model, { actions: notificationActions({ dispatch: hosts.dispatch, acquire: (id, reason) => sessionService.acquire(id, reason), pending: (id, attentionId) => sessions.model.attention(id).find((item) => item.id === attentionId) }), restoredIds: attention.restoredIds, settings: () => settings.state().settings, openWindow });
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
   const quitGuard = installQuitGuard(sessions.model, {
     // C12 start

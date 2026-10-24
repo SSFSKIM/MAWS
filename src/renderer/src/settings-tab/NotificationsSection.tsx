@@ -9,7 +9,7 @@ import { NOTIFICATIONS } from './copy';
 import { Chip, Setting, Switch, writeSettings } from './parts';
 
 type Kind = keyof Settings['notifications']['kinds'];
-const KINDS: Kind[] = ['approvals', 'questions', 'planReviews', 'errors', 'asyncInput', 'essential' /* P2-C */, 'heldPeerMessages'];
+const KINDS: Kind[] = ['turnFinished', 'approvals', 'questions', 'planReviews', 'errors', 'asyncInput', 'essential' /* P2-C */, 'heldPeerMessages'];
 
 export function NotificationsSection({ settings }: { settings: Settings }) {
   const { enabled, sound, kinds } = settings.notifications;

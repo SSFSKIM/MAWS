@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V17 } from '../../settings/defaults';
+import { SETTINGS_DEFAULTS_V18 } from '../../settings/defaults';
 import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
 import { LaunchProfileSchema, userScopeProfile } from '../../engine/launch-profile'; // P4-A2
 
-const base = SETTINGS_DEFAULTS_V17;
+const base = SETTINGS_DEFAULTS_V18;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
@@ -13,7 +13,7 @@ describe('export author setting', () => {
   it('accepts an additive explicit name or clearing it, and rejects blank and oversized identities', () => {
     expect(SettingsPatchSchema.parse({ artifacts: { exportAuthorName: '  Kim Min  ' } })).toEqual({ artifacts: { exportAuthorName: 'Kim Min' } });
     expect(SettingsPatchSchema.safeParse({ artifacts: { exportAuthorName: null } }).success).toBe(true);
-    expect(SettingsSchema.safeParse(base).success).toBe(true); // existing v17 files need no migration
+    expect(SettingsSchema.safeParse(base).success).toBe(true); // current files validate without the optional author name
     for (const name of ['', '  ', 'x'.repeat(201)]) expect(SettingsPatchSchema.safeParse({ artifacts: { exportAuthorName: name } }).success).toBe(false);
   });
 });
@@ -33,8 +33,11 @@ describe('settings keymap is a partial record', () => {
     expect(issueCodes({ ...base, keymap: { 'tab.close': 'Cmd J!' } })).toEqual(['invalid_format']);
   });
 
-  it('is version 17 and carries the notification policy (P4-R8: the app MCP servers; P4-A2: the launch profile)', () => {
-    expect(base.version).toBe(17);
+  it('is version 18 and carries the notification policy (P4-R8: the app MCP servers; P4-A2: the launch profile)', () => {
+    expect(base.version).toBe(18);
+    expect(SettingsSchema.safeParse({ ...base, version: 17 }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ ...base, sessions: undefined }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ ...base, notifications: { ...base.notifications, kinds: { ...base.notifications.kinds, turnFinished: undefined } } }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, version: 16 }).success).toBe(false); // P4-A2
     expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, launchProfile: undefined } }).success).toBe(false); // P4-A2: required, even at the user scope
     expect(SettingsSchema.safeParse({ ...base, version: 15 }).success).toBe(false); // P4-R8

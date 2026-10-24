@@ -13,9 +13,9 @@ export const REPORT = {
   running: 'Working',
   toolCalls: (n: number) => `${n} tool ${n === 1 ? 'call' : 'calls'}`,
   messages: (n: number) => `${n} ${n === 1 ? 'message' : 'messages'}`,
-  mustRead: (n: number) => `${n} must-read`,
+  unread: (n: number) => `${n} unread`,
   markAllRead: 'Mark all read',
-  notMarkedAll: (error: string) => `Must-reads not marked read: ${error}`, // M6's fix wave: a failed Mark all read, as a toast
+  notMarkedAll: (error: string) => `Items not marked read: ${error}`, // M6's fix wave: a failed Mark all read, as a toast
   retry: 'Retry',
   mismatch: (observed: string, resolved: string) => `The engine uses the output style “${observed}”, not “${resolved}” as MAWS read it. The next start follows the engine.`,
 };

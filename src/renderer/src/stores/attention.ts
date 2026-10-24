@@ -89,7 +89,7 @@ export function createAttentionStore() {
       set({ bySession, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
     },
     applyNotified({ delivery }) {
-      set({ notificationDelivery: delivery });
+      if (delivery !== 'in-app') set({ notificationDelivery: delivery });
     },
     loadRequest(client, item) {
       if (get().requests.has(item.id)) return Promise.resolve();

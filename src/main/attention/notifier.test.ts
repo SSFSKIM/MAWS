@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
-import { item, project, record } from '../../../test/support/builders';
-import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
+import { digest, item, project, record } from '../../../test/support/builders';
+import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 
 // A stand-in for Electron's Notification: records every instance, and lets a test fire its events.
 const electron = vi.hoisted(() => {
@@ -14,6 +14,7 @@ const electron = vi.hoisted(() => {
     static isSupported = () => FakeNotification.supported;
     listeners = new Map<string, Listener[]>();
     shown = 0;
+    close = vi.fn();
     constructor(readonly options: { title: string; body: string; silent: boolean }) {
       FakeNotification.instances.push(this);
     }
@@ -42,9 +43,9 @@ type Writer = import('../sessions/read-model').ReadModelWriter;
 const CHARTER = 'app-charter' as AppSessionId;
 const LOOSE = 'app-loose' as AppSessionId;
 const T = '2026-09-28T10:00:00Z';
-const SETTINGS: Settings = SETTINGS_DEFAULTS_V17;
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V18;
 
-function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void } = {}) {
+function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void; actions?: import('./actions').NotificationActions } = {}) {
   const model = new SessionReadModel('index');
   let writer!: Writer;
   model.register({ start: (w) => ((writer = w), () => {}) });
@@ -52,13 +53,14 @@ function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Wr
   writer.observeRecord(record(CHARTER, { projectId: 'maws' as never, title: { text: 'Charter + research', source: 'user' } }));
   writer.observeRecord(record(LOOSE, { title: { text: 'Terminal workflow notes', source: 'user' } }));
   opts.before?.(writer);
-  const state = { focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS };
+  const state = { viewing: null as AppSessionId | null, focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS };
   const emit = vi.fn(() => true);
   const focusWindow = vi.fn();
   const navigate = vi.fn();
-  const stop = startNotifier(model, { isFocused: () => state.focused, focusWindow, navigate, settings: () => state.settings, emit });
+  const failure = vi.fn();
+  const stop = startNotifier(model, { actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, focusWindow, navigate, settings: () => state.settings, emit });
   const set = (appSessionId: AppSessionId, items: AttentionItem[]) => writer.observeAttention(appSessionId, items);
-  return { model, writer, state, emit, focusWindow, navigate, stop, set };
+  return { model, writer, state, emit, focusWindow, navigate, failure, stop, set };
 }
 
 const posted = () => electron.FakeNotification.instances;
@@ -124,7 +126,7 @@ describe('notifier fires once per item when unfocused', () => {
   });
 
   it('with C11’s notifications.kinds, posts only for a group that is on (approvals, questions, plan reviews, errors)', () => {
-    const kinds = { approvals: false, questions: true, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: true, essential: true /* P2-C */ };
+    const kinds = { turnFinished: true, approvals: false, questions: true, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: true, essential: true /* P2-C */ };
     const settings: Settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds } };
     const h = harness({ settings });
     const at = (n: number) => `2026-09-28T10:0${n}:00Z`;
@@ -237,3 +239,56 @@ describe('dock badge', () => {
     expect(posted()).toHaveLength(0); // neither is in Needs you, so neither is announced
   });
 });
+
+ describe('per-session notifications', () => {
+  it('uses an in-app notice for another session, suppressing only the focused session', () => {
+    const h = harness({ focused: true });
+    h.state.viewing = LOOSE;
+    h.set(CHARTER, [item(CHARTER, 'question', T)]);
+    h.set(LOOSE, [item(LOOSE, 'question', T)]);
+    expect(posted()).toHaveLength(0);
+    expect(emitted(h.emit, 'attention.notified')).toMatchObject([{ appSessionId: CHARTER, delivery: 'in-app' }]);
+  });
+  it('announces a new completed turn once, not a restored idle digest', () => {
+    const h = harness();
+    h.writer.setDigest(digest(CHARTER, { lastTurnEndedAt: T }));
+    expect(posted()).toHaveLength(0);
+    h.writer.setDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
+    const done = digest(CHARTER, { turnStartedAt: T, lastTurnEndedAt: '2026-09-28T10:01:00Z', lastAssistantLine: 'All tests pass.' });
+    h.writer.setDigest(done);
+    h.writer.setDigest(done);
+    expect(posted()).toHaveLength(1);
+    expect(posted()[0].options.body).toBe('All tests pass.');
+  });
+  it('hands a failed reply to the ready-page relay rather than emitting it to a just-created window', async () => {
+    const actions = { reply: vi.fn().mockRejectedValue(new Error('Session unavailable')), canAllow: vi.fn(), allow: vi.fn() };
+    const h = harness({ actions });
+    h.writer.setDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
+    h.writer.setDigest(digest(CHARTER, { lastTurnEndedAt: '2026-09-28T10:01:00Z' }));
+    posted()[0].fire('reply', 'Do not lose these words');
+    await vi.waitFor(() => expect(h.focusWindow).toHaveBeenCalledOnce());
+    expect(h.navigate).toHaveBeenCalledWith({ appSessionId: CHARTER, attentionId: null, source: 'notification' });
+    expect(h.failure).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: null, delivery: 'in-app', at: expect.any(String), error: 'Session unavailable', reply: 'Do not lose these words' });
+    expect(emitted(h.emit, 'attention.notified')).toEqual([]);
+  });
+
+  it('hands a failed Allow once action to the same ready-page relay', async () => {
+    const actions = { reply: vi.fn(), canAllow: vi.fn().mockResolvedValue(true), allow: vi.fn().mockRejectedValue(new Error('Request expired')) };
+    const h = harness({ actions });
+    const request = item(CHARTER, 'permission', T);
+    h.set(CHARTER, [request]);
+    await vi.waitFor(() => expect(posted()).toHaveLength(1));
+    posted()[0].fire('action', 0);
+    await vi.waitFor(() => expect(h.focusWindow).toHaveBeenCalledOnce());
+    expect(h.failure).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: request.id, delivery: 'in-app', at: expect.any(String), error: 'Request expired' });
+    expect(emitted(h.emit, 'attention.notified')).toEqual([]);
+  });
+
+  it('withdraws a request banner when the request resolves', () => {
+    const h = harness();
+    const request = item(CHARTER, 'permission', T);
+    h.set(CHARTER, [request]);
+    h.set(CHARTER, [{ ...request, state: 'confirmed' } as AttentionItem]);
+    expect(posted()[0].close).toHaveBeenCalledOnce();
+  });
+ });

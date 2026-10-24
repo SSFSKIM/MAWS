@@ -232,6 +232,16 @@ describe('transcript records map to X1 events', () => {
     expect(startsTurn(rec({ type: 'user', uuid: 'm1', parentUuid: 'u1', message: { role: 'user', content: '[Request interrupted by user]' } }))).toBe(false);
   });
 
+  it('l2-transcript-15: preserves human provenance when a typed prompt contains the whole interrupt marker', () => {
+    for (const content of ['[Request interrupted by user]', [{ type: 'text', text: '[Request interrupted by user for tool use]' }]]) {
+      const typed = rec({ type: 'user', uuid: 'typed', parentUuid: null, timestamp: at(0), origin: { kind: 'human' }, message: { role: 'user', content } });
+      expect(startsTurn(typed)).toBe(true);
+      const events = mapAll([typed]);
+      expect(only(events, 'turn.started')).toMatchObject([{ userMessageUuid: 'typed', origin: 'human' }]);
+      expect(only(events, 'user.message')).toMatchObject([{ messageUuid: 'typed', origin: 'human', content, isSynthetic: false }]);
+    }
+  });
+
   it('the marker-carrying transcript from the owner\'s store: the turn count does not grow at the marker', () => {
     const records = currentChain(loadTranscriptFixture('interrupt-marker')).chain;
     const markerAt = records.findIndex((record) => JSON.stringify(record.message ?? null).includes('[Request interrupted by user]'));
@@ -280,7 +290,8 @@ describe('a human queued_command attachment in the main transcript is a steer', 
     const sourceUuid = (record.attachment as { source_uuid: string }).source_uuid;
     const events = mapAll([record]);
     expect(kinds(events)).toEqual(['session.started', 'user.message', 'command.lifecycle']);
-    expect(only(events, 'user.message')[0]).toMatchObject({ id: record.uuid, messageUuid: sourceUuid, content: text, isSynthetic: false, origin: null, bash: null, seq: null });
+    // l2-transcript-15: the attachment's guaranteed human provenance must survive into the model.
+    expect(only(events, 'user.message')[0]).toMatchObject({ id: record.uuid, messageUuid: sourceUuid, content: text, isSynthetic: false, origin: 'human', bash: null, seq: null });
     expect(only(events, 'command.lifecycle')[0]).toMatchObject({ id: `${record.uuid as string}#1`, commandUuid: sourceUuid, state: 'started' });
     expect(only(events, 'turn.started')).toEqual([]);
   });
@@ -593,7 +604,7 @@ describe('peer messages from disk (E7)', () => {
     expect(events[at - 1]).toMatchObject({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
     expect(events[at]).toMatchObject({ kind: 'user.message', origin: 'peer', isSynthetic: true, content: (records[32]!.message as { content: string }).content });
     expect(events[at + 1]).toMatchObject({ kind: 'peer.message', messageUuid: uuid, seq: null, midTurn: false });
-    expect(only(events, 'turn.started').map((e) => e.origin)).toEqual([null, 'peer', null, null, null]);
+    expect(only(events, 'turn.started').map((e) => e.origin)).toEqual(['human', 'peer', 'human', 'human', 'human']);
   });
 
   it('admits a peer queued_command attachment as the synthetic user.message the live stream carries, under its source uuid', () => {
@@ -721,7 +732,7 @@ describe('peer messages from disk (E7)', () => {
     expect(events[at - 1]).toMatchObject({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
     expect(events[at]).toMatchObject({ kind: 'user.message', origin: 'peer', isSynthetic: true });
     expect(events[at + 1]).toMatchObject({ kind: 'peer.message', messageUuid: peer.uuid, seq: null, midTurn: false, fromName: 'repo-33', text: 'E11 S2c: hello from a MAWS session. No reply needed.' });
-    expect(only(events, 'turn.started').map((e) => e.origin), 'the READY turn, then the peer turn: no prompt turn opened by the message').toEqual([null, 'peer']);
+    expect(only(events, 'turn.started').map((e) => e.origin), 'the READY turn, then the peer turn: no prompt turn opened by the message').toEqual(['human', 'peer']);
   });
 
   // E11 S2(d) (the tracker's E7 row on a terminal team): the lead of a team an interactive terminal formed under the teams
@@ -738,8 +749,8 @@ describe('peer messages from disk (E7)', () => {
     expect(events[at - 1]).toMatchObject({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
     expect(events[at]).toMatchObject({ kind: 'user.message', origin: 'peer', isSynthetic: true });
     expect(events[at + 1]).toMatchObject({ kind: 'peer.message', messageUuid: report.uuid, from: '', fromName: 'scout', text: 'one.txt contains a single line: "ONE" (followed by a trailing newline).', midTurn: false, replyable: false });
-    expect(only(events, 'user.message').filter((e) => e.origin === null && !e.isSynthetic).map((e) => e.messageUuid), "the owner's prompt only").toEqual([records[4]!.uuid]);
-    expect(only(events, 'turn.started').map((e) => [e.origin, e.userMessageUuid])).toEqual([[null, records[4]!.uuid], ['peer', null]]);
+    expect(only(events, 'user.message').filter((e) => e.origin === 'human' && !e.isSynthetic).map((e) => e.messageUuid), "the owner's prompt only").toEqual([records[4]!.uuid]);
+    expect(only(events, 'turn.started').map((e) => [e.origin, e.userMessageUuid])).toEqual([['human', records[4]!.uuid], ['peer', null]]);
   });
 
   it('keeps a plain user record whose text is a cross-session envelope the owner’s: only the teammate form comes without an origin', () => {

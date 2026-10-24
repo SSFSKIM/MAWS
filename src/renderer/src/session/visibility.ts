@@ -58,6 +58,7 @@ export function visibleSessions(
 }
 
 export function connectVisibility(client: MawsBridge = ipc, stores = { layout: useLayout, sessions: useSessions, side: useSidePane /* E3 */ }): () => void {
+  let viewing: AppSessionId | null = null;
   let reported = new Set<AppSessionId>();
   const send = (appSessionId: AppSessionId, visible: boolean) =>
     void client.invoke('session.setVisible', { appSessionId, visible }).then((result) => {
@@ -71,6 +72,14 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
     for (const id of reported) if (!next.has(id)) send(id, false);
     for (const id of next) if (!reported.has(id)) send(id, true);
     reported = next;
+    const set = currentSet(main);
+    const pane = set.panes[set.focusedPane];
+    const tab = pane?.tabs.find((entry) => entry.id === pane.activeTabId);
+    const focused = tab?.kind === 'session' && next.has(tab.appSessionId) ? tab.appSessionId : null;
+    if (viewing !== focused) {
+      viewing = focused;
+      void client.invoke('attention.viewing', { appSessionId: focused });
+    }
   };
 
   const offLayout = stores.layout.subscribe((state, before) => {
@@ -94,5 +103,6 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
     window.removeEventListener('blur', update);
     document.removeEventListener('visibilitychange', update);
     for (const id of reported) send(id, false);
+    void client.invoke('attention.viewing', { appSessionId: null });
   };
 }

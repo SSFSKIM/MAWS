@@ -49,10 +49,11 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // house design system as the default and no Space defaults. P4-B1: to version 15, with the comments view expanded.
       // P4-R8: to version 16, with no app MCP servers. P4-A2: to version 17, with the launch profile at the user scope.
       expect(readSettings(userData)).toMatchObject({
-        version: 17, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17
+        version: 18, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18
+        sessions: { archiveInactiveDays: null },
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
-        notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
+        notifications: { enabled: false, sound: true, kinds: { turnFinished: true, approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
         engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8 */, launchProfile: { plugins: { off: [] }, outputStyle: 'user', hooks: 'user' } /* P4-A2 */ }, // W13: no pinnedVersion
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
@@ -124,7 +125,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       await expect(gateway.getByRole('combobox', { name: 'Relay unreachable at launch' })).toHaveValue('wait');
       await expect(keyRow(page, 'Next Needs-you').locator('kbd')).toHaveText('⌘⇧J');
       await expect(panel(page).getByRole('region', { name: 'Appearance' }).getByRole('radio', { name: 'System' })).toBeChecked();
-      await expect(panel(page).getByRole('region', { name: 'Notifications' }).getByRole('switch', { name: 'Notify while MAWS is not focused' })).toHaveAttribute('aria-checked', 'false');
+      await expect(panel(page).getByRole('region', { name: 'Notifications' }).getByRole('switch', { name: 'Notify when I am not looking at that session' })).toHaveAttribute('aria-checked', 'false');
       expect(await accelerator(app, 'attention.next')).toBe('Cmd+Shift+J');
       expect(maws.consoleErrors()).toEqual([]);
     } finally {

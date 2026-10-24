@@ -1,47 +1,15 @@
-import { useDisclosure } from '../../transcript/view/context';
-import { Chevron } from '../../transcript/view/rows/parts';
 import { Markdown } from '../../transcript/view/markdown/Markdown';
-import { parse, type Kind, type Part } from '@shared/owner/to-human-parser';
+import { hasClosedMarks, messageInk } from './message-ink';
 import './presenter.css';
 
-const labels: Record<Kind, string> = { 'to-human': 'to human', essential: 'essential', 'need-input': 'need input', insight: 'insight' };
-// answerable (P2-E1): a Reply field sits under the drawing (the comment card's), so a question is answered there
-type Drawing = { showRecord: boolean; live: boolean; recordKey: string; hasWorkFold?: boolean; answerable?: boolean };
-
-// The only registration API: callers know whether a presentation exists, not the owner's vocabulary.
+// The native fallback is only a decoration of the authored Markdown. Attached engine mods get first refusal;
+// history and local mounts use this same drawing without inventing cards, labels, or a second working-record fold.
 export function assistantPresentation(text: string) {
-  const parts = parse(text);
-  return parts.some((part) => part.kind !== 'plain') ? {
-    render: (drawing: Drawing) => <Presenter parts={parts} {...drawing} />,
+  return hasClosedMarks(text) ? {
+    render: ({ live }: { live: boolean }) => <div className="transcript-answer"><Markdown markdown={text} live={live} decorate={messageInk} /></div>,
   } : null;
 }
 
-// P4-R7: a message tool's message, drawn as the one to-human span it is (no working record of its own to fold).
 export function messagePresentation(text: string) {
-  return <Presenter parts={[{ kind: 'to-human', text }]} showRecord={false} live={false} recordKey="" />;
-}
-
-function Presenter({ parts, showRecord, live, recordKey, hasWorkFold = true, answerable = false }: Drawing & { parts: Part[] }) {
-  const [recordOpen, toggleRecord] = useDisclosure(`owner-report:${recordKey}`);
-  // A text-only answer has no turn work divider. Keep its record reachable without changing transcript derivation.
-  const ownFold = !hasWorkFold && parts.some((part) => part.kind === 'plain' && part.text.trim());
-  const recordVisible = ownFold ? recordOpen : showRecord;
-  return <div className="owner-report" data-owner-report="">
-    {parts.map((part, index) => {
-      if (part.kind === 'plain') return recordVisible && part.text.trim() ? <div key={index} className="transcript-commentary"><Markdown markdown={part.text} live={live} /></div> : null;
-      const Tag = part.kind === 'insight' ? 'aside' : 'section';
-      return <Tag key={index} data-owner-span={part.kind} className={`owner-report-span transcript-answer${part.kind === 'essential' ? ' font-semibold' : ''}`} aria-label={labels[part.kind]}>
-        <div className="owner-report-label">{labels[part.kind]}</div>
-        <div className="owner-report-body">
-          <Markdown markdown={part.text} live={live} />
-          {part.choices && <ol className="owner-report-choices">{part.choices.map((choice, n) => <li key={n}>
-            <Markdown markdown={choice.text} live={false} />
-            {choice.recommended && <span className="owner-report-recommended">Recommended</span>}
-          </li>)}</ol>}
-          {part.kind === 'need-input' && !answerable && <p className="owner-report-resume">Resume this session to answer.</p>}
-        </div>
-      </Tag>;
-    })}
-    {ownFold && <button type="button" className="transcript-disclosure" aria-expanded={recordOpen} onClick={toggleRecord}><Chevron />Working record</button>}
-  </div>;
+  return <div className="transcript-answer owner-message-ink"><Markdown markdown={text} live={false} /></div>;
 }

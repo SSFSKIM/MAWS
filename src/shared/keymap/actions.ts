@@ -49,6 +49,9 @@ export const ACTIONS = {
   'theme.dark':           { title: 'Appearance: Dark',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'theme.system':         { title: 'Appearance: System',          chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'palette.open':         { title: 'Command palette',             chord: 'Cmd+K',        sink: 'menu', menu: 'go',   scope: 'app' },
+  'session.previous':    { title: 'Previous session', chord: 'Cmd+Shift+[', sink: 'menu', menu: 'go', scope: 'app' },
+  'session.next':        { title: 'Next session', chord: 'Cmd+Shift+]', sink: 'menu', menu: 'go', scope: 'app' },
+  'session.markUnread':  { title: 'Mark session unread', chord: 'Cmd+Alt+U', sink: 'menu', menu: 'go', scope: 'app' },
   'attention.next':       { title: 'Next Needs-you',              chord: 'Cmd+Shift+J',  sink: 'menu', menu: 'go',   scope: 'app' },
   'diagnostics.open':     { title: 'Diagnostics',                 chord: null,           sink: 'menu', menu: 'help', scope: 'app' },
   'request.accept':       { title: 'Approve / answer the docked request', chord: 'Enter', sink: 'renderer', menu: null, scope: 'pane' },     // C7's card subscribes through useKeyChord

@@ -279,10 +279,10 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(fake.pending('session.queue.setPaused')).toBe(1));
     await fake.fail('session.queue.setPaused', 'the queue store is unavailable');
     await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the queue store is unavailable']));
-    // W10: with text it is Send, which C3 puts behind the paused messages, and the tooltip says so
+    // l2-transcript-15 (b46e2ea63): fresh text after Stop sends now, without resuming older held messages.
     await type('one more');
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Joins the paused queue; Resume sends it (Enter)');
+    expect(primary().title).toBe('Sends this now (Enter)');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A, content: 'one more' }]));
     expect(invoked('session.steer')).toEqual([]);

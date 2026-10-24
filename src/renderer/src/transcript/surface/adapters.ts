@@ -119,7 +119,8 @@ export function withToolProps(input: ToolInput, props: TranscriptProps['ToolUse'
   if (!replacedOutput && 'spill' in drawn.detail && 'spill' in cell.detail && cell.detail.spill !== null && drawn.detail.spill?.path === cell.detail.spill.path) {
     drawn.detail = { ...drawn.detail, spill: cell.detail.spill };
   }
-  return { ...drawn, id: cell.id, classification: cell.classification, agent: cell.agent, startedAt: cell.startedAt, endedAt: cell.endedAt };
+  const summary = props.tool === input.props.tool && sameValue(props.input, input.props.input) ? cell.summary : undefined;
+  return { ...drawn, ...(summary ? { summary } : {}), id: cell.id, classification: cell.classification, agent: cell.agent, startedAt: cell.startedAt, endedAt: cell.endedAt };
 }
 
 interface Sized { value: unknown; nodes: number; chars: number }

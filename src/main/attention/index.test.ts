@@ -1,27 +1,98 @@
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { emit } from '../ipc/events';
+import { registerMainHandler } from '../ipc/router';
+import { appWindows } from '../windows';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
-import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
-import { item, record } from '../../../test/support/builders';
+import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { digest, item, record } from '../../../test/support/builders';
 import { SessionReadModel } from '../sessions/read-model';
 import { PERSIST_RETRY_MS, startAttentionService } from './service';
 import { startAttention } from './index';
 
-const electron = vi.hoisted(() => ({ shown: vi.fn(), badge: vi.fn(), bounce: vi.fn() }));
+const electron = vi.hoisted(() => ({ shown: vi.fn(), badge: vi.fn(), bounce: vi.fn(), notices: [] as { fire(event: string, ...args: unknown[]): void }[] }));
 vi.mock('electron', () => ({
   app: { on: vi.fn(), dock: { setBadge: electron.badge, bounce: electron.bounce } },
   BrowserWindow: { getAllWindows: () => [] },
   Notification: class {
     static isSupported() { return true; }
-    on() { return this; }
+    private listeners = new EventEmitter();
+    constructor() { electron.notices.push(this); }
+    on(event: string, listener: (...args: unknown[]) => void) { this.listeners.on(event, listener); return this; }
+    fire(event: string, ...args: unknown[]) { this.listeners.emit(event, {}, ...args); }
     show() { electron.shown(); }
+    close() {}
   },
 }));
 vi.mock('../ipc/router', () => ({ registerMainHandler: vi.fn() }));
+vi.mock('../ipc/events', () => ({ emit: vi.fn() }));
+vi.mock('../windows', () => ({ appWindows: vi.fn(() => []), isAppWindow: vi.fn(() => true) }));
 
 describe('attention startup', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); electron.notices = []; vi.mocked(appWindows).mockReturnValue([]); });
   afterEach(() => vi.useRealTimers());
+  it('keeps viewing across child-frame loads, and releases only a main-frame navigation without accumulating listeners', () => {
+    const sender = Object.assign(new EventEmitter(), { id: 7, isDestroyed: () => false });
+    const win = Object.assign(new EventEmitter(), { webContents: sender, isFocused: () => true });
+    vi.mocked(appWindows).mockReturnValue([win as never]);
+    const model = new SessionReadModel('index');
+    const id = 'viewed' as AppSessionId;
+    let observe!: (items: AttentionItem[]) => void;
+    model.register({ start: (writer) => {
+      writer.observeRecord(record(id));
+      observe = (items) => writer.observeAttention(id, items);
+      return () => {};
+    } });
+    const stop = startAttention(model, { restoredIds: new Set(), settings: () => SETTINGS_DEFAULTS_V18, openWindow: () => { throw new Error('already open'); } });
+    const handler = vi.mocked(registerMainHandler).mock.calls.find(([name]) => name === 'attention.viewing')![1] as (input: { appSessionId: AppSessionId }, context: unknown) => void;
+    const view = () => handler({ appSessionId: id }, { sender });
+    try {
+      view();
+      sender.emit('did-start-loading'); // also fires for an iframe
+      sender.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false });
+      observe([item(id, 'question', '2026-10-23T00:00:00Z')]);
+      expect(emit).not.toHaveBeenCalled();
+      sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
+      observe([item(id, 'question', '2026-10-23T01:00:00Z')]);
+      expect(emit).not.toHaveBeenCalled();
+      for (let n = 0; n < 3; n++) {
+        sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+        expect(sender.listenerCount('did-start-navigation')).toBe(1); // only followAppPages remains
+        view();
+        expect(sender.listenerCount('did-start-navigation')).toBe(2);
+        expect(sender.listenerCount('destroyed')).toBe(1);
+      }
+      sender.emit('render-process-gone');
+      expect(sender.listenerCount('destroyed')).toBe(0);
+      observe([item(id, 'question', '2026-10-23T02:00:00Z')]);
+      expect(emit).toHaveBeenCalledWith('attention.notified', expect.objectContaining({ appSessionId: id, delivery: 'in-app' }));
+    } finally { stop(); }
+  });
+
+  it('delivers a failed notification reply only after the newly created page asks for pending navigation', async () => {
+    const model = new SessionReadModel('index');
+    const id = 'cold-window' as AppSessionId;
+    let writer!: import('../sessions/read-model').ReadModelWriter;
+    model.register({ start: (w) => { writer = w; w.observeRecord(record(id)); return () => {}; } });
+    const win = { isMinimized: () => false, show: vi.fn(), focus: vi.fn() };
+    const openWindow = vi.fn(() => win as never);
+    const stop = startAttention(model, { restoredIds: new Set(), settings: () => SETTINGS_DEFAULTS_V18, openWindow,
+      actions: { reply: vi.fn().mockRejectedValue(new Error('Host unavailable')), canAllow: vi.fn(), allow: vi.fn() } });
+    try {
+      writer.setDigest(digest(id, { phase: 'working' }));
+      writer.setDigest(digest(id, { lastTurnEndedAt: '2026-10-23T00:00:00Z' }));
+      electron.notices[0].fire('reply', 'Recover this exact reply');
+      await vi.waitFor(() => expect(openWindow).toHaveBeenCalledOnce());
+      expect(emit).not.toHaveBeenCalled(); // no subscriber yet in the new window
+      const pending = vi.mocked(registerMainHandler).mock.calls.find(([name]) => name === 'attention.pendingNavigate')![1] as () => { navigate: unknown };
+      expect(pending()).toEqual({ navigate: { appSessionId: id, attentionId: null, source: 'notification' } });
+      expect(emit).toHaveBeenCalledExactlyOnceWith('attention.notified', { appSessionId: id, attentionId: null, delivery: 'in-app', at: expect.any(String), error: 'Host unavailable', reply: 'Recover this exact reply' });
+      expect(pending()).toEqual({ navigate: null });
+      expect(emit).toHaveBeenCalledOnce();
+    } finally { stop(); }
+  });
+
   it('seeds persisted attention after hydration without launch notifications, then announces new items', async () => {
     const model = new SessionReadModel('index');
     const id = 'app' as AppSessionId;
@@ -39,7 +110,7 @@ describe('attention startup', () => {
       emit: (name, payload) => { if (name === 'attention.changed') observe((payload as { items: AttentionItem[] }).items); },
       store: { list: () => new Promise((resolve) => { loaded = resolve; }), replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V17, openWindow: () => { throw new Error('not clicked'); } });
+    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V18, openWindow: () => { throw new Error('not clicked'); } });
     const old = item(id, 'error', '2026-10-01T00:00:00Z');
     loaded([old]); // window still hidden/unfocused while the persisted table arrives
     await service.ready;
@@ -71,7 +142,7 @@ describe('attention startup', () => {
       emit: (name, payload) => { if (name === 'attention.changed') { const change = payload as { appSessionId: AppSessionId; items: AttentionItem[] }; observe(change.appSessionId, change.items); } },
       store: { list, replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V17, openWindow: () => { throw new Error('not clicked'); } });
+    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V18, openWindow: () => { throw new Error('not clicked'); } });
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(list).toHaveBeenCalledTimes(2);

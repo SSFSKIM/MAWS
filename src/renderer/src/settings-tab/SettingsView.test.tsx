@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V17 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
@@ -22,7 +22,7 @@ import { REL } from '../test-support/relative-time';
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V17, section: Parameters<typeof SettingsView>[0]['section'] = null, answers: SettingsBridge['answers'] = {}) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V18, section: Parameters<typeof SettingsView>[0]['section'] = null, answers: SettingsBridge['answers'] = {}) {
   b = settingsBridge(initial);
   Object.assign(b.answers, answers); // before the first render, so the sections' first reads see them
   window.maws = b.bridge;
@@ -52,9 +52,9 @@ describe('settings tab writes one field per row', () => {
   it('has the eight sections, the index and its footer', () => {
     renderView();
     const index = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Browser', 'Artifacts']); // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
+    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts']); // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
     expect(index.textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
-    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Browser', 'Artifacts']) expect(screen.getByRole('region', { name })).toBeTruthy();
+    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts']) expect(screen.getByRole('region', { name })).toBeTruthy();
   });
 
   it('Engine: the binary, the config home, and the subagent model as one field', async () => {
@@ -151,9 +151,19 @@ describe('settings tab writes one field per row', () => {
     expect(within(row('Monospace font')).getByText('Name a Nerd Font to draw prompt glyphs in the terminal')).toBeTruthy();
   });
 
+  it('Sessions: automatic archiving is opt-in and saves the chosen interval', async () => {
+    renderView();
+    const select = screen.getByRole('combobox', { name: 'Archive sessions inactive for' });
+    expect((select as HTMLSelectElement).value).toBe('never');
+    await userEvent.selectOptions(select, '14');
+    expect(settings().sessions.archiveInactiveDays).toBe(14);
+    await userEvent.selectOptions(select, 'never');
+    expect(settings().sessions.archiveInactiveDays).toBeNull();
+  });
+
   it('Notifications: enabled, one kind at a time, sound and no retired near-limit control; held peer messages never notify', async () => {
     renderView();
-    const when = row('When a session needs you');
+    const when = row('When a session finishes or needs you');
     expect(within(when).queryByText(/^macOS:/)).toBeNull();
     act(() => useAttention.setState({ notificationDelivery: 'fallback' }));
     expect(within(when).getByText('macOS: not delivered · MAWS falls back to a dock bounce and a toast')).toBeTruthy();
@@ -161,9 +171,13 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets).toEqual([{ notifications: { enabled: false } }]));
 
     const kinds = row('For');
+    const finished = within(kinds).getByRole('checkbox', { name: 'Turn finished' }) as HTMLInputElement;
+    expect(finished.checked).toBe(true);
+    fireEvent.click(finished);
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { turnFinished: false } } }));
     fireEvent.click(within(kinds).getByRole('checkbox', { name: /^errors/ }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { errors: false } } }));
-    expect(settings().notifications.kinds).toEqual({ approvals: true, questions: true, planReviews: true, errors: false, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ });
+    expect(settings().notifications.kinds).toEqual({ turnFinished: false, approvals: true, questions: true, planReviews: true, errors: false, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ });
     const held = within(kinds).getByRole('checkbox', { name: /^held peer messages/ }) as HTMLInputElement;
     expect(held.disabled).toBe(true);
     expect(kinds.textContent).toContain('Never notifies in this version');
@@ -172,7 +186,7 @@ describe('settings tab writes one field per row', () => {
     fireEvent.click(within(row('Sound')).getByRole('switch'));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { sound: true } }));
     expect(screen.queryByText('Near-limit banner')).toBeNull();
-    expect(b.sets).toHaveLength(3);
+    expect(b.sets).toHaveLength(4);
   });
 
   // P2-C start (2026-10-10; the P2-C document, §9 and G7): the to-human mod's app switch and the owner channel's two groups
@@ -187,7 +201,7 @@ describe('settings tab writes one field per row', () => {
 
     const kinds = row('For');
     expect(within(kinds).getAllByRole('checkbox').map((box) => box.closest('label')!.textContent)).toEqual([
-      'approvals· permission requests, dialogs and MCP elicitations', 'questions', 'plan reviews', 'errors', 'questions an agent left for you', 'must-read messages', 'held peer messages· Never notifies in this version',
+      'Turn finished', 'approvals· permission requests, dialogs and MCP elicitations', 'questions', 'plan reviews', 'errors', 'questions an agent left for you', 'must-read messages', 'held peer messages· Never notifies in this version',
     ]);
     fireEvent.click(within(kinds).getByRole('checkbox', { name: 'must-read messages' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { essential: false } } }));
@@ -234,7 +248,7 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V17, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V18, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
@@ -289,7 +303,7 @@ describe('settings tab: the memory budget rows', () => {
   });
 
   it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V17, engine: { ...SETTINGS_DEFAULTS_V17.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, memoryBudgetMiB: 6144 } });
     const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
     expect(field.value).toBe('6.0');
     for (const typed of ['0.4', 'lots']) {
@@ -303,7 +317,7 @@ describe('settings tab: the memory budget rows', () => {
 
   // W7: the switch (settings version 7), on by default; off hides the limit and the stateful servers
   it('Memory budget: a switch, on by default, writes the switch whole; off hides the limit and the stateful servers and says what off means', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V17, engine: { ...SETTINGS_DEFAULTS_V17.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, memoryBudgetMiB: 6144 } });
     const toggle = within(row('Memory budget')).getByRole('switch', { name: 'Release idle sessions to stay under a memory limit' });
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(row('Limit')).toBeTruthy();
@@ -380,7 +394,7 @@ describe('settings view lists Voice', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView({ ...SETTINGS_DEFAULTS_V17, keymap: { 'composer.dictate': 'Cmd+D' } });
+    renderView({ ...SETTINGS_DEFAULTS_V18, keymap: { 'composer.dictate': 'Cmd+D' } });
     expect(within(row('Shortcut')).getByText('⌘D')).toBeTruthy();
     fireEvent.click(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' }));
     expect(scrolled.at(-1)).toBe('settings-keyboard');
@@ -395,7 +409,7 @@ describe('settings view lists Voice', () => {
     expect(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' })).toBeTruthy();
     expect(row('Shortcut').textContent).toContain("Click the microphone in the composer's toolbar to start dictating and again to stop.");
     cleanup();
-    renderView({ ...SETTINGS_DEFAULTS_V17, keymap: { 'composer.dictate': 'Alt+Space' } });
+    renderView({ ...SETTINGS_DEFAULTS_V18, keymap: { 'composer.dictate': 'Alt+Space' } });
     expect(within(row('Shortcut')).getByText('⌥Space')).toBeTruthy();
   });
 
@@ -414,7 +428,7 @@ describe('settings view lists Voice', () => {
   });
 
   it('keeps a saved language the probe does not list, and offers System alone when the helper could not be probed', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V17, voice: { locale: 'de-DE' } }, null, {
+    renderView({ ...SETTINGS_DEFAULTS_V18, voice: { locale: 'de-DE' } }, null, {
       'voice.status': status({ helper: { state: 'missing', path: VOICE_HELPER }, permission: null, systemLocale: null, supportsOnDevice: null, locales: [] }),
     });
     await vi.waitFor(() => expect(row('Helper').textContent).toContain('Not found'));
@@ -423,7 +437,7 @@ describe('settings view lists Voice', () => {
   });
 
   it('a denied microphone shows the denial with a button that opens its System Settings pane', async () => {
-    renderView(SETTINGS_DEFAULTS_V17, null, { 'voice.status': status({ permission: { microphone: 'denied', speech: 'restricted' } }) });
+    renderView(SETTINGS_DEFAULTS_V18, null, { 'voice.status': status({ permission: { microphone: 'denied', speech: 'restricted' } }) });
     await vi.waitFor(() => expect(row('Microphone').textContent).toContain('Off for MAWS'));
     expect(row('Speech recognition').textContent).toContain('Off for MAWS and cannot be turned on here');
     fireEvent.click(within(row('Microphone')).getByRole('button', { name: 'Open System Settings' }));
@@ -433,7 +447,7 @@ describe('settings view lists Voice', () => {
   });
 
   it('a System Settings pane that fails to open raises a warning toast naming the pane to open by hand', async () => {
-    renderView(SETTINGS_DEFAULTS_V17, null, {
+    renderView(SETTINGS_DEFAULTS_V18, null, {
       'voice.status': status({ permission: { microphone: 'denied', speech: 'denied' } }),
       'voice.openPrivacySettings': () => {
         throw new Error('no handler for x-apple.systempreferences');
@@ -449,7 +463,7 @@ describe('settings view lists Voice', () => {
   });
 
   it('granted and not-yet-asked permissions read as such, with no button, and an on-device language says so', async () => {
-    renderView(SETTINGS_DEFAULTS_V17, null, { 'voice.status': status({ permission: { microphone: 'authorized', speech: 'notDetermined' } }) });
+    renderView(SETTINGS_DEFAULTS_V18, null, { 'voice.status': status({ permission: { microphone: 'authorized', speech: 'notDetermined' } }) });
     await vi.waitFor(() => expect(row('Speech recognition').textContent).toContain('Not asked yet · macOS asks the first time you dictate'));
     expect(row('Microphone').textContent).toContain('Allowed');
     expect(screen.queryByRole('button', { name: 'Open System Settings' })).toBeNull();
@@ -458,7 +472,7 @@ describe('settings view lists Voice', () => {
   });
 
   it('a missing helper shows its path and how to build it', async () => {
-    renderView(SETTINGS_DEFAULTS_V17, null, {
+    renderView(SETTINGS_DEFAULTS_V18, null, {
       'voice.status': status({ helper: { state: 'missing', path: '/repo/build/voice-helper/maws-voice-helper' }, permission: null, supportsOnDevice: null }),
     });
     await vi.waitFor(() => expect(row('Helper').textContent).toContain('/repo/build/voice-helper/maws-voice-helper'));
@@ -467,7 +481,7 @@ describe('settings view lists Voice', () => {
   });
 
   it('a language without an on-device model is marked in the select and refused in words', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V17, voice: { locale: 'fr-FR' } }, null, { 'voice.status': status({ supportsOnDevice: false }) });
+    renderView({ ...SETTINGS_DEFAULTS_V18, voice: { locale: 'fr-FR' } }, null, { 'voice.status': status({ supportsOnDevice: false }) });
     await vi.waitFor(() => expect(row('Recognition').textContent).toContain('No on-device model · download it in System Settings › Keyboard › Dictation'));
     expect(language().selectedOptions[0]!.textContent).toBe('French (France) · no on-device model');
     expect(optionTexts().filter((text) => text!.includes('no on-device model'))).toHaveLength(1);
@@ -485,7 +499,7 @@ describe('settings view lists Browser', () => {
   const search = () => within(row('Search engine')).getByRole('textbox', { name: 'Search engine' }) as HTMLInputElement;
 
   it('the Profile select lists Default first, then the imported profiles by name, and writes the choice as one field', async () => {
-    renderView(SETTINGS_DEFAULTS_V17, 'browser', profiles);
+    renderView(SETTINGS_DEFAULTS_V18, 'browser', profiles);
     expect(row('Profile').textContent).toContain('Applies to tabs opened from now on');
     await vi.waitFor(() => expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([['', 'Default'], ['Default', 'Home'], ['Profile 2', 'Work']]));
     fireEvent.change(select(), { target: { value: 'Profile 2' } });
@@ -496,7 +510,7 @@ describe('settings view lists Browser', () => {
   });
 
   it('a saved profile reads as its directory until the list answers, then, if the list lacks it, as not found', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V17, browser: { ...SETTINGS_DEFAULTS_V17.browser, profile: 'Profile 9' } }, null, profiles);
+    renderView({ ...SETTINGS_DEFAULTS_V18, browser: { ...SETTINGS_DEFAULTS_V18.browser, profile: 'Profile 9' } }, null, profiles);
     expect([...select().options].map((o) => o.textContent)).toEqual(['Default', 'Profile 9']); // not yet answered
     await vi.waitFor(() => expect(select().options).toHaveLength(4));
     expect(select().value).toBe('Profile 9');
@@ -533,7 +547,7 @@ describe('settings view lists Browser', () => {
 
   // cua #90: settings 12's switch, next to the profile
   it('the Bookmarks bar switch mirrors the setting and writes its one field', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V17, browser: { ...SETTINGS_DEFAULTS_V17.browser, bookmarksBar: 'hidden' } }, 'browser', profiles);
+    renderView({ ...SETTINGS_DEFAULTS_V18, browser: { ...SETTINGS_DEFAULTS_V18.browser, bookmarksBar: 'hidden' } }, 'browser', profiles);
     expect(row('Bookmarks bar').textContent).toContain('⌘⇧B in the browser');
     const toggle = within(row('Bookmarks bar')).getByRole('switch', { name: 'Show the bookmarks bar' });
     expect(toggle.getAttribute('aria-checked')).toBe('false');

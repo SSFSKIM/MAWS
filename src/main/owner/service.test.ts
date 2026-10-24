@@ -1100,6 +1100,21 @@ describe('legacy recognition (Design §6)', () => {
 describe('marks and the attention projection (Design §5)', () => {
   const ESSENTIAL = '<essential>The key rotates tonight.</essential>';
 
+  it('UX1 clears duplicate legacy questions without cards, while preserving in-flight answers', async () => {
+    const t = await harness();
+    const first = t.ask('Which tone?');
+    const second = t.ask('Which tone?');
+    const inFlight = t.ask('Which backend?');
+    t.report(inFlight, { disposition: 'steered', messageUuid: 'pending-answer' as MessageUuid });
+    t.service.markRead({ appSessionId: app, markIds: [first] });
+    expect(t.question(first).state).toBe('retired');
+    expect(t.question(second).state).toBe('unanswered');
+    t.service.markRead({ appSessionId: app, markIds: 'all' });
+    expect(t.question(second).state).toBe('retired');
+    expect(t.question(inFlight).state).toBe('queued');
+    expect(t.items()).toHaveLength(0);
+  });
+
   it('stores a live mark with its item, projects a question and an essential, and the notifier may announce them', async () => {
     const t = await harness();
     const uuid = t.sim.assistant([`Plan.\n${QUESTION('Which backend?')}\n${ESSENTIAL}`]);
@@ -1112,7 +1127,7 @@ describe('marks and the attention projection (Design §5)', () => {
     ]);
     expect(projection.silent).toEqual([]);
     expect(index.ownerChannel.marks(app).map((m) => [m.kind, m.live, m.item])).toEqual([['need-input', true, true], ['essential', true, true]]);
-    t.service.markRead({ appSessionId: app, markIds: 'all' });
+    t.service.markRead({ appSessionId: app, markIds: [e] });
     expect(t.mark(e).essential).toMatchObject({ state: 'read' });
     expect(t.items().map((i) => i.kind)).toEqual(['async_input']);
   });

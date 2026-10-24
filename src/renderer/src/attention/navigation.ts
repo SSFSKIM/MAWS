@@ -17,6 +17,7 @@ import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
+import { queueComposerAttachment } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown } from '../side/store';
 import { useCommentCard } from '../side/card/store'; // P2-E1
@@ -103,11 +104,25 @@ const toastId = (attentionId: AttentionId) => `attention:${attentionId}`;
 // the session's list has held it yet (main may announce an item before the page's list carries it).
 type ToastedItems = Map<AttentionId, { appSessionId: AppSessionId; held: boolean }>;
 
-function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery }: EventPayload<'attention.notified'>): void {
-  if (delivery !== 'fallback') return;
+function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery, error, reply }: EventPayload<'attention.notified'>): void {
+  if (delivery === 'os') return;
+  if (error) {
+    // Add to the restored draft, never replace it. A busy or unmounted composer
+    // keeps this queue until it can take the text; dismissing the toast loses nothing.
+    if (reply !== undefined) queueComposerAttachment(appSessionId, { files: [], text: reply });
+    useNotices.getState().toast({ level: 'danger', text: `${error}${reply !== undefined ? ' Reply not sent; kept in the session composer.' : ''}`, actions: [], dismissible: true });
+    return;
+  }
+  if (attentionId === null) {
+    const record = useSessions.getState().records.get(appSessionId);
+    const digest = useSessions.getState().digests.get(appSessionId);
+    useNotices.getState().toast({ level: 'info', text: `${record ? displayTitle(record) : 'A session'} finished${digest?.lastAssistantLine ? ` · ${digest.lastAssistantLine}` : ''}`,
+      actions: [{ label: 'Open', run: () => useLayout.getState().openSession(appSessionId) }], dismissible: true });
+    return;
+  }
   const id = appSessionId as AppSessionId;
   const item = itemOf(id, attentionId as AttentionId);
-  if (requestOnScreen(id, item)) return;
+  if (delivery === 'fallback' && requestOnScreen(id, item)) return;
   if (item && !isOpen(item)) return; // settled before its notice arrived
   const record = useSessions.getState().records.get(id);
   const title = record ? displayTitle(record) : 'A session';
