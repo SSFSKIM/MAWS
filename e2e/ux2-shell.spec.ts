@@ -1,9 +1,13 @@
 // UX2-L acceptance in the real, quiet Electron app: the scenario supplies sessions, not replacement UI.
 // launchMaws owns an isolated profile/config/shell home per case. Screenshots are report attachments, not baselines.
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { status } from '../test/support/builders';
+import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '../src/shared/ipc/schema';
-import { test, type MawsLaunch } from './support/launch';
+import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
 import { closeSurface, openSurface, unfoldSessionCard } from './support/shell';
@@ -88,6 +92,75 @@ async function openSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
   await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Harness A', exact: true })).toHaveAttribute('aria-selected', 'true');
 }
+
+// Identical measurement-only code runs before and after the chrome changes. The lead compares independent run artifacts.
+// eslint-disable-next-line no-empty-pattern -- this case owns its isolated fixture launch
+test('Chrome measurements: document, deck and live Customize at both desktop sizes', async ({}, info) => {
+  test.setTimeout(120_000);
+  const root = mkdtempSync(join(tmpdir(), 'maws-chrome-measure-'));
+  const directory = join(root, 'chrome-project');
+  mkdirSync(directory);
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/panel/harness-sessions.json'), 'utf8'));
+  scenario.projects[0].directory = directory;
+  scenario.sessions.forEach((record: { directory: string; worktree: unknown }) => { record.directory = directory; record.worktree = null; });
+  scenario.engine = [{ ...status('A'), cwd: directory }];
+  const source = join(root, 'scenario.json');
+  writeFileSync(source, JSON.stringify(scenario));
+  const plugins = [{ name: 'chrome-review', version: '1.0.0', description: 'Review the working narrative.' }];
+  const market = scratchMarketplace(join(root, 'market'), { name: 'chrome-tools', plugins });
+  const cli = writePluginCliStub(root, { marketplaces: [{ name: 'chrome-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'chrome-review@chrome-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
+  try {
+    const maws = await launchMaws({ userData: root, env: { ...ENV, MAWS_SESSION_SOURCE: `stub:${source}`, MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
+    try {
+      const { page } = maws;
+      await openSession(page);
+      await expect.poll(async () => value(await invoke(page, 'engine.hostState', undefined)).state, { timeout: 20_000 }).toBe('ready');
+      const document = value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Chrome working notes' })).artifact;
+      const deck = value(await invoke(page, 'artifacts.create', { kind: 'presentation', title: 'Chrome review deck' })).artifact;
+      await page.waitForFunction(() => typeof (window as unknown as { __maws_presentations?: unknown }).__maws_presentations === 'object');
+      await page.evaluate(async ([id, files]) => {
+        const seam = (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<unknown> } }).__maws_presentations;
+        await seam.seed(id, files);
+      }, [deck.id, DECK_FILES] as const);
+      const capture = async (state: string, selectors: Record<string, string>) => {
+        const geometry = await page.evaluate((selectors) => {
+          const rectangle = (node: Element) => { const b = node.getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height, bottom: b.bottom }; };
+          const visible = (node: Element) => { const b = node.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(node).visibility !== 'hidden'; };
+          const boxes = Object.fromEntries(Object.entries(selectors).map(([key, selector]) => [key, [...document.querySelectorAll(selector)].filter(visible).map(rectangle)]));
+          const main = document.querySelector('[data-region="main"]')!;
+          const content = boxes.page?.[0] ?? boxes.stage?.[0] ?? boxes.firstPlugin?.[0] ?? null;
+          return { window: { width: innerWidth, height: innerHeight }, main: rectangle(main), boxes, contentTopFromMain: content ? content.y - main.getBoundingClientRect().y : null,
+            features: { sectionStrip: document.querySelectorAll('.doc-tabs').length, deckToolbarHost: document.querySelectorAll('[data-editor-toolbar]').length, notesDisclosure: document.querySelectorAll('[data-notes-disclosure]').length, liveScope: document.querySelectorAll('select[aria-label="Live session"]').length } };
+        }, selectors);
+        const name = `chrome-${state}-${geometry.window.width}x${geometry.window.height}`;
+        await info.attach(`${name}.json`, { body: Buffer.from(JSON.stringify(geometry, null, 2)), contentType: 'application/json' });
+        await shot(maws, info, `chrome-${state}`);
+      };
+      for (const { width, height } of SIZES) {
+        await size(maws, width, height);
+        const notes = await openArtifact(page, 'Chrome working notes', document.id);
+        await expect(notes.locator('.ds-doc .ProseMirror')).toBeVisible({ timeout: 15_000 });
+        await capture('document-single-section', { header: '[data-region="main"] [data-editor-header]', sections: '.doc-tabs', toolbar: '.doc-toolbar', page: '.doc-page-frame', editor: '.ds-doc .ProseMirror' });
+        const deckTab = await openArtifact(page, 'Chrome review deck', deck.id);
+        await expect(deckTab.locator('[data-stage-slide]')).toBeVisible({ timeout: 15_000 });
+        await capture('deck-default', { header: '[data-region="main"] [data-editor-header]', toolbar: '.deck-toolbar', stage: '.deck-stage', slide: '[data-stage-slide]', notes: '.deck-notes', notesField: '.deck-notes-field', filmstrip: '.deck-filmstrip' });
+        const disclosure = deckTab.locator('[data-notes-disclosure]');
+        if (await disclosure.count()) {
+          await disclosure.click();
+          await expect(deckTab.getByRole('textbox', { name: 'Speaker notes' })).toBeVisible();
+          await capture('deck-notes-open', { toolbar: '.deck-toolbar', stage: '.deck-stage', notes: '.deck-notes', notesField: '.deck-notes-field' });
+          await disclosure.click();
+        }
+        await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
+        await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('proj-harness');
+        await expect(page.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
+        await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
+        await capture('customize-live-plugins', { header: '[data-region="main"] header', sections: '[aria-label="Customize sections"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', library: '[data-widget-variant="embedded"] > header', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
+      }
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally { await maws.cleanup(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('UX2: one chrome row and no reserved column for empty main or Settings', async ({ maws }, info) => {
   const { page } = maws;
