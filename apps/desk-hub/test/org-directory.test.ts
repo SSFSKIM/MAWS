@@ -418,21 +418,28 @@ describe("the directory's push to a machine, failed", () => {
     await hub.retryBase('registry', 1000);
     const watcher = await connected();
     const b = await connected();
+    const other = await connected(newName(), { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
+    await other.sync(newProject());
+    await nextOrg(watcher, 0, (f) => machineIn(f, other.name)?.online === true, 'the unrelated machine online');
     const project = newProject();
     const lease = (seq: number, online: boolean) => hub.report(project, { ...COUNTS, seq, machines_state: [{ name: b.name, online, client: b.creds.clientId }] });
     await hub.directoryFault(watcher.name, 1);
     const from = watcher.frames.length;
     // b online, a push that fails; then b offline again, a push that lands.
     await lease(1, true);
+    await waitFor(async () => ((await hub.directoryFault(watcher.name)).remaining === 0 ? true : undefined));
     await lease(2, false);
     const newer = (f: OrgFrame) => machineIn(f, b.name)?.online === false && machineIn(f, b.name)?.seen !== null;
     await nextOrg(watcher, from, newer, 'the later change');
-    const { calls } = await hub.directoryFault(watcher.name);
-    // Past the failed push's retry time, nothing has followed: no directory that holds b online, and no call.
+    // The hub is shared: other tests' close-grace timers can legitimately push newer directories here.
+    // Exercise one explicitly rather than assuming the RPC count stays fixed while b stays offline.
+    const beforeClose = watcher.frames.length;
+    await other.close();
+    await nextOrg(watcher, beforeClose, (f) => machineIn(f, other.name)?.online === false, 'the unrelated machine offline');
+    // Past the failed push's retry time, no directory that holds b online follows the newer one.
     await pause(1500);
     const frames = orgFramesOf(watcher, from);
     expect(frames.slice(frames.findIndex(newer)).every(newer)).toBe(true);
-    expect((await hub.directoryFault(watcher.name)).calls).toBe(calls);
     await b.close();
     await watcher.close();
   });
