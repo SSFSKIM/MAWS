@@ -19,6 +19,13 @@ describe('the optional surface geometry', () => {
     expect(wide.panel).toBeGreaterThan(narrow.panel);
     expect(1280 - wide.sidebar - wide.panel).toBeGreaterThanOrEqual(360);
   });
+  it('keeps the automatic narrow width stable until the main floor requires it to yield, without writing saved regions', () => {
+    const before = structuredClone(regions);
+    expect(shellGeometry(regions, 1280, true, false)).toMatchObject({ sidebar: 240, panel: 420 });
+    expect(shellGeometry(regions, 900, true, false)).toMatchObject({ sidebar: 0, panel: 420 });
+    expect(shellGeometry(regions, 700, true, false)).toMatchObject({ sidebar: 0, panel: 340 });
+    expect(regions).toEqual(before);
+  });
   it('opens an artifact surface at the narrow automatic width while reading tools alone earn wide defaults', () => {
     resetPanelStores();
     useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: 'artifacts:aaaaaaaa' }]]) });
