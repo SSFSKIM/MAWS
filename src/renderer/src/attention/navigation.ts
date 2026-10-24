@@ -105,7 +105,7 @@ type ToastedItems = Map<AttentionId, { appSessionId: AppSessionId; held: boolean
 
 function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery, error }: EventPayload<'attention.notified'>): void {
   if (delivery === 'os') return;
-  if (error) { useNotices.getState().toast({ level: 'error', text: error, actions: [], dismissible: true }); return; }
+  if (error) { useNotices.getState().toast({ level: 'danger', text: error, actions: [], dismissible: true }); return; }
   if (attentionId === null) {
     const record = useSessions.getState().records.get(appSessionId);
     const digest = useSessions.getState().digests.get(appSessionId);

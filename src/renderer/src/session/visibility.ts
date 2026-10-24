@@ -74,7 +74,7 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
     reported = next;
     const set = currentSet(main);
     const pane = set.panes[set.focusedPane];
-    const tab = pane.tabs.find((entry) => entry.id === pane.activeTabId);
+    const tab = pane?.tabs.find((entry) => entry.id === pane.activeTabId);
     const focused = tab?.kind === 'session' && next.has(tab.appSessionId) ? tab.appSessionId : null;
     if (viewing !== focused) {
       viewing = focused;
