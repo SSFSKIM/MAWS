@@ -44,7 +44,7 @@ export function withLongInputs(recording: Recording): Recording {
   const file = Array.from({ length: 12 }, (_, n) => `export const line${n + 1} = '${'a long line of a file, '.repeat(6)}';`).join('\n');
   const rows: JsonObject[] = [
     { ...envelope(1), type: 'user', origin: { kind: 'human' }, promptId: 'p-long', message: { role: 'user', content: LONG_PROMPT } },
-    call(2, 'toolu_long_bash', 'Bash', { command: LONG_COMMAND, description: 'Run the phone layout cases in WebKit' }),
+    call(2, 'toolu_long_bash', 'Bash', { command: LONG_COMMAND, description: 'Run the phone layout cases in WebKit at both narrow widths with every long command, path and search pattern' }),
     result(3, 'toolu_long_bash', output, { stdout: output, stderr: '', interrupted: false, isImage: false, noOutputExpected: false }),
     call(4, 'toolu_long_read', 'Read', { file_path: LONG_PATH }),
     result(5, 'toolu_long_read', file, { type: 'text', file: { filePath: LONG_PATH, content: file, numLines: 12, startLine: 1, totalLines: 12 } }),

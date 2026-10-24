@@ -10,6 +10,7 @@
 // a message tool: its landing, and its drawing while its input streams.
 //
 // With DESK_SHOTS set to a directory, the report and the transcript at one point are saved there at desktop width.
+import { revealEarlier } from './transcript-history';
 import type { Locator, Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -119,7 +120,8 @@ const isRow = (uuid: string) => (s: Step) => s.k === 'row' && s.row.uuid === uui
 test("G1: the report over the session's rows — marked turns folded to one record each, unmarked ones whole, its questions — the toggle to the transcript and back, a reload; the column's tabs", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   fm.step(endOf(fm.recording)); // every row in, the session idle and still running
-  await expect(view.locator('[data-owner-card="to-human"]').filter({ hasText: ANSWER })).toBeVisible();
+  await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
+  await expect(view.locator('.owner-message-ink').filter({ hasText: ANSWER })).toBeVisible();
   await expect(page.getByTestId('session-status')).toHaveText('');
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
   // The unmarked last turn draws whole: its prompt and its answer, at the end.
@@ -129,11 +131,11 @@ test("G1: the report over the session's rows — marked turns folded to one reco
   const record = records(view).filter({ hasText: /Working record · \d+ tool calls?/ });
   await scrollUntil(view, view.getByText('Color→blue'), -1);
   await expect(record.last()).toBeVisible();
-  await expect(view).not.toContainText('Ran python3 -c');
+  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
   await scrollUntil(view, view.locator(`[data-row-id^="question:${ASK_CALL}"]`), -1); // the ask mod's async question, a question row
-  // Older turns: a marked one (part 23) is its message card over a closed record, an unmarked one (part 24) whole.
+  // Older turns: a marked one (part 23) is its message ink over a closed record, an unmarked one (part 24) whole.
   await scrollUntil(view, view.getByText('Read notes part 23 and tell me what it says.'), -1);
-  const part23 = view.locator('[data-owner-card="to-human"]').filter({ hasText: 'Part 23 is forty numbered lines' });
+  const part23 = view.locator('.owner-message-ink').filter({ hasText: 'Part 23 is forty numbered lines' });
   await expect(part23).toBeVisible();
   const between = async (from: string, to: string) => {
     const [a, b] = [await indexOf(view, { text: from }), await indexOf(view, { text: to })];
@@ -158,8 +160,8 @@ test("G1: the report over the session's rows — marked turns folded to one reco
   // At one point, the marked answer's turn as each side of the toggle draws it, for the owner.
   if (SHOTS) {
     await scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-    await scrollUntil(view, view.locator('[data-owner-card="to-human"]').filter({ hasText: ANSWER }), -1);
-    await view.locator('[data-owner-card="to-human"]').filter({ hasText: ANSWER }).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    await scrollUntil(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }), -1);
+    await view.locator('.owner-message-ink').filter({ hasText: ANSWER }).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     await page.waitForTimeout(300);
     await shot(page, 'session-view-report');
     await toggle(page, 'Transcript').click();
@@ -185,7 +187,8 @@ test("G1: the report over the session's rows — marked turns folded to one reco
 
   // A reload draws the same rows.
   await page.reload();
-  await expect(view.locator('[data-owner-card="to-human"]').filter({ hasText: ANSWER })).toBeVisible();
+  await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
+  await expect(view.locator('.owner-message-ink').filter({ hasText: ANSWER })).toBeVisible();
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
   await expect
     .poll(
@@ -204,16 +207,21 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   const uuid = answerRow(recording);
   fm.step(recording.steps.findIndex(isAnswerChunk(uuid, recording)) - fm.played); // up to the answer's first chunk
   await expect(view).toContainText('Color→blue');
-  await expect(view).toContainText('Ran python3 -c'); // nothing marked yet: the turn draws whole, its Bash call too
+  await expect(view).toContainText("Write 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {
     fm.step(1);
     await page.waitForTimeout(20);
   }
+  // UX1-C decorates a closed tag, never repairs an unfinished one.
+  const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
+  if (answerBlock.k !== 'block-row') throw new Error('no block-row');
+  const lastText = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === answerBlock.body.turnId && s.step === answerBlock.body.step && s.chunk.index === answerBlock.body.index && s.chunk.kind === 'text');
+  fm.step(lastText + 1 - fm.played);
   const live = streamingRows(view).last();
-  await expect(live.locator('[data-owner-card="to-human"]')).toContainText(ANSWER);
+  await expect(live.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(live).not.toContainText('<message>');
-  await expect(view).not.toContainText('Ran python3 -c'); // folded into its record while the mark streams
+  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory"); // folded into its record while the mark streams
   await expect(workingDots(records(view))).toHaveCount(1); // the record says it works
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 
@@ -548,7 +556,8 @@ test("G3: with the fake machine disconnected, the channel is the log's, its work
   delete draft.ts;
   delete draft.seq;
   await hub.append(PROJECT, draft as never);
-  await expect(view.locator('[data-owner-card="to-human"]').filter({ hasText: ANSWER })).toBeVisible();
+  await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
+  await expect(view.locator('.owner-message-ink').filter({ hasText: ANSWER })).toBeVisible();
   hub.dropMachine(PROJECT, MACHINE);
   const center = page.getByRole('region', { name: 'Channel' });
   await expect(page.getByTestId('machine-offline')).toBeVisible();
@@ -661,7 +670,7 @@ test("a notification's landing on a message sent through a message tool opens th
   });
   const row = view.locator(`[data-row-id="to-human:${id}"]`);
   await expect(row).toHaveAttribute('data-landed', '');
-  await expect(row.locator('[data-owner-card="to-human"]')).toContainText(STAGE);
+  await expect(row.locator('.owner-message-ink')).toContainText(STAGE);
   await expect(row).toBeInViewport();
   await expect(page.getByTestId('landing')).toHaveCount(0); // found: nothing to say
 });
@@ -681,7 +690,7 @@ test('a message sent through a message tool draws as the message while its input
   chunk(0, { kind: 'tool', index: 0, id, name: MESSAGE_TOOL });
   chunk(1, { kind: 'input', index: 0, json: '' });
   chunk(2, { kind: 'input', index: 0, json: '{"text": "Stage 2 of 4 is done:' });
-  const live = streamingRows(view).locator(`[data-to-human-call="${id}"] [data-owner-card="to-human"]`);
+  const live = streamingRows(view).locator(`[data-to-human-call="${id}"] .owner-message-ink`);
   await expect(live).toContainText('Stage 2 of 4 is done:');
   await expect(live).not.toContainText('{"text"');
   chunk(3, { kind: 'input', index: 0, json: ' 34 of the 37 missing labels are restored."}' });
@@ -694,9 +703,9 @@ test('a message sent through a message tool draws as the message while its input
   land(call);
   await expect(streamingRows(view)).toHaveCount(0);
   const row = view.locator(`[data-row-id="to-human:${id}"]`);
-  await expect(row.locator('[data-owner-card="to-human"]')).toContainText(STAGE);
+  await expect(row.locator('.owner-message-ink')).toContainText(STAGE);
   await expect.poll(() => occurrences(view, STAGE)).toBe(1);
   land(next(messageSent(id)));
-  await expect(row.locator('[data-owner-card="to-human"]')).toContainText(STAGE);
+  await expect(row.locator('.owner-message-ink')).toContainText(STAGE);
   await expect.poll(() => occurrences(view, STAGE)).toBe(1);
 });

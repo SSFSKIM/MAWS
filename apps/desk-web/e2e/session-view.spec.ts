@@ -6,6 +6,7 @@
 // the top of the view until the first row, on a live session and on one that ended while the view was open, against
 // the recorded session's plane (`depth-player.ts`), whose snapshots can be cut short (the fake machine's recording fits
 // one snapshot). The column and the center share one subscription.
+import { revealEarlier } from './transcript-history';
 import type { Locator, Page } from '@playwright/test';
 import type { Step } from 'desk-hub/fake-machine';
 import type { JsonObject } from 'desk-hub/protocol';
@@ -91,7 +92,8 @@ const isAnswerChunk = (uuid: string, replay: FakeMachineReplay) => {
 test("the report: the marks and questions, one working record per marked turn, an unmarked turn whole; the toggle shows the transcript and back; a reload draws the same rows", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   fm.playThrough();
-  await expect(view.locator('[data-owner-card="to-human"]')).toContainText(ANSWER);
+  await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
+  await expect(view.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(page.getByTestId('session-status')).toHaveText('');
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
   // The unmarked last turn draws whole: its prompt and its answer, at the end.
@@ -114,7 +116,8 @@ test("the report: the marks and questions, one working record per marked turn, a
   await expect.poll(() => allRowIds(view)).toEqual(report);
 
   await page.reload();
-  await expect(view.locator('[data-owner-card="to-human"]')).toContainText(ANSWER);
+  await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
+  await expect(view.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => allRowIds(view), { timeout: 15_000 }).toEqual(report);
 });
@@ -254,18 +257,22 @@ test('a marked response folds its turn and shows its mark while it streams, befo
   const uuid = answerRow(fm);
   fm.step(fm.recording.steps.findIndex(isAnswerChunk(uuid, fm)) - fm.played); // up to the answer's first chunk
   await expect(view).toContainText('Color→blue');
-  await expect(view).toContainText("Ran python3 -c"); // nothing marked yet: the turn draws whole, its Bash call too
+  await expect(view).toContainText("Write 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
   await expect(records(view)).toHaveCount(0);
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {
     fm.step(1);
     await page.waitForTimeout(20);
   }
+  const named = fm.recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
+  if (named.k !== 'block-row') throw new Error('no block-row');
+  const lastText = fm.recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === named.body.turnId && s.step === named.body.step && s.chunk.index === named.body.index && s.chunk.kind === 'text');
+  fm.step(lastText + 1 - fm.played);
   const live = streamingRows(view).last();
-  await expect(live.locator('[data-owner-card="to-human"]')).toContainText(ANSWER);
+  await expect(live.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(live).not.toContainText('<message>');
   await expect(records(view)).toHaveCount(1); // the turn folded into its record while the mark streams
-  await expect(view).not.toContainText('Ran python3 -c');
+  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 
   fm.playThrough();
