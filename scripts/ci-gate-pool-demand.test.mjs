@@ -2,7 +2,7 @@
 // gate.yml's static job collects this file with scripts/*.test.mjs.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -17,6 +17,7 @@ const packageJson = readFileSync(join(root, 'package.json'), 'utf8');
 const variables = { GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
 const identity = Object.fromEntries(['AUTHOR', 'COMMITTER'].flatMap((role) => [[`GIT_${role}_NAME`, 'pool-demand test'], [`GIT_${role}_EMAIL`, 'pool-demand@test.invalid']]));
 const message = (trailers) => `ci-gate: test\n\n${trailers}`;
+const legacyPlanner = "console.log('unsupported workflow output'); process.exit(0);\n";
 
 function fixture(run) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-pool-demand-'));
@@ -31,6 +32,7 @@ function fixture(run) {
     git('init', '--quiet', '-b', 'demand');
     put('package.json', packageJson);
     put('.github/workflows/gate.yml', workflow);
+    cpSync(join(root, '.github/scripts'), join(tree, '.github/scripts'), { recursive: true });
     put('src/shared/pool-demand.ts', 'export const value = 1;\n');
     git('add', '.');
     git('commit', '--quiet', '-m', 'tested inputs');
@@ -99,7 +101,7 @@ function scheduledPoolDemand(outputs) {
 const scenarios = [
   ['class 1a on the pool counts every unit shard', 'Gates: static,unit,probes\nClass1a: pool', '16x1 8x4 2x1'],
   ['the whole macOS matrix counts pool e2e and each guest build variant, not Mac jobs', 'Runner: macos', '16x1 8x4 4x3 2x1'],
-  ['a Mac-only run asks for no pool boxes', 'Gates: static,unit,unit:darwin,probes,packaged,e2e:library\nClass1a: macos\nRunner: macos', 'none'],
+  ['a Mac-only run asks for no pool boxes', 'Gates: static,unit,unit:darwin,probes,packaged\nClass1a: macos\nRunner: macos', 'none'],
   ['affected selection counts the single related-unit job', 'Gates: static,unit,probes\nSelection: affected\nAffected-Count: 1\nAffected: M\tsrc/shared/pool-demand.ts', '16x1 8x1 2x1'],
   ['an affected fallback still counts all unit shards', 'Gates: unit\nSelection: affected\nAffected-Count: 1\nAffected: M\tpackage.json', '8x4'],
   ['the VM lane needs one e2e-build box per variant, not one per guest group', 'Gates: e2e:document-app,e2e:widgets,e2e:to-human\nClass1a: linux\nRunner: macos\nLane: vm', '4x2'],
@@ -129,6 +131,50 @@ test('the CLI reads scripts and env lists at the pushed sha, ignoring dirty file
   assert.equal(demand(tree, sha, trailers).stdout, '4x2\n');
 }));
 
+test('the CLI uses the target exported planner for its shard count, not the launcher or dirty tree', () => fixture(({ tree, sha, put, git }) => {
+  const planner = readFileSync(join(tree, '.github/scripts/gate-plan.mjs'), 'utf8');
+  put('.github/scripts/gate-plan.mjs', planner.replace('const UNIT_SHARDS = 4;', 'const UNIT_SHARDS = 1;'));
+  git('add', '.');
+  git('commit', '--quiet', '-m', 'target runs one unsharded unit job');
+  const target = git('rev-parse', 'HEAD');
+  put('.github/scripts/gate-plan.mjs', planner);
+  const result = demand(tree, target, 'Gates: unit');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '8x1\n');
+  assert.equal(demand(tree, sha, 'Gates: unit').stdout, '8x4\n');
+}));
+
+test('the CLI loads planner dependencies from the target commit', () => fixture(({ tree, sha, put, git }) => {
+  const dependency = readFileSync(join(tree, '.github/scripts/gate-affected.mjs'), 'utf8');
+  put('.github/scripts/gate-affected.mjs', "export const affected = () => ({ paths: 1, reason: 'target requires the full suite' });\n");
+  git('add', '.');
+  git('commit', '--quiet', '-m', 'target selection falls back to all shards');
+  const target = git('rev-parse', 'HEAD');
+  put('.github/scripts/gate-affected.mjs', dependency);
+  const trailers = 'Gates: unit\nSelection: affected\nAffected-Count: 1\nAffected: M\tsrc/shared/pool-demand.ts';
+  const result = demand(tree, target, trailers);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '8x4\n');
+  assert.equal(demand(tree, sha, trailers).stdout, '8x1\n');
+}));
+
+test('the CLI refuses a missing or unsupported planner without leaking its output', () => fixture(({ tree, put, git }) => {
+  for (const source of [null, 'export const notAPlanner = true;\n', legacyPlanner]) {
+    if (source === null) rmSync(join(tree, '.github/scripts/gate-plan.mjs'));
+    else put('.github/scripts/gate-plan.mjs', source);
+    if (source === legacyPlanner) {
+      const standalone = spawnSync(process.execPath, [join(tree, '.github/scripts/gate-plan.mjs')], { cwd: tree, encoding: 'utf8' });
+      assert.equal(standalone.status, 0, standalone.stderr);
+      assert.equal(standalone.stdout, 'unsupported workflow output\n');
+    }
+    git('add', '.');
+    git('commit', '--quiet', '-m', 'unsupported target planner');
+    const result = demand(tree, git('rev-parse', 'HEAD'), 'Gates: unit');
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
+  }
+}));
+
 test('the CLI refuses an unreadable tree or invalid plan without emitting a hint', () => fixture(({ tree, sha }) => {
   for (const [target, trailers] of [['no-such-sha', 'Gates: unit'], [sha, 'Gates: no-such-gate']]) {
     const result = demand(tree, target, trailers);
@@ -151,10 +197,12 @@ function pushedGate(args, { failure = '', affected = false } = {}) {
       git('commit', '--quiet', '-m', 'source change');
       sha = git('rev-parse', 'HEAD');
     }
-    if (failure === 'workflow') {
-      put('.github/workflows/gate.yml', 'env:\n  MAC_VM_E2E: [cannot, read]\n');
+    if (failure === 'workflow') put('.github/workflows/gate.yml', 'env:\n  MAC_VM_E2E: [cannot, read]\n');
+    if (failure === 'missing-planner') rmSync(join(tree, '.github/scripts/gate-plan.mjs'));
+    if (failure === 'unsupported-planner') put('.github/scripts/gate-plan.mjs', legacyPlanner);
+    if (['workflow', 'missing-planner', 'unsupported-planner'].includes(failure)) {
       git('add', '.');
-      git('commit', '--quiet', '-m', 'unreadable env');
+      git('commit', '--quiet', '-m', 'target cannot provide a pool hint');
       sha = git('rev-parse', 'HEAD');
     }
     // Dirty caller files must not affect the hint, even for --gates all.
@@ -198,7 +246,7 @@ test('ci-gate pushes exactly one Pool-Demand line from the same trailers and pus
 });
 
 test('failed variable reads or a failed CLI omit the advisory hint but still push', () => {
-  for (const failure of ['variable', 'workflow']) {
+  for (const failure of ['variable', 'workflow', 'missing-planner', 'unsupported-planner']) {
     const result = pushedGate(['--gates', 'static,unit,probes'], { failure });
     assert.doesNotMatch(result.message, /^Pool-Demand:/m);
     assert.match(result.message, /^Gates: static,unit,probes$/m);
