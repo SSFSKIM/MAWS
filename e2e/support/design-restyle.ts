@@ -100,4 +100,3 @@ export async function openFromLibrary(page: Page, title: string, artifactId: str
   await expect(tab.locator(drawn).first()).toBeVisible({ timeout: 15_000 });
   return tab;
 }
-
