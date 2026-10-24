@@ -161,6 +161,10 @@ export class SessionReadModel {
     return this.attentionById;
   }
 
+  isVisible(appSessionId: AppSessionId): boolean {
+    return this.visible.has(appSessionId);
+  }
+
   setVisible(appSessionId: AppSessionId, visible: boolean): void {
     if (this.visible.has(appSessionId) === visible) return;
     if (visible) {

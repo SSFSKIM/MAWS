@@ -534,6 +534,29 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     }
   });
 
+  // l1-sessions-13 review: the renderer closes tabs on the owner's archive (`update`) and not on a transcript gone from
+  // disk (`facts`), so an archive goes out under its own cause whatever changed the record earlier in the tick.
+  it('an archive coalesced into a tick goes out under its own cause, not an earlier change’s', async () => {
+    const fake = scriptedHost();
+    begin(fake.host);
+    await settle();
+    const owner = summary();
+    const gone = summary();
+    const ownerId = index.sessions.upsertFromSummary(owner).record.appId;
+    const goneId = index.sessions.upsertFromSummary(gone).record.appId;
+    await settle();
+    emitted.length = 0;
+    index.sessions.upsertFromSummary({ ...owner, size: owner.size + 1, lastRecordAt: '2026-09-28T11:00:00.000Z' }); // facts
+    index.sessions.update(ownerId, { archived: true }); // the project command's archive
+    index.sessions.setPinned(goneId, true); // update
+    index.sessions.markTranscriptRemoved(gone.sessionId); // facts: its transcript left the disk
+    index.sessions.setUnread(goneId, false); // a later update in the tick lends nothing either
+    await settle();
+    const changed = new Map(events('session.changed').map((e) => [e.record.appId, e]));
+    expect(changed.get(ownerId)).toMatchObject({ cause: 'update', record: { archived: true } });
+    expect(changed.get(goneId)).toMatchObject({ cause: 'facts', record: { archived: true } });
+  });
+
   it('a summary that changes nothing emits no session.changed', async () => {
     const fake = scriptedHost();
     begin(fake.host);

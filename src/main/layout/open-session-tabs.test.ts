@@ -22,3 +22,10 @@ it('reads the session and agent tabs of every project’s set, not the closed-ta
   value = 'not a layout'; // the renderer shows its default tabs for this
   expect(open(id(1))).toBe(false);
 });
+
+// l1-sessions-13 review: a tab opened before the renderer's layout hydrates is not written yet, but it is on screen.
+it('counts a session on screen as open, whatever main.tabs holds', () => {
+  const onScreen = new Set([id(5)]);
+  const open = openSessionTabs({ get: () => null }, (appSessionId) => onScreen.has(appSessionId));
+  expect([open(id(5)), open(id(1))]).toEqual([true, false]);
+});

@@ -366,7 +366,11 @@ export class IndexSessionSource implements SessionSource {
     } else {
       this.writer?.observeRecord(record);
       if (cause === 'discovered' || cause === 'facts' || cause === 'holder') this.digest(record);
-      this.pending.set(appId, { t: 'changed', record, cause: previous?.t === 'changed' ? previous.cause : cause, revision });
+      // l1-sessions-13: except an archive, which goes out under its own cause, since the renderer closes the session's
+      // tabs on the owner's (`update`) and not on a transcript gone from disk (`facts`, perhaps a move): an earlier
+      // change in the tick lends it neither. A record discovered this tick stays news of its discovery.
+      const archives = record.archived && previous?.t === 'changed' && !previous.record.archived && previous.cause !== 'discovered';
+      this.pending.set(appId, { t: 'changed', record, cause: previous?.t === 'changed' && !archives ? previous.cause : cause, revision });
     }
     this.schedule();
   }

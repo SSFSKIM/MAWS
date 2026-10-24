@@ -447,7 +447,7 @@ void startWithProfileLock(app, () => {
     waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
     archive: (id, eligible, stillEligible) => sessionService.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
-    open: openSessionTabs(layout), // the sweep keeps what the owner keeps in a tab
+    open: openSessionTabs(layout, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab
     activity: (id) => {
       const digest = sessions.model.digest(id);
       const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
