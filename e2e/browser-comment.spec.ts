@@ -202,6 +202,9 @@ async function openCommentPage(s: BrowserScene, id: AppSessionId): Promise<Comme
   const tabId = await tabAt(s, id, url);
   const page = await pageAt(s, url);
   await expect(page.locator('#increment')).toBeVisible();
+  // Quiet launches are natively unfocused: a preparatory turn can leave a real completion toast over this page.
+  // Dismiss it through its UI before asserting an uncovered, live page; browser.spec separately pins toast cover.
+  await clearToasts(s.page);
   try {
     await expectOnPane(s, tabId, paneIn(panel), 'panel');
   } catch (error) {
