@@ -72,6 +72,16 @@ async function commentScene(opts: CommentSceneOptions, body: (s: BrowserScene) =
     }
     try {
       await listen(s);
+      if (/^2[bc]\./.test(test.info().title)) {
+        await s.page.evaluate(() => {
+          const log: unknown[] = [];
+          (window as unknown as { __e4dVisibility: unknown[] }).__e4dVisibility = log;
+          const record = (kind: string, payload: unknown) => { if (log.length < 100) log.push({ at: Date.now(), kind, payload }); };
+          window.maws.on('browser.tabs.changed', ({ tabs }) => record('tabs', tabs.map(({ tabId, loading, covered, placedIn, suspended, crashed, failed, loadError }) => ({ tabId, loading, covered, placedIn, suspended, crashed, failed, loadError }))));
+          window.maws.on('browser.view.covered', ({ tabId, placeholder }) => record('still', { tabId, placeholder: placeholder !== null }));
+          window.maws.on('attention.notified', (payload) => record('notification', payload));
+        });
+      }
       await body(s);
     } catch (error) {
       await s.maws.cleanup();
@@ -192,7 +202,35 @@ async function openCommentPage(s: BrowserScene, id: AppSessionId): Promise<Comme
   const tabId = await tabAt(s, id, url);
   const page = await pageAt(s, url);
   await expect(page.locator('#increment')).toBeVisible();
-  await expectOnPane(s, tabId, paneIn(panel), 'panel');
+  try {
+    await expectOnPane(s, tabId, paneIn(panel), 'panel');
+  } catch (error) {
+    const state = await tabState(s, tabId);
+    const shell = await s.page.evaluate((pane) => ({
+      focused: document.hasFocus(), visibility: document.visibilityState, viewport: { width: window.innerWidth, height: window.innerHeight },
+      regions: Array.from(document.querySelectorAll('[data-region]')).map((element) => ({ region: element.getAttribute('data-region'), inert: element.hasAttribute('inert'), rect: element.getBoundingClientRect().toJSON() })),
+      transitions: (window as unknown as { __e4dVisibility?: unknown[] }).__e4dVisibility,
+      layers: Array.from(document.querySelectorAll('body > :not(#root):not(script):not(style), [data-toast-viewport] > *, [role="dialog"], [role="alertdialog"], aside[aria-label="Session cards"]')).map((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const popper = element.matches('[data-radix-popper-content-wrapper]');
+        return {
+          tag: element.tagName, role: element.getAttribute('role'), label: element.getAttribute('aria-label'),
+          text: element.textContent?.trim().slice(0, 500), display: style.display, visibility: style.visibility,
+          hidden: element.closest('[hidden], [inert], [aria-hidden="true"]')?.outerHTML.slice(0, 300),
+          popper, tooltip: element.querySelector('[role="tooltip"]') !== null,
+          modal: !popper && (element.matches('[role="dialog"], [role="alertdialog"]') || element.querySelector('[role="dialog"], [role="alertdialog"]') !== null),
+          focusGuard: element.hasAttribute('data-radix-focus-guard'),
+          intersects: rect.left < pane.x + pane.width && rect.right > pane.x && rect.top < pane.y + pane.height && rect.bottom > pane.y,
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        };
+      }),
+    }), await paneRect(paneIn(panel)));
+    const diagnostics = JSON.stringify({ state, shell }, null, 2);
+    await test.info().attach('comment-page-placement-state', { body: Buffer.from(diagnostics), contentType: 'application/json' });
+    await test.info().attach('comment-page-shell', { body: await s.page.screenshot(), contentType: 'image/png' });
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nComment-page diagnostics: ${diagnostics}`, { cause: error });
+  }
   return { panel, tabId, url, page };
 }
 
@@ -464,8 +502,7 @@ async function liveParent(s: BrowserScene, parent: AppSessionId, journal: string
 // The parent's recorded turn (its journal's `turn(MAIN_REPLY)`), sent as an ordinary prompt where a case has no Send to
 // main of its own (the parent's one written prompt); done once its result has played and the parent is idle again.
 async function parentTurn(s: BrowserScene, parent: AppSessionId): Promise<void> {
-  // This is setup for the thread, not a background-completion notification case. Keep the parent in front so its
-  // finished toast does not correctly cover the Browser page the case opens next.
+  // Keep this preparatory turn in its session; background notification routing is tested separately.
   await show(s, parent);
   value(await invoke(s.page, 'session.send', { appSessionId: parent, content: MAIN_COMMENT }));
   await expect.poll(() => s.journal(parent).some((r) => r.direction === 'in' && (r.frame as { type?: string }).type === 'result'), { timeout: 20_000 }).toBe(true);

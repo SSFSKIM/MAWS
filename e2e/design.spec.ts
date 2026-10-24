@@ -161,6 +161,10 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   await canvases.evaluateAll((ns) => ns.forEach((n, i) => ((n as HTMLElement).dataset.e2eMark = String(i))));
   const before = (await viewOf(page, id, 'main')).viewport!;
   const from = await worldAt(inMain, before, 200, 4000); // below the phone: no board there
+  expect(await inMain.locator('[data-design-world]').evaluate((world, point) => {
+    const hit = document.elementFromPoint(point.x, point.y);
+    return hit !== null && world.contains(hit) && hit.closest('[data-board-id], [data-board-title]') === null;
+  }, from), 'the empty-world pan begins on exposed canvas, not an overlaid Boards sheet').toBe(true);
   await drag(page, from, { x: from.x - 80, y: from.y - 60 });
   // P4-B3 Decision Log 35: the main tab adopts the view the panel held (X38's carry), whose arithmetic leaves the pan
   // about 3 × 10⁻⁵ px off; the offsets are compared within that, the zoom exactly
@@ -791,7 +795,12 @@ test('an edit in one replica patches the other within a frame: a board’s geome
     await inMain.getByRole('button', { name: 'Board Desktop options' }).click();
     await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
     const d = await boardAt(inMain, 'desktop', frameOnly('desktop'));
-    await page.mouse.click(d.at(300, 560).x, d.at(300, 560).y); // the inactive desktop activated, its box selected
+    const point = d.at(300, 560);
+    expect(await inMain.locator('[data-board-id="desktop"] .design-board-canvas [data-eid="a"]').evaluate((element, point) => {
+      const hit = document.elementFromPoint(point.x, point.y);
+      return hit !== null && (hit === element || element.contains(hit));
+    }, point), 'the measured desktop box is exposed, not underneath the Boards sheet').toBe(true);
+    await page.mouse.click(point.x, point.y); // the inactive desktop activated, its box selected
     await expect.poll(async () => (await viewOf(page, id, 'main')).selection).toEqual(['a']);
     const probe = await armFrameProbe(page, id, 'panel', { kind: 'style', boardId: 'desktop', elementId: 'a', prop: 'background', value: '#0000ff' }, [{ selector: '[data-board-id="desktop"] .design-board-canvas [data-eid="a"]', style: 'background-color', equals: 'rgb(0, 0, 255)' }]);
     const fill = inMain.getByRole('complementary', { name: 'Inspector' }).getByRole('textbox', { name: 'Fill colour' });

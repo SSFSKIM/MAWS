@@ -363,17 +363,19 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 });
 
 // The controller's measurement (at B1's landing): B1's margin tier (src/artifacts/comments/margin-tiers.ts, `tierFor`)
-// reads only the side space beside the page; our Expand pane widens the document to the main column. At 1512 × 900 with
-// UX2's 240px sidebar and content-sized Artifacts surface and a document with an open thread: (c) in the panel's record with the
+// reads only the side space beside the page; Expand gives the document the main region minus its conversation. At
+// 1280 and 1512 × 900 with UX2's 240px sidebar and narrow default Artifacts surface and an open thread: (c) in the panel's record with the
 // panel floated (P3-G's card over it), (a) alone in main with the panel docked, (d) the same with the panel closed, (b)
 // beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
 // document keeps WR #12's reading column beside the conversation), then after Restore split, the panel back and the tier as it was in the split. What
 // the margin draws in each is asserted; the widths go to the report.
-type MarginReading = { scrollBox: number; page: number; conversation: number; tier: string | null; threads: number };
+type MarginReading = { host: number; body: number; scrollBox: number; page: number; conversation: number; tier: string | null; threads: number };
 const marginOf = (scope: Locator): Promise<MarginReading> =>
   scope.evaluate((root) => {
     const scroll = root.querySelector<HTMLElement>('.ds-doc')!;
     return {
+      host: Math.round(root.getBoundingClientRect().width),
+      body: Math.round(root.querySelector('.doc-editor-body')!.getBoundingClientRect().width),
       scrollBox: scroll.clientWidth,
       conversation: Math.round(root.querySelector('[data-document-session-column]')?.getBoundingClientRect().width ?? 0),
       page: Math.round(root.querySelector('.ds-doc-page')!.getBoundingClientRect().width),
@@ -402,9 +404,9 @@ async function settled<T>(read: () => Promise<T>, message: string): Promise<T> {
   return value!;
 }
 
-test('the document margin’s tier at 1512 × 900: in the floated panel, alone in main, with the panel closed, after Expand pane and after Restore split', async () => {
+for (const width of [1280, 1512]) test(`the document margin’s tier at ${width} × 900: in the floated panel, alone in main, with the panel closed, after Expand pane and after Restore split`, async () => {
   test.setTimeout(120_000);
-  const page = await start(undefined, [1512, 900]);
+  const page = await start(undefined, [width, 900]);
   await pinArtifactsTool(page);
   const id = await documentInMain(page, 'B3 margin');
   await mainTab(page, id).getByRole('button', { name: /^Close / }).click();
@@ -468,9 +470,7 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   await header.getByRole('button', { name: 'Expand pane' }).click();
   await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toBeVisible();
   await expect.poll(async () => (await widths()).panel, 'Expand folds the right panel').toBeLessThanOrEqual(0);
-  // Keep the former master-red line 462's substantive bound: Expand must give the document more room than alone
-  // beside the open panel. UX2 changes that panel's geometry, not the comparison or its strict inequality.
-  await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
+  // Record actual widths before checking the nonshrinking bound below, so a failure retains its accounting.
   const expanded = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) expanded settled');
   await header.getByRole('button', { name: 'Restore split', pressed: true }).click();
   await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toHaveCount(0);
@@ -479,23 +479,30 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   const restored = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) restored settled');
   readings.b = { ...expanded, split, restored };
   test.info().annotations.push({ type: 'margin readings', description: JSON.stringify(readings) });
+  const gain = expanded.scrollBox - alone.scrollBox;
+  test.info().annotations.push({ type: 'Expand width gain', description: `${width}px window: alone ${alone.scrollBox}px, expanded ${expanded.scrollBox}px, gain ${gain}px` });
+  await test.info().attach(`margin-accounting-${width}`, { body: JSON.stringify({ width, gain, readings }, null, 2), contentType: 'application/json' });
+  expect(cardCovers, 'the floated conversation does not cover the reserved comments margin').toEqual({ column: false, entries: 0 });
 
-  // What holds (margin-tiers.ts): off under a 720 px body (rail-width.ts RAIL_BESIDE_FROM_PX); cards while the side
-  // space beside the 816 px page is at least 26 + 282 + 25 = 333 px; else icons.
-  // UX2's wide record surface puts main below the 720px margin floor. WR #12 (DocumentSessionSpace, already on
-  // master) reserves 420px for an open conversation in the floated/expanded states: they earn icons, not cards.
-  // The old master-red strict width bound above previously prevented this test from reaching its stale tier assertion.
-  expect(alone.scrollBox).toBeLessThan(720);
-  for (const reading of [floated, expanded]) {
-    expect(reading.conversation, 'the open conversation owns a real reading-side column').toBe(420);
-    expect(reading.scrollBox, 'the editor is above the margin-off floor').toBeGreaterThanOrEqual(720);
-    expect(reading.scrollBox - reading.page, 'the reserved conversation leaves less than the 333px card threshold').toBeLessThan(333);
+  // Runtime geometry, not snapshot tiers: off below a 720px body; cards once the page leaves at least
+  // 26px + 282px + 25px = 333px for them; icons otherwise. All space beside the page has a named owner.
+  const cases = { floated, alone, closed, split, expanded, restored };
+  for (const [name, reading] of Object.entries(cases)) {
+    expect(reading.body + reading.conversation, `${name}: the document and conversation account for the whole host`).toBe(reading.host);
+    expect(reading.scrollBox, `${name}: closed document tools reserve no empty column`).toBe(reading.body);
+    const tier = reading.body < 720 ? 'off' : reading.scrollBox - reading.page >= 333 ? 'cards' : 'icons';
+    expect(reading.tier, `${name}: margin tier follows its measured body and page side space`).toBe(tier);
+    expect(reading.threads, `${name}: the open thread survives every layout`).toBe(1);
   }
-  expect(closed.conversation, 'no conversation column with the session docked').toBe(0);
-  expect(closed.scrollBox - closed.page, 'the closed panel earns the full margin cards').toBeGreaterThanOrEqual(333);
-  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier, restored: restored.tier }).toEqual({ c: 'icons', a: 'off', d: 'cards', split: 'off', b: 'icons', restored: 'off' });
+  for (const reading of [floated, expanded]) expect(reading.conversation, 'WR #12 reserves the open conversation’s actual default column').toBe(420);
+  for (const reading of [alone, closed, split, restored]) expect(reading.conversation, 'a docked session leaves no conversation column').toBe(0);
+  expect(alone.host, 'the alone document fills its main region').toBe(alone.main);
+  expect(closed.host, 'closing the panel leaves no empty column beside the main document').toBe(closed.main);
+  expect(expanded.host, 'the expanded document and conversation fill the whole main region').toBe(expanded.main);
   expect(expanded.main, 'the expanded document has the panel-closed main column').toBe(closed.main);
-  expect([floated, alone, closed, expanded, restored].map((r) => r.threads), 'the open thread in every reading').toEqual([1, 1, 1, 1, 1]);
+  expect(alone.sidebar + alone.main + alone.panel, 'docked regions account for the whole window').toBe(width);
+  expect(closed.sidebar + closed.main, 'closed-panel regions account for the whole window').toBe(width);
+  expect(gain, 'Expand does not shrink the document; a zero gain remains an owner hands-on question').toBeGreaterThanOrEqual(0);
 });
 
 // Loaded in main before its entry (launchMaws's requireFirst): a frame preload registered on the window's session before

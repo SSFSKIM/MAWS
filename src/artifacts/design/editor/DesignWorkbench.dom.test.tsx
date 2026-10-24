@@ -117,6 +117,28 @@ describe('the world', () => {
     expect([v.x, v.y]).toEqual([50, -80]); // the world's origin under the pointer stays there
   });
 
+  it('closing Boards removes its sheet without remounting the world, which still pans by the pointer’s exact delta', () => {
+    const { container, view, world } = mount();
+    const boards = screen.getByRole('button', { name: 'Boards' });
+    expect(boards.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-design-rail="boards"]')).not.toBeNull();
+    fireEvent.click(boards);
+    expect(boards.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByRole('navigation', { name: 'Boards' })).toBeNull();
+    expect(container.querySelector('[data-design-rail="boards"]')).toBeNull();
+    expect(container.querySelector('[data-design-world]')).toBe(world);
+    const before = { zoom: 0.25, x: 200, y: 100 };
+    act(() => view.setViewport(before));
+    const ground = container.querySelector('[data-design-ground]')!;
+    press(ground, 200, 200);
+    drag(world, 120, 140);
+    release(world, 120, 140);
+    expect(view.snapshot().viewport).toEqual({ zoom: before.zoom, x: before.x - 80, y: before.y - 60 });
+    fireEvent.click(boards);
+    expect(screen.getByRole('navigation', { name: 'Boards' })).toBeDefined();
+    expect(container.querySelector('[data-design-world]')).toBe(world);
+  });
+
   it('the toolbar zooms by steps, fits all and fits the selected board, 2 %–400 %', () => {
     const { container, view } = mount();
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
