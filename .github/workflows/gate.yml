@@ -135,7 +135,12 @@ env:
   # A name joins only on that spec's trial evidence (its V4: green in the guest, matching the host's results). The plan
   # keeps a MEASURED_E2E group on the exclusive instance whatever this says, and runs a group on both lists shared; a
   # `Lane:` trailer moves these groups to the guest alone.
-  MAC_VM_E2E: document-app widgets to-human
+  # Wave 2 (V4, CI-opt): transcript, panel, side, c7, code, scm, library, document and settings were 3/3 green in guest
+  # runs 40095523463, 40099706584 and 40107391110, matching host references 40095523499 and 40077708930. tools matched the
+  # host's two stale failures in all three guest runs, its other 11 cases green; UX2 fixed those on master (f645666ee),
+  # and tools now passes on the host. design, presentations and dashboard remain held back.
+  MAC_VM_E2E: >-
+    document-app widgets to-human transcript panel side c7 code scm library document settings tools
 
 defaults:
   run:
