@@ -3,6 +3,7 @@
 // the project chip and the focused pane's active tab as the title (with the branch chip on a session), the usage slot,
 // the session actions menu and the panel toggle.
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
+import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { useRef } from 'react';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -205,7 +206,7 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
   return <DropdownMenu.Sub>
-    <DropdownMenu.SubTrigger disabled={ids.length === 0} className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover">Session actions</DropdownMenu.SubTrigger>
+    <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={ids.length === 0} className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover">Session actions</DropdownMenu.SubTrigger>
     <DropdownMenu.Portal><DropdownMenu.SubContent className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
       {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
     </DropdownMenu.SubContent></DropdownMenu.Portal>

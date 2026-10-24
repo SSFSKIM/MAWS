@@ -1,3 +1,4 @@
+import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import type { ReactElement, ReactNode } from 'react';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
@@ -75,7 +76,7 @@ export function SurfaceRow({ maxIcons = Infinity, overflowControls }: { maxIcons
           {overflowControls}
           {held.filter((tab) => tab.toolId === 'artifacts' && !candidates.includes(tab.toolId)).map((tab: PanelTabRef) => <SurfaceContext key={tab.id} toolId={tab.toolId}><DropdownMenu.Item className={ITEM} onSelect={() => toggleSurface(tab.toolId)}>Open saved artifact</DropdownMenu.Item></SurfaceContext>)}
           {held.filter((tab) => !tools.has(tab.toolId)).map((tab) => <DropdownMenu.Sub key={tab.id}>
-            <DropdownMenu.SubTrigger className={ITEM}>{tab.toolId} (unavailable)</DropdownMenu.SubTrigger>
+            <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} className={ITEM}>{tab.toolId} (unavailable)</DropdownMenu.SubTrigger>
             <DropdownMenu.Portal><DropdownMenu.SubContent className={MENU}>
               <DropdownMenu.Item className={ITEM} onSelect={() => toggleSurface(tab.toolId)}>Show saved surface</DropdownMenu.Item>
               {session && <DropdownMenu.Item className={ITEM} onSelect={() => state.setPanelTabPinned(session, tab.id, !tab.pinned)}>{tab.pinned ? 'Keep with this session only' : 'Keep open for every session'}</DropdownMenu.Item>}

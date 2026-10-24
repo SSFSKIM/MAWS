@@ -4,6 +4,7 @@
 // "Named only"; "Save version" with a name and a note. A click previews a version in the editor in place; a
 // shift-click compares it with the selected one. App chrome, so it reads the app's tokens (chrome.css). P4 W1-B: a
 // turn's line names its blocks and comments by the controller's `words`, the live document's, read once per list.
+import { preserveSubmenuPointer } from '../../../ui/menu-pointer';
 import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import './version-export.css';
@@ -154,7 +155,7 @@ function VersionExportItem({ entry }: { entry: HistoryExport }) {
   const label = <span className="doc-version-export-label">{entry.label}{entry.description && <span className="doc-version-export-description">{entry.description}</span>}</span>;
   if (entry.children?.length) return (
     <DropdownMenu.Sub>
-      <DropdownMenu.SubTrigger className="doc-tab-menu-item doc-version-export-group" disabled={entry.disabled}>
+      <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} className="doc-tab-menu-item doc-version-export-group" disabled={entry.disabled}>
         {label}<span aria-hidden="true">›</span>
       </DropdownMenu.SubTrigger>
       <DropdownMenu.Portal>

@@ -4,6 +4,7 @@
 // 360 px header all of them in "More actions", so the title keeps the room), then the region's own controls.
 // `EditorHeader` is the row; the panel draws it over the selected tab as `PanelHeader`, with Float, Maximize and Hide; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). A tool
 // that registers nothing (X32) shows the strip's label, so today's tools read as they did.
+import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
@@ -288,7 +289,7 @@ function ExportMenu({ exports }: { exports: readonly EditorHostExport[] }) {
 function ExportEntries({ exports }: { exports: readonly EditorHostExport[] }) {
   return exports.map((entry) => entry.children ? (
     <DropdownMenu.Sub key={entry.id}>
-      <DropdownMenu.SubTrigger disabled={entry.disabled} className={ITEM}>{entry.label}<span aria-hidden className="ml-auto">›</span></DropdownMenu.SubTrigger>
+      <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={entry.disabled} className={ITEM}>{entry.label}<span aria-hidden className="ml-auto">›</span></DropdownMenu.SubTrigger>
       <DropdownMenu.Portal>
         <DropdownMenu.SubContent sideOffset={4} className={MENU}><ExportEntries exports={entry.children} /></DropdownMenu.SubContent>
       </DropdownMenu.Portal>
