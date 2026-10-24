@@ -35,6 +35,20 @@ afterEach(() => {
 });
 
 describe('the chrome yields to the tab strip', () => {
+  it.each([1440, 900])('keeps collapsed-sidebar navigation clear of the native traffic lights at %ipx', (width) => {
+    setWidth(width);
+    useLayout.getState().setSidebar({ collapsed: true });
+    if (width === 900) useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' });
+    renderShell();
+    const navigation = within(chrome()).getByRole('button', { name: 'Toggle sidebar' }).parentElement!;
+    const leading = navigation.parentElement!;
+    // Layout arithmetic at the renderer boundary: 28px icon buttons, 4px inter-button gap, 12px right inset.
+    // happy-dom has no box layout; the Mac acceptance test checks the actual button bounds.
+    const count = within(navigation).getAllByRole('button').length;
+    const firstControlX = Number.parseFloat(leading.style.width) - 12 - count * 28 - (count - 1) * 4;
+    expect(firstControlX).toBeGreaterThanOrEqual(78);
+  });
+
   it('uses the header width left by a wide surface, not the window width, and keeps overflow keyboard accessible', async () => {
     const user = userEvent.setup();
     setWidth(900);

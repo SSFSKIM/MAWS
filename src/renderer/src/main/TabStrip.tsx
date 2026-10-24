@@ -138,7 +138,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   const stop = tabs.some((t) => t.id === state.activeTabId) ? state.activeTabId : tabs[0]?.id;
 
   return (
-    <div className="relative flex h-(--toolbar-h) min-w-0 shrink-0 items-stretch [-webkit-app-region:no-drag]">
+    <div className="relative flex h-full min-w-0 shrink-0 items-stretch [-webkit-app-region:no-drag]">
       <div
         ref={strip}
         role="tablist"

@@ -78,7 +78,7 @@ export function Toolbar() {
   // Budget against the grid's actual header, not the window: a full-height surface can leave only 360px.
   // Preserve a usable, scrolling strip (including New chat) before allocating optional chrome controls.
   const compact = geometry.chrome < 520;
-  const leading = compact ? 118 : geometry.sidebar || 148;
+  const leading = compact ? 118 : geometry.sidebar || 150;
   const stripRoom = split ? 240 : 180;
   const projectChip = geometry.chrome >= leading + stripRoom + 322;
   const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
@@ -112,7 +112,7 @@ export function Toolbar() {
         </div>
       </div>
       {projectChip && <div className="max-w-24 min-w-0 shrink"><ProjectChip /></div>}
-      <div ref={mountChromeTabs} data-chrome-tabs className="flex min-w-0 flex-1 items-stretch">
+      <div ref={mountChromeTabs} data-chrome-tabs className="flex h-full min-w-0 flex-1 items-stretch">
         <div data-chrome-slot="0" className="contents" />
         <div data-chrome-slot="1" className="contents" />
       </div>

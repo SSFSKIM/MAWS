@@ -607,7 +607,7 @@ test.describe('sessions', () => {
     await page.screenshot({ path: test.info().outputPath('new-chat-project-menu.png') });
     await menu.getByRole('option', { name: alpha.name }).click();
     await expect(page.getByRole('heading', { name: `New chat in ${alpha.name}` })).toBeVisible();
-    await expect(page.getByRole('tab', { name: `New chat · ${alpha.name}` }), 'the tab names the project too').toBeVisible();
+    await expect(page.getByRole('tab', { name: 'New chat', exact: true }), 'UX2: the current project is not repeated in its tab label').toBeVisible();
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: alpha.id, location: { kind: 'directory', path: first.root } });
     await expect(row.getByRole('button', { name: `Project ${alpha.name}` })).toBeVisible();
     await expect(row.getByLabel('Branch main')).toBeVisible();

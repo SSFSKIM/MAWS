@@ -25,6 +25,7 @@ const SHELL_ENV = {
 };
 
 // The scenario's sessions (test/fixtures/shell/nine-sessions.json).
+// UX2 l7-05: current-project session tabs omit the redundant project suffix; the title-bar chip names their set.
 const CHARTER = 'app-9a1d4262';
 const FIX = 'Fix sidebar drag';
 const SIP = 'Sidebar interaction pass';
@@ -89,34 +90,34 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
     await expect(main.locator('[data-strip-project]'), 'the strip names no project').toHaveCount(0);
     await (await sidebarRow(page, FIX)).click();
     await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX, SIP]);
 
     await clickProject('codex_somersault');
     await expect(label).toHaveText('codex_somersault');
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'another project, another (empty) set' }).toEqual([]);
     await (await sidebarRow(page, QUOTA)).click();
     await (await sidebarRow(page, 'Trace stream reconnects')).click(); // a click replaces the shown session
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects · codex_somersault']);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects']);
     await menu(app, 'tab.reopen'); // the replaced one comes back
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects · codex_somersault', `${QUOTA} · codex_somersault`]);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects', QUOTA]);
     await menu(app, 'tab.select:1');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects · codex_somersault');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects');
     await menu(app, 'tab.select:3'); // no third tab in this set
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects · codex_somersault');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects');
 
     await clickProject('MAWS'); // expanded already: the click folds it and still shows its set
     await expect(projectRow(page, 'MAWS')).toHaveAttribute('aria-expanded', 'false');
     await expect(label).toHaveText('MAWS');
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'MAWS’s set as it was left' }).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'MAWS’s set as it was left' }).toEqual([FIX, SIP]);
     await menu(app, 'tab.select:1');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${FIX} · MAWS`);
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(FIX);
 
     // an open from elsewhere (the palette) of another project's session switches the strip to its set
     await openPalette(app, page);
     await page.keyboard.type('quota');
     await page.keyboard.press('Enter');
     await expect(label).toHaveText('codex_somersault');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${QUOTA} · codex_somersault`);
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(QUOTA);
 
     // the chip's context menu reveals its project in the sidebar: its row expanded in place, and focused
     await closeProject(page, 'codex_somersault');
@@ -156,43 +157,43 @@ test('a session opens in place of Settings or Diagnostics; a pin keeps its tab; 
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     const strip = 'Open tabs';
     const labels = () => tabLabels(page, strip);
-    const tabNamed = (name: string) => page.getByRole('tablist', { name: strip }).getByRole('tab', { name });
+    const tabNamed = (name: string) => page.getByRole('tablist', { name: strip }).getByRole('tab', { name, exact: true });
     const CHARTER_ROW = 'Charter + research';
     await (await sidebarRow(page, NORTH)).click();
-    await expect.poll(labels).toEqual([`${NORTH} · MAWS`]);
+    await expect.poll(labels).toEqual([NORTH]);
 
     // Settings gives its place to the session clicked
     await menu(app, 'settings.open');
-    await expect.poll(labels).toEqual([`${NORTH} · MAWS`, 'Settings']);
+    await expect.poll(labels).toEqual([NORTH, 'Settings']);
     await (await sidebarRow(page, FIX)).click();
-    await expect.poll(labels, { message: 'Settings gave its place' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`]);
+    await expect.poll(labels, { message: 'Settings gave its place' }).toEqual([NORTH, FIX]);
 
     // the session's right-click menu: Open in new tab keeps what is shown (Diagnostics here) and adds a tab
     await menu(app, 'diagnostics.open');
-    await expect.poll(labels).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, 'Diagnostics']);
+    await expect.poll(labels).toEqual([NORTH, FIX, 'Diagnostics']);
     await (await sidebarRow(page, SIP)).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Open in new tab' }).click();
-    await expect.poll(labels, { message: 'Open in new tab added one' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, 'Diagnostics', `${SIP} · MAWS`]);
+    await expect.poll(labels, { message: 'Open in new tab added one' }).toEqual([NORTH, FIX, 'Diagnostics', SIP]);
 
     // a plain click on Diagnostics' place replaces it; ⌘⇧T brings it back
     await tabNamed('Diagnostics').click();
     await (await sidebarRow(page, CHARTER_ROW)).click();
-    await expect.poll(labels, { message: 'Diagnostics gave its place' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, `${CHARTER_ROW} · MAWS`, `${SIP} · MAWS`]);
+    await expect.poll(labels, { message: 'Diagnostics gave its place' }).toEqual([NORTH, FIX, CHARTER_ROW, SIP]);
     await menu(app, 'tab.reopen');
     await expect.poll(labels, { message: '⌘⇧T brings Diagnostics back' }).toContain('Diagnostics');
 
     // pinned: the pin shows, says what it does, and keeps its tab; the session opens after it
-    await tabNamed(`${CHARTER_ROW} · MAWS`).click({ button: 'middle' }); // a middle-click closes it
-    await expect.poll(labels).not.toContain(`${CHARTER_ROW} · MAWS`);
-    await tabNamed(`${FIX} · MAWS`).click();
-    await tabNamed(`${FIX} · MAWS`).click({ button: 'right' });
+    await tabNamed(CHARTER_ROW).click({ button: 'middle' }); // a middle-click closes it
+    await expect.poll(labels).not.toContain(CHARTER_ROW);
+    await tabNamed(FIX).click();
+    await tabNamed(FIX).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Pin tab' }).click();
-    const pin = tabNamed(`${FIX} · MAWS`).getByRole('img', { name: 'Pinned' });
+    const pin = tabNamed(FIX).getByRole('img', { name: 'Pinned' });
     await expect(pin).toBeVisible();
     await expect(pin).toHaveAttribute('title', 'Pinned: stays open when you open another session');
     await (await sidebarRow(page, CHARTER_ROW)).click();
-    await expect.poll(labels, { message: 'the pinned tab stayed, the session opened after it' }).toEqual(expect.arrayContaining([`${FIX} · MAWS`, `${CHARTER_ROW} · MAWS`]));
-    await expect.poll(() => selectedTab(page, strip)).toBe(`${CHARTER_ROW} · MAWS`);
+    await expect.poll(labels, { message: 'the pinned tab stayed, the session opened after it' }).toEqual(expect.arrayContaining([FIX, CHARTER_ROW]));
+    await expect.poll(() => selectedTab(page, strip)).toBe(CHARTER_ROW);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -240,7 +241,7 @@ test('Float with no session in front: disabled with its reason, the action float
     await expect(overview).toBeFocused();
     await overview.getByRole('button', { name: 'Close Overview' }).click();
     await menu(app, 'settings.open');
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${NORTH} · MAWS`, 'Settings']);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([NORTH, 'Settings']);
 
     await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
     await menu(app, 'panel.float');
@@ -248,7 +249,7 @@ test('Float with no session in front: disabled with its reason, the action float
     await mainShown('the action floats nothing with Settings in front');
     await expect(card).toHaveCount(0);
 
-    await strip.getByRole('tab', { name: `${NORTH} · MAWS` }).click();
+    await strip.getByRole('tab', { name: NORTH, exact: true }).click();
     await panel.getByRole('button', { name: 'Float session over panel' }).click();
     await expect(card).toBeVisible();
     await expect(main).toHaveJSProperty('inert', true);
@@ -394,7 +395,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
   // W12: one project's sessions, since each project has its own tab set
-  const three = [`${FIX} · MAWS`, `${SIP} · MAWS`, `${NORTH} · MAWS`];
+  const three = [FIX, SIP, NORTH];
 
   // UX2 optional-surfaces ruling: an empty main has no full-height summary/panel column.
   for (const name of ['sidebar', 'main']) await expect(page.locator(`[data-region="${name}"]`)).toBeVisible({ timeout: 10_000 });
@@ -630,8 +631,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
   await test.step('Item 2: ⌘⇧J lands on the oldest Needs-you session', async () => {
     await menu(app, 'attention.next');
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`]);
-    const fixTab = page.getByRole('tab', { name: `${FIX} · MAWS` });
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX]);
+    const fixTab = page.getByRole('tab', { name: FIX, exact: true });
     await expect(fixTab).toHaveAttribute('aria-selected', 'true');
     await expect(fixTab.getByRole('img', { name: 'Needs approval' })).toHaveText('◐');
     const panel = main.getByRole('tabpanel');
@@ -715,7 +716,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const strip = page.getByRole('tablist', { name: 'Open tabs' });
     const stripBox = (await strip.boundingBox())!;
     await drag(page, await sidebarRow(page, 'Charter + research'), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual([three[0], three[2], 'Charter + research · MAWS']);
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual([three[0], three[2], 'Charter + research']);
   });
 
   await test.step('Item 8: the ⌘K palette', async () => {
@@ -756,7 +757,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Meta+Enter');
     await expect.poll(() => tabLabels(page, 'Right pane tabs'), { message: '⌘⏎ opens it in the split' }).toEqual([three[2]]);
-    expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
+    expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research']);
   });
 
   await test.step('Item 6: sizes, the expanded project, the collapsed panel', async () => {
@@ -775,7 +776,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await openPalette(app, page);
     await page.keyboard.type('charter');
     await page.keyboard.press('Enter');
-    await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
+    await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research']);
     await expect(projectChip).toHaveText('MAWS');
     // UX2 optional surfaces: explicitly open one in the restored session before resizing it. Content-based widths
     // replace the fixed 380px, so the pointer delta starts at the rendered size, not the former default.

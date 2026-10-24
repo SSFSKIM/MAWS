@@ -66,7 +66,7 @@ test('resume chooser from the sidebar: library box, search, the lazy preview, En
 
     await page.keyboard.press('Enter');
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: `${FIX} · MAWS` })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: FIX, exact: true })).toHaveAttribute('aria-selected', 'true');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -95,7 +95,7 @@ test('resume chooser: an exited session opens to its transcript with the session
     await expect(options(page)).toHaveCount(1);
     await page.keyboard.press('Enter');
     await expect(chooser(page)).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: `${NORTH} · MAWS` })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: NORTH, exact: true })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('banner').getByRole('button', { name: 'Session actions' }).click();
     const after = page.getByRole('menuitem', { name: 'Resume', exact: true });
     await expect(after, 'the opened session offers Resume as its row did').toBeVisible();
@@ -134,7 +134,7 @@ test('resume chooser from /resume: the same chooser over the session’s project
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 });
     await openProject(page, 'MAWS');
     await sessionRow(page, CHARTER).click();
-    await expect(page.getByRole('tab', { name: `${CHARTER} · MAWS` })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: CHARTER, exact: true })).toHaveAttribute('aria-selected', 'true');
     const message = page.getByRole('textbox', { name: 'Message' });
     await message.click();
     await page.keyboard.type('/resume ');
@@ -160,8 +160,8 @@ test('resume chooser from /resume: the same chooser over the session’s project
     await expect(options(page)).toHaveCount(1);
     await page.keyboard.press('Meta+Enter');
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: `${FIX} · MAWS` })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('tab', { name: `${CHARTER} · MAWS` }), 'a new tab beside the one it was opened from').toHaveCount(1);
+    await expect(page.getByRole('tab', { name: FIX, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: CHARTER, exact: true }), 'a new tab beside the one it was opened from').toHaveCount(1);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();

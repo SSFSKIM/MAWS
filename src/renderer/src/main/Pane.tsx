@@ -73,10 +73,10 @@ export function Pane({ index, split, column, collapsed = false }: { index: PaneI
       className="contents"
     >
       {chrome ? createPortal(
-        <div data-pane-strip data-chrome-pane={index} className="min-w-0 flex-1" style={collapsed ? { display: 'none' } : undefined}>
+        <div data-pane-strip data-chrome-pane={index} className="h-full min-w-0 flex-1" style={collapsed ? { display: 'none' } : undefined}>
           <TabStrip pane={index} split={split} idPrefix={idPrefix} />
         </div>, chrome
-      ) : <div data-pane-strip className="min-w-0" style={{ gridRow: 1, gridColumn: column, ...(collapsed ? HIDDEN : null) }}>
+      ) : <div data-pane-strip className="h-(--toolbar-h) min-w-0" style={{ gridRow: 1, gridColumn: column, ...(collapsed ? HIDDEN : null) }}>
         <TabStrip pane={index} split={split} idPrefix={idPrefix} />
       </div>}
       <div

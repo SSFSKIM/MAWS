@@ -86,7 +86,7 @@ async function singleChromeRow(page: Page): Promise<void> {
 async function openSession(page: Page): Promise<void> {
   await expect(sidebar(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 15_000 });
   await (await sidebarRow(page, 'Harness A')).click();
-  await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Harness A · Harness', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Harness A', exact: true })).toHaveAttribute('aria-selected', 'true');
 }
 
 test('UX2: one chrome row and no reserved column for empty main or Settings', async ({ maws }, info) => {
