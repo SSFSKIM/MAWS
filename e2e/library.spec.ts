@@ -4,7 +4,7 @@
 // a document's text and in an HTML page; Pin moves a row into Pinned; a Space made and an artifact moved into it shows
 // under By Space; Rename and Delete land after the host's event; and the library is right after the host process is
 // killed and restarted (M7: with a write main's index had missed, through main's e2e seam). M7's upgrade case: an index rewound
-// to version 9 beside a populated host store migrates to 10 at launch and the first connection's snapshot fills it. M5b:
+// to version 9 beside a populated host store migrates to the current version at launch and the first connection's snapshot fills it. M5b:
 // an HTML artifact a session made (on C3's replay transport, `support/library-session.ts`) in the panel's Artifacts
 // tool, its versions, P2's comment card and its Side thread, Move to tab and Export to PDF; a PDF, a video and an audio
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
@@ -217,12 +217,13 @@ function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
   };
 }
 
-// An index at version 9 as an install before P3-L left it: the library's four tables dropped (migration 10 only adds
-// them) and the version set back, checked equal to the schema migrations 1 to 9 build.
+// An index at version 9 as an install before P3-L left it: drop the library tables
+// (10/11) and UX1-B's conversation search (12), checked against migrations 1 to 9.
 function rewindIndexTo9(path: string): void {
   const db = new DatabaseSync(path);
   try {
-    expect(schemaOf(db).version, 'the first launch left the index at 11').toBe(11);
+    expect(schemaOf(db).version, 'the first launch left the index at 12').toBe(12);
+    db.exec('DROP TRIGGER session_text_delete; DROP TABLE session_text_chunks; DROP TABLE session_text_state; DROP TABLE session_text;');
     db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 9;');
     const template = new DatabaseSync(':memory:');
     try {
@@ -254,7 +255,7 @@ test('on a Korean app locale the library’s ages and date group read English', 
   expect(await library.getByRole('heading', { level: 2 }).allTextContents()).toEqual(['Make something new', 'Today']);
 });
 
-test('an index at version 9 beside a populated host store migrates to 10 at launch, and the first connection’s snapshot fills the library', async () => {
+test('an index at version 9 beside a populated host store migrates to the current version at launch, and the first connection’s snapshot fills the library', async () => {
   test.setTimeout(120_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-upgrade-'));
   const userData = join(scratch, 'ud');
@@ -277,7 +278,7 @@ test('an index at version 9 beside a populated host store migrates to 10 at laun
   launch = null;
   rewindIndexTo9(join(userData, 'index.sqlite'));
 
-  // the upgrade: main migrates the index to 10, and the host's snapshot at the first connection is the whole library
+  // the upgrade: main migrates the index through 10 to 12, and the host's snapshot at the first connection is the whole library
   launch = await launchMaws({ userData });
   ({ page } = launch);
   await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
@@ -311,7 +312,7 @@ test('an index at version 9 beside a populated host store migrates to 10 at laun
   launch = null;
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
-    expect(schemaOf(db).version, 'the index is at 11 again').toBe(11);
+    expect(schemaOf(db).version, 'the index is at 12 again').toBe(12);
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
