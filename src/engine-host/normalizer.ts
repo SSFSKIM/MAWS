@@ -368,14 +368,14 @@ export class Normalizer {
       return;
     }
     const uuid = (frame.uuid ?? null) as MessageUuid | null;
-    const marker = engineUserMarkerOf(content);
+    if (uuid !== null && this.state.pendingHumanUuids.has(uuid)) {
+      this.state.pendingHumanUuids.delete(uuid); // the engine's --replay-user-messages echo of our own frame
+      return;
+    }
+    const marker = frame.origin?.kind === 'human' ? null : engineUserMarkerOf(content);
     if (marker) {
       // engine-authored, never a human prompt: opens nothing and dedupes against no outgoing frame
       out.emit({ kind: 'user.message', messageUuid: uuid, content: marker.content, isReplay: frame.isReplay ?? false, isSynthetic: frame.isSynthetic ?? false, origin: marker.origin, bash: null }, attribution);
-      return;
-    }
-    if (uuid !== null && this.state.pendingHumanUuids.has(uuid)) {
-      this.state.pendingHumanUuids.delete(uuid); // the engine's --replay-user-messages echo of our own frame
       return;
     }
     const bash = bashPartOf(content);

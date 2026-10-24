@@ -51,6 +51,40 @@ describe('l2-transcript-15: stopping closes the turn at the engine evidence', ()
     expect(next.turns.get(turnId.ofMessage(uuid('typed')))).toMatchObject({ state: 'closed', closedBy: 'completed' });
   });
 
+  it.each(['[Request interrupted by user]', '[Request interrupted by user for tool use]'])('normalizes a host-written prompt and its same-UUID human replay of %s without stopping or duplicating its turn', (text) => {
+    // Recorded order: write 16, started 19, same-UUID human replay 22, assistant 232, result 239.
+    const wire = loadJournal('pass3', 'steer-next').filter((row) => [16, 19, 22, 232, 239].includes(row.seq)).map((row) => {
+      if (row.seq !== 16 && row.seq !== 22) return row;
+      const frame = row.frame as { message: { role: string; content: string } };
+      return { ...row, frame: { ...frame, message: { ...frame.message, content: text } } };
+    });
+    const events = journalToEvents(wire);
+    expect(events.filter((event) => event.kind === 'user.message')).toHaveLength(1);
+    expect(events.some((event) => event.kind === 'user.message' && event.origin === 'interrupt-marker')).toBe(false);
+    let state = reduce(events.filter((event) => event.seq !== null && event.seq <= 22));
+    expect(state.turns.get(state.current!)!).toMatchObject({ state: 'open', closedBy: null });
+    state = applyEvents(state, events.filter((event) => event.seq !== null && event.seq > 22));
+    expect(state.order).toHaveLength(1);
+    expect(state.turns.get(state.order[0])).toMatchObject({ state: 'closed', closedBy: null, ended: { terminalReason: 'completed' } });
+    const rows = rowsOf(state);
+    expect(rows.filter((row) => row.kind === 'user').map((row) => row.text)).toEqual([text]);
+    expect(rows.filter((row) => row.kind === 'assistant_text').map((row) => row.markdown)).toEqual(['COUNTED']);
+  });
+
+  it.each(['[Request interrupted by user]', '[Request interrupted by user for tool use]'])('normalizes an explicitly human inbound %s as a prompt even without a pending host echo', (text) => {
+    const wire = loadJournal('pass3', 'steer-next').filter((row) => [22, 232, 239].includes(row.seq)).map((row) => {
+      if (row.seq !== 22) return row;
+      const frame = row.frame as { message: { role: string; content: string } };
+      return { ...row, frame: { ...frame, message: { ...frame.message, content: text } } };
+    });
+    const events = journalToEvents(wire);
+    expect(events.filter((event) => event.kind === 'user.message')).toMatchObject([{ origin: 'human', content: text }]);
+    const state = reduce(events);
+    expect(state.order).toHaveLength(1);
+    expect(state.turns.get(state.order[0])).toMatchObject({ state: 'closed', closedBy: null, ended: { terminalReason: 'completed' } });
+    expect(rowsOf(state).filter((row) => row.kind === 'user').map((row) => row.text)).toEqual([text]);
+  });
+
   it('attaches the result after a marker to the stopped turn, never to a newer running turn', () => {
     const b = builder();
     b.turn('u1');
