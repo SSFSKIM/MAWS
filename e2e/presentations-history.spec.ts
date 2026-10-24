@@ -3,7 +3,7 @@
 // through the renderer's seam (presentations.spec.ts's way), named in a design system and versioned through A's
 // `artifacts.saveVersion`, then changed (a slide removed, one added, an element deleted, a restyle, the notes, the cover,
 // the system switched) and versioned again, and opened from the library in a main tab:
-// - the header's Version history opens B's rail beside the stage, listing A's versions as B's does;
+// - the document toolbar's Version history opens its floating card and Fit uses the width it leaves;
 // - a version previews read-only on the stage with Show changes on: the filmstrip edges each changed slide (a new one
 //   badged, a deleted one ghosted at its place), the stage outlines the changed element in the author's colour and
 //   ghosts the deleted one from the earlier doc, the notes below show the diff, "N changes" with ↑ ↓ moving the stage;
@@ -104,8 +104,14 @@ async function openFromLibrary(page: Page, title: string, artifactId: string): P
   return tab;
 }
 
-/** A header action by its label: its button, or its entry under More actions when the header folded it there. */
+/** Document History lives in its toolbar/card; non-card actions remain in the title header and its overflow. */
 async function headerAction(page: Page, label: string): Promise<void> {
+  if (label === 'Version history') {
+    const editor = page.locator('[data-region="main"] [data-deck-editor]');
+    const close = editor.getByRole('button', { name: 'Close version history', exact: true });
+    if (await close.isVisible()) return close.click();
+    return editor.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: label, exact: true }).click();
+  }
   const header = page.locator('[data-region="main"] [data-editor-header]');
   const button = header.getByRole('button', { name: label, exact: true });
   if (await button.isVisible()) return button.click();
@@ -149,7 +155,6 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   expect(listed.versions.find((v) => v.id === draft.versionId)?.designSystemRef?.id, 'the draft pins Official').toBe(official.id);
 
   const tab = await openFromLibrary(page, 'History lab', id);
-  const header = page.locator('[data-region="main"] [data-editor-header]');
 
   await test.step('WR #37: a narrow deck keeps a working slide beside its filmstrip', async () => {
     const editor = tab.locator('[data-deck-editor]');
@@ -163,17 +168,27 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     }), { message: 'the wide stage has fitted its restored viewport' }).toBeLessThan(1);
   });
 
-  await test.step('the header’s Version history opens B’s rail, listing A’s versions', async () => {
+  await test.step('the document toolbar’s Version history opens its floating card and Fit uses the width it leaves', async () => {
     const stageBefore = await tab.locator('[data-stage-slide]').boundingBox();
     await headerAction(page, 'Version history');
-    await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width).toBeCloseTo(stageBefore!.width, 0);
     const rail = tab.getByRole('complementary', { name: 'Version history' });
     await expect(rail).toBeVisible();
+    await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width, { message: 'Fit gives the open card real width' }).toBeLessThan(stageBefore!.width);
+    await expect.poll(() => tab.evaluate((root) => {
+      const viewport = root.querySelector<HTMLElement>('.deck-stage')!;
+      const cards = root.querySelector<HTMLElement>('.deck-tool-cards')!;
+      const slide = root.querySelector('[data-stage-slide]')!.getBoundingClientRect();
+      // Approved Fit geometry: the measured card stack plus its 16px gutters, and 48px of stage surround.
+      const fittedWidth = Math.min(viewport.clientWidth - cards.clientWidth - 16 - 48, (viewport.clientHeight - 48) * 16 / 9);
+      return Math.abs(slide.width - fittedWidth);
+    }), { message: 'the slide exactly fits the space left by the floating tool stack' }).toBeLessThan(1);
+    const [slideBox, cardBox] = [(await tab.locator('[data-stage-slide]').boundingBox())!, (await tab.locator('.deck-tool-cards').boundingBox())!];
+    expect(slideBox.x + slideBox.width, 'the full slide stays left of the floating card').toBeLessThanOrEqual(cardBox.x);
     await expect(tab.locator('[data-deck-rail="history"]')).toBeVisible();
     for (const fold of await rail.getByRole('button', { name: /^\d+ more versions?$/ }).all()) await fold.click();
     await expect(rail.getByRole('button', { name: /^Version / })).toHaveCount(listed.versions.length);
     await expect(rail.getByRole('button', { name: /^Version Draft by You/ })).toBeVisible();
-    await expect(header.getByRole('button', { name: 'Version history', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(tab.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: 'Version history', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
   const rail = tab.getByRole('complementary', { name: 'Version history' });

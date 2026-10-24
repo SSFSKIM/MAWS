@@ -81,6 +81,10 @@ async function withScratch(h: Harness, body: (scratch: CodeScratch) => Promise<v
 async function reviewAppTs(h: Harness, opts: { pin?: boolean } = {}): Promise<void> {
   await openSurface(h.page, 'Review');
   if (opts.pin) await pinSurfaceForSessions(h.page, 'Review');
+  // Opening an existing surface preserves its scope, including Last turn from the previous theme scan.
+  const uncommitted = h.region.locator('[data-chip="uncommitted"]');
+  await uncommitted.click();
+  await expect(uncommitted).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(async () => (await h.review('panel'))?.header).toBe('5 files changed · +4 −0 · Uncommitted');
   await h.code('selectFile', 'src/app.ts', 'panel');
   await expect.poll(async () => (await h.review('panel'))?.hunk).toEqual({ index: 1, count: 3 });

@@ -253,10 +253,10 @@ describe('the document editor in L’s registry', () => {
     expect(header.closeGuard).toBe(state.closeGuard);
     const historyToggle = within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Version history' });
     expect(header.actions!.some((a) => a.id === 'history' || a.id === 'comments')).toBe(false);
-    act(() => fireEvent.click(historyToggle));
+    act(() => historyToggle.click());
     await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null, 'the history rail');
     expect(historyToggle.getAttribute('aria-pressed')).toBe('true');
-    act(() => fireEvent.click(historyToggle));
+    act(() => historyToggle.click());
     await until(() => screen.queryByRole('complementary', { name: 'Version history' }) === null, 'the rail closed');
     // an export's failure is said in the header's own action
     act(() => editorHostOf(scope)!.exports!.find((e) => e.id === 'pdf-a4')!.onSelect());

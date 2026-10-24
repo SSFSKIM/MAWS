@@ -318,7 +318,7 @@ async function startComment(page: Page, scope: Locator, k: number, text: string)
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
   }, `Paragraph ${k}:`);
-  await scope.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  await scope.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
   const field = scope.locator('[data-comment-card] textarea');
   await expect(field).toBeFocused();
   await page.keyboard.insertText(text);
@@ -367,14 +367,15 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 // UX2's 240px sidebar and content-sized Artifacts surface and a document with an open thread: (c) in the panel's record with the
 // panel floated (P3-G's card over it), (a) alone in main with the panel docked, (d) the same with the panel closed, (b)
 // beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
-// document reaches the cards tier), then after Restore split, the panel back and the tier as it was in the split. What
+// document keeps WR #12's reading column beside the conversation), then after Restore split, the panel back and the tier as it was in the split. What
 // the margin draws in each is asserted; the widths go to the report.
-type MarginReading = { scrollBox: number; page: number; tier: string | null; threads: number };
+type MarginReading = { scrollBox: number; page: number; conversation: number; tier: string | null; threads: number };
 const marginOf = (scope: Locator): Promise<MarginReading> =>
   scope.evaluate((root) => {
     const scroll = root.querySelector<HTMLElement>('.ds-doc')!;
     return {
       scrollBox: scroll.clientWidth,
+      conversation: Math.round(root.querySelector('[data-document-session-column]')?.getBoundingClientRect().width ?? 0),
       page: Math.round(root.querySelector('.ds-doc-page')!.getBoundingClientRect().width),
       tier: root.querySelector('.doc-margin')?.getAttribute('data-margin-tier') ?? null,
       threads: new Set(Array.from(root.querySelectorAll<HTMLElement>('[data-thread]')).map((el) => el.dataset.thread)).size,
@@ -481,10 +482,18 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
 
   // What holds (margin-tiers.ts): off under a 720 px body (rail-width.ts RAIL_BESIDE_FROM_PX); cards while the side
   // space beside the 816 px page is at least 26 + 282 + 25 = 333 px; else icons.
-  // UX2's content-sized wide record surface leaves the main document below the 720px margin floor, rather than at
-  // the old fixed-380px panel's icons tier. Closing/folding it must still earn the full cards tier.
+  // UX2's wide record surface puts main below the 720px margin floor. WR #12 (DocumentSessionSpace, already on
+  // master) reserves 420px for an open conversation in the floated/expanded states: they earn icons, not cards.
+  // The old master-red strict width bound above previously prevented this test from reaching its stale tier assertion.
   expect(alone.scrollBox).toBeLessThan(720);
-  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier, restored: restored.tier }).toEqual({ c: 'cards', a: 'off', d: 'cards', split: 'off', b: 'cards', restored: 'off' });
+  for (const reading of [floated, expanded]) {
+    expect(reading.conversation, 'the open conversation owns a real reading-side column').toBe(420);
+    expect(reading.scrollBox, 'the editor is above the margin-off floor').toBeGreaterThanOrEqual(720);
+    expect(reading.scrollBox - reading.page, 'the reserved conversation leaves less than the 333px card threshold').toBeLessThan(333);
+  }
+  expect(closed.conversation, 'no conversation column with the session docked').toBe(0);
+  expect(closed.scrollBox - closed.page, 'the closed panel earns the full margin cards').toBeGreaterThanOrEqual(333);
+  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier, restored: restored.tier }).toEqual({ c: 'icons', a: 'off', d: 'cards', split: 'off', b: 'icons', restored: 'off' });
   expect(expanded.main, 'the expanded document has the panel-closed main column').toBe(closed.main);
   expect([floated, alone, closed, expanded, restored].map((r) => r.threads), 'the open thread in every reading').toEqual([1, 1, 1, 1, 1]);
 });

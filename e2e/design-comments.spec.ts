@@ -106,7 +106,7 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await zoomTo('Phone');
     await ws.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
     await expect.poll(async () => (await viewOf(page, id, 'panel')).frame).toBe('phone');
-    await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
     await expect(card).toHaveAttribute('data-anchor-locator', 'Phone');
@@ -139,7 +139,7 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await zoomTo('Desktop');
     await pressOn(page, ws.locator('[data-board-id="desktop"] [data-eid="note"]')); // the inactive desktop activated, the note selected
     await expect.poll(async () => (await viewOf(page, id, 'panel')).selection).toEqual(['note']);
-    await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
     await expect(card).toHaveAttribute('data-anchor-locator', 'Edit me');
     await expect(card).toHaveAttribute('aria-label', 'Comment on Launch screens, Desktop');
     noteThread = (await threadOf((t) => t.elementId === 'note'))!.id;

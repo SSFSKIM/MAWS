@@ -102,7 +102,7 @@ async function keep(page: Page, main: Locator, text: Locator, index: number, quo
   const before = new Set(await text.locator('[data-thread]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.thread!)));
   await selectIn(text, index, quote);
   const toolbar = main.getByRole('toolbar', { name: 'Formatting' });
-  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+  await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   await expect(main.locator('[data-margin-entry][data-compose] [data-comment-card]'), 'the compose card hosted in the margin').toBeVisible();

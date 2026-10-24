@@ -715,13 +715,16 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   const id = await createDeck(page, 'Inspector lab', LAB);
   const other = await createDeck(page, 'Second deck', SECOND);
   const tab = await openFromLibrary(page, 'Inspector lab', id);
-  const { at } = await stageAt(tab);
   const element = (eid: string, slide = 'lab') => elementOf(page, id, slide, eid);
   await tab.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: 'Inspector', exact: true }).click();
   const inspector = tab.getByRole('complementary', { name: 'Inspector' });
+  await expect(inspector).toBeVisible();
 
+  // Opening the card refits the stage. Select the box at its current rendered position, not cached slide coordinates.
+  await tab.locator('[data-stage-slide="lab"] [data-eid="a"]').click();
+  await expect(tab.locator('[data-overlay] [data-selected="a"]')).toBeVisible();
+  await expect(inspector.getByRole('textbox', { name: 'Fill colour' })).toHaveValue('#ff0000');
   // the inspector: a fill, a border, a font size, the text's fit
-  await page.mouse.click(at(400, 560).x, at(400, 560).y);
   await inspector.getByRole('textbox', { name: 'Fill colour' }).fill('rgb(0, 0, 255)');
   await inspector.getByRole('textbox', { name: 'Fill colour' }).press('Enter');
   await expect.poll(async () => (await element('a'))?.style.background).toBe('#0000ff');

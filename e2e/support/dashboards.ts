@@ -317,7 +317,7 @@ export async function watchSelection(scope: Locator): Promise<{ log(): Promise<s
 
 /** Comments on the selected chart through the toolbar; when Comment is not offered, the failure carries the selection's log. */
 export async function commentSelectedChart(record: Locator, watched: { log(): Promise<string[]> }): Promise<void> {
-  const button = record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true });
+  const button = record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true });
   const offered = await expect(button)
     .toBeEnabled({ timeout: 10_000 })
     .then(

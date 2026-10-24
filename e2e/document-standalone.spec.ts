@@ -100,7 +100,7 @@ async function select(text: Locator, quote: string): Promise<void> {
     .toEqual({ page: quote, editor: quote });
 }
 
-const comment = (tab: Locator) => tab.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+const comment = (tab: Locator) => tab.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
 const marks = (text: Locator) => text.locator('[data-thread]');
 const titleOf = async (page: Page, id: AppSessionId) => value(await invoke(page, 'session.list', {})).sessions.find((record) => record.appId === id)?.title.text ?? '';
 

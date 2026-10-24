@@ -368,12 +368,26 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
     await expect(placeholder).toHaveCount(0);
     await expectOnPane(s, t, pane, 'panel');
 
-    // The chrome's More surfaces menu drops over the Browser pane: covers.
+    // The shell toolbar ends before the right surface: its More surfaces menu is beside the page, not over it.
     await surfaceRow(s.page).getByRole('button', { name: 'More surfaces' }).click();
     await expect(s.page.getByRole('menuitem', { name: 'Session info', exact: true })).toBeVisible();
-    await covered(true, 'the More surfaces menu');
+    await s.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const [surfacesMenuBox, pageBox] = [(await s.page.getByRole('menu').boundingBox())!, (await pane.boundingBox())!];
+    expect(surfacesMenuBox.x + surfacesMenuBox.width, 'the shell menu stays left of the Browser page').toBeLessThanOrEqual(pageBox.x);
+    await covered(false, 'the disjoint More surfaces menu');
+    await expectOnPane(s, t, pane, 'panel');
     await s.page.keyboard.press('Escape');
-    await covered(false, 'the More surfaces menu closed');
+    await expect(s.page.getByRole('menu')).toHaveCount(0);
+
+    // Browser's own options menu does overlap its page: the native view must yield to that menu.
+    await panel.getByRole('button', { name: 'Browser options', exact: true }).click();
+    await expect(s.page.getByRole('menuitem', { name: 'Open in tab', exact: true })).toBeVisible();
+    await covered(true, 'the Browser options menu');
+    const optionsBox = (await s.page.getByRole('menu').boundingBox())!;
+    expect(Math.min(optionsBox.x + optionsBox.width, pageBox.x + pageBox.width) - Math.max(optionsBox.x, pageBox.x), 'the Browser menu overlaps the page horizontally').toBeGreaterThan(0);
+    expect(Math.min(optionsBox.y + optionsBox.height, pageBox.y + pageBox.height) - Math.max(optionsBox.y, pageBox.y), 'the Browser menu overlaps the page vertically').toBeGreaterThan(0);
+    await s.page.keyboard.press('Escape');
+    await covered(false, 'the Browser options menu closed');
 
     // a composer chip's popover opens over the composer, away from the pane: no cover
     await s.pane.getByRole('button', { name: /^Model / }).click();

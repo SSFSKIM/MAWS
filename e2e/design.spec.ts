@@ -683,7 +683,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   const commentCard = async (surface: string, body: Locator, region: 'main' | 'panel') => {
     await body.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
     await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('phone');
-    await toolbarOf(body).getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbarOf(body).getByRole('button', { name: 'Add comment', exact: true }).click();
     const card = page.locator('[data-comment-card]');
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-locator', 'Phone');
@@ -724,7 +724,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
     // P3-F (L230): the design's own context decides; none here, so the notice in the card's place says why
     await inMain.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
     await expect.poll(async () => (await viewOf(page, id, 'main')).frame).toBe('phone');
-    await toolbarOf(inMain).getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbarOf(inMain).getByRole('button', { name: 'Add comment', exact: true }).click();
     const notice = inMain.locator('[data-comment-context]');
     await expect(notice).toBeVisible();
     await expect(notice).toHaveAttribute('role', 'dialog');

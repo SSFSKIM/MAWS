@@ -205,7 +205,7 @@ test('carried dashboard: bind, owner prose and conversation, agent replacement, 
   expect(labels).toHaveLength(2);
   for (const label of labels) expect(label).toMatch(/^Sales · from sales\.csv · updated .* UTC by Harness A$/);
   await selectChart(record);
-  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   const block = record.locator('.doc-chart').first();

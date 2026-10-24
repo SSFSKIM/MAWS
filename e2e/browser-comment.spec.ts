@@ -183,7 +183,7 @@ interface CommentTab {
   page: Page;
 }
 
-// The session shown, the Browser tool added from "+", the comment page loaded and on the pane.
+// The session shown, its optional Browser surface opened, the comment page loaded and on the pane.
 async function openCommentPage(s: BrowserScene, id: AppSessionId): Promise<CommentTab> {
   await show(s, id);
   const panel = await openBrowser(s);
@@ -464,6 +464,9 @@ async function liveParent(s: BrowserScene, parent: AppSessionId, journal: string
 // The parent's recorded turn (its journal's `turn(MAIN_REPLY)`), sent as an ordinary prompt where a case has no Send to
 // main of its own (the parent's one written prompt); done once its result has played and the parent is idle again.
 async function parentTurn(s: BrowserScene, parent: AppSessionId): Promise<void> {
+  // This is setup for the thread, not a background-completion notification case. Keep the parent in front so its
+  // finished toast does not correctly cover the Browser page the case opens next.
+  await show(s, parent);
   value(await invoke(s.page, 'session.send', { appSessionId: parent, content: MAIN_COMMENT }));
   await expect.poll(() => s.journal(parent).some((r) => r.direction === 'in' && (r.frame as { type?: string }).type === 'result'), { timeout: 20_000 }).toBe(true);
   await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: parent })).turn, { timeout: 20_000 }).toBeNull();

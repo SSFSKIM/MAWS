@@ -39,9 +39,15 @@ export async function closeSurface(page: Page, name: string): Promise<void> {
 }
 
 export async function hideSurfaces(page: Page): Promise<void> {
-  // Collapse, rather than close the retained tools. The public default action works even when all icons have folded.
+  // Collapse, rather than close the retained tools. The isolated #panel page has its own real control, not the
+  // product's native application menu; both routes invoke the same registered shell action.
   const panel = page.locator('[data-region="panel"]:not([inert])');
-  if (await panel.count() || await sessionCards(page).isVisible()) await menu(applicationOf(page), 'panel.toggle');
+  if (!await panel.count() && !await sessionCards(page).isVisible()) return;
+  const harness = page.locator('[data-panel-harness]');
+  if (await harness.count()) await harness.getByRole('button', { name: 'Hide panel', exact: true }).click();
+  else await menu(applicationOf(page), 'panel.toggle');
+  await expect(panel).toHaveCount(0);
+  await expect(sessionCards(page)).toBeHidden();
 }
 
 export async function showSessionCards(page: Page): Promise<Locator> {

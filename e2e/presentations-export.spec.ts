@@ -54,11 +54,29 @@ const POPPLER = '/opt/homebrew/bin';
 
 let launch: MawsLaunch | null = null;
 let scratch: string | null = null;
-test.afterEach(async () => {
-  await launch?.cleanup();
-  launch = null;
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
-  scratch = null;
+let exportMenuTrace = false;
+test.afterEach(async ({}, testInfo) => {
+  try {
+    if (exportMenuTrace && launch) {
+      try {
+        if (testInfo.status !== testInfo.expectedStatus) {
+          const path = testInfo.outputPath('export-menu-failure.png');
+          await launch.page.screenshot({ path });
+          await testInfo.attach('Export menu failure', { path, contentType: 'image/png' });
+        }
+      } finally {
+        exportMenuTrace = false;
+        const path = testInfo.outputPath('export-menu-trace.zip');
+        await launch.page.context().tracing.stop({ path });
+        await testInfo.attach('Export menu trace', { path, contentType: 'application/zip' });
+      }
+    }
+  } finally {
+    await launch?.cleanup();
+    launch = null;
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+    scratch = null;
+  }
 });
 
 async function ready(env: Record<string, string> = {}): Promise<Page> {
@@ -557,6 +575,8 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
   const saved = join(scratch, 'saved');
   mkdirSync(saved);
   const page = await ready({ MAWS_E2E_SAVE_PATH: saved });
+  await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
+  exportMenuTrace = true;
   const id = await createDeck(page, 'Quarterly', DECK);
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   await page.locator('[data-library]').getByRole('article', { name: 'Quarterly', exact: true }).click();

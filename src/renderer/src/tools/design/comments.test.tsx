@@ -124,7 +124,7 @@ describe('a design opened as its own tab', () => {
     await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy());
   }
   const comment = async () => {
-    const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Design' })).getByRole('button', { name: 'Comment' }));
+    const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Design' })).getByRole('button', { name: 'Add comment' }));
     act(() => button.click());
     await act(async () => {});
   };
@@ -193,7 +193,7 @@ describe('a design’s compose card keeps its draft', () => {
     );
     await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy());
     const comment = async () => {
-      const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Design' })).getByRole('button', { name: 'Comment' }));
+      const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Design' })).getByRole('button', { name: 'Add comment' }));
       act(() => button.click());
       await act(async () => {});
     };

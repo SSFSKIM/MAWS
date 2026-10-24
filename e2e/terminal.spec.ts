@@ -556,7 +556,17 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
   const within = latencyBudgets();
   const h = await harnessOf(maws);
   const { tabId, id } = await h.addTerminal();
+  // UX2 docks an empty surface stack, so load's pre-creation maximize cannot calibrate this workload. Expand only
+  // after Terminal exists, and again after the cards hide it. The partial FOX line plus the longest marker needs 62 cols.
+  const calibrateWidth = async () => {
+    const terminal = surface(h.page, 'terminal');
+    const maximize = terminal.getByRole('button', { name: 'Maximize right panel', exact: true });
+    if (await maximize.count()) await maximize.click();
+    await expect(terminal.getByRole('button', { name: 'Restore right panel', exact: true })).toBeVisible();
+    await expect.poll(async () => (await h.snap(id)).cols, { message: 'the full W1 marker fits its final output row' }).toBeGreaterThanOrEqual(62);
+  };
   await h.prompt(id);
+  await calibrateWidth();
   // A prompt without a clock or a duration, so `true` and the workload differ only by the workload's output.
   await h.run(id, 'exec /bin/bash --norc --noprofile');
   await sleep(800);
@@ -589,6 +599,7 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
     await h.run(id, `${FOX}; echo W1-HIDDEN-$((6*7))`);
     await expect.poll(pausedSeen, { timeout: 30_000, message: "W1's fox line pauses the pty at the high watermark" }).toBe(true);
     await h.selectTerminalTab(tabId);
+    await calibrateWidth();
     await ends('W1-HIDDEN-42');
     await h.idle(id, 500);
 

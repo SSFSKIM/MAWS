@@ -51,7 +51,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
   let firstTab = '';
   await test.step('Comment on the selected chart opens the card on the block, its locator the view and caption, and writes no mark', async () => {
     await selectChart(record);
-    await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+    await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
     const card = page.locator('[data-comment-card]');
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');

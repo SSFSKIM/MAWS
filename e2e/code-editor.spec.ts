@@ -13,6 +13,7 @@ import { CONFLICT_BLOCK, MERGE_LINES } from './support/code-scratch';
 import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
 import { MEASURED_WAIT_MS } from './support/latency';
+import { closeSurface, openSurface } from './support/shell';
 
 const APP = 'src/app.ts';
 const MERGE = 'conflicts/merge.ts';
@@ -223,8 +224,10 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       // E11 W-D: at a viewer about 600 px wide the merge bar's controls take the directory's width, never the file's name
       const [width, height] = await p.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
       const resize = (next: number) => p.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [next, height] as const);
-      const wide = (await viewer.boundingBox())!.width;
-      await resize(Math.round(width - (wide - 600)));
+      // Files otherwise consumes a responsive share of the window (and becomes a sheet below 700 px).
+      // Close it through its chrome; at 600 px the sidebar yields and the real viewer fills main.
+      await closeSurface(p.page, 'Files');
+      await resize(600);
       await expect.poll(async () => Math.abs((await viewer.boundingBox())!.width - 600), { message: 'the viewer about 600 px wide' }).toBeLessThan(40);
       const name = viewer.locator('[data-path-name]');
       await expect(name).toHaveText('app.ts');
@@ -232,6 +235,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       expect(shown.width, 'the basename drawn whole').toBeGreaterThanOrEqual(shown.needed - 0.5);
       expect(shown.right, 'inside the bar').toBeLessThanOrEqual(shown.bar);
       await resize(width);
+      await openSurface(p.page, 'Files');
 
       // The first chunk is the typed line, which the disk lacks: Take theirs drops it; the rest stays mine.
       await chunks.first().getByRole('button', { name: 'Take theirs' }).click();

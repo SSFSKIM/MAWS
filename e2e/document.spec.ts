@@ -201,14 +201,14 @@ test('a document opens in a main tab and in the panel as two replicas; the heade
     await expect(rail.getByRole('button', { name: /^Version / })).toHaveCount(listed.versions.length);
 
     // the rail closes from the header, then the text after the version goes and comes back by Restore
-    await mainHeader.getByRole('button', { name: 'Version history' }).click();
+    await main.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
     await expect(rail).toBeHidden();
     await mainText.click();
     await page.keyboard.press('End');
     await page.keyboard.type(' Doomed sentence.');
     await expect(panelText).toContainText('Doomed sentence.', { timeout: 10_000 });
     await durable(main);
-    await mainHeader.getByRole('button', { name: 'Version history' }).click();
+    await main.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
     await rail.getByRole('button', { name: /^Version Before the cut/ }).click();
     const bar = main.getByRole('toolbar', { name: 'Version preview' });
     await expect(bar).toBeVisible({ timeout: 10_000 });
@@ -382,7 +382,7 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
       await page.keyboard.type(' Added after the version.');
       await durable(main);
       await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'With the addition' });
-      await mainHeader.getByRole('button', { name: 'Version history' }).click();
+      await main.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
       const rail = main.getByRole('complementary', { name: 'Version history' });
       await rail.getByRole('button', { name: /^Version Three tabs/ }).click();
       const bar = main.getByRole('toolbar', { name: 'Version preview' });
@@ -400,7 +400,7 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
       for (const item of await items.all()) await expect(item, 'two versions compared: nothing to export').toBeDisabled();
       await page.keyboard.press('Escape');
 
-      await mainHeader.getByRole('button', { name: 'Version history' }).click();
+      await rail.getByRole('button', { name: 'Close version history', exact: true }).click();
       await expect(bar).toBeHidden();
       rmSync(savedFile('Quarterly plan.md'));
       await pick('Markdown (.md)');
@@ -594,7 +594,7 @@ const markedText = (text: Locator) =>
 async function commentOn(page: Page, record: Locator, text: Locator, index: number, quote: string): Promise<string> {
   const before = new Set(Object.keys(await markedText(text)));
   await selectIn(text, index, quote);
-  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');

@@ -110,36 +110,55 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(deck.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   const toolbar = deck.getByRole('toolbar', { name: 'Deck' });
 
-  // at the panel's default width a rail is a sheet over the stage, which keeps its width (Decision Log 31's ruling)
-  expect((await deck.locator('[data-deck-editor]').boundingBox())!.width).toBeLessThan(720);
+  // UX2 surfaces are content-sized, so deliberately narrow this editor rather than assuming the default panel is small.
+  // Below the usable stage width the floating card overlays without reserving slide space.
+  const editor = deck.locator('[data-deck-editor]');
+  const divider = panel.getByRole('separator', { name: 'Resize right panel' });
+  const narrowBy = Number(await divider.getAttribute('aria-valuenow')) - 600;
+  const narrowGrip = (await divider.boundingBox())!;
+  const gripX = narrowGrip.x + narrowGrip.width / 2;
+  const gripY = narrowGrip.y + narrowGrip.height / 2;
+  await page.mouse.move(gripX, gripY);
+  await page.mouse.down();
+  await page.mouse.move(gripX + narrowBy, gripY, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => Number(await divider.getAttribute('aria-valuenow'))).toBe(600);
+  const narrowEditor = (await editor.boundingBox())!;
+  expect(narrowEditor.width, 'the editor reflects the genuinely narrowed surface').toBeLessThanOrEqual(600);
+  expect(narrowEditor.width, 'only surface chrome is deducted').toBeGreaterThan(560);
   const surface = deck.locator('[data-stage-surface]');
+  await settledStage(deck);
   const before = (await surface.boundingBox())!;
+  const slideBefore = (await deck.locator('[data-stage-slide]').boundingBox())!;
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   const sheet = deck.locator('[data-deck-rail="comments"]');
+  const stack = deck.locator('.deck-tool-cards');
   await expect(sheet).toBeVisible();
-  expect(await sheet.evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
-  const [over, under] = [(await sheet.boundingBox())!, (await surface.boundingBox())!];
+  await expect(stack).toHaveCSS('position', 'absolute');
+  const [over, under] = [(await stack.boundingBox())!, (await surface.boundingBox())!];
   expect(Math.abs(under.width - before.width)).toBeLessThan(1);
+  await expect.poll(async () => (await deck.locator('[data-stage-slide]').boundingBox())!.width).toBeCloseTo(slideBefore.width, 0);
   expect(over.x).toBeLessThan(under.x + under.width); // it lies over the stage's right side
-  expect(over.x + over.width).toBeGreaterThan(under.x + under.width - 1);
+  expect(Math.abs(over.x + over.width - (under.x + under.width - 8)), 'the card stack keeps its 8px right inset').toBeLessThan(1);
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(sheet).toHaveCount(0);
 
-  // the panel widened to its widest (640 px), so the gestures below have room on the stage
-  const divider = panel.getByRole('separator', { name: 'Resize right panel' });
+  // The panel widened to its widest through the same real divider, so the gestures below have room on the stage
   const room = Number(await divider.getAttribute('aria-valuemax')) - Number(await divider.getAttribute('aria-valuenow'));
   const grip = (await divider.boundingBox())!;
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
   await page.mouse.down();
   await page.mouse.move(grip.x + grip.width / 2 - room, grip.y + grip.height / 2, { steps: 8 });
   await page.mouse.up();
-  await expect.poll(async () => (await panel.boundingBox())!.width).toBeGreaterThanOrEqual(600);
+  await expect.poll(async () => Number(await divider.getAttribute('aria-valuenow'))).toBe(Number(await divider.getAttribute('aria-valuemax')));
+  await expect.poll(async () => (await editor.boundingBox())!.width, { message: 'the real surface is wide again for editing' }).toBeGreaterThan(720);
+  await settledStage(deck);
 
   // the element selected by a click and commented: P2's card on B's artifact target, labelled with the slide
   const first = (await stageAt(deck)).at;
   await page.mouse.click(first(550, 560).x, first(550, 560).y);
   await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
-  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+  await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
@@ -154,7 +173,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(thread).toHaveAttribute('data-status', 'resolved');
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-status', 'open');
-  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible(); // the header's count
+  await expect(panel.getByTitle('1 open comment', { exact: true })).toBeVisible(); // the header's count
 
   // the pin at the element's top-right
   await expect.poll(() => pinOffset(deck, 'body'), { message: 'the pin on the element’s corner' }).toBeLessThan(4);
@@ -202,20 +221,20 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(thread).toContainText('The commented element was deleted.');
   await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths');
   await expect(deck.locator('[data-comment-pin]')).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: /open comment/ })).toHaveCount(0);
+  await expect(panel.getByTitle(/^\d+ open comments?$/)).toHaveCount(0);
 
   // Resolve and Reopen in the rail; a revealed orphan still never contributes to the live-target header count
   await thread.getByRole('button', { name: 'Resolve' }).click();
   await expect(thread).toHaveAttribute('data-status', 'resolved');
-  await expect(panel.getByRole('button', { name: /open comment/ })).toHaveCount(0);
+  await expect(panel.getByTitle(/^\d+ open comments?$/)).toHaveCount(0);
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-orphan', '');
-  await expect(panel.getByRole('button', { name: /open comment/ })).toHaveCount(0);
+  await expect(panel.getByTitle(/^\d+ open comments?$/)).toHaveCount(0);
   // an undo brings the element back: the thread is no orphan any more, its pin and header count are back
   await deck.getByRole('button', { name: 'Undo' }).click();
   await expect(thread).not.toHaveAttribute('data-orphan', '');
   await expect.poll(() => pinOffset(deck, 'body')).toBeLessThan(4);
-  await expect(panel.getByRole('button', { name: '1 open comment', exact: true })).toBeVisible();
+  await expect(panel.getByTitle('1 open comment', { exact: true })).toBeVisible();
 
   expect(launch!.consoleErrors()).toEqual([]);
 });
@@ -256,7 +275,7 @@ test('the pin popover: at the pin with its reply field focused, Escape keeps the
   // card's view while nothing is sent in it; reopened, it is the pin's)
   await page.mouse.click(at(550, 560).x, at(550, 560).y);
   await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
-  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+  await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: 'Resolve' }).click();
