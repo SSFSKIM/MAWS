@@ -4,7 +4,7 @@
 // M4's strip, summary, R7, theme and side-column Terminal cases) run the `#panel` page, over the harness scenario's two
 // sessions (ruling O1), so that main's read model knows A and B, accepts their panel keys, and a Terminal tab has a
 // directory to start in. The last two cases run the product over a scenario derived from C5's nine-sessions.json.
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
@@ -715,7 +715,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await panel.call('switchSession', 'B');
     await openSurface(panel.page, 'Background work');
     await expect(surface(panel.page, 'background')).toContainText('Shells and monitors are known only while the session runs here');
-    await expect(surface(panel.page, 'background')).toContainText('Shells · 0 running');
+    // Unknown while offline is not zero: no live Shells counter should be claimed for this disk-only session.
+    await expect(surface(panel.page, 'background')).not.toContainText('Shells ·');
     panel.expectQuietConsole();
   });
 
@@ -752,14 +753,15 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     for (const width of [280, 380, 640, 'maximized'] as const) {
       await test.step(`${width}`, async () => {
         if (open) expect(await panel.call('closeTab', open)).toBe(true); // a fresh child over a fresh player
-        if (width === 'maximized') await panel.call('maximize', true);
-        else await panel.call('setWidth', width);
         await panel.call('loadTranscript', 'A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
         open = await panel.call('addTool', 'child');
+        // UX2 restores main when there is no selected surface. Size/maximize the real child after opening it, not the
+        // empty stack between iterations, whose maximal state would correctly normalize back to docked.
+        if (width === 'maximized') await panel.call('maximize', true);
+        else await panel.call('setWidth', width);
         await expect.poll(async () => (await panel.metrics()).rows, 'the child’s history').toBeGreaterThan(0);
-        const region = await panel.metrics();
-        if (width === 'maximized') expect(region.regionWidth, 'maximized: wider than the widest side width').toBeGreaterThan(640);
-        else expect(region.regionWidth, 'UX2: the 380px sentinel adopts a content-sized default; narrow tools cap at 420px').toBe(width === 280 ? 280 : 420);
+        if (width === 'maximized') await expect.poll(async () => (await panel.metrics()).regionWidth, 'maximized: wider than the widest side width').toBeGreaterThan(640);
+        else await expect.poll(async () => (await panel.metrics()).regionWidth, 'UX2: the 380px sentinel adopts a content-sized default; narrow tools cap at 420px').toBe(width === 280 ? 280 : 420);
 
         let last: PanelChildMetrics | null = null;
         for (const [i, count] of PANEL_CHILD_TAIL.batches.entries()) {
@@ -957,12 +959,20 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 }
 
 // The product app over nine-sessions.json copied with *Charter + research* pointed at a scratch repository.
-async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<void>): Promise<void> {
+// A Files case may point one more session at that real root instead of a recorded, nonexistent probe directory.
+async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<void>, { filesFor }: { filesFor?: string } = {}): Promise<void> {
   const repo = scratchRepository();
   const dir = mkdtempSync(join(tmpdir(), 'maws-panel-scenario-'));
   let maws: MawsLaunch | null = null;
   try {
     const scenario = panelScenario(dir, repo.dir);
+    if (filesFor) {
+      const fixture = JSON.parse(readFileSync(scenario, 'utf8')) as { sessions: { title: { text: string }; directory: string }[] };
+      const session = fixture.sessions.find((record) => record.title.text === filesFor);
+      if (!session) throw new Error(`Files fixture has no session ${filesFor}`);
+      session.directory = repo.dir;
+      writeFileSync(scenario, JSON.stringify(fixture, null, 2));
+    }
     maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0' } });
     await body(maws, maws.page.locator('[data-region="panel"]'));
   } finally {
@@ -1138,6 +1148,7 @@ test.describe('the floating session card (P3-G)', () => {
         await openSurface(page, 'Files');
         await closeSurface(page, 'Session info');
         await expect(surface(page, 'files').getByRole('tree')).toBeVisible();
+        await expect(surface(page, 'files').getByRole('treeitem').first(), 'the real scratch root renders behind the card').toBeVisible();
         expect(await near()).toEqual({ right: 16, bottom: 16 });
         // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
         // top, so the strip above it and its controls stay clear
@@ -1164,7 +1175,7 @@ test.describe('the floating session card (P3-G)', () => {
         await expect(composers).toHaveCount(1);
       });
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
-    });
+    }, { filesFor: USAGE });
   });
 
   // The whole-branch review: at its minimum size a docked request and the composer are taller than the card. The card's
