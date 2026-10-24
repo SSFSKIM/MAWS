@@ -166,19 +166,11 @@ async function closeTab(page: Page, title: string): Promise<void> {
   await expect(page.getByRole('button', { name: `Close ${title}`, exact: true })).toHaveCount(0, { timeout: 15_000 });
 }
 
-/** A header action by its label: its button, or its entry under More actions when the header folded it there. */
-async function headerAction(page: Page, label: string): Promise<void> {
-  if (label === 'Version history') {
-    const editor = page.locator('[data-region="main"] [data-deck-editor]');
-    const close = editor.getByRole('button', { name: 'Close version history', exact: true });
-    if (await close.isVisible()) return close.click();
-    return editor.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: label, exact: true }).click();
-  }
-  const header = page.locator('[data-region="main"] [data-editor-header]');
-  const button = header.getByRole('button', { name: label, exact: true });
-  if (await button.isVisible()) return button.click();
-  await header.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
+async function toggleHistory(page: Page): Promise<void> {
+  const editor = page.locator('[data-region="main"] [data-deck-editor]');
+  const close = editor.getByRole('button', { name: 'Close version history', exact: true });
+  if (await close.isVisible()) return close.click();
+  await editor.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
 }
 
 test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an agent republishing, the renderer, the publishes, the history preview', async () => {
@@ -314,7 +306,7 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
 
   await test.step('5: the history preview of the seeded version, three times', async () => {
     await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'After the run' });
-    await headerAction(page, 'Version history');
+    await toggleHistory(page);
     const rail = tab.getByRole('complementary', { name: 'Version history' });
     await expect(rail).toBeVisible();
     const bar = tab.getByRole('toolbar', { name: 'Version preview' });
@@ -396,7 +388,7 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       await page.locator('[data-library]').getByRole('article', { name: 'Heavy deck', exact: true }).click();
       const heavyTab = page.locator(`[data-region="main"] [data-artifact-tab="${heavy.id}"]`);
       await expect(heavyTab.locator('[data-deck-editor]')).toBeVisible({ timeout: 30_000 });
-      await headerAction(page, 'Version history');
+      await toggleHistory(page);
       const rail = heavyTab.getByRole('complementary', { name: 'Version history' });
       const bar = heavyTab.getByRole('toolbar', { name: 'Version preview' });
       const heavyQuiet = await quietWait(); // the heavy row's first trial's, after the soak and the heavy deck's setup

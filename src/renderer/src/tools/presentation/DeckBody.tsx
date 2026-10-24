@@ -85,9 +85,11 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
     () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
     [opened, artifactId],
   );
+  const [toolbarElement, setToolbarElement] = useState<HTMLDivElement | null>(null);
+  const toolbarHost = useMemo(() => toolbarElement ? { element: toolbarElement, menuLabel: 'Deck actions' } : null, [toolbarElement]);
   const header = deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, unresolved: snapshot.unresolved, history: state.history !== null }, commands);
   const sendTo = useSendToAction(sendToSubject(artifactId, 'presentation', row?.title, shown)); // P4-B5
-  useEditorHost(scope, sendTo ? { ...header, actions: [...(header.actions ?? []), sendTo] } : header);
+  useEditorHost(scope, { ...header, toolbarHost, ...(sendTo && { actions: [...(header.actions ?? []), sendTo] }) });
 
   // M7: comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown,
   // to the deck's own context; not offered only while that is unread
@@ -151,6 +153,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         system={system}
         readOnly={snapshot.document?.readOnly ?? false}
         compact={compact}
+        onToolbarHost={setToolbarElement}
         onStage={onStage}
         onDrawn={onDrawn}
         onThumbnailsDrawn={onThumbnailsDrawn}

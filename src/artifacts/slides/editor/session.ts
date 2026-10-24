@@ -40,6 +40,7 @@ export type DeckRail = 'theme' | 'check' | 'comments' | 'history'; // M7: the th
 export interface DeckSessionState {
   currentSlide: string | null;
   zoom: Zoom;
+  notesOpen: boolean;
   canUndo: boolean;
   canRedo: boolean;
   /** M5: the selected elements of the current slide, in the order they were picked (the last is the inspector's). */
@@ -141,7 +142,7 @@ export class DeckSession {
     private readonly options: DeckSessionOptions = {},
   ) {
     this.undo = createDeckUndo(doc, { editor: 'deck' });
-    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0, shown: null, keyboard: 'away', dragging: false, composing: false };
+    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', notesOpen: false, canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0, shown: null, keyboard: 'away', dragging: false, composing: false };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
     this.publish();
@@ -391,6 +392,9 @@ export class DeckSession {
   }
   setZoom(zoom: Zoom): void {
     this.set({ zoom });
+  }
+  setNotesOpen(notesOpen: boolean): void {
+    this.set({ notesOpen });
   }
   /** L233: the editor shows a retained version, two compared, or (null) the live deck. */
   showVersion(shown: DeckShown): void {

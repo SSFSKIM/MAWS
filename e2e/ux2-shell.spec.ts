@@ -1,10 +1,14 @@
 // UX2-L acceptance in the real, quiet Electron app: the scenario supplies sessions, not replacement UI.
 // launchMaws owns an isolated profile/config/shell home per case. Screenshots are report attachments, not baselines.
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseScenario } from '../test/support/scenario';
+import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '../src/shared/ipc/schema';
 import { AppSessionIdSchema } from '../src/shared/graph/ids';
-import { test, type MawsLaunch } from './support/launch';
+import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
 import { closeSurface, openSurface, unfoldSessionCard } from './support/shell';
@@ -89,6 +93,126 @@ async function openSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
   await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Harness A', exact: true })).toHaveAttribute('aria-selected', 'true');
 }
+
+// Identical measurement-only code runs before and after the chrome changes. The lead compares independent run artifacts.
+// eslint-disable-next-line no-empty-pattern -- this case owns its isolated fixture launch
+test('Chrome measurements: document, deck and live Customize at both desktop sizes', async ({}, info) => {
+  test.setTimeout(120_000);
+  const root = mkdtempSync(join(tmpdir(), 'maws-chrome-measure-'));
+  const directory = join(root, 'chrome-project');
+  mkdirSync(directory);
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/panel/harness-sessions.json'), 'utf8'));
+  scenario.projects[0].directory = directory;
+  scenario.sessions.forEach((record: { directory: string; worktree: unknown }) => { record.directory = directory; record.worktree = null; });
+  scenario.engine = [{ appSessionId: 'A', process: 'ready', engineState: 'idle', turn: null, pendingRequests: 0 }];
+  expect(parseScenario(scenario).engine[0]?.cwd).toBe(directory);
+  const source = join(root, 'scenario.json');
+  writeFileSync(source, JSON.stringify(scenario));
+  const plugins = [{ name: 'chrome-review', version: '1.0.0', description: 'Review the working narrative.' }];
+  const market = scratchMarketplace(join(root, 'market'), { name: 'chrome-tools', plugins });
+  const cli = writePluginCliStub(root, { marketplaces: [{ name: 'chrome-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'chrome-review@chrome-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
+  try {
+    const maws = await launchMaws({ userData: root, env: { ...ENV, MAWS_SESSION_SOURCE: `stub:${source}`, MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
+    try {
+      const { page } = maws;
+      await openSession(page);
+      await expect.poll(async () => value(await invoke(page, 'engine.hostState', undefined)).state, { timeout: 20_000 }).toBe('ready');
+      const document = value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Chrome working notes' })).artifact;
+      const deck = value(await invoke(page, 'artifacts.create', { kind: 'presentation', title: 'Chrome review deck' })).artifact;
+      await page.waitForFunction(() => typeof (window as unknown as { __maws_presentations?: unknown }).__maws_presentations === 'object');
+      await page.evaluate(async ([id, files]) => {
+        const seam = (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<unknown> } }).__maws_presentations;
+        await seam.seed(id, files);
+      }, [deck.id, DECK_FILES] as const);
+      const capture = async (state: string, selectors: Record<string, string>) => {
+        const geometry = await page.evaluate((selectors) => {
+          const rectangle = (node: Element) => { const b = node.getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height, bottom: b.bottom }; };
+          const visible = (node: Element) => { const b = node.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(node).visibility !== 'hidden'; };
+          const boxes = Object.fromEntries(Object.entries(selectors).map(([key, selector]) => [key, [...document.querySelectorAll(selector)].filter(visible).map(rectangle)]));
+          const main = document.querySelector('[data-region="main"]')!;
+          const content = boxes.page?.[0] ?? boxes.stage?.[0] ?? boxes.firstPlugin?.[0] ?? null;
+          return { window: { width: innerWidth, height: innerHeight }, main: rectangle(main), boxes, contentTopFromMain: content ? content.y - main.getBoundingClientRect().y : null,
+            features: { sectionStrip: document.querySelectorAll('.doc-tabs').length, deckToolbarHost: document.querySelectorAll('[data-editor-toolbar]').length, notesDisclosure: document.querySelectorAll('[data-notes-disclosure]').length, liveScope: document.querySelectorAll('select[aria-label="Live session"]').length } };
+        }, selectors);
+        const name = `chrome-${state}-${geometry.window.width}x${geometry.window.height}`;
+        await info.attach(`${name}.json`, { body: Buffer.from(JSON.stringify(geometry, null, 2)), contentType: 'application/json' });
+        await shot(maws, info, `chrome-${state}`);
+      };
+      for (const { width, height } of SIZES) {
+        await size(maws, width, height);
+        const notes = await openArtifact(page, 'Chrome working notes', document.id);
+        await expect(notes.locator('.ds-doc .ProseMirror')).toBeVisible({ timeout: 15_000 });
+        await capture('document-single-section', { header: '[data-region="main"] [data-editor-header]', sections: '.doc-tabs', toolbar: '.doc-toolbar', page: '.doc-page-frame', editor: '.ds-doc .ProseMirror' });
+        const deckTab = await openArtifact(page, 'Chrome review deck', deck.id);
+        await expect(deckTab.locator('[data-stage-slide]')).toBeVisible({ timeout: 15_000 });
+        await capture('deck-default', { header: '[data-region="main"] [data-editor-header]', toolbar: '.deck-toolbar', stage: '.deck-stage', slide: '[data-stage-slide]', notes: '.deck-notes', notesField: '.deck-notes-field', filmstrip: '.deck-filmstrip' });
+        const disclosure = deckTab.locator('[data-notes-disclosure]');
+        if (await disclosure.count()) {
+          await disclosure.click();
+          await expect(deckTab.getByRole('textbox', { name: 'Speaker notes' })).toBeVisible();
+          await capture('deck-notes-open', { toolbar: '.deck-toolbar', stage: '.deck-stage', notes: '.deck-notes', notesField: '.deck-notes-field' });
+          await disclosure.click();
+        }
+        await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
+        await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('proj-harness');
+        await expect(page.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
+        await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
+        await capture('customize-live-plugins', { header: '[data-region="main"] header', sections: '[aria-label="Customize sections"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', library: '[data-widget-variant="embedded"] > header', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
+      }
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally { await maws.cleanup(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// eslint-disable-next-line no-empty-pattern -- this case owns its ready-session fixture launch
+test('Chrome: live Customize keeps scopes on its two control rows and loaded feedback on the third', async ({}, info) => {
+  test.setTimeout(90_000);
+  const root = mkdtempSync(join(tmpdir(), 'maws-customize-chrome-'));
+  const directory = join(root, 'chrome-project');
+  mkdirSync(directory);
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/panel/harness-sessions.json'), 'utf8'));
+  scenario.projects[0].directory = directory;
+  scenario.sessions.forEach((record: { directory: string; worktree: unknown }) => { record.directory = directory; record.worktree = null; });
+  scenario.engine = [{ appSessionId: 'A', process: 'ready', engineState: 'idle', turn: null, pendingRequests: 0 }];
+  expect(parseScenario(scenario).engine[0]?.cwd).toBe(directory);
+  const source = join(root, 'scenario.json');
+  writeFileSync(source, JSON.stringify(scenario));
+  const plugins = [{ name: 'chrome-review', version: '1.0.0', description: 'Review the working narrative.' }];
+  const market = scratchMarketplace(join(root, 'market'), { name: 'chrome-tools', plugins });
+  const cli = writePluginCliStub(root, { marketplaces: [{ name: 'chrome-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'chrome-review@chrome-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
+  try {
+    const maws = await launchMaws({ userData: root, env: { ...ENV, MAWS_SESSION_SOURCE: `stub:${source}`, MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
+    try {
+      const { page } = maws;
+      await openSession(page);
+      await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('proj-harness');
+      const header = main(page).locator('[data-customize-header]');
+      const library = page.locator('[data-widget="plugins"][data-widget-variant="embedded"] > header');
+      await expect(library.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
+      await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
+      for (const { width, height } of SIZES) {
+        await size(maws, width, height);
+        const headerControls = await Promise.all([box(header.getByRole('heading', { name: 'Customize', exact: true })), box(header.getByRole('tablist', { name: 'Customize sections' })), box(header.getByRole('combobox', { name: 'Project', exact: true }))]);
+        const libraryControls = await Promise.all([box(library.getByRole('radio', { name: 'My items', exact: true })), box(library.getByRole('searchbox', { name: 'Search plugins', exact: true })), box(library.getByRole('combobox', { name: 'Live session', exact: true }))]);
+        for (const row of [headerControls, libraryControls]) {
+          const centers = row.map((rect) => rect.y + rect.height / 2);
+          expect(Math.max(...centers) - Math.min(...centers), 'scope controls share their earned row at desktop widths').toBeLessThanOrEqual(1);
+        }
+        await expect(library.getByRole('heading', { name: 'Plugins', exact: true })).toHaveCount(0);
+        const loaded = await box(page.locator('[data-plugins-loaded]'));
+        const content = await box(page.locator('[data-plugin-row="chrome-review@chrome-tools"]'));
+        const mainBox = await box(main(page));
+        expect(loaded.y).toBeGreaterThanOrEqual((await box(library)).y + (await box(library)).height);
+        expect(content.y).toBeGreaterThan(loaded.y + loaded.height);
+        expect(await main(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
+        await info.attach(`customize-chrome-regression-${width}x${height}.json`, { body: Buffer.from(JSON.stringify({ window: { width, height }, main: mainBox, headerControls, libraryControls, loaded, firstPlugin: content, contentTopFromMain: content.y - mainBox.y }, null, 2)), contentType: 'application/json' });
+        await shot(maws, info, 'customize-three-rows');
+      }
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally { await maws.cleanup(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('UX2: one chrome row and no reserved column for empty main or Settings', async ({ maws }, info) => {
   const { page } = maws;
@@ -359,6 +483,21 @@ test('UX2: real Library document and deck editors use main without an empty pane
     const documentTab = await openArtifact(page, 'UX2 working notes', document.id);
     await expect(documentTab.locator('.ds-doc .ProseMirror')).toContainText('The main area is the main thing.');
     const documentTools = documentTab.getByRole('toolbar', { name: 'Formatting', exact: true });
+    await expect(documentTab.locator('.doc-tabs')).toHaveCount(0);
+    const singlePage = await box(documentTab.locator('.doc-page-frame'));
+    await documentTools.getByRole('button', { name: 'Insert', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'New section', exact: true }).click();
+    await expect(documentTab.locator('.doc-tabs').getByRole('tab')).toHaveCount(2);
+    const earnedStrip = await box(documentTab.locator('.doc-tabs'));
+    const multiPage = await box(documentTab.locator('.doc-page-frame'));
+    expect(Math.abs(multiPage.y - singlePage.y - earnedStrip.height), 'a single-section page starts one measured section-strip height earlier').toBeLessThanOrEqual(1);
+    expect(Math.abs(singlePage.height - multiPage.height - earnedStrip.height), 'the removed row becomes actual page height').toBeLessThanOrEqual(1);
+    await shot(maws, info, 'document-two-sections');
+    await documentTab.getByRole('button', { name: 'Delete Tab 2', exact: true }).click();
+    await expect(documentTab.locator('.doc-tabs')).toHaveCount(0);
+    await expect(documentTab.locator('.ds-doc .ProseMirror')).toContainText('The main area is the main thing.');
+    await expect.poll(async () => (await box(documentTab.locator('.doc-page-frame'))).height).toBe(singlePage.height);
+    await info.attach(`document-chrome-regression-${width}x${height}.json`, { body: Buffer.from(JSON.stringify({ window: { width, height }, singlePage, multiPage, earnedStrip, recoveredPagePixels: singlePage.height - multiPage.height }, null, 2)), contentType: 'application/json' });
     await expect(documentTools.getByRole('button', { name: 'Version history', exact: true })).toHaveCount(1);
     await expect(documentTools.getByRole('button', { name: /^Comments(?: |$)/ })).toHaveCount(1);
     await expect(documentTools.getByRole('button', { name: 'Add comment', exact: true })).toBeVisible();
@@ -369,6 +508,29 @@ test('UX2: real Library document and deck editors use main without an empty pane
     const deckTab = await openArtifact(page, 'UX2 review', deck.id);
     await expect(deckTab.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
     await expect(deckTab.locator('[data-deck-editor]')).toContainText('Main is the main thing');
+    await expect(main(page).locator('[data-editor-header]')).toHaveCount(0);
+    const deckTools = deckTab.getByRole('toolbar', { name: 'Deck', exact: true });
+    await expect(deckTools.locator('[data-editor-toolbar]')).toBeVisible();
+    await expect(deckTools.getByRole('button', { name: 'Present', exact: true })).toBeVisible();
+    await expect(deckTools.getByRole('button', { name: 'Deck actions', exact: true })).toBeVisible();
+    const mainBox = await box(main(page));
+    const toolbarBox = await box(deckTools);
+    expect(toolbarBox.y, 'the working toolbar is flush with main; no metadata row remains above it').toBe(mainBox.y);
+    const notesToggle = deckTab.locator('[data-notes-disclosure]');
+    await expect(notesToggle).toHaveAttribute('aria-expanded', 'false');
+    const foldedNotes = await box(deckTab.locator('.deck-notes'));
+    const foldedStage = await box(deckTab.locator('.deck-stage'));
+    expect(foldedNotes.height, 'unused notes occupy only the approved disclosure row').toBeLessThanOrEqual(28.5);
+    await notesToggle.click();
+    await expect(deckTab.getByRole('textbox', { name: 'Speaker notes' })).toBeVisible();
+    const expandedNotes = await box(deckTab.locator('.deck-notes'));
+    const expandedStage = await box(deckTab.locator('.deck-stage'));
+    expect(expandedNotes.height).toBeGreaterThan(foldedNotes.height);
+    expect(Math.abs(foldedStage.height - expandedStage.height - (expandedNotes.height - foldedNotes.height)), 'folding notes gives the stage the actual measured height, not a presumed pixel budget').toBeLessThanOrEqual(1);
+    await shot(maws, info, 'deck-notes-expanded');
+    await notesToggle.click();
+    await expect.poll(async () => (await box(deckTab.locator('.deck-stage'))).height).toBe(foldedStage.height);
+    await info.attach(`deck-chrome-regression-${width}x${height}.json`, { body: Buffer.from(JSON.stringify({ window: { width, height }, main: mainBox, toolbar: toolbarBox, foldedNotes, expandedNotes, foldedStage, expandedStage, currentBuildRecoveredStagePixels: foldedStage.height - expandedStage.height }, null, 2)), contentType: 'application/json' });
     await noReservedPanel(page);
     await singleChromeRow(page);
     await deckFilmstripPlacement(deckTab, width === 1280);

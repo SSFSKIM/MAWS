@@ -2,6 +2,9 @@
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { HistoryApi } from '../../document/editor/history/api';
@@ -41,7 +44,98 @@ function mount(doc = deck(), readOnly = false) {
 }
 const thumbs = () => screen.getAllByRole('button', { name: /^Slide \d+(, hidden|, held)*$/ });
 
+function PortalToolbar({ session, consume = false }: { session: DeckSession; consume?: boolean }) {
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  return <>
+    <DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} onToolbarHost={setHost} />
+    {host && createPortal(<button onKeyDown={(event) => { if (consume && event.key === 'F6') event.preventDefault(); }}>Host action</button>, host)}
+  </>;
+}
+
 describe('the deck editor', () => {
+  it.each(['Insert', 'Arrange', 'Text style'].flatMap((name) => [false, true].map((shiftKey) => ({ name, shiftKey }))))('routes F6 from the real open $name menu (shift: $shiftKey) back into the editor ring', async ({ name, shiftKey }) => {
+    const user = userEvent.setup();
+    const { session, container } = mount();
+    act(() => session.select(['t']));
+    await user.click(within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name, exact: true }));
+    const menu = await screen.findByRole('menu');
+    expect(container.contains(menu)).toBe(false); // Radix renders this React-owned menu under document.body.
+    act(() => menu.focus());
+    expect(document.activeElement).toBe(menu);
+    const event = new KeyboardEvent('keydown', { key: 'F6', code: 'F6', shiftKey, bubbles: true, cancelable: true });
+    act(() => { menu.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement?.closest(shiftKey ? '.deck-notes' : '.deck-toolbar')).not.toBeNull();
+  });
+
+  it('consults the owner keymap only once for one DOM-and-React-owned F6 event', () => {
+    const bindsKey = vi.fn(() => true);
+    render(<DeckEditor session={new DeckSession(deck())} assetUrl={() => null} system={null} readOnly={false} bindsKey={bindsKey} />);
+    const inspector = within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Inspector' });
+    inspector.focus();
+    fireEvent.keyDown(inspector, { key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(inspector);
+    expect(bindsKey).toHaveBeenCalledTimes(1);
+  });
+
+  it('cycles F6 from a separately rendered host portal and remembers that toolbar control on return', () => {
+    const session = new DeckSession(deck());
+    render(<PortalToolbar session={session} />);
+    const hostAction = screen.getByRole('button', { name: 'Host action' });
+    hostAction.focus();
+    fireEvent.keyDown(hostAction, { key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(thumbs()[0]);
+    fireEvent.keyDown(thumbs()[0], { key: 'F6', code: 'F6', shiftKey: true });
+    expect(document.activeElement).toBe(hostAction);
+  });
+
+  it('lets a nested React control consume F6 before the native editor ring sees it', () => {
+    render(<PortalToolbar session={new DeckSession(deck())} consume />);
+    const hostAction = screen.getByRole('button', { name: 'Host action' });
+    hostAction.focus();
+    fireEvent.keyDown(hostAction, { key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(hostAction);
+  });
+
+  it('steps an ordinary toolbar descendant exactly once on F6', () => {
+    mount();
+    const inspector = within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Inspector' });
+    inspector.focus();
+    fireEvent.keyDown(inspector, { key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(thumbs()[0]);
+  });
+
+  it('starts notes folded with saved content indicated, preserves the choice on remount, and follows remote notes while folded', () => {
+    const { session, doc, unmount } = mount();
+    const disclosure = () => screen.getByRole('button', { name: 'Speaker notes', exact: true });
+    expect(disclosure().getAttribute('aria-expanded')).toBe('false');
+    expect(disclosure().textContent).toContain('Notes a');
+    expect(screen.queryByRole('textbox', { name: 'Speaker notes' })).toBeNull();
+    fireEvent.click(disclosure());
+    expect(screen.getByRole('textbox', { name: 'Speaker notes' })).toBeTruthy();
+    fireEvent.click(disclosure());
+    act(() => setNotes(doc, 'a', 'Opening notes from another writer', 'remote'));
+    expect(disclosure().textContent).toContain('Opening notes from another writer');
+    unmount();
+    const reopened = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(disclosure().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(disclosure());
+    expect((screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement).value).toBe('Opening notes from another writer');
+    reopened.unmount();
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(disclosure().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('keeps an unsaved notes draft visible even when the tab’s notes choice is folded', () => {
+    const doc = deck();
+    const session = new DeckSession(doc);
+    session.keepNotesDraft('a', { from: 'Notes a', text: 'Retained notes while read-only' });
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly />);
+    expect(screen.getByRole('button', { name: 'Speaker notes', exact: true }).getAttribute('aria-expanded')).toBe('true');
+    expect((screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement).value).toBe('Retained notes while read-only');
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+
   it('keeps the inspector closed until its own toolbar action is used, then closes it from the card', () => {
     mount();
     expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
@@ -114,7 +208,7 @@ describe('the deck editor', () => {
 
   it('the notes: typed into the model, a remote change into the field, the current slide’s only', () => {
     const { doc } = mount();
-    const field = screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+    const field = notesField();
     expect(field.value).toBe('Notes a');
     field.value = 'Notes a, then more';
     fireEvent.input(field);
@@ -126,7 +220,7 @@ describe('the deck editor', () => {
   it('read-only: no gestures offered, the notes not editable', () => {
     mount(deck(), true);
     expect(screen.queryByRole('button', { name: 'New slide' })).toBeNull();
-    expect((screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(notesField().readOnly).toBe(true);
   });
 
   it('reports the first showing drawn once every thumbnail has laid out', async () => {
@@ -142,7 +236,11 @@ describe('the deck editor', () => {
 
 // ---- fix wave 1 ----------------------------------------------------------------------------------------------------
 
-const notesField = () => screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+const notesField = () => {
+  const disclosure = screen.getByRole('button', { name: 'Speaker notes', exact: true });
+  if (disclosure.getAttribute('aria-expanded') === 'false') fireEvent.click(disclosure);
+  return screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+};
 
 describe('the notes under a composition and the dialect’s limits (findings 1 and 4)', () => {
   it('a composition ends carried onto a remote insertion at the edge of the owner’s deletion, nothing of either lost', () => {
@@ -356,15 +454,20 @@ describe('what the editor shows, for the header’s Export (L233)', () => {
       markViewed: async () => {},
     };
     const session = new DeckSession(doc);
-    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
+    const toolbarHosts: Array<HTMLDivElement | null> = [];
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} onToolbarHost={(element) => { toolbarHosts.push(element); }} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Speaker notes', exact: true }));
     act(() => session.toggleRail('history'));
     const row = (label: string) => screen.findByRole('button', { name: new RegExp(`^Version ${label} by`) });
     fireEvent.click(await row('Draft 2'));
     await waitFor(() => expect(session.snapshot().shown).toEqual({ versionId: 2 }));
+    expect(toolbarHosts.at(-1)?.closest('.deck-history-bar')).toBeTruthy();
     fireEvent.click(await row('Draft 1'), { shiftKey: true });
     await waitFor(() => expect(session.snapshot().shown).toBe('compare'));
     act(() => session.toggleRail('history'));
     await waitFor(() => expect(session.snapshot().shown).toBeNull());
+    expect(toolbarHosts.at(-1)?.closest('[aria-label="Deck"]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Speaker notes', exact: true }).getAttribute('aria-expanded')).toBe('true');
   });
 });
 

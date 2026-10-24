@@ -67,6 +67,8 @@ export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked
   readOnly: boolean;
   /** The panel's narrow body: a narrower filmstrip. */
   compact?: boolean;
+  /** The portable toolbar slot where the shell can mount saved state and document/host actions. */
+  onToolbarHost?: (element: HTMLDivElement | null) => void;
   /** The stage's slide frame, for Mark-up's surface. */
   onStage?: (element: HTMLElement | null) => void;
   /** Once, when the first slide is drawn on the stage. */
@@ -106,7 +108,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, versionExports, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey, provisional = null }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onToolbarHost, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, versionExports, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey, provisional = null }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -232,8 +234,18 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const previewDrawn = useCallback(() => onPreviewDrawn?.(performance.now() - requestedAt), [onPreviewDrawn, requestedAt]);
 
   const [regions] = useState(() => new RegionRing(DECK_REGIONS)); // P4-B2 (D14)
+  const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
+  const regionEvents = useRef(new WeakSet<KeyboardEvent>());
+  const routeRegionKey = useCallback((event: ReactKeyboardEvent<HTMLDivElement> | KeyboardEvent) => {
+    const node = root.current;
+    if (!node) return false;
+    const native = 'nativeEvent' in event ? event.nativeEvent : event;
+    if (native.defaultPrevented || regionEvents.current.has(native)) return false;
+    regionEvents.current.add(native);
+    return regionKey(event, regions, session, bindsKey, node);
+  }, [regions, session, bindsKey]);
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (regionKey(event, regions, session, bindsKey)) return; // P4-B2 (D14): F6 and ⇧F6
+    if (routeRegionKey(event)) return;
     const mod = event.metaKey || event.ctrlKey;
     if (!mod || readOnly || preview) return; // M8: no undo in history (the live deck is not shown)
     const target = event.target as HTMLElement;
@@ -249,7 +261,6 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       session.redoStep();
     }
   };
-  const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
   const [below, setBelow] = useState(compact);
   useLayoutEffect(() => {
     const node = root.current;
@@ -261,6 +272,24 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     return () => observer.disconnect();
   }, []);
   const thumbnailWidth = below ? 112 : 96;
+
+  // React ownership reaches editor menus portalled under body; DOM ownership reaches host controls portalled into the
+  // toolbar from a different React tree. One native event takes only one route, after nested handlers can consume it.
+  useEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const focus = (event: FocusEvent) => regions.note(node, event.target);
+    const key = (event: KeyboardEvent) => {
+      // Document bubbling follows React's delegated handlers, so nested controls can consume the key first.
+      if (event.target instanceof Node && node.contains(event.target)) routeRegionKey(event);
+    };
+    node.addEventListener('focusin', focus);
+    node.ownerDocument.addEventListener('keydown', key);
+    return () => {
+      node.removeEventListener('focusin', focus);
+      node.ownerDocument.removeEventListener('keydown', key);
+    };
+  }, [regions, routeRegionKey]);
 
   useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
@@ -371,6 +400,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           </div>
     </>
   );
+  const toolbarHost = onToolbarHost && <div ref={onToolbarHost} className="deck-toolbar-host" />;
   const editor = (
     <div ref={root /* P4-B2 K6 */} className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown} onFocus={(event) => regions.note(event.currentTarget, event.target)}>
       {faces && <style data-deck-faces>{faces}</style>}
@@ -384,9 +414,9 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           </div>
         )}
       {preview ? (
-        <HistoryBar preview={preview} controller={history!} onBack={() => history!.close()} />
+        <HistoryBar preview={preview} controller={history!} onBack={() => history!.close()} toolbarEnd={toolbarHost} />
       ) : (
-          <Toolbar session={session} zoom={state.zoom} scale={scale} fit={fit} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly}>
+          <Toolbar session={session} zoom={state.zoom} scale={scale} fit={fit} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly} metadata={toolbarHost}>
             <ElementBar
               session={session}
               slideId={slide?.id ?? null}
@@ -430,7 +460,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   return <DeckCommentsProvider value={commentsApi}>{editor}</DeckCommentsProvider>;
 }
 
-function Toolbar({ session, zoom, scale, fit, canUndo, canRedo, children }: { session: DeckSession; zoom: Zoom; scale: number; fit: number; canUndo: boolean; canRedo: boolean; children?: ReactNode }) {
+function Toolbar({ session, zoom, scale, fit, canUndo, canRedo, children, metadata }: { session: DeckSession; zoom: Zoom; scale: number; fit: number; canUndo: boolean; canRedo: boolean; children?: ReactNode; metadata?: ReactNode }) {
   const step = (direction: 1 | -1) => {
     const steps = direction === 1 ? ZOOM_STEPS.filter((s) => s > scale + 0.001) : ZOOM_STEPS.filter((s) => s < scale - 0.001).reverse();
     if (steps[0] !== undefined) session.setZoom(steps[0]);
@@ -446,6 +476,7 @@ function Toolbar({ session, zoom, scale, fit, canUndo, canRedo, children }: { se
       <span className="deck-toolbar-divider" aria-hidden />
       {children}
       <span className="deck-toolbar-spacer" />
+      {metadata}
       <div className="deck-zoom-controls" role="group" aria-label={C.zoomControls}>
         <button type="button" className="deck-button" aria-label={C.zoomOut} disabled={scale <= ZOOM_STEPS[0] + 0.001} onClick={() => step(-1)}>
           −

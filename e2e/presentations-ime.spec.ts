@@ -208,7 +208,12 @@ test('ARMED: a selected text element’s box is focused and editable with its ca
   // takes the keyboard back (on the element still selected, T3: its caret)
   await l.click('b');
   await expect.poll(() => l.focus()).toBe('textbox:b');
-  await l.tab.locator('.deck-notes-field').first().focus();
+  const notesDisclosure = l.tab.getByRole('button', { name: 'Speaker notes', exact: true });
+  if (await notesDisclosure.getAttribute('aria-expanded') !== 'true') await notesDisclosure.click();
+  const notes = l.tab.getByRole('textbox', { name: 'Speaker notes', exact: true });
+  await expect(notes).toBeVisible();
+  await notes.focus();
+  await expect(notes).toBeFocused();
   await expect.poll(() => l.state()).toEqual(expect.objectContaining({ selection: ['b'], keyboard: 'away' }));
   await expect(l.tab.locator('.deck-textbox')).toHaveCount(0);
   await l.click('b');

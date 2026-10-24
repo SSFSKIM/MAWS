@@ -14,6 +14,7 @@
 // paste moves it, a real mouse drag keeps exactly one; A's restore brings back a deleted tab and the earlier text while
 // a reply posted after the version stays and a thread made after it shows orphaned.
 // Every launch's userData is its own directory under /tmp; windows are never shown (the e2e quiet mode).
+import { addDocumentSection } from './support/document-sections';
 import { openArtifactInPanel, openArtifactReplicaInPanel, pinSurfaceForSessions } from './support/shell';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -303,7 +304,7 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
     await mainText.click();
     await page.keyboard.type('The launch waits for the review.');
     for (const words of ['Budget notes for October.', '안녕하세요, 팀 여러분.']) {
-      await main.getByRole('button', { name: 'Add tab' }).click();
+      await addDocumentSection(main);
       await expect(main.locator('.ds-doc .ProseMirror')).toHaveText('', { timeout: 10_000 });
       await main.locator('.ds-doc .ProseMirror').click();
       await page.keyboard.type(words);
@@ -737,7 +738,7 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   const { id, record, text } = await openBesideSession(page, 'Restore notes', ['The budget review is on Friday.']);
   const older = await commentOn(page, record, text, 0, 'budget review');
   // a second tab with its own text, in the version
-  await record.getByRole('button', { name: 'Add tab' }).click();
+  await addDocumentSection(record);
   const tabs = record.getByRole('tablist', { name: 'Tabs' });
   await expect(tabs.getByRole('tab')).toHaveText(['Restore notes', 'Tab 2']);
   await expect(text).toHaveText('', { timeout: 10_000 });
@@ -752,7 +753,7 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   const ask = page.getByRole('alertdialog', { name: 'Delete “Tab 2”?' });
   await ask.getByRole('button', { name: 'Delete tab' }).click();
   await expect(ask).toHaveCount(0);
-  await expect(tabs.getByRole('tab')).toHaveText(['Restore notes']);
+  await expect(tabs).toHaveCount(0);
   await expect(text.locator('p')).toHaveText(['The budget review is on Friday.']);
   let rail = await railOf(record);
   const reply = rail.locator(`article[data-thread="${older}"]`).getByRole('textbox', { name: 'Reply' });

@@ -6,6 +6,7 @@
 // pasteboard orphans the thread (its quote kept); pasted into a new tab, the thread follows it there (the host moves its
 // tab); deleted, it is orphaned again and is resolved and reopened in the rail; a restore of the version brings the chart
 // back to its first tab with the thread live, every reply kept. Evidence shots go to test-results/dashboard-proof/.
+import { addDocumentSection } from './support/document-sections';
 import { expect, test, type Locator } from '@playwright/test';
 import { bindCsv, chart, closeDrawer, durable, edit, figures, insertBlocks, ok, openInPanel, paragraph, selectPanelSession, railOf, reply, selectChart, startApp, type DashboardApp } from './support/dashboards';
 
@@ -94,7 +95,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await rail.getByRole('button', { name: 'Hide deleted-target comments', exact: true }).click();
     await expect(item).toHaveCount(0);
 
-    await record.getByRole('button', { name: 'Add tab' }).click();
+    await addDocumentSection(record);
     await expect(tabs.getByRole('tab')).toHaveCount(2);
     await expect(tabs.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
     // the rail is P3-F1's drawer over the narrow panel's page: the owner closes it to click into the new tab's page, and
@@ -139,7 +140,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
   await test.step('a restore of the version brings the chart back to its first tab, the thread live there with every reply', async () => {
     await durable(record);
     await ok(page, 'artifacts.restore', { artifactId: id, versionId });
-    await expect(tabs.getByRole('tab')).toHaveCount(1, { timeout: 15_000 });
+    await expect(tabs).toHaveCount(0, { timeout: 15_000 });
     await expect(figures(record)).toHaveCount(1, { timeout: 15_000 });
     await expect(figures(record).first().locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
     await expect(chartBlock).toHaveClass(new RegExp(`\\bcomment-${threadId}\\b`));

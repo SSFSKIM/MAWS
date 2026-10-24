@@ -2,10 +2,12 @@
 // what the open tab is on the left (its icon, an editor's breadcrumb and title, its saved state and open-comment count)
 // and what can be done with it on the right (an editor's actions, three then "More actions", and its Export menu; under a
 // 360 px header all of them in "More actions", so the title keeps the room), then the region's own controls.
+// An editor-owned toolbar can host the saved state, grouped actions and region controls instead of this metadata row.
 // `EditorHeader` is the row; the panel draws it over the selected tab as `PanelHeader`, with Float, Maximize and Hide; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). A tool
 // that registers nothing (X32) shows the strip's label, so today's tools read as they did.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
+import { createPortal } from 'react-dom';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { FloatIcon, Icon, IconButton, MaximizeIcon, PanelIcon, PenIcon, RestoreIcon } from '../app/IconButton';
@@ -53,9 +55,10 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   const exports = registration?.exports ?? [];
   const breadcrumb = registration?.breadcrumb ?? [];
   const counted = listed.filter((a) => !a.pinned); // P4-B5: a pinned action is drawn beside the three, never folded but narrow
-  const shown = narrow ? [] : [...counted.slice(0, SHOWN_ACTIONS), ...listed.filter((a) => a.pinned)];
-  const overflow = narrow ? listed : counted.slice(SHOWN_ACTIONS);
-  const folded = narrow ? exports : [];
+  const toolbarHost = registration?.toolbarHost;
+  const shown = toolbarHost ? listed.slice(0, 1) : narrow ? [] : [...counted.slice(0, SHOWN_ACTIONS), ...listed.filter((a) => a.pinned)];
+  const overflow = toolbarHost ? listed.slice(1) : narrow ? listed : counted.slice(SHOWN_ACTIONS);
+  const folded = toolbarHost || narrow ? exports : [];
   const plain = suffix ? `${title} · ${suffix}` : title;
   const hasEditorControls = listed.length > 0 || exports.length > 0 || Boolean(markup);
   // P3-L (M6b fix wave 1): focus back to an action's control, "More actions" when it is folded there
@@ -71,6 +74,17 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
     control.focus({ preventScroll: true });
     return true;
   });
+
+  if (toolbarHost) return createPortal(
+    <div ref={row} data-editor-toolbar className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
+      {scope?.surface === 'panel' && registration && <span data-header-title title={registration.title} className="max-w-full min-w-0 truncate text-ui text-fg">{registration.title}</span>}
+      {registration?.saved && <span data-header-saved title={SAVED_COPY[registration.saved]} className="truncate px-1 text-ui-sm text-fg-muted">{registration.saved === 'saved' ? 'Saved' : SAVED_COPY[registration.saved]}</span>}
+      {shown.map((action) => <ActionButton key={action.id} action={action} text />)}
+      {(overflow.length > 0 || folded.length > 0) && <MoreMenu actions={overflow} exports={folded} label={toolbarHost.menuLabel} text />}
+      {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
+      {markup}{controls}
+    </div>, toolbarHost.element,
+  );
 
   return (
     <div ref={row} data-editor-header className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -230,8 +244,8 @@ function CommentCount({ count, action }: { count: number; action: EditorHostActi
   );
 }
 
-function ActionButton({ action }: { action: EditorHostAction }) {
-  const ActionIcon = action.icon;
+function ActionButton({ action, text = false }: { action: EditorHostAction; text?: boolean }) {
+  const ActionIcon = text ? undefined : action.icon;
   if (ActionIcon) {
     return (
       <IconButton label={action.label} pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id}>
@@ -253,10 +267,10 @@ const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline
 // The overflow: the actions past the inline ones, and under a narrow header every action and the exports (under their
 // own heading). A pressed action is a checkbox item with its check drawn; while any is, every item keeps the check's
 // room so the labels align.
-function MoreMenu({ actions, exports }: { actions: readonly EditorHostAction[]; exports: readonly EditorHostExport[] }) {
+function MoreMenu({ actions, exports, label = HEADER_COPY.more, text = false }: { actions: readonly EditorHostAction[]; exports: readonly EditorHostExport[]; label?: string; text?: boolean }) {
   const checks = actions.some((action) => action.pressed !== undefined);
   return (
-    <HeaderMenu label={HEADER_COPY.more} icon={<MoreIcon />} more>
+    <HeaderMenu label={label} icon={<MoreIcon />} more text={text}>
       {actions.map((action) =>
         action.pressed === undefined ? (
           <DropdownMenu.Item key={action.id} disabled={action.disabled} onSelect={() => action.onSelect()} className={ITEM}>
@@ -308,13 +322,13 @@ function ExportEntries({ exports }: { exports: readonly EditorHostExport[] }) {
   ));
 }
 
-function HeaderMenu({ label, icon, children, more = false }: { label: string; icon: ReactNode; children: ReactNode; more?: boolean }) {
+function HeaderMenu({ label, icon, children, more = false, text = false }: { label: string; icon: ReactNode; children: ReactNode; more?: boolean; text?: boolean }) {
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <IconButton label={label} data-editor-more={more ? '' : undefined}>
+        {text ? <button type="button" aria-label={label} data-editor-more={more ? '' : undefined} className={GHOST}>{label} ▾</button> : <IconButton label={label} data-editor-more={more ? '' : undefined}>
           {icon}
-        </IconButton>
+        </IconButton>}
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={6} className={MENU}>

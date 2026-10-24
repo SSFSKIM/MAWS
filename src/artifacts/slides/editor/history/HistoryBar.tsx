@@ -6,7 +6,7 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import type { DeckHistoryController, DeckPreview } from './controller';
 import { HISTORY_COPY as C } from './copy';
 
-export function HistoryBar({ preview, controller, onBack }: { preview: DeckPreview; controller: DeckHistoryController; onBack(): void }) {
+export function HistoryBar({ preview, controller, onBack, toolbarEnd }: { preview: DeckPreview; controller: DeckHistoryController; onBack(): void; toolbarEnd?: ReactNode }) {
   const [confirming, setConfirming] = useState(false);
   const [naming, setNaming] = useState(false);
   const count = preview.changes.count;
@@ -51,6 +51,7 @@ export function HistoryBar({ preview, controller, onBack }: { preview: DeckPrevi
         <Button label={C.back} onClick={onBack}>
           {C.back}
         </Button>
+        {toolbarEnd}
       </div>
       {naming && <NameForm onName={(label) => controller.name(label)} onDone={() => setNaming(false)} />}
       {confirming && (

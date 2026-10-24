@@ -398,9 +398,21 @@ describe('a link', () => {
 });
 
 describe('tabs', () => {
+  it('earns a section strip only after Insert creates a second section, and removes it when one remains', async () => {
+    const { editor, handle } = await mount(doc(para('p1', 'First section text')));
+    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
+    insert('New section');
+    await until(() => listTabs(handle.doc).length === 2 && editor().getText() === '', 'the new section to bind');
+    expect(screen.getByRole('tablist', { name: 'Tabs' })).toBeTruthy();
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain('Tab 2');
+    act(() => fireEvent.click(screen.getByLabelText('Delete Tab 2')));
+    await until(() => listTabs(handle.doc).length === 1 && editor().getText() === 'First section text', 'the original section');
+    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
+  });
+
   it('are added, renamed, reordered and switched, each with its own body', async () => {
     const { editor, handle } = await mount(doc(para('p1', 'First tab text')));
-    act(() => fireEvent.click(screen.getByRole('button', { name: 'Add tab' })));
+    insert('New section');
     await until(() => listTabs(handle.doc).length === 2 && editor().getText() === '', 'the new tab');
     const added = listTabs(handle.doc)[1].id;
     expect(screen.getByRole('tab', { selected: true }).textContent).toContain('Tab 2');
@@ -528,17 +540,14 @@ describe('tabs', () => {
   it('delete with ×, which the last tab lacks, asking first when the tab has content', async () => {
     const { editor, handle } = await mount(doc(para('p1', 'First tab text')));
     expect(screen.queryByLabelText('Delete Main'), 'a × on the last tab').toBeNull();
-    act(() => void fireEvent.contextMenu(screen.getByRole('tab', { name: 'Main' })));
-    expect((await screen.findByRole('menuitem', { name: 'Delete' })).hasAttribute('data-disabled')).toBe(true);
-    act(() => void fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' }));
-    await until(() => screen.queryByRole('menu') === null, 'the menu closed');
+    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
 
     act(() => void addTab(handle.doc, { title: 'Empty', id: 'tab00002' }));
     await until(() => screen.getAllByRole('tab').length === 2, 'two tabs');
     act(() => fireEvent.click(screen.getByLabelText('Delete Empty') /* shown on hover */));
     await until(() => listTabs(handle.doc).length === 1, 'the empty tab deleted');
     expect(screen.queryByRole('alertdialog')).toBeNull();
-    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe('Main');
+    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
 
     act(() => void addTab(handle.doc, { title: 'Second', id: 'tab00003' }));
     await until(() => screen.getAllByRole('tab').length === 2, 'two tabs again');
@@ -553,7 +562,7 @@ describe('tabs', () => {
     act(() => fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete tab' })));
     await until(() => listTabs(handle.doc).length === 1, 'Main deleted once confirmed');
     expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Second']);
-    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe('Second');
+    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
     await until(() => editor().getText() === '', 'the remaining tab’s body shown');
     expect(screen.queryByLabelText('Delete Second'), 'a × on the last tab').toBeNull();
   });
@@ -562,7 +571,7 @@ describe('tabs', () => {
   // menu's actions from the keyboard: F2 renames, Delete or ⌫ deletes (the same question and last-tab guard), ⌥⇧← and
   // ⌥⇧→ move it, Shift+F10 opens its menu; the focus stays on the tab acted on, or after a deletion its neighbour's
   it('take rename, delete and move from the keyboard on the focused tab, and open its menu', async () => {
-    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    const { handle, editor } = await mount(doc(para('p1', 'First tab text')));
     act(() => {
       addTab(handle.doc, { title: 'Bravo', id: 'tab00002' });
       addTab(handle.doc, { title: 'Charlie', id: 'tab00003' });
@@ -612,9 +621,8 @@ describe('tabs', () => {
     act(() => fireEvent.click(within(ask).getByRole('button', { name: 'Delete tab' })));
     await until(() => titles().length === 1, 'Main deleted once confirmed');
     expect(titles()).toEqual(['Beta']);
-    await until(() => focused() === 'Beta', 'the focus on the last tab');
-    key('Beta', { key: 'Delete' }); // the last tab stays
-    key('Beta', { key: 'Backspace' });
+    await until(() => editor().view.hasFocus(), 'the focus in the remaining section after its strip disappears');
+    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(titles()).toEqual(['Beta']);
   });
@@ -622,7 +630,7 @@ describe('tabs', () => {
   // P4 W1-B review (tracker L300): the menu Shift+F10 opens leaves the focus as the keys do; its own focus return goes to
   // the tab it opened on, which Rename replaces with the title field and Delete takes away
   it('leave the focus as the keys do after Rename, Move and Delete from the menu the keyboard opened', async () => {
-    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    const { handle, editor } = await mount(doc(para('p1', 'First tab text')));
     act(() => {
       addTab(handle.doc, { title: 'Bravo', id: 'tab00002' });
       addTab(handle.doc, { title: 'Charlie', id: 'tab00003' });
@@ -669,7 +677,8 @@ describe('tabs', () => {
     act(() => fireEvent.click(within(ask).getByRole('button', { name: 'Delete tab' })));
     await until(() => titles().length === 1, 'Main deleted once confirmed');
     expect(titles()).toEqual(['Charlie']);
-    await until(() => focused() === 'Charlie', 'the focus on the last tab');
+    await until(() => editor().view.hasFocus(), 'the focus in the remaining section after its strip disappears');
+    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
   });
 });
 
@@ -957,6 +966,8 @@ describe('a read-only document', () => {
     render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} comments={comments} onEditor={(e) => (current = e)} />);
     await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
     const editor = () => current!;
+    act(() => void addTab(handle.doc, { title: 'Appendix', id: 'tab00002' }));
+    await until(() => screen.queryAllByRole('tab').length === 2, 'two sections for the read-only strip checks');
     // a thread to resolve, and the rail open on it
     act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
     press('Add comment');

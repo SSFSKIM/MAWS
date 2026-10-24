@@ -19,6 +19,8 @@ export interface EditorHostAction { id: string; label: string; icon?: ComponentT
 export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean; children?: readonly EditorHostExport[]; description?: string }
 export interface EditorHostRegistration {
   title: string;
+  /** An editor-owned toolbar can host the saved state/actions and region controls instead of a duplicate metadata row. */
+  toolbarHost?: { element: HTMLElement; menuLabel: string } | null;
   breadcrumb?: readonly string[];
   saved?: SavedState | null; // absent or null: no indicator
   unresolved?: number; // 0 or absent: no count

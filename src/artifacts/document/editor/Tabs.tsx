@@ -37,7 +37,7 @@ function hasContent(doc: Doc, tabId: string): boolean {
 }
 
 /** `readOnly`: the store is read-only, so the tabs can be selected but not added, renamed, moved or deleted. */
-export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: Doc; tabs: TabInfo[]; active: string | null; readOnly?: boolean; onSelect(tabId: string): void }) {
+export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: Doc; tabs: TabInfo[]; active: string | null; readOnly?: boolean; onSelect(tabId: string, focusPage?: boolean): void }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [asking, setAsking] = useState<TabInfo | null>(null); // the tab with content whose deletion waits for the owner
   const renameFromMenu = useRef(false); // the menu's focus return, which would end the rename it starts
@@ -94,7 +94,7 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
     }
     const next = tabs[at + 1] ?? tabs[at - 1];
     if (refocus.current === tab.id) refocus.current = next?.id ?? null;
-    if (tab.id === active && next) onSelect(next.id);
+    if (next && (tab.id === active || tabs.length === 2)) onSelect(next.id, tabs.length === 2);
   };
   const askToRemove = (tab: TabInfo) => {
     if (!deletable) return;
