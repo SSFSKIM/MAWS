@@ -14,3 +14,26 @@ describe('session stepping follows rendered sidebar rows', () => {
     expect(visibleSessionStep('outside', 1)).toBeNull();
   });
 });
+
+ it('keeps Cmd+Shift+T on one mixed most-recent-first closed history', async () => {
+  const { ACTIONS } = await import('@shared/keymap/actions');
+  const { registerShellActions } = await import('../app/shell-actions');
+  const { runAction } = await import('./actions-runtime');
+  const { useLayout } = await import('../stores/layout');
+  const { activeTab } = await import('../stores/layout-model');
+  const { resetShellStores } = await import('../test-support/shell-stores');
+  resetShellStores();
+  const off = registerShellActions();
+  try {
+    const layout = () => useLayout.getState();
+    layout().openTab({ kind: 'file', path: '/work/readme.md', appSessionId: null });
+    layout().closeTab(activeTab(layout().main)!.id);
+    layout().openSession('closed-session' as never);
+    layout().closeTab(activeTab(layout().main)!.id);
+    expect(ACTIONS['tab.reopen'].chord).toBe('Cmd+Shift+T');
+    runAction('tab.reopen');
+    expect(activeTab(layout().main)?.kind).toBe('session');
+    runAction('tab.reopen');
+    expect(activeTab(layout().main)?.kind).toBe('file');
+  } finally { off(); resetShellStores(); }
+ });

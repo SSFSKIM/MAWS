@@ -71,7 +71,7 @@ export interface LayoutState {
   refileTabs(): void;
   closeTab(id: string, opts?: model.CloseOptions): void; // P4-B3: `remember: false` for a move (no ⌘⇧T entry)
   retargetTab(id: string, target: TabTarget): void; // cua #90: `model.retargetTab`
-  reopenClosed(kind?: TabRef['kind']): void;
+  reopenClosed(): void;
   moveTab(id: string, toPane: Pane, index: number): void;
   reorderTab(id: string, index: number): void;
   selectTab(n: number): void;
@@ -421,12 +421,12 @@ export function createLayoutStore() {
         main((m) => model.closeTab(m, id, opts));
       },
       retargetTab: (id, target) => main((m) => model.retargetTab(m, id, target)), // cua #90
-      reopenClosed(kind) {
-        const last = get().main.closedTabs.findLast((tab) => kind === undefined || tab.kind === kind);
+      reopenClosed() {
+        const last = get().main.closedTabs.at(-1);
         if (!last) return;
         const at = closedAt.get(last.id) ?? null;
         closedAt.delete(last.id);
-        main((m) => model.reopenClosed(m, at, setOfTab(last) ?? undefined, kind));
+        main((m) => model.reopenClosed(m, at, setOfTab(last) ?? undefined));
       },
       moveTab: (id, toPane, index) => main((m) => model.moveTab(m, id, toPane, index)),
       reorderTab(id, index) {

@@ -15,5 +15,5 @@ export function visibleSessionStep(current: string | null, delta: 1 | -1): AppSe
 
 export async function setSessionUnread(appSessionId: AppSessionId, unread: boolean, client: MawsBridge = ipc): Promise<void> {
   const result = await client.invoke('session.update', { appSessionId, patch: { unread } });
-  if (!result.ok) toast({ level: 'error', text: result.error.message, actions: [], dismissible: true });
+  if (!result.ok) toast({ level: 'danger', text: result.error.message, actions: [], dismissible: true });
 }

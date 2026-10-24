@@ -393,10 +393,10 @@ export function cycleTab(main: LayoutMain, delta: 1 | -1): LayoutMain {
 
 // `at` is where the tab stood when it was closed, when the store remembers it; otherwise it opens like any tab. `set`
 // is where it goes (its session's project's; the current set for a tab of no session).
-export function reopenClosed(main: LayoutMain, at: number | null, set?: TabSetKey, kind?: TabRef['kind']): LayoutMain {
-  const tab = main.closedTabs.findLast((entry) => kind === undefined || entry.kind === kind);
+export function reopenClosed(main: LayoutMain, at: number | null, set?: TabSetKey): LayoutMain {
+  const tab = main.closedTabs.at(-1);
   if (!tab) return main;
-  const rest = { ...main, closedTabs: main.closedTabs.filter((entry) => entry !== tab) };
+  const rest = { ...main, closedTabs: main.closedTabs.slice(0, -1) };
   if (isOpen(rest, tab.id)) return activateTab(rest, tab.id);
   const to = set ?? main.current;
   return onSet(switchSet(rest, to), to, (v) => place(v, tab, v.focusedPane, at ?? 'afterActive', true));

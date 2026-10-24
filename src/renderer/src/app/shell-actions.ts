@@ -55,7 +55,6 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       const tab = activeTab(layout().main);
       if (tab?.kind === 'session') await setSessionUnread(tab.appSessionId, true, client);
     }),
-    registerAction('session.reopenClosed', () => layout().reopenClosed('session')),
     registerAction('tab.reopen', () => layout().reopenClosed()),
     // W5: ⌘0, the View menu and the palette open the floating Overview, or bring focus back to it when it is open.
     registerAction('tab.overview', () => {
