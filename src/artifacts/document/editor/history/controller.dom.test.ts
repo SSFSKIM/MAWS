@@ -118,6 +118,8 @@ describe('a restore overlapping a versions notification', () => {
     api.versions = () => new Promise((resolve) => { reads.push(resolve); });
 
     versionsChanged();
+    // A live restore sends its document update before the notice, so the notice is not initial-sync catch-up.
+    host.write((doc) => { addTab(doc, { id: 'removed', title: 'Removed tab', body: body('p2', 'The agent deletes this whole tab') }); });
     const restored = history.version('restore', { kind: 'human' }, { label: 'Restored from Draft' });
     const versions = await history.versions();
     host.announceRestored(restored.id);
