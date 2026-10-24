@@ -61,7 +61,7 @@ export async function dispatchByMode(client: MawsBridge, appSessionId: AppSessio
 // After the host accepted: what was left out is said, and the prompt goes into MAWS's history.
 export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, project: string | null = null): void {
   // A new instruction returns to the conversation's live end; a refusal or a memory save leaves the reader alone.
-  if (s.mode === 'send') useTranscriptStore.getState().setFollowing(appSessionId, true);
+  if (s.mode === 'send') useTranscriptStore.getState().requestSendFollow(appSessionId);
   if (s.omitted > 0) warn(s.omitted === 1 ? '1 pasted segment was unavailable and was left out' : `${s.omitted} pasted segments were unavailable and were left out`);
   appendHistory(client, appSessionId, s, project);
 }

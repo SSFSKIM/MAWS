@@ -132,6 +132,27 @@ describe('the report view', () => {
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
   });
 
+  it('keeps the working-record disclosure focused through expansion and collapse', async () => {
+    await mounted(session());
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('false'));
+    const disclosure = record()!;
+    disclosure.focus();
+    expect(document.activeElement).toBe(disclosure);
+
+    fireEvent.click(disclosure); // native keyboard activation dispatches a click to this same button
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
+    expect(document.activeElement).toBe(disclosure);
+    expect(record()).toBe(disclosure);
+    expect(document.querySelectorAll('[data-kind="owner_record"] .transcript-disclosure')).toHaveLength(1);
+    expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
+
+    fireEvent.click(disclosure);
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('false'));
+    expect(document.activeElement).toBe(disclosure);
+    expect(record()).toBe(disclosure);
+    expect(screen.queryByText('Unmarked closing words.')).toBeNull();
+  });
+
   it('the transcript view draws every turn in full, the marks unboxed', async () => {
     const { key } = await mounted(session());
     await waitFor(() => expect(record()).not.toBeNull());

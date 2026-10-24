@@ -971,3 +971,45 @@ test('R5: composer shadow switches below 640px and keeps the dark edge', async (
   }
   expect(editor.consoleErrors()).toEqual([]);
 });
+
+// A remote SessionMode drawing is a non-shrinking toolbar item: even its own cap must fit a narrow split column.
+test('plugin mode drawings stay inside a split composer while short labels remain whole', async ({ editor }, testInfo) => {
+  const { page, app } = editor;
+  const recording = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3/mods-surface-render-sites.jsonl'), 'utf8');
+  const labels = ['Repository investigation with the full workspace dependency graph enabled', 'Focus'];
+  const ids = ['acceptance-plugin-mode-long', 'acceptance-plugin-mode-short'];
+  await openComposerPage(page);
+  for (const [index, id] of ids.entries()) {
+    const journal = join(scratch, `${id}.jsonl`);
+    // Keep the recorded hooked tree and handshake; change only the label's length.
+    writeFileSync(journal, recording.replaceAll('MODS_PROBE_MODE modes=0', labels[index]));
+    await launchReady(page, id, journal, { cwd: repo });
+  }
+  await showPanes(page, [{ composer: ids[0], transcript: true }, { composer: ids[1], transcript: true }]);
+  for (const width of [1280, 620]) {
+    await app.evaluate(({ BrowserWindow }, w) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.setMinimumSize(0, 0);
+      window.setContentSize(w, 820);
+    }, width);
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
+    for (const index of [0, 1] as const) {
+      const toolbar = pane(page, index).getByRole('toolbar', { name: 'Composer tools' });
+      const mode = toolbar.getByLabel('Plugin modes');
+      await expect(mode).toHaveText(labels[index]);
+      const geometry = await mode.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const parent = element.closest('[role="toolbar"]')!.getBoundingClientRect();
+        return { width: bounds.width, parentWidth: parent.width,
+          contained: bounds.left >= parent.left - 1 && bounds.right <= parent.right + 1 && bounds.top >= parent.top - 1 && bounds.bottom <= parent.bottom + 1,
+          clipped: element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1 };
+      });
+      if (width === 620) expect(geometry.parentWidth, 'exercise a split footer narrower than the 256px mode cap').toBeLessThan(256);
+      expect(geometry.contained, `${width}: pane ${index} plugin drawing stays inside its footer`).toBe(true);
+      expect(geometry.width).toBeGreaterThan(16);
+      if (index === 1) expect(geometry.clipped, `${width}: the ordinary short mode label is not cut off`).toBe(false);
+      await testInfo.attach(`plugin-mode-${index}-${width}x820`, { body: await toolbar.screenshot(), contentType: 'image/png' });
+    }
+  }
+  expect(editor.consoleErrors()).toEqual([]);
+});

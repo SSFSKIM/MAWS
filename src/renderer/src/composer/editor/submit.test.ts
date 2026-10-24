@@ -35,12 +35,19 @@ describe('the editor submits by mode and records history', () => {
     const { bridge } = client();
     try {
       store.setFollowing(APP, false);
+      const request = useTranscriptStore.getState().entries[APP].sendFollowRequest;
       await submitSerialized(bridge, APP, serialized({}), 'send', null, { dispatch: async () => 'refused' });
       expect(useTranscriptStore.getState().entries[APP].following).toBe(false);
+      expect(useTranscriptStore.getState().entries[APP].sendFollowRequest).toBe(request);
       await submitSerialized(bridge, APP, serialized({ mode: 'memory' }), 'send', null);
+      await submitSerialized(bridge, APP, serialized({ mode: 'bash' }), 'send', null);
       expect(useTranscriptStore.getState().entries[APP].following).toBe(false);
+      expect(useTranscriptStore.getState().entries[APP].sendFollowRequest).toBe(request);
       await submitSerialized(bridge, APP, serialized({}), 'send', null);
       expect(useTranscriptStore.getState().entries[APP].following).toBe(true);
+      expect(useTranscriptStore.getState().entries[APP].sendFollowRequest).toBe(request + 1);
+      await submitSerialized(bridge, APP, serialized({}), 'steer', null);
+      expect(useTranscriptStore.getState().entries[APP].sendFollowRequest).toBe(request + 2);
     } finally { store.drop(APP); }
   });
 

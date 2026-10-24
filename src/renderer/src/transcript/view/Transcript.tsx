@@ -498,14 +498,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
-  // The list reports reader movement to the store; an accepted composer send can request follow in the other direction.
-  const requestedFollowing = useTranscriptStore((state) => state.entries[storeKey]?.following ?? true);
-  const lastFollowing = useRef(requestedFollowing);
+  // Reader movement is local to each list, even when two views share a key. Only an accepted send requests follow.
+  const sendFollowRequest = useTranscriptStore((state) => state.entries[storeKey]?.sendFollowRequest ?? 0);
+  const lastSendFollow = useRef({ storeKey, request: sendFollowRequest });
   useLayoutEffect(() => {
-    const returnToLatest = requestedFollowing && !lastFollowing.current;
-    lastFollowing.current = requestedFollowing;
-    if (returnToLatest) listRef.current?.scrollToEnd();
-  }, [requestedFollowing]);
+    const requested = lastSendFollow.current.storeKey === storeKey && sendFollowRequest > lastSendFollow.current.request;
+    lastSendFollow.current = { storeKey, request: sendFollowRequest };
+    if (requested) listRef.current?.scrollToEnd();
+  }, [storeKey, sendFollowRequest]);
   const disclosures = useDisclosures();
   const [motion] = useState(() => new WorkMotion());
   const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;

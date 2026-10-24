@@ -1,8 +1,11 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { EventId } from '@shared/graph/ids';
+import type { AppSessionId, EventId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
+import { afterAccepted } from '../../composer/editor/submit';
+import { fakeClient } from '../../../../../test/support/fake-client';
+import type { Serialized } from '../../composer/editor/serialize';
 import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
@@ -56,14 +59,75 @@ async function mounted(events: SessionEvent[]) {
   return source.key!;
 }
 
+const acceptedPrompt = (key: string) => {
+  const prompt: Serialized = { mode: 'send', text: 'Next instruction', content: 'Next instruction', display: 'Next instruction', pastedContents: {}, omitted: 0, empty: false };
+  afterAccepted(fakeClient().client, key as AppSessionId, prompt);
+};
+
 describe('Transcript', () => {
-  it('a requested return to following reaches the list after the reader scrolled up', async () => {
+  it('an accepted send returns to following after the reader scrolled up', async () => {
     const key = await mounted(deniedThenAnswer());
     fireEvent.wheel(document.querySelector('[data-transcript-scroller]')!, { deltaY: -100 });
     expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
     expect(useTranscriptStore.getState().entries[key].following).toBe(false);
-    act(() => useTranscriptStore.getState().setFollowing(key, true));
+    act(() => acceptedPrompt(key));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull());
+  });
+
+  async function sharedChildViews() {
+    const source = sourceOf(deniedThenAnswer());
+    const view = render(
+      <>
+        <section aria-label="First child view"><Transcript source={source} variant="child" /></section>
+        <section aria-label="Second child view"><Transcript source={source} variant="child" /></section>
+      </>,
+    );
+    await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
+    const views = ['First child view', 'Second child view'].map((name) => {
+      const root = view.getByRole('region', { name });
+      const region = within(root);
+      const scroller = root.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+      let top = 18_000;
+      Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => void (top = value) });
+      Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 20_000 });
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 2_000 });
+      const scroll = vi.fn((options: ScrollToOptions) => { top = Math.min(options.top ?? top, 18_000); });
+      scroller.scrollTo = scroll;
+      const moveTo = (offset: number) => act(() => { top = offset; fireEvent.scroll(scroller); });
+      moveTo(18_000);
+      fireEvent.wheel(scroller, { deltaY: -100 });
+      moveTo(1_000);
+      return { region, scroll, moveTo, offset: () => top };
+    });
+    for (const { region, scroll } of views) {
+      expect(region.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
+      scroll.mockClear();
+    }
+    return { key: source.key!, views };
+  }
+
+  for (const method of ['Jump to latest', 'scrolling to the bottom'] as const) {
+    it(`${method} in one live child view leaves another view of the same child in place`, async () => {
+      const { views: [first, second] } = await sharedChildViews();
+      if (method === 'Jump to latest') fireEvent.click(first.region.getByRole('button', { name: 'Jump to latest' }));
+      else first.moveTo(18_000);
+      await waitFor(() => expect(first.region.queryByRole('button', { name: 'Jump to latest' })).toBeNull());
+      expect(second.region.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
+      expect(second.offset()).toBe(1_000);
+      expect(second.scroll).not.toHaveBeenCalled();
+    });
+  }
+
+  it('an accepted-send request reaches a released view even when another shared child view already follows', async () => {
+    const { key, views: [first, second] } = await sharedChildViews();
+    fireEvent.click(first.region.getByRole('button', { name: 'Jump to latest' }));
+    expect(useTranscriptStore.getState().entries[key].following).toBe(true);
+    expect(second.region.getByRole('button', { name: 'Jump to latest' })).toBeTruthy();
+    expect(second.scroll).not.toHaveBeenCalled();
+    act(() => acceptedPrompt(key));
+    await waitFor(() => expect(second.region.queryByRole('button', { name: 'Jump to latest' })).toBeNull());
+    expect(second.offset()).toBe(18_000);
+    expect(second.scroll).toHaveBeenCalled();
   });
 
   it('a jump to a standalone cell in a collapsed turn opens the turn and focuses the cell', async () => {

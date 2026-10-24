@@ -25,17 +25,20 @@ const completedMs = (row: DividerRowData) => row.summary.durationMs ?? (row.ende
 
 // A working turn's duration, re-read from the store once a second while its process is live; without one (C5's
 // liveness rule) it is the latest event's time, following the events as they arrive and never the wall clock.
-function useDuration(row: DividerRowData, storeKey: string): number {
-  const working = row.state === 'working';
-  const frozen = useTranscriptStore((state) => (working && !ticks(state, storeKey) ? workingDurationMs(state.entries[storeKey], row.startedAt, 0, false) : null));
-  const [ms, setMs] = useState(() => workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, Date.now()));
+function useDuration(row: DividerRowData | undefined, storeKey: string): number {
+  const startedAt = row?.startedAt;
+  const working = row?.state === 'working';
+  const frozen = useTranscriptStore((state) => (working && startedAt !== undefined && !ticks(state, storeKey) ? workingDurationMs(state.entries[storeKey], startedAt, 0, false) : null));
+  const [now, setNow] = useState(Date.now);
   const ticking = working && frozen === null;
   useEffect(() => {
     if (!ticking) return;
-    const timer = setInterval(() => setMs(workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, Date.now())), 1000);
-    return () => clearInterval(timer);
-  }, [ticking, storeKey, row.startedAt]);
-  return working ? (frozen ?? ms) : completedMs(row);
+    // Report can introduce a summary into an already-mounted disclosure; sample its clock as it opens.
+    const frame = requestAnimationFrame(() => setNow(Date.now()));
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => { cancelAnimationFrame(frame); clearInterval(timer); };
+  }, [ticking, startedAt]);
+  return row === undefined ? 0 : working ? (frozen ?? workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, now)) : completedMs(row);
 }
 
 // The rows of an open work area: the turn's rows after its divider up to its receipt, without those that stay in view
@@ -52,22 +55,28 @@ function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[]
   return ids;
 }
 
-export function DividerRow({ row, onToggle }: { row: DividerRowData; onToggle?: () => void }) {
+// Report uses the same summary inside its own stable disclosure, never a replacement button.
+export function useDividerSummary(row: DividerRowData | undefined, open: boolean) {
   const { storeKey, idPrefix, variant } = useTranscriptContext();
   const durationMs = useDuration(row, storeKey);
-  const motion = useWorkMotion();
-  const turn = row.turnId!;
-  const open = !useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn)) && row.expanded;
   // A string, so the divider re-renders only when the work area's rows change, not with every batch.
   const controls = useTranscriptStore((state) => {
     const rows = open ? state.entries[storeKey]?.rows : undefined;
-    return rows ? workAreaRowIds(rows, row).map((id) => rowElementId(idPrefix, id)).join(' ') : '';
+    return rows && row ? workAreaRowIds(rows, row).map((id) => rowElementId(idPrefix, id)).join(' ') : '';
   });
-  const store = useTranscriptStore.getState();
   // R2: a plugin hooking the Spinner gives the working label its text (a session's own transcript, never a child's)
-  const spinner = useSpinnerText(variant === 'session' ? (storeKey as AppSessionId) : null, row.state === 'working');
-  const label = spinner ?? dividerCopy({ state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
-  const firstOf = (disposition: 'denied' | 'auto_denied') => row.summary.denials.find((denial) => denial.disposition === disposition)?.cellId ?? null;
+  const spinner = useSpinnerText(variant === 'session' ? (storeKey as AppSessionId) : null, row?.state === 'working');
+  const label = row === undefined ? null : spinner ?? dividerCopy({ state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
+  return { durationMs, controls, label: spinner === null ? label : <span data-plugin-spinner="">{label}</span> };
+}
+
+export function DividerRow({ row }: { row: DividerRowData }) {
+  const { storeKey } = useTranscriptContext();
+  const motion = useWorkMotion();
+  const turn = row.turnId!;
+  const open = !useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn)) && row.expanded;
+  const { durationMs, controls, label } = useDividerSummary(row, open);
+  const store = useTranscriptStore.getState();
   return (
     <>
       <div className="transcript-divider">
@@ -77,7 +86,6 @@ export function DividerRow({ row, onToggle }: { row: DividerRowData; onToggle?: 
           aria-expanded={open}
           aria-controls={controls || undefined}
           onClick={() => {
-            if (onToggle) return onToggle(); // Report's working record owns this turn-level disclosure.
             const target = !row.expanded;
             motion.toggle(turn, row.expanded, () => {
               const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);
@@ -86,19 +94,29 @@ export function DividerRow({ row, onToggle }: { row: DividerRowData; onToggle?: 
           }}
         >
           <Chevron />
-          {spinner === null ? label : <span data-plugin-spinner="">{label}</span>}
+          {label}
         </button>
-        {row.denied > 0 && <CountLink count={row.denied} noun="denied" cell={firstOf('denied')} turnId={row.turnId!} storeKey={storeKey} />}
-        {row.autoDenied > 0 && <CountLink count={row.autoDenied} noun="auto-denied" cell={firstOf('auto_denied')} turnId={row.turnId!} storeKey={storeKey} />}
-        <TurnSummary row={row} durationMs={durationMs} />
+        <DividerDetails row={row} durationMs={durationMs} />
       </div>
       {row.state === 'working' && <PluginStatusLine storeKey={storeKey} />}
     </>
   );
 }
 
+export function DividerDetails({ row, durationMs }: { row: DividerRowData; durationMs: number }) {
+  const { storeKey } = useTranscriptContext();
+  const firstOf = (disposition: 'denied' | 'auto_denied') => row.summary.denials.find((denial) => denial.disposition === disposition)?.cellId ?? null;
+  return (
+    <>
+      {row.denied > 0 && <CountLink count={row.denied} noun="denied" cell={firstOf('denied')} turnId={row.turnId!} storeKey={storeKey} />}
+      {row.autoDenied > 0 && <CountLink count={row.autoDenied} noun="auto-denied" cell={firstOf('auto_denied')} turnId={row.turnId!} storeKey={storeKey} />}
+      <TurnSummary row={row} durationMs={durationMs} />
+    </>
+  );
+}
+
 // R1: a string, so the divider re-renders only when the line itself changes.
-function PluginStatusLine({ storeKey }: { storeKey: string }) {
+export function PluginStatusLine({ storeKey }: { storeKey: string }) {
   const line = useTranscriptStore((state) => latestPluginLine(state.entries[storeKey]?.state.pluginStatus));
   if (line === null) return null;
   return (
