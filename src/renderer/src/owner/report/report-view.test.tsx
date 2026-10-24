@@ -2,7 +2,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { resetSurfaceRegistry } from '../../engine-surface/registry';
@@ -11,6 +11,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { api, BASH_RESULT, builder } from '../../transcript/model/test-events';
 import type { TranscriptSource } from '../../transcript/source/types';
 import { Transcript } from '../../transcript/view/Transcript';
+import { CLOSE_MOTION, OPEN_MOTION } from '../../ui/disclosure';
 import sitting31 from './fixtures/sitting-31.txt?raw';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -151,6 +152,43 @@ describe('the report view', () => {
     expect(document.activeElement).toBe(disclosure);
     expect(record()).toBe(disclosure);
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
+  });
+
+  it('restoring an open Report record cancels a Transcript fold without disabling later fold animations', async () => {
+    const { key } = await mounted(session());
+    await waitFor(() => expect(record()).not.toBeNull());
+    const work = () => document.querySelector('[data-cell-id="cell:t1"]')?.closest<HTMLElement>('[data-kind="cell"]') ?? null;
+    fireEvent.click(record()!);
+    expect(work()).not.toBeNull();
+    act(() => useTranscriptStore.getState().setView(key, 'transcript'));
+    expect(dividers()[0].getAttribute('aria-expanded')).toBe('true');
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fireEvent.click(dividers()[0]);
+      expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
+      expect(work()!.style.transition).toContain(`height ${CLOSE_MOTION.ms}ms`);
+      expect(work()!.style.height).toBe('0px');
+      act(() => useTranscriptStore.getState().setView(key, 'report'));
+      // Wait beyond both motion windows: an obsolete Transcript callback must not fold the restored work away.
+      act(() => vi.advanceTimersByTime(CLOSE_MOTION.ms + OPEN_MOTION.ms + 1));
+      expect(record()?.getAttribute('aria-expanded')).toBe('true');
+      expect(work()).not.toBeNull();
+      expect(work()!.getAttribute('style')).toBeNull();
+      expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
+
+      // A new, deliberate fold in Transcript still animates before removing its rows.
+      act(() => useTranscriptStore.getState().setView(key, 'transcript'));
+      fireEvent.click(dividers()[0]);
+      expect(work()!.style.transition).toContain(`height ${CLOSE_MOTION.ms}ms`);
+      act(() => vi.advanceTimersByTime(CLOSE_MOTION.ms - 1));
+      expect(work()).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1));
+      expect(work()).toBeNull();
+      expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the transcript view draws every turn in full, the marks unboxed', async () => {
