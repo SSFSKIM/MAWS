@@ -26,7 +26,7 @@
 //   one gesture; a table's cell edited by a double-click, Tab to the next; single clicks through a group (P7).
 // - P4-B2 K6: the Edit menu's Undo and Redo, clicked by id, undo and redo a nudge on the stage and only the field's own
 //   typing in the inspector.
-import { openArtifactInPanel, openSurface, pinSurfaceForSessions } from './support/shell';
+import { mainTab, openArtifactInPanel, openSurface, pinSurfaceForSessions } from './support/shell';
 import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
@@ -140,6 +140,15 @@ async function openFromLibrary(page: Page, title: string, artifactId: string): P
   return tab;
 }
 
+async function openNotes(where: Locator): Promise<Locator> {
+  const disclosure = where.getByRole('button', { name: 'Speaker notes', exact: true });
+  await expect(disclosure).toBeVisible();
+  if (await disclosure.getAttribute('aria-expanded') === 'false') await disclosure.click();
+  const field = where.getByRole('textbox', { name: 'Speaker notes', exact: true });
+  await expect(field).toBeVisible();
+  return field;
+}
+
 // One pixel of the window, as the compositor painted it (BGRA → rgb).
 async function pixel(app: ElectronApplication, x: number, y: number): Promise<[number, number, number]> {
   return app.evaluate(async ({ BrowserWindow }, at) => {
@@ -222,8 +231,10 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await panel.getByRole('button', { name: 'All', exact: true }).click();
   await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-title]')).toHaveText('Q3 review');
-  await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-saved]')).toHaveText('All changes saved');
+  await expect(mainTab(page, 'Q3 review')).toHaveAttribute('aria-selected', 'true');
+  const saved = inMain.locator('.deck-toolbar [data-editor-toolbar] [data-header-saved]');
+  await expect(saved).toHaveText('Saved');
+  await expect(saved).toHaveAttribute('title', 'All changes saved');
   // the owner's view recorded once a slide is on screen (L's onShown)
   await expect.poll(async () => (await ok<{ artifact: { lastViewedAt: number | null } }>(page, 'artifacts.get', { artifactId: id })).artifact.lastViewedAt).not.toBeNull();
 
@@ -255,12 +266,15 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   // notes typed in the panel reach the main tab
   await inPanel.getByRole('button', { name: 'Slide 1', exact: true }).click();
   await inMain.getByRole('button', { name: 'Slide 1', exact: true }).click();
-  const panelNotes = inPanel.getByRole('textbox', { name: 'Speaker notes' });
+  await expect(inPanel.getByRole('button', { name: 'Speaker notes', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(inMain.getByRole('button', { name: 'Speaker notes', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  const panelNotes = await openNotes(inPanel);
   await expect(panelNotes).toHaveValue('Open with the ramp time.');
   await panelNotes.click();
   await panelNotes.press('End');
   await panelNotes.pressSequentially(' Then the office.');
-  await expect(inMain.getByRole('textbox', { name: 'Speaker notes' })).toHaveValue('Open with the ramp time. Then the office.');
+  await expect(inMain.locator('.deck-notes-preview')).toHaveText('Open with the ramp time. Then the office.');
+  await expect(await openNotes(inMain)).toHaveValue('Open with the ramp time. Then the office.');
 
   // add, duplicate, delete
   await inMain.getByRole('button', { name: 'New slide' }).click();
@@ -391,6 +405,16 @@ test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole cont
   await resizePanel(page, 280);
   const toolbar = inPanel.getByRole('toolbar', { name: 'Deck' });
   await expect(toolbar.getByRole('button', { name: 'Text style', exact: true })).toBeVisible();
+  const identity = toolbar.locator('[data-header-title]');
+  await expect(identity).toHaveText('Q3 review');
+  for (const label of ['Present', 'Deck actions', 'Float conversation over surface', 'Expand surface', 'Close surface']) {
+    await expect(toolbar.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  const titleBox = (await identity.boundingBox())!;
+  const panelBox = (await panel.boundingBox())!;
+  expect(titleBox.width).toBeGreaterThan(0);
+  expect(titleBox.x).toBeGreaterThanOrEqual(panelBox.x);
+  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width);
 
   await test.info().attach('deck-panel-280', { body: await panel.screenshot(), contentType: 'image/png' });
   expect(await squeezedControls(toolbar, { within: panel }), 'nothing selected').toEqual([]);
@@ -401,6 +425,16 @@ test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole cont
   await expect(inPanel.locator('[data-overlay] [data-selected="title"]')).toHaveCount(1);
   await test.info().attach('deck-panel-280-selected', { body: await panel.screenshot(), contentType: 'image/png' });
   expect(await squeezedControls(toolbar, { within: panel }), 'a heading selected').toEqual([]);
+
+  // Leave F6 to the portable editor for this isolated profile instead of the shell's default region shortcuts.
+  await ok(page, 'settings.set', { keymap: { 'region.focusNext': null, 'region.focusPrevious': null } });
+  const hostAction = toolbar.getByRole('button', { name: 'Present', exact: true });
+  await hostAction.focus();
+  await expect(hostAction).toBeFocused();
+  await page.keyboard.press('F6');
+  await expect(inPanel.locator('.deck-filmstrip [data-current] .deck-thumb-button')).toBeFocused();
+  await page.keyboard.press('Shift+F6');
+  await expect(hostAction).toBeFocused();
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

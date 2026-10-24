@@ -40,17 +40,12 @@ describe('the report projection (the P2-C document, Design §7)', () => {
     expect(rows[2]).toEqual({ id: rowId.ownerRecord(T1), turnId: T1, at: rows[1].at, kind: 'owner_record', open: false, working: false, toolCalls: 1, messages: 2 });
   });
 
-  it('level 1: the record opened shows the turn as the full transcript draws it folded, the record above it', () => {
-    const state = stateOf(markedTurn().events, () => ({ reportOpenTurns: new Set([T1]) }));
-    const rows = project(state);
-    expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'divider', 'text:Looking first. <to-human>The plan is A.</to-human>', 'text:All done, unmarked.']);
-    expect(rows[2]).toMatchObject({ open: true });
-    expect(rows[3]).toMatchObject({ kind: 'divider', expanded: false });
-  });
-
-  it('level 2: the divider expanded shows the work rows as the full transcript does', () => {
+  it('the record opened exposes the work without a second turn divider', () => {
     const state = stateOf(markedTurn().events, () => ({ reportOpenTurns: new Set([T1]), expandedTurns: new Set([T1]) }));
-    expect(kinds(project(state))).toEqual(['time', 'user', 'owner_record', 'divider', 'text:Looking first. <to-human>The plan is A.</to-human>', 'cell', 'text:All done, unmarked.']);
+    const rows = project(state);
+    expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'text:Looking first. <to-human>The plan is A.</to-human>', 'cell', 'text:All done, unmarked.']);
+    expect(rows[2]).toMatchObject({ open: true });
+    expect(rows.some((row) => row.kind === 'divider')).toBe(false);
   });
 
   it('a marked commentary block stays in view under the lane even with the turn folded and no drawing reported', () => {
@@ -205,8 +200,8 @@ describe('the report projection (the P2-C document, Design §7)', () => {
       expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'to_human']);
       expect(rows[2]).toMatchObject({ kind: 'owner_record', open: false, working: false, toolCalls: 1, messages: 2 }); // the call is the message, not one of the calls
       expect(rows[3]).toMatchObject({ toolUseId: 'c1', text: 'Stage 1 is done.' });
-      // opened, the turn as the full transcript draws it folded: the message stays in view there too
-      expect(kinds(project(stateOf(b.events, () => ({ reportOpenTurns: new Set([T1]) }))))).toEqual(['time', 'user', 'owner_record', 'divider', 'to_human', 'text:All stages ran.']);
+      // Opened, the turn's work is exposed directly; the message stays in view too.
+      expect(kinds(project(stateOf(b.events, () => ({ reportOpenTurns: new Set([T1]), expandedTurns: new Set([T1]) }))))).toEqual(['time', 'user', 'owner_record', 'text:Looking first.', 'to_human', 'cell', 'text:All stages ran.']);
     });
 
     it('sits at its place among the turn’s marked texts', () => {

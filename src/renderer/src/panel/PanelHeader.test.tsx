@@ -22,6 +22,7 @@ import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';
 import type { PanelToolContext } from './tool';
+import { EditorHeader } from './PanelHeader';
 
 const offs: (() => void)[] = [];
 beforeEach(() => {
@@ -64,6 +65,46 @@ const add = (toolId: string) => {
 };
 
 describe('the panel header', () => {
+  it('moves saved state, primary action, grouped actions and host controls into an editor toolbar without a second header row', async () => {
+    const user = userEvent.setup();
+    const target = document.createElement('div');
+    target.setAttribute('role', 'toolbar');
+    document.body.append(target);
+    offs.push(() => target.remove());
+    const calls: string[] = [];
+    const inlineScope = { surface: 'panel', tabId: 'inline-deck' } as const;
+    render(<EditorHeader title="Deck" scope={inlineScope} registration={{ title: 'Deck', saved: 'saved', toolbarHost: { element: target, menuLabel: 'Deck actions' }, actions: [
+      { id: 'present', label: 'Present', onSelect: () => calls.push('present') },
+      { id: 'theme', label: 'Theme', pressed: false, onSelect: () => calls.push('theme') },
+      { id: 'check', label: 'Check against the design system', onSelect: () => calls.push('check') },
+    ], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('pdf') }] }} controls={<button onClick={() => calls.push('expand')}>Expand pane</button>} />);
+    expect(document.querySelector('[data-editor-header]')).toBeNull();
+    expect(within(target).getByText('Deck', { exact: true })).toBeTruthy(); // the panel has no main tab naming its record
+    expect(within(target).getByText('Saved').getAttribute('title')).toBe('All changes saved');
+    await user.click(within(target).getByRole('button', { name: 'Present' }));
+    await user.click(within(target).getByRole('button', { name: 'Expand pane' }));
+    expect(within(target).queryByRole('button', { name: 'Theme' })).toBeNull();
+    await user.click(within(target).getByRole('button', { name: 'Deck actions' }));
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Theme' }));
+    await user.click(within(target).getByRole('button', { name: 'Deck actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'PDF' }));
+    expect(calls).toEqual(['present', 'expand', 'theme', 'pdf']);
+    act(() => expect(focusEditorHostAction(inlineScope, 'theme')).toBe(true));
+    expect(document.activeElement).toBe(within(target).getByRole('button', { name: 'Deck actions' }));
+    act(() => expect(focusEditorHostAction(inlineScope, 'present')).toBe(true));
+    expect(document.activeElement).toBe(within(target).getByRole('button', { name: 'Present' }));
+  });
+
+  it('does not repeat a main tab’s record title in its hosted controls', () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    offs.push(() => target.remove());
+    render(<EditorHeader title="Presentation" scope={{ surface: 'main', tabId: 'main-deck' }} registration={{ title: 'Q3 review', saved: 'saved', toolbarHost: { element: target, menuLabel: 'Deck actions' } }} />);
+    expect(within(target).queryByText('Q3 review', { exact: true })).toBeNull();
+    expect(within(target).getByText('Saved')).toBeTruthy();
+    expect(document.querySelector('[data-editor-header]')).toBeNull();
+  });
+
   it('reserves no header or column for the resting summary (D1 floating cards)', () => {
     mount();
     expect(header()).toBeNull();
@@ -73,23 +114,29 @@ describe('the panel header', () => {
   // P3-F wave S (F6, candidate 58): the card draws the session in front; with none, Float is disabled and names why
   it('with no session in front, Float is disabled and reads its reason; Maximize and Hide stay', () => {
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });
-    offs.push(registerPanelTool(probeTool('files').tool));
+    offs.push(registerPanelTool(probeTool('files', { multiInstance: false }).tool));
     panelHost.addTool('files', { appSessionId: null, pin: true });
     mount();
-    expect(buttons()).toEqual([FLOAT_COPY.noSession, 'Maximize right panel', 'Close surface']);
+    expect(buttons()).toEqual([FLOAT_COPY.noSession, 'Expand surface', 'Close surface']);
     expect((within(header()).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement).disabled).toBe(true);
-    expect((within(header()).getByRole('button', { name: 'Maximize right panel' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((within(header()).getByRole('button', { name: 'Expand surface' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('shows an unregistered tool’s strip label, its setTitle suffix following in the header and the strip alike', () => {
+  it('puts an unregistered multi-instance tool’s tabs and surface controls in one header, naming the terminal only once', async () => {
+    const user = userEvent.setup();
     offs.push(registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool));
     mount();
-    const id = add('terminal');
-    expect(title().textContent).toBe('Terminal');
-    act(() => setTitle(id, 'claude'));
-    expect(title().textContent).toBe('Terminal · claude');
-    expect(title().getAttribute('title')).toBe('Terminal · claude');
-    expect(screen.getByRole('tab', { name: 'Terminal · claude' })).toBeTruthy();
+    const first = add('terminal');
+    act(() => setTitle(first, 'zsh'));
+    const tab = within(header()).getByRole('tab', { name: 'Terminal · zsh' });
+    expect(header().textContent?.match(/Terminal/g)).toHaveLength(1);
+    expect(within(header()).getByRole('button', { name: 'Close surface' })).toBeTruthy();
+    await user.click(within(header()).getByRole('button', { name: 'New terminal tab' }));
+    expect(within(header()).getAllByRole('tab')).toHaveLength(2);
+    await user.click(tab);
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    await user.click(within(tab.parentElement!).getByRole('button', { name: 'Close Terminal' }));
+    expect(within(header()).getAllByRole('tab')).toHaveLength(1);
   });
 
   it('hands a tool its scope as ctx.editorHost', () => {
@@ -135,7 +182,7 @@ describe('the panel header', () => {
     expect(header().textContent).toContain('Docs/Planning/Q3 brief');
     expect(header().textContent).toContain('Saving…');
     // The count stands for the `comments` action, which is not repeated among the actions.
-    expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export', 'Float session over panel', 'Maximize right panel', 'Close surface']);
+    expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export', 'Float conversation over surface', 'Expand surface', 'Close surface']);
     await user.click(within(header()).getByRole('button', { name: '3 open comments' }));
     await user.click(within(header()).getByRole('button', { name: 'Version history' }));
     await user.click(within(header()).getByRole('button', { name: 'Export' }));
@@ -185,7 +232,7 @@ describe('the panel header', () => {
     expect(title().textContent).toBe('Registered');
     expect(header().textContent).toContain('Unsaved changes');
     act(() => handle.dispose());
-    expect(title().textContent).toBe('Plain');
+    expect(within(header()).getByRole('tab', { name: 'Plain' })).toBeTruthy();
     expect(header().textContent).not.toContain('Unsaved changes');
   });
 
@@ -232,12 +279,12 @@ describe('the panel header', () => {
     mount();
     const id = add('t');
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1, { pressed: true }), action(2), action(3)] }));
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Float session over panel', 'Maximize right panel', 'Close surface']);
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Float conversation over surface', 'Expand surface', 'Close surface']);
     expect(within(header()).getByRole('button', { name: 'Action 1' }).getAttribute('aria-pressed')).toBe('true');
 
     resetEditorHosts();
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [1, 2, 3, 4, 5].map((n) => action(n, n === 5 ? { disabled: true } : {})) }));
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'More actions', 'Float session over panel', 'Maximize right panel', 'Close surface']);
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'More actions', 'Float conversation over surface', 'Expand surface', 'Close surface']);
     await user.click(within(header()).getByRole('button', { name: 'More actions' }));
     const items = within(await screen.findByRole('menu')).getAllByRole('menuitem');
     expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled')])).toEqual([
@@ -263,7 +310,7 @@ describe('the panel header', () => {
     mount();
     const id = add('t');
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1), action(2), action(3), action(4), action(5, { pinned: true, label: 'Send to…' })] }));
-    const controls = ['Float session over panel', 'Maximize right panel', 'Close surface'];
+    const controls = ['Float conversation over surface', 'Expand surface', 'Close surface'];
     expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Send to…', 'More actions', ...controls]);
     await user.click(within(header()).getByRole('button', { name: 'More actions' }));
     expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Action 4']);
@@ -325,7 +372,7 @@ describe('the panel header', () => {
         { title: 'Q3 brief', saved: 'saved', actions: [action(1), action(2), action(3)], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('export:pdf') }] },
       ),
     );
-    const controls = ['Float session over panel', 'Maximize right panel', 'Close surface'];
+    const controls = ['Float conversation over surface', 'Expand surface', 'Close surface'];
 
     width = 280; // the panel's narrowest
     resize(header(), { width: 264, height: 40 });
@@ -354,6 +401,7 @@ describe('the panel header', () => {
       registerPanelTool(
         probeTool('page', {
           title: 'Page',
+          multiInstance: false,
           render: function PageBody() {
             const scope = useEditorHostScope();
             useEffect(() => (scope ? registerMarkupSurface(scope, { element: () => element, label: () => 'Page', begin, end: () => {} }) : undefined), [scope]);
@@ -362,15 +410,15 @@ describe('the panel header', () => {
         }).tool,
       ),
     );
-    offs.push(registerPanelTool(probeTool('plain', { title: 'Plain' }).tool));
+    offs.push(registerPanelTool(probeTool('plain', { title: 'Plain', multiInstance: false }).tool));
     mount();
     add('page');
-    expect(buttons()).toEqual(['Mark up', 'Float session over panel', 'Maximize right panel', 'Close surface']);
+    expect(buttons()).toEqual(['Mark up', 'Float conversation over surface', 'Expand surface', 'Close surface']);
     await userEvent.click(within(header()).getByRole('button', { name: 'Mark up' }));
     expect(begin).toHaveBeenCalledTimes(1);
     const plain = add('plain');
     act(() => useLayout.getState().setSurfaceStack(A, [plain]));
-    expect(buttons()).toEqual(['Float session over panel', 'Maximize right panel', 'Close surface']);
+    expect(buttons()).toEqual(['Float conversation over surface', 'Expand surface', 'Close surface']);
   });
 
   it('closing an inactive editor tab asks its guard: switched away, the registration still vetoes', async () => {

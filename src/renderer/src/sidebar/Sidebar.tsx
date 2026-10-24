@@ -8,7 +8,7 @@
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
-import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
@@ -31,6 +31,7 @@ import { ResumeChooserHost } from '../resume/host'; // P2-D
 import { registerProjectRevealer } from './reveal';
 import { AddProject } from './AddProject';
 import { Search } from './Search';
+import { SidebarInteractionContext } from './interaction';
 import { openConversationSearch, openPalette } from '../palette/CommandPalette';
 import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
@@ -85,13 +86,65 @@ function SidebarBody() {
   const [focused, setFocused] = useState<string | null>(null);
   const pendingFocus = useRef<string | null>(null); // a tree item to focus once a render shows it
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
+  const [pointerWithin, setPointerWithin] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
+  const pointerOwner = useRef<Node | null>(null);
+  const focusOwner = useRef<Node | null>(null);
+  const ownPointer = (target: EventTarget, fallback: HTMLElement) => {
+    // Row and portal shells survive incidental icon/text replacement; their actual removal still ends ownership.
+    pointerOwner.current = (target as Element).closest('[role="treeitem"], [data-needs-you], [role="dialog"], [role="menu"]') ?? fallback;
+    setPointerWithin(true);
+  };
+  const releaseRemoved = useCallback((removed: Node) => {
+    if (pointerOwner.current && removed.contains(pointerOwner.current)) {
+      pointerOwner.current = null;
+      setPointerWithin(false);
+    }
+    if (focusOwner.current && removed.contains(focusOwner.current)) {
+      focusOwner.current = null;
+      setFocusWithin(false);
+    }
+  }, []);
+  useLayoutEffect(() => {
+    // Removing a row can omit leave/blur and move focus to BODY without focusin. Reconcile after this
+    // sidebar's commit; surviving targets and focus transfers performed by children keep their ownership.
+    for (const owner of [pointerOwner.current, focusOwner.current]) {
+      if (owner && !owner.isConnected) releaseRemoved(owner);
+    }
+  });
+  useEffect(() => {
+    // Clear at document capture first; this subtree's React capture renews ownership for its own controls,
+    // including portals. A focus elsewhere also clears stale ownership left by a removed portal.
+    const clearFocus = () => { focusOwner.current = null; setFocusWithin(false); };
+    document.addEventListener('focusin', clearFocus, true);
+    return () => document.removeEventListener('focusin', clearFocus, true);
+  }, []);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLDivElement>(null);
 
   const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const hidden = useMemo(() => new Set([...hiddenProjects, ...allKnownProjects.filter((p) => !projects.some((listed) => listed.id === p.id))].map((p) => p.id)), [hiddenProjects, allKnownProjects, projects]);
-  const everyEntry = useMemo(() => projectList({ records, digests, projects, rows, hidden }), [records, digests, projects, rows, hidden]);
+  const rankedEntries = useMemo(() => projectList({ records, digests, projects, rows, hidden }).map((entry) => ({
+    ...entry,
+    sessions: projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true }),
+  })), [records, digests, projects, rows, hidden, sidebar.sort]);
+  // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
+  // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
+  // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.
+  const holding = pointerWithin || focusWithin || menuTarget !== null;
+  const [settledOrder, setSettledOrder] = useState({ entries: rankedEntries, sort: sidebar.sort });
+  if ((!holding || settledOrder.sort !== sidebar.sort) && settledOrder.entries !== rankedEntries) {
+    setSettledOrder({ entries: rankedEntries, sort: sidebar.sort });
+  }
+  const everyEntry = useMemo(() => {
+    if (!holding) return rankedEntries;
+    const previous = new Map(settledOrder.entries.map((entry) => [entry.key, entry]));
+    return holdOrder(rankedEntries, settledOrder.entries, (entry) => entry.key).map((entry) => ({
+      ...entry,
+      sessions: holdOrder(entry.sessions, previous.get(entry.key)?.sessions ?? [], (record) => record.appId),
+    }));
+  }, [rankedEntries, settledOrder, holding]);
   const searching = query.trim() !== '';
   const matches = useMemo(() => sessionMatcher(query, byId), [query, byId]);
   const expanded = useMemo(() => new Set(sidebar.expandedProjects), [sidebar.expandedProjects]);
@@ -111,11 +164,11 @@ function SidebarBody() {
       listed.map((entry) => {
         const open = searching || expanded.has(entry.key);
         if (!open) return { entry, open, sessions: [], more: 0 };
-        const all = nestLineage(projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches })); // E3: the caps count trees
+        const all = nestLineage(entry.sessions.filter(matches)); // E3: the caps count trees; rank was settled above
         const count = searching ? all.length : shownCount(all.length, more.has(entry.key));
         return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: searching ? 0 : Math.min(all.length, SESSIONS_CAP) - count };
       }),
-    [listed, searching, expanded, digests, rows, sidebar.sort, matches, more],
+    [listed, searching, expanded, matches, more],
   );
   // The list's "Show more" sits after the last project row, before Other sessions.
   const moreAt = folded > 0 ? shown.filter((p) => p.entry.project !== null).length : -1;
@@ -198,7 +251,7 @@ function SidebarBody() {
     if (!group) return;
     setMore(new Set(more).add(key));
     const shownTrees = group.sessions.filter((row) => row.nestedUnder === null).length; // E3: the next tree's root
-    const next = nestLineage(projectSessions({ sessions: group.entry.sessions, digests, rows, sort: sidebar.sort, matches }))[shownTrees]?.root;
+    const next = nestLineage(group.entry.sessions.filter(matches))[shownTrees]?.root;
     if (next) focusItem(sessionNodeId(next.appId));
   };
 
@@ -230,76 +283,93 @@ function SidebarBody() {
 
   return (
     <TreeContext.Provider value={tree}>
-      <SidebarDestinations>
-        <div ref={search}>
-          <Search value={query} onChange={setQuery} label="Search projects and sessions" onSearch={openPalette} chord={searchChord} onLeave={() => {
-            const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
-            if (waiting) waiting.focus();
-            else if (tabStop) focusItem(tabStop);
-          }} />
-        </div>
-      </SidebarDestinations>
-      <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
-        <ContextMenu.Trigger asChild>
-          <div
-            ref={scroller}
-            data-testid="sidebar-tree"
-            onContextMenu={(event) => {
-              const target = menuTargetOf(event.target as Element);
-              if (target) setMenuTarget(target);
-              else event.preventDefault(); // no row, no menu
-            }}
-            className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
-          >
-            <NeedsYou rows={rows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
-            <SectionHeading title="Projects">
-              <ProjectFilter projects={allKnownProjects} current={selected ? records.get(selected)?.projectId ?? null : null} selected={projectFilter} onChange={setProjectFilter} />
-              <SortMenu sort={sidebar.sort} />
-              <AddProject />
-            </SectionHeading>
-            {listEmpty && <EmptyProjects />}
-            {listed.length === 0 ? (
-              searching && <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
-            ) : (
-              <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col gap-px">
-                {shown.map((group, i) => (
-                  <Fragment key={group.entry.key}>
-                    {i === moreAt && moreProjects}
-                    <ProjectRow entry={group.entry} open={group.open} sessions={group.sessions} more={group.more} matchCount={searching ? group.sessions.length : undefined} onToggle={toggleProject} onShowMore={showMore} />
-                  </Fragment>
-                ))}
-                {moreAt === shown.length && moreProjects}
-              </div>
-            )}
+      <SidebarInteractionContext.Provider value={releaseRemoved}>
+      <div className="flex min-h-0 flex-1 flex-col"
+        onPointerEnter={(event) => ownPointer(event.target, event.currentTarget)}
+        onPointerOverCapture={(event) => ownPointer(event.target, event.currentTarget)}
+        onPointerLeave={() => { pointerOwner.current = null; setPointerWithin(false); }}
+        onFocusCapture={(event) => { focusOwner.current = event.target; setFocusWithin(true); }}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) { focusOwner.current = null; setFocusWithin(false); }
+        }}>
+        <SidebarDestinations>
+          <div ref={search}>
+            <Search value={query} onChange={setQuery} label="Search projects and sessions" onSearch={openPalette} chord={searchChord} onLeave={() => {
+              const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
+              if (waiting) waiting.focus();
+              else if (tabStop) focusItem(tabStop);
+            }} />
             {searching && <button type="button" onClick={() => openConversationSearch(query.trim())}
-              className="mt-1 w-full rounded-sm px-[9px] py-1.5 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+              className="mb-1 w-full rounded-sm px-[9px] py-1.5 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
               Search in conversations for ‘{query.trim()}’
             </button>}
-            {hiddenProjects.length > 0 && !searching && (
-              <button
-                type="button"
-                onClick={() => openDialog({ kind: 'hiddenProjects' })}
-                className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-              >
-                Hidden projects…
-              </button>
-            )}
-            {!searching && (
-              <button
-                type="button"
-                onClick={() => openDialog({ kind: 'archived', projectId: null })}
-                className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-              >
-                Archived sessions…
-              </button>
-            )}
           </div>
-        </ContextMenu.Trigger>
-        <SidebarMenuContent target={menuTarget} />
-      </ContextMenu.Root>
-      <ResumeChooserHost />
+        </SidebarDestinations>
+        <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
+          <ContextMenu.Trigger asChild>
+            <div
+              ref={scroller}
+              data-testid="sidebar-tree"
+              onContextMenu={(event) => {
+                const target = menuTargetOf(event.target as Element);
+                if (target) setMenuTarget(target);
+                else event.preventDefault(); // no row, no menu
+              }}
+              className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
+            >
+              <NeedsYou rows={rows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
+              <SectionHeading title="Projects">
+                <ProjectFilter projects={allKnownProjects} current={selected ? records.get(selected)?.projectId ?? null : null} selected={projectFilter} onChange={setProjectFilter} />
+                <SortMenu sort={sidebar.sort} />
+                <AddProject />
+              </SectionHeading>
+              {listEmpty && <EmptyProjects />}
+              {listed.length === 0 ? (
+                searching && <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
+              ) : (
+                <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col gap-px">
+                  {shown.map((group, i) => (
+                    <Fragment key={group.entry.key}>
+                      {i === moreAt && moreProjects}
+                      <ProjectRow entry={group.entry} open={group.open} sessions={group.sessions} more={group.more} matchCount={searching ? group.sessions.length : undefined} onToggle={toggleProject} onShowMore={showMore} />
+                    </Fragment>
+                  ))}
+                  {moreAt === shown.length && moreProjects}
+                </div>
+              )}
+              {hiddenProjects.length > 0 && !searching && (
+                <button
+                  type="button"
+                  onClick={() => openDialog({ kind: 'hiddenProjects' })}
+                  className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+                >
+                  Hidden projects…
+                </button>
+              )}
+              {!searching && (
+                <button
+                  type="button"
+                  onClick={() => openDialog({ kind: 'archived', projectId: null })}
+                  className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+                >
+                  Archived sessions…
+                </button>
+              )}
+            </div>
+          </ContextMenu.Trigger>
+          <SidebarMenuContent target={menuTarget} />
+        </ContextMenu.Root>
+        <ResumeChooserHost />
+      </div>
+      </SidebarInteractionContext.Provider>
     </TreeContext.Provider>
   );
+}
+
+function holdOrder<T>(current: T[], previous: T[], key: (item: T) => string): T[] {
+  const rank = new Map(previous.map((item, index) => [key(item), index]));
+  // New arrivals follow the held rows; stable sort keeps the arrivals' live ordering.
+  return [...current].sort((a, b) => (rank.get(key(a)) ?? previous.length) - (rank.get(key(b)) ?? previous.length));
 }
 
 const SORTS: { value: SidebarSort; label: string }[] = [

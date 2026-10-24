@@ -65,6 +65,15 @@ async function mount(doc: Doc) {
 }
 
 describe('the deck body', () => {
+  it('registers the deck’s own toolbar as its host without dropping the tab’s close guard or actions', async () => {
+    const { state } = await mount(deckOf(['a']));
+    const host = editorHostOf(scope)!;
+    expect(host.toolbarHost?.menuLabel).toBe('Deck actions');
+    expect(host.toolbarHost?.element.closest('[role="toolbar"]')?.getAttribute('aria-label')).toBe('Deck');
+    expect(host.closeGuard).toBe(state.closeGuard);
+    expect(host.actions?.map((action) => action.id)).toEqual(['present', 'theme', 'check']);
+  });
+
   // scalpel-2#1: header.ts's contract, "the deck has a slide to show"
   it('offers Present while the deck has a slide to show: not with every slide hidden, nor with no slide', async () => {
     const doc = deckOf(['a']);

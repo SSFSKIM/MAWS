@@ -865,6 +865,88 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(editor.consoleErrors()).toEqual([]);
 });
 
+const ACCEPTANCE_SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }, { width: 900, height: 820 }, { width: 620, height: 820 }] as const;
+
+// The two-pane harness leaves a composer narrower than the native window, exercising side-surface/split constraints.
+test('narrow composer tools wrap without overlap, lost labels or clipped hit targets', async ({ editor }, testInfo) => {
+  const { page, app } = editor;
+  const id = 'acceptance-footer';
+  await openComposerPage(page);
+  await launchReady(page, id, turnsJournal(scratch, id, 1), { cwd: repo });
+  await showPanes(page, [{ composer: id }, null]);
+  const toolbar = pane(page, 0).getByRole('toolbar', { name: 'Composer tools' });
+  for (const { width, height } of ACCEPTANCE_SIZES) {
+    await app.evaluate(({ BrowserWindow }, [w, h]) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.setMinimumSize(0, 0);
+      window.setContentSize(w, h);
+    }, [width, height] as const);
+    await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+    const controls = await toolbar.getByRole('button').evaluateAll((buttons) => buttons.map((button) => {
+      const r = button.getBoundingClientRect();
+      const parent = button.closest('[role="toolbar"]')!.getBoundingClientRect();
+      return { label: button.getAttribute('aria-label'), x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width,
+        contained: r.x >= parent.x - 1 && r.right <= parent.right + 1 && r.y >= parent.y - 1 && r.bottom <= parent.bottom + 1,
+        clipped: button.scrollWidth > button.clientWidth + 1 };
+    }));
+    for (const [i, control] of controls.entries()) {
+      expect(control.contained, `${width}: ${control.label} stays inside the footer`).toBe(true);
+      expect(control.width, `${width}: ${control.label} keeps a hit target`).toBeGreaterThan(16);
+      expect(control.clipped, `${width}: ${control.label} is not cut off`).toBe(false);
+      for (const other of controls.slice(i + 1)) {
+        const overlap = Math.min(control.right, other.right) - Math.max(control.x, other.x) > 1 && Math.min(control.bottom, other.bottom) - Math.max(control.y, other.y) > 1;
+        expect(overlap, `${width}: ${control.label} and ${other.label} do not overlap`).toBe(false);
+      }
+    }
+    await toolbar.getByRole('button', { name: /^Location / }).click();
+    await expect(page.getByRole('dialog', { name: 'Location', exact: true })).toContainText(repo);
+    await page.keyboard.press('Escape');
+    const column = Math.round((await toolbar.boundingBox())!.width);
+    await testInfo.attach(`composer-footer-${width}x${height}-column-${column}`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
+  }
+});
+
+for (const { width, height } of ACCEPTANCE_SIZES) {
+  test(`sending while reading old work follows the new turn and preserves tight user line breaks (${width}x${height})`, async ({ editor }, testInfo) => {
+    const { page, app } = editor;
+    await app.evaluate(({ BrowserWindow }, [w, h]) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.setMinimumSize(0, 0);
+      window.setContentSize(w, h);
+    }, [width, height] as const);
+    await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+    const id = `acceptance-send-follow-${width}`;
+    await openComposerPage(page);
+    await launchReady(page, id, turnsJournal(scratch, id, 2), { cwd: repo });
+    await showPanes(page, [{ composer: id, transcript: true }, null]);
+    await messageIn(page, 0).click();
+    // Multiline Enter inserts a line; Cmd+Enter sends. Enough old work to scroll even at 982px high.
+    await page.keyboard.insertText(Array.from({ length: 80 }, (_, i) => `Earlier instruction ${i + 1}`).join('\n'));
+    await messageIn(page, 0).press('Meta+Enter');
+    await expect.poll(() => sent(page, id)).toHaveLength(1);
+    await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+    const scroller = pane(page, 0).locator('[data-transcript-scroller]');
+    await scroller.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(pane(page, 0).getByRole('button', { name: 'Jump to latest' })).toBeVisible();
+    await testInfo.attach(`composer-reading-old-${width}x${height}`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
+    await messageIn(page, 0).click();
+    await page.keyboard.insertText('red apple\ngreen pear\nblue plum');
+    await messageIn(page, 0).press('Meta+Enter');
+    await expect.poll(() => sent(page, id)).toHaveLength(2);
+    await expect(pane(page, 0).getByRole('button', { name: 'Jump to latest' })).toHaveCount(0);
+    await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1);
+    const paragraph = pane(page, 0).locator('.transcript-user-bubble p').filter({ hasText: 'red apple' });
+    await expect(paragraph).toBeVisible();
+    expect(await paragraph.evaluate((el) => el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight))).toBeCloseTo(3, 1);
+    await expect(paragraph.locator('br')).toHaveCount(2);
+    await testInfo.attach(`composer-send-follow-linebreaks-${width}x${height}`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
+  });
+}
+
 // R5: the light composer elevation follows the window, not the pane; the dark edge stays inset.
 test('R5: composer shadow switches below 640px and keeps the dark edge', async ({ editor }) => {
   const { page, app } = editor;
@@ -887,6 +969,48 @@ test('R5: composer shadow switches below 640px and keeps the dark edge', async (
     await expect.poll(() => box.evaluate((el, expected) => getComputedStyle(el).boxShadow.endsWith(expected), shadow(width < 640 ? 40 : 80))).toBe(true);
     await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
     await expect.poll(() => box.evaluate((el) => getComputedStyle(el).boxShadow.endsWith('rgba(255, 255, 255, 0.2) 0px 0px 1px 0px inset'))).toBe(true);
+  }
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// A remote SessionMode drawing is a non-shrinking toolbar item: even its own cap must fit a narrow split column.
+test('plugin mode drawings stay inside a split composer while short labels remain whole', async ({ editor }, testInfo) => {
+  const { page, app } = editor;
+  const recording = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3/mods-surface-render-sites.jsonl'), 'utf8');
+  const labels = ['Repository investigation with the full workspace dependency graph enabled', 'Focus'];
+  const ids = ['acceptance-plugin-mode-long', 'acceptance-plugin-mode-short'];
+  await openComposerPage(page);
+  for (const [index, id] of ids.entries()) {
+    const journal = join(scratch, `${id}.jsonl`);
+    // Keep the recorded hooked tree and handshake; change only the label's length.
+    writeFileSync(journal, recording.replaceAll('MODS_PROBE_MODE modes=0', labels[index]));
+    await launchReady(page, id, journal, { cwd: repo });
+  }
+  await showPanes(page, [{ composer: ids[0], transcript: true }, { composer: ids[1], transcript: true }]);
+  for (const width of [1280, 620]) {
+    await app.evaluate(({ BrowserWindow }, w) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.setMinimumSize(0, 0);
+      window.setContentSize(w, 820);
+    }, width);
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
+    for (const index of [0, 1] as const) {
+      const toolbar = pane(page, index).getByRole('toolbar', { name: 'Composer tools' });
+      const mode = toolbar.getByLabel('Plugin modes');
+      await expect(mode).toHaveText(labels[index]);
+      const geometry = await mode.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const parent = element.closest('[role="toolbar"]')!.getBoundingClientRect();
+        return { width: bounds.width, parentWidth: parent.width,
+          contained: bounds.left >= parent.left - 1 && bounds.right <= parent.right + 1 && bounds.top >= parent.top - 1 && bounds.bottom <= parent.bottom + 1,
+          clipped: element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1 };
+      });
+      if (width === 620) expect(geometry.parentWidth, 'exercise a split footer narrower than the 256px mode cap').toBeLessThan(256);
+      expect(geometry.contained, `${width}: pane ${index} plugin drawing stays inside its footer`).toBe(true);
+      expect(geometry.width).toBeGreaterThan(16);
+      if (index === 1) expect(geometry.clipped, `${width}: the ordinary short mode label is not cut off`).toBe(false);
+      await testInfo.attach(`plugin-mode-${index}-${width}x820`, { body: await toolbar.screenshot(), contentType: 'image/png' });
+    }
   }
   expect(editor.consoleErrors()).toEqual([]);
 });

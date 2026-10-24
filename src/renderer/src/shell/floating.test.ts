@@ -58,7 +58,7 @@ describe('the transition table', () => {
   const rows: [string, () => void, (Name | null)[]][] = [
     ['panel.float', () => runAction('panel.float'), ['floating, card open', 'floating, card open', 'floating, card open', 'docked', 'floating, card open']],
     ['panel.maximize', () => runAction('panel.maximize'), ['maximized', 'docked', 'maximized', 'maximized', 'maximized']],
-    ['panel.toggle', () => runAction('panel.toggle'), ['collapsed', 'collapsed', 'docked', 'collapsed', 'collapsed']],
+    ['surface visibility', () => useLayout.getState().setPanel({ collapsed: !useLayout.getState().regions.panel.collapsed }), ['collapsed', 'collapsed', 'docked', 'collapsed', 'collapsed']],
     ['the card’s Dock', dockPanel, [null, null, null, 'docked', null]],
     ['the card’s Close / the pill', () => (useFloatingCard.getState().closed ? openCard() : closeCard()), [null, null, null, 'floating, pill', 'floating, card open']],
     ['revealMain (the Overview, attention navigation)', () => useLayout.getState().revealMain(), [null, 'docked', null, 'docked', 'docked']],
@@ -519,7 +519,7 @@ describe('the split’s card', () => {
 
     it('the owner reopening the panel while expanded drops the fold: Restore split leaves the panel open', () => {
       expand();
-      runAction('panel.toggle');
+      useLayout.getState().setPanel({ collapsed: !useLayout.getState().regions.panel.collapsed });
       expect(set().floating, 'the float stands, the fold gone').toEqual({ sessionTabId: S.id });
       expect(panel()).toEqual(OPEN);
       expand();
@@ -528,8 +528,8 @@ describe('the split’s card', () => {
 
     it('the owner reopening and closing the panel again while expanded: Restore split leaves it closed', () => {
       expand();
-      runAction('panel.toggle');
-      runAction('panel.toggle');
+      useLayout.getState().setPanel({ collapsed: !useLayout.getState().regions.panel.collapsed });
+      useLayout.getState().setPanel({ collapsed: !useLayout.getState().regions.panel.collapsed });
       expect(set().floating).toEqual({ sessionTabId: S.id });
       expand();
       expect(panel()).toEqual({ ...OPEN, collapsed: true });
@@ -545,7 +545,7 @@ describe('the split’s card', () => {
 
     it('the owner opening and floating the panel while expanded: it floats and stays floating', () => {
       expand();
-      runAction('panel.toggle');
+      useLayout.getState().setPanel({ collapsed: !useLayout.getState().regions.panel.collapsed });
       floatPanel(); // the panel's divider past its maximum: docks the split first (one card at a time)
       expect(set().floating).toBeUndefined();
       expect(panel()).toEqual({ ...OPEN, floating: true });

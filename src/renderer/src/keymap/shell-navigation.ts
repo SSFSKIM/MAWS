@@ -18,7 +18,7 @@ const FOCUSABLE = 'button, a[href], input:not([type="hidden"]), textarea, select
 
 function firstControl(root: HTMLElement): HTMLElement | null {
   return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)]
-    .find((element) => element.tabIndex >= 0 && !element.matches(':disabled') && available(element)) ?? null;
+    .find((element) => element.tabIndex >= 0 && !element.matches(':disabled, [role="separator"]') && available(element)) ?? null;
 }
 
 function focus(element: HTMLElement): void {
@@ -63,7 +63,20 @@ function regionStops(): FocusStop[] {
       add(pane.querySelector<HTMLElement>('[role="tabpanel"]'));
     }
   }
-  add(panel);
+  add(main?.querySelector<HTMLElement>('[data-region="cards"]') ?? null);
+  if (panel && available(panel)) {
+    const surfaces = panel.querySelectorAll<HTMLElement>('[data-surface]');
+    if (surfaces.length > 0) {
+      for (const surface of surfaces) {
+        const content = surface.querySelector<HTMLElement>('[role="tabpanel"]');
+        const next = content && stop(content);
+        if (next) result.push({ root: surface, target: next.target });
+      }
+    } else {
+      const next = stop(panel.querySelector<HTMLElement>('[data-panel-content]') ?? panel);
+      if (next) result.push({ root: panel, target: next.target });
+    }
+  }
   return result;
 }
 

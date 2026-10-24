@@ -234,9 +234,14 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   await page.waitForTimeout(300);
   await expect(view).not.toContainText(ASIDE); // folded: the record below proves it arrived
   const working = records(view).filter({ has: page.locator('.transcript-working-dots') });
-  await working.getByRole('button').first().click();
+  const workingId = await working.getAttribute('data-row-id');
+  expect(workingId).not.toBeNull();
+  const disclosure = view.locator(`[data-row-id="${workingId}"] .transcript-disclosure`);
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
   await expect(view).toContainText(ASIDE);
-  await view.getByText('Fold to report').click();
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
   await expect(view).not.toContainText(ASIDE);
 
   // Settled: the row replaces the live text, drawn once. Then the engine's turn_duration closes the turn.

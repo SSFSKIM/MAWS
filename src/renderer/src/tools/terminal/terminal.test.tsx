@@ -1,6 +1,7 @@
 // The Terminal tool against a mocked registry (C9 M4 unit pins): the state factory, the close veto, the attach entry
 // point, and the view's mount, worktree warning, title suffix, lifecycle bars and context menu.
 import { StrictMode } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -10,7 +11,11 @@ import { ensureShownInstances, instanceOf, panelHost, registerPanelTool } from '
 import type { PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
-import { resetPanelStores } from '../../test-support/panel';
+import { A as SHELL_A, ref, resetPanelStores } from '../../test-support/panel';
+import { Shell } from '../../app/Shell';
+import { registerSlot, resetSlots } from '../../app/slots';
+import { queryClient } from '../../ipc/query';
+import { PanelHost } from '../../panel/PanelHost';
 import type { TerminalInfo } from '../../terminal/registry';
 import type { TerminalTabState } from './index';
 
@@ -726,4 +731,49 @@ describe('terminal view', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
     expect(registry.renderer.clear).toHaveBeenCalled();
   });
+
+  it('leaves composing Escape to the input method while its context menu is open', () => {
+    render(<View state={newState()} ctx={context()} />);
+    fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
+    const copy = screen.getByRole('menuitem', { name: 'Copy' });
+    copy.focus();
+    const composing = new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true });
+    act(() => copy.dispatchEvent(composing));
+    expect(screen.getByRole('menu', { name: 'terminal' })).toBeTruthy();
+    expect(composing.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(copy);
+  });
+});
+
+it.each([620, 1280])('lets only the terminal menu consume its Escape before the sheet or Overview at %ipx', (width) => {
+  const windowSize = (window as unknown as { happyDOM: { setWindowSize(size: { width: number }): void } }).happyDOM;
+  const originalWidth = window.innerWidth;
+  windowSize.setWindowSize({ width });
+  resetPanelStores();
+  const off = registerPanelTool(terminalTool);
+  registerSlot('panelHost', PanelHost);
+  useLayout.getState().setOverviewOpen(true);
+  try {
+    render(<QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>);
+    act(() => useLayout.getState().setPanelTabs(SHELL_A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' }));
+    const surface = screen.getByTestId('terminal-surface');
+    fireEvent.contextMenu(surface, { clientX: 20, clientY: 30 });
+    const copy = screen.getByRole('menuitem', { name: 'Copy' });
+    copy.focus();
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => copy.dispatchEvent(escape));
+    expect(screen.queryByRole('menu', { name: 'terminal' })).toBeNull();
+    expect(escape.defaultPrevented).toBe(true);
+    expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    fireEvent.keyDown(surface, { key: 'Escape' });
+    expect(useLayout.getState().regions.panel.collapsed).toBe(width < 700);
+    expect(useLayout.getState().overviewOpen).toBe(width < 700);
+  } finally {
+    cleanup();
+    off();
+    resetSlots();
+    resetPanelStores();
+    windowSize.setWindowSize({ width: originalWidth });
+  }
 });

@@ -13,6 +13,8 @@ import type { SiteAnswer } from '../../engine-surface';
 export const PLUGIN_SITES = { band: 'From plugins', mode: 'Plugin modes', hint: 'Plugin hint' };
 const BAND_ROWS = 12;
 const NO_MODES: readonly string[] = [];
+// Wrap intact when possible, but never let a plugin drawing exceed its toolbar's own width.
+const MODE_CLASS = 'inline-flex h-6 max-w-[min(16rem,100%)] min-w-0 shrink-0 items-center overflow-hidden px-1.5 text-ui-sm whitespace-nowrap text-fg-muted';
 
 export function PluginBand({ appSessionId, working }: { appSessionId: AppSessionId; working: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -48,14 +50,14 @@ export function PluginModeSlot({ appSessionId }: { appSessionId: AppSessionId })
       instanceId="session-mode"
       props={{ modes: NO_MODES }}
       frame={(tree) => (
-        <span aria-label={PLUGIN_SITES.mode} data-plugin-mode="" className="inline-flex h-6 max-w-64 min-w-0 shrink items-center overflow-hidden px-1.5 text-ui-sm whitespace-nowrap text-fg-muted">
+        <span aria-label={PLUGIN_SITES.mode} data-plugin-mode="" className={MODE_CLASS}>
           {tree}
         </span>
       )}
       engine={(answer) => {
         const words = answer?.hooked ? rewrittenModes(answer) : '';
         return words ? (
-          <span aria-label={PLUGIN_SITES.mode} data-plugin-mode="" className="inline-flex h-6 items-center px-1.5 text-ui-sm whitespace-nowrap text-fg-muted">
+          <span aria-label={PLUGIN_SITES.mode} data-plugin-mode="" className={MODE_CLASS}>
             {words}
           </span>
         ) : null;

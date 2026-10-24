@@ -114,8 +114,10 @@ test('live: Files, the viewer and Review over this checkout', async () => {
           await expect(roots).toHaveCount(1);
           await expect(roots).toHaveAttribute('data-path', root);
           observed.roots = await roots.evaluateAll((rows) => rows.map((r) => `${r.getAttribute('data-path')} · ${r.textContent}`));
-          await roots.click();
-          await panel.locator(`[data-path="${root}/docs"]`).click();
+          await expect(roots).toHaveAttribute('aria-expanded', 'true');
+          const docs = panel.locator(`[data-tool="files"] [role="treeitem"][data-path="${root}/docs"]`);
+          await expect(docs).toBeVisible();
+          await docs.click();
         });
 
         await test.step('docs/charter.md renders, with its Source', async () => {

@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { HostOn } from '@shared/host/runtime';
 import type { CustomizationInventory, CustomizationServer, CustomizationSkill } from '@shared/ipc/schema';
+import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { migrateSettings } from '@shared/settings/defaults';
 import { captureLocalKey } from '../connectors/local-key';
 import { configFileOf, legacyConfigFileOf, nodeSourceFiles } from '../connectors/source-entry';
@@ -208,7 +209,7 @@ async function installedSkills(r: Reading, configHome: string, cwd: string | nul
           if (!(await addDirectory(directory))) for (const child of await r.directories(directory, anchor)) await addDirectory(child);
         }
       }
-      r.warn('Plugin MCP servers and marketplace-only skill declarations are not inventoried; see Plugins.');
+      r.warn(CUSTOMIZATION_INVENTORY_COVERAGE);
     }
   }
 }

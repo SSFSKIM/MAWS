@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, pinSurfaceForSessions, surface } from './support/shell';
+import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, closeSurface, pinSurfaceForSessions, surface } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -206,12 +206,12 @@ test('a document moves main → panel and panel → main by drag: the edit typed
   const id = await documentInMain(page, 'B3 transfer');
   const panel = panelRegion(page);
 
-  await test.step('main → panel: the main tab onto the panel, "Move to panel" shown over it', async () => {
+  await test.step('main → panel: the main tab onto the panel, "Move to side surface" shown over it', async () => {
     await scrollTo(inMain(page, id), 20);
     await typeAtEndOf(page, inMain(page, id), 24, ' main-edit');
     const shown = await firstBlock(inMain(page, id)); // where the reader is as the drag starts
     expect(shown, 'a page scrolled into the document').toMatch(/^Paragraph (1\d|2\d):/);
-    await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
+    await drag(page, mainTab(page, id), panel, panel.getByText('Move to side surface', { exact: true }));
     await expect(inPanel(page, id)).toBeVisible();
     await expect(mainTab(page, id), 'the main tab closed').toHaveCount(0);
     await expect(inMain(page, id)).toHaveCount(0);
@@ -257,7 +257,7 @@ test('a drop onto a panel already showing the document activates it and closes t
   const record = inPanel(page, id);
 
   await typeAtEndOf(page, inMain(page, id), 5, ' last-main-edit');
-  await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
+  await drag(page, mainTab(page, id), panel, panel.getByText('Move to side surface', { exact: true }));
   await expect(mainTab(page, id), 'the source closed').toHaveCount(0);
   await expect(record, 'the panel’s own view kept').toBeVisible();
   await expect(surface(page, 'artifacts'), 'one Artifacts singleton surface, not a cross-tool tab').toHaveCount(1);
@@ -360,7 +360,7 @@ test('a comment draft moves with its document, panel → main and back, kept onc
   expect(await draftFields(page, DRAFT), 'one draft').toBe(1);
   await expect(activePassage(inMain(page, id)).first(), 'the thread still active in main').toBeVisible();
 
-  await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
+  await drag(page, mainTab(page, id), panel, panel.getByText('Move to side surface', { exact: true }));
   await expect(inPanel(page, id)).toBeVisible();
   await expect(inPanel(page, id).locator('[data-comment-card] textarea'), 'the draft back in the panel’s card').toHaveValue(DRAFT);
   expect(await draftFields(page, DRAFT), 'one draft').toBe(1);
@@ -461,12 +461,12 @@ for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the doc
   readings.a = alone;
 
   // (d) the panel closed
-  await menu('panel.toggle');
+  await closeSurface(page, 'Artifacts');
   await expect.poll(async () => (await widths()).panel).toBeLessThanOrEqual(0);
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
   const closed = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(d) settled');
   readings.d = closed;
-  await menu('panel.toggle');
+  await openSurface(page, 'Artifacts');
   await expect.poll(async () => (await widths()).panel).toBeGreaterThan(0);
 
   // (b) beside a session in main, then Expand pane (the session floats into the main area's card and the right panel

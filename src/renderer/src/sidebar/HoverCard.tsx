@@ -9,7 +9,7 @@
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
 // card is `ProjectHoverCard.tsx`.
 import { HoverCard as Radix } from 'radix-ui';
-import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { QuickReply, useQuickReply, type QuickReplyState } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -25,6 +25,7 @@ import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores
 import { useSessions } from '../stores/sessions';
 import { rowBranch, sessionAge } from './derive';
 import { displayTitle } from '../sessions/title';
+import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
 
 export interface SidebarHoverCardProps {
@@ -38,6 +39,12 @@ export interface SidebarHoverCardProps {
 export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const releaseRemoved = useContext(SidebarInteractionContext);
+  const setContentRef = useCallback((node: HTMLDivElement | null) => {
+    const previous = contentRef.current;
+    contentRef.current = node;
+    if (previous && previous !== node) releaseRemoved?.(previous);
+  }, [releaseRemoved]);
   const triggerRef = useRef<HTMLAnchorElement>(null); // the row (asChild), typed as Radix types its default element
   const dismissing = useRef(false); // Escape or a press outside: the owner's close, which a focused field does not hold off
   const restoring = useRef(false); // focus handed back to the trigger, which opens nothing
@@ -68,7 +75,7 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
       </Radix.Trigger>
       <Radix.Portal>
         <Radix.Content
-          ref={contentRef}
+          ref={setContentRef}
           // Escape from inside the card puts the keyboard back on the row it came from, without reopening the card
           onEscapeKeyDown={() => {
             dismiss();
@@ -189,7 +196,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
           <Request item={waiting.oldest} />
         </div>
       )}
-      {!record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
+      {!pending.some((item) => item.kind === 'question') && !record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
         <QuickReply record={record} reply={reply} />}
     </div>
   );

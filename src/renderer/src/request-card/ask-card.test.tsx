@@ -1,7 +1,5 @@
-// E1 M4b (the architect's ruling 1): a blocking `maws` ask is a `question` attention item whose originating event is
-// `maws.ask.opened`. The request card renders it compact in every placement (the ask's title, else "Questions from the
-// agent"; the count; one button that opens the Question sheet through the registered `openAsk` with the event's data)
-// and never answers it: the sheet does.
+// The main request card opens a blocking MAWS ask's sheet with the event's data. The answering hover placement is
+// exercised with its real sidebar in HoverCard.test.tsx.
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
@@ -41,7 +39,7 @@ function mount(placement: Placement, event = askOpened()) {
 }
 
 describe('the request card for a blocking ask', () => {
-  it.each<Placement>(['docked', 'card', 'hover'])('reads the title and the count, and opens the Question sheet (%s)', async (placement) => {
+  it.each<Placement>(['docked', 'card'])('reads the title and the count, and opens the Question sheet (%s)', async (placement) => {
     mount(placement);
     expect(screen.getByRole('heading', { name: 'Release setup' })).toBeTruthy();
     expect(screen.getByText('2 questions')).toBeTruthy();

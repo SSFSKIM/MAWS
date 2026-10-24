@@ -47,13 +47,16 @@ export async function closeSurface(page: Page, name: string): Promise<void> {
 }
 
 export async function hideSurfaces(page: Page): Promise<void> {
-  // Collapse, rather than close the retained tools. The isolated #panel page has its own real control, not the
-  // product's native application menu; both routes invoke the same registered shell action.
+  // Hide the visible surfaces, retaining their tool instances. The isolated #panel page has its own real control, not the
+  // product's surface controls: its visibility toggle directly collapses the harness region.
   const panel = page.locator('[data-region="panel"]:not([inert])');
   if (!await panel.count() && !await sessionCards(page).isVisible()) return;
   const harness = page.locator('[data-panel-harness]');
   if (await harness.count()) await harness.getByRole('button', { name: 'Hide panel', exact: true }).click();
-  else await menu(applicationOf(page), 'panel.toggle');
+  else {
+    for (const name of await panel.locator('[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')!))) await closeSurface(page, name);
+    if (await sessionCards(page).isVisible()) await menu(applicationOf(page), 'panel.toggle');
+  }
   await expect(panel).toHaveCount(0);
   await expect(sessionCards(page)).toBeHidden();
 }
@@ -117,7 +120,7 @@ export async function openArtifactReplicaInPanel(page: Page, artifactId: string)
 // The old Artifacts launcher is the project Library card now. Record editors still move into a surface through X38.
 export async function moveMainArtifactToPanel(page: Page, artifactId: string): Promise<Locator> {
   await mainTabById(page, `artifact:${artifactId}`).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Show in panel', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Move to side surface', exact: true }).click();
   const record = surface(page, 'artifacts').locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record).toBeVisible();
   return record;

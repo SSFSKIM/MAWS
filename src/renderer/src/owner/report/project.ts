@@ -2,8 +2,8 @@
 // already derives. A turn with at least one mark draws, at level 0, its prompt, one `owner_record` row in place of its
 // work and its unmarked text, then in event order the rows that stay in view when a turn folds (asks, deliveries,
 // artifacts, side threads, boundaries, steers, command output, plugin errors, question receipts, the receipt) and its
-// marked texts, which the report module draws as cards with their unmarked parts hidden. Opened (level 1), the turn
-// draws exactly as the full transcript does, the record row above it as the way back; its divider expanded is level 2.
+// marked texts. Opened, the record shows the turn's expanded work directly; its summary stands in the record row
+// as the single turn-level disclosure. Individual tool and group details keep their own disclosures.
 // A turn with no mark draws as the full transcript, so untagged history and a turn the model forgot to mark are never
 // hidden. A native streaming block is read from its live buffer (`liveMarkedRowIds`); external live rows carry their
 // current text inline. Both use the live grammar for folding, independently of closed-only message ink.
@@ -67,7 +67,10 @@ export function reportRows(rows: readonly Row[], state: TranscriptState, ui: Pic
     if (fold === null) continue;
     if (fold.prompt > 0) recordAfter.set(own[fold.prompt - 1], fold.record);
     else recordBefore.set(own[0], fold.record);
-    if (!fold.record.open) for (const row of own.slice(fold.prompt)) if (!showsFolded(row, live)) hidden.add(row);
+    for (const row of own.slice(fold.prompt)) {
+      // One turn-level fold, not a Working record opening onto a second Worked for disclosure.
+      if (row.kind === 'divider' || (!fold.record.open && !showsFolded(row, live))) hidden.add(row);
+    }
   }
   const out: Row[] = [];
   for (const row of rows) {
@@ -92,6 +95,7 @@ function foldOf(own: Row[], turn: TurnId, state: TranscriptState, open: boolean)
   const record = {
     id: rowId.ownerRecord(turn), turnId: turn, at: own[lead].at, kind: 'owner_record' as const, open,
     working: divider?.kind === 'divider' && divider.state === 'working', toolCalls: divider?.kind === 'divider' ? divider.toolCalls : 0, messages,
+    ...(open && divider?.kind === 'divider' ? { divider } : {}),
   };
   return { record, prompt };
 }

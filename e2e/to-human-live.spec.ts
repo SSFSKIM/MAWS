@@ -601,7 +601,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await page.keyboard.press('Backspace');
     });
 
-    await step('g3-report', 'G3: the turn reads as message cards over one Working record; opened, the divider; expanded, the tool rows; folded again', async () => {
+    await step('g3-report', 'G3: the turn reads as message cards over one Working record; opened, the tool rows; folded again', async () => {
       await settle(page, s1, 0); // every prompt of the session: the marks prompt and the answer, both written by now (g4-ask)
       const p = pane(page);
       const counts = {
@@ -613,26 +613,23 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       };
       // the sleep's tool row (a cell, or a group holding it), never the prompt that names the command
       const toolRow = p.locator('.transcript-row[data-kind="cell"], .transcript-row[data-kind="group"]').filter({ hasText: 'sleep 40' });
-      const record = p.locator('.owner-record button').first();
+      const record = p.locator('[data-kind="owner_record"] .transcript-disclosure').first();
       const closed = (await record.innerText()).replaceAll('\n', ' ');
       await expect(toolRow, 'level 0: the tool row folded into the record').toHaveCount(0);
       await record.click();
-      await expect(record).toContainText('Fold to report');
-      const divider = p.getByRole('button', { name: /^Worked for/ }).first();
-      await expect(divider).toBeVisible();
-      const dividerText = (await divider.innerText()).replaceAll('\n', ' ');
-      await expect(toolRow, 'level 1: the divider still closed').toHaveCount(0);
-      await divider.click();
-      await expect(toolRow.first(), 'level 2: the tool row shown').toBeVisible();
+      await expect(record).toHaveAttribute('aria-expanded', 'true');
+      await expect(record).toContainText('Worked for');
+      const dividerText = (await record.innerText()).replaceAll('\n', ' ');
+      await expect(toolRow.first(), 'opened directly: the tool row shown').toBeVisible();
       const toolText = (await toolRow.first().innerText()).replaceAll('\n', ' ');
       await shot('03-record-open');
       await record.click();
       await expect(record).toContainText('Working record');
       await expect(toolRow, 'folded: the tool row gone again').toHaveCount(0);
-      log(`cards ${JSON.stringify(counts)}; record closed "${closed}"; divider "${dividerText}"; the tool row: absent at levels 0 and 1, "${toolText.slice(0, 120)}" at level 2, absent after the fold`);
+      log(`cards ${JSON.stringify(counts)}; record closed "${closed}"; opened summary "${dividerText}"; the tool row: absent while closed, "${toolText.slice(0, 120)}" immediately after opening, absent after the fold`);
       observe('g3Report', { counts, closed, dividerText, toolText });
       expect(counts.message).toBeGreaterThanOrEqual(1);
-      line(`G3 report: ${counts.message} message card(s) over "${closed}" (contract 5 asks for no other mark: ${counts.mustRead} must-read, ${counts.insight} insight, ${counts.question} question card(s)); the sleep's tool row absent; opened: "${dividerText}", the row still absent; expanded: the row "${toolText.slice(0, 40)}"; "Fold to report": absent again`);
+      line(`G3 report: ${counts.message} message card(s) over "${closed}" (contract 5 asks for no other mark: ${counts.mustRead} must-read, ${counts.insight} insight, ${counts.question} question card(s)); the sleep's tool row absent; opened: "${dividerText}" and the row "${toolText.slice(0, 40)}"; folded through the same disclosure: absent again`);
     });
 
     await step('restart', 'restart: the cards and the answered ask restored silently; nothing notified', async () => {

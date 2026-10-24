@@ -111,7 +111,9 @@ export interface HistoryControls {
   toggle(): void;
 }
 
-export function Toolbar({ editor, artifactId, host, onFind, comments, history, mentions, highlightScope: HighlightScope }: { highlightScope?: ComponentType<{ children: ReactNode }>; editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls; history?: HistoryControls; mentions?: MentionSource }) {
+export interface SectionControls { add(): void; disabled: boolean; reason?: string }
+
+export function Toolbar({ editor, artifactId, host, onFind, comments, history, mentions, newSection, highlightScope: HighlightScope }: { highlightScope?: ComponentType<{ children: ReactNode }>; editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls; history?: HistoryControls; mentions?: MentionSource; newSection?: SectionControls }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -331,6 +333,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
           </Tool>
           {menu === 'insert' && (
             <div role="menu" className="doc-menu">
+              {newSection && <button type="button" role="menuitem" disabled={newSection.disabled} title={newSection.reason} onClick={() => { setMenu(null); if (writable(editor)) newSection.add(); }}>New section</button>}
               {inserts.map(([label, insert]) => (
                 <button
                   key={label}

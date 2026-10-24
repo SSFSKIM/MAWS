@@ -145,7 +145,7 @@ function addArtifacts(target?: string, select = true): string {
 }
 
 describe('a main tab dragged onto the panel', () => {
-  it('Z1, Z3, Z7: the drag moves only; the panel is one target with one highlight saying “Move to panel”; the drop moves it (T1)', async () => {
+  it('Z1, Z3, Z7: the drag moves only; the panel is one target with one highlight saying “Move to side surface”; the drop moves it (T1)', async () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     renderBoth();
     await readyForTransfer();
@@ -476,7 +476,7 @@ describe('the menus and actions share the drop’s refusal (M1 to M5)', () => {
     expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noProjectSession);
   });
 
-  it('M4: “Move to panel” and “Move to tab” are keymap actions with no chord; a refusal says why', async () => {
+  it('M4: “Move to side surface” and “Move to tab” are keymap actions with no chord; a refusal says why', async () => {
     offs.push(registerShellActions());
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     renderBoth();

@@ -71,3 +71,10 @@ it('closes on Escape, restores the opener, and clears search when reopened', asy
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
   fireEvent.click(screen.getByRole('button', { name: 'Close keyboard shortcuts' }));
 });
+
+
+it.each(['cards', 'terminal', 'review', 'files', 'browser'])('finds the current surface vocabulary for %s', (query) => {
+  const dialog = openSheet();
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
+  expect(within(dialog).getAllByRole('row').length).toBeGreaterThan(0);
+});

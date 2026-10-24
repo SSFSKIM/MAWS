@@ -2,7 +2,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { resetSurfaceRegistry } from '../../engine-surface/registry';
@@ -11,6 +11,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { api, BASH_RESULT, builder } from '../../transcript/model/test-events';
 import type { TranscriptSource } from '../../transcript/source/types';
 import { Transcript } from '../../transcript/view/Transcript';
+import { CLOSE_MOTION, OPEN_MOTION } from '../../ui/disclosure';
 import sitting31 from './fixtures/sitting-31.txt?raw';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -70,7 +71,7 @@ function session() {
   return b.events;
 }
 
-const record = () => screen.queryByRole('button', { name: /^(Working record|Fold to report)/ });
+const record = () => document.querySelector<HTMLElement>('[data-kind="owner_record"] .transcript-disclosure');
 const dividers = () => [...document.querySelectorAll('[data-kind="divider"] .transcript-divider > .transcript-disclosure')] as HTMLElement[];
 
 describe('the report view', () => {
@@ -92,7 +93,22 @@ describe('the report view', () => {
     expect(critical.querySelector('code')?.textContent).toContain('Critical');
   });
 
-  it('folds a marked turn to its prompt, one working record and its marks, and opens it to level 1 and level 2', async () => {
+  it('a resting report reuses the projected completed summary, not a stale running divider', async () => {
+    const b = builder();
+    b.turn('resting-user');
+    b.toolUse('resting-tool', 'Bash', { command: 'ls' });
+    b.result('resting-tool', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('resting-text', 0, '<message>Done.</message>');
+    const { source } = pushSource(b.events);
+    render(<Transcript source={source} variant="session" ownerLane atRest />);
+    await waitFor(() => expect(record()).not.toBeNull());
+    fireEvent.click(record()!);
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
+    expect(record()?.textContent).toMatch(/^Worked for/);
+    expect(document.querySelector('[data-plugin-spinner]')).toBeNull();
+  });
+
+  it('opens a marked turn’s working record to the work in one click, without a second turn fold', async () => {
     await mounted(session());
     // level 0
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));
@@ -102,22 +118,77 @@ describe('the report view', () => {
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
     expect(dividers()).toHaveLength(1); // the unmarked turn's own divider: drawn as the full transcript
     expect(screen.getByText('A plain answer.')).toBeTruthy();
-    // level 1: the turn as the full transcript draws it folded, the record above it as the way back
+    // One disclosure opens the work; the unmarked turn keeps its own divider.
     fireEvent.click(record()!);
-    await waitFor(() => expect(record()?.textContent).toBe('Fold to report'));
-    expect(dividers()).toHaveLength(2);
-    expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
-    expect(dividers()[0].textContent).toMatch(/1 tool call/);
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
+    expect(record()?.textContent).toMatch(/Worked for .*1 tool call/);
+    expect(document.querySelector('[data-kind="owner_record"] [aria-label="Turn summary"]')).not.toBeNull();
+    expect(dividers()).toHaveLength(1);
     expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
     expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy(); // the marked text's own unmarked words
-    expect(document.querySelector('[data-kind="group"], [data-kind="cell"]')).toBeNull();
-    // level 2: the divider expanded shows the work rows
-    fireEvent.click(dividers()[0]);
-    await waitFor(() => expect(document.querySelectorAll('[data-kind="group"], [data-kind="cell"]').length).toBeGreaterThan(0));
+    expect(document.querySelectorAll('[data-kind="group"], [data-kind="cell"]').length).toBeGreaterThan(0);
     // back to the report
     fireEvent.click(record()!);
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
+  });
+
+  it('keeps the working-record disclosure focused through expansion and collapse', async () => {
+    await mounted(session());
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('false'));
+    const disclosure = record()!;
+    disclosure.focus();
+    expect(document.activeElement).toBe(disclosure);
+
+    fireEvent.click(disclosure); // native keyboard activation dispatches a click to this same button
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
+    expect(document.activeElement).toBe(disclosure);
+    expect(record()).toBe(disclosure);
+    expect(document.querySelectorAll('[data-kind="owner_record"] .transcript-disclosure')).toHaveLength(1);
+    expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
+
+    fireEvent.click(disclosure);
+    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('false'));
+    expect(document.activeElement).toBe(disclosure);
+    expect(record()).toBe(disclosure);
+    expect(screen.queryByText('Unmarked closing words.')).toBeNull();
+  });
+
+  it('restoring an open Report record cancels a Transcript fold without disabling later fold animations', async () => {
+    const { key } = await mounted(session());
+    await waitFor(() => expect(record()).not.toBeNull());
+    const work = () => document.querySelector('[data-cell-id="cell:t1"]')?.closest<HTMLElement>('[data-kind="cell"]') ?? null;
+    fireEvent.click(record()!);
+    expect(work()).not.toBeNull();
+    act(() => useTranscriptStore.getState().setView(key, 'transcript'));
+    expect(dividers()[0].getAttribute('aria-expanded')).toBe('true');
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fireEvent.click(dividers()[0]);
+      expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
+      expect(work()!.style.transition).toContain(`height ${CLOSE_MOTION.ms}ms`);
+      expect(work()!.style.height).toBe('0px');
+      act(() => useTranscriptStore.getState().setView(key, 'report'));
+      // Wait beyond both motion windows: an obsolete Transcript callback must not fold the restored work away.
+      act(() => vi.advanceTimersByTime(CLOSE_MOTION.ms + OPEN_MOTION.ms + 1));
+      expect(record()?.getAttribute('aria-expanded')).toBe('true');
+      expect(work()).not.toBeNull();
+      expect(work()!.getAttribute('style')).toBeNull();
+      expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
+
+      // A new, deliberate fold in Transcript still animates before removing its rows.
+      act(() => useTranscriptStore.getState().setView(key, 'transcript'));
+      fireEvent.click(dividers()[0]);
+      expect(work()!.style.transition).toContain(`height ${CLOSE_MOTION.ms}ms`);
+      act(() => vi.advanceTimersByTime(CLOSE_MOTION.ms - 1));
+      expect(work()).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1));
+      expect(work()).toBeNull();
+      expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the transcript view draws every turn in full, the marks unboxed', async () => {

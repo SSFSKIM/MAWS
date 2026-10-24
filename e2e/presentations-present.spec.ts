@@ -68,13 +68,12 @@ async function openFromLibrary(page: Page, title: string, artifactId: string): P
   return tab;
 }
 
-/** A header action by its label: its button, or its entry under More actions when the header folded it there. */
-async function headerAction(page: Page, label: string): Promise<void> {
-  const header = page.locator('[data-region="main"] [data-editor-header]');
-  const button = header.getByRole('button', { name: label, exact: true });
-  if (await button.isVisible()) return button.click();
-  await header.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
+/** Present stays direct; Theme and Check live in the deck toolbar's action menu. */
+async function deckAction(page: Page, label: 'Present' | 'Theme' | 'Check against the design system'): Promise<void> {
+  const toolbar = page.locator('[data-region="main"] .deck-toolbar [data-editor-toolbar]');
+  if (label === 'Present') return toolbar.getByRole('button', { name: label, exact: true }).click();
+  await toolbar.getByRole('button', { name: 'Deck actions', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: label, exact: true }).click();
 }
 
 const bundled = (key: string) => JSON.parse(readFileSync(join(REPO_ROOT, `src/artifacts/types/design_system/defaults/${key}/tokens.tokens.json`), 'utf8')) as { color: Record<string, { $root: { $value: { hex: string } } }> };
@@ -102,7 +101,7 @@ test('the design system: Theme switches the deck’s system and overrides it, Te
   await expect.poll(() => computed(title, 'color')).toBe(rgbOf(bundled('maws').color.text!.$root.$value.hex));
 
   // Theme: the panel beside the stage, each system offered; Official names the deck's system and restyles it
-  await headerAction(page, 'Theme');
+  await deckAction(page, 'Theme');
   const theme = tab.locator('[data-deck-rail="theme"]');
   await expect(theme).toBeVisible();
   await expect.poll(async () => (await theme.locator('.deck-theme-system-name').allInnerTexts()).sort()).toEqual(['Classroom', 'Default', 'MAWS', 'Official']);
@@ -150,7 +149,7 @@ test('the design system: Theme switches the deck’s system and overrides it, Te
   expect(files[`project/slides/${made.at(-1)}.html`]).toContain('var(--ds-type-title-size)');
 
   // Check: the planted literal colour is listed under its slide; a click shows the slide and selects the element
-  await headerAction(page, 'Check against the design system');
+  await deckAction(page, 'Check against the design system');
   const check = tab.locator('[data-deck-rail="check"]');
   await expect(check).toBeVisible();
   const violation = check.locator('[data-violation="literal-color"][data-element="loud"]');
@@ -183,7 +182,7 @@ test('the presenter: the audience window and the presenter view, builds, a fade,
   await openFromLibrary(page, 'Show', id);
   const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().length);
 
-  await headerAction(page, 'Present');
+  await deckAction(page, 'Present');
   await expect.poll(() => presentPages(app).length, { timeout: 15_000, message: 'the show’s windows opened' }).toBe(displays > 1 ? 2 : 1);
   const audience = presentPages(app).find((w) => w.url().includes('role=audience'))!;
   await expect(audience.locator('[data-present-view="audience"]')).toBeVisible({ timeout: 15_000 });
@@ -272,7 +271,7 @@ test('a magic move starts each element where it was, a child inside a turned gro
   const app = launch!.app;
   const id = await createDeck(page, 'Magic', MAGIC_DECK);
   await openFromLibrary(page, 'Magic', id);
-  await headerAction(page, 'Present');
+  await deckAction(page, 'Present');
   await expect.poll(() => presentPages(app).length, { timeout: 15_000 }).toBeGreaterThan(0);
   const audience = presentPages(app).find((w) => w.url().includes('role=audience'))!;
   await expect(audience.locator('[data-present-view="audience"]')).toBeVisible({ timeout: 15_000 });

@@ -750,10 +750,10 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible();
 
   await test.step('wide, the panel maximized beside the chat: a board’s new comment card', async () => {
-    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await panel.getByRole('button', { name: 'Expand surface' }).click();
     await expect.poll(async () => (await inPanel.boundingBox())?.width ?? 0, { message: 'the maximized panel lays the editor out wide' }).toBeGreaterThanOrEqual(720);
     await commentCard('wide', inPanel, 'panel');
-    await panel.getByRole('button', { name: 'Restore right panel' }).click();
+    await panel.getByRole('button', { name: 'Restore surface' }).click();
     await expect.poll(async () => (await inPanel.boundingBox())?.width ?? Infinity).toBeLessThan(720);
   });
 

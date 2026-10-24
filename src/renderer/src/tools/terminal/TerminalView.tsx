@@ -190,7 +190,12 @@ function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; sta
     const outside = (ev: Event) => {
       if (!ref.current?.contains(ev.target as Node)) dismiss();
     };
-    const escape = (ev: KeyboardEvent) => ev.key === 'Escape' && dismiss();
+    const escape = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape' || ev.defaultPrevented || ev.isComposing) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      dismiss();
+    };
     window.addEventListener('mousedown', outside, true);
     window.addEventListener('keydown', escape, true);
     return () => {
@@ -209,6 +214,7 @@ function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; sta
     <div
       ref={ref}
       role="menu"
+      data-state="open"
       aria-label="terminal"
       style={{ left: at.x, top: at.y }}
       className="absolute z-10 flex min-w-32 flex-col rounded-md border border-border bg-bg-overlay py-1 text-ui-sm"

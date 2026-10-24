@@ -298,7 +298,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
       </p>
     );
   } else if (request?.kind === 'maws.ask.opened') {
-    body = <AskBody appSessionId={item.appSessionId} request={request} />; // E1 M4b: every placement, the hover's too
+    body = <AskBody appSessionId={item.appSessionId} request={request} hover={hover} />;
   } else if (hover) {
     body = request ? <HoverPreview request={request} /> : <NoticeBody item={item} />;
   } else {

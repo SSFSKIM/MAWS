@@ -96,7 +96,7 @@ describe('the floating card in the Shell', () => {
     const user = userEvent.setup();
     render(<Shell />);
     expect(composers()).toEqual([A]);
-    await user.click(within(region('panel')).getByRole('button', { name: 'Float session over panel' }));
+    await user.click(within(region('panel')).getByRole('button', { name: 'Float conversation over surface' }));
     expect(region('main').inert).toBe(true);
     expect(region('main').parentElement!.style.gridTemplateColumns).toBe('240px 0px minmax(0, 1fr)');
     const shown = card()!;
@@ -223,7 +223,7 @@ describe('the floating card in the Shell', () => {
     const header = region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
     const float = within(header).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement;
     expect(float.disabled).toBe(true);
-    expect(within(header).queryByRole('button', { name: 'Float session over panel' })).toBeNull();
+    expect(within(header).queryByRole('button', { name: 'Float conversation over surface' })).toBeNull();
     act(() => runAction('panel.float'));
     await act(async () => {});
     expect(useLayout.getState().regions.panel.floating).toBe(false);

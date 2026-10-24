@@ -196,7 +196,8 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     ]);
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
-    await expect(sheet).toContainText('No open questions');
+    await expect(sheet).toHaveCount(0);
+    await expect(s.panel).toHaveJSProperty('inert', true); // an automatic Questions surface gives main its space back
     // the attention item went at Submit
     await expect(questionRow).toHaveCount(0);
     expect(value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id && item.state === 'pending')).toEqual([]);
@@ -210,6 +211,59 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     await expect(sectionOf(readOnly, 'q1')).toContainText('Blue');
     await expect(sectionOf(readOnly, 'q3')).toContainText('Skipped');
     await expect(sheet.getByRole('button', { name: /^Submit/ })).toHaveCount(0);
+  });
+});
+
+test('a waiting question is answered in its sidebar hover card, never queued as a follow-up', async () => {
+  await scene({ titles: ['Acceptance: hover answer'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    const args = { blocking: true, title: 'Release setup', questions: [
+      { id: 'filename', question: 'Should the new file be named hello.txt or hi.txt?', modality: 'choice', options: [{ label: 'hello.txt' }, { label: 'hi.txt' }] },
+      { id: 'title', question: 'What title?', modality: 'text' },
+    ] };
+    await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, args));
+    // This old recording contains the redundant approval; launch.test.ts covers its omission on new launches.
+    await allowNext(s, id);
+    const row = sidebarOf(s.page).locator(`button[data-needs-you="${id}"]`);
+    await expect(row).toHaveAccessibleName(/ · Question$/);
+    const card = s.page.locator('[data-hover-card]');
+    await expect(async () => {
+      await s.page.mouse.move(700, 20);
+      await row.hover();
+      await expect(card).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 10_000 });
+    await expect(card.getByText(args.questions[0]!.question)).toBeVisible();
+    for (const [width, height] of [[1280, 820], [1512, 982], [900, 820], [620, 820]] as const) {
+      await s.maws.app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0]!.setContentSize(width, height), [width, height]);
+      await expect.poll(() => s.page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+      if (await sidebarOf(s.page).evaluate((node) => node.hasAttribute('inert'))) await s.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+      await expect(async () => {
+        await s.page.mouse.move(width - 5, 20);
+        await row.hover();
+        await expect(card).toBeVisible({ timeout: 2_000 });
+      }).toPass({ timeout: 10_000 });
+      await expect(card.getByRole('button', { name: 'Submit', exact: true })).toBeInViewport();
+      await test.info().attach(`acceptance-hover-question-${width}x${height}.png`, { body: await s.page.screenshot(), contentType: 'image/png' });
+    }
+    await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1280, 820));
+    await row.hover();
+    await expect(card).toBeVisible();
+    await expect(card.getByRole('textbox', { name: /^Reply to / })).toHaveCount(0);
+    await card.getByRole('radio', { name: 'hi.txt', exact: true }).click();
+    await card.getByRole('textbox', { name: 'What title?' }).fill('Release notes');
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    await card.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([
+      { id: 'filename', question: args.questions[0]!.question, status: 'answered', value: ['hi.txt'] },
+      { id: 'title', question: 'What title?', status: 'answered', value: 'Release notes' },
+    ]);
+    await expect(row).toHaveCount(0);
+    await expect(sheetOf(s)).toHaveCount(0);
+    await test.info().attach('acceptance-question-answered.png', { body: await s.page.screenshot(), contentType: 'image/png' });
+    expect(value(await invoke(s.page, 'session.queue.list', { appSessionId: id })).entries.filter((entry) => entry.content === 'Release notes' || entry.content === 'hi.txt')).toEqual([]);
+    expect(s.journal(id).filter((row) => row.direction === 'out' && (row.frame as Frame).type === 'user')).toHaveLength(1);
+    await idle(s, id);
   });
 });
 
@@ -416,8 +470,8 @@ test('previews: a single-select question lays its options beside the focused opt
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
     const askSurface = surface(s.page, 'ask-sheet');
     // UX2-L caps a docked Questions surface at 420 px; maximize it to exercise the existing wide preview layout.
-    await askSurface.getByRole('button', { name: 'Maximize right panel', exact: true }).click();
-    await expect(askSurface.getByRole('button', { name: 'Restore right panel', exact: true })).toBeVisible();
+    await askSurface.getByRole('button', { name: 'Expand surface', exact: true }).click();
+    await expect(askSurface.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
 
     const section = sectionOf(sheet, 'q1');
     const radios = section.getByRole('radiogroup');
@@ -455,7 +509,7 @@ test('previews: a single-select question lays its options beside the focused opt
     await shoot(s, 'ask-previews');
 
     // Restore and take the panel to its narrowest: the pane under the options, as wide as they are.
-    await askSurface.getByRole('button', { name: 'Restore right panel', exact: true }).click();
+    await askSurface.getByRole('button', { name: 'Restore surface', exact: true }).click();
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     await resizer.focus();
     await s.page.keyboard.press('Home');

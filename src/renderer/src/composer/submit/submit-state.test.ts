@@ -92,7 +92,7 @@ describe('submitState covers Send, Stop, Resume and the unstarted rows (W10: one
   it('resumes a paused queue, sends behind waiting entries saying so, and otherwise sends', () => {
     const paused = { entries: [entry('queued')], paused: true };
     expect(row({ queue: paused, empty: true })).toEqual(['resume', 'Resume', true, null, false]);
-    expect(row({ queue: { entries: [], paused: true }, empty: true })).toEqual(['resume', 'Resume', false, null, false]);
+    expect(row({ queue: { entries: [], paused: true }, empty: true })).toEqual(['send', 'Send', false, null, false]);
     // idle with messages waiting in the app queue: Send, and C3 puts the new one behind them (W10: no Queue label)
     expect(row({ queue: paused })).toEqual(['send', 'Send', true, null, false]);
     expect(submitState(input({ queue: paused })).detail).toBe('Joins the paused queue; Resume sends it');
@@ -108,7 +108,7 @@ describe('submitState covers Send, Stop, Resume and the unstarted rows (W10: one
     for (const entries of [[], [entry('queued')]]) {
       const queue = { entries, paused: true, pauseReason: 'interrupt' as const };
       expect(submitState(input({ queue }))).toMatchObject({ primary: 'send', label: 'Send', enabled: true, steer: false, detail: 'Sends this now' });
-      expect(submitState(input({ queue, empty: true }))).toMatchObject({ primary: 'resume', enabled: entries.length > 0 });
+      expect(submitState(input({ queue, empty: true }))).toMatchObject({ primary: entries.length > 0 ? 'resume' : 'send', enabled: entries.length > 0 });
     }
   });
 

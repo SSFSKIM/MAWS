@@ -365,12 +365,27 @@ describe('files tool', () => {
 
   const openTool = (params?: { path?: string; line?: number }) => act(() => void panelHost.addTool('files', { appSessionId: A, params }));
 
-  it('shows one root per directory in record order with its role, and lists a directory only when it expands', async () => {
+  it('gives the semantic tree its virtual content extent as directories expand and collapse, with Refresh outside it', async () => {
     render(<TestHost />);
     openTool();
-    await waitFor(() => expect(items()).toEqual(['rdirectory', 'docsadditional directory']));
-    expect(main.callsOf('files.list')).toEqual([{ appSessionId: A }]);
+    await waitFor(() => expect(items()).toHaveLength(5));
+    const tree = screen.getByRole('tree', { name: FILES_COPY.title });
+    const extent = () => Number.parseFloat(tree.style.height);
+    const initial = extent();
+    expect(initial).toBeGreaterThan(0);
+    expect(tree.contains(screen.getByRole('button', { name: FILES_COPY.refresh }))).toBe(false);
+    fireEvent.click(item('src'));
+    await waitFor(() => expect(items()).toHaveLength(7));
+    expect(extent()).toBeGreaterThan(initial);
     fireEvent.click(item('r'));
+    await waitFor(() => expect(items()).toHaveLength(2));
+    expect(extent()).toBeGreaterThan(0);
+    expect(extent()).toBeLessThan(initial);
+  });
+
+  it('opens the project root immediately, keeps additional roots lazy, and preserves a deliberate collapse on refresh and remount', async () => {
+    const mounted = render(<TestHost />);
+    openTool();
     await waitFor(() => expect(items()).toEqual(['rdirectory', 'src', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']));
     expect(main.calls.filter((c) => c.name.startsWith('files.')).map((c) => [c.name, c.input.path])).toEqual([
       ['files.list', undefined],
@@ -378,12 +393,20 @@ describe('files tool', () => {
       ['files.list', '/r'],
     ]);
     expect(item('r').getAttribute('aria-expanded')).toBe('true');
+    expect(item('docs').getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(item('r'));
+    fireEvent.click(screen.getByRole('button', { name: FILES_COPY.refresh }));
+    await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === undefined)).toHaveLength(2));
+    mounted.unmount();
+    render(<TestHost />);
+    expect(item('r').getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('src')).toBeNull();
   });
 
   it('opens a clicked file in the main area for the session and leaves the panel; a symlink opens nothing', async () => {
     render(<TestHost />);
     openTool();
-    fireEvent.click(await screen.findByText('r'));
+    await screen.findByText('src');
     fireEvent.click(await screen.findByText('src'));
     fireEvent.click(await screen.findByText('app.ts'));
     expect(fileTabs()).toEqual([{ id: 'file:/r/src/app.ts', kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: A, pinned: false }]);
@@ -420,14 +443,14 @@ describe('files tool', () => {
     render(<TestHost />);
     openTool({ path: '/app/config.ts', line: 2 });
     await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/app/config.ts', line: 2, appSessionId: A })]));
-    expect(item('app').getAttribute('aria-expanded')).toBe('false');
-    expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([]);
+    expect(item('app').getAttribute('aria-expanded')).toBe('true');
+    expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([{ appSessionId: A, path: '/Users/new/work/app' }]);
   });
 
   it('lists the roots again when the session record changes its directories', async () => {
     render(<TestHost />);
     openTool();
-    await waitFor(() => expect(items()).toHaveLength(2));
+    await screen.findByText('src');
     act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r', additionalDirectories: [] })) })));
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === undefined)).toHaveLength(2));
   });
@@ -491,7 +514,7 @@ describe('files tool', () => {
   it('stops watching the expanded directories under a collapsed parent, and remembers their expansion', async () => {
     render(<TestHost />);
     openTool();
-    fireEvent.click(await screen.findByText('r'));
+    await screen.findByText('src');
     fireEvent.click(await screen.findByText('src'));
     await screen.findByText('app.ts');
     expect([useFiles.getState().holders(A, '/r'), useFiles.getState().holders(A, '/r/src')]).toEqual([1, 1]);
@@ -516,14 +539,14 @@ describe('files tool', () => {
       },
       set(this: HTMLElement, value: number) {
         if (!this.hasAttribute('data-files-scroller')) return scrollTop.set!.call(this, value);
-        const content = parseFloat((this.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0;
+        const content = parseFloat(this.querySelector<HTMLElement>('[role="tree"]')?.style.height ?? '0') || 0;
         offsets.set(this, Math.max(0, Math.min(value, content - 600)));
       },
     });
     try {
       render(<TestHost />);
       openTool();
-      fireEvent.click(await screen.findByText('r'));
+      await screen.findByText('src');
       fireEvent.click(await screen.findByText('src'));
       await screen.findByText('f000.ts');
       const scroller = () => document.querySelector('[data-files-scroller]') as HTMLElement;
@@ -545,7 +568,7 @@ describe('files tool', () => {
   it('keeps the selection through a refresh caused by files.changed, and re-lists and re-watches an invalidated directory', async () => {
     render(<TestHost />);
     openTool();
-    fireEvent.click(await screen.findByText('r'));
+    await screen.findByText('src');
     fireEvent.click(await screen.findByText('src'));
     fireEvent.click(await screen.findByText('app.ts'));
     REPO['/r/src'] = [file('/r/src/app.ts'), file('/r/src/new.ts'), file('/r/src/staged.ts')];
@@ -570,13 +593,13 @@ describe('files tool', () => {
     openTool();
     const id = panelOf(A)!.tabs[0].id;
     act(() => useLayout.getState().setPanelTabPinned(A, id, true));
-    fireEvent.click(await screen.findByText('r'));
+    await screen.findByText('src');
     await screen.findByText('src');
     const state = instanceOf(id)!.state as FilesState;
     act(() => useLayout.getState().openSession(B));
     act(() => panelHost.selectTab(id));
     await waitFor(() => expect(main.callsOf('files.list')).toContainEqual({ appSessionId: B }));
-    expect(state.ui.getState().views[B]).toBeUndefined();
+    await waitFor(() => expect(state.ui.getState().views[B]?.defaultRoot).toBe('/r'));
     act(() => useLayout.getState().openSession(A));
     expect(await screen.findByText('src')).toBeTruthy(); // A's expansion kept
     expect(within(screen.getByRole('tree')).getAllByRole('treeitem')[0].getAttribute('aria-expanded')).toBe('true');

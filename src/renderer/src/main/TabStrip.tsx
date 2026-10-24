@@ -6,6 +6,9 @@
 // moves there as a main tab, its insertion line labelled "Move to tab". Under a split the focused pane's strip carries an
 // accent inset. W12 (I3): the strips show the current project's tab set; P3-F wave S (F17, the owner's obs 8): its name
 // is the title bar's project chip (app/Toolbar.tsx), so the crowded strip carries tabs only.
+import { DropdownMenu } from 'radix-ui';
+import type { TabRef } from '@shared/ipc/schema/layout';
+import { Icon, IconButton } from '../app/IconButton';
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { createSession, focusedProject, NEW_CHAT, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -14,7 +17,7 @@ import { dragAccepted, dropPanelRecord, endDrag, moveMainTab, PANEL_TAB_DRAG_TYP
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
-import { Tab, TAB_DRAG_TYPE } from './Tab';
+import { Tab, useTabLabel, TAB_DRAG_TYPE } from './Tab';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { focusPaneElement } from './pane-dom';
 
@@ -59,6 +62,19 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   // The insertion line's x while a drag hovers, and the outcome's label for a panel record (P4-B3, Z7).
   const [marker, setMarker] = useState<{ left: number; label: string | null; labelLeft: number } | null>(null);
   const activeTabId = state?.activeTabId;
+  const [overflow, setOverflow] = useState(false);
+  useEffect(() => {
+    const element = strip.current;
+    if (!element) return;
+    const measure = () => {
+      setOverflow(element.scrollWidth > element.clientWidth + 1);
+      element.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, [state?.tabs]);
 
   // Keep the active tab in view.
   useEffect(() => {
@@ -138,7 +154,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   const stop = tabs.some((t) => t.id === state.activeTabId) ? state.activeTabId : tabs[0]?.id;
 
   return (
-    <div className="relative flex h-full min-w-0 shrink-0 items-stretch [-webkit-app-region:no-drag]">
+    <div className="relative flex h-full min-w-0 items-stretch [-webkit-app-region:no-drag]">
       <div
         ref={strip}
         role="tablist"
@@ -150,7 +166,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMarker(null);
         }}
         onDrop={onDrop}
-        className="relative flex min-w-0 items-stretch overflow-x-auto [scrollbar-width:none]"
+        className="relative flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none]"
       >
         {tabs.map((tab, index) => (
           <Tab
@@ -173,6 +189,14 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
           {marker.label}
         </span>
       )}
+      {overflow && <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger asChild><IconButton label="All tabs" className="self-center"><Icon><path d="m4 6 4 4 4-4" /></Icon></IconButton></DropdownMenu.Trigger>
+        <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={4} className="z-50 max-h-80 min-w-48 max-w-96 overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float">
+          <DropdownMenu.RadioGroup value={activeTabId ?? ''} onValueChange={(id) => { useLayout.getState().focusPane(pane); useLayout.getState().activateTab(id); }}>
+            {tabs.map((tab) => <OverflowTab key={tab.id} tab={tab} />)}
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Content></DropdownMenu.Portal>
+      </DropdownMenu.Root>}
       <NewSessionButton pane={pane} />
       {/* The focused pane's mark under a split, drawn over the tabs rather than under their backgrounds. */}
       {split && focused && <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-accent" />}
@@ -199,4 +223,11 @@ function NewSessionButton({ pane }: { pane: Pane }) {
       </span>
     </button>
   );
+}
+
+function OverflowTab({ tab }: { tab: TabRef }) {
+  const label = useTabLabel(tab);
+  return <DropdownMenu.RadioItem value={tab.id} className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-ui outline-none data-highlighted:bg-bg-hover data-[state=checked]:bg-bg-active">
+    <span>{label.title}{label.secondary && <small className="ml-2 text-fg-muted">{label.secondary}</small>}</span>
+  </DropdownMenu.RadioItem>;
 }

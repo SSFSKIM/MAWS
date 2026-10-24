@@ -97,7 +97,7 @@ export function submitState(i: SubmitInput): SubmitDecision {
   if (mode === 'memory') return decide('send', 'Save to memory', !empty);
   if (busy) return empty ? decide('stop', 'Stop', true) : decide('send', 'Send', true, null, SENDS_AT_NEXT_STEP, true);
   // Stop holds the older queued text, not a fresh instruction. Other pauses keep new text behind the held entries.
-  if (queue.paused) return empty ? decide('resume', 'Resume', queue.entries.length > 0) : decide('send', 'Send', true, null, queue.pauseReason === 'interrupt' ? SENDS_NOW : JOINS_PAUSED_QUEUE);
+  if (queue.paused && (!empty || queue.entries.length > 0)) return empty ? decide('resume', 'Resume', true) : decide('send', 'Send', true, null, queue.pauseReason === 'interrupt' ? SENDS_NOW : JOINS_PAUSED_QUEUE);
   if (queue.entries.length > 0) return decide('send', 'Send', !empty, null, SENDS_AFTER_QUEUED);
   return decide('send', 'Send', !empty);
 }

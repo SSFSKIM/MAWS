@@ -38,8 +38,7 @@ export function PanelHost({ appSessionId, tabs, activeTabId, onChange, onToggleP
     <div className="flex h-full min-h-0 flex-col gap-1.5" data-surface-stack>
       {visible.map((active, index) => (
         <section key={active.toolId} aria-label={tools.get(active.toolId)?.title ?? active.toolId} data-surface={active.toolId} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-bg-raised">
-          <PanelHeader tabs={shown} activeTabId={active.id} hide={() => closeSurface(active.toolId)} secondary={index > 0} />
-          {tools.get(active.toolId)?.multiInstance && <TabStrip toolId={active.toolId} appSessionId={appSessionId} tabs={shown.filter((tab) => tab.toolId === active.toolId)} activeTabId={active.id} onChange={(next) => onChange({ tabs: shown, activeTabId: next.activeTabId })} bodyId={`${PANEL_BODY_ID}-${active.toolId}`} />}
+          <PanelHeader tabs={shown} activeTabId={active.id} hide={() => closeSurface(active.toolId)} secondary={index > 0} navigation={tools.get(active.toolId)?.multiInstance && <TabStrip inline toolId={active.toolId} appSessionId={appSessionId} tabs={shown.filter((tab) => tab.toolId === active.toolId)} activeTabId={active.id} onChange={(next) => onChange({ tabs: shown, activeTabId: next.activeTabId })} bodyId={`${PANEL_BODY_ID}-${active.toolId}`} />} />
           <div id={`${PANEL_BODY_ID}-${active.toolId}`} role="tabpanel" aria-label={tools.get(active.toolId)?.title ?? active.toolId} className="min-h-0 flex-1 overflow-auto wrap-anywhere">
             <ToolBody key={active.id} tab={active} appSessionId={appSessionId} />
           </div>

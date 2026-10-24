@@ -2,10 +2,12 @@
 // what the open tab is on the left (its icon, an editor's breadcrumb and title, its saved state and open-comment count)
 // and what can be done with it on the right (an editor's actions, three then "More actions", and its Export menu; under a
 // 360 px header all of them in "More actions", so the title keeps the room), then the region's own controls.
+// An editor-owned toolbar can host the saved state, grouped actions and region controls instead of this metadata row.
 // `EditorHeader` is the row; the panel draws it over the selected tab as `PanelHeader`, with Float, Maximize and Hide; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). A tool
 // that registers nothing (X32) shows the strip's label, so today's tools read as they did.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
+import { createPortal } from 'react-dom';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { FloatIcon, Icon, IconButton, MaximizeIcon, PanelIcon, PenIcon, RestoreIcon } from '../app/IconButton';
@@ -36,12 +38,13 @@ export interface EditorHeaderProps {
   title: string; // the plain title, shown when nothing is registered
   suffix?: string | null; // a tool's setTitle suffix, with the plain title
   registration: EditorHostRegistration | null;
+  navigation?: ReactNode; // within-tool tabs replace a plain tool's repeated identity
   controls?: ReactNode; // the region's own controls, which never collapse
   markup?: ReactNode; // P3-G (§D2.2, §D4.4): Mark up, after the actions and before Export, when the tab has a surface
   scope?: EditorHostScope | null; // P3-L (M6b fix wave 1): the tab it is over, for `focusEditorHostAction`
 }
 
-export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, controls, markup, scope = null }: EditorHeaderProps) {
+export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, navigation, controls, markup, scope = null }: EditorHeaderProps) {
   const row = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(row);
   const unresolved = registration?.unresolved ?? 0;
@@ -52,9 +55,10 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   const exports = registration?.exports ?? [];
   const breadcrumb = registration?.breadcrumb ?? [];
   const counted = listed.filter((a) => !a.pinned); // P4-B5: a pinned action is drawn beside the three, never folded but narrow
-  const shown = narrow ? [] : [...counted.slice(0, SHOWN_ACTIONS), ...listed.filter((a) => a.pinned)];
-  const overflow = narrow ? listed : counted.slice(SHOWN_ACTIONS);
-  const folded = narrow ? exports : [];
+  const toolbarHost = registration?.toolbarHost;
+  const shown = toolbarHost ? listed.slice(0, 1) : narrow ? [] : [...counted.slice(0, SHOWN_ACTIONS), ...listed.filter((a) => a.pinned)];
+  const overflow = toolbarHost ? listed.slice(1) : narrow ? listed : counted.slice(SHOWN_ACTIONS);
+  const folded = toolbarHost || narrow ? exports : [];
   const plain = suffix ? `${title} · ${suffix}` : title;
   const hasEditorControls = listed.length > 0 || exports.length > 0 || Boolean(markup);
   // P3-L (M6b fix wave 1): focus back to an action's control, "More actions" when it is folded there
@@ -71,6 +75,17 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
     return true;
   });
 
+  if (toolbarHost) return createPortal(
+    <div ref={row} data-editor-toolbar className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
+      {scope?.surface === 'panel' && registration && <span data-header-title title={registration.title} className="max-w-full min-w-0 truncate text-ui text-fg">{registration.title}</span>}
+      {registration?.saved && <span data-header-saved title={SAVED_COPY[registration.saved]} className="truncate px-1 text-ui-sm text-fg-muted">{registration.saved === 'saved' ? 'Saved' : SAVED_COPY[registration.saved]}</span>}
+      {shown.map((action) => <ActionButton key={action.id} action={action} text />)}
+      {(overflow.length > 0 || folded.length > 0) && <MoreMenu actions={overflow} exports={folded} label={toolbarHost.menuLabel} text />}
+      {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
+      {markup}{controls}
+    </div>, toolbarHost.element,
+  );
+
   return (
     <div ref={row} data-editor-header className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
       {/* Narrowing gives up the breadcrumb first (as one run, so its separators go with it), then the saved state, then
@@ -78,29 +93,31 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
           first), up to their own width, so the title truncates only once both are gone. The count stays whole; what
           still does not fit is clipped here rather than drawn under the actions. Full height, so a focus ring shows. */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch overflow-hidden">
-        {TabIcon && <TabIcon className="size-3.5 shrink-0 text-fg-muted" />}
-        {breadcrumb.length > 0 && (
-          <span data-header-breadcrumb title={breadcrumb.join(' / ')} className="max-w-max min-w-0 flex-[1_1_0px] truncate text-ui text-fg-muted">
-            {breadcrumb.map((segment, i) => (
-              <Fragment key={i}>
-                {segment}
-                <span aria-hidden className={i < breadcrumb.length - 1 ? 'px-1' : 'pl-1'}>
-                  /
-                </span>
-              </Fragment>
-            ))}
+        {navigation || <>
+          {TabIcon && <TabIcon className="size-3.5 shrink-0 text-fg-muted" />}
+          {breadcrumb.length > 0 && (
+            <span data-header-breadcrumb title={breadcrumb.join(' / ')} className="max-w-max min-w-0 flex-[1_1_0px] truncate text-ui text-fg-muted">
+              {breadcrumb.map((segment, i) => (
+                <Fragment key={i}>
+                  {segment}
+                  <span aria-hidden className={i < breadcrumb.length - 1 ? 'px-1' : 'pl-1'}>
+                    /
+                  </span>
+                </Fragment>
+              ))}
+            </span>
+          )}
+          <span data-header-title title={registration ? registration.title : plain} className="min-w-0 truncate text-ui text-fg">
+            {registration ? registration.title : title}
+            {!registration && suffix && <span className="text-fg-faint"> · {suffix}</span>}
           </span>
-        )}
-        <span data-header-title title={registration ? registration.title : plain} className="min-w-0 truncate text-ui text-fg">
-          {registration ? registration.title : title}
-          {!registration && suffix && <span className="text-fg-faint"> · {suffix}</span>}
-        </span>
-        {registration?.saved && (
-          <span data-header-saved title={SAVED_COPY[registration.saved]} className="max-w-max min-w-0 flex-[1000_1_0px] truncate text-ui-sm text-fg-muted">
-            {SAVED_COPY[registration.saved]}
-          </span>
-        )}
-        {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
+          {registration?.saved && (
+            <span data-header-saved title={SAVED_COPY[registration.saved]} className="max-w-max min-w-0 flex-[1000_1_0px] truncate text-ui-sm text-fg-muted">
+              {SAVED_COPY[registration.saved]}
+            </span>
+          )}
+          {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
+        </>}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {shown.map((action) => (
@@ -137,18 +154,22 @@ function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
 
 // The panel's header over its selected tab (the summary when none): the tab's registration under its panel scope, else
 // its strip label; then Float, Maximize / Restore and Hide.
-export function PanelHeader({ tabs, activeTabId, hide, secondary = false }: { tabs: readonly PanelTabRef[]; activeTabId: string | null; hide?: () => void; secondary?: boolean }) {
+export function PanelHeader({ tabs, activeTabId, hide, secondary = false, navigation }: { tabs: readonly PanelTabRef[]; activeTabId: string | null; hide?: () => void; secondary?: boolean; navigation?: ReactNode }) {
   const tab = tabs.find((t) => t.id === activeTabId && !isRestoredLog(t.id)) ?? null;
   const controls = <RegionControls hide={hide} secondary={secondary} />;
-  return tab ? <ToolHeader tab={tab} controls={controls} /> : <EditorHeader title={HEADER_COPY.overview} registration={null} controls={controls} />;
+  return tab ? <ToolHeader tab={tab} controls={controls} navigation={navigation} /> : <EditorHeader title={HEADER_COPY.overview} registration={null} controls={controls} />;
 }
 
-function ToolHeader({ tab, controls }: { tab: PanelTabRef; controls: ReactNode }) {
+function ToolHeader({ tab, controls, navigation }: { tab: PanelTabRef; controls: ReactNode; navigation?: ReactNode }) {
   const { tool, title, suffix } = useTabLabel(tab);
   const scope = useMemo(() => ({ surface: 'panel', tabId: tab.id }) as const, [tab.id]);
   const registration = useEditorHostRegistration(scope);
   const surface = useMarkupSurface(scope);
-  return <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} controls={controls} markup={surface && <MarkupButton scope={scope} />} scope={scope} />;
+  return <>
+    <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} navigation={registration ? undefined : navigation} controls={controls} markup={surface && <MarkupButton scope={scope} />} scope={scope} />
+    {/* Editors keep their registered breadcrumb/actions as well as their within-tool tabs. Plain tools need only one row. */}
+    {registration && navigation && <div className="flex h-9 shrink-0 items-center border-b border-border px-1">{navigation}</div>}
+  </>;
 }
 
 // P3-G (§D4.4): Mark up over the tab's surface, pressed while a session draws over it; disabled with no shown session
@@ -176,7 +197,7 @@ function RegionControls({ hide, secondary = false }: { hide?: () => void; second
   return (
     <>
       {!secondary && <><IconButton
-        label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float session over panel' : pill ? 'Open session card' : 'Dock session'}
+        label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float conversation over surface' : pill ? 'Open session card' : 'Dock session'}
         action="panel.float"
         pressed={floating}
         disabled={nothing}
@@ -184,7 +205,7 @@ function RegionControls({ hide, secondary = false }: { hide?: () => void; second
       >
         <FloatIcon />
       </IconButton>
-      <IconButton label={maximized ? 'Restore right panel' : 'Maximize right panel'} action="panel.maximize" pressed={maximized} onClick={() => runAction('panel.maximize')}>
+      <IconButton label={maximized ? 'Restore surface' : 'Expand surface'} action="panel.maximize" pressed={maximized} onClick={() => runAction('panel.maximize')}>
         {maximized ? <RestoreIcon /> : <MaximizeIcon />}
       </IconButton></>}
       <IconButton label={hide ? 'Close surface' : 'Hide right panel'} action={hide ? undefined : 'panel.toggle'} onClick={hide ?? (() => runAction('panel.toggle'))}>
@@ -223,8 +244,8 @@ function CommentCount({ count, action }: { count: number; action: EditorHostActi
   );
 }
 
-function ActionButton({ action }: { action: EditorHostAction }) {
-  const ActionIcon = action.icon;
+function ActionButton({ action, text = false }: { action: EditorHostAction; text?: boolean }) {
+  const ActionIcon = text ? undefined : action.icon;
   if (ActionIcon) {
     return (
       <IconButton label={action.label} pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id}>
@@ -246,10 +267,10 @@ const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline
 // The overflow: the actions past the inline ones, and under a narrow header every action and the exports (under their
 // own heading). A pressed action is a checkbox item with its check drawn; while any is, every item keeps the check's
 // room so the labels align.
-function MoreMenu({ actions, exports }: { actions: readonly EditorHostAction[]; exports: readonly EditorHostExport[] }) {
+function MoreMenu({ actions, exports, label = HEADER_COPY.more, text = false }: { actions: readonly EditorHostAction[]; exports: readonly EditorHostExport[]; label?: string; text?: boolean }) {
   const checks = actions.some((action) => action.pressed !== undefined);
   return (
-    <HeaderMenu label={HEADER_COPY.more} icon={<MoreIcon />} more>
+    <HeaderMenu label={label} icon={<MoreIcon />} more text={text}>
       {actions.map((action) =>
         action.pressed === undefined ? (
           <DropdownMenu.Item key={action.id} disabled={action.disabled} onSelect={() => action.onSelect()} className={ITEM}>
@@ -301,13 +322,13 @@ function ExportEntries({ exports }: { exports: readonly EditorHostExport[] }) {
   ));
 }
 
-function HeaderMenu({ label, icon, children, more = false }: { label: string; icon: ReactNode; children: ReactNode; more?: boolean }) {
+function HeaderMenu({ label, icon, children, more = false, text = false }: { label: string; icon: ReactNode; children: ReactNode; more?: boolean; text?: boolean }) {
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <IconButton label={label} data-editor-more={more ? '' : undefined}>
+        {text ? <button type="button" aria-label={label} data-editor-more={more ? '' : undefined} className={GHOST}>{label} ▾</button> : <IconButton label={label} data-editor-more={more ? '' : undefined}>
           {icon}
-        </IconButton>
+        </IconButton>}
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={6} className={MENU}>

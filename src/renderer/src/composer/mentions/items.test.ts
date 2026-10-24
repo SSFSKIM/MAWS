@@ -83,6 +83,9 @@ describe('slash items union the catalogue, the widget catalogue and MAWS actions
 });
 
 describe('slash and @ ranking is deterministic', () => {
+  it('finds session cards by the same vocabulary as the shell control', () => {
+    expect(rankItems('cards', mawsItems(() => true)).map((item) => item.action)).toContainEqual({ kind: 'maws', id: 'panel.toggle' });
+  });
   it('orders exact, prefix, substring, subsequence, then a description word; ties by origin then name', () => {
     const items = slashItems(autoRouted(), new Set(), mawsItems(() => true));
     const ranked = rankItems('mo', items).map((i) => `${i.origin}:${i.name}`);

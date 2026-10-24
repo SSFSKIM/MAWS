@@ -1,12 +1,11 @@
-// E1 M4b (the architect's ruling 1): the card of a blocking `maws` ask, a `question` attention item whose originating
-// event is `maws.ask.opened`. Compact in every placement: the count and one button that opens the Question sheet with
-// the event's own data (the transcript's registered `openAsk`, as the capsule does). Nothing here answers: the sheet
-// holds the modalities, so `session.answer` is never offered for an ask.
+// A blocking MAWS ask opens its sheet from the main request card. The sidebar hover card instead answers in place,
+// through the sheet's controls and shared drafts; neither path uses the native tool's `session.answer`.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { registeredActions, type AskRowData } from '../../transcript';
 import { CardButton } from '../controls';
 import { ASK_CARD } from '../copy';
+import { HoverAsk } from '../../tools/maws/ask/HoverAsk';
 
 export type AskOpenedEvent = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
 
@@ -16,7 +15,8 @@ const rowDataOf = (request: AskOpenedEvent): AskRowData => ({
   questions: request.questions, state: 'pending', answers: null, error: null, cancelReason: null,
 });
 
-export function AskBody({ appSessionId, request }: { appSessionId: AppSessionId; request: AskOpenedEvent }) {
+export function AskBody({ appSessionId, request, hover = false }: { appSessionId: AppSessionId; request: AskOpenedEvent; hover?: boolean }) {
+  if (hover) return <HoverAsk appSessionId={appSessionId} askId={request.askId} />;
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-ui-sm text-fg-muted">
       <span>{ASK_CARD.count(request.questions.length)}</span>

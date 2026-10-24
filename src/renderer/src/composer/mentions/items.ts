@@ -41,10 +41,10 @@ const MAWS_PALETTE: Partial<Record<ActionId, { name: string; title: string; desc
   'pane.split': { name: 'split', title: 'Split / send to other pane', description: 'Split the view, or send this tab to the other pane' },
   'pane.focusOther': { name: 'focus-other-pane', title: 'Focus other pane', description: 'Put the keyboard in the other pane' },
   'sidebar.toggle': { name: 'sidebar', title: 'Toggle sidebar', description: 'Show or hide the sidebar' },
-  'panel.toggle': { name: 'panel', title: 'Toggle right panel', description: 'Show or hide the right panel' },
-  'panel.maximize': { name: 'maximize-panel', title: 'Maximize right panel', description: 'Give the right panel the whole window' },
+  'panel.toggle': { name: 'cards', title: 'Toggle session cards', description: 'Show or hide session cards' },
+  'panel.maximize': { name: 'expand-surface', title: 'Expand surface', description: 'Give the surface the main area' },
   'markup.start': { name: 'mark-up', title: 'Mark up', description: 'Draw on the panel’s page and attach it to the chat' }, // P3-G
-  'panel.float': { name: 'float-session', title: 'Float session over panel', description: 'Give the right panel the whole window and float the session over it' }, // P3-G
+  'panel.float': { name: 'float-session', title: 'Float conversation over surface', description: 'Give the surface the main area and float the conversation over it' }, // P3-G
   'main.expandArtifactPane': { name: 'expand-pane', title: 'Expand pane', description: 'Give this pane the main area, float the session beside it and hide the right panel' }, // P4-B3; P4-B3x: the panel
   'theme.light': { name: 'light', title: 'Appearance: Light', description: 'Use the light theme' },
   'theme.dark': { name: 'dark', title: 'Appearance: Dark', description: 'Use the dark theme' },

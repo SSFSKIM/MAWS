@@ -24,9 +24,10 @@ interface TabStripProps {
   onChange: PanelHostProps['onChange'];
   bodyId: string;
   toolId?: string;
+  inline?: boolean;
 }
 
-export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, toolId }: TabStripProps) {
+export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, toolId, inline = false }: TabStripProps) {
   const tool = usePanelHost((s) => toolId ? s.tools.get(toolId) : undefined);
   const canAdd = tool?.multiInstance && tool.menu !== false;
   const select = (id: string) => {
@@ -44,7 +45,7 @@ export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, to
   };
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1">
+    <div className={`flex min-w-0 items-center gap-1 ${inline ? 'flex-1' : 'h-9 shrink-0 border-b border-border px-1'}`}>
       {!toolId && <IconButton label={COPY.home} pressed={activeTabId === null} onClick={() => activeTabId !== null && onChange({ tabs, activeTabId: null })}>
         <HomeIcon />
       </IconButton>}

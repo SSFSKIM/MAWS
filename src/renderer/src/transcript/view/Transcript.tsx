@@ -498,8 +498,20 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
+  // Reader movement is local to each list, even when two views share a key. Only an accepted send requests follow.
+  const sendFollowRequest = useTranscriptStore((state) => state.entries[storeKey]?.sendFollowRequest ?? 0);
+  const lastSendFollow = useRef({ storeKey, request: sendFollowRequest });
+  useLayoutEffect(() => {
+    const requested = lastSendFollow.current.storeKey === storeKey && sendFollowRequest > lastSendFollow.current.request;
+    lastSendFollow.current = { storeKey, request: sendFollowRequest };
+    if (requested) listRef.current?.scrollToEnd();
+  }, [storeKey, sendFollowRequest]);
   const disclosures = useDisclosures();
   const [motion] = useState(() => new WorkMotion());
+  useLayoutEffect(() => {
+    // Restoring Report reopens its saved records in the store; retire this view's older fold intents as well.
+    if (report) for (const turn of openRecords ?? []) motion.unfold(turn);
+  }, [report, openRecords, motion]);
   const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   // P4-B3 (its Decision Log 14): the place a card's float or dock carries to this mount (once), and where it leaves
   const takeCarried = useCallback(() => takeTranscriptCarry(storeKey), [storeKey]);

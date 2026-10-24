@@ -61,7 +61,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         // I2: a click replaces the focused pane's session; ⌘-click and a middle-click open a tab of its own (Chrome's rule)
         onClick={(event) => useLayout.getState().openSession(id, event.metaKey ? { how: 'tab' } : {})}
         onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(id, { how: 'tab' })}
-        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm ${nested ? 'pr-[9px] pl-[30px]' : 'px-[9px]'} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
+        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm ${nested ? 'pr-[7px] pl-[30px]' : 'px-[7px]'} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
         {record.worktree !== null && <span data-testid="row-branch" role="img" aria-label="Worktree" className="shrink-0 text-ui-sm text-fg-faint">⎇</span>}
         {/* E3 */}
@@ -70,7 +70,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
             ↳
           </span>
         )}
-        <span className="min-w-0 flex-1 truncate text-ui text-fg">{title}</span>
+        <span data-session-title className="min-w-0 flex-1 truncate text-ui text-fg">{title}</span>
         {/* E3: the lineage caption takes the branch's place; a nested side thread shares its parent's branch */}
         {caption !== null && (
           <span data-testid="row-lineage" title={caption} className={`max-w-[45%] shrink-0 truncate text-ui-sm text-fg-muted`}>
@@ -84,10 +84,12 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
             <PinIcon className="size-[11px]" />
           </span>
         )}
-        <GlyphMark glyph={glyph} className="w-[14px] shrink-0" />
-        <span className={`shrink-0 text-ui-sm text-fg-muted tabular-nums`}>{sessionAge(record, digest, now)}</span>
-        {hasActions && <SessionOverflow appSessionId={id} title={title} />}
-        {/* The overflow stays in flow to the left: the unread target is never covered on hover. */}
+        <GlyphMark glyph={glyph} className="w-[12px] shrink-0" />
+        {/* Approved mockup: overflow replaces age in one fixed slot, never the title or unread target. */}
+        <span className="relative flex h-[22px] w-[26px] shrink-0 items-center justify-end [&:has([data-state=open])>[data-session-age]]:invisible">
+          <span data-session-age className={`text-ui-sm text-fg-muted tabular-nums ${hasActions ? 'group-hover/session:invisible group-focus-within/session:invisible' : ''}`}>{sessionAge(record, digest, now)}</span>
+          {hasActions && <span className="absolute inset-0 flex items-center justify-end"><SessionOverflow appSessionId={id} title={title} /></span>}
+        </span>
         <button type="button" tabIndex={-1} aria-label={record.unread ? 'Mark read' : 'Mark unread'}
           onClick={(event) => { event.stopPropagation(); void setSessionUnread(id, !record.unread); }}
           className="flex size-4 shrink-0 items-center justify-center rounded-sm outline-accent focus-visible:outline-2">

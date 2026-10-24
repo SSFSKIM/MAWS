@@ -38,7 +38,7 @@ interface WidgetFrameBase {
 // Embedded libraries belong to their page: no modal dismissal, session acquisition, or composer focus.
 export type WidgetFrameProps = WidgetFrameBase & (
   | { variant?: 'modal'; appSessionId: AppSessionId; state: ReadState; close(): void }
-  | { variant: 'embedded'; appSessionId?: never; state: 'loading' | 'error' | 'ready'; close?: never }
+  | { variant: 'embedded'; appSessionId?: never; state: 'loading' | 'error' | 'ready'; close?: never; scope?: ReactNode }
 );
 
 // P2-B start (2026-10-09)
@@ -127,9 +127,9 @@ export function WidgetFrame(props: WidgetFrameProps) {
     >
       {/* P2-B start (2026-10-09): the library's head: title and heading at the left, the toolbar at the right */}
       <header className={size === 'library' ? `flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2 ${embedded ? 'flex-wrap' : ''}` : 'flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2'}>
-        <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>
+        {!(embedded && size === 'library') && <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>}
         {size === 'library' && heading}
-        <span className={size === 'library' ? 'ml-auto flex min-w-0 items-center gap-2' : 'flex items-baseline gap-2'}>
+        <span className={size === 'library' ? `flex min-w-0 items-center gap-2 ${embedded ? 'max-w-full' : 'ml-auto'}` : 'flex items-baseline gap-2'}>
           {size === 'library' && toolbar}
           {/* P2-B end */}
           {props.variant !== 'embedded' && (
@@ -141,6 +141,7 @@ export function WidgetFrame(props: WidgetFrameProps) {
             </>
           )}
         </span>
+        {props.variant === 'embedded' && props.scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{props.scope}</div>}
       </header>
       {/* P2-B (2026-10-09): the library's body takes the remaining height; its panes scroll, and A's dormant line, drawn
           above them, keeps the head's inset (2026-10-10) */}

@@ -1108,7 +1108,7 @@ test.describe('the floating session card (P3-G)', () => {
         await expect(card).toBeVisible();
         await panel.getByRole('button', { name: 'Dock session', pressed: true }).click(); // the header's Float, pressed
         await expect(card).toHaveCount(0);
-        await panel.getByRole('button', { name: 'Float session over panel' }).click();
+        await panel.getByRole('button', { name: 'Float conversation over surface' }).click();
         await expect(card).toBeVisible();
       });
 
@@ -1459,8 +1459,10 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await expect(panel.summary).toBeVisible();
       await expect(panel.region.locator('[data-editor-header]')).toHaveCount(0);
       await panel.call('addTool', 'harness-stub');
-      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
-      for (const name of ['Float session over panel', 'Maximize right panel', 'Close surface']) await expect(stubHeader.getByRole('button', { name })).toBeVisible();
+      // A multi-instance plain tool is named by its selected tab, not a duplicate metadata title.
+      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
+      await expect(stubHeader.locator('[data-header-title]')).toHaveCount(0);
+      for (const name of ['Float conversation over surface', 'Expand surface', 'Close surface']) await expect(stubHeader.getByRole('button', { name })).toBeVisible();
     });
 
     const editor = await panel.call('addTool', 'harness-editor');
@@ -1494,7 +1496,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
     await test.step('the header at the panel’s narrowest: three actions and Export fold into "More actions", the title keeps its room', async () => {
       await setEditor({ unresolved: 0 }); // the comments action is an ordinary action again: three actions plus Export
       await panel.call('setWidth', 280); // restored from maximized too
-      for (const name of ['Float session over panel', 'Maximize right panel', 'Close surface']) await expect(header.getByRole('button', { name })).toBeInViewport();
+      for (const name of ['Float conversation over surface', 'Expand surface', 'Close surface']) await expect(header.getByRole('button', { name })).toBeInViewport();
       await expect(title).toBeVisible();
       expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth), 'the title is whole, not truncated').toBeLessThanOrEqual(0);
       for (const name of ['Version history', 'Open in tab', 'Comments', 'Export']) await expect(header.getByRole('button', { name })).toHaveCount(0);
@@ -1518,7 +1520,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
       // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes.
       await openSurface(panel.page, 'Stub');
       await closeSurface(panel.page, 'Editor'); // Close surface hides, rather than discarding the guarded editor ref.
-      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
+      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
       await expect(surface(panel.page, 'harness-editor')).toHaveCount(0);
       expect(await panel.call('closeTab', editor), 'the inactive ref’s guard vetoes').toBe(false);
       expect(await panel.ids()).toContain(editor);
@@ -1526,7 +1528,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await setEditor({ allowClose: true });
       expect(await panel.call('closeTab', editor), 'the confirmed close releases the editor').toBe(true);
       await expect.poll(() => panel.ids()).not.toContain(editor);
-      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
+      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
     });
     panel.expectQuietConsole();
   });

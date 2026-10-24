@@ -1,5 +1,5 @@
-// The toolbar below the box (C7 execution document, "Composer frame"; §5.4 as amended 2026-10-01, W2 and W10): one row
-// of plain controls outside the box's border and inside the frame, and nothing else around the box. At the left "+"
+// The toolbar below the box (C7 execution document, "Composer frame"; §5.4 as amended 2026-10-01, W2 and W10): plain
+// controls outside the box's border and inside the frame, one row when they fit and wrapping intact in a narrow column. At the left "+"
 // (files, photos, add directory, the palette, connectors and plugins), the location (a started session's; its popover
 // carries the project directory and the additional directories) and the permission mode; at the right the model with
 // its effort, whose chip opens the model selector (W3), then the session's context ring (C3: a started session's, the
@@ -32,7 +32,7 @@ export interface ToolbarProps {
 
 export function Toolbar({ appSessionId, bindings, cwd, dirty, editor, onOpen, ring = null }: ToolbarProps) {
   return (
-    <div role="toolbar" aria-label="Composer tools" className="flex min-w-0 items-center gap-0.5">
+    <div role="toolbar" aria-label="Composer tools" className="flex min-w-0 flex-wrap items-center gap-x-0.5 gap-y-1">
       <PlusMenu appSessionId={appSessionId} cwd={cwd} editor={editor} directories={bindings.directories} />
       {/* New chat: an unstarted tab's project row above the box stands for the location until the session starts */}
       {bindings.project === null && <LocationChip location={bindings.location} directories={bindings.directories.value} dirty={dirty} onOpen={() => onOpen?.('rules')} />}
@@ -41,9 +41,10 @@ export function Toolbar({ appSessionId, bindings, cwd, dirty, editor, onOpen, ri
       <PluginModeSlot appSessionId={appSessionId} />
       {/* E9: the microphone, its capture state and notice */}
       <MicControl appSessionId={appSessionId} />
-      <span className="min-w-2 flex-1" />
-      <ModelChip appSessionId={appSessionId} binding={bindings.model} onOpen={() => onOpen?.('models')} onClosed={() => editor.current?.focus()} />
-      {ring}
+      <span className="ml-auto flex min-w-0 max-w-full shrink-0 items-center gap-0.5">
+        <ModelChip appSessionId={appSessionId} binding={bindings.model} onOpen={() => onOpen?.('models')} onClosed={() => editor.current?.focus()} />
+        {ring}
+      </span>
     </div>
   );
 }

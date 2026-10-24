@@ -13,7 +13,7 @@
 // never stand in for the list, and A's session states (its observed facts, availability and Refresh) reach `/plugins`
 // only through the loaded line and the detail's "Loaded in this session".
 import { useQueryClient } from '@tanstack/react-query';
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
@@ -61,27 +61,28 @@ function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>>): Eng
 
 const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
 
-type LibraryPresentation = { variant: 'embedded' } | { variant: 'modal'; appSessionId: AppSessionId; close(): void };
+type LibraryPresentation = { variant: 'embedded'; scope?: ReactNode } | { variant: 'modal'; appSessionId: AppSessionId; close(): void };
 
 export interface PluginsLibraryProps {
   cwd: string;
   appSessionId: AppSessionId | null;
+  scope?: ReactNode;
 }
 
 // Customize supplies a real directory and, optionally, a ready session. Runtime hooks are mounted only while that
 // attachment is actually ready; an exit never turns Customize into an engine-start surface. A project change resets
 // details and confirmations, so an old request cannot silently become a change in a different project.
-export function PluginsLibrary({ cwd, appSessionId }: PluginsLibraryProps) {
+export function PluginsLibrary({ cwd, appSessionId, scope }: PluginsLibraryProps) {
   const ready = useSessions((s) => appSessionId !== null && s.engine.get(appSessionId)?.process === 'ready');
-  return <EmbeddedLibrary key={cwd} cwd={cwd} appSessionId={ready ? appSessionId : null} />;
+  return <EmbeddedLibrary key={cwd} cwd={cwd} appSessionId={ready ? appSessionId : null} scope={scope} />;
 }
 
-function EmbeddedLibrary({ cwd, appSessionId }: PluginsLibraryProps) {
+function EmbeddedLibrary({ cwd, appSessionId, scope }: PluginsLibraryProps) {
   const [session, setSession] = useState<PluginSession | null>(null);
   return (
     <>
       {appSessionId !== null && <ReadySession key={appSessionId} appSessionId={appSessionId} onChange={setSession} />}
-      <LibraryBody cwd={cwd} session={session?.appSessionId === appSessionId ? session : null} presentation={{ variant: 'embedded' }} />
+      <LibraryBody cwd={cwd} session={session?.appSessionId === appSessionId ? session : null} presentation={{ variant: 'embedded', scope }} />
     </>
   );
 }

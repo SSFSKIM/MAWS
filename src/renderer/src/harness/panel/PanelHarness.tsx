@@ -21,7 +21,6 @@ import { registerSlot } from '../../app/slots';
 import { ipc } from '../../ipc/client';
 import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
-import { runAction } from '../../keymap/actions-runtime';
 import { connectPanelHost, instanceIds, instanceOf, isRestoredLog, panelHost, pendingAdds, registerPanelTool, shownSession, togglePinned, usePanelHost } from '../../panel/host';
 import { PanelHost } from '../../panel/PanelHost';
 import { PanelRegion } from '../../panel/PanelRegion';
@@ -287,7 +286,7 @@ function Controls() {
         <TerminalControls /> {/* C9 */}
         <span className="flex-1" />
         <WidthControls />
-        <button type="button" className={buttonClass} onClick={() => runAction('panel.toggle')}>
+        <button type="button" className={buttonClass} onClick={() => useLayout.getState().setPanel({ collapsed: !collapsed })}>
           {collapsed ? 'Show panel' : 'Hide panel'}
         </button>
         <button type="button" className={buttonClass} onClick={() => void setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>

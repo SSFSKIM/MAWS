@@ -536,7 +536,7 @@ test('an artifact main tab’s Show in panel, from its context menu, shows the r
 
   // the tab's context menu: Show in panel
   await tab.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Show in panel', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Move to side surface', exact: true }).click();
   await expect(record).toBeVisible();
   await expect(record.frameLocator('[data-artifact-frame="html"]').locator('#version')).toHaveText('IN_PANEL');
   await expect(tab).toHaveCount(0);

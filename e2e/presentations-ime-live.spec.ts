@@ -209,8 +209,8 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       // the deck as seeded, nothing selected, the stage focused
       await reseed();
       await page.keyboard.press('Escape');
-      await tab.locator('[data-stage-surface]').focus();
       const where = await targets(page, tab.locator('[data-stage-slide]'));
+      await tab.locator('[data-stage-surface]').focus();
       for (const f of ['ready.json', 'done', 'result.json']) rmSync(join(DIR, `${name}.${f}`), { force: true });
       const probes: ProbeCall[] = [];
       const run = async () => {
@@ -557,11 +557,18 @@ interface ProbeCall {
 
 /** Where the driver presses: page px, window points and screen points (the window's frame and content from main). */
 async function targets(page: Page, frame: ReturnType<Page['locator']>) {
+  const editor = page.locator('[data-region="main"] [data-deck-editor]');
+  const disclosure = editor.getByRole('button', { name: 'Speaker notes', exact: true });
+  if (await disclosure.getAttribute('aria-expanded') !== 'true') await disclosure.click();
+  const notesField = editor.getByRole('textbox', { name: 'Speaker notes', exact: true });
+  await expect(notesField).toBeVisible();
+  // Let the fit observer repaint after opening notes before measuring either screen target.
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const box = (await frame.boundingBox())!;
   const scale = box.width / 1920;
   const at = (x: number, y: number) => ({ x: Math.round(box.x + x * scale), y: Math.round(box.y + y * scale) });
-  const notes = await page.locator('.deck-notes-field').first().boundingBox();
-  const page_ = { a: at(260, 250), b: at(1060, 250), empty: at(100, 1000), shape: at(1150, 600), notes: notes ? { x: Math.round(notes.x + 40), y: Math.round(notes.y + notes.height / 2) } : null };
+  const notes = (await notesField.boundingBox())!;
+  const page_ = { a: at(260, 250), b: at(1060, 250), empty: at(100, 1000), shape: at(1150, 600), notes: { x: Math.round(notes.x + 40), y: Math.round(notes.y + notes.height / 2) } };
   const win = await page.evaluate(() => ({ outerX: screenX, outerY: screenY, outerW: outerWidth, outerH: outerHeight, innerW: innerWidth, innerH: innerHeight, dpr: devicePixelRatio }));
   return {
     page: page_,

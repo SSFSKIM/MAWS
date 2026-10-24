@@ -4,7 +4,7 @@
 // into each new editor), so ⌘Z after either undoes an edit made before it; a move also carries what the owner was
 // looking at: the first visible block, the selection and the focus. happy-dom lays nothing out, so the page and its
 // blocks are given rects here: a block's height stands for the surface's width (the panel's narrower, its blocks taller).
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -243,7 +243,8 @@ describe('a document moved between the panel and a main tab comes back where the
     const first = await ready();
     edit(first, source.state);
     const firstBody = liveBody(first);
-    act(() => screen.getByRole('button', { name: 'Add tab' }).click());
+    act(() => within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Insert' }).click());
+    act(() => screen.getByRole('menuitem', { name: 'New section' }).click());
     await until(() => editorOn() !== null && editorOn() !== first, 'the second tab’s editor');
     const second = await ready();
     expect(liveBody(second)).not.toBe(firstBody);

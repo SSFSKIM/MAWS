@@ -282,7 +282,7 @@ test('in a 600 px panel the comments card floats over the unchanged page; maximi
   });
 
   await test.step('maximized: the floating card leaves its own width and gutters beside the page, never beside the toolbar', async () => {
-    await page.locator('[data-region="panel"]').getByRole('button', { name: 'Maximize right panel' }).click();
+    await page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface' }).click();
     await expect.poll(async () => (await box(body)).width).toBeGreaterThan(1000);
     await toolbar.getByRole('button', { name: /^Comments/ }).click();
     const rail = record.getByRole('complementary', { name: 'Comments' });

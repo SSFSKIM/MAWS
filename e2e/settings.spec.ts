@@ -486,6 +486,11 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
   const cli = writePluginCliStub(userData, { marketplaces: [{ name: 'harbor-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'editorial-tools@harbor-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
   try {
     const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin }, prepare: ({ claudeConfigDir }) => {
+      // The cold inventory reads this registry, not the CLI stub's declared installations.
+      mkdirSync(join(claudeConfigDir, 'plugins'), { recursive: true });
+      writeFileSync(join(claudeConfigDir, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+        'editorial-tools@harbor-tools': [{ scope: 'user', installPath: join(market, 'plugins', 'editorial-tools'), version: '1.0.0' }],
+      } }));
       // UX2-L defaults to a 240px sidebar and no surface: do not hide a reserved panel by fixture.
       mkdirSync(join(claudeConfigDir, 'skills', 'proofread'), { recursive: true });
       writeFileSync(join(claudeConfigDir, 'skills', 'proofread', 'SKILL.md'), '---\nname: proofread\ndescription: Check wording, consistency and citations.\n---\n# Proofread\n');
@@ -507,7 +512,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await page.screenshot({ path });
         await testInfo.attach(name, { path, contentType: 'image/png' });
       };
-      for (const [width, height] of [[1280, 820], [1512, 982], [900, 760], [600, 760]] as const) {
+      for (const [width, height] of [[1280, 820], [1512, 982], [900, 820], [620, 820]] as const) {
         await app.evaluate(({ BrowserWindow }, [width, height]) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(600, 600); win.setContentSize(width, height); }, [width, height]);
         await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, [width, height]);
         await page.getByRole('tab', { name: 'Plugins', exact: true }).click();
@@ -515,6 +520,8 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await shot(`ux2k-plugins-${width}x${height}`);
         await page.getByRole('tab', { name: 'Skills', exact: true }).click();
         await expect(page.getByRole('button', { name: 'View review-quarterly' })).toBeVisible();
+        await expect(page.getByText('Inventory coverage', { exact: true })).toBeVisible();
+        await expect(page.getByText('Some configuration could not be read', { exact: true })).toHaveCount(0);
         await shot(`ux2k-skills-${width}x${height}`);
         await page.getByRole('tab', { name: 'MCP servers', exact: true }).click();
         await expect(page.getByText('documents', { exact: true })).toBeVisible();
