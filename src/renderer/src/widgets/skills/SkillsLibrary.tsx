@@ -56,7 +56,7 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
 // A click inside the row opens its detail unless it landed on a control of its own.
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open])') !== null;
 
-function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow): void; onUse(name: string): void }) {
+function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow): void; onUse?(name: string): void }) {
   const label = labelOf(row);
   const badge = badgeOf(row);
   return (
@@ -89,7 +89,7 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
   );
 }
 
-function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; onUse(name: string): void }) {
+function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; onUse?(name: string): void }) {
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => root.current?.focus(), []);
   const facts: { label: string; value: ReactNode }[] = [

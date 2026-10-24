@@ -472,6 +472,7 @@ test('settings: a Nerd Font in appearance.monoFont draws private-use prompt glyp
 
 // UX2-K: the app-level libraries with no session. Real disk inventory and the existing plugin CLI boundary; screenshots
 // are attachments from the Mac gate, not the owner's running app. Narrow captures exercise these pages' own reflow.
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
 test('Customize and Projects are reachable without a chat, at desktop and narrow widths', async ({}, testInfo) => {
   const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-ux2k-')));
   const directory = join(userData, 'harbor-quarterly-review');

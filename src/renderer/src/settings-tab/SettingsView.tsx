@@ -82,7 +82,7 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
             </button>
           ))}
           <button type="button" onClick={() => openCustomize()} className="mt-2 rounded-sm border-t border-border px-2 py-2 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2 @max-lg/settings:mt-0 @max-lg/settings:border-t-0">
-            Plugins, skills and MCP servers <span aria-hidden>↗</span>
+            Plugins, skills and MCP servers <span aria-hidden>›</span>
           </button>
           <p className="m-0 px-2 pt-3.5 text-ui-sm leading-normal text-fg-muted @max-lg/settings:hidden">{INDEX.footer}</p>
         </nav>

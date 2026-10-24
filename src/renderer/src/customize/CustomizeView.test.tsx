@@ -1,16 +1,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { project } from '../../../../test/support/builders';
+import { project, status } from '../../../../test/support/builders';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { CustomizeView } from './CustomizeView';
 import { useCustomizeProject } from './open';
+import { PlusMenu } from '../composer/plus-menu/PlusMenu';
+import { activeTab } from '../stores/layout-model';
+import userEvent from '@testing-library/user-event';
 
 const P = 'project-one' as ProjectId;
 const Q = 'project-two' as ProjectId;
@@ -44,6 +47,34 @@ it('reads the focused project without a session and switches the disk inventory 
   await screen.findByRole('button', { name: 'View translate' });
   expect(screen.queryByRole('button', { name: 'View review' })).toBeNull();
   expect(backend.calls.filter((call) => call.command.startsWith('session.'))).toEqual([]);
+});
+
+it('opens the connector Manage footer for the composer project even when no session exists', async () => {
+  const user = userEvent.setup();
+  render(<PlusMenu cwd="/two" editor={{ current: null }} />);
+  await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
+  const connectors = screen.getByRole('menuitem', { name: 'Connectors' });
+  act(() => connectors.focus());
+  await user.keyboard('{ArrowRight}');
+  await user.click(await screen.findByRole('menuitem', { name: 'Manage connectors…' }));
+  expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'customize', section: 'mcp' });
+  expect(useCustomizeProject.getState().projectId).toBe(Q);
+  expect(backend.calls).toEqual([]);
+});
+
+it('attaches live facts only from a ready session in the selected directory and detaches on exit', async () => {
+  const matching = { ...status('running-one'), cwd: '/one' };
+  const unrelated = { ...status('running-two'), cwd: '/two' };
+  useSessions.setState({ engine: new Map([[matching.appSessionId, matching], [unrelated.appSessionId, unrelated]]) });
+  backend.script('session.mcpStatus', () => ({ mcpServers: [{ name: 'live-documents', status: 'connected', tools: [{ name: 'read' }] }] }));
+  mount('mcp');
+  const live = await screen.findByRole('region', { name: 'Live connectors' });
+  await within(live).findByText('live-documents');
+  expect(backend.calls.filter((call) => call.command === 'session.mcpStatus').map((call) => call.input)).toEqual([{ appSessionId: matching.appSessionId }]);
+  act(() => useSessions.setState({ engine: new Map([[matching.appSessionId, { ...matching, process: 'exited' }], [unrelated.appSessionId, unrelated]]) }));
+  expect(screen.queryByRole('region', { name: 'Live connectors' })).toBeNull();
+  expect(screen.getByText(/Connection state and tools are unavailable/)).toBeTruthy();
+  expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
 });
 
 it('shows configured servers without inventing connection state or offering a session start', async () => {
