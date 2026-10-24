@@ -300,16 +300,21 @@ describe('toolbar', () => {
     useSettings.setState({ state: null });
   });
 
-  it('the session menu is disabled with no tab open and lists the §5.1 actions for a session, unregistered ones disabled', async () => {
+  it('More omits session actions with no tab open and lists the §5.1 submenu for a session, unregistered ones disabled', async () => {
     const user = userEvent.setup();
     useSessions.setState({ records: new Map([[A, record('app-a')]]) });
     renderShell();
-    expect(screen.queryByRole('button', { name: 'Session actions' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    expect(screen.queryByRole('menuitem', { name: 'Session actions' })).toBeNull();
+    await user.keyboard('{Escape}');
     const split = vi.fn();
     offs.push(registerShellActions(fakeBridge()), (await import('./session-actions')).registerSessionAction('openInSplit', split));
     act(() => useLayout.setState({ main: withActive(sessionTab('app-a')) }));
-    await user.click(screen.getByRole('button', { name: 'Session actions' }));
-    const menu = await screen.findByRole('menu');
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const menu = (await screen.findByRole('menuitem', { name: 'Pin' })).closest<HTMLElement>('[role="menu"]')!;
     const items = within(menu).getAllByRole('menuitem');
     expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled') === 'true'])).toEqual([
       ['Open in split', false],
@@ -325,6 +330,7 @@ describe('toolbar', () => {
   });
 
   it('offers a foreign-live session no actions, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
+    const user = userEvent.setup();
     const nine = scenarioFile('nine-sessions');
     const held = nine.sessions.find((r) => r.holder.kind === 'terminal')!;
     useSessions.setState({ records: new Map(nine.sessions.map((r) => [r.appId, r])) });
@@ -332,7 +338,8 @@ describe('toolbar', () => {
     renderShell();
     act(() => useLayout.setState({ main: withActive(sessionTab(held.appId)) }));
     expect(within(chromeTabs()).getByRole('tab', { name: held.title.text })).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Session actions' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    expect((await screen.findByRole('menuitem', { name: 'Session actions' })).getAttribute('aria-disabled')).toBe('true');
   });
 });
 

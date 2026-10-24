@@ -12,6 +12,7 @@ import { A, mainShowing, probeTool, ref, resetPanelStores } from '../test-suppor
 import { Shell } from './Shell';
 import { useShellView } from './shell-view';
 import { registerSlot, resetSlots } from './slots';
+import { registerSessionAction } from './session-actions';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -47,6 +48,24 @@ describe('the chrome yields to the tab strip', () => {
     const count = within(navigation).getAllByRole('button').length;
     const firstControlX = Number.parseFloat(leading.style.width) - 12 - count * 28 - (count - 1) * 4;
     expect(firstControlX).toBeGreaterThanOrEqual(78);
+  });
+
+  it('keeps one More control at full width and routes session actions through its keyboard submenu', async () => {
+    const user = userEvent.setup();
+    const pin = vi.fn();
+    offs.push(registerSessionAction('pin', pin));
+    renderShell();
+    expect(within(chrome()).queryByRole('button', { name: 'Session actions' })).toBeNull();
+    const more = within(chrome()).getByRole('button', { name: 'More surfaces' });
+    act(() => more.focus());
+    await user.keyboard('{ArrowDown}');
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const pinItem = await screen.findByRole('menuitem', { name: 'Pin' });
+    expect(document.activeElement).toBe(pinItem);
+    await user.keyboard('{Enter}');
+    expect(pin).toHaveBeenCalledWith(A);
   });
 
   it('uses the header width left by a wide surface, not the window width, and keeps overflow keyboard accessible', async () => {

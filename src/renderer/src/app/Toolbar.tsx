@@ -82,8 +82,7 @@ export function Toolbar() {
   const stripRoom = split ? 240 : 180;
   const projectChip = geometry.chrome >= leading + stripRoom + 322;
   const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
-  const sessionMenu = controlsRoom >= 180;
-  const surfaceIcons = Math.max(0, Math.floor((controlsRoom - (sessionMenu && appSessionId ? 32 : 0) - 28) / 30));
+  const surfaceIcons = Math.max(0, Math.floor((controlsRoom - 28) / 30));
 
   return (
     <header data-toolbar className={`${geometry.mainHidden ? 'col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
@@ -117,10 +116,9 @@ export function Toolbar() {
         <div data-chrome-slot="1" className="contents" />
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
-        {appSessionId && sessionMenu && <SessionMenu appSessionId={appSessionId} />}
         <SurfaceRow maxIcons={surfaceIcons} overflowControls={<>
           {compact && <DropdownMenu.Item className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-highlighted:bg-bg-hover" onSelect={() => useLayout.getState().setOverviewOpen(!overviewOpen)}>{waiting > 0 ? `Overview, ${waiting} waiting` : 'Overview'}</DropdownMenu.Item>}
-          {appSessionId && !sessionMenu && <SessionMenuOverflow appSessionId={appSessionId} />}
+          {appSessionId && <SessionMenuOverflow appSessionId={appSessionId} />}
         </>} />
       </div>
     </header>
@@ -203,32 +201,6 @@ const BoardIcon = () => (
 // §5.1's session actions for the session on screen, as its sidebar menus offer them (`sessionActionsFor`: a
 // foreign-live session has none here); "Open" and "Open in new tab" are left out because it is the open tab. A session
 // with no record (an unstarted one) offers nothing yet, and with nothing to offer the menu is disabled.
-function SessionMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
-  const record = useSessions((s) => (appSessionId ? s.records.get(appSessionId) : undefined));
-  const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
-  return (
-    <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild disabled={ids.length === 0}>
-        <IconButton label="Session actions">
-          <span aria-hidden className="text-ui leading-none tracking-tight">•••</span>
-        </IconButton>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg"
-        >
-          {record &&
-            ids.map((id) => (
-              <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />
-            ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  );
-}
-
 function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];

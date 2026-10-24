@@ -8,7 +8,7 @@ import { CommandPalette } from '../palette/CommandPalette';
 import { KeyboardShortcuts } from '../keymap/KeyboardShortcuts';
 import { PanelRegion } from '../panel/PanelRegion';
 import { FloatingSummary } from '../panel/summary/Summary';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
+import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useLayout } from '../stores/layout';
 import { COLLAPSE_THRESHOLD_PX, SIDEBAR_BOUNDS, useWindowWidth } from './regions';
@@ -17,6 +17,7 @@ import { Resizer } from './Resizer';
 import { ToastHost } from './ToastHost';
 import { Toolbar } from './Toolbar';
 import { holdCover } from '../tools/browser/covering';
+import { useDragAccepted } from '../shell/transfer';
 
 export const SIDEBAR_REGION_ID = 'region-sidebar';
 export const MAIN_REGION_ID = 'region-main';
@@ -29,10 +30,14 @@ export function Shell() {
   const collapsed = useLayout((s) => s.regions.panel.collapsed);
   const overlay = useShellView((s) => s.sidebarOverlay);
   const cardsOverlay = useShellView((s) => s.cardsOverlay);
+  const split = useLayout((s) => currentSet(s.main).panes.length === 2);
+  const edgeDrag = useDragAccepted('edge');
+  // Let the split target reach the main region's outer edge; keep cards mounted for a lossless cancel.
+  const yieldCards = edgeDrag && !split;
   const room = width - geometry.sidebar;
   const cards = session !== null && geometry.panel === 0 && !collapsed && (room >= 960 || cardsOverlay);
   // Wide cards reserve a column below; explicitly opened narrow cards overlay main's native pages.
-  const cardsCover = cards && room < 960;
+  const cardsCover = cards && !yieldCards && room < 960;
   useEffect(() => cardsCover ? holdCover() : undefined, [cardsCover]);
   useEffect(() => { useShellView.setState({ sidebarOverlay: false }); }, [active]);
   return (
@@ -42,11 +47,11 @@ export function Shell() {
       {geometry.sidebarAside && overlay && <button aria-label="Close sidebar overlay" onClick={() => useShellView.setState({ sidebarOverlay: false })} className="absolute inset-0 top-(--toolbar-h) z-30 bg-transparent" />}
       <SidebarRegion />
       <section id={MAIN_REGION_ID} data-region="main" aria-label="Main" inert={geometry.mainHidden || geometry.sheet} className="relative col-start-2 row-start-3 flex min-h-0 min-w-0 flex-col overflow-hidden">
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" style={cards && room >= 960 ? { paddingRight: 304 } : undefined}>
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" style={cards && !yieldCards && room >= 960 ? { paddingRight: 304 } : undefined}>
           <MainArea />
           <OverviewLayer />
         </div>
-        {cards && <aside aria-label="Session cards" className="absolute top-3 right-3 bottom-3 z-20 w-70 overflow-y-auto"><FloatingSummary appSessionId={session} /></aside>}
+        {cards && <aside aria-label="Session cards" hidden={yieldCards} className="absolute top-3 right-3 bottom-3 z-20 w-70 overflow-y-auto"><FloatingSummary appSessionId={session} /></aside>}
       </section>
       <ToastHost />
       <PanelRegion />
