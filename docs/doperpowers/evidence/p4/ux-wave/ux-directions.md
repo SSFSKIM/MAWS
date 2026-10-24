@@ -12,6 +12,11 @@ Each direction cites the observation it comes from (O1, O2, …, below). A direc
 - **D4. Because the side view is cards, new capability arrives as a card** (O2). First candidate: an artifacts card below Connectors, the project's artifacts at a glance, with a way to look at another project's.
 - **D5. No Needs-you section; a waiting session is marked by a coloured dot on its own row** (O3). Claude Desktop has no gathered section and marks each session row instead (orange for waiting on the person, blue for running).
 - **D6. The sidebar's top carries the app's destinations** (O4). Today it holds only search above Needs you and the project tree. Following Claude Desktop (search, New, Projects, Artifacts, Customize, More): add Projects and a Customize page that gathers skills, plugins, marketplaces, connectors and the like, beside the existing Artifacts library. Lens 8 of the assessment found the same gap from the other side (l8-settings-02: plugins, skills and connectors open only as a modal over a session's composer, Settings has no section for them; it proposes a Customize tab reusing the library components, with a project picker).
+- **D5, revised by the owner (batch 1, l1-sessions-05 and -06):** keep Needs you, but smaller: the person only needs to know which session to visit. Per-row status marks (D5's dots) stay compatible with it.
+- **D7. A session row carries only what tells sessions apart; detail goes in a hover card** (batch 1, l1-sessions-10; O5). A worktree session shows only a branch mark at the row's left, the status mark moves right beside the age, the branch name and more go in a card on hover, and ⋯ on hover holds rename, fork and the rest. The hover card can answer the session (Claude Desktop's quick reply).
+- **D8. The sidebar can narrow to the sessions of one project or a chosen set** (O6): a small button beside the Projects heading shows only the current session's project, a second click shows all again, and hovering it lists projects to choose from. Clicking a project still folds its sessions.
+- **D9. Space follows attention** (O6): the sidebar is compact by default and the default side view is small, so the main area is spacious; a surface the person opens from the side (artifact, diff, browser) gets real width, because opening it means looking at it rather than the session.
+- **D10. The transcript renders what the agent wrote, structured as it wrote it** (batch 1, l2-transcript-03, -01): line breaks kept, the to-human style's text as produced rather than boxed; tool calls as Claude Desktop's block rows, each named by a one-line summary rather than its raw command ("Ran /skill", "Used <MCP>"), with input and output, and edits, shown only on demand the way Claude Desktop shows them.
 
 ## Open questions
 
@@ -58,3 +63,18 @@ Screenshot: `owner-notes/claude-sidebar-status-dots.png` (Image #9: Claude Deskt
 > they have 'customization' and Projects too on left top panel which I think is good too. Our left top panel has too-nothing, and adding 'Projects' and 'Customization' (loads Skills, Plugins, Marketplaces and more) could be good.[Image #10]
 
 Screenshot: `owner-notes/claude-sidebar-top-nav.png` (Image #10: Claude Desktop's sidebar top, search, New, Projects (beta), Artifacts, Customize and More, above the sessions grouped by project with status dots).
+
+### O5 and O6. Hover cards, a project filter, spaciousness (2026-10-23, about 23:55Z, with marks batch 1)
+
+Screenshots: `owner-notes/claude-sidebar-hover-quick-reply.png` (Image #19: Claude Desktop's hover card on a sidebar session: title, "Claude asked · …", and a reply field); the tool-row references named in batch 1 are copied as `owner-notes/claude-tool-rows-summaries.png`, `claude-turn-receipt.png` and `claude-tool-input-output.png`.
+
+> [Image #19] --> hovering on sidebar's session showing and allowing human to choose on that seems good. This implementation is in Claude Desktop
+> another observation: 
+> 
+> 4. On project view — let’s add an option on sidebar to:
+>     1. Optionally make only the session from certain project shows up on sidebar. Currently the default behavior when user clicks the project card on the left sidebar is that it folds the list of sessions under that project card. Keep that behavior, but we can add another small button next to  “PROJECTS” that, when clicked, make right sidebar show only the sessions from the project of currently loaded sessions, (clicking again brings it back to show projects of all sessions on right sidebar). When hovered on that button, it shows the lists of projects, which when user clicks, loads the sessions of those projects only on the sidebar. Click button, does the same — shows all projects lists on right sidebar
+>     2. ￼
+> 
+>     1. Another observation is this sense of spaciousness I felt from Claude Desktop. If you look at it, its left sidebar is default to being very compact on the side. Much shorter. The ratio of each left/right sidebar and main is much greater, giving spacious feeling for main tab.
+>  Same for its right side component that shows up as default. On the other hand, when it opens actual thing from the right sidebar, it opens it to be bigger. And this is right decision because what you mean by opening something, browser, dev panel, whatever, from the right sidebar means that you are going to look at it, not the session. So making default sidebar component small and giving space for it only when they’re actually opened (artifact, diff panel, whatever) is correct.
+> 
