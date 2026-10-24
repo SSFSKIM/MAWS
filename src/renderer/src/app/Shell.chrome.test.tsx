@@ -21,6 +21,7 @@ const setWidth = (width: number) => (window as unknown as { happyDOM: { setWindo
 const chrome = () => screen.getByRole('banner');
 const strips = () => chrome().querySelector<HTMLElement>('[data-chrome-tabs]')!;
 const renderShell = () => render(<QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>);
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 beforeEach(() => {
   setWidth(1440);
@@ -138,11 +139,51 @@ it('dismisses a narrow sheet with Escape or its backdrop without forgetting its 
   useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' });
   renderShell();
   await userEvent.keyboard('{Escape}');
+  await act(nextFrame);
   expect(document.getElementById('region-main')!.hasAttribute('inert')).toBe(false);
+  expect(document.activeElement).toBe(within(strips()).getByRole('tab', { selected: true }));
   expect(useLayout.getState().effectivePanelTabs(A)).toHaveLength(1);
   act(() => useLayout.getState().setPanel({ collapsed: false }));
   await userEvent.click(screen.getByRole('button', { name: 'Close surface sheet' }));
+  await act(nextFrame);
   expect(document.getElementById('region-main')!.hasAttribute('inert')).toBe(false);
+  expect(document.activeElement).toBe(within(strips()).getByRole('tab', { selected: true }));
+});
+
+it.each([
+  ['Escape', true], ['Escape', false], ['backdrop', true], ['backdrop', false],
+] as const)('restores usable focus after %s sheet dismissal and layout commit (opener available: %s)', async (dismissal, available) => {
+  const user = userEvent.setup();
+  setWidth(620);
+  useLayout.getState().setPanel({ collapsed: true });
+  offs.push(registerPanelTool(probeTool('focus', { render: () => <input aria-label="Sheet editor" autoFocus /> }).tool));
+  render(<>
+    <button onClick={() => {
+      useLayout.getState().setPanelTabs(A, { tabs: [ref('focus:aaaaaaaa')], activeTabId: 'focus:aaaaaaaa' });
+      useLayout.getState().setPanel({ collapsed: false });
+    }}>Open test sheet</button>
+    <QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>
+  </>);
+  const opener = screen.getByRole('button', { name: 'Open test sheet' });
+  await user.click(opener);
+  const field = screen.getByRole('textbox', { name: 'Sheet editor' });
+  field.focus();
+  expect(document.activeElement).toBe(field);
+  if (!available) opener.setAttribute('disabled', '');
+  const target = available ? opener : within(strips()).getByRole('tab', { selected: true });
+  const inertAtFocus: boolean[] = [];
+  const focus = target.focus.bind(target);
+  vi.spyOn(target, 'focus').mockImplementation((options) => {
+    inertAtFocus.push(document.getElementById('region-main')!.hasAttribute('inert'));
+    focus(options);
+  });
+  if (dismissal === 'Escape') await user.keyboard('{Escape}');
+  else await user.click(screen.getByRole('button', { name: 'Close surface sheet' }));
+  await act(nextFrame);
+  expect(screen.queryByRole('button', { name: 'Close surface sheet' })).toBeNull();
+  expect(inertAtFocus).toEqual([false]);
+  expect(document.activeElement).toBe(target);
+  expect(target.closest('[inert]')).toBeNull();
 });
 
 it('leaves composing Escape and keyboard focus in a narrow sheet field', async () => {

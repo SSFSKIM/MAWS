@@ -7,13 +7,15 @@
 // amended) and the floating card draws the shown session over the panel body. P4-B3 (X38): while a main tab is dragged,
 // the region (header and body) is covered by one drop target, which moves in an artifact the panel can take and refuses
 // (no drop cursor) everything else.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { surfaceSession } from './surface-model';
-import { useShellGeometry } from '../app/shell-view';
+import { shellGeometryOf, useShellGeometry } from '../app/shell-view';
+import { focusPaneElement } from '../main/pane-dom';
+import { currentSet } from '../stores/layout-model';
 import { COLLAPSE_THRESHOLD_PX, PANEL_BOUNDS } from '../app/regions';
 import { Resizer } from '../app/Resizer';
 import { useSlot } from '../app/slots';
@@ -37,19 +39,8 @@ export function PanelRegion() {
   const shown = useShownPanel(); // P3-G: the header and the host read one selection
   const cover = useCoverState('panel'); // P4-B3 (Z3): the panel is one target for an artifact main tab
 
-  useEffect(() => {
-    if (!geometry.sheet) return;
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
-      event.preventDefault();
-      useLayout.getState().setPanel({ collapsed: true });
-    };
-    window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
-  }, [geometry.sheet]);
-
   return (<>
-    {geometry.sheet && <button aria-label="Close surface sheet" onClick={() => setPanel({ collapsed: true })} className="absolute inset-0 top-(--toolbar-h) z-30 bg-fg/10" />}
+    {geometry.sheet && <SurfaceSheetDismissal />}
     <section
       id={PANEL_REGION_ID}
       data-region="panel"
@@ -93,6 +84,37 @@ export function PanelRegion() {
       )}
     </section>
   </>);
+}
+
+function availableFocus(element: Element | null): element is HTMLElement {
+  return element instanceof HTMLElement && element !== document.body && element.isConnected
+    && !element.matches(':disabled, [aria-disabled="true"]')
+    && !element.closest('[inert], [hidden], [aria-hidden="true"]');
+}
+
+function dismissSheet(opener: HTMLElement | null): void {
+  useLayout.getState().setPanel({ collapsed: true });
+  requestAnimationFrame(() => {
+    // Main must have left inert before focus returns. Do not undo a deliberate focus move or a reopened sheet.
+    if (shellGeometryOf(useLayout.getState(), window.innerWidth).sheet || availableFocus(document.activeElement)) return;
+    if (availableFocus(opener)) opener.focus({ preventScroll: true });
+    else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
+  });
+}
+
+function SurfaceSheetDismissal() {
+  // Mount only for a sheet: snapshot before an autoFocus child takes the keyboard during the same commit.
+  const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      event.preventDefault();
+      dismissSheet(opener);
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [opener]);
+  return <button aria-label="Close surface sheet" onClick={() => dismissSheet(opener)} className="absolute inset-0 top-(--toolbar-h) z-30 bg-fg/10" />;
 }
 
 interface ShownPanel {
