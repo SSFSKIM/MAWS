@@ -10,6 +10,7 @@ export const SECTIONS = {
   voice: 'Voice', // E9
   appearance: 'Appearance',
   notifications: 'Notifications',
+  sessions: 'Sessions',
   browser: 'Browser', // E4a: Settings › Browser (settings version 11)
   artifacts: 'Artifacts', // P3-D: Settings › Artifacts (settings version 14), last in the index
 } as const;

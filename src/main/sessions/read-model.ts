@@ -112,6 +112,10 @@ export class SessionReadModel {
     return [...this.digestsById.values()];
   }
 
+  digest(appSessionId: AppSessionId): SessionDigest | null {
+    return this.digestsById.get(appSessionId) ?? null;
+  }
+
   engineStatus(appSessionId: AppSessionId): EngineSessionStatus | null {
     return this.statuses.get(appSessionId) ?? null;
   }
@@ -155,6 +159,10 @@ export class SessionReadModel {
   // Every session's list, for the consumers that read across sessions (the notifier's start, the dock badge).
   allAttention(): ReadonlyMap<AppSessionId, AttentionItem[]> {
     return this.attentionById;
+  }
+
+  isVisible(appSessionId: AppSessionId): boolean {
+    return this.visible.has(appSessionId);
   }
 
   setVisible(appSessionId: AppSessionId, visible: boolean): void {

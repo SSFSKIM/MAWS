@@ -259,7 +259,7 @@ test('the slash palette opens above a started session’s composer and moves not
 
 // W11 at scale (many-sessions.json: three projects of 120 sessions, a third of MAWS's in a managed and a sibling
 // worktree): Codex's flat tree, 36px project rows expanding in place to 30px session rows, five and then eight at most,
-// one flat list with a worktree session marked by its branch; the hover card names the branch and folder; ArrowLeft
+// one flat list with a worktree mark at left; only the hover card names its branch and folder; ArrowLeft
 // steps out to the project.
 test('sidebar at scale: the flat tree, 36px project rows, 30px session rows, five then eight', async () => {
   const maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/many-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' } });
@@ -284,7 +284,8 @@ test('sidebar at scale: the flat tree, 36px project rows, 30px session rows, fiv
     // A worktree session, found through the search (which lists the project open on its matches).
     await sidebar.getByRole('searchbox', { name: 'Search projects and sessions' }).fill('scale-alpha');
     const alpha = maWS.locator('[data-kind="session"]').first();
-    await expect(alpha.getByTestId('row-branch')).toHaveText('⎇ worktree-scale-alpha');
+    await expect(alpha.getByRole('img', { name: 'Worktree', exact: true })).toHaveText('⎇');
+    await expect(alpha, 'branch names belong only in the hover card').not.toContainText('worktree-scale-alpha');
     const title = (await alpha.getAttribute('aria-label'))!;
     const card = page.getByRole('dialog', { name: title });
     await expect(async () => {
@@ -385,10 +386,11 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     // W11: the project list, most recently active first, with each collapsed project's waiting and working counts; no
     // Pinned section. M2 restores cross-project Needs you above it, independent of expansions.
     await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible();
-    expect(await sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button').allTextContents()).toEqual([
-      `MAWS${FIX}Approval needed`, `MAWS${SIP}Question`, `codex_somersault${QUOTA}Plan review`,
-    ]);
     const needsYou = sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button');
+    await expect(needsYou).toHaveText([`◐${FIX}MAWS`, `◐${SIP}MAWS`, `◐${QUOTA}codex_somersault`]);
+    for (const [index, label] of [`MAWS · ${FIX} · Approval needed`, `MAWS · ${SIP} · Question`, `codex_somersault · ${QUOTA} · Plan review`].entries()) {
+      await expect(needsYou.nth(index), 'compact rows retain their attention reason for assistive technology').toHaveAccessibleName(label);
+    }
     await sidebar.getByRole('searchbox').focus();
     await page.keyboard.press('Tab');
     await expect(needsYou.nth(0)).toBeFocused();
@@ -397,7 +399,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await page.keyboard.press('Home');
     await expect(needsYou.nth(0)).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(sidebar.getByRole('button', { name: 'Sort sessions' })).toBeFocused();
+    await expect(sidebar.getByRole('button', { name: 'Filter projects' })).toBeFocused();
     await sidebar.getByRole('searchbox').focus();
     await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
@@ -876,7 +878,7 @@ const rollups = (sidebar: Locator) =>
 const rowGlyphs = (sidebar: Locator) =>
   sidebar
     .locator('[data-kind="session"]')
-    .evaluateAll((els) => Object.fromEntries(els.map((el) => [el.getAttribute('aria-label'), el.querySelector('[role="img"]')?.getAttribute('aria-label')])));
+    .evaluateAll((els) => Object.fromEntries(els.map((el) => [el.getAttribute('aria-label'), el.querySelector('[role="img"]:not([aria-label="Worktree"]):not([aria-label="Pinned"]):not([aria-label="Unread"])')?.getAttribute('aria-label')])));
 
 const unreadRows = (sidebar: Locator) =>
   sidebar

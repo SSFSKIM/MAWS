@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
@@ -49,6 +49,28 @@ describe('layout persistence', () => {
     const replayed = { ...regions, sidebar: { ...regions.sidebar, width: 260 } };
     expect(sets()).toEqual([{ key: 'main.tabs', value: LAYOUT_DEFAULTS.main }, { key: 'regions', value: replayed }]); // a first launch materialises the default
     expect(store.getState().regions).toEqual(replayed);
+  });
+
+  // l1-sessions-13 review: main's inactivity sweep keeps the sessions `main.tabs` holds open, so an opening cannot wait
+  // for the write delay; a closing can (main keeping a closed tab's session a moment longer archives nothing wrongly).
+  it('writes a session or agent tab’s opening at once, and its closing after the delay', async () => {
+    const { store, hydrate, sets } = setup();
+    await hydrate();
+    const written = () => sets().filter((s) => s.key === 'main.tabs').map((s) => s.value as LayoutMain);
+    store.getState().openTab({ kind: 'diagnostics' });
+    expect(written()).toEqual([]); // no session joined: the delay as before
+    store.getState().openTab({ kind: 'session', appSessionId: A });
+    expect(written()).toHaveLength(1);
+    expect(written()[0]).toBe(store.getState().main);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS * 2);
+    expect(written()).toHaveLength(1); // the pending diagnostics write went out with it
+    store.getState().openTab({ kind: 'agent', appSessionId: 'app-b' as AppSessionId, agentId: 'agent-1' as AgentId });
+    expect(written()).toHaveLength(2);
+    store.getState().closeTab(`session:${A}`);
+    expect(written()).toHaveLength(2);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(written()).toHaveLength(3);
+    expect(written()[2]).toBe(store.getState().main);
   });
 
   it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {

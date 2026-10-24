@@ -9,10 +9,12 @@
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
-import { FolderIcon, GearIcon, IconButton, PlusIcon, SortIcon } from '../app/IconButton';
+import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { useChordHint } from '../app/IconButton'; // C11
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
+import type { ProjectId } from '@shared/graph/ids';
+import { ProjectFilter } from './ProjectFilter';
 import type { SidebarSort } from '../overview/derive';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -25,7 +27,7 @@ import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
 import { ResumeChooserHost } from '../resume/host'; // P2-D
 import { registerProjectRevealer } from './reveal';
-import { runAddProject, useAddProjectEnabled } from './project-actions';
+import { AddProject } from './AddProject';
 import { Search } from './Search';
 import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
@@ -62,9 +64,16 @@ function SidebarBody() {
   const records = useSessions((s) => s.records);
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const digests = useSessions((s) => s.digests);
-  const projects = useSessions(selectProjectOrder);
+  const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectId> | null>(null);
+  const allKnownProjects = useSessions(selectProjectOrder);
   const hiddenProjects = useSessions(selectHiddenProjects);
   const rows = useAttention((s) => selectNeedsYou(s, { records, recordsVersion }));
+  const projects = useMemo(() => {
+    const waiting = new Set(rows.map((row) => row.appSessionId));
+    const retained = new Set([...records.values()].filter((r) => !r.archived && (r.pinned || r.holder.kind !== 'none' || waiting.has(r.appId)
+      || digests.get(r.appId)?.phase === 'working' || digests.get(r.appId)?.phase === 'starting')).map((r) => r.projectId));
+    return allKnownProjects.filter((p) => !p.discovered || retained.has(p.id) || projectFilter?.has(p.id));
+  }, [allKnownProjects, records, digests, rows, projectFilter]);
   const sidebar = useLayout((s) => s.regions.sidebar);
   const selected = useLayout((s) => {
     const tab = activeTab(s.main);
@@ -82,7 +91,7 @@ function SidebarBody() {
   const search = useRef<HTMLDivElement>(null);
 
   const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
-  const hidden = useMemo(() => new Set(hiddenProjects.map((p) => p.id)), [hiddenProjects]);
+  const hidden = useMemo(() => new Set([...hiddenProjects, ...allKnownProjects.filter((p) => !projects.some((listed) => listed.id === p.id))].map((p) => p.id)), [hiddenProjects, allKnownProjects, projects]);
   const everyEntry = useMemo(() => projectList({ records, digests, projects, rows, hidden }), [records, digests, projects, rows, hidden]);
   const searching = query.trim() !== '';
   const matches = useMemo(() => sessionMatcher(query, byId), [query, byId]);
@@ -91,12 +100,12 @@ function SidebarBody() {
   // Five project rows, then "Show more" for the rest (Codex's `maxGroups`); Other sessions stays last whatever is folded.
   // A search lists every project it finds.
   const { listed, folded } = useMemo(() => {
-    const found = filterProjectList(everyEntry, query, byId);
-    if (searching || allProjects) return { listed: found, folded: 0 };
+    const found = filterProjectList(everyEntry, query, byId).filter((entry) => projectFilter === null || (entry.project !== null && projectFilter.has(entry.project.id)));
+    if (searching || allProjects || projectFilter !== null) return { listed: found, folded: 0 };
     const real = found.filter((e) => e.project !== null);
     const other = found.filter((e) => e.project === null);
     return { listed: [...real.slice(0, PROJECTS_FIRST), ...other], folded: Math.max(0, real.length - PROJECTS_FIRST) };
-  }, [everyEntry, query, byId, searching, allProjects]);
+  }, [everyEntry, query, byId, searching, allProjects, projectFilter]);
 
   const shown: ShownProject[] = useMemo(
     () =>
@@ -104,8 +113,8 @@ function SidebarBody() {
         const open = searching || expanded.has(entry.key);
         if (!open) return { entry, open, sessions: [], more: 0 };
         const all = nestLineage(projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches })); // E3: the caps count trees
-        const count = shownCount(all.length, more.has(entry.key));
-        return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: Math.min(all.length, SESSIONS_CAP) - count };
+        const count = searching ? all.length : shownCount(all.length, more.has(entry.key));
+        return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: searching ? 0 : Math.min(all.length, SESSIONS_CAP) - count };
       }),
     [listed, searching, expanded, digests, rows, sidebar.sort, matches, more],
   );
@@ -153,6 +162,7 @@ function SidebarBody() {
     () =>
       registerProjectRevealer((projectId) => {
         setQuery('');
+        setProjectFilter(null);
         setAllProjects(true);
         setFocused(null);
         pendingFocus.current = projectNodeId(projectId);
@@ -242,8 +252,9 @@ function SidebarBody() {
           >
             <NeedsYou rows={rows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
             <SectionHeading title="Projects">
+              <ProjectFilter projects={allKnownProjects} current={selected ? records.get(selected)?.projectId ?? null : null} selected={projectFilter} onChange={setProjectFilter} />
               <SortMenu sort={sidebar.sort} />
-              {projects.length > 0 && <AddProjectButton />}
+              <AddProject />
             </SectionHeading>
             {listEmpty && <EmptyProjects />}
             {listed.length === 0 ? (
@@ -253,7 +264,7 @@ function SidebarBody() {
                 {shown.map((group, i) => (
                   <Fragment key={group.entry.key}>
                     {i === moreAt && moreProjects}
-                    <ProjectRow entry={group.entry} open={group.open} sessions={group.sessions} more={group.more} onToggle={toggleProject} onShowMore={showMore} />
+                    <ProjectRow entry={group.entry} open={group.open} sessions={group.sessions} more={group.more} matchCount={searching ? group.sessions.length : undefined} onToggle={toggleProject} onShowMore={showMore} />
                   </Fragment>
                 ))}
                 {moreAt === shown.length && moreProjects}
@@ -381,32 +392,8 @@ const ArtifactsIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-function AddProjectButton() {
-  const enabled = useAddProjectEnabled();
-  return (
-    <IconButton label="Add project" disabled={!enabled} onClick={runAddProject} className="size-[22px]">
-      <PlusIcon className="size-[13px]" />
-    </IconButton>
-  );
-}
-
-const TEXT_BUTTON =
-  'rounded-sm border border-border-strong px-2.5 py-1 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:border-border disabled:text-fg-faint disabled:hover:bg-transparent';
-
-// An empty workspace (residue *Empty and loading states*): Add project, disabled until its handler exists; the other way
-// in is the New chat row above (New chat, 2026-10-01).
 function EmptyProjects() {
-  const canAdd = useAddProjectEnabled();
-  return (
-    <div className="flex flex-col gap-2.5 px-2.5 py-2">
-      <p className="m-0 text-ui-sm text-fg-muted">No projects yet</p>
-      <div className="flex gap-2">
-        <button type="button" disabled={!canAdd} title={canAdd ? undefined : 'Not available here'} onClick={runAddProject} className={TEXT_BUTTON}>
-          Add project
-        </button>
-      </div>
-    </div>
-  );
+  return <p className="m-0 px-2.5 py-2 text-ui-sm text-fg-muted">No projects yet</p>;
 }
 
 // Until both snapshots have loaded: the search field and a few placeholder project rows.

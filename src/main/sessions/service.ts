@@ -969,7 +969,7 @@ export class SessionService {
     });
   }
 
-  archive(appSessionId: AppSessionId, opts: { onlyIfIdle?: boolean } = {}): Promise<ArchiveOutcome> {
+  archive(appSessionId: AppSessionId, opts: { onlyIfIdle?: boolean; eligible?: () => Promise<boolean>; stillEligible?: () => boolean } = {}): Promise<ArchiveOutcome> {
     return this.serial(appSessionId, async () => archiveRecord(await this.ready(), appSessionId, opts));
   }
 

@@ -26,6 +26,7 @@ let fake: FakeClient;
 let offs: (() => void)[] = [];
 beforeEach(() => {
   resetShellStores();
+  useNotices.setState({ notices: [] });
   resetSetupStore();
   fake = fakeClient({ 'session.projects.remove': () => undefined });
   window.maws = fake.client;
@@ -44,8 +45,16 @@ describe('the session and project entries', () => {
     expect(sessionActionsFor(record('x', { holder: { kind: 'terminal', pid: 1 } }))).toEqual(['open', 'openInNewTab']);
   });
 
+  it('archives old sessions only in the chosen project through the guarded main command', async () => {
+    act(() => runProjectAction('archiveOlder', P1));
+    await waitFor(() => expect(fake.pending('session.archiveOlder')).toBe(1));
+    expect(fake.invoked('session.archiveOlder')).toEqual([{ projectId: P1, days: 7 }]);
+    await act(() => fake.reply('session.archiveOlder', { archived: 3, skipped: 2 }));
+    expect(useNotices.getState().notices.some((n) => n.text === '3 sessions archived; 2 kept')).toBe(true);
+  });
+
   it('retires the project-level "Add directory…" and adds "Archived sessions…"', () => {
-    expect(PROJECT_ACTION_IDS).toEqual(['archiveSessions', 'removeProject', 'revealInFinder', 'archivedSessions', 'worktrees']); // C12: Worktrees…
+    expect(PROJECT_ACTION_IDS).toEqual(['archiveSessions', 'archiveOlder', 'removeProject', 'revealInFinder', 'archivedSessions', 'worktrees']); // C12: Worktrees…
     expect(Object.values(PROJECT_ACTIONS)).not.toContain('Add directory…');
   });
 

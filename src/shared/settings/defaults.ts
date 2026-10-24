@@ -9,6 +9,7 @@ import { userScopeProfile } from '../engine/launch-profile'; // P4-A2
 
 export const SETTINGS_DEFAULTS_V17: Settings = {
   version: 17, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17
+  sessions: { archiveInactiveDays: null }, // UX1: opt-in only
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
@@ -228,7 +229,7 @@ function withoutRetiredActions(raw: unknown): unknown {
 // field, and `notifications.kinds` a second level, key by key, so a kinds patch never replaces the sibling kinds. The
 // theme and the keymap are values of their own and are replaced whole. A key present as `undefined` changes nothing.
 export function applySettingsPatch(state: Settings, patch: SettingsPatch): Settings {
-  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, browser, mods, artifacts, ...values } = patch; // E4a: browser; P2-C: mods; P3-D: artifacts
+  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, browser, mods, artifacts, sessions, ...values } = patch; // E4a: browser; P2-C: mods; P3-D: artifacts
   const next: Settings = { ...state, ...defined(values) };
   if (notifications) {
     const { kinds, ...fields } = notifications;
@@ -243,6 +244,7 @@ export function applySettingsPatch(state: Settings, patch: SettingsPatch): Setti
   if (supervisor) next.supervisor = { ...state.supervisor, ...defined(supervisor) }; // E10
   if (browser) next.browser = { ...state.browser, ...defined(browser) }; // E4a
   if (mods?.toHuman) next.mods = { ...state.mods, toHuman: { ...state.mods.toHuman, ...defined(mods.toHuman) } }; // P2-C: a mod's fields one by one
+  if (sessions) next.sessions = { ...state.sessions, ...defined(sessions) };
   if (artifacts) next.artifacts = { ...state.artifacts, ...defined(artifacts) }; // P3-D: the Spaces' record replaced whole
   return next;
 }

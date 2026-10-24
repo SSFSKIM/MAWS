@@ -41,6 +41,7 @@ export class Index {
     const stamp = () => ++this.stamped;
     this.projects = new ProjectStore(this.db, stamp, (projectId, directory) => this.sessions.attachOrphans(projectId, directory));
     this.sessions = new SessionStore(this.db, this.projects, stamp);
+    this.projects.preserveUsedProjects();
     this.attention = new IndexAttentionStore(this.db);
     this.drafts = new DraftStore(this.db);
     this.fixtures = new ReplayFixtureStore(this.db);

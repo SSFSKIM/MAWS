@@ -81,7 +81,7 @@ describe('C10 session lifecycle entries', () => {
   const ID = '0b6a2d3e-8f1c-4a57-9b2e-1d3c4e5f6a7b';
   it('registers every C10 name with its owner, and the two events', () => {
     const main = [
-      'session.archive', 'session.create', 'session.delete', 'session.fork', 'session.intent.discard', 'session.intent.get', 'session.intent.list',
+      'session.archive', 'session.archiveOlder', 'session.create', 'session.delete', 'session.fork', 'session.intent.discard', 'session.intent.get', 'session.intent.list',
       'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree', 'session.rename', 'session.revealPath', 'session.start', 'session.trust.check',
       'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview',
     ] as const;

@@ -376,7 +376,10 @@ export class SessionStore {
         created_at: now,
         updated_at: now,
       });
-      if (membership.projectId !== null) this.projects.sessionPresenceChanged();
+      if (membership.projectId !== null) {
+        this.projects.usedByMaws(membership.projectId);
+        this.projects.sessionPresenceChanged();
+      }
       this.changed(appId, 'live');
       return { ok: true, record: this.require(appId) };
     });
@@ -412,6 +415,7 @@ export class SessionStore {
     return this.db.transaction(() => {
       const existing = this.row(appId);
       if (patch.engineSessionId !== undefined && patch.engineSessionId !== null) this.bindRow(existing, patch.engineSessionId, 'live');
+      if (patch.holder?.kind === 'self' && existing.project_id !== null) this.projects.usedByMaws(existing.project_id as ProjectId);
       const values: Record<string, Value> = {};
       if (patch.engineVersion !== undefined && patch.engineVersion !== null) values.engine_version = patch.engineVersion;
       if (patch.holder !== undefined) values.holder = JSON.stringify(patch.holder);

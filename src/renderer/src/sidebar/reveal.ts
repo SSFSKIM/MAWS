@@ -29,7 +29,7 @@ export function registerProjectRevealer(fn: (projectId: ProjectId) => void): () 
 
 export function revealProject(projectId: ProjectId): void {
   const project = useSessions.getState().projects.get(projectId);
-  if (project?.hidden) {
+  if (project && (project.hidden || project.discovered)) {
     // The same restore as Hidden projects: main persists visibility and publishes the project list.
     // A response arriving before that event is safe: the sidebar keeps its pending focus until the row mounts.
     void ipc.invoke('session.projects.add', { directory: project.directory }).then((result) => {
