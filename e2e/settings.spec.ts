@@ -512,7 +512,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await expect(page.locator('body')).not.toContainText('must-not-reach-renderer');
         await shot(`ux2k-mcp-${width}x${height}`);
         await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Projects', exact: true }).click();
-        await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Projects', exact: true, level: 1 })).toBeVisible();
         await shot(`ux2k-projects-${width}x${height}`);
         await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Customize', exact: true }).click();
         await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
