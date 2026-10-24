@@ -139,6 +139,12 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
   await size(maws, 1280, 820);
   await openSurface(page, 'Terminal');
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toBeVisible({ timeout: 15_000 });
+  const terminalHeader = surface(page, 'terminal').locator('[data-editor-header]');
+  const tabBox = await box(terminalHeader.getByRole('tablist', { name: 'terminal tabs' }));
+  const headerBox = await box(terminalHeader);
+  expect(tabBox.y).toBeGreaterThanOrEqual(headerBox.y);
+  expect(tabBox.y + tabBox.height, 'terminal tabs share the surface header instead of repeating a heading below it').toBeLessThanOrEqual(headerBox.y + headerBox.height);
+  await expect(terminalHeader.getByRole('button', { name: 'Close surface' })).toBeVisible();
   const terminalId = await surface(page, 'terminal').locator('[data-terminal-id]').getAttribute('data-terminal-id');
   const narrowWidth = (await box(panel(page))).width;
   expect(narrowWidth).toBeLessThanOrEqual(420);
@@ -149,6 +155,13 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
   expect((await box(surface(page, 'review'))).y, 'the second surface is below the first').toBeGreaterThanOrEqual(first.y + first.height);
   await openSurface(page, 'Files');
   await expect.poll(() => stack(page)).toEqual(['terminal', 'files']);
+  const files = surface(page, 'files');
+  const root = files.getByRole('treeitem').first();
+  await expect(root).toHaveAttribute('aria-expanded', 'true');
+  const refreshBox = await box(files.getByRole('button', { name: 'Refresh', exact: true }));
+  const rootBox = await box(root);
+  expect(refreshBox.y, 'Files refresh lives beside the root, without its own toolbar').toBe(rootBox.y);
+  expect(refreshBox.y + refreshBox.height).toBeLessThanOrEqual(rootBox.y + rootBox.height);
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toHaveAttribute('data-terminal-id', terminalId!);
   await expect(surface(page, 'review'), 'the displaced tool is closed even if narrow chrome folds its icon').toHaveCount(0);
 
@@ -362,6 +375,14 @@ test('UX2: real Library document and deck editors use main without an empty pane
     await toolbar.getByRole('button', { name: 'Inspector', exact: true }).click();
     await toolbar.getByRole('button', { name: 'Version history', exact: true }).click();
     await expect(deckTab.locator('.deck-tool-card')).toHaveCount(2);
+    await page.mouse.move(0, 0); // pressed, not merely hovered
+    const activeToolColor = await deckTab.locator('[data-deck-editor]').evaluate((node) => getComputedStyle(node).color);
+    for (const name of ['Inspector', 'Version history']) {
+      const toggle = toolbar.getByRole('button', { name, exact: true });
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+      await expect(toggle).toHaveCSS('color', activeToolColor);
+      await expect(toggle).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    }
     // Fit uses the measured width left by the floating stack, not the full stage underneath it (l7-shell-02).
     await expect.poll(async () => {
       const slide = await box(deckTab.locator('[data-stage-slide]').first());

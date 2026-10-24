@@ -37,7 +37,6 @@ export function Environment({ appSessionId, record, directory }: { appSessionId:
         </Row>
       )}
       <PushState directory={directory} appSessionId={appSessionId} embedded />
-      <p className="text-ui-sm text-fg-muted">Remote control is not available in MAWS</p>
       {record.engineVersion !== null && <Row><span className="block truncate text-fg-muted">{SUMMARY_COPY.engineVersion(record.engineVersion)}</span></Row> /* W13 */}
       <Row action={<ToolButton toolId="session-info" label={SUMMARY_COPY.sessionInfo} appSessionId={appSessionId} />}>
         <ModelLine record={record} directory={directory} />

@@ -3,6 +3,9 @@
 import * as z from 'zod';
 import type { CommandSpec } from './common';
 
+// A normal coverage boundary, not a configuration read failure. Shared by the cold reader and its presentation.
+export const CUSTOMIZATION_INVENTORY_COVERAGE = 'Plugin MCP servers and marketplace-only skill declarations are not inventoried; see Plugins.';
+
 const AbsolutePath = z.string().min(1).max(4096).refine((path) => path.startsWith('/') && !path.includes('\0'), 'expected an absolute path');
 export const CustomizationSkillSchema = z.strictObject({
   name: z.string(), description: z.string(), source: z.enum(['user', 'project', 'plugin']), path: AbsolutePath, plugin: z.string().nullable(),

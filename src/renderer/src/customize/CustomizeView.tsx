@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
+import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { ipc } from '../ipc/client';
 import { IpcCommandError } from '../ipc/query';
 import { useLayout } from '../stores/layout';
@@ -104,10 +105,12 @@ function DirectoryPlugins({ cwd, appSessionId }: { cwd: string | null; appSessio
 }
 
 function InventoryState({ error, pending, warnings, refresh }: { error: Error | null; pending: boolean; warnings?: string[]; refresh(): void }) {
+  const failures = warnings?.filter((warning) => warning !== CUSTOMIZATION_INVENTORY_COVERAGE) ?? [];
   return <>
     {pending && <p role="status" className="m-0 p-2 text-ui-sm text-fg-muted">Reading configuration…</p>}
     {error && <p role="alert" className="m-0 p-2 text-ui-sm text-danger">{error.message} <button type="button" className={BUTTON} onClick={refresh}>Retry</button></p>}
-    {warnings && warnings.length > 0 && <details className="mb-2 px-2 text-ui-sm text-warning"><summary>Some configuration could not be read</summary><ul>{warnings.map((warning, index) => <li key={index} className="[overflow-wrap:anywhere]">{warning}</li>)}</ul></details>}
+    {failures.length > 0 && <details className="mb-2 px-2 text-ui-sm text-warning"><summary className="rounded-sm outline-accent focus-visible:outline-2">Some configuration could not be read</summary><ul>{failures.map((warning, index) => <li key={index} className="[overflow-wrap:anywhere]">{warning}</li>)}</ul></details>}
+    {warnings?.includes(CUSTOMIZATION_INVENTORY_COVERAGE) && <details className="mb-2 px-2 text-ui-sm text-fg-muted"><summary className="rounded-sm outline-accent focus-visible:outline-2">Inventory coverage</summary><p className="my-1 [overflow-wrap:anywhere]">{CUSTOMIZATION_INVENTORY_COVERAGE}</p></details>}
   </>;
 }
 

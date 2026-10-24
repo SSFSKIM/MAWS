@@ -36,12 +36,13 @@ export interface EditorHeaderProps {
   title: string; // the plain title, shown when nothing is registered
   suffix?: string | null; // a tool's setTitle suffix, with the plain title
   registration: EditorHostRegistration | null;
+  navigation?: ReactNode; // within-tool tabs replace a plain tool's repeated identity
   controls?: ReactNode; // the region's own controls, which never collapse
   markup?: ReactNode; // P3-G (§D2.2, §D4.4): Mark up, after the actions and before Export, when the tab has a surface
   scope?: EditorHostScope | null; // P3-L (M6b fix wave 1): the tab it is over, for `focusEditorHostAction`
 }
 
-export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, controls, markup, scope = null }: EditorHeaderProps) {
+export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, navigation, controls, markup, scope = null }: EditorHeaderProps) {
   const row = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(row);
   const unresolved = registration?.unresolved ?? 0;
@@ -78,29 +79,31 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
           first), up to their own width, so the title truncates only once both are gone. The count stays whole; what
           still does not fit is clipped here rather than drawn under the actions. Full height, so a focus ring shows. */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch overflow-hidden">
-        {TabIcon && <TabIcon className="size-3.5 shrink-0 text-fg-muted" />}
-        {breadcrumb.length > 0 && (
-          <span data-header-breadcrumb title={breadcrumb.join(' / ')} className="max-w-max min-w-0 flex-[1_1_0px] truncate text-ui text-fg-muted">
-            {breadcrumb.map((segment, i) => (
-              <Fragment key={i}>
-                {segment}
-                <span aria-hidden className={i < breadcrumb.length - 1 ? 'px-1' : 'pl-1'}>
-                  /
-                </span>
-              </Fragment>
-            ))}
+        {navigation || <>
+          {TabIcon && <TabIcon className="size-3.5 shrink-0 text-fg-muted" />}
+          {breadcrumb.length > 0 && (
+            <span data-header-breadcrumb title={breadcrumb.join(' / ')} className="max-w-max min-w-0 flex-[1_1_0px] truncate text-ui text-fg-muted">
+              {breadcrumb.map((segment, i) => (
+                <Fragment key={i}>
+                  {segment}
+                  <span aria-hidden className={i < breadcrumb.length - 1 ? 'px-1' : 'pl-1'}>
+                    /
+                  </span>
+                </Fragment>
+              ))}
+            </span>
+          )}
+          <span data-header-title title={registration ? registration.title : plain} className="min-w-0 truncate text-ui text-fg">
+            {registration ? registration.title : title}
+            {!registration && suffix && <span className="text-fg-faint"> · {suffix}</span>}
           </span>
-        )}
-        <span data-header-title title={registration ? registration.title : plain} className="min-w-0 truncate text-ui text-fg">
-          {registration ? registration.title : title}
-          {!registration && suffix && <span className="text-fg-faint"> · {suffix}</span>}
-        </span>
-        {registration?.saved && (
-          <span data-header-saved title={SAVED_COPY[registration.saved]} className="max-w-max min-w-0 flex-[1000_1_0px] truncate text-ui-sm text-fg-muted">
-            {SAVED_COPY[registration.saved]}
-          </span>
-        )}
-        {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
+          {registration?.saved && (
+            <span data-header-saved title={SAVED_COPY[registration.saved]} className="max-w-max min-w-0 flex-[1000_1_0px] truncate text-ui-sm text-fg-muted">
+              {SAVED_COPY[registration.saved]}
+            </span>
+          )}
+          {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
+        </>}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {shown.map((action) => (
@@ -137,18 +140,22 @@ function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
 
 // The panel's header over its selected tab (the summary when none): the tab's registration under its panel scope, else
 // its strip label; then Float, Maximize / Restore and Hide.
-export function PanelHeader({ tabs, activeTabId, hide, secondary = false }: { tabs: readonly PanelTabRef[]; activeTabId: string | null; hide?: () => void; secondary?: boolean }) {
+export function PanelHeader({ tabs, activeTabId, hide, secondary = false, navigation }: { tabs: readonly PanelTabRef[]; activeTabId: string | null; hide?: () => void; secondary?: boolean; navigation?: ReactNode }) {
   const tab = tabs.find((t) => t.id === activeTabId && !isRestoredLog(t.id)) ?? null;
   const controls = <RegionControls hide={hide} secondary={secondary} />;
-  return tab ? <ToolHeader tab={tab} controls={controls} /> : <EditorHeader title={HEADER_COPY.overview} registration={null} controls={controls} />;
+  return tab ? <ToolHeader tab={tab} controls={controls} navigation={navigation} /> : <EditorHeader title={HEADER_COPY.overview} registration={null} controls={controls} />;
 }
 
-function ToolHeader({ tab, controls }: { tab: PanelTabRef; controls: ReactNode }) {
+function ToolHeader({ tab, controls, navigation }: { tab: PanelTabRef; controls: ReactNode; navigation?: ReactNode }) {
   const { tool, title, suffix } = useTabLabel(tab);
   const scope = useMemo(() => ({ surface: 'panel', tabId: tab.id }) as const, [tab.id]);
   const registration = useEditorHostRegistration(scope);
   const surface = useMarkupSurface(scope);
-  return <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} controls={controls} markup={surface && <MarkupButton scope={scope} />} scope={scope} />;
+  return <>
+    <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} navigation={registration ? undefined : navigation} controls={controls} markup={surface && <MarkupButton scope={scope} />} scope={scope} />
+    {/* Editors keep their registered breadcrumb/actions as well as their within-tool tabs. Plain tools need only one row. */}
+    {registration && navigation && <div className="flex h-9 shrink-0 items-center border-b border-border px-1">{navigation}</div>}
+  </>;
 }
 
 // P3-G (§D4.4): Mark up over the tab's surface, pressed while a session draws over it; disabled with no shown session
@@ -176,7 +183,7 @@ function RegionControls({ hide, secondary = false }: { hide?: () => void; second
   return (
     <>
       {!secondary && <><IconButton
-        label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float session over panel' : pill ? 'Open session card' : 'Dock session'}
+        label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float conversation over surface' : pill ? 'Open session card' : 'Dock session'}
         action="panel.float"
         pressed={floating}
         disabled={nothing}
@@ -184,7 +191,7 @@ function RegionControls({ hide, secondary = false }: { hide?: () => void; second
       >
         <FloatIcon />
       </IconButton>
-      <IconButton label={maximized ? 'Restore right panel' : 'Maximize right panel'} action="panel.maximize" pressed={maximized} onClick={() => runAction('panel.maximize')}>
+      <IconButton label={maximized ? 'Restore surface' : 'Expand surface'} action="panel.maximize" pressed={maximized} onClick={() => runAction('panel.maximize')}>
         {maximized ? <RestoreIcon /> : <MaximizeIcon />}
       </IconButton></>}
       <IconButton label={hide ? 'Close surface' : 'Hide right panel'} action={hide ? undefined : 'panel.toggle'} onClick={hide ?? (() => runAction('panel.toggle'))}>

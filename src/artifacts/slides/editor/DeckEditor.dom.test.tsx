@@ -53,6 +53,28 @@ describe('the deck editor', () => {
     expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
   });
 
+  it('visually distinguishes every open toolbar card, including Inspector while Comments is also open', () => {
+    const sheet = document.createElement('style');
+    sheet.textContent = `${chromeCss}\n.deck-editor { --bg-active: #eeeeee; --fg: #111111; --fg-muted: #777777; }`;
+    document.head.append(sheet);
+    onTestFinished(() => sheet.remove());
+    mount();
+    const toolbar = within(screen.getByRole('toolbar', { name: 'Deck' }));
+    const inspector = toolbar.getByRole('button', { name: 'Inspector' });
+    const comments = toolbar.getByRole('button', { name: /^Comments/ });
+    const closedBackground = getComputedStyle(inspector).backgroundColor;
+    fireEvent.click(inspector);
+    expect(inspector.getAttribute('aria-pressed')).toBe('true');
+    expect(getComputedStyle(inspector).backgroundColor).not.toBe(closedBackground);
+    fireEvent.click(comments);
+    expect(comments.getAttribute('aria-pressed')).toBe('true');
+    expect(getComputedStyle(comments).backgroundColor).toBe(getComputedStyle(inspector).backgroundColor);
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    expect(inspector.getAttribute('aria-pressed')).toBe('false');
+    expect(getComputedStyle(inspector).backgroundColor).toBe(closedBackground);
+    expect(comments.getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('shows every slide as a live thumbnail, the sections before their slides, hidden and held slides marked', () => {
     const { container } = mount();
     expect(thumbs().map((b) => b.getAttribute('aria-label'))).toEqual(['Slide 1', 'Slide 2, hidden', 'Slide 3, held']);

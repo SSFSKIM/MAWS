@@ -147,6 +147,25 @@ it('attaches live facts only from a ready session in the selected directory and 
   expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
 });
 
+it.each(['skills', 'mcp'] as const)('shows normal inventory coverage quietly in %s, separately from actionable read warnings', async (section) => {
+  const coverage = 'Plugin MCP servers and marketplace-only skill declarations are not inventoried; see Plugins.';
+  const unreadable = '/config/settings.json: not valid JSON';
+  backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage] }));
+  mount(section);
+  const note = await screen.findByText('Inventory coverage');
+  expect(note.closest('details')?.classList.contains('text-fg-muted')).toBe(true);
+  expect(screen.queryByText('Some configuration could not be read')).toBeNull();
+  fireEvent.click(note);
+  expect(screen.getByText(coverage)).toBeTruthy();
+
+  backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage, unreadable] }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  const warning = await screen.findByText('Some configuration could not be read');
+  expect(warning.closest('details')?.classList.contains('text-warning')).toBe(true);
+  expect(within(warning.closest('details')!).getByText(unreadable)).toBeTruthy();
+  expect(within(warning.closest('details')!).queryByText(coverage)).toBeNull();
+});
+
 it('shows configured servers without inventing connection state or offering a session start', async () => {
   mount('mcp');
   await screen.findByText('notion');

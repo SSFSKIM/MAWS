@@ -10,7 +10,6 @@ import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { IconButton } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { FILES_COPY, REFUSAL } from '../copy';
 import { normalizeLexically, openFile } from '../open-file';
@@ -31,6 +30,7 @@ export interface FilesView {
   expanded: ReadonlySet<string>;
   selected: string | null;
   scrollTop: number;
+  defaultRoot: string | null;
 }
 
 export interface FilesUi {
@@ -43,7 +43,7 @@ export interface FilesState {
   readonly ui: StoreApi<FilesUi>;
 }
 
-const EMPTY_VIEW: FilesView = { expanded: new Set(), selected: null, scrollTop: 0 };
+const EMPTY_VIEW: FilesView = { expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null };
 const viewOf = (ui: FilesUi, appSessionId: AppSessionId): FilesView => ui.views[appSessionId] ?? EMPTY_VIEW;
 
 function patchView(ui: StoreApi<FilesUi>, appSessionId: AppSessionId, next: (view: FilesView) => Partial<FilesView>): void {
@@ -117,6 +117,14 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
     [rootEntries, listings, appSessionId, view.expanded, roles],
   );
 
+  // Open the working root once so Files starts with useful content. A deliberate collapse survives refresh/remount;
+  // a newly created worktree gets its own first expansion when it replaces the original directory.
+  const defaultRoot = rootEntries.find((root) => roles.get(root.path) === 'worktree')?.path ?? rootEntries[0]?.path ?? null;
+  useEffect(() => {
+    if (defaultRoot === null || view.defaultRoot === defaultRoot) return;
+    patchView(ui, appSessionId, (current) => ({ defaultRoot, expanded: new Set([...current.expanded, defaultRoot]) }));
+  }, [defaultRoot, view.defaultRoot, ui, appSessionId]);
+
   // The roots, again whenever the record changes the directories the session may read; before the session starts, its
   // setup intent's location, which main lists until the record exists (E11), so a project chosen after the pane opened
   // is listed then.
@@ -175,14 +183,8 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
 
   return (
     <div data-tool="files" className="flex h-full min-h-0 flex-col">
-      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border pr-1 pl-3 text-ui-sm text-fg-muted">
-        <span>{FILES_COPY.title}</span>
-        <IconButton label={FILES_COPY.refresh} onClick={refresh}>
-          <RefreshIcon className="size-3.5" />
-        </IconButton>
-      </div>
-      {roots?.status === 'error' ? <RootsFailure message={roots.message} /> : null}
-      <TreeList rows={rows} selected={view.selected} activate={activate} ui={ui} appSessionId={appSessionId} />
+      {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
+      <TreeList rows={rows} selected={view.selected} activate={activate} ui={ui} appSessionId={appSessionId} refresh={refresh} />
     </div>
   );
 }
@@ -195,12 +197,14 @@ function TreeList({
   activate,
   ui,
   appSessionId,
+  refresh,
 }: {
   rows: TreeRow[];
   selected: string | null;
   activate: (row: TreeRow) => void;
   ui: StoreApi<FilesUi>;
   appSessionId: AppSessionId;
+  refresh(): void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
@@ -238,15 +242,18 @@ function TreeList({
   const scrolledByOwner = () => void (pending.current = null);
   return (
     <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
-      <div role="tree" aria-label={FILES_COPY.title} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-        {virtualizer.getVirtualItems().map((item) => {
-          const row = rows[item.index];
-          return (
-            <div key={item.key} className="absolute inset-x-0" style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
-              <Row row={row} selected={selected === row.path && row.kind !== 'notice'} activate={activate} />
-            </div>
-          );
-        })}
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        <div role="tree" aria-label={FILES_COPY.title}>
+          {virtualizer.getVirtualItems().map((item) => {
+            const row = rows[item.index];
+            return (
+              <div key={item.key} className={`absolute inset-x-0 flex items-center ${item.index === 0 && row.kind === 'root' ? 'pr-8' : 'pr-1'}`} style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
+                <Row row={row} selected={selected === row.path && row.kind !== 'notice'} activate={activate} />
+              </div>
+            );
+          })}
+        </div>
+        {rows[0]?.kind === 'root' && <div className="absolute top-0 right-1"><RefreshButton refresh={refresh} /></div>}
       </div>
     </div>
   );
@@ -255,6 +262,10 @@ function TreeList({
 // E11: what main says of a session it cannot place (a New chat with no project yet): the pane's no-session sentence,
 // not an error.
 const UNKNOWN_SESSION = 'unknown app session';
+
+function RefreshButton({ refresh }: { refresh(): void }) {
+  return <button type="button" aria-label={FILES_COPY.refresh} title={FILES_COPY.refresh} onClick={refresh} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"><RefreshIcon className="size-3.5" /></button>;
+}
 
 function RootsFailure({ message }: { message: string }) {
   if (message.startsWith(UNKNOWN_SESSION)) return <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>;
@@ -308,7 +319,7 @@ function Row({ row, selected, activate }: { row: TreeRow; selected: boolean; act
       data-kind={row.kind === 'root' ? 'root' : row.entry.kind}
       title={row.path}
       onClick={() => activate(row)}
-      className={`flex h-full w-full items-center gap-1.5 truncate pr-2 text-left text-ui hover:bg-bg-hover ${selected ? 'bg-bg-active text-fg' : inert ? 'text-fg-muted' : 'text-fg'}`}
+      className={`flex h-full min-w-0 flex-1 items-center gap-1.5 truncate pr-2 text-left text-ui hover:bg-bg-hover ${selected ? 'bg-bg-active text-fg' : inert ? 'text-fg-muted' : 'text-fg'}`}
       style={indent(row.depth)}
     >
       {directory ? <Chevron open={row.expanded} /> : <span className="size-3 shrink-0" />}
