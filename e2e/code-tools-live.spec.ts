@@ -26,6 +26,7 @@ import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
 import { sidebarOf, sidebarRow } from './support/sidebar';
+import { openSurface } from './support/shell';
 
 function skipReason(): string | null {
   if (process.env.MAWS_CODE_LIVE !== '1') return 'the C8c live acceptance runs only under MAWS_CODE_LIVE=1';
@@ -49,8 +50,7 @@ async function hideWindow(maws: MawsLaunch): Promise<void> {
 }
 
 async function addTool(page: Page, name: 'Files' | 'Review'): Promise<void> {
-  await page.locator('[data-region="panel"]').getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name }).click();
+  await openSurface(page, name);
 }
 
 // The owner's home after a live turn, read only: nothing in ~/.claude/history.jsonl or ~/.claude.json names the turn's

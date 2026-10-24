@@ -8,6 +8,7 @@
 // never shown (the e2e quiet mode).
 // P3-F wave S F3: a document's and a dashboard's toolbar (the dashboard's is the document's, DashboardPanel.tsx) in the
 // panel at its 280 px minimum: still one scrolling row, no control squeezed. Capture: `panel-280-toolbars`.
+import { openArtifactInPanel, pinSurfaceForSessions } from './support/shell';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -51,21 +52,15 @@ async function start(): Promise<Page> {
   return page;
 }
 
-// The panel's Artifacts tool, added in session A's panel and pinned; the main area shows Harness A, so a comment has a
-// session to go to.
-async function pinArtifactsTool(page: Page): Promise<void> {
-  const panel = page.locator('[data-region="panel"]');
+// Select Harness A so the record's panel surface has a session for comments.
+async function selectPanelSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 }
 
 async function openInPanel(page: Page, artifactId: string): Promise<Locator> {
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click({ timeout: 15_000 });
+  await openArtifactInPanel(page, artifactId);
+  await pinSurfaceForSessions(page, 'Artifacts');
   const record = panel.locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record.locator('.ds-doc .ProseMirror')).toBeVisible({ timeout: 15_000 });
   return record;
@@ -191,7 +186,7 @@ const wrappedLabels = (toolbar: Locator) =>
 test('in a 600 px panel the comments rail is a drawer over the page, the toolbar one row whose menus open whole; maximized, the rail sits beside the page as before', async () => {
   test.setTimeout(150_000);
   const page = await start();
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Narrow review' });
   const record = await openInPanel(page, artifact.id);
   await resizePanel(page, PANEL_PX);
@@ -311,15 +306,14 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
 test('at the panel’s 280 px minimum a document’s and a dashboard’s toolbar stay one scrolling row, no control squeezed', async () => {
   test.setTimeout(120_000);
   const page = await start();
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const panel = page.locator('[data-region="panel"]');
   const shots: Buffer[] = [];
   for (const kind of ['document', 'dashboard'] as const) {
     const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind, title: `Narrowest ${kind}` });
     // openInPanel's steps, with a dashboard's several editors allowed (its views' captions)
-    await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-    await panel.getByRole('button', { name: 'All', exact: true }).click();
-    await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
+    await openArtifactInPanel(page, artifact.id);
+    await pinSurfaceForSessions(page, 'Artifacts');
     const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
     await expect(record.locator('.ds-doc .ProseMirror').first()).toBeVisible({ timeout: 15_000 });
     if (kind === 'document') await resizePanel(page, 280); // opened at the panel's width, as the case above; the dashboard at 280

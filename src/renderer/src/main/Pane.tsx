@@ -36,7 +36,7 @@ const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
 // from its end), so nothing in it reflows at no width: a transcript re-measured at 0 px scrolled to other rows, and the
 // carry its float records named a row the reader never saw.
 export function Pane({ index, split, column, collapsed = false }: { index: PaneIndex; split: boolean; column: number; collapsed?: boolean }) {
-  const chrome = useChromeTabs((s) => s.host);
+  const chrome = useChromeTabs((s) => s.panes[index]);
   const pane = useLayout((s) => currentSet(s.main).panes[index]);
   const hydrated = useLayout((s) => s.hydrated);
   const cover = useCoverState('main'); // P4-B3 (Z5): a panel record dragged here appends to this pane

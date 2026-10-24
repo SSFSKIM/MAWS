@@ -7,6 +7,7 @@
 // the host's own context sample at ready empty, so observed facts appear after a turn (§11). Opening a session starts
 // nothing; Load now and Send are the gestures that do. No engine runs; the owner's `~/.claude` is never read or written.
 // Run by `pnpm e2e:available`.
+import { mainTabById, openSurface, surface } from './support/shell';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -87,15 +88,11 @@ const mainRegion = (page: Page) => page.locator('[data-region="main"]');
 async function open(page: Page, appId: string): Promise<void> {
   await (await sidebarRow(page, { appSessionId: appId })).click();
   await page.mouse.move(700, 450); // off the sidebar: its hover card would cover what follows
-  await expect(mainRegion(page).locator(`[role="tab"][data-tab-id="session:${appId}"]`)).toHaveAttribute('aria-selected', 'true');
+  await expect(mainTabById(page, `session:${appId}`)).toHaveAttribute('aria-selected', 'true');
 }
 async function sessionInfo(page: Page) {
-  const panel = page.locator('[data-region="panel"]');
-  if ((await panel.locator('[data-session-info]').count()) === 0) {
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Session info' }).click();
-  }
-  return panel.locator('[data-session-info]');
+  await openSurface(page, 'Session info');
+  return surface(page, 'session-info').locator('[data-session-info]');
 }
 const valueOf = (info: Awaited<ReturnType<typeof sessionInfo>>, label: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
 

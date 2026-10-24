@@ -3,7 +3,7 @@
 // copied) plus a local web server, the folder main saves downloads into under the e2e (MAWS_E2E_SAVE_PATH), and the
 // Browser tool's locators and readers:
 //
-// - `openBrowser` adds the tool from the panel's "+" menu; `browserIn` is a surface's view (the panel tool or a
+// - `openBrowser` shows the optional Browser surface; `browserIn` is a surface's view (the panel tool or a
 //   `browser` main tab), `paneIn` its pane, `chipsIn` its tab strip's chips, `address` types into its address field;
 // - `tabState` reads a tab as main records it (`browser.tabs.list`) and its view as Electron holds it (the seam's
 //   `__maws_browser.tab`, which reports the view's own state alone: visible, bounds, attached, window, owner);
@@ -12,6 +12,7 @@
 // - `shootBrowser` writes `e4a-<surface>-<theme>.png` under docs/doperpowers/evidence/p1-e4a/ when MAWS_E4A_SHOTS=1. A
 //   view is not in the renderer's screenshot, so the shown page's own screenshot is laid into the pane first, where the
 //   view draws, and taken out after.
+import { openSurface } from './shell';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
@@ -88,10 +89,9 @@ export const chipOf = (view: Locator, tabId: string): Locator => view.locator(`[
 export const addressOf = (view: Locator): Locator => view.getByRole('combobox', { name: 'Address' });
 export const noticesIn = (view: Locator): Locator => view.locator('[data-browser-notice]');
 
-// The Browser tool added from the panel's "+" menu (it shows the shown session's tabs).
+// The optional Browser surface (it shows the shown session's tabs).
 export async function openBrowser(s: Scene): Promise<Locator> {
-  await s.panel.getByRole('button', { name: 'Add a tool' }).click();
-  await s.page.getByRole('menuitem', { name: 'Browser', exact: true }).click();
+  await openSurface(s.page, 'Browser');
   const view = browserIn(s, 'panel');
   await expect(view).toBeVisible();
   return view;

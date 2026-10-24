@@ -17,6 +17,7 @@
 //   showing offers the pill with the count; opening it shows the comparison since the last view.
 // The second case is M8's bound: the preview of a 3-month-old version of S7a's heavy deck (the soak's own states, read
 // from MAWS_DECK_HISTORY's export) ≤ 1,000 ms through the editor's whole path, the 1-minute load printed beside it.
+import { openArtifactInPanel, openSurface, pinSurfaceForSessions } from './support/shell';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -403,18 +404,16 @@ test('a live editor and a version’s preview of one deck in one window each dra
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const inPanel = panel.locator(`[data-deck-artifact="${id}"]`);
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole('button', { name: /^Pin / }).first().click();
+  await pinSurfaceForSessions(page, 'Artifacts');
   await panel.getByRole('button', { name: 'Move to tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
   await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole('tab', { name: 'Artifacts' }).click();
+  await openSurface(page, 'Artifacts');
   await expect(inPanel).toHaveCount(0);
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
   await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
 

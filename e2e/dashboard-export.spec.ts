@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { asDocumentReplay } from './support/document-replay';
-import { bindCsv, chart, commentSelectedChart, durable, figures, insertBlocks, ok, openInMain, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, SESSION_A, startApp, watchSelection, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, commentSelectedChart, durable, figures, insertBlocks, ok, openInMain, openInPanel, paragraph, selectPanelSession, railOf, reply, selectChart, SESSION_A, startApp, watchSelection, type DashboardApp } from './support/dashboards';
 import { allowNext, idle, mcpCalls, mcpResultOf, PASS3, recordedCwd, replay, resultText, scene, show } from './support/maws-tools';
 
 const PROOF = 'test-results/dashboard-proof';
@@ -361,7 +361,7 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
   // WR73: export identity is explicit, never inferred from the OS login or a generic owner role.
   const authorName = 'Morgan Rivera';
   await ok(page, 'settings.set', { artifacts: { exportAuthorName: authorName } });
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title: 'Commented board' });
   const id = artifact.id;
   const record = await openInPanel(page, id);

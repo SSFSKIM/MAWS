@@ -12,6 +12,7 @@
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_C11_LIVE=1 pnpm exec playwright test e2e/c11-live.spec.ts
 // MAWS_C11_LIVE_GPT names the relay alias the gateway-model case uses (default `luna`; a Codex alias at its usage limit
 // is refused by the relay at `set_model`).
+import { openSurface } from './support/shell';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -202,13 +203,10 @@ async function settled(w: Locator): Promise<string> {
 
 const sessionInfo = (page: Page, id: string) => page.locator(`[data-session-info="${id}"]`);
 const infoRow = async (page: Page, id: string, label: string) => (await sessionInfo(page, id).innerText()).match(new RegExp(`${label}\\n([^\\n]+)`))?.[1] ?? null;
-// W2: the status line and its usage popover are gone (§5.5 as amended 2026-10-01): Session info, opened from the panel's
-// "+", carries the windows (its Usage row) and the route with its switch (its Route row).
+// W2: the status line and its usage popover are gone (§5.5 as amended 2026-10-01): Session info carries
+// the windows (its Usage row) and the route with its switch (its Route row).
 async function openSessionInfo(page: Page, id: string): Promise<Locator> {
-  if (!(await sessionInfo(page, id).isVisible())) {
-    await page.locator('[data-region="panel"]').getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Session info' }).click();
-  }
+  await openSurface(page, 'Session info');
   await expect(sessionInfo(page, id)).toBeVisible();
   return sessionInfo(page, id);
 }

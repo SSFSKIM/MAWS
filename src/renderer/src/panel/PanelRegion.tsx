@@ -43,7 +43,7 @@ export function PanelRegion() {
       data-region="panel"
       aria-label="Panel"
       inert={collapsed}
-      className={`col-start-3 row-span-3 row-start-1 flex min-h-0 min-w-0 ${geometry.sheet ? 'absolute inset-y-0 right-0 z-30 shadow-float' : 'relative'} ${collapsed ? 'overflow-hidden' : 'py-1.5 pr-1.5 pl-1'}`}
+      className={`col-start-3 ${geometry.mainHidden ? 'row-start-3' : 'row-span-3 row-start-1'} flex min-h-0 min-w-0 ${geometry.sheet ? 'absolute inset-y-0 top-(--toolbar-h) right-0 z-30 shadow-float' : 'relative'} ${collapsed ? 'overflow-hidden' : 'py-1.5 pr-1.5 pl-1'}`}
       style={geometry.sheet ? { width } : undefined}
     >
       {!collapsed && !maximized && !floating && !geometry.sheet && (

@@ -53,7 +53,10 @@ export function surfaceTabs(state: SurfaceState, session: AppSessionId | null): 
 export function stackAfterSelection(before: readonly PanelTabRef[], refs: readonly PanelTabRef[], activeTabId: string | null): string[] {
   if (activeTabId === null) return [];
   const active = refs.find((tab) => tab.id === activeTabId);
-  const stack = normalizeSurfaceStack(before.map((tab) => active?.toolId === tab.toolId ? active.id : tab.id), refs);
+  const stack = normalizeSurfaceStack(before.flatMap((tab) => {
+    const replacement = active?.toolId === tab.toolId ? active : (refs.find((ref) => ref.id === tab.id) ?? refs.findLast((ref) => ref.toolId === tab.toolId));
+    return replacement ? [replacement.id] : [];
+  }), refs);
   if (!active || stack.includes(activeTabId)) return stack;
   return stack.length < 2 ? [...stack, activeTabId] : [stack[0], activeTabId];
 }

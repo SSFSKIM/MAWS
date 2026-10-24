@@ -20,6 +20,7 @@ import type { DeliverableRecord } from '../../src/shared/maws/deliverable';
 import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './launch';
 import { sidebarRow } from './sidebar';
+import { openArtifactInPanel, openSurface, surface, surfaceRow } from './shell';
 
 export const PASS3 = 'spikes/protocol-probe/fixtures/pass3';
 
@@ -351,10 +352,28 @@ export const listOf = (s: Scene) => s.panel.locator('[data-artifacts-list]');
 export const viewerOf = (root: Locator) => root.locator('[data-artifact-viewer]');
 export const rowOf = (root: Locator, record: { id: string }) => root.locator(`[data-artifact-row][data-artifact-id="${record.id}"]`);
 
-// The tool added from the panel's "+" menu (it opens on the shown session's list).
+// Legacy list behavior remains covered through a real Library record transfer and Back, not a removed launcher.
+// Each scene has its own profile. A fixture without artifacts gets a temporary real document, deleted at the list.
 export async function openArtifacts(s: Scene): Promise<void> {
-  await s.panel.getByRole('button', { name: 'Add a tool' }).click();
-  await s.page.getByRole('menuitem', { name: 'Artifacts' }).click();
+  let retained = await surface(s.page, 'artifacts').count() > 0 || await surfaceRow(s.page).getByRole('button', { name: 'Artifacts', exact: true }).count() > 0;
+  if (!retained) {
+    await surfaceRow(s.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    retained = await s.page.getByRole('menuitem', { name: 'Open saved artifact', exact: true }).or(s.page.getByRole('menuitem', { name: 'Artifacts', exact: true })).count() > 0;
+    await s.page.keyboard.press('Escape');
+  }
+  if (retained) {
+    await openSurface(s.page, 'Artifacts');
+    const back = s.panel.getByRole('button', { name: 'Back', exact: true });
+    if (await back.count()) await back.click();
+  } else {
+    const rows = value(await invoke(s.page, 'library.list', {})).rows;
+    let artifactId = rows.find((row) => row.kind !== 'design-system')?.id;
+    const temporary = artifactId === undefined;
+    if (!artifactId) artifactId = value(await invoke(s.page, 'artifacts.create', { kind: 'document', title: 'Artifact list navigation fixture' })).artifact.id;
+    const record = await openArtifactInPanel(s.page, artifactId);
+    await record.getByRole('button', { name: 'Back', exact: true }).click();
+    if (temporary) value(await invoke(s.page, 'artifacts.delete', { artifactId }));
+  }
   await expect(listOf(s)).toBeVisible();
 }
 

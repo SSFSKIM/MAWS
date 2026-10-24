@@ -27,6 +27,8 @@ interface TabStripProps {
 }
 
 export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, toolId }: TabStripProps) {
+  const tool = usePanelHost((s) => toolId ? s.tools.get(toolId) : undefined);
+  const canAdd = tool?.multiInstance && tool.menu !== false;
   const select = (id: string) => {
     if (id !== activeTabId) onChange({ tabs, activeTabId: id });
     requestFocus(id);
@@ -51,7 +53,7 @@ export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, to
           <Tab key={tab.id} tab={tab} selected={tab.id === activeTabId} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => select(tab.id)} />
         ))}
       </div>
-      {toolId ? <IconButton label={`New ${toolId} tab`} disabled={!appSessionId} onClick={() => appSessionId && panelHost.addTool(toolId, { appSessionId })}><PlusIcon /></IconButton> : <AddMenu appSessionId={appSessionId} tabs={tabs} />}
+      {toolId ? canAdd && <IconButton label={`New ${toolId} tab`} disabled={!appSessionId} onClick={() => appSessionId && panelHost.addTool(toolId, { appSessionId })}><PlusIcon /></IconButton> : <AddMenu appSessionId={appSessionId} tabs={tabs} />}
     </div>
   );
 }

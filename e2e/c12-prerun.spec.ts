@@ -14,6 +14,7 @@
 // The real-store case is the one read-only observation of the owner's store: it copies launchMaws's environment
 // (MAWS_E2E=1 kept, so Chromium stays on a mock keychain) and deletes only CLAUDE_CONFIG_DIR; it launches no engine and
 // mutates no session, commits only counts and timing, and keeps its screenshot under the scratch root.
+import { mainTabById, openSurface, surface, surfaceRow, unfoldSessionCard } from './support/shell';
 import { hookStartedCommand, terminalPwdCommand } from '../test/support/prerun-commands';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -428,12 +429,8 @@ class EventLog {
   }
 }
 
-const tabOf = (page: Page, name: string) => panel(page).locator('[role="tab"]').filter({ hasText: new RegExp(`^${name}`) });
 async function showTool(page: Page, name: 'Subagents' | 'Background work' | 'Review' | 'Files' | 'Terminal' | 'Session info'): Promise<void> {
-  if (name !== 'Terminal' && (await tabOf(page, name).count()) > 0) return tabOf(page, name).first().click();
-  await panel(page).getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name }).click();
-  await expect(tabOf(page, name).first()).toBeVisible();
+  await openSurface(page, name);
 }
 
 function readJournal(path: string): { direction: string; frame: Record<string, unknown> }[] {
@@ -719,15 +716,15 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       new MutationObserver(scan).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
     });
 
-    await step('C8 gap 1: Session info is listed by "+" and opens from the summary’s model row', async () => {
-      await panel(page).getByRole('button', { name: 'Add a tool' }).click();
+    await step('C8 gap 1: Session info is listed by More surfaces and opens from the Environment card’s model row', async () => {
+      const env = await unfoldSessionCard(page, 'Environment');
+      await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
       const items = await page.getByRole('menuitem').allTextContents();
       await page.keyboard.press('Escape');
-      const env = panel(page).getByRole('region', { name: 'Environment' });
       await expect(env).toBeVisible({ timeout: 15_000 });
       await env.getByRole('button', { name: 'Session info' }).click();
-      await expect(panel(page).locator(`[data-session-info="${id}"]`)).toBeVisible({ timeout: 15_000 });
-      out.sessionInfo = { plusMenu: items, opensFromModelRow: true, screenshots: await shoot(page, '10.4-session-info') };
+      await expect(surface(page, 'session-info').locator(`[data-session-info="${id}"]`)).toBeVisible({ timeout: 15_000 });
+      out.sessionInfo = { moreSurfacesMenu: items, opensFromModelRow: true, screenshots: await shoot(page, '10.4-session-info') };
       expect(items).toContain('Session info');
     });
 
@@ -1560,8 +1557,8 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
       await (await rowOf(page, bg!.appId)).click({ button: 'right' });
       const items = await page.getByRole('menuitem').allTextContents();
       await page.getByRole('menuitem', { name: 'Attach in a terminal tab' }).click();
-      await expect(page.locator(`[data-tab-id="session:${bg!.appId}"]`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
-      await expect(tabOf(page, 'Terminal').first()).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+      await expect(mainTabById(page, `session:${bg!.appId}`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+      await expect(surface(page, 'terminal').getByRole('tab', { selected: true }).first()).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
       await expect.poll(async () => value(await invoke(page, 'pty.list', undefined)).ptys.some((p) => p.appSessionId === bg!.appId && p.alive), { timeout: 15_000 }).toBe(true);
       out.attach = { rowMenu: items, sessionTabActivated: true, terminalTabActive: true, screenshots: await shoot(page, 'c8-attach') };
       out.consoleErrors = maws.consoleErrors();

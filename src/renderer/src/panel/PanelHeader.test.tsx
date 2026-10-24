@@ -152,7 +152,7 @@ describe('the panel header', () => {
     expect(header().textContent).toContain('All changes saved');
 
     act(() => panelHost.showSummary()); // the body unmounts; its registration stays with the tab
-    expect(title().textContent).toBe('Session overview');
+    expect(header()).toBeNull(); // floating cards no longer occupy a panel header
     expect(editorHostOf({ surface: 'panel', tabId: id })?.saved).toBe('saved');
     act(() => panelHost.selectTab(id));
     expect(header().textContent).toContain('All changes saved'); // and the remounted body's registration replaces it

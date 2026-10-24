@@ -45,7 +45,8 @@ function state(): Name {
 let off: () => void;
 beforeEach(() => {
   resetShellStores();
-  useLayout.setState({ main: mainShowing(A) });
+  // Panel floats now require a real tool surface, never the session cards alone.
+  useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [{ id: 'terminal-1', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-1' }]]) });
   useFloatingCard.setState({ closed: false, column: null, columnDrag: null, pillHost: null });
   useComposerStore.setState({ focusOnMount: new Set() });
   off = registerShellActions(fakeClient({}).client);
@@ -166,8 +167,8 @@ describe('a float with no session to draw', () => {
 
   it('a float stored with a session tab in front comes back floating', async () => {
     const stored = { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, floating: true } };
-    const values: Record<string, unknown> = { regions: stored, 'main.tabs': mainShowing(A), 'panel.pinned': null };
-    const { client } = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs'] }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }) });
+    const values: Record<string, unknown> = { regions: stored, 'main.tabs': mainShowing(A), 'panel.pinned': null, [`panel.${A}`]: { tabs: [{ id: 'terminal-1', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-1' } };
+    const { client } = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }) });
     useLayout.setState({ hydrated: false, main: LAYOUT_DEFAULTS.main, regions: LAYOUT_DEFAULTS.regions });
     await useLayout.getState().hydrate(client, () => true);
     await microtasks();
@@ -271,6 +272,7 @@ describe('the card’s size', () => {
 
 describe('the card’s size key', () => {
   it('is the shown session’s selected panel tab, or the summary', () => {
+    useLayout.setState({ panelBySession: new Map() });
     expect(cardSizeKey(useLayout.getState())).toBe('summary');
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: 'browser-1', toolId: 'browser', pinned: false }], activeTabId: 'browser-1' }]]) });
     expect(cardSizeKey(useLayout.getState())).toBe('browser-1');

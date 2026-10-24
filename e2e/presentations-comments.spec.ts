@@ -9,6 +9,7 @@
 // ruling: at the panel's default width (under 720 px of editor) a rail overlays the stage as a sheet from the right, so
 // the stage keeps its width. The agent's three tools are the
 // host's unit tests (src/engine-host/presentations/threads.test.ts), through the real tool server.
+import { openArtifactInPanel } from './support/shell';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -104,10 +105,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const deck = panel.locator(`[data-deck-artifact="${id}"]`);
   await expect(deck.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   const toolbar = deck.getByRole('toolbar', { name: 'Deck' });
@@ -240,10 +238,7 @@ test('the pin popover: at the pin with its reply field focused, Escape keeps the
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const deck = panel.locator(`[data-deck-artifact="${id}"]`);
   await expect(deck.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   const toolbar = deck.getByRole('toolbar', { name: 'Deck' });

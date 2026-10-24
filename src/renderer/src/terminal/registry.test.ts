@@ -725,6 +725,12 @@ describe('terminal key filter', () => {
       expect(renderer.key('keyup', { key: 'F8', code: 'F8' })).toBe(false);
       expect(renderer.key('keydown', { key: 'F6', code: 'F6' })).toBe(true);
       expect(runAction).not.toHaveBeenCalled(); // the application menu alone owns these bindings
+      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, keymap: { 'tab.next': 'F9', 'tab.previous': null } }, resolvedTheme: 'light' } });
+      expect(renderer.key('keydown', { key: 'Tab', code: 'Tab', ctrlKey: true })).toBe(true);
+      expect(renderer.key('keydown', { key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true })).toBe(true);
+      expect(renderer.key('keydown', { key: 'F9', code: 'F9' })).toBe(false);
+      expect(renderer.key('keyup', { key: 'F9', code: 'F9' })).toBe(false);
+      expect(runAction.mock.calls).toEqual([['tab.next']]);
     } finally { useSettings.setState({ state: previous }); }
   });
 

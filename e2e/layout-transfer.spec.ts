@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, pinSurfaceForSessions, surface } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -59,19 +60,24 @@ async function start(requireFirst?: string, size: [number, number] | null = [144
 
 const mainRegion = (page: Page) => page.locator('[data-region="main"]');
 const panelRegion = (page: Page) => page.locator('[data-region="panel"]');
-const mainTab = (page: Page, artifactId: string) => mainRegion(page).locator(`[role="tab"][data-tab-id="artifact:${artifactId}"]`);
+// UX2 owner ruling: pane-owned tabs render in the single chrome row, outside the main region's DOM.
+const mainTab = (page: Page, artifactId: string) => mainTabById(page, `artifact:${artifactId}`);
 const inMain = (page: Page, artifactId: string) => mainRegion(page).locator(`[data-artifact-tab="${artifactId}"]`);
 const inPanel = (page: Page, artifactId: string) => panelRegion(page).locator(`[data-artifact-record="${artifactId}"]`);
 const editorIn = (scope: Locator) => scope.locator('.ds-doc .ProseMirror').first();
 
-// The Artifacts tool added in Harness A's panel and pinned (tools belong to a session; a pin stays beside whatever main
-// shows).
+// UX2 removes the generic Artifacts launcher, not existing record transfers. Establish the real singleton by moving a
+// temporary Library document through the main-tab route, pin it across sessions, and return it to its list.
 async function pinArtifactsTool(page: Page): Promise<void> {
-  const panel = panelRegion(page);
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Transfer staging' });
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await page.locator('[data-library]').getByRole('article', { name: 'Transfer staging', exact: true }).click({ timeout: 15_000 });
+  await expect(editorIn(inMain(page, artifact.id))).toBeVisible({ timeout: 15_000 });
+  const record = await moveMainArtifactToPanel(page, artifact.id);
+  await pinSurfaceForSessions(page, 'Artifacts');
+  await record.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(surface(page, 'artifacts').locator('[data-artifacts-list]')).toBeVisible();
 }
 
 // A document of PARAGRAPHS lines, opened from the library in a main tab (and typed there).
@@ -94,7 +100,7 @@ async function documentInMain(page: Page, title: string): Promise<string> {
 // The document in the pinned Artifacts tool's record view, opened from its list (P3-L's "open": the panel's own view).
 async function openInPanel(page: Page, artifactId: string): Promise<void> {
   const panel = panelRegion(page);
-  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
+  await openSurface(page, 'Artifacts');
   await panel.getByRole('button', { name: 'All', exact: true }).click();
   await panel.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click({ timeout: 15_000 });
   await expect(editorIn(inPanel(page, artifactId))).toBeVisible({ timeout: 15_000 });
@@ -254,7 +260,7 @@ test('a drop onto a panel already showing the document activates it and closes t
   await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
   await expect(mainTab(page, id), 'the source closed').toHaveCount(0);
   await expect(record, 'the panel’s own view kept').toBeVisible();
-  await expect(panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }), 'one Artifacts tab').toHaveCount(1);
+  await expect(surface(page, 'artifacts'), 'one Artifacts singleton surface, not a cross-tool tab').toHaveCount(1);
   await expect.poll(async () => occurrences((await editorIn(record).textContent())!, 'last-main-edit'), 'the edit reaches the panel’s view, once').toBe(1);
   await durable(record);
   expect(occurrences(await hostText(page, id), 'last-main-edit'), 'once at the host').toBe(1);
@@ -269,10 +275,12 @@ test('the editor header’s Expand floats the session beside it into the main ar
   await (await sidebarRow(page, 'Harness A')).click();
   const id = await documentInMain(page, 'B3 expand');
   await menu('pane.split'); // the document into a right pane
-  const right = page.getByRole('tablist', { name: 'Right pane tabs' });
+  const right = mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' });
   await expect(right.locator(`[data-tab-id="artifact:${id}"]`)).toBeVisible();
-  const left = page.getByRole('tablist', { name: 'Left pane tabs' });
+  const left = mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' });
   await left.getByRole('tab', { name: /^Harness A/ }).click(); // the session beside it (the library tab stayed active there)
+  // UX2 optional surfaces: explicitly open a narrow tool so Expand/Restore still exercises folding a real column.
+  await openSurface(page, 'Session info');
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const card = mainRegion(page).getByRole('region', { name: 'Session card' });
   const panelBefore = await regionWidth(page, 'panel');
@@ -327,7 +335,7 @@ test('a comment draft moves with its document, panel → main and back, kept onc
   const id = await documentInMain(page, 'B3 draft');
   await mainTab(page, id).getByRole('button', { name: /^Close / }).click(); // the record will be the document's one view
   await expect(mainTab(page, id)).toHaveCount(0);
-  await mainRegion(page).getByRole('tab', { name: /^Harness A/ }).click();
+  await chromeTab(page, /^Harness A/).click();
   await openInPanel(page, id);
   const panel = panelRegion(page);
   const DRAFT = 'draft-note kept across the move';
@@ -356,7 +364,7 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 
 // The controller's measurement (at B1's landing): B1's margin tier (src/artifacts/comments/margin-tiers.ts, `tierFor`)
 // reads only the side space beside the page; our Expand pane widens the document to the main column. At 1512 × 900 with
-// the default layout (sidebar 300, panel 380) and a document with an open thread: (c) in the panel's record with the
+// UX2's 240px sidebar and content-sized Artifacts surface and a document with an open thread: (c) in the panel's record with the
 // panel floated (P3-G's card over it), (a) alone in main with the panel docked, (d) the same with the panel closed, (b)
 // beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
 // document reaches the cards tier), then after Restore split, the panel back and the tier as it was in the split. What
@@ -399,7 +407,7 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   await pinArtifactsTool(page);
   const id = await documentInMain(page, 'B3 margin');
   await mainTab(page, id).getByRole('button', { name: /^Close / }).click();
-  await mainRegion(page).getByRole('tab', { name: /^Harness A/ }).click();
+  await chromeTab(page, /^Harness A/).click();
   await openInPanel(page, id);
   // an open thread that needs no session to stay (B1's e2e's way): its compose card resolved, then reopened from the
   // Comments panel, so the thread outlives the comment's target (a document alone in main has no session to go to)
@@ -452,13 +460,15 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
   // (b) beside a session in main, then Expand pane (the session floats into the main area's card and the right panel
   // folds), then Restore split (the session docked beside it, the panel back)
   await menu('pane.split');
-  await page.getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click();
+  await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click();
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox, 'the document in its half of the split').toBeLessThan(alone.scrollBox);
   const split = await settled(() => marginOf(inMain(page, id)), '(b) split settled');
   await header.getByRole('button', { name: 'Expand pane' }).click();
   await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toBeVisible();
   await expect.poll(async () => (await widths()).panel, 'Expand folds the right panel').toBeLessThanOrEqual(0);
+  // Keep the former master-red line 462's substantive bound: Expand must give the document more room than alone
+  // beside the open panel. UX2 changes that panel's geometry, not the comparison or its strict inequality.
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
   const expanded = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) expanded settled');
   await header.getByRole('button', { name: 'Restore split', pressed: true }).click();
@@ -471,7 +481,10 @@ test('the document margin’s tier at 1512 × 900: in the floated panel, alone i
 
   // What holds (margin-tiers.ts): off under a 720 px body (rail-width.ts RAIL_BESIDE_FROM_PX); cards while the side
   // space beside the 816 px page is at least 26 + 282 + 25 = 333 px; else icons.
-  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier, restored: restored.tier }).toEqual({ c: 'cards', a: 'icons', d: 'cards', split: 'off', b: 'cards', restored: 'off' });
+  // UX2's content-sized wide record surface leaves the main document below the 720px margin floor, rather than at
+  // the old fixed-380px panel's icons tier. Closing/folding it must still earn the full cards tier.
+  expect(alone.scrollBox).toBeLessThan(720);
+  expect({ c: floated.tier, a: alone.tier, d: closed.tier, split: split.tier, b: expanded.tier, restored: restored.tier }).toEqual({ c: 'cards', a: 'off', d: 'cards', split: 'off', b: 'cards', restored: 'off' });
   expect(expanded.main, 'the expanded document has the panel-closed main column').toBe(closed.main);
   expect([floated, alone, closed, expanded, restored].map((r) => r.threads), 'the open thread in every reading').toEqual([1, 1, 1, 1, 1]);
 });
@@ -508,7 +521,7 @@ test('a relaunch brings the pinned Artifacts tab back on its record and never dr
   const id = await documentInMain(page, 'B3 restore');
   await openInPanel(page, id);
   // a main area with tabs to restore: the session and the document
-  await expect(mainRegion(page).getByRole('tab', { name: /^Harness A/ })).toHaveCount(1);
+  await expect(chromeTab(page, /^Harness A/)).toHaveCount(1);
   await expect(mainTab(page, id)).toHaveCount(1);
   // what persistence wrote before the quit: the pinned tab's record (row 290's key)
   await expect
@@ -521,8 +534,8 @@ test('a relaunch brings the pinned Artifacts tab back on its record and never dr
   const panel = panelRegion(page);
   await expect(inPanel(page, id), 'the pinned Artifacts tab back on its record').toBeVisible({ timeout: 15_000 });
   await expect(editorIn(inPanel(page, id))).toContainText(line(PARAGRAPHS));
-  await expect(panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/, selected: true })).toBeVisible();
-  await expect(panel.getByRole('tabpanel', { name: 'Session overview' })).toHaveCount(0);
+  await expect(surface(page, 'artifacts')).toBeVisible();
+  await expect(panel.locator('[data-surface]'), 'only the restored record surface, no summary column').toHaveCount(1);
   await expect(mainTab(page, id)).toHaveCount(1);
   expect(await sawNoOpenTabs(page), 'no "No open tabs" frame at any moment of the relaunch').toBe(false);
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);

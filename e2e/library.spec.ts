@@ -10,6 +10,7 @@
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // P3-H (P3 Decision Log 92): a row menu's Export on its first opening.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
+import { mainTab, openArtifactInPanel } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -432,9 +433,7 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
 
   // the panel's Artifacts tool, This session: the page opens in the record view on its latest version
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const viewer = panel.locator('[data-artifact-viewer]');
   const frame = viewer.locator('[data-artifact-frame="html"]');
   await expect(frame).toHaveAttribute('src', artifactUrl(id, seqs[1]!, 'index.html'));
@@ -502,15 +501,12 @@ test('an artifact main tab’s Show in panel, from its context menu, shows the r
   const { id } = await createHtml(page, 'Quarterly page', HEADING_PAGE('IN_PANEL'));
   const main = page.locator('[data-region="main"]');
   const panel = page.locator('[data-region="panel"]');
-  const tab = main.getByRole('tab', { name: 'Quarterly page', exact: true });
+  const tab = mainTab(page, 'Quarterly page');
   const record = panel.locator(`[data-artifact-record="${id}"]`);
 
   // Harness A shown; the page from its panel's Artifacts tool (All) into a main tab beside it by the record's Move to tab
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click({ timeout: 15_000 });
+  await openArtifactInPanel(page, id);
   await expect(record).toBeVisible();
   await panel.getByRole('button', { name: 'Move to tab' }).click();
   await expect(main.locator(`[data-artifact-tab="${id}"] [data-artifact-viewer]`)).toBeVisible();
@@ -524,7 +520,7 @@ test('an artifact main tab’s Show in panel, from its context menu, shows the r
   await expect(record.frameLocator('[data-artifact-frame="html"]').locator('#version')).toHaveText('IN_PANEL');
   await expect(tab).toHaveCount(0);
   await expect(main.locator(`[data-artifact-tab="${id}"]`)).toHaveCount(0);
-  await expect(main.getByRole('tab', { name: /^Harness A/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(mainTab(page, /^Harness A/)).toHaveAttribute('aria-selected', 'true');
   expect(launch.consoleErrors()).toEqual([]);
 });
 

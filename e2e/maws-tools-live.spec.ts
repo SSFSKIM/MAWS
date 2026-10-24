@@ -12,6 +12,7 @@
 // It spends money, within the sitting's cap MAWS_E1_LIVE_MAX_USD (US$0.20 when unset; each session launches with what
 // is left of it); run on purpose only, after a build:
 //   MAWS_HARNESS=1 electron-vite build && MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts
+import { surface } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -423,7 +424,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
         ['terminal', 'panel-tool', null],
         ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
       ]);
-      await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ })).toHaveAttribute('aria-selected', 'true');
+      await expect(surface(s.page, 'terminal')).toBeVisible();
       const divider = s.pane.locator('[data-kind="divider"]').last().locator('button[aria-expanded]').first();
       if ((await divider.getAttribute('aria-expanded')) === 'false') await divider.click();
       // the cells' own labels, since the model's reply may quote the same words (a live run's read "opened Terminal panel")

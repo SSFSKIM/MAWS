@@ -6,6 +6,7 @@
 import { useEffect, useSyncExternalStore, type RefObject } from 'react';
 import { Icon } from '../../app/IconButton';
 import type { PanelTool } from '../../panel/tool';
+import { PANEL_BODY_ID } from '../../panel/PanelHost';
 import { useTranscriptStore } from '../../stores/transcript';
 import { Transcript, type SubagentRef, type TranscriptSource } from '../../transcript';
 import { OVERSCAN, type TranscriptListHandle } from '../../transcript/view/Transcript';
@@ -126,8 +127,9 @@ const rowsOfChild = () => {
   return key ? useTranscriptStore.getState().rows(key) : [];
 };
 
-// The region's slot: the element C5's PanelRegion scrolls the host in (the host's own root is its only child).
-const slotElement = () => document.getElementById('panel-host-body')?.parentElement?.parentElement ?? null;
+const bodyElement = () => document.getElementById(`${PANEL_BODY_ID}-${CHILD_TOOL_ID}`);
+// The region’s scroll slot wraps the surface stack; an individual tool body lives inside its own section.
+const slotElement = () => bodyElement()?.closest<HTMLElement>('[data-surface-stack]')?.parentElement ?? null;
 
 export const childProbes: PanelHarnessApi['child'] = {
   async release(n) {
@@ -159,7 +161,7 @@ export const childProbes: PanelHarnessApi['child'] = {
     const last = rendered.find((el) => Number(el.dataset.index) === rows.length - 1);
     const lastRect = last?.getBoundingClientRect();
     const slot = slotElement();
-    const body = document.getElementById('panel-host-body');
+    const body = bodyElement();
     return {
       rows: rows.length,
       domRows: rendered.length,

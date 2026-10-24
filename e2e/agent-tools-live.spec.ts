@@ -30,6 +30,7 @@ import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { chargeOf } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
+import { openSurface, surface } from './support/shell';
 
 function skipReason(): string | null {
   if (process.env.MAWS_C8B_LIVE !== '1') return 'the C8b live acceptance runs only under MAWS_C8B_LIVE=1';
@@ -94,7 +95,7 @@ function installProbes(): void {
   const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
   const all = <E extends Element = Element>(root: ParentNode | null | undefined, selector: string): E[] => Array.from(root?.querySelectorAll<E>(selector) ?? []);
   const panel = () => document.querySelector<HTMLElement>('[data-region="panel"]');
-  const tabpanel = () => panel()?.querySelector<HTMLElement>('[role="tabpanel"]') ?? null;
+  const bodyOf = (toolId: string) => panel()?.querySelector<HTMLElement>(`[data-surface="${toolId}"] [role="tabpanel"]`) ?? null;
   type Hist = { t: number; v: string }[];
   const rec = {
     rows: {} as Record<string, { firstSeen: number; sections: { t: number; v: string }[]; elapsed: Hist; lines: Hist }>,
@@ -134,7 +135,7 @@ function installProbes(): void {
   new MutationObserver(scan).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
 
   const subagents = () => {
-    const body = tabpanel();
+    const body = bodyOf('subagents');
     const lists = body?.querySelector('[data-view="lists"]');
     const rows = (section: string) =>
       all<HTMLElement>(body, `section[data-section="${section}"] [data-agent-row]`).map((row) => ({
@@ -170,7 +171,7 @@ function installProbes(): void {
     };
   };
   const background = () => {
-    const body = tabpanel();
+    const body = bodyOf('background');
     const tasks = body?.querySelector('section[data-section="tasks"]');
     return {
       headings: all(body, 'section[data-section] h3').map(text),
@@ -200,7 +201,7 @@ function installProbes(): void {
   };
   // E7: the run widget Background work shows for one run (its phases and the selected phase's agent table).
   const widget = () => {
-    const run = tabpanel()?.querySelector<HTMLElement>('[data-view="run"][data-run]');
+    const run = bodyOf('background')?.querySelector<HTMLElement>('[data-view="run"][data-run]');
     if (!run) return null;
     const cell = (tr: Element, part: string) => text(tr.querySelector(`[data-part="${part}"]`));
     return {
@@ -214,7 +215,7 @@ function installProbes(): void {
     };
   };
   const log = () => {
-    const body = tabpanel();
+    const body = bodyOf('log');
     const shown = body?.querySelector('[data-log]');
     return shown
       ? { heading: text(shown.querySelector('h2')), path: text(shown.querySelector('[data-part="path"]')), size: text(shown.querySelector('[data-part="size"]')), pages: body!.querySelectorAll('pre[data-log-page]').length }
@@ -365,17 +366,6 @@ function expectStopOrder(order: string[], taskId: string): void {
   expect(order[notification]).toMatch(/ stopped$/);
 }
 
-const tabOf = (page: Page, name: string) => page.locator('[data-region="panel"] [role="tab"]').filter({ hasText: new RegExp(`^${name}`) });
-async function showTool(page: Page, name: 'Subagents' | 'Background work'): Promise<void> {
-  if ((await tabOf(page, name).count()) > 0) {
-    await tabOf(page, name).first().click();
-    return;
-  }
-  await page.locator('[data-region="panel"]').getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name }).click();
-  await expect(tabOf(page, name)).toHaveCount(1);
-}
-
 // E7: the Subagents tree's Done section is collapsed by default; this opens it, once listed, unless it is open already.
 async function openDone(page: Page): Promise<void> {
   const toggle = page.locator('[data-region="panel"] section[data-section="done"] > h3 button');
@@ -522,7 +512,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const ids = { first: [] as string[], perm: '', relayBusy: '', relayIdle: '', foreground: '' };
 
     await step('i', 'two background agents under Agents, then Done', async () => {
-      await showTool(page, 'Subagents');
+      await openSurface(page, 'Subagents');
       const from = await s.send('Dispatch two general-purpose agents in the background, model haiku: one lists the files under docs/, the other under mockups/; report both.');
       const started = await s.until('two subagent.started', (ev) => {
         const found = ev.filter((e) => e.seq !== null && e.seq > from && e.kind === 'subagent.started');
@@ -586,7 +576,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         throw new Error(`no control "Open ${description}" in the main transcript, walked from its top`);
       }
       const labels = found.labels;
-      await expect(tabOf(page, 'Subagents')).toHaveAttribute('aria-selected', 'true');
+      await expect(surface(page, 'subagents')).toBeVisible();
       await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.header ?? null), { timeout: 10_000 }).not.toBeNull();
       const drill = await probe(page, (p) => p.subagents().drillIn);
       expect(drill?.header, 'the drill-in is on the agent whose control was clicked').toBe(description);
@@ -618,7 +608,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       note('iii.mode', mode);
       expect(mode.value?.effective).toBe('default');
       s.holdChildPermissions = true;
-      await showTool(page, 'Subagents');
+      await openSurface(page, 'Subagents');
       const from = await s.send(`Dispatch one general-purpose agent in the background, model haiku: run "touch ${TMP.perm}" with Bash and reply OK.`);
       const asked = await s.until('the child’s permission request', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'permission.requested' && e.agentId !== null), 180_000);
       ids.perm = asked.agentId!;
@@ -643,7 +633,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     });
 
     await step('iv', 'a background shell: Output opens the Log, Stop reads stopping then stopped', async () => {
-      await showTool(page, 'Background work');
+      await openSurface(page, 'Background work');
       const from = await s.send(`Run exactly "sleep 300 && echo done > ${TMP.bg}" with Bash, run_in_background true; reply STARTED.`);
       const started = await s.until('the shell’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_bash' && e.isBackground === true));
       const taskId = started.taskId as string;
@@ -654,12 +644,13 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const shell = (await probe(page, (p) => p.background().shells)).find((r) => r.taskId === taskId);
       const result = s.events.find((e) => e.kind === 'tool.result' && e.toolUseId === started.toolUseId);
       await row.getByRole('button', { name: 'Output' }).click();
-      await expect(tabOf(page, 'Log')).toHaveCount(1);
+      await expect(surface(page, 'log').getByRole('tab')).toHaveCount(1);
+      await expect(surface(page, 'log')).toBeVisible();
       await expect.poll(() => probe(page, (p) => p.log().path ?? null), { timeout: 10_000 }).not.toBeNull();
       const log = await probe(page, (p) => p.log());
       note('iv.shell', { taskId, command: started.description, row: shell, outputEnabledAfterStartMs: enabledAfterMs, resultText: result?.content, log });
       expect(log.path).toMatch(/^\/private\/tmp\/claude-\d+\/.+\/tasks\/[^/]+\.output$/);
-      await showTool(page, 'Background work');
+      await openSurface(page, 'Background work');
       const stopFrom = s.seq;
       await row.getByRole('button', { name: 'Stop', exact: true }).click();
       await s.until('the shell’s task.notification', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === taskId), 30_000);
@@ -683,7 +674,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await expect(panel.locator(`[data-view="run"][data-run="${taskId}"]`)).toBeVisible();
     };
     await step('v', 'a workflow shows its phases and agent table in its widget; Stop workflow ends a re-run', async () => {
-      await showTool(page, 'Background work');
+      await openSurface(page, 'Background work');
       const from = await s.send(`Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${WORKFLOW_SCRIPT}`);
       const started = await s.until('the workflow’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_workflow'));
       const taskId = started.taskId as string;
@@ -727,7 +718,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
 
     await step('vi', 'the relay: busy parent, then idle parent', async () => {
       rmSync(TMP.stop, { force: true });
-      await showTool(page, 'Subagents');
+      await openSurface(page, 'Subagents');
       const relay = async (agentId: string, text: string, turnOpen: boolean) => {
         const back = panel.getByRole('button', { name: '‹ Subagents' });
         if (await back.isVisible()) await back.click();
@@ -810,7 +801,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     // gate off through the flag settings' env to show a genuine foreground child.
     const foreground = async (pg: Page, sess: Session) => {
       const pnl = pg.locator('[data-region="panel"]');
-      await showTool(pg, 'Subagents');
+      await openSurface(pg, 'Subagents');
       const back = pnl.getByRole('button', { name: '‹ Subagents' });
       if (await back.isVisible()) await back.click();
       const from = await sess.send('Dispatch one general-purpose agent in the foreground, model haiku: run "sleep 30" with Bash and reply OK; wait for it.');
@@ -825,7 +816,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const finishedReads = async (pg: Page, sess: Session, agentId: string) => {
       const pnl = pg.locator('[data-region="panel"]');
       await sess.until('the agent finished', (ev) => ev.find((e) => e.kind === 'subagent.finished' && e.taskId === agentId), 180_000);
-      await showTool(pg, 'Subagents');
+      await openSurface(pg, 'Subagents');
       const back = pnl.getByRole('button', { name: '‹ Subagents' });
       if (await back.isVisible()) await back.click();
       await openDone(pg); // E7: a finished root is listed under Done, collapsed by default
@@ -851,7 +842,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     });
 
     await step('ix', 'the checklist reads the list TaskCreate writes', async () => {
-      await showTool(page, 'Background work');
+      await openSurface(page, 'Background work');
       const from = await s.send('Create three tasks with TaskCreate, one call each: "Survey docs", "Survey mockups", "Write the summary". Then mark "Survey docs" completed with TaskUpdate. Reply OK.');
       await s.idle(240_000);
       const st = await s.status();
@@ -877,7 +868,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const panel2 = p2.locator('[data-region="panel"]');
 
       await step('x', 'a disk-only session: On disk, runs from disk, the shells sentence, the session list', async () => {
-        await showTool(p2, 'Subagents');
+        await openSurface(p2, 'Subagents');
         await expect.poll(() => probe(p2, (p) => p.subagents().headings.find((h) => h.startsWith('On disk')) ?? null), { timeout: 20_000 }).not.toBeNull();
         const lists = await probe(p2, (p) => p.subagents());
         if (lists.disk[0]) {
@@ -885,7 +876,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
           await expect.poll(() => probe(p2, (p) => p.subagents().drillIn?.disabled ?? null), { timeout: 10_000 }).not.toBeNull();
         }
         const drill = await probe(p2, (p) => p.subagents().drillIn);
-        await showTool(p2, 'Background work');
+        await openSurface(p2, 'Background work');
         await expect.poll(() => probe(p2, (p) => p.background().tasks.label), { timeout: 20_000 }).toBe('session list');
         // The runs step (v) leaves this session's two workflow runs on disk.
         if (STEPS.has('v')) await expect.poll(() => probe(p2, (p) => p.background().headings.join(' | ')), { timeout: 20_000 }).toMatch(/Workflow runs on disk · 2/);
@@ -906,7 +897,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         await step('ix', 'CLAUDE_CODE_TASK_LIST_ID shows that list instead', async () => {
           const st = await s2.status();
           expect(st.taskListId).toBe(TASK_LIST_OVERRIDE);
-          await showTool(p2, 'Background work');
+          await openSurface(p2, 'Background work');
           const empty = await probe(p2, (p) => p.background().tasks);
           await s2.send('Create two tasks with TaskCreate, one call each: "Override one", "Override two". Reply OK.');
           await s2.idle(240_000);

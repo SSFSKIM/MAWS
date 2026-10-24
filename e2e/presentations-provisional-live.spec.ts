@@ -19,6 +19,7 @@
 // MAWS_LIVE_SLIDE_MODEL (haiku when unset, the cheapest that drives the publish). Run on purpose only:
 //   MAWS_LIVE=1 pnpm e2e:presentations-provisional-live
 // Evidence: test-results/presentations-provisional-live/live-run.txt (the scratch root, journal included, is kept).
+import { openArtifactInPanel } from './support/shell';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -292,10 +293,7 @@ test('the live run: the agent’s publish of a slide is seen as it is written, i
     const { artifact } = value(await invoke(page, 'artifacts.create', { kind: 'presentation', title: TITLE }));
     const seeded = await page.evaluate(([a, f]) => (window as unknown as DeckSeam).__maws_presentations.seed(a!, f!), [artifact.id, FILES] as const);
     expect(seeded.held, 'the seeded slide loads').toEqual([]);
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-    await panel.getByRole('button', { name: 'All', exact: true }).click();
-    await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
+    await openArtifactInPanel(page, artifact.id);
     const rootSelector = `[data-region="panel"] [data-deck-artifact="${artifact.id}"]`;
     const deck = page.locator(rootSelector);
     await expect(deck.locator('[data-deck-editor]')).toBeVisible({ timeout: 30_000 });

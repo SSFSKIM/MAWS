@@ -256,7 +256,7 @@ describe('shell focus actions from native browser views', () => {
     electron.focused = null;
   });
 
-  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther'])(
+  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open'])(
     '%s focuses the browser view’s actual shell host before delivering the action to that page alone', (id) => {
       const otherPage = contents(1);
       const hostPage = contents(2);
@@ -270,13 +270,25 @@ describe('shell focus actions from native browser views', () => {
       (byId(menuTemplate(ACTIONS, {}, ALL, send), id)!.click as () => void)();
       expect(hostPage.focus).toHaveBeenCalledOnce();
       expect(hostPage.send).toHaveBeenCalledWith(eventChannel('layout.action'), { action: id, arg: null });
-      expect(vi.mocked(hostPage.focus).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(hostPage.send).mock.invocationCallOrder[0]);
+      expect(vi.mocked(hostPage.focus).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(hostPage.send).mock.invocationCallOrder[0]!);
       expect(otherPage.focus).not.toHaveBeenCalled();
       expect(otherPage.send).not.toHaveBeenCalled();
       expect(browserPage.focus).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled(); // no broadcast to other windows
     },
   );
+
+  it('uses the menu callback’s actual app window when no contents hold focus', () => {
+    const first = { webContents: contents(1), contentView: { children: [] } };
+    const second = { webContents: contents(2), contentView: { children: [] } };
+    electron.windows = [first, second];
+    const send = vi.fn();
+    (byId(menuTemplate(ACTIONS, {}, ALL, send), 'region.focusNext')!.click as (item: unknown, window: unknown) => void)({}, second);
+    expect(second.webContents.focus).toHaveBeenCalledOnce();
+    expect(second.webContents.send).toHaveBeenCalledWith(eventChannel('layout.action'), { action: 'region.focusNext', arg: null });
+    expect(first.webContents.focus).not.toHaveBeenCalled();
+    expect(first.webContents.send).not.toHaveBeenCalled();
+  });
 
   it('does not pull native focus away for unrelated menu actions', () => {
     const hostPage = contents(1);

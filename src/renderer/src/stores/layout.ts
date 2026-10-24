@@ -31,7 +31,7 @@ import {
 } from '@shared/ipc/schema/layout';
 import type * as z from 'zod';
 import * as model from './layout-model';
-import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope } from '../panel/surface-model';
+import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
 
 type Pane = 0 | 1;
 
@@ -227,10 +227,19 @@ export function pinSelection(before: PanelTabRef[], after: PanelTabRef[], curren
   return right?.id ?? after[after.length - 1].id;
 }
 
+// A summary is no longer a panel surface. If the current context has no tool to show, main keeps its place;
+// hidden refs, params and sizing preferences remain available when that surface is opened again.
+function surfaceRegions(state: LayoutState): LayoutRegions {
+  const { regions } = state;
+  if (!state.hydrated || (!regions.panel.floating && !regions.panel.maximized) || surfaceTabs(state, surfaceSession(state)).length > 0) return regions;
+  return { ...regions, panel: { ...regions.panel, floating: false, maximized: false } };
+}
+
 export function createLayoutStore() {
   // Where each closed tab stood, so ⌘⇧T puts it back there (transient: `closedTabs` persists refs only).
   const closedAt = new Map<string, number>();
-  return create<LayoutState>()((set, get) => {
+  return create<LayoutState>()((write, get) => {
+    const set = (patch: Partial<LayoutState>) => write((state) => ({ ...patch, regions: surfaceRegions({ ...state, ...patch }) }));
     // W12: the set a session's tabs belong in, its project's; asked when a change applies (an early change replayed after
     // hydration asks the resolver hydration was given). Undefined for a session not known now: an open of it goes to the
     // current set, and its tabs are not refiled.
@@ -356,12 +365,14 @@ export function createLayoutStore() {
         panelSurfaces = earlySurfaces.splice(0).reduce((state, change) => change(state), panelSurfaces);
         // P4-B3x: a fold restored with its float stands; one whose float the reader dropped opens the panel it folded,
         // and one stored beside an open panel is dropped (both written back below).
-        const { main: hydratedMain, regions } = reconcileFold(restored, { main: repairedMain, regions: replayedRegions });
+        const { main: hydratedMain, regions: foldedRegions } = reconcileFold(restored, { main: repairedMain, regions: replayedRegions });
+        const hydratedPins = pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId);
+        const regions = surfaceRegions({ ...get(), main: hydratedMain, regions: foldedRegions, ...hydratedPins, panelBySession, panelSurfaces, hydrated: true });
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
         // no-session selection is read back if it still names a pin.
         const live = livePanelTabIds(panelPinned, panelBySession);
         const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
-        set({ regions, main: hydratedMain, ...pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId), panelBySession, panelParams, panelSurfaces, hydrated: true });
+        set({ regions, main: hydratedMain, ...hydratedPins, panelBySession, panelParams, panelSurfaces, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
         // and persistence takes the hydrated state as its baseline, so they are written here too. Everything after this

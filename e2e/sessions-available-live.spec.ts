@@ -16,6 +16,7 @@
 // never written. Run on purpose only; it spends usage (one Haiku turn):
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_P2A_LIVE=1 [MAWS_LIVE_MAX_USD=0.20] pnpm exec playwright test e2e/sessions-available-live.spec.ts --reporter=line
 // Its log, observations and screenshots stay in the scratch root, which the run leaves in place and names.
+import { mainTabById, openSurface, surface } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -137,15 +138,11 @@ async function appIdOf(page: Page, engineSessionId: string): Promise<string> {
 async function open(page: Page, appId: string): Promise<void> {
   await (await sidebarRow(page, { appSessionId: appId as AppSessionId })).click();
   await page.mouse.move(700, 450);
-  await expect(main(page).locator(`[role="tab"][data-tab-id="session:${appId}"]`)).toHaveAttribute('aria-selected', 'true');
+  await expect(mainTabById(page, `session:${appId}`)).toHaveAttribute('aria-selected', 'true');
 }
 async function sessionInfo(page: Page) {
-  const panel = page.locator('[data-region="panel"]');
-  if ((await panel.locator('[data-session-info]').count()) === 0) {
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Session info' }).click();
-  }
-  return panel.locator('[data-session-info]');
+  await openSurface(page, 'Session info');
+  return surface(page, 'session-info').locator('[data-session-info]');
 }
 const infoValue = (info: Awaited<ReturnType<typeof sessionInfo>>, label: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
 async function untilExited(page: Page, id: string): Promise<void> {

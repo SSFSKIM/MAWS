@@ -1,5 +1,6 @@
 // The terminal keeps ordinary input and its copy/paste/select-all chords. Effective application menu bindings yield
-// to the shell, even without ⌘ (F6's region navigation, or a function-key override); ⌃Tab keeps the existing tab cycle.
+// to the shell, even without ⌘ (F6's region navigation, or a function-key override). The effective tab-cycle bindings
+// (⌃Tab / ⌃⇧Tab by default) are forwarded explicitly, because the pane dispatcher leaves terminal-owned keys alone.
 // The registry installs it on every renderer and forwards the two tab verdicts through C5's `runAction`.
 import { ACTIONS, ACTION_IDS, effectiveChord, type KeymapOverrides } from '@shared/keymap/actions';
 import { matchesChord, parseChord } from '@shared/keymap/chord';
@@ -18,11 +19,12 @@ function chordLetter(ev: KeyboardEvent): string {
 }
 
 export function terminalKeyFilter(ev: KeyboardEvent, keymap: KeymapOverrides = {}): KeyVerdict {
-  if (ev.ctrlKey && !ev.metaKey && ev.key === 'Tab') return ev.shiftKey ? 'tab.previous' : 'tab.next';
-  if (ev.metaKey) {
-    const plain = !ev.shiftKey && !ev.altKey && !ev.ctrlKey;
-    return plain && TERMINAL_COMMAND_CHORDS.has(chordLetter(ev)) ? 'pty' : 'app';
+  if (ev.metaKey && !ev.shiftKey && !ev.altKey && !ev.ctrlKey && TERMINAL_COMMAND_CHORDS.has(chordLetter(ev))) return 'pty';
+  for (const id of ['tab.next', 'tab.previous'] as const) {
+    const chord = effectiveChord(id, keymap);
+    if (chord !== null && matchesChord(ev, parseChord(chord))) return id;
   }
+  if (ev.metaKey) return 'app';
   const bound = MENU_ACTIONS.some((id) => {
     const chord = effectiveChord(id, keymap);
     if (chord === null) return false;

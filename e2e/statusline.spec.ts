@@ -6,6 +6,7 @@
 // minutes old (percentages untouched). The fixture's drain target is `2aca3c4b…` (5h 53 %, 7d 63 %); account
 // `477e393c…` pins `73171552…` (5h 77 %, 7d 44 %); the one window at or over 90 % is `aa9db20d…`'s 5-hour window at
 // 100 %. Runs on a plain build; the owner's ClaudeUsage directory is never read.
+import { openSurface, surface } from './support/shell';
 import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,13 +48,8 @@ const ENV = () => ({ MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOC
 async function open(page: Page, title: string): Promise<Locator> {
   await (await sidebarRow(page, title)).click();
   await expect(page.locator('[data-region="main"]').getByRole('tabpanel').getByRole('group', { name: 'Session status' })).toHaveCount(0);
-  const tools = page.locator('[data-region="panel"]');
-  if (!(await tools.locator('[data-session-info]').isVisible())) {
-    // the panel's layout persists: after a reload the session's Session info tab is already there
-    await tools.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Session info' }).click();
-  }
-  return tools.locator('[data-session-info]').getByRole('term').filter({ hasText: /^Usage$/ }).locator('xpath=following-sibling::dd[1]');
+  await openSurface(page, 'Session info');
+  return surface(page, 'session-info').locator('[data-session-info]').getByRole('term').filter({ hasText: /^Usage$/ }).locator('xpath=following-sibling::dd[1]');
 }
 const nearLimitBanners = (page: Page) => page.locator('[data-banner-host] [role="status"]').filter({ hasText: 'window at' });
 

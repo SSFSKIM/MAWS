@@ -5,6 +5,7 @@
 // relaunch over the same profile. The monospace-font case needs the harness's `#probe` page (`pnpm e2e:settings` builds
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
+import { mainTab } from './support/shell';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -70,7 +71,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // Settings… sits in the application menu at ⌘, and opens the singleton tab.
       expect(await accelerator(app, 'settings.open')).toBe('Cmd+,');
       await menu(app, 'settings.open');
-      await expect(page.locator('[data-region="main"]').getByRole('tab', { name: /Settings/ })).toBeVisible();
+      await expect(mainTab(page, /Settings/)).toBeVisible();
       await expect(panel(page).getByRole('region', { name: 'Keyboard' })).toBeVisible();
 
       const fallback = panel(page).getByRole('combobox', { name: 'When auto mode is unavailable' });
@@ -251,7 +252,7 @@ test('settings: Engine shows the resolved binary, its version and the tested one
   }
 });
 
-// W9 (H1, the comparative assessment's M-01): ⌘, then ⌘\ at the default window puts Settings in a pane of about 300px.
+// W9 (H1, the comparative assessment's M-01): Settings in a split pane narrower than 32rem.
 // Below 32rem the index is a top row and every row stacks, so the Engine section's controls sit inside the pane and
 // nothing scrolls sideways; back in one pane the index and the label column are as they were.
 test('WR #57: first tab click after choosing or dismissing the design-system popup navigates', async () => {
@@ -259,11 +260,10 @@ test('WR #57: first tab click after choosing or dismissing the design-system pop
   try {
     const { app, page } = maws;
     await menu(app, 'artifacts.open');
-    const main = page.locator('[data-region="main"]');
-    const library = main.getByRole('tab').filter({ hasText: 'Artifacts' });
+    const library = mainTab(page, /Artifacts/);
     await expect(library).toBeVisible();
     await menu(app, 'settings.open');
-    const settings = main.getByRole('tab').filter({ hasText: 'Settings' });
+    const settings = mainTab(page, /Settings/);
     await panel(page).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Artifacts', exact: true }).click();
     const select = panel(page).getByRole('combobox', { name: 'Default design system', exact: true });
     await expect(select.locator('option', { hasText: 'Classroom' })).toHaveCount(1);
@@ -291,9 +291,12 @@ test('settings: in a 50/50 split the view stacks inside its pane, and in one pan
   const maws = await launchMaws();
   try {
     const { app, page } = maws;
+    // UX2-L no longer reserves an empty panel column. Stage a narrow split explicitly, keeping the <32rem bound.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1240, 900));
+    await page.waitForFunction(() => window.innerWidth === 1240);
     const main = page.locator('[data-region="main"]');
     await menu(app, 'session.new'); // a second tab, so ⌘\ has one to leave behind
-    await expect(main.getByRole('tab', { name: /New chat/ })).toBeVisible();
+    await expect(mainTab(page, /New chat/)).toBeVisible();
     await menu(app, 'settings.open');
     await menu(app, 'pane.split');
     const pane = main.locator('[data-pane="1"]');
@@ -305,7 +308,7 @@ test('settings: in a 50/50 split the view stacks inside its pane, and in one pan
     await page.screenshot({ path: test.info().outputPath('settings-split.png') });
 
     const paneBox = (await settings.boundingBox())!; // the pane's section is `display: contents`; its tab panel has the box
-    expect(paneBox.width, 'a 50/50 split at the default window').toBeLessThan(512);
+    expect(paneBox.width, 'a 50/50 split at the staged narrow window').toBeLessThan(512);
     for (const control of [change, fallback]) {
       const box = (await control.boundingBox())!;
       expect(box.x, 'the control starts inside the pane').toBeGreaterThanOrEqual(paneBox.x);

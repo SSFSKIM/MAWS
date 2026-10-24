@@ -18,6 +18,7 @@ import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_D
 import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
 import { closeScene, launchScene, scratchProject, show, type Scene } from './support/maws-tools'; // P4-B3: the split's float
 import { seedTranscript, transcript } from './support/side-replay'; // P4-B3
+import { closeSurface, mainTabs, openSurface, sessionCards, showSessionCards, surface, surfaceRow, unfoldSessionCard } from './support/shell';
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const SCENARIO = 'stub:test/fixtures/panel/harness-sessions.json';
@@ -50,8 +51,8 @@ test('a restored Terminal tab reattaches to its running shell after a renderer r
   const { page } = maws;
   const panel = page.locator('[data-region="panel"]');
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Terminal' }).click();
+  // UX2: tools open from the chrome icon row, not a cross-tool tab strip.
+  await openSurface(page, 'Terminal');
 
   const shellsOfA = async () => (await ptys(page)).filter((pty) => pty.appSessionId === 'A' && pty.alive);
   await expect.poll(shellsOfA, { timeout: 15_000, message: 'a shell for session A' }).toHaveLength(1);
@@ -149,9 +150,15 @@ class PanelPage {
   // M4: the strip and the summary as a reader finds them.
   tab = (id: string) => this.region.locator(`[data-tab-id="${id}"]`);
   get summary() {
-    return this.region.getByRole('tabpanel', { name: 'Session overview' });
+    return sessionCards(this.page);
   }
-  section = (name: 'Environment' | 'Push state' | 'Subagents' | 'Background work' | 'Sources') => this.summary.getByRole('region', { name });
+  // UX2: push state lives inside Environment; Sources is embedded in Context rather than a separate panel section.
+  section = (name: 'Environment' | 'Context' | 'Connectors' | 'Artifacts' | 'Sources') => name === 'Sources'
+    ? this.summary.locator('[aria-label="Sources"]')
+    : this.summary.getByRole('region', { name, exact: true });
+  async unfold(...names: ('Environment' | 'Context' | 'Connectors' | 'Artifacts')[]): Promise<void> {
+    for (const name of names) await unfoldSessionCard(this.page, name);
+  }
   get changeLine() {
     return this.summary.getByTestId('change-line');
   }
@@ -160,12 +167,6 @@ class PanelPage {
     this.section('Sources')
       .locator('li')
       .evaluateAll((items) => items.map((li) => li.querySelector('button')?.title ?? `mcp: ${li.textContent ?? ''}`));
-  // The Subagents glyph line (its label names the agents, its text is the glyphs), or null when none is drawn.
-  glyphLine = async (): Promise<string | null> => {
-    const line = this.section('Subagents').getByTestId('agent-glyphs');
-    return (await line.count()) === 0 ? null : `${await line.getAttribute('aria-label')} ${await line.textContent()}`;
-  };
-
   tabs = (): Promise<PanelHarnessTab[]> => this.call('tabs');
   ids = async (): Promise<string[]> => (await this.tabs()).map((tab) => tab.id);
   active = async (): Promise<string | null> => (await this.tabs()).find((tab) => tab.active)?.id ?? null;
@@ -325,7 +326,7 @@ test.describe('the #panel harness: persistence and pins', () => {
       await panel.call('switchSession', 'B');
       const tabs = await panel.tabs();
       expect(await panel.active()).toBe(expected);
-      if (expected === null) await expect(panel.region.getByRole('tabpanel', { name: 'Session overview' })).toBeVisible();
+      if (expected === null) await expect(panel.summary, 'UX2 resting cards replace the dedicated summary column').toBeVisible();
       else expect(tabs.map((tab) => tab.id), 'never a missing id').toContain(expected);
       await expect.poll(async () => (await panel.panelOf('B'))?.activeTabId).toBe(expected);
       await panel.call('switchSession', 'A');
@@ -420,10 +421,12 @@ test.describe('the #panel harness: persistence and pins', () => {
     const second = await panel.call('addTool', 'harness-single', { pin: true }); // C11: a stand-in, not Session info (C11's real tool)
     await panel.call('switchSession', null);
     expect(await panel.call('session')).toBeNull();
-    await expect(panel.region.getByRole('button', { name: 'Open a session to add a tool' })).toBeDisabled();
+    await expect(surfaceRow(panel.page).getByRole('button', { name: 'Terminal', exact: true })).toBeDisabled();
+    await expect(surfaceRow(panel.page).getByRole('button', { name: 'Session cards', exact: true })).toBeDisabled();
 
-    await panel.call('showSummary'); // the summary with no session: the footer alone, the pins still in the strip
-    await expect(panel.region.getByText('Tools stay with this session. Pin a tab to keep it with you as you switch.')).toBeVisible();
+    await panel.call('showSummary'); // UX2: no session means no cards or reserved column; held pins remain selectable.
+    await expect(panel.summary).toHaveCount(0);
+    await expect.poll(async () => (await panel.region.boundingBox())?.width ?? 0).toBe(0);
     expect(await panel.ids()).toEqual([first, second]);
     expect(await panel.active()).toBeNull();
 
@@ -432,7 +435,7 @@ test.describe('the #panel harness: persistence and pins', () => {
     await panel.call('switchSession', 'A');
     await panel.call('switchSession', null);
     expect(await panel.active()).toBe(second);
-    await expect(panel.region.locator(`[data-tab-id="${second}"] [role="tab"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(surface(panel.page, 'harness-single')).toBeVisible();
     await expect(panel.stubLine).toContainText(`${second} · no session · pinned · visible`);
     panel.expectQuietConsole();
   });
@@ -460,28 +463,26 @@ const EDIT_SOURCES = ['src/util/rows.ts', 'src/store.ts', 'src/app.ts'].map((pat
 test.describe('the #panel harness: strip, summary, R7 and themes', () => {
   test.use({ mawsEnv: HARNESS_ENV });
 
-  test('plus lists registered tools and opens a tab', async ({ maws }) => {
+  test('the icon row and overflow list registered tools and open their surfaces', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     const pin = await panel.call('addTool', 'harness-stub', { pin: true });
     await panel.call('showSummary');
 
-    await panel.region.getByRole('button', { name: 'Add a tool' }).click();
-    // §5.6's order for the registered menu tools (Log and the harness's child transcript are `menu: false`).
-    // C8c (a C8a test amended by C8c): the page registers C8c's Review and Files, as App.tsx does.
-    // C8b (a C8a test amended by C8b): and C8b's Subagents and Background work (its Log is `menu: false`).
-    // E7 (a C8a test amended by E7): and the Tasks panel, registered with the agent tools ahead of the page's stub.
-    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Tasks', 'Stub']);
-    await panel.page.getByRole('menuitem', { name: 'Terminal' }).click();
+    // UX2: the primary tools are icons; non-primary registered tools remain reachable through overflow.
+    await surfaceRow(panel.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Background work', 'Tasks', 'Session info', 'Stub']);
+    await panel.page.keyboard.press('Escape');
+    await openSurface(panel.page, 'Terminal');
     const terminal = (await panel.tabs()).find((tab) => tab.toolId === 'terminal');
     expect(terminal?.id).toMatch(/^terminal:[0-9a-z]{8}$/);
     expect(terminal).toMatchObject({ pinned: false, active: true });
     await expect.poll(() => panel.panelOf('A')).toEqual({ tabs: [{ id: terminal!.id, toolId: 'terminal', pinned: false }], activeTabId: terminal!.id });
 
-    // With no session shown, "+" is disabled and says why, and the pins stay selectable (ruling O3).
+    // UX2's overflow replaces "+"; with no session, new tools are disabled but existing global pins stay selectable (O3).
     await panel.call('switchSession', null);
-    await expect(panel.region.getByRole('button', { name: 'Open a session to add a tool' })).toBeDisabled();
+    await expect(surfaceRow(panel.page).getByRole('button', { name: 'Terminal', exact: true })).toBeDisabled();
     expect(await panel.ids()).toEqual([pin]);
-    await panel.tab(pin).getByRole('tab').click();
+    await openSurface(panel.page, 'Stub');
     expect(await panel.active()).toBe(pin);
     await expect(panel.stubLine).toContainText(`${pin} · no session · pinned · visible`);
     panel.expectQuietConsole();
@@ -513,7 +514,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await expect(counter).toHaveText('3');
 
     await test.step('collapse with the region’s hide button, reopen', async () => {
-      await panel.region.getByRole('button', { name: 'Hide right panel' }).click();
+      await panel.page.getByRole('button', { name: 'Hide panel', exact: true }).click();
       await expect(panel.stubLine).toContainText('hidden');
       await panel.page.getByRole('button', { name: 'Show panel' }).click();
       await expect(panel.stubLine).toContainText('visible');
@@ -545,13 +546,13 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await scroller.evaluate((el) => el.scrollTo({ top: 400 }));
     await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBe(400);
 
-    await panel.region.getByRole('button', { name: 'Session overview' }).click();
+    await showSessionCards(panel.page); // UX2: resting cards are selected by the chrome control, not a Home tab.
     await expect(panel.summary).toBeVisible();
     await expect(scroller, 'the unselected tool is unmounted').toHaveCount(0);
     expect(await panel.ids(), 'the tabs are kept').toEqual([stub]);
     expect(await panel.active()).toBeNull();
 
-    await panel.tab(stub).getByRole('tab').click();
+    await openSurface(panel.page, 'Stub');
     await expect(scroller).toBeVisible();
     const top = await scroller.evaluate((el) => el.scrollTop);
     expect(Math.abs(top - 400), `scrollTop ${top}`).toBeLessThanOrEqual(1);
@@ -593,14 +594,16 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await withRepository(async (repo) => {
       const panel = await PanelPage.open(maws);
       await panel.call('setSession', 'A', { directory: repo.dir });
+      await panel.unfold('Environment', 'Context');
 
       await test.step('git, the status and the digest', async () => {
         await expect(panel.section('Environment')).toContainText('⎇ main');
         await expect(panel.changeLine).toHaveText('+1 −0 across 2 files · 1 untracked');
-        await expect(panel.section('Push state')).toContainText('1 ahead of origin/main');
-        await expect(panel.section('Push state').getByRole('button', { name: 'Open on GitHub' }), 'a local remote has no GitHub page').toHaveCount(0);
-        await expect(panel.section('Subagents')).toContainText('2 working · 1 done');
-        await expect(panel.section('Background work')).toContainText('1 shell · 1 workflow');
+        // UX2 embeds push state in Environment and agent/background destinations in Context.
+        await expect(panel.section('Environment')).toContainText('1 ahead of origin/main');
+        await expect(panel.section('Environment').getByRole('button', { name: 'Open on GitHub' }), 'a local remote has no GitHub page').toHaveCount(0);
+        await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toBeEnabled();
+        await expect(panel.section('Context').getByRole('button', { name: 'Background work', exact: true })).toBeEnabled();
         await expect(panel.section('Sources')).toContainText('Open the session to list its sources');
       });
 
@@ -626,15 +629,15 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         const environment = panel.section('Environment');
         // C8c (a C8a test amended by C8c): Review is registered now, so its row opens it.
         await expect(environment.getByRole('button', { name: 'Review', exact: true }), 'Review is C8c’s').toBeEnabled();
-        // C8b start (a C8a test amended by C8b): the page registers C8b's tools, whose sections fill themselves with Open.
-        await expect(panel.section('Subagents').getByRole('button', { name: 'Open' })).toBeEnabled();
-        await expect(panel.section('Background work').getByRole('button', { name: 'Open' })).toBeEnabled();
-        // C8b end
+        // UX2's Context card keeps the existing tools reachable without their former permanent summary sections.
+        await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toBeEnabled();
+        await expect(panel.section('Context').getByRole('button', { name: 'Background work', exact: true })).toBeEnabled();
 
         await environment.getByRole('button', { name: 'Session info' }).click(); // the model row
         const info = (await panel.tabs()).find((tab) => tab.toolId === 'session-info');
         expect(info, 'the model row opens Session info in A').toMatchObject({ active: true, pinned: false });
         await panel.call('showSummary');
+        await panel.unfold('Context');
 
         await panel.section('Sources').getByRole('button', { name: /src\/util\/rows\.ts/ }).click();
         await expect
@@ -647,16 +650,16 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     });
   });
 
-  test('the summary’s Sources and Subagents do not change with disclosure', async ({ maws }) => {
+  test('Context’s Sources do not change with transcript disclosure', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    const read = async () => ({ sources: await panel.sources(), glyphs: await panel.glyphLine() });
+    await panel.unfold('Context');
+    const read = () => panel.sources();
     const disclose = (how: 'collapseAll' | 'expandAll') =>
       panel.page.evaluate((how) => (window as unknown as PanelWindow).__maws_harness!.panel!.transcript('A')[how](), how);
     const cases = [
-      ['transcript/exploration-and-web', { sources: EXPLORATION_SOURCES, glyphs: null }],
-      // C8b (a C8a test amended by C8b): the glyphs are the task graph's, running agents first and then the finished ones
-      // newest end first (C8b M2), so the agent that ended last leads.
-      ['transcript/agents-and-messages', { sources: [], glyphs: expect.stringMatching(/^List the tests, Survey src for TODOs /) }],
+      ['transcript/exploration-and-web', EXPLORATION_SOURCES],
+      // UX2 removes the digest glyph strip, not the disclosure-independent source projection or Subagents destination.
+      ['transcript/agents-and-messages', []],
     ] as const;
     for (const [fixture, expected] of cases) {
       await test.step(fixture, async () => {
@@ -676,6 +679,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       });
     }
     await expect(panel.section('Sources')).toContainText('No sources yet'); // agents-and-messages: the parent has none of its own
+    await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toBeEnabled();
     panel.expectQuietConsole();
   });
 
@@ -685,6 +689,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await withRepository(async (repo) => {
       const panel = await PanelPage.open(maws);
       await panel.call('setSession', 'A', { directory: repo.dir });
+      await panel.unfold('Environment', 'Context');
       await expect(panel.changeLine).toHaveText('+1 −0 across 2 files · 1 untracked');
       // Two more writes to the same dirty tracked file: its status is unchanged, so only the watcher's size and mtime
       // comparison (the Ask of C4) makes each one a git.changed.
@@ -702,28 +707,35 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     });
   });
 
-  test('a disk-only session marks shells unavailable', async ({ maws }) => {
+  test('a disk-only session marks shells unavailable in its Background work surface', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    await expect(panel.section('Background work')).toContainText('1 shell · 1 workflow'); // A: live
+    // UX2 moves the work listing out of a permanent summary section, while preserving the live/disk read boundary.
+    await openSurface(panel.page, 'Background work');
+    await expect(surface(panel.page, 'background')).toContainText('Shells · 1 running'); // A: live
     await panel.call('switchSession', 'B');
-    await expect(panel.summary.getByRole('heading', { level: 2 })).toContainText('Harness B');
-    await expect(panel.section('Background work')).toContainText('Shells and monitors are known only while the session runs here');
-    await expect(panel.section('Background work')).not.toContainText('shell ·');
+    await openSurface(panel.page, 'Background work');
+    await expect(surface(panel.page, 'background')).toContainText('Shells and monitors are known only while the session runs here');
+    await expect(surface(panel.page, 'background')).toContainText('Shells · 0 running');
     panel.expectQuietConsole();
   });
 
-  test('section expansion persists', async ({ maws }) => {
+  test('temporary cards start folded on reload without overwriting legacy section preferences', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    const heading = panel.section('Sources').getByRole('button', { name: 'Sources' });
-    await expect(heading).toHaveAttribute('aria-expanded', 'true');
-    await heading.click();
+    const legacy = { version: 1, collapsed: ['sources'] };
+    const saved = await panel.page.evaluate((value) => window.maws.invoke('layout.set', { key: 'summary.sections', value }), legacy);
+    expect(saved.ok).toBe(true);
+    const heading = panel.section('Context').getByRole('button').first();
     await expect(heading).toHaveAttribute('aria-expanded', 'false');
-    await expect.poll(() => panel.layout('summary.sections')).toEqual({ version: 1, collapsed: ['sources'] });
-
+    await heading.click();
+    await expect(heading).toHaveAttribute('aria-expanded', 'true');
+    // UX2's disclosures are intentionally temporary, not the previous permanent-column preferences.
+    expect(await panel.layout('summary.sections')).toEqual(legacy);
     await panel.page.reload();
     const reloaded = await PanelPage.open(maws);
-    await expect(reloaded.section('Sources').getByRole('button', { name: 'Sources' })).toHaveAttribute('aria-expanded', 'false');
-    await expect(reloaded.section('Environment').getByRole('button', { name: 'Environment' })).toHaveAttribute('aria-expanded', 'true');
+    for (const name of ['Environment', 'Context', 'Connectors', 'Artifacts'] as const) {
+      await expect(reloaded.section(name).getByRole('button').first()).toHaveAttribute('aria-expanded', 'false');
+    }
+    expect(await reloaded.layout('summary.sections')).toEqual(legacy);
     reloaded.expectQuietConsole();
   });
 
@@ -747,7 +759,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         await expect.poll(async () => (await panel.metrics()).rows, 'the child’s history').toBeGreaterThan(0);
         const region = await panel.metrics();
         if (width === 'maximized') expect(region.regionWidth, 'maximized: wider than the widest side width').toBeGreaterThan(640);
-        else expect(region.regionWidth, 'rendered as set').toBe(width);
+        else expect(region.regionWidth, 'UX2: the 380px sentinel adopts a content-sized default; narrow tools cap at 420px').toBe(width === 280 ? 280 : 420);
 
         let last: PanelChildMetrics | null = null;
         for (const [i, count] of PANEL_CHILD_TAIL.batches.entries()) {
@@ -792,6 +804,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       await page.reload();
       const panel = await PanelPage.open(maws);
       await panel.call('setSession', 'A', { directory: repo.dir });
+      await panel.unfold('Environment', 'Context');
       await panel.call('loadTranscript', 'A', 'transcript/exploration-and-web');
       const pin = await panel.call('addTool', 'harness-stub', { pin: true });
       const own = await panel.call('addTool', 'harness-stub');
@@ -806,6 +819,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
             async () => {
               await panel.call('switchSession', 'A');
               await panel.call('showSummary');
+              await panel.unfold('Environment', 'Context');
               await expect(panel.changeLine).toHaveText('+1 −0 across 2 files · 1 untracked');
               await expect.poll(() => panel.sources()).toEqual(EXPLORATION_SOURCES);
             },
@@ -813,8 +827,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
           [
             'the "+" menu',
             async () => {
-              await panel.region.getByRole('button', { name: 'Add a tool' }).click();
-              await expect(page.getByRole('menuitem', { name: 'Terminal' })).toBeVisible();
+              await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+              await expect(page.getByRole('menuitem', { name: 'Session info', exact: true })).toBeVisible();
             },
           ],
           [
@@ -832,7 +846,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
             'a placeholder tab',
             async () => {
               await panel.call('switchSession', 'B');
-              await panel.tab('topology:placeholder').getByRole('tab').click(); // C8b
+              await panel.call('selectTab', 'topology:placeholder'); // Restored unavailable tools have no registered icon.
               await expect(panel.region.getByRole('tabpanel')).toHaveText('topology is not available'); // C8b
             },
           ],
@@ -856,9 +870,11 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     // As in R7: with the page's sidebar collapsed, C5's clamp cannot narrow the panel in a small window, so the default
     // width and the 640 px refit below render as set.
     await panel.call('collapseSidebar', true);
-    expect((await panel.region.boundingBox())!.width, 'the product default, C5’s --panel-w').toBe(380);
-    await panel.region.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Terminal' }).click();
+    // UX2: no tool means no column. Terminal opens at its content-sized narrow default, capped at 420px.
+    expect((await panel.region.boundingBox())!.width).toBe(0);
+    await openSurface(page, 'Terminal');
+    const defaultWidth = (await panel.region.boundingBox())!.width;
+    expect(defaultWidth).toBe(420);
     await expect.poll(async () => (await panel.tabs()).find((t) => t.toolId === 'terminal')?.terminalId ?? null).not.toBeNull();
     const id = (await panel.tabs()).find((t) => t.toolId === 'terminal')!.terminalId!;
 
@@ -877,10 +893,10 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
     const side = await cols();
     const screen = page.locator(`[data-terminal-id="${id}"] .xterm-screen`);
-    expect((await screen.boundingBox())!.width, 'the terminal fits the side column').toBeLessThanOrEqual(380);
+    expect((await screen.boundingBox())!.width, 'the terminal fits the content-sized side column').toBeLessThanOrEqual(defaultWidth);
     expect(side, 'fitted to the side column, not the window').toBeLessThan(80);
     expect(side).toBeGreaterThan(20);
-    test.info().annotations.push({ type: 'columns at 380 px', description: String(side) });
+    test.info().annotations.push({ type: `columns at ${defaultWidth} px`, description: String(side) });
 
     // A command typed through the pty runs; a line wider than the column wraps onto the next row.
     await type(`printf '%s\\n' "SIDE-$((6*7))"\r`);
@@ -912,9 +928,9 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await type('\r');
     await expect.poll(() => hasLine('PASTED-42')).toBe(true);
 
-    // Wider and back: the terminal refits each time, and nothing in the region scrolls sideways.
-    await panel.call('setWidth', 640);
-    await expect.poll(cols, 'refits wider').toBeGreaterThan(side);
+    // Narrower and back: UX2 caps this narrow tool, so exercise the meaningful refit from its default to the floor.
+    await panel.call('setWidth', 280);
+    await expect.poll(cols, 'refits narrower').toBeLessThan(side);
     await panel.call('setWidth', 380);
     await expect.poll(cols, 'and back').toBe(side);
     const sideways = await panel.region.evaluate((region) =>
@@ -959,76 +975,53 @@ async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<
 const tabNamed = (title: string) => new RegExp(`^${title.replace(/[+]/g, '\\+')}`);
 
 test.describe('the product host over a scenario derived from C5’s records', () => {
-  test('the product host rests on the summary and follows the focused session', async () => {
+  test('floating cards follow the focused session and leave non-session main tabs unreserved', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
-      const summary = panel.getByRole('tabpanel', { name: 'Session overview' });
-      const title = summary.getByRole('heading', { level: 2 });
-
       await (await sidebarRow(page, CHARTER)).click();
-      await expect(title).toContainText(CHARTER);
-      await expect(summary.getByRole('region', { name: 'Environment' })).toContainText('⎇ main');
-      await expect(summary.getByRole('region', { name: 'Push state' })).toContainText('1 ahead of origin/main');
-      // E6 (a C8a test amended by E6): the push text opens Source control, and the row's PR line asks for trust, since the
-      // launch's config home trusts nothing.
-      // A-28: the button is named by its visible text, and says what it does as its description
-      const openScm = summary.getByRole('region', { name: 'Push state' }).getByRole('button', { name: '1 ahead of origin/main', exact: true });
+      const environment = await unfoldSessionCard(page, 'Environment');
+      await expect(environment).toContainText('⎇ main');
+      await expect(environment).toContainText('1 ahead of origin/main');
+      // UX2 embeds push state without changing the real Source control route or its trust boundary (A-28).
+      const openScm = environment.getByRole('button', { name: '1 ahead of origin/main', exact: true });
       await expect(openScm).toHaveText('1 ahead of origin/main');
       await expect(openScm).toHaveAccessibleDescription('Open Source control');
-      await expect(summary.getByRole('region', { name: 'Push state' })).toContainText('Trust this folder to see PR state');
-      await expect(summary.getByRole('region', { name: 'Subagents' })).toContainText('2 working · 1 done'); // the fixture's digest
+      await expect(environment).toContainText('Trust this folder to see PR state');
 
-      // Fix sidebar drag in a split, focused: the summary follows; its probe directory does not exist on this machine.
-      // I2: ⌘-click opens it in a tab of its own (a plain click would replace Charter's).
       await (await sidebarRow(page, SIDEBAR_DRAG)).click({ modifiers: ['Meta'] });
       await menu(app, 'pane.split');
-      await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: tabNamed(SIDEBAR_DRAG) })).toBeVisible();
-      await expect(title).toContainText(SIDEBAR_DRAG);
-      const environment = summary.getByRole('region', { name: 'Environment' });
+      await expect(mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: tabNamed(SIDEBAR_DRAG) })).toBeVisible();
+      await unfoldSessionCard(page, 'Environment');
       await expect(environment).toContainText(/Not a git repository|Git unavailable/);
       await expect(environment).not.toContainText('⎇');
-      await expect(summary.getByRole('region', { name: 'Push state' })).toHaveCount(0);
+      await expect(environment).not.toContainText('ahead of origin/main');
 
-      // Back to the left pane's Charter tab, then a tab of no session (W5: the Overview is no tab; Help › Diagnostics
-      // is one): the footer, no sections, no tabs, "+" disabled.
-      const left = page.getByRole('tablist', { name: 'Left pane tabs' });
-      await left.getByRole('tab', { name: tabNamed(CHARTER) }).click();
-      await expect(title).toContainText(CHARTER);
+      await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: tabNamed(CHARTER) }).click();
+      await unfoldSessionCard(page, 'Environment');
+      await expect(environment).toContainText('⎇ main');
       await menu(app, 'diagnostics.open');
-      await expect(summary.getByText('Tools stay with this session. Pin a tab to keep it with you as you switch.')).toBeVisible();
-      await expect(summary.getByRole('region')).toHaveCount(0);
-      await expect(panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab')).toHaveCount(0);
-      await expect(panel.getByRole('button', { name: 'Open a session to add a tool' })).toBeDisabled();
+      // UX2: a non-session tab earns neither cards nor an empty right column, but keeps remembered tool context.
+      await expect(sessionCards(page)).toHaveCount(0);
+      await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(0);
+      await expect(surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true })).toBeDisabled();
+      await expect(surfaceRow(page).getByRole('button', { name: 'Review', exact: true })).toBeEnabled();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
   });
 
-  test('unregistered tools are named', async () => {
-    await withScenario(async (maws, panel) => {
+  test('registered tools remain reachable through cards, primary icons and overflow', async () => {
+    await withScenario(async (maws) => {
       const { page } = maws;
       await (await sidebarRow(page, CHARTER)).click();
-      const summary = panel.getByRole('tabpanel', { name: 'Session overview' });
-      const environment = summary.getByRole('region', { name: 'Environment' });
+      const environment = await unfoldSessionCard(page, 'Environment');
       await expect(environment).toContainText('⎇ main');
-      // C9's Terminal is registered from App.tsx (C8a's block, since C9 merged); every other P0 tool arrives with its child.
-      // C8c (a C8a test amended by C8c): C8c's Review and Files are registered from App.tsx too.
-      await expect(environment.getByRole('button', { name: 'Review', exact: true }), 'Review').toBeEnabled();
-      // C11 (a C8a test amended by C11): Session info is registered from App.tsx, so the model row opens it.
-      await expect(environment.getByRole('button', { name: 'Session info' }), 'the model row').toBeEnabled();
-      // C8b start: Subagents (M2) and Background work (M3) register from C8b's block and fill their own sections, each
-      // with its Open enabled; the Log registers too but is never offered from "+" (menu: false).
-      await expect(summary.getByRole('region', { name: 'Subagents' }).getByRole('button', { name: 'Open' })).toBeEnabled();
-      await expect(summary.getByRole('region', { name: 'Background work' }).getByRole('button', { name: 'Open' })).toBeEnabled();
-      // C8b end
-      const disabled = await summary.locator('button:disabled').allTextContents();
-      expect(disabled).toHaveLength(0); // C8b, C8c and C11: every summary row's tool is registered
-
-      await panel.getByRole('button', { name: 'Add a tool' }).click();
-      // E6 (a C8a test amended by E6): Source control registers from App.tsx's E6 block; outside MENU_ORDER, it follows the
-      // ranked tools. E7: Tasks registers with the agent tools from C8b's block, ahead of E6's and E3's blocks. E3: Side
-      // registers from App.tsx's E3 block; E2: Deliverables from E2's, after it; P3-L: Artifacts in E2's block, Deliverables'
-      // place since the cutover (M6b); E4a: Browser from E4a's, after E2's (landing order; the Question sheet is menu: false)
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Tasks' /* E7 */, 'Source control', 'Side' /* E3 */, 'Artifacts' /* E2; P3-L */, 'Browser' /* E4a */]); // by MENU_ORDER (Tasks, Source control, Side, Artifacts and Browser, not in it, after in registration order); Log is menu: false
+      for (const name of ['Review', 'Files', 'Session info']) await expect(environment.getByRole('button', { name, exact: true })).toBeEnabled();
+      const context = await unfoldSessionCard(page, 'Context');
+      for (const name of ['Subagents', 'Background work']) await expect(context.getByRole('button', { name, exact: true })).toBeEnabled();
+      for (const name of ['Terminal', 'Review', 'Files', 'Browser']) await expect(surfaceRow(page).getByRole('button', { name, exact: true })).toBeEnabled();
+      await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+      // UX2: non-primary product tools stay in overflow. Artifacts is the project Library card; Log is internal.
+      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Subagents', 'Background work', 'Session info', 'Tasks', 'Source control', 'Side'].sort());
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
@@ -1070,6 +1063,8 @@ test.describe('the floating session card (P3-G)', () => {
       const mainWidth = () => main.evaluate((el) => el.getBoundingClientRect().width);
 
       await (await sidebarRow(page, USAGE)).click();
+      // UX2 optional surfaces: the divider and Float controls belong to an explicitly opened tool, not resting cards.
+      await openSurface(page, 'Files');
       await expect(main.getByRole('textbox', { name: 'Message' })).toBeVisible();
 
       await test.step('acceptance 1: 39 px past the maximum leaves the panel at its maximum; 40 px floats it', async () => {
@@ -1129,8 +1124,8 @@ test.describe('the floating session card (P3-G)', () => {
       });
 
       await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s right and bottom edges', async () => {
-        await panel.getByRole('button', { name: 'Add a tool' }).click();
-        await page.getByRole('menuitem', { name: 'Session info' }).click();
+        await openSurface(page, 'Session info');
+        await closeSurface(page, 'Files'); // Keep one tool for this floating-card contract, not the separate stacking case.
         await expect(panel.locator(`[data-session-info="${USAGE_ID}"]`)).toBeVisible();
         await expect(card).toBeVisible();
         // P4-B3 (parent Decision Log 15.7): the card sits at the panel body's bottom right (it sat at the bottom left)
@@ -1140,9 +1135,9 @@ test.describe('the floating session card (P3-G)', () => {
         };
         // The region's 1 px border is on its left, outside the card's side
         expect(await near()).toEqual({ right: 16, bottom: 16 });
-        await panel.getByRole('button', { name: 'Add a tool' }).click();
-        await page.getByRole('menuitem', { name: 'Artifacts' }).click(); // P3-L M6b: Deliverables' place
-        await expect(panel.locator('[data-artifacts-list]')).toBeVisible();
+        await openSurface(page, 'Files');
+        await closeSurface(page, 'Session info');
+        await expect(surface(page, 'files').getByRole('tree')).toBeVisible();
         expect(await near()).toEqual({ right: 16, bottom: 16 });
         // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
         // top, so the strip above it and its controls stay clear
@@ -1150,13 +1145,13 @@ test.describe('the floating session card (P3-G)', () => {
         const from = (await handle.boundingBox())!;
         await dragBy(page, handle, -2000, 1 - from.y);
         const [strip, body, box] = [
-          (await panel.getByRole('tablist', { name: 'Panel tools' }).boundingBox())!,
-          (await panel.locator('#panel-host-body').boundingBox())!,
+          (await surface(page, 'files').locator('[data-editor-header]').boundingBox())!,
+          (await panel.locator('#panel-host-body-files').boundingBox())!,
           (await card.boundingBox())!,
         ];
         expect(Math.round(box.y - body.y), 'the card’s top 16 px under the tool body’s').toBe(16);
         expect(box.y, 'the card below the strip').toBeGreaterThan(strip.y + strip.height);
-        await panel.getByRole('button', { name: 'Add a tool' }).click({ trial: true }); // nothing covers it
+        await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click({ trial: true }); // nothing covers it
         expect(await near()).toEqual({ right: 16, bottom: 16 });
       });
 
@@ -1183,6 +1178,7 @@ test.describe('the floating session card (P3-G)', () => {
       const request = card.getByRole('group', { name: 'Approval needed' });
 
       await (await sidebarRow(page, SIDEBAR_DRAG)).click(); // its permission is pending in nine-sessions.json
+      await openSurface(page, 'Files'); // UX2: floating must have a real surface behind the card.
       await menu(app, 'panel.float');
       await expect(request.getByTestId('request-input')).toHaveText('git log --oneline');
       const handle = card.locator('[data-card-resize="top-left"]'); // P4-B3: the corner mirrored with the card
@@ -1303,7 +1299,7 @@ test.describe('the main split’s float (P4-B3)', () => {
       await show(s, id);
       await menu(app, 'diagnostics.open');
       await menu(app, 'pane.split');
-      await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: /^Diagnostics/ })).toBeVisible();
+      await expect(mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: /^Diagnostics/ })).toBeVisible();
       await expect(left.locator(`section[data-composer="${id}"]`)).toBeVisible();
       const paneScroller = left.locator('[data-transcript-scroller]');
       await expect(paneScroller.locator('[data-row-id]').first()).toBeVisible();
@@ -1422,6 +1418,7 @@ test.describe('the main split’s float (P4-B3)', () => {
         await expect.poll(() => atEnd(paneScroller), 'docked at the end').toBe(true);
         const panelCard = s.panel.getByRole('region', { name: 'Session card' });
         await expect(panelCard).toHaveCount(0);
+        await openSurface(page, 'Session info'); // UX2 has no implicit empty panel to float.
         await menu(app, 'panel.float');
         await expect(panelCard).toBeVisible();
         await expect(panelCard.getByRole('textbox', { name: 'Message' })).toHaveText(`${DRAFT} and in the card`);
@@ -1442,21 +1439,22 @@ test.describe('the panel header and X32 (P3-G)', () => {
 
   test('the header shows a tool’s title, and an editor’s registration with its handlers, updates, disposal and closeGuard', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    const header = panel.region.locator('[data-editor-header]');
+    const header = surface(panel.page, 'harness-editor').locator('[data-editor-header]');
     const title = header.locator('[data-header-title]');
+    const stubHeader = surface(panel.page, 'harness-stub').locator('[data-editor-header]');
     const invoked = () => panel.page.evaluate(() => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.invoked());
     const setEditor = (patch: Parameters<PanelHarnessApi['editor']['set']>[0]) =>
       panel.page.evaluate((patch) => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.set(patch), patch);
-    let stub = '';
-
-    await test.step('the summary, then a tool that registers nothing, keep their titles and the region’s controls', async () => {
-      await expect(title).toHaveText('Session overview');
-      stub = await panel.call('addTool', 'harness-stub');
-      await expect(title).toHaveText('Stub');
-      for (const name of ['Float session over panel', 'Maximize right panel', 'Hide right panel']) await expect(header.getByRole('button', { name })).toBeVisible();
+    await test.step('resting cards reserve no header; an opened tool keeps its title and controls', async () => {
+      await expect(panel.summary).toBeVisible();
+      await expect(panel.region.locator('[data-editor-header]')).toHaveCount(0);
+      await panel.call('addTool', 'harness-stub');
+      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
+      for (const name of ['Float session over panel', 'Maximize right panel', 'Close surface']) await expect(stubHeader.getByRole('button', { name })).toBeVisible();
     });
 
     const editor = await panel.call('addTool', 'harness-editor');
+    await closeSurface(panel.page, 'Stub'); // Keep the editor primary while testing its region controls.
     await test.step('acceptance 9: the registration’s breadcrumb, saved state, count, actions and Export, each invoking its handler', async () => {
       await panel.call('maximize', true); // room for the whole left side
       await expect(title).toHaveText('Q3 brief');
@@ -1486,7 +1484,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
     await test.step('the header at the panel’s narrowest: three actions and Export fold into "More actions", the title keeps its room', async () => {
       await setEditor({ unresolved: 0 }); // the comments action is an ordinary action again: three actions plus Export
       await panel.call('setWidth', 280); // restored from maximized too
-      for (const name of ['Float session over panel', 'Maximize right panel', 'Hide right panel']) await expect(header.getByRole('button', { name })).toBeInViewport();
+      for (const name of ['Float session over panel', 'Maximize right panel', 'Close surface']) await expect(header.getByRole('button', { name })).toBeInViewport();
       await expect(title).toBeVisible();
       expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth), 'the title is whole, not truncated').toBeLessThanOrEqual(0);
       for (const name of ['Version history', 'Open in tab', 'Comments', 'Export']) await expect(header.getByRole('button', { name })).toHaveCount(0);
@@ -1503,20 +1501,22 @@ test.describe('the panel header and X32 (P3-G)', () => {
 
     await test.step('acceptance 9: a closeGuard answering false keeps the tab open', async () => {
       await setEditor({ allowClose: false });
-      await panel.tab(editor).getByRole('button', { name: 'Close Editor' }).click();
+      // UX2 singletons have no fake tab strip: close the retained ref through the host's actual guarded close API.
       expect(await panel.call('closeTab', editor), 'the guard vetoes').toBe(false);
       expect(await panel.ids()).toContain(editor);
       await expect(title).toHaveText('Q3 brief');
       // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes.
-      await panel.tab(stub).click();
-      await expect(title).toHaveText('Stub');
-      expect(await panel.call('closeTab', editor), 'the inactive tab’s guard vetoes').toBe(false);
+      await openSurface(panel.page, 'Stub');
+      await closeSurface(panel.page, 'Editor'); // Close surface hides, rather than discarding the guarded editor ref.
+      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
+      await expect(surface(panel.page, 'harness-editor')).toHaveCount(0);
+      expect(await panel.call('closeTab', editor), 'the inactive ref’s guard vetoes').toBe(false);
       expect(await panel.ids()).toContain(editor);
-      await panel.tab(editor).click();
+      await panel.call('selectTab', editor);
       await setEditor({ allowClose: true });
-      await panel.tab(editor).getByRole('button', { name: 'Close Editor' }).click();
+      expect(await panel.call('closeTab', editor), 'the confirmed close releases the editor').toBe(true);
       await expect.poll(() => panel.ids()).not.toContain(editor);
-      await expect(title).toHaveText('Stub');
+      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
     });
     panel.expectQuietConsole();
   });

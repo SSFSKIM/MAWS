@@ -25,6 +25,7 @@
 // The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
 // observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
 // scans run either way). Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
+import { openSurface, surface } from './support/shell';
 import { type ChildProcess } from 'node:child_process';
 import { createConnection } from 'node:net'; // P3-A M5
 import { randomUUID } from 'node:crypto';
@@ -560,9 +561,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     // G4: the memory budget answers from the kept supervisor, counting its session, and the renderer's store holds it
     const budget = value(await invoke(second.page, 'engine.budget', undefined));
     expect(budget.blocked.length + budget.settling + budget.candidates, 'engine.budget counts the kept session').toBe(1);
-    const panel = second.page.locator('[data-region="panel"]');
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await second.page.getByRole('menuitem', { name: 'Session info' }).click();
+    await openSurface(second.page, 'Session info');
     const budgetRow = dd(second.page.locator(`[data-session-info="${id}"]`), 'Memory budget');
     await expect(budgetRow, 'Session info reads the budget the renderer holds').toHaveText(/ · 1 session$/);
     log.push(`engine.budget after the relaunch: ${JSON.stringify(budget)}; Session info's Memory budget "${await budgetRow.textContent()}"`);
@@ -845,9 +844,7 @@ test('(h) G4: after a keep-quit a restored terminal tab says its shell closed wi
     await startTurn(first.page, s, id);
     await untilRequested(first.page, id);
     await showSession(first.page, id);
-    const panel = first.page.locator('[data-region="panel"]');
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await first.page.getByRole('menuitem', { name: 'Terminal' }).click();
+    await openSurface(first.page, 'Terminal');
     let label = '';
     await expect.poll(async () => {
       const ptys = value(await invoke(first.page, 'pty.list', undefined)).ptys.filter((p) => p.appSessionId === id && p.alive);
@@ -863,16 +860,16 @@ test('(h) G4: after a keep-quit a restored terminal tab says its shell closed wi
     const second = await s.launch();
     expect((await s.ready(second.page)).supervisor!.pid).toBe(pid);
     await showSession(second.page, id);
-    const region = second.page.locator('[data-region="panel"]');
+    await openSurface(second.page, 'Terminal');
+    const region = surface(second.page, 'terminal');
     await expect(region.locator(`[data-tab-id="${label}"]`)).toBeVisible({ timeout: 15_000 });
     await expect(region.locator('[data-terminal-id]:visible')).toHaveCount(1, { timeout: 15_000 });
     const lost = region.getByRole('status', { name: 'previous shell' });
     await expect(lost).toHaveText(/The previous shell closed when MAWS quit/);
     await shots(second.maws, 'terminal-lost', () => region);
 
-    // a terminal from the + menu is new, not restored: no line
-    await region.getByRole('button', { name: 'Add a tool' }).click();
-    await second.page.getByRole('menuitem', { name: 'Terminal' }).click();
+    // A tab from Terminal's own strip is new, not restored: no line.
+    await region.getByRole('button', { name: 'New terminal tab', exact: true }).click();
     await expect.poll(async () => value(await invoke(second.page, 'pty.list', undefined)).ptys.filter((p) => p.appSessionId === id && p.alive).length, { timeout: 15_000 }).toBe(2);
     await expect(region.locator('[data-terminal-id]:visible')).toHaveCount(1);
     await expect(lost).toBeHidden();

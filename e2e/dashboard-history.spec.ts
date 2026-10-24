@@ -9,7 +9,7 @@
 // new ones; Make a copy draws the copy's own snapshot; Restore brings the old data back as a new version, which a closed
 // and reopened tab keeps. Evidence shots go to test-results/dashboard-proof/.
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { bindCsv, chart, durable, insertBlocks, ok, openInMain, openInPanel, paragraph, pinArtifactsTool, railOf, reply, restartHost, selectChart, SESSION_A, startApp, tipsOf, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, durable, insertBlocks, ok, openInMain, openInPanel, paragraph, selectPanelSession, railOf, reply, restartHost, selectChart, SESSION_A, startApp, tipsOf, type DashboardApp } from './support/dashboards';
 import { launchMaws } from './support/launch';
 
 const PROOF = 'test-results/dashboard-proof';
@@ -192,7 +192,7 @@ test('carried dashboard: bind, owner prose and conversation, agent replacement, 
   app = await startApp(PROOF);
   let { page } = app;
   const { agent } = app;
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title: 'Carried dashboard' });
   const id = artifact.id;
   let record = await openInPanel(page, id);

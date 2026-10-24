@@ -6,6 +6,7 @@ import type { CommandInput, CommandName, CommandResult } from '../src/shared/ipc
 import { test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
+import { closeSurface, openSurface } from './support/shell';
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -122,20 +123,20 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
     await shot(maws, info, 'session-cards');
   }
   await size(maws, 1280, 820);
-  await surfaces(page).getByRole('button', { name: 'Terminal', exact: true }).click();
+  await openSurface(page, 'Terminal');
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toBeVisible({ timeout: 15_000 });
   const terminalId = await surface(page, 'terminal').locator('[data-terminal-id]').getAttribute('data-terminal-id');
   const narrowWidth = (await box(panel(page))).width;
   expect(narrowWidth).toBeLessThanOrEqual(420);
-  await surfaces(page).getByRole('button', { name: 'Review', exact: true }).click();
+  await openSurface(page, 'Review');
   await expect.poll(() => stack(page)).toEqual(['terminal', 'review']);
   expect((await box(panel(page))).width, 'Review earns a wide surface').toBeGreaterThan(narrowWidth);
   const first = await box(surface(page, 'terminal'));
   expect((await box(surface(page, 'review'))).y, 'the second surface is below the first').toBeGreaterThanOrEqual(first.y + first.height);
-  await surfaces(page).getByRole('button', { name: 'Files', exact: true }).click();
+  await openSurface(page, 'Files');
   await expect.poll(() => stack(page)).toEqual(['terminal', 'files']);
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toHaveAttribute('data-terminal-id', terminalId!);
-  await expect(surfaces(page).getByRole('button', { name: 'Review', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(surface(page, 'review'), 'the displaced tool is closed even if narrow chrome folds its icon').toHaveCount(0);
 
   // Owner ruling: tabs exist within one tool; adding another Terminal must not replace Files or add a third surface.
   const terminal = surface(page, 'terminal');
@@ -154,6 +155,8 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
     await shot(maws, info, 'two-surfaces-terminal-tabs');
   }
 
+  // This part specifically tests toolbar pinning, so give the chrome room to retain the pinned icon.
+  await size(maws, 1512, 982);
   await surfaces(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Session info', exact: true }).click();
   await expect.poll(() => stack(page)).toEqual(['terminal', 'session-info']);
@@ -179,7 +182,7 @@ test('UX2: at 900 the sidebar yields; at 600 a surface is a dismissible sheet', 
   const { page } = maws;
   await size(maws, 1280, 820);
   await openSession(page);
-  await surfaces(page).getByRole('button', { name: 'Files', exact: true }).click();
+  await openSurface(page, 'Files');
   await expect(surface(page, 'files')).toBeVisible();
   await expect.poll(() => layout(page, 'panelTools.surfaces')).toMatchObject({ stacks: { A: [expect.any(String)] } });
   const remembered = await layout(page, 'regions');
@@ -218,7 +221,7 @@ test('UX2: at 900 the sidebar yields; at 600 a surface is a dismissible sheet', 
   await expect(panel(page)).toHaveCSS('position', 'relative');
   expect(await layout(page, 'regions')).toEqual(remembered);
   await size(maws, 600, 820);
-  await surface(page, 'files').getByRole('button', { name: 'Close surface', exact: true }).click();
+  await closeSurface(page, 'Files');
   await expect.poll(async () => (await box(panel(page))).width).toBe(0);
   expect((await box(main(page))).width).toBe(600);
   await shot(maws, info, 'narrow-sheet-dismissed');

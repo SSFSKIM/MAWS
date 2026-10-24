@@ -22,6 +22,7 @@
 //   `.deck-toolbar` rules, no longer the workbench's own).
 // - P4-B2 (D1 to D9, D12; F9's c43 rewritten): a board's text element ARMED on its first click, words typed replacing its
 //   text (C's overlay); a double-click on an inactive board's heading edits it in one gesture (T22).
+import { mainTab, openArtifactInPanel, openSurface, pinSurfaceForSessions } from './support/shell';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -88,20 +89,18 @@ async function inPanelAndTab(page: Page, id: string): Promise<{ panel: Locator; 
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const inPanel = panel.locator(`[data-design-artifact="${id}"]`);
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole('button', { name: /^Pin / }).first().click();
+  await pinSurfaceForSessions(page, 'Artifacts');
   await panel.getByRole('button', { name: 'Move to tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-design-artifact="${id}"]`);
   await expect(inMain.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   // Move to tab moves the design (P3-F wave S, F16): the pinned tab is back on its list. Opened from it again, it is the
   // panel's replica beside the main tab's (the parent's Decision Log 8).
-  await panel.getByRole('tab', { name: 'Artifacts' }).click();
+  await openSurface(page, 'Artifacts');
   await expect(inPanel).toHaveCount(0);
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
   await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   return { panel, inPanel, inMain };
@@ -299,10 +298,7 @@ test('a design in the panel at its 280 px minimum: the toolbar wraps by whole co
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const inPanel = panel.locator(`[data-design-artifact="${id}"]`);
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   await resizePanel(page, 280);
@@ -744,7 +740,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   });
 
   // the main area back on the chat: comments in the panel go to it
-  const chat = mainRegion.getByRole('tab', { name: /^New chat/ });
+  const chat = mainTab(page, /^New chat/);
   await chat.click();
   await expect(chat).toHaveAttribute('aria-selected', 'true');
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible();

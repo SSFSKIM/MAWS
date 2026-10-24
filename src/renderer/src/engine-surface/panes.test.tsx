@@ -1,6 +1,6 @@
 // R2: a plugin's panes as `plugin-pane` panel tabs (panes.ts, PaneTool.tsx): the roster read when a session attaches and
 // followed through `plugin.panes`, tabs opened and closed with it, the pane's drawing or Desktop's placeholder, the
-// engine told which pane shows and when the person closes one, and the panel's "+" listing them under "Plugin panes".
+// engine told which pane shows and when the person closes one, and the surface overflow listing the available panes.
 // The pane's tree is the one 2.1.287 answered in pass3/mods-surface-render-sites.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

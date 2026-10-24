@@ -6,6 +6,7 @@
 // the product shell over C5's scenario and the committed ClaudeUsage fixture moved to now (accounts.spec.ts's recipe).
 // Nothing here asserts a look: it drives each state to where the mockup shows it and photographs it. Run on purpose only:
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_C11_SHOTS=1 pnpm exec playwright test e2e/c11-shots.spec.ts
+import { hideSurfaces, mainTab } from './support/shell';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -127,16 +128,15 @@ test('the usage popover (W6: the Accounts tab retired into it) and the Settings 
   const { app, page } = maws;
   try {
     await expect(page.locator('[data-region="main"]')).toBeVisible();
-    await page.getByRole('button', { name: 'Hide right panel' }).click(); // the tabs at the mockup's width: the right panel closed
-    await menu(app, 'accounts.open'); // View › Usage: the top bar's usage popover
+    await hideSurfaces(page); // the tabs at the mockup's width: no optional surface open
+    await menu(app, 'accounts.open'); // View › Usage: the sidebar footer's usage popover
     const popover = page.getByRole('dialog', { name: 'Claude Usage' });
     await expect(popover.locator('[data-account]:not([data-codex] [data-account])')).toHaveCount(5);
     await shoot(page, 'accounts', false);
     await page.keyboard.press('Escape');
     await menu(app, 'settings.open');
-    await expect(page.locator('[data-region="main"]').getByRole('tab', { name: /Settings/ })).toBeVisible();
-    const hide = page.getByRole('button', { name: 'Hide right panel' });
-    if (await hide.isVisible()) await hide.click(); // a new tab opens with the panel; the mockup has none
+    await expect(mainTab(page, /Settings/)).toBeVisible();
+    await hideSurfaces(page); // the mockup has no optional surface beside Settings
     await shoot(page, 'settings', false);
     for (const section of ['Keyboard', 'Notifications']) {
       await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: section, exact: true }).click();

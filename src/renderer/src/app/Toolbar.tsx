@@ -12,7 +12,7 @@ import { createSession, runAction, useSessionCreatorRegistered } from '../keymap
 import { revealProject } from '../sidebar/reveal';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { useSessions } from '../stores/sessions';
 import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
@@ -74,18 +74,28 @@ export function Toolbar() {
   const waiting = useAttention((s) => selectNeedsYou(s, { records, recordsVersion }).filter((row) => row.tier === 1).length);
   const overviewOpen = useLayout((s) => s.overviewOpen);
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
+  const split = useLayout((s) => currentSet(s.main).panes.length === 2);
+  // Budget against the grid's actual header, not the window: a full-height surface can leave only 360px.
+  // Preserve a usable, scrolling strip (including New chat) before allocating optional chrome controls.
+  const compact = geometry.chrome < 520;
+  const leading = compact ? 118 : geometry.sidebar || 148;
+  const stripRoom = split ? 240 : 180;
+  const projectChip = geometry.chrome >= leading + stripRoom + 322;
+  const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
+  const sessionMenu = controlsRoom >= 180;
+  const surfaceIcons = Math.max(0, Math.floor((controlsRoom - (sessionMenu && appSessionId ? 32 : 0) - 28) / 30));
 
   return (
-    <header data-toolbar className="col-span-2 row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]">
+    <header data-toolbar className={`${geometry.mainHidden ? 'col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
       <div
         className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
-        style={{ width: geometry.sidebar || 148 }}
+        style={{ width: leading }}
       >
         <div className="flex items-center gap-1">
           <IconButton label="Toggle sidebar" action="sidebar.toggle" pressed={geometry.sidebarAside ? overlay : !sidebar.collapsed} onClick={() => runAction('sidebar.toggle')}>
             <SidebarIcon />
           </IconButton>
-          <IconButton
+          {!compact && <IconButton
             label={waiting > 0 ? `Overview, ${waiting} waiting` : 'Overview'}
             action="tab.overview"
             pressed={overviewOpen}
@@ -98,14 +108,20 @@ export function Toolbar() {
                 ◐{waiting}
               </span>
             )}
-          </IconButton>
+          </IconButton>}
         </div>
       </div>
-      <div className="max-w-24 min-w-0 shrink max-[1100px]:hidden"><ProjectChip /></div>
-      <div ref={mountChromeTabs} data-chrome-tabs className="flex min-w-0 flex-1 items-stretch" />
+      {projectChip && <div className="max-w-24 min-w-0 shrink"><ProjectChip /></div>}
+      <div ref={mountChromeTabs} data-chrome-tabs className="flex min-w-0 flex-1 items-stretch">
+        <div data-chrome-slot="0" className="contents" />
+        <div data-chrome-slot="1" className="contents" />
+      </div>
       <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
-        {appSessionId && <SessionMenu appSessionId={appSessionId} />}
-        <SurfaceRow />
+        {appSessionId && sessionMenu && <SessionMenu appSessionId={appSessionId} />}
+        <SurfaceRow maxIcons={surfaceIcons} overflowControls={<>
+          {compact && <DropdownMenu.Item className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-highlighted:bg-bg-hover" onSelect={() => useLayout.getState().setOverviewOpen(!overviewOpen)}>{waiting > 0 ? `Overview, ${waiting} waiting` : 'Overview'}</DropdownMenu.Item>}
+          {appSessionId && !sessionMenu && <SessionMenuOverflow appSessionId={appSessionId} />}
+        </>} />
       </div>
     </header>
   );
@@ -211,6 +227,17 @@ function SessionMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   );
+}
+
+function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
+  const record = useSessions((s) => s.records.get(appSessionId));
+  const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
+  return <DropdownMenu.Sub>
+    <DropdownMenu.SubTrigger disabled={ids.length === 0} className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover">Session actions</DropdownMenu.SubTrigger>
+    <DropdownMenu.Portal><DropdownMenu.SubContent className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+      {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
+    </DropdownMenu.SubContent></DropdownMenu.Portal>
+  </DropdownMenu.Sub>;
 }
 
 function SessionMenuItem({ id, appSessionId, label }: { id: SessionActionId; appSessionId: AppSessionId; label: string }) {

@@ -36,6 +36,15 @@ describe('terminal key filter', () => {
     expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true }))).toBe('tab.previous');
   });
 
+  it('honors moved and unbound existing tab-cycle bindings instead of reserving Ctrl+Tab', () => {
+    const overrides = { 'tab.next': 'F8', 'tab.previous': null } as const;
+    expect(terminalKeyFilter(key({ key: 'F8', code: 'F8' }), overrides)).toBe('tab.next');
+    expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', ctrlKey: true }), overrides)).toBe('pty');
+    expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true }), overrides)).toBe('pty');
+    expect(terminalKeyFilter(key({ key: 'p', code: 'KeyP', metaKey: true, altKey: true }), { 'tab.previous': 'Cmd+Alt+P' })).toBe('tab.previous');
+    expect(terminalKeyFilter(key({ key: 'c', code: 'KeyC', metaKey: true }), { 'tab.next': 'Cmd+C' })).toBe('pty');
+  });
+
   it.each([
     ['Esc', { key: 'Escape', code: 'Escape' }],
     ['Enter', { key: 'Enter', code: 'Enter' }],

@@ -54,7 +54,7 @@ function regionStops(): FocusStop[] {
     if (panes.length === 0) add(main);
     for (const pane of panes) {
       const index = pane.getAttribute('data-pane');
-      const strip = document.querySelector<HTMLElement>(`[data-chrome-pane="${index}"] [role="tablist"]`) ?? pane.querySelector<HTMLElement>('[role="tablist"]');
+      const strip = document.querySelector<HTMLElement>(`[data-chrome-pane="${index}"] [role="tablist"]`) ?? pane.querySelector<HTMLElement>('[data-pane-strip] [role="tablist"]');
       if (strip) {
         const next = stop(strip);
         const selected = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
@@ -99,7 +99,7 @@ export function stepMainTab(delta: 1 | -1): void {
   useLayout.getState().cycleTab(delta);
   requestAnimationFrame(() => {
     const region = document.getElementById('region-main');
-    const strip = document.querySelector<HTMLElement>(`[data-chrome-pane="${pane}"] [role="tablist"]`) ?? document.getElementById(`pane-${pane}`)?.querySelector<HTMLElement>('[role="tablist"]');
+    const strip = document.querySelector<HTMLElement>(`[data-chrome-pane="${pane}"] [role="tablist"]`) ?? document.getElementById(`pane-${pane}`)?.querySelector<HTMLElement>('[data-pane-strip] [role="tablist"]');
     if (region && available(region) && strip && available(strip)) focusPaneElement(pane);
   });
 }

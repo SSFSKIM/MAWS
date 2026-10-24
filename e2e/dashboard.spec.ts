@@ -14,6 +14,7 @@
 // The data is bound as `artifact_dataset` binds it (an uploaded asset and its descriptor in the doc's `datasets` root),
 // written here through the human's upload and the host's MAWS_E2E test writer, since this milestone's proof is the
 // editor's; the agent's tool is M2's (unit-proved) and M6's (product). Evidence shots go to test-results/dashboard-proof/.
+import { openArtifactReplicaInPanel } from './support/shell';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +23,7 @@ import { GDP_CSV, PENGUINS_CSV } from '../src/artifacts/dashboard/fixtures/datas
 import { DatasetError, parseDataset } from '../src/artifacts/dashboard/parse';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, pinArtifactsTool, railOf, refusalOf, reply, revisionOf, selectChart, startApp, watchSelection, type DashboardApp } from './support/dashboards'; // M6
+import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, selectPanelSession, railOf, refusalOf, reply, revisionOf, selectChart, startApp, watchSelection, type DashboardApp } from './support/dashboards'; // M6
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -228,9 +229,6 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
   const page = await start();
   const panel = page.locator('[data-region="panel"]');
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 
   const title = '성장률 대시보드';
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title });
@@ -276,9 +274,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
 
   let record: Locator | null = null;
   await test.step('the panel, a second replica, draws the same views; a narrow column scrolls a figure rather than shrinking it', async () => {
-    await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-    await panel.getByRole('button', { name: 'All', exact: true }).click();
-    await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click({ timeout: 15_000 });
+    await openArtifactReplicaInPanel(page, id);
     const shown = panel.locator(`[data-artifact-record="${id}"]`);
     record = shown;
     await expect(figures(shown)).toHaveCount(VIEWS.length, { timeout: 15_000 });
@@ -541,7 +537,7 @@ test('beside the agent’s views the owner comments on the chart and writes; B�
   test.setTimeout(240_000);
   agentApp = await startApp(PROOF);
   const { page, agent, launch } = agentApp;
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifactId: id, revision } = await agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title: 'Owner and agent', content: BOARD_MARKDOWN });
   await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'sales', title: 'Sales', path: await agent.write('A', 'sales.csv', AGENT_CSV) });
   const record = await openInPanel(page, id);

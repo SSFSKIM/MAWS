@@ -12,6 +12,7 @@
 // while toasts are held and remounts as a new element the DOM watch cannot see by itself.
 import type { AppSessionId } from '@shared/graph/ids';
 import { panelInMain } from '../../app/regions';
+import { shellGeometryOf } from '../../app/shell-view';
 import { ipc } from '../../ipc/client';
 import { useLayout, type LayoutState } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
@@ -42,16 +43,18 @@ function sync(): void {
 
 const rects = () => [...panes.keys()].flatMap((rectOf) => rectOf() ?? []);
 
-const overviewShownIn = (state: LayoutState): boolean => state.overviewOpen && !panelInMain(state.regions);
+const overviewShownIn = (state: LayoutState): boolean => state.overviewOpen && !panelInMain(state.regions) && !shellGeometryOf(state, window.innerWidth).sheet;
+const refreshOverview = () => {
+  const shown = overviewShownIn(useLayout.getState());
+  if (shown === overviewShown) return;
+  overviewShown = shown;
+  sync();
+};
 
 function start(): void {
   overviewShown = overviewShownIn(useLayout.getState());
-  offLayout = useLayout.subscribe((state) => {
-    const shown = overviewShownIn(state);
-    if (shown === overviewShown) return;
-    overviewShown = shown;
-    sync();
-  });
+  offLayout = useLayout.subscribe(refreshOverview);
+  window.addEventListener('resize', refreshOverview);
   offNotices = useNotices.subscribe(() => {
     if (noticesFrame !== 0) return;
     noticesFrame = requestAnimationFrame(() => {
@@ -68,6 +71,7 @@ function start(): void {
 function unsubscribe(): void {
   offLayout?.();
   offLayout = null;
+  window.removeEventListener('resize', refreshOverview);
   offNotices?.();
   offNotices = null;
   cancelAnimationFrame(noticesFrame);

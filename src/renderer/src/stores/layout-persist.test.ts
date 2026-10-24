@@ -281,7 +281,8 @@ describe('layout persistence', () => {
 
   it('opening Overview restores and persists only the regions, with the normal write delay', async () => {
     const regions = { ...LAYOUT_DEFAULTS.regions, panel: { width: 444, collapsed: false, maximized: true, floating: false } };
-    const { store, hydrate, sets } = setup({ regions });
+    const tab = { id: 'files:pinned', toolId: 'files', pinned: true };
+    const { store, hydrate, sets } = setup({ regions, 'panel.pinned': [tab], 'panelTools.activeNoSession': { version: 1, activeTabId: tab.id } });
     await hydrate();
     store.getState().setOverviewOpen(true);
     vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS - 1);

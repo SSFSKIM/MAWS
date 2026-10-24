@@ -26,6 +26,7 @@
 //   one gesture; a table's cell edited by a double-click, Tab to the next; single clicks through a group (P7).
 // - P4-B2 K6: the Edit menu's Undo and Redo, clicked by id, undo and redo a nudge on the stage and only the field's own
 //   typing in the inspector.
+import { openArtifactInPanel, openSurface, pinSurfaceForSessions } from './support/shell';
 import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
@@ -206,21 +207,19 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const inPanel = panel.locator(`[data-deck-artifact="${id}"]`);
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await expect(panel.getByRole('button', { name: 'Mark up', exact: true })).toBeVisible(); // the stage is the tab's Mark-up surface
-  await panel.getByRole('button', { name: /^Pin / }).first().click();
+  await pinSurfaceForSessions(page, 'Artifacts');
   await panel.getByRole('button', { name: 'Move to tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
   await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   // Move to tab moves the deck (P3-F wave S, F16): with no session shown, the pinned tab is picked again, back on its
   // list. Opened from it again, it is the panel's replica beside the main tab's (the parent's Decision Log 8).
-  await panel.getByRole('tab', { name: 'Artifacts' }).click();
+  await openSurface(page, 'Artifacts');
   await expect(inPanel).toHaveCount(0);
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
   await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-title]')).toHaveText('Q3 review');
@@ -290,17 +289,18 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   // scroll the filmstrip with it, under the droppables measured at the lift), and the old press-until-it-moves loop could
   // press again after a slow first move and move the cover a second slot.
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
-  await page.keyboard.press('ArrowDown');
+  const horizontal = await inMain.locator('.deck-filmstrip').getAttribute('data-direction') === 'horizontal';
+  await page.keyboard.press(horizontal ? 'ArrowRight' : 'ArrowDown');
   // dropped once the sensor has the next slide under it (its announcement says so)
   await trace.step(
     'filmstrip-reorder',
     async () => {
-      await expect(lifted).toHaveAttribute('style', /translate3d\(0px, [1-9]/);
+      await expect(lifted).toHaveAttribute('style', horizontal ? /translate3d\([1-9]/ : /translate3d\(0px, [1-9]/);
       await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: /^Slide 1(, .*)?, moved to position 2\.$/ })).toHaveCount(1); // W1-C L283: by position, no id
     },
     () =>
       inMain.locator('.deck-filmstrip-list').evaluate((list) => ({
-        list: { top: Math.round(list.getBoundingClientRect().top), client: list.clientHeight, scrollTop: list.scrollTop, scrollHeight: list.scrollHeight },
+        list: { direction: list.closest('.deck-filmstrip')?.getAttribute('data-direction'), left: Math.round(list.getBoundingClientRect().left), top: Math.round(list.getBoundingClientRect().top), clientWidth: list.clientWidth, clientHeight: list.clientHeight, scrollLeft: list.scrollLeft, scrollTop: list.scrollTop, scrollWidth: list.scrollWidth, scrollHeight: list.scrollHeight },
         thumbs: Array.from(list.querySelectorAll<HTMLElement>('[data-slide-thumb]')).map((t) => {
           const r = t.getBoundingClientRect();
           return [t.dataset.slideThumb, Math.round(r.top), Math.round(r.height), t.style.transform, t.dataset.dragging ?? null];
@@ -385,10 +385,7 @@ test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole cont
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const inPanel = panel.locator(`[data-deck-artifact="${id}"]`);
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await resizePanel(page, 280);
@@ -684,6 +681,7 @@ test('Edit ▸ Undo and Redo: the deck’s step on the stage, the field’s own 
   await expect.poll(async () => (await element('b'))?.style.left).toBe('701px');
 
   // typed into the inspector's Width field, the menu's Undo takes back the typing, not the deck's nudge
+  await tab.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: 'Inspector', exact: true }).click();
   const width = tab.getByRole('complementary', { name: 'Inspector' }).getByRole('textbox', { name: 'Width', exact: true });
   await expect(width).toHaveValue('200');
   await width.click();
@@ -719,6 +717,7 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   const tab = await openFromLibrary(page, 'Inspector lab', id);
   const { at } = await stageAt(tab);
   const element = (eid: string, slide = 'lab') => elementOf(page, id, slide, eid);
+  await tab.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: 'Inspector', exact: true }).click();
   const inspector = tab.getByRole('complementary', { name: 'Inspector' });
 
   // the inspector: a fill, a border, a font size, the text's fit
@@ -741,6 +740,7 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await inspector.getByRole('textbox', { name: 'Font size' }).press('Enter');
   await expect(inspector.getByRole('alert')).toBeVisible();
   expect((await element('head'))?.style['font-size']).toBe('72px');
+  await tab.getByRole('button', { name: 'Close inspector', exact: true }).click();
 
   // Insert: each kind lands on the slide through the loader; a text kind opens for typing
   const insert = async (item: string, sub?: string) => {

@@ -6,7 +6,7 @@
 // The menu is rebuilt on every `settings.changed` (overrides, the checked appearance) and every change of that set.
 // Items carry `id` (the action id; `tab.select:<n>` for the nine tab items; `edit.selectAll`, `edit.undo` and `edit.redo`
 // for the Edit menu's own items) so the smoke can click them by id.
-import { Menu, webContents, type MenuItemConstructorOptions } from 'electron';
+import { Menu, webContents, type BaseWindow, type MenuItemConstructorOptions } from 'electron';
 import { appWindows } from './windows'; // E2
 import type { Settings, ThemeSetting } from '@shared/ipc/schema';
 import type { EditOp } from '@shared/ipc/schema/layout'; // P4-B2 K6
@@ -64,9 +64,10 @@ function edit(op: EditOp): void {
 // (the view manager attaches it directly to contentView), focus that page, then send only that page its DOM action.
 const SHELL_FOCUS_ACTIONS: ReadonlySet<ActionId> = new Set([
   'region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther',
+  'shortcuts.open', 'palette.open',
 ]);
 
-function dispatchAction(id: ActionId, arg: number | null, emit: Emit): void {
+function dispatchAction(id: ActionId, arg: number | null, emit: Emit, menuWindow?: BaseWindow): void {
   const payload = { action: id, arg };
   if (!SHELL_FOCUS_ACTIONS.has(id)) {
     void emit('layout.action', payload);
@@ -74,8 +75,8 @@ function dispatchAction(id: ActionId, arg: number | null, emit: Emit): void {
   }
   const windows = appWindows();
   const focused = webContents.getFocusedWebContents();
-  const host = focused ? windows.find((win) => win.webContents === focused
-    || win.contentView.children.some((view) => 'webContents' in view && view.webContents === focused)) : windows[0];
+  const host = windows.find((win) => win === menuWindow) ?? (focused ? windows.find((win) => win.webContents === focused
+    || win.contentView.children.some((view) => 'webContents' in view && view.webContents === focused)) : windows[0]);
   if (!host) return;
   host.webContents.focus();
   emitTo(host.webContents, 'layout.action', payload);
@@ -93,7 +94,7 @@ export function menuTemplate(
     label,
     ...(accelerator ? { accelerator } : {}),
     enabled: enabled.has(id),
-    click: () => dispatchAction(id, arg, emit),
+    click: (_item, window) => dispatchAction(id, arg, emit, window),
     ...extra,
   });
 

@@ -10,9 +10,10 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, type Locator } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { launchMaws, REPO_ROOT, test } from './support/launch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
+import { mainTabById, sessionCards, unfoldSessionCard } from './support/shell';
 
 test.skip(process.env.MAWS_PANEL_LIVE !== '1', 'the live check runs only under MAWS_PANEL_LIVE=1');
 
@@ -77,7 +78,7 @@ test('live: the summary over this repository matches git', async () => {
   const plain = join(scratch, 'not-a-repository');
   mkdirSync(plain);
 
-  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as { sessions: { title: { text: string }; directory: string }[] };
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as { sessions: { appId: string; title: { text: string }; directory: string }[] };
   const point = (title: string, directory: string) => (scenario.sessions.find((s) => s.title.text === title)!.directory = directory);
   point('Charter + research', REPO_ROOT);
   point('Fix sidebar drag', clone);
@@ -88,24 +89,25 @@ test('live: the summary over this repository matches git', async () => {
   const observed: Record<string, unknown> = {};
   try {
     const { page, app } = maws;
-    const panel = page.locator('[data-region="panel"]');
-    const summary = panel.getByRole('tabpanel', { name: 'Session overview' });
-    const section = (name: string): Locator => summary.getByRole('region', { name });
-    const changeLine = summary.getByTestId('change-line');
+    const environment = sessionCards(page).getByRole('region', { name: 'Environment', exact: true });
+    const changeLine = environment.getByTestId('change-line');
     // W11: a session's row shows in its expanded project, expanded first, once the stub's records are in.
     const open = async (title: string) => {
       await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
       await (await sidebarRow(page, title)).click();
-      await expect(summary.getByRole('heading', { level: 2 })).toContainText(title);
+      const session = scenario.sessions.find((record) => record.title.text === title)!;
+      await expect(mainTabById(page, `session:${session.appId}`)).toHaveAttribute('aria-selected', 'true');
+      await expect(mainTabById(page, `session:${session.appId}`)).toContainText(title);
+      await unfoldSessionCard(page, 'Environment');
     };
 
     await test.step('this checkout: branch, change line and push state as git reports them', async () => {
       await open('Charter + research');
       const line = expectedChangeLine(REPO_ROOT);
       const push = expectedPush(REPO_ROOT);
-      await expect(section('Environment')).toContainText(`⎇ ${branch}`);
+      await expect(environment).toContainText(`⎇ ${branch}`);
       await expect(changeLine).toHaveText(line);
-      await expect(section('Push state')).toContainText(push);
+      await expect(environment).toContainText(push);
       Object.assign(observed, { checkout: { branch, line, push, revList: tryGit(REPO_ROOT, 'rev-list', '--count', '@{u}..HEAD') ?? 'no upstream' } });
     });
 
@@ -116,15 +118,15 @@ test('live: the summary over this repository matches git', async () => {
         shell.openExternal = async (url: string) => void opened.push(url);
       });
       await open('Fix sidebar drag');
-      await expect(section('Push state')).toContainText(expectedPush(clone)); // up to date with origin/<branch>
-      await section('Push state').getByRole('button', { name: 'Open on GitHub' }).click();
+      await expect(environment).toContainText(expectedPush(clone)); // up to date with origin/<branch>
+      await environment.getByRole('button', { name: 'Open on GitHub' }).click();
       await expect.poll(() => app.evaluate(() => (globalThis as { __opened?: string[] }).__opened)).toEqual([`https://github.com/${repository}/tree/${branch}`]);
       observed.openOnGitHub = (await app.evaluate(() => (globalThis as { __opened?: string[] }).__opened))?.[0];
 
       writeFileSync(join(clone, 'panel-live-note.txt'), 'scratch\n');
       fixtureGit(clone, 'add', 'panel-live-note.txt');
       fixtureGit(clone, '-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@maws.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'scratch');
-      await expect(section('Push state')).toContainText(expectedPush(clone));
+      await expect(environment).toContainText(expectedPush(clone));
       observed.cloneAhead = { push: expectedPush(clone), revList: git(clone, 'rev-list', '--count', '@{u}..HEAD') };
       await expect(changeLine).toHaveText('Clean');
 
@@ -141,7 +143,7 @@ test('live: the summary over this repository matches git', async () => {
 
     await test.step('a directory that is not a repository', async () => {
       await open('Sidebar interaction pass');
-      await expect(section('Environment')).toContainText('Not a git repository');
+      await expect(environment).toContainText('Not a git repository');
     });
     expect(maws.consoleErrors()).toEqual([]);
   } finally {

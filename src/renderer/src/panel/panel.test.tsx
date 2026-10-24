@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -215,6 +215,38 @@ describe('surface icons and same-tool tabs', () => {
     expect(useLayout.getState().panelSurfaces.pinnedTools).toEqual([]);
     expect(within(surfaceRow()).queryByRole('button', { name: 'Subagents' })).toBeNull();
     expect(pinIds()).toEqual([id]);
+  });
+
+  it('More surfaces can show, pin, unpin and close a saved unavailable tool without deleting its ref on hide', async () => {
+    const user = userEvent.setup();
+    const saved = ref('files:aaaaaaaa');
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [saved], activeTabId: null }]]) });
+    renderHost();
+    const openSavedMenu = async () => {
+      await user.click(icon('More surfaces'));
+      await user.click(await screen.findByRole('menuitem', { name: 'files (unavailable)' }));
+    };
+    await openSavedMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Show saved surface' }));
+    expect(screen.getByRole('tabpanel', { name: 'files' }).textContent).toBe('files is not available');
+    expect(panelOf(A)!.activeTabId).toBe(saved.id);
+    await openSavedMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Keep open for every session' }));
+    expect(pinIds()).toEqual([saved.id]);
+    expect(panelOf(A)!).toEqual({ tabs: [], activeTabId: saved.id });
+    await user.click(screen.getByRole('button', { name: 'Close surface' }));
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    expect(pinIds()).toEqual([saved.id]);
+    await openSavedMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Keep with this session only' }));
+    expect(pinIds()).toEqual([]);
+    expect(panelOf(A)!.tabs).toEqual([saved]);
+    await openSavedMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Close saved tab' }));
+    await waitFor(() => expect(panelOf(A)!.tabs).toEqual([]));
+    expect(panelOf(A)!.activeTabId).toBeNull();
+    await user.click(icon('More surfaces'));
+    expect(screen.queryByRole('menuitem', { name: 'files (unavailable)' })).toBeNull();
   });
 
   it('an unavailable tool keeps its placeholder, and a registered tool’s title suffix follows its own tab', () => {

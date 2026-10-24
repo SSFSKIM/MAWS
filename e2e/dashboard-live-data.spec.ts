@@ -324,12 +324,8 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         // `openSession` with `how: 'tab'`), so the dashboard's tab stays open rather than being replaced
         await (await sidebarRow(page, { appSessionId: engine.appSessionId })).click({ modifiers: ['Meta'] });
         await expect(tab.locator('.ds-doc').first()).toBeHidden();
-        await setPanel(page, true);
-        const panel = page.locator('[data-region="panel"]');
-        await panel.getByRole('button', { name: 'Add a tool' }).click();
-        await page.getByRole('menuitem', { name: 'Artifacts' }).click();
         const shownAt = Date.now();
-        const record = await openInPanel(page, id);
+        const record = await openInPanel(page, id, true);
         await nextCall(scene, shownAt);
         await drawsRows(liveViews(record), TRIALS, 'the dashboard in the panel');
         await wait(2_000);

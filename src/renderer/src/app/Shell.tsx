@@ -16,6 +16,7 @@ import { useShellGeometry, useShellView } from './shell-view';
 import { Resizer } from './Resizer';
 import { ToastHost } from './ToastHost';
 import { Toolbar } from './Toolbar';
+import { holdCover } from '../tools/browser/covering';
 
 export const SIDEBAR_REGION_ID = 'region-sidebar';
 export const MAIN_REGION_ID = 'region-main';
@@ -37,7 +38,7 @@ export function Shell() {
       <BannerHost className="col-span-2 row-start-2" />
       {geometry.sidebarAside && overlay && <button aria-label="Close sidebar overlay" onClick={() => useShellView.setState({ sidebarOverlay: false })} className="absolute inset-0 top-(--toolbar-h) z-30 bg-transparent" />}
       <SidebarRegion />
-      <section id={MAIN_REGION_ID} data-region="main" aria-label="Main" inert={geometry.mainHidden} className="relative col-start-2 row-start-3 flex min-h-0 min-w-0 flex-col overflow-hidden">
+      <section id={MAIN_REGION_ID} data-region="main" aria-label="Main" inert={geometry.mainHidden || geometry.sheet} className="relative col-start-2 row-start-3 flex min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" style={cards && room >= 960 ? { paddingRight: 304 } : undefined}>
           <MainArea />
           <OverviewLayer />
@@ -59,6 +60,8 @@ function SidebarRegion() {
   const persisted = useLayout((s) => s.regions.sidebar.width);
   const setSidebar = useLayout((s) => s.setSidebar);
   const floating = geometry.sidebarAside && overlay;
+  // The dismiss layer spans the content: native views must yield along with the DOM beneath it.
+  useEffect(() => floating ? holdCover() : undefined, [floating]);
   const hidden = geometry.sidebar === 0 && !floating;
   const width = floating ? Math.min(320, Math.max(240, persisted)) : geometry.sidebar;
   return (

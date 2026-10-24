@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { GitStatus } from '@shared/ipc/schema/git';
@@ -11,6 +12,8 @@ import { record } from '../../../../../../test/support/builders';
 import { loadSyntheticJournal } from '../../../../../../test/support/fixtures';
 import { connectPanelEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
+import { FloatingSummary } from '../../../panel/summary/Summary';
+import { queryClient } from '../../../ipc/query';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { fail, installFakeMain, ok } from '../../../test-support/code';
@@ -1000,8 +1003,10 @@ describe('review tool', () => {
     expect(panelOf(A)?.tabs).toHaveLength(1);
   });
 
-  it('fills Environment’s change line with the staged count, and opens Review from it', async () => {
-    render(<TestHost />);
+  it('fills the folded Environment card’s change line with the staged count, and opens Review from it', async () => {
+    render(<QueryClientProvider client={queryClient}><FloatingSummary appSessionId={A} /><TestHost /></QueryClientProvider>);
+    expect(screen.queryByTestId('change-line')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Environment/ }));
     await waitFor(() => expect(screen.getByTestId('change-line').textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged'));
     fireEvent.click(screen.getByTestId('change-line'));
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0 · Uncommitted'));

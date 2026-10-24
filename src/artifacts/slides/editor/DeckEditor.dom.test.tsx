@@ -501,6 +501,7 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
   const WIDE = { w: 1200, h: 800 };
   const NARROW = { w: 900, h: 800 };
 
+  // Approved layout-mockups/app.js:368 keeps at least 520 px beside the stack before cards become an overlay.
   it('fits the width left by all open floating cards without reserving a second column', () => {
     cardWidth = 288;
     const { container } = withHistory();

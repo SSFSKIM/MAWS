@@ -88,10 +88,10 @@ export const shownSession = (main: LayoutMain = layout().main): AppSessionId | n
 const selectionOf = (appSessionId: AppSessionId | null): string | null =>
   appSessionId === null ? layout().panelActiveNoSession : (layout().panelBySession.get(appSessionId)?.activeTabId ?? null);
 
-// P3-G (§D4.4): the panel tab the region shows over its body: the shown session's selection, else the no-session pin
-// selection (PanelRegion's own rule), for a caller outside React (Mark-up's start and its tab-switch ending).
+// The active tab within the panel's visible context, which can remain a session's while a document is in main.
+// This is distinct from `shownSession`: a foreground document supplies no chat for floating or mark-up delivery.
 export const selectedPanelTabId = (state: LayoutState = layout()): string | null => {
-  const shown = shownSession(state.main);
+  const shown = surfaceSession(state);
   return shown === null ? state.panelActiveNoSession : (state.panelBySession.get(shown)?.activeTabId ?? null);
 };
 
@@ -197,7 +197,7 @@ function writeRefs(appSessionId: AppSessionId | null, fn: (refs: PanelTabRef[]) 
   const current = selectionOf(appSessionId);
   const activeTabId = requested === null ? null : pinSelection(before, after, current, requested ?? current);
   if (appSessionId === null) l.setPanelTabs(null, { tabs: after, activeTabId });
-  else if (mounted && mounted.appSessionId === appSessionId && shownSession() === appSessionId) mounted.onChange({ tabs: after, activeTabId });
+  else if (mounted && mounted.appSessionId === appSessionId && surfaceSession(layout()) === appSessionId) mounted.onChange({ tabs: after, activeTabId });
   else if (requested === null) l.setPanelTabs(appSessionId, { tabs: after, activeTabId: null });
   else l.updatePanelTabs(appSessionId, fn, requested ? { activeTabId: requested } : undefined);
 }
@@ -205,7 +205,7 @@ function writeRefs(appSessionId: AppSessionId | null, fn: (refs: PanelTabRef[]) 
 // The writer for a change to the pins alone: the shown session's list when it has one (so its selection is written
 // with it), else the pins by themselves; no session gains a list for it.
 function pinWriter(): AppSessionId | null {
-  const shown = shownSession();
+  const shown = surfaceSession(layout());
   return shown !== null && layout().panelBySession.has(shown) ? shown : null;
 }
 
@@ -276,7 +276,7 @@ function reveal(): void {
 function activateIn(target: AppSessionId | null, tabId: string): void {
   if (target === null) {
     writeRefs(null, (refs) => refs, tabId);
-    if (shownSession() === null) requestFocus(tabId);
+    if (surfaceSession(layout()) === null) requestFocus(tabId);
     reveal();
     return;
   }
@@ -337,7 +337,7 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   // single-instance tool finds this tab rather than making a second one.
   writeRefs(target, (refs) => [...refs, ref], activate ? tabId : undefined);
   if (activate && target !== null && surfaceSession(layout()) !== target) layout().openSession(target);
-  if (activate && (target !== null || shownSession() === null)) requestFocus(tabId);
+  if (activate && (target !== null || surfaceSession(layout()) === null)) requestFocus(tabId);
   if (activate) reveal();
   return tabId;
 }
@@ -426,7 +426,7 @@ export function connectPanelHost(): () => void {
     // P4-B3x: not when the panel opens because an Expand that folded it ended: the dock hands the keyboard to the
     // session's composer (P4-B3's Decision Log 7), which a tool taking it here would undo.
     if (prev.regions.panel.collapsed && !state.regions.panel.collapsed && !foldEnded(prev.main, state.main)) {
-      const selected = selectionOf(shownSession());
+      const selected = selectionOf(surfaceSession(layout()));
       if (selected !== null) requestFocus(selected);
     }
   });
@@ -466,7 +466,7 @@ export function setMountedHost(props: Pick<PanelHostProps, 'appSessionId' | 'onC
 // selections are repaired.
 export function togglePinned(id: string): void {
   const tabId = resolveId(id);
-  const shown = shownSession();
+  const shown = surfaceSession(layout());
   if (shown === null) return;
   const toggle = () => {
     if (mounted && mounted.appSessionId === shown) mounted.onTogglePinned(tabId);
@@ -518,7 +518,7 @@ export const panelHost = {
     const tabId = resolveId(id);
     const at = locate(tabId);
     if (!at) return;
-    const shown = shownSession();
+    const shown = surfaceSession(layout());
     const owner = at.pinned ? shown : at.appSessionId;
     writeRefs(owner, (refs) => refs, tabId);
     if (focus && owner === shown) requestFocus(tabId);
@@ -556,7 +556,7 @@ export const panelHost = {
     return closing;
   },
   showSummary(): void {
-    const shown = shownSession();
+    const shown = surfaceSession(layout());
     if (selectionOf(shown) !== null) writeRefs(shown, (refs) => refs, null);
   },
   tools(): PanelTool<unknown, unknown>[] {

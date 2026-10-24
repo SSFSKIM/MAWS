@@ -14,5 +14,7 @@ export function shellGeometry(regions: LayoutRegions, width: number, hasSurface:
   const preferred = regions.panel.width === 380 ? Math.round(room * (wide ? 0.6 : 0.4)) : regions.panel.width;
   const panel = !open ? 0 : mainHidden ? room : sheet ? Math.max(280, width - 24) : Math.max(280, Math.min(panelMax, wide ? preferred : Math.min(420, preferred)));
   const columns = mainHidden ? `${sidebar}px 0px minmax(0, 1fr)` : `${sidebar}px minmax(0, 1fr) ${sheet ? 0 : panel}px`;
-  return { sidebar, sidebarAside, sheet, mainHidden, panel, panelMax, columns };
+  // A normal surface owns the full-height right column; sheets and expanded surfaces leave the chrome across the window.
+  const chrome = sheet || mainHidden ? width : width - panel;
+  return { sidebar, sidebarAside, sheet, mainHidden, panel, panelMax, columns, chrome };
 }

@@ -18,6 +18,7 @@
 // same recordings with the ask's arguments rewritten (`askFixture`, which says why the replay still holds).
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
+import { surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
@@ -521,8 +522,8 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await show(s, id);
     await replay(s, id, SHOW_PANE);
     await allowNext(s, id); // terminal (seq 68)
-    const terminalTab = s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ });
-    await expect(terminalTab).toHaveAttribute('aria-selected', 'true');
+    const terminalSurface = surface(s.page, 'terminal');
+    await expect(terminalSurface).toBeVisible();
     await allowNext(s, id); // artifact (seq 85; the recording's deliverable, renamed in the derived fixture)
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
@@ -593,7 +594,7 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
     // a click: the panel's Artifacts tool on its record, the transcript still in front
     await chip('Linked plan').click();
     await expect(s.panel.locator(`[data-artifact-record="${artifact.id}"]`)).toBeVisible();
-    await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(surface(s.page, 'artifacts')).toBeVisible();
     await expect(chip('Linked plan')).toBeVisible();
 
     // an id no record answers to: the record's not-found notice in its body, its title in the panel's header, as the tool
@@ -606,7 +607,7 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
     // ⌘-click: the artifact in a main tab of its own
     await chip('Linked plan').click({ modifiers: ['Meta'] });
     await expect(s.page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`)).toBeVisible();
-    await expect(s.page.locator(`[data-region="main"] [role="tab"][data-tab-id="artifact:${artifact.id}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(mainTabById(s.page, `artifact:${artifact.id}`)).toHaveAttribute('aria-selected', 'true');
   });
 });
 

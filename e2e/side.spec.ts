@@ -25,6 +25,7 @@ import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SID
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
+import { closeSurface, hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -184,17 +185,14 @@ const panelRegion = (page: Page) => page.locator('[data-region="panel"]');
 async function showSession(page: Page, id: string): Promise<void> {
   await (await sidebarRow(page, { appSessionId: id })).click();
   await page.mouse.move(700, 450); // off the sidebar: its hover card would cover what follows
-  await expect(mainRegion(page).locator(`[role="tab"][data-tab-id="session:${id}"]`)).toHaveAttribute('aria-selected', 'true');
+  await expect(mainTabById(page, `session:${id}`)).toHaveAttribute('aria-selected', 'true');
 }
 
 // Files in the panel, the repository expanded down to `relative`, and its tab opened; answers the viewer.
 async function openFile(page: Page, repo: ScratchRepo, relative: string): Promise<Locator> {
-  const panel = panelRegion(page);
-  if ((await panel.locator('[data-tool="files"]').count()) === 0) {
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Files' }).click();
-  }
-  const row = (path: string) => panel.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
+  await openSurface(page, 'Files');
+  const files = surface(page, 'files');
+  const row = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
   let at = repo.root;
   for (const segment of ['', ...relative.split('/').slice(0, -1)]) {
     at = segment ? `${at}/${segment}` : at;
@@ -242,6 +240,7 @@ async function openThreadFromGutter(c: Case & { parent: string }): Promise<{ chi
   const child = await sideThreadOf(page, c.parent, 'comment');
   const pane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
   await expect(pane, 'the Side pane opens on the new thread').toBeVisible();
+  await closeSurface(page, 'Files');
   await expect(pane.getByText(CHILD_REPLY)).toBeVisible({ timeout: 20_000 });
   return { child, pane, viewer };
 }
@@ -362,7 +361,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // the head's label opens the file at the line, in the parent's context
     await threadPane.getByRole('button', { name: 'Open app.ts:3' }).click();
-    await expect(mainRegion(page).locator(`[role="tab"][data-tab-id="file:${repo.path(APP)}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(mainTabById(page, `file:${repo.path(APP)}`)).toHaveAttribute('aria-selected', 'true');
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -385,7 +384,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // Open as tab: the main area shows the thread; the pane says so instead of drawing a second one
     await thread.getByRole('button', { name: 'Open as tab' }).click();
-    const tab = mainRegion(page).locator(`[role="tab"][data-tab-id="session:${child}"]`);
+    const tab = mainTabById(page, `session:${child}`);
     await expect(tab).toHaveAttribute('aria-selected', 'true');
     await expect(mainRegion(page).getByText(CHILD_REPLY)).toBeVisible();
     // the panel follows the shown session (now the thread): back to the parent's tab to see its pane
@@ -711,7 +710,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       };
 
       // the sheet, over the file's tab
-      await main.locator(`[role="tab"][data-tab-id="file:${repo.path(APP)}"]`).click();
+      await mainTabById(page, `file:${repo.path(APP)}`).click();
       const open = await commentOn(page, viewer, 3);
       await open.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
       await shoot(open, 'comment-sheet');
@@ -764,11 +763,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
   // ---- P2-E1 (M2): the comment card's thread (P2-E1 document, acceptance 3, 4 and 5) ----------------------------------
 
-  test('9. a comment on a delivered page’s element becomes its side thread in the card: the comment row and the reply with no parent history above them, the Artifacts tab still selected and no Side tab; Reply while idle reaches the thread and nothing reaches the parent', async () => {
+  test('9. a comment on a delivered page’s element becomes its side thread in the card: the comment row and the reply with no parent history above them, the Artifacts surface still open and no Side surface; Reply while idle reaches the thread and nothing reaches the parent', async () => {
     test.setTimeout(150_000);
     const c = await begin((cwd, dir) => [parentJournal(cwd).write(dir, 'parent'), threadJournal(CHILD, cwd, HERO, [CARD_REPLY, CARD_REPLY_2]).write(dir, 'thread')]);
     const { page, maws, parent } = c;
-    const { card, tools } = await commentOnHeading(c);
+    const { card } = await commentOnHeading(c);
     await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
     await card.getByRole('button', { name: 'Send' }).click();
 
@@ -790,8 +789,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(toolbarBox.x, 'the toolbar’s left inside the card').toBeGreaterThanOrEqual(cardBox.x);
     expect(toolbarBox.x + toolbarBox.width, 'its right inside the card').toBeLessThanOrEqual(cardBox.x + cardBox.width);
     await page.mouse.move(1, 1);
-    await expect(tools.getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
-    await expect(tools.getByRole('tab', { name: /^Side/ }), 'no Side tab').toHaveCount(0);
+    await expect(surface(page, 'artifacts')).toBeVisible();
+    await expect(surface(page, 'side'), 'no Side surface').toHaveCount(0);
     await expect(page.getByText('Side thread opened in the panel of', { exact: false })).toHaveCount(0);
     const first = writtenUsers(maws, child);
     expect(first).toHaveLength(1);
@@ -871,7 +870,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
   // ---- P2-E1 (M3): re-dock and re-pin (P2-E1 document, acceptance 6 and 4's last sentence) ------------------------------
 
-  test('11. a thread moved to the Side pane and answered there comes back with “Show in artifact”: the Artifacts tab selected, the card in thread phase pinned under the heading it found again, kept open, and still pinned after a Reload', async () => {
+  test('11. a thread moved to the Side pane and answered there comes back with “Show in artifact”: the Artifacts surface open, the card in thread phase pinned under the heading it found again, kept open, and still pinned after a Reload', async () => {
     test.setTimeout(150_000);
     const c = await begin((cwd, dir) => {
       const thread = new SideJournal(CHILD, cwd);
@@ -883,7 +882,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       return [parentJournal(cwd).write(dir, 'parent'), thread.write(dir, 'thread')];
     });
     const { page, maws, parent } = c;
-    const { card, tools } = await commentOnHeading(c);
+    const { card } = await commentOnHeading(c);
     await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
     await card.getByRole('button', { name: 'Send' }).click();
     await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
@@ -902,7 +901,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // Show in artifact: the parent's Artifacts tool on the artifact, the card back on the same thread under the heading
     await pane.getByRole('button', { name: 'Show in artifact' }).click();
-    await expect(tools.getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(surface(page, 'artifacts')).toBeVisible();
+    await closeSurface(page, 'Side');
     const viewer = panelRegion(page).locator('[data-artifact-viewer]');
     const redocked = viewer.locator('[data-comment-card]');
     await expect(redocked).toHaveAttribute('data-card-phase', 'thread');
@@ -939,7 +939,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // read it and publish over it
     const c = await begin((cwd, dir) => [pageParentJournal(cwd).write(dir, 'parent'), updateJournal(cwd, {}).write(dir, 'thread')]);
     const { page, maws, parent, repo } = c;
-    const { card, tools, record } = await commentOnHeading(c, await parentPage(page, parent));
+    const { card, record } = await commentOnHeading(c, await parentPage(page, parent));
     updateJournal(repo.root, { status: 'published', id: 'dash', deliverableId: record.id, version: 2, title: 'Dashboard', changed: ['index.html'], ownerAppSessionId: parent }).write(c.journals, 'thread');
     await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
     await card.getByRole('button', { name: 'Send' }).click();
@@ -1011,8 +1011,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(hero).toHaveText(HERO_V2);
     await expect(card).toHaveAttribute('data-card-phase', 'thread');
     await expect.poll(() => pinnedUnder(hero, card), { message: 'pinned under the v2 heading again', timeout: 10_000 }).toBe(true);
-    await expect(tools.getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
-    await expect(tools.getByRole('tab', { name: /^Side/ })).toHaveCount(0);
+    await expect(surface(page, 'artifacts')).toBeVisible();
+    await expect(surface(page, 'side'), 'no Side surface').toHaveCount(0);
     expect(writtenUsers(maws, parent), 'the main conversation received nothing').toHaveLength(1);
     await shootCard(maws, viewer, 'card-thread-updated');
     expect(maws.consoleErrors()).toEqual([]);
@@ -1149,18 +1149,15 @@ const CARD_REPLY_2 = 'The subtitle stays at 16 px.';
 const CARD_UPDATED = 'The heading now reads “Sales overview, larger” at 48 px: version 2 of the page.';
 
 // The parent's page seeded as a pre-P3 deliverable (X12's layout, imported as the host imports it at start: P3-L M6b),
-// opened in the panel's Artifacts tool, Comment, the heading clicked: answers the card (composing), the panel's tool
-// strip and the seeded page. `existing`: the page when the parent made it (P3-A M6), else one is seeded.
-async function commentOnHeading(c: Case & { parent: string }, existing?: { id: string }): Promise<{ card: Locator; tools: Locator; record: { id: string } }> {
+// opened through Library and Show in panel, then Comment and the heading clicked: answers the composing card and the
+// seeded page. `existing`: the page when the parent made it (P3-A M6), else one is seeded.
+async function commentOnHeading(c: Case & { parent: string }, existing?: { id: string }): Promise<{ card: Locator; record: { id: string } }> {
   const { page, maws, parent } = c;
   const record = existing ?? seedArtifact(maws.userData, parent as AppSessionId, 'dash', 'Dashboard', [HEADING_PAGE]);
   if (!existing) await importSeeded(page);
-  const panel = panelRegion(page);
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  // the session's list was read (empty) before the record was seeded under the parent's runtime id; All reads anew
-  await panel.getByRole('group', { name: 'Show artifacts of' }).getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifacts-list] [data-artifact-row][data-artifact-id="${record.id}"]`).click();
+  await hideSurfaces(page);
+  await openArtifactInPanel(page, record.id);
+  const panel = surface(page, 'artifacts');
   const viewer = panel.locator('[data-artifact-viewer]');
   const frame = await frameAt(page, await pageUrlOf(page, record.id, 1));
   await expect(frame.locator('#hero')).toHaveText('Sales overview');
@@ -1171,5 +1168,5 @@ async function commentOnHeading(c: Case & { parent: string }, existing?: { id: s
   const card = viewer.locator('[data-comment-card]');
   await expect(card).toHaveAttribute('data-card-phase', 'composing');
   await expect(card).toHaveAttribute('data-anchor-locator', '#hero');
-  return { card, tools: panel.getByRole('tablist', { name: 'Panel tools' }), record };
+  return { card, record };
 }

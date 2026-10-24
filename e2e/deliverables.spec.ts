@@ -23,6 +23,7 @@
 // under docs/doperpowers/evidence/p1-e2/ (`e2-<surface>-<theme>.png`).
 // Runs under `pnpm e2e:deliverables` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
+import { surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -924,7 +925,7 @@ test('show_pane: a target no record answers to is the model’s error; an artifa
     await allowNext(s, seeded); // artifact "none": the viewer opens on the artifact
     const viewer = viewerOf(s.panel);
     await expect(viewer).toHaveAttribute('data-artifact-viewer', none.id);
-    await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(surface(s.page, 'artifacts')).toBeVisible();
     await expect((await frameAt(s.page, await pageUrlOf(s.page, none.id))).locator('#heading')).toHaveText('RELEASE_NOTES');
     await allowNext(s, seeded); // nope
     await idle(s, seeded);
@@ -974,8 +975,8 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
     const comment = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true });
     const hint = viewer.locator('[data-picking]');
-    const tools = s.panel.getByRole('tablist', { name: 'Panel tools' });
-    const artifactsTab = tools.getByRole('tab', { name: /Artifacts/ });
+    const tools = surfaceRow(s.page);
+    const artifactsSurface = surface(s.page, 'artifacts');
 
     // Escape while picking ends picking; the viewer, the panel's tab and the session's composer stay as they were
     await comment.click();
@@ -985,7 +986,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(hint).toHaveCount(0);
     await expect(comment).toHaveAttribute('aria-pressed', 'false');
     await expect(viewer).toHaveAttribute('data-artifact-viewer', record.id);
-    await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(artifactsSurface).toBeVisible();
     await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
 
     // with the console popover open over a picking viewer, one Escape closes the popover alone
@@ -1003,7 +1004,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await s.page.mouse.move(box.x + 60, box.y + 30);
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
     await shoot(s, 'comment-picking', () => s.page.mouse.move(box.x + 61, box.y + 31));
-    const mainTabs = s.page.locator('[data-region="main"] [role="tab"]');
+    const mainTabs = shellMainTabs(s.page).getByRole('tab');
     const mainTabsBefore = await mainTabs.count();
     await s.page.mouse.click(box.x + 60, box.y + 30);
     const card = viewer.getByRole('dialog', { name: 'Comment on Dashboard v1 › h1#hero “Sales overview”' });
@@ -1016,8 +1017,8 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(s.page.locator('[data-comment-composer]')).toHaveCount(0);
     await expect(hint).toHaveCount(0); // one pick per Comment
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(0);
-    await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
-    await expect(tools.getByRole('tab', { name: /^Side/ })).toHaveCount(0);
+    await expect(artifactsSurface).toBeVisible();
+    await expect(s.panel.getByRole('tab', { name: /^Side/ }).or(tools.getByRole('button', { name: /^Side/ }))).toHaveCount(0);
     await expect(mainTabs).toHaveCount(mainTabsBefore);
 
     // its box: 4 px under the heading's bottom edge, at its left, 300 px wide, inside the viewer's body
@@ -1044,7 +1045,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await s.page.keyboard.press('Escape');
     await expect(card).toHaveCount(0);
     await expect(comment).toBeFocused();
-    await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(artifactsSurface).toBeVisible();
 
     // the same pick in the artifact's main tab opens the card inside that tab's viewer
     await s.panel.getByRole('button', { name: 'Move to tab' }).click();
@@ -1136,7 +1137,7 @@ test('a relaunch over the same profile lists every deliverable; the All scope sh
       // the panel comes back as it was (the Artifacts tool on the viewer), or the tool is opened afresh
       const list = listOf(second);
       const viewer = viewerOf(second.panel);
-      await expect(list.or(viewer).or(second.panel.getByRole('button', { name: 'Add a tool' })).first()).toBeVisible();
+      await expect(list.or(viewer).or(surfaceRow(second.page)).first()).toBeVisible();
       if (await viewer.isVisible()) await second.panel.getByRole('button', { name: 'Back' }).click();
       else if (!(await list.isVisible())) await openArtifacts(second);
       await expect(list.locator('[data-artifact-row] [data-part="title"]')).toHaveText(['Dashboard', 'hello.txt'], { timeout: 20_000 });
