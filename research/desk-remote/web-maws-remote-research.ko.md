@@ -26,7 +26,7 @@
 | [background-work-handoff.md](background-work-handoff.md) | 세션을 옮길 때 백그라운드 셸·서브에이전트·Monitor·MCP 작업·cron이 어떻게 되는가, headless가 인계를 받는가(2.1.307) |
 | [holder-tui-spike.md](holder-tui-spike.md) | 우리 PTY holder 아래의 plain Claude: 관리자 SIGKILL 생존, 다시 그리기, 두 클라이언트, Ctrl+Z, 엔진 PTY host 설계 발췌(2.1.307–2.1.308) |
 | [reap-signal-spike.md](reap-signal-spike.md) | SIGTERM과 `/exit`으로 끝낼 때의 차이, 턴 시작을 mod가 어디서 붙잡을 수 있는가(2.1.308) |
-| [session-holder-design.ko.md](session-holder-design.ko.md) | 설계 초안: 터미널 세션을 holder가 쥐는 구조와 SDK 경로, "GUI 모드로 이어 가기" |
+| [session-holder-design.ko.md](session-holder-design.ko.md) | 설계 초안: MAWS·웹 세션(`claude -p`)의 프로세스를 claude-ssh 방식으로 쥐는 holder. 터미널 세션은 bridge mod로만(F7) |
 
 desk 설계 문서(spec)는 MAWS `48fec4bd1`의 `docs/doperpowers/specs/2026-10-15-desk-design.md`다.
 
@@ -373,7 +373,7 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
 | 프로세스 소유 | 엔진 supervisor, 또는 사람의 터미널 | E10 supervisor (MAWS) |
 | 통제자 | bridge mod | MAWS 데몬 (stdio 제어 요청) |
 | plane의 seq를 매기는 곳 | sminos 데몬 (bridge 구독에서) | MAWS 데몬 (supervisor의 seq와 링) |
-| 제어 폭 | mod API와 slash 명령. 나머지는 웹 터미널(§3.6) | MAWS X2 세션 명령 전부 |
+| 제어 폭 | mod API와 slash 명령. 이 폭을 넓힌다(2026-10-24 F7) | MAWS X2 세션 명령 전부 |
 | 서브에이전트 토큰 델타 | `turn.step` | SDK wire에 없다. 관찰 전용 bridge가 준다(아래) |
 | 쓸 수 있는 기계 | 모든 기계 | MAWS 데몬이 도는 기계 |
 
@@ -384,7 +384,7 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
     웹 쪽 공유 패키지에 둔다. spec이 이미 그 자리에 두었고(spec §2 Web client), X1 타입이 TypeScript다.
     hub가 내용을 읽지 않는 한(§7 hub 저장 (a), (b)) 전송 어휘를 하나로 맞춰 얻는 것이 적다. 대안이 나아지는
     조건: hub 저장을 (c) caching proxy로 정하면 기계 쪽에서 X1로 바꿔 보낸다.
-  - 세션마다 capability 목록을 낸다. snapshot에 경로와, X2 세션 명령마다 `gui | terminal | none`을 싣는다.
+  - 세션마다 capability 목록을 낸다. snapshot에 경로와, X2 세션 명령마다 `gui | none`을 싣는다.
     웹은 경로 이름이 아니라 이 목록을 보고 조작을 그린다. mod API가 넓어지면 경로 A의 목록만 바뀐다.
   - 의미가 다른 동작은 다르다고 보여 준다.
     - 권한 답: 경로 A는 터미널 dialog와 경합하고 먼저 답한 쪽이 이긴다. 경로 B는 MAWS broker의 답이 유일하다.
@@ -402,6 +402,8 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
   id는 그대로이고, launch epoch가 바뀌어 시청자는 snapshot을 받는다.
   - B → A ("터미널에서 쥐기"): MAWS가 세션을 멈추고 `claude --bg --resume <id>`. 그 뒤 `claude attach`.
   - A → B ("GUI 전체 제어로 열기"): `control.sock`의 `kill`로 job을 멈추고 MAWS가 `--resume`.
+    (2026-10-24 owner 결정 F7: 살아 있는 터미널 세션은 B로 옮기지 않는다. 프로세스가 끝난 세션을 B로 다시 여는 것만
+    남는다. [holder 설계](session-holder-design.ko.md) §3.5.)
   - 터미널 세션 → A: `/background`. mod의 `$.command.run`으로도 되지만, 멈출 일이 있으면 확인 dialog가 사람의
     터미널에서 Enter를 기다린다(2026-10-21 측정).
   - 두 번째 소유자는 기계가 막는다. resume 전에 엔진 레지스트리(`~/.claude/sessions/<pid>.json`)로 살아 있는
@@ -420,7 +422,7 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
   - **끊긴 턴은 headless에서도 이어진다.** 첫 resume에 `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`을 주면 끊긴 턴을
     프롬프트부터 다시 돌린다(돌던 명령은 처음부터). 첫 resume에 빠뜨리면 그 턴은 합성 답으로 닫혀 다시 이을 수
     없다. 그러니 idle까지 기다릴 필요는 없고, 기다려야 하는 것은 백그라운드 일이다.
-  - **권고 절차.** 터미널 세션을 넘겨받을 때는 먼저 `/background`로 job으로 옮긴다(경로 A). 돌던 일은 거기서
+  - **권고 절차** (2026-10-24 F7 뒤로는 쓰지 않는다. 기록으로 둔다). 터미널 세션을 넘겨받을 때는 먼저 `/background`로 job으로 옮긴다(경로 A). 돌던 일은 거기서
     계속된다. GUI 전체 제어(경로 B)가 필요하면 job의 일이 비었을 때(`jobs/<short>/state.json`의 `fan`이 비고
     `inFlight`에 `session_cron`만 남을 때) `claude stop` 뒤 `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`로 headless
     resume한다. `/background`가 session id를 새로 만들므로 웹은 새 id를 따라간다.
@@ -430,13 +432,12 @@ owner는 `--bg` 세션과 MAWS의 SDK 세션을 모두 웹에 내주기로 했�
     `adopt.json`을 직접 쓰는 것은 권하지 않는다.
   - **경로 B 세션은 프로세스를 holder가 쥐고 있는 한 이 문제가 없다.** 일은 같은 프로세스 안에서 계속된다.
     그래서 Query를 재시작해도 프로세스는 건드리지 않는 holder 분리가 중요하다.
-  - **옮기지 않는 길 (설계 초안, 2026-10-22).** 사람이 치는 `claude`가 처음부터 우리 PTY holder 안에서 돌면
-    옮길 일이 없다. 사람의 터미널은 그 PTY에 붙은 클라이언트이고, 웹은 같은 프로세스에 bridge mod로만 붙는다.
-    웹 터미널 창은 두지 않는다. 조작성은 좋지만 raw 키 바이트가 hub를 지나 sminos·MAWS 구조를 깨기 때문이다
-    (owner 결정, 2026-10-23). 백그라운드 일은 프로세스가 그대로이므로 모두 남는다. 설계는
-    [session-holder-design.ko.md](session-holder-design.ko.md),
-    사실 근거는 [holder-tui-spike.md](holder-tui-spike.md)다.
-    `/background` 절차는 holder 밖에서 시작된 세션에만 남는다.
+  - **옮기지 않는다 (owner 결정 F7, 2026-10-24).** 터미널에서 띄운 세션은 bridge mod로만 제어하고 그 한계를
+    받아들인다. 살아 있는 프로세스를 경로 B로 옮기지 않고, 대신 mod 쪽 제어 표면을 최대한 넓힌다. 웹 터미널 창도
+    두지 않는다. 조작성은 좋지만 raw 키 바이트가 hub를 지나 sminos·MAWS 구조를 깨기 때문이다(F5, 2026-10-23).
+    한때 설계한 "사람의 `claude`를 처음부터 우리 PTY holder 안에서 띄우는 길"(2026-10-22)도 함께 버렸다. holder는
+    경로 B의 pipe 세션만 쥐고 MAWS engine host에 흡수된다(F3 개정).
+    [session-holder-design.ko.md](session-holder-design.ko.md)가 지금의 설계다.
 - **웹에서 새로 띄우는 세션 (권고).** MAWS 데몬이 도는 기계에서는 경로 B로 띄운다. MAWS가 기능의 기준이고,
   그 기능을 GUI로 다 주는 것은 경로 B뿐이다. MAWS 데몬이 없는 기계(Linux, devcloud)나 사람이 "터미널에서
   쥘 세션"을 고른 경우에는 경로 A(`claude --bg`)로 띄운다.
