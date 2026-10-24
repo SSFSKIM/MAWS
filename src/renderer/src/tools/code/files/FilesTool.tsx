@@ -242,8 +242,8 @@ function TreeList({
   const scrolledByOwner = () => void (pending.current = null);
   return (
     <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
-      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-        <div role="tree" aria-label={FILES_COPY.title}>
+      <div className="relative w-full">
+        <div role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
             return (

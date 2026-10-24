@@ -1459,7 +1459,9 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await expect(panel.summary).toBeVisible();
       await expect(panel.region.locator('[data-editor-header]')).toHaveCount(0);
       await panel.call('addTool', 'harness-stub');
-      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
+      // A multi-instance plain tool is named by its selected tab, not a duplicate metadata title.
+      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
+      await expect(stubHeader.locator('[data-header-title]')).toHaveCount(0);
       for (const name of ['Float conversation over surface', 'Expand surface', 'Close surface']) await expect(stubHeader.getByRole('button', { name })).toBeVisible();
     });
 
@@ -1518,7 +1520,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
       // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes.
       await openSurface(panel.page, 'Stub');
       await closeSurface(panel.page, 'Editor'); // Close surface hides, rather than discarding the guarded editor ref.
-      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
+      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
       await expect(surface(panel.page, 'harness-editor')).toHaveCount(0);
       expect(await panel.call('closeTab', editor), 'the inactive ref’s guard vetoes').toBe(false);
       expect(await panel.ids()).toContain(editor);
@@ -1526,7 +1528,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await setEditor({ allowClose: true });
       expect(await panel.call('closeTab', editor), 'the confirmed close releases the editor').toBe(true);
       await expect.poll(() => panel.ids()).not.toContain(editor);
-      await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
+      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
     });
     panel.expectQuietConsole();
   });

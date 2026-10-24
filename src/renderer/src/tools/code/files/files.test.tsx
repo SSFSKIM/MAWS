@@ -365,6 +365,24 @@ describe('files tool', () => {
 
   const openTool = (params?: { path?: string; line?: number }) => act(() => void panelHost.addTool('files', { appSessionId: A, params }));
 
+  it('gives the semantic tree its virtual content extent as directories expand and collapse, with Refresh outside it', async () => {
+    render(<TestHost />);
+    openTool();
+    await waitFor(() => expect(items()).toHaveLength(5));
+    const tree = screen.getByRole('tree', { name: FILES_COPY.title });
+    const extent = () => Number.parseFloat(tree.style.height);
+    const initial = extent();
+    expect(initial).toBeGreaterThan(0);
+    expect(tree.contains(screen.getByRole('button', { name: FILES_COPY.refresh }))).toBe(false);
+    fireEvent.click(item('src'));
+    await waitFor(() => expect(items()).toHaveLength(7));
+    expect(extent()).toBeGreaterThan(initial);
+    fireEvent.click(item('r'));
+    await waitFor(() => expect(items()).toHaveLength(2));
+    expect(extent()).toBeGreaterThan(0);
+    expect(extent()).toBeLessThan(initial);
+  });
+
   it('opens the project root immediately, keeps additional roots lazy, and preserves a deliberate collapse on refresh and remount', async () => {
     const mounted = render(<TestHost />);
     openTool();
@@ -521,7 +539,7 @@ describe('files tool', () => {
       },
       set(this: HTMLElement, value: number) {
         if (!this.hasAttribute('data-files-scroller')) return scrollTop.set!.call(this, value);
-        const content = parseFloat((this.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0;
+        const content = parseFloat(this.querySelector<HTMLElement>('[role="tree"]')?.style.height ?? '0') || 0;
         offsets.set(this, Math.max(0, Math.min(value, content - 600)));
       },
     });
