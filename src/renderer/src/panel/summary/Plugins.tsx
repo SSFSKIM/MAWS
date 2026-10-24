@@ -31,14 +31,14 @@ function Header({ appSessionId, loaded, freshness }: { appSessionId: AppSessionI
   );
 }
 
-export function Plugins({ appSessionId }: { appSessionId: AppSessionId }) {
+export function Plugins({ appSessionId, embedded = false }: { appSessionId: AppSessionId; embedded?: boolean }) {
   const status = useTranscriptStore((s) => s.entries[appSessionId]?.state.pluginStatus);
   const lines = useMemo(() => (status ? pluginLines(status) : []), [status]);
   const { plugins, freshness } = useLoadedPlugins(appSessionId); // P2-A
   const loaded = plugins.length;
   if (lines.length === 0 && loaded === 0) return null;
-  return (
-    <Section id="plugins">
+  const body = (
+    <>
       {loaded > 0 && <Header appSessionId={appSessionId} loaded={loaded} freshness={freshness} />}
       {lines.map(({ plugin, text }) => {
         const line = PLUGIN.status(plugin, text);
@@ -50,6 +50,7 @@ export function Plugins({ appSessionId }: { appSessionId: AppSessionId }) {
           </Row>
         );
       })}
-    </Section>
+    </>
   );
+  return embedded ? <div className="flex flex-col gap-1 border-t border-border pt-2">{body}</div> : <Section id="plugins">{body}</Section>;
 }

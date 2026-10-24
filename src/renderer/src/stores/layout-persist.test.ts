@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type LayoutRegions, type PanelSurfaces, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
 import { currentSet } from './layout-model';
 
 const A = 'app-a' as AppSessionId;
+const surfaceState = (contexts: PanelSurfaces['contexts'] = {}): PanelSurfaces => ({ version: 1, stacks: {}, pinnedTools: [], contexts });
 
 // A store persisting through a fake main whose layout.json holds the three fixed keys at their defaults, then `values`
 // (an `undefined` value leaves that key out).
@@ -114,9 +115,12 @@ describe('layout persistence', () => {
       [X]: { panes: [{ tabs: [tab('x1')], activeTabId: 'session:x1' }, { tabs: [tab('x2')], activeTabId: 'session:x2' }], focusedPane: 0, splitRatio: 0.4 },
     });
     expect(main.closedTabs).toEqual([tab('x3')]);
-    expect(sets()).toEqual([{ key: 'main.tabs', value: main }]);
-    // the next launch reads version 2 as it is and writes nothing
-    const again = setup({ 'main.tabs': main });
+    expect(sets()).toEqual([
+      { key: 'main.tabs', value: main },
+      { key: 'panelTools.surfaces', value: surfaceState({ [Y]: 'y1' as AppSessionId }) },
+    ]);
+    // the next launch reads version 2 and the remembered surface context as they are and writes nothing
+    const again = setup({ 'main.tabs': main, 'panelTools.surfaces': store.getState().panelSurfaces });
     await again.hydrate((id) => id in projects, (id) => projects[id] ?? null);
     expect(again.store.getState().main).toEqual(main);
     vi.advanceTimersByTime(1000);
@@ -188,7 +192,7 @@ describe('layout persistence', () => {
       const again = setup({ 'main.tabs': clone(main), regions: clone(regions) });
       await again.hydrate();
       expect([again.store.getState().main, again.store.getState().regions]).toEqual([main, regions]);
-      expect(again.sets(), 'nothing to write back').toEqual([]);
+      expect(again.sets(), 'only the additive surface context is materialized').toEqual([{ key: 'panelTools.surfaces', value: surfaceState({ [NO_PROJECT]: A }) }]);
       again.store.getState().dockSplit();
       vi.advanceTimersByTime(1000);
       expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
@@ -341,8 +345,11 @@ describe('layout persistence', () => {
     await hydrate();
     store.getState().setPanelTabs(null, { tabs: store.getState().panelPinned, activeTabId: 'p2' });
     vi.advanceTimersByTime(1000);
-    expect(sets()).toEqual([{ key: 'panelTools.activeNoSession', value: { version: 1, activeTabId: 'p2' } }]);
-    const again = setup({ 'panel.pinned': pins, 'panelTools.activeNoSession': sets()[0].value });
+    expect(sets()).toEqual([
+      { key: 'panelTools.activeNoSession', value: { version: 1, activeTabId: 'p2' } },
+      { key: 'panelTools.surfaces', value: { ...surfaceState(), stacks: { '@none': ['p2'] } } },
+    ]);
+    const again = setup({ 'panel.pinned': pins, ...Object.fromEntries(sets().map(({ key, value }) => [key, value])) });
     await again.hydrate();
     expect(again.store.getState().panelActiveNoSession).toBe('p2');
     vi.advanceTimersByTime(1000);
@@ -454,9 +461,12 @@ describe('the reader’s write-back of main.tabs', () => {
     const written = sets().filter((s) => s.key === 'main.tabs');
     expect(written).toEqual([{ key: 'main.tabs', value: store.getState().main }]);
     vi.advanceTimersByTime(1000);
-    expect(sets()).toHaveLength(1);
+    expect(sets()).toEqual([
+      ...written,
+      { key: 'panelTools.surfaces', value: surfaceState({ [NO_PROJECT]: A }) },
+    ]);
     warn.mockClear();
-    const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(written[0].value)) });
+    const again = setup(JSON.parse(JSON.stringify(Object.fromEntries(sets().map(({ key, value }) => [key, value])))) as Record<string, unknown>);
     await again.hydrate((id) => id === A);
     vi.advanceTimersByTime(1000);
     expect(again.sets()).toEqual([]);
@@ -467,7 +477,7 @@ describe('the reader’s write-back of main.tabs', () => {
   it('writes nothing for a value the reader keeps, whatever order its keys were written in', async () => {
     const value = stored([{ pinned: true, appSessionId: A, kind: 'session', id: session.id }]);
     const reordered = { closedTabs: [], sets: { [NO_PROJECT]: { splitRatio: 0.5, focusedPane: 0, panes: value.sets[NO_PROJECT].panes } }, current: NO_PROJECT, version: 2 };
-    const { hydrate, sets } = setup({ 'main.tabs': reordered });
+    const { hydrate, sets } = setup({ 'main.tabs': reordered, 'panelTools.surfaces': surfaceState({ [NO_PROJECT]: A }) });
     await hydrate((id) => id === A);
     vi.advanceTimersByTime(1000);
     expect(sets()).toEqual([]);

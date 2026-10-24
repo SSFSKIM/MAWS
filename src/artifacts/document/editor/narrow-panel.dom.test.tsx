@@ -160,8 +160,8 @@ describe('the rail in the body’s width', () => {
     expect(layout(container)).toBe('beside');
   });
 
-  it('as a drawer starts at the page’s top, under the toolbar, and under find while find is open', async () => {
-    width = 600;
+  it.each([600, 1200])('floats below the toolbar and find at %i px, without moving those controls into the card', async (bodyWidth) => {
+    width = bodyWidth;
     const container = await mount();
     press(/^Comments/);
     expect(body(container).style.getPropertyValue('--doc-drawer-top')).toBe('37px');

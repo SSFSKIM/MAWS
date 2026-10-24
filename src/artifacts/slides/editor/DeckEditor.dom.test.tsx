@@ -1,7 +1,7 @@
 // P3-C M4 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8): the deck editor over a replica, under happy-dom:
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { HistoryApi } from '../../document/editor/history/api';
@@ -41,6 +41,15 @@ function mount(doc = deck(), readOnly = false) {
 const thumbs = () => screen.getAllByRole('button', { name: /^Slide \d+(, hidden|, held)*$/ });
 
 describe('the deck editor', () => {
+  it('keeps the inspector closed until its own toolbar action is used, then closes it from the card', () => {
+    mount();
+    expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Inspector' }));
+    expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
+  });
+
   it('shows every slide as a live thumbnail, the sections before their slides, hidden and held slides marked', () => {
     const { container } = mount();
     expect(thumbs().map((b) => b.getAttribute('aria-label'))).toEqual(['Slide 1', 'Slide 2, hidden', 'Slide 3, held']);
@@ -409,6 +418,8 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
   // test lays the window out, the stage (connected) at the size given, a detached node (or a hidden stage) at 0 × 0, as
   // a browser reports an observed node taken out of the document
   let stage = { w: 1200, h: 800 };
+  let editorWidth = 1280;
+  let cardWidth = 0;
   const observers = new Set<StubObserver>();
   class StubObserver {
     readonly nodes = new Set<Element>();
@@ -436,7 +447,11 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
     vi.stubGlobal('ResizeObserver', StubObserver);
     const side = (axis: 'w' | 'h') =>
       function (this: HTMLElement) {
-        return this.isConnected && this.classList.contains('deck-stage') ? stage[axis] : 0;
+        if (!this.isConnected) return 0;
+        if (this.classList.contains('deck-stage')) return stage[axis];
+        if (axis === 'w' && this.classList.contains('deck-editor')) return editorWidth;
+        if (axis === 'w' && this.classList.contains('deck-tool-cards')) return cardWidth;
+        return 0;
       };
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(side('w'));
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(side('h'));
@@ -446,6 +461,8 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
     vi.restoreAllMocks();
     observers.clear();
     stage = { w: 1200, h: 800 };
+    editorWidth = 1280;
+    cardWidth = 0;
   });
 
   function withHistory() {
@@ -483,6 +500,52 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
   // (w − 48) / 1920 against (h − 48) / 1080: 1200 × 800 fits at 60 %, 900 × 800 at 44 %
   const WIDE = { w: 1200, h: 800 };
   const NARROW = { w: 900, h: 800 };
+
+  it('fits the width left by all open floating cards without reserving a second column', () => {
+    cardWidth = 288;
+    const { container } = withHistory();
+    const tools = within(screen.getByRole('toolbar', { name: 'Deck' }));
+    expect(shown()).toBe('Fit (60%)');
+    fireEvent.click(tools.getByRole('button', { name: 'Inspector' }));
+    expect(shown()).toBe('Fit (44%)');
+    fireEvent.click(tools.getByRole('button', { name: 'Version history' }));
+    expect(screen.getByRole('complementary', { name: 'Version history' })).toBeTruthy();
+    expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
+    expect(shown()).toBe('Fit (44%)');
+    expect(container.querySelector('.deck-editor-body')!.getAttribute('style')).toContain('--deck-card-reserve: 304px');
+    fireEvent.click(tools.getByRole('button', { name: 'Inspector' }));
+    expect(shown()).toBe('Fit (44%)');
+    fireEvent.click(tools.getByRole('button', { name: 'Version history' }));
+    expect(shown()).toBe('Fit (60%)');
+  });
+
+  it('moves the filmstrip below the stage when the editor narrows, keeping the selected slide', () => {
+    const { session, container } = withHistory();
+    act(() => session.show('b'));
+    const strip = () => container.querySelector<HTMLElement>('.deck-filmstrip')!;
+    expect(strip().dataset.direction).toBe('vertical');
+    editorWidth = 1000;
+    layout();
+    expect(strip().dataset.direction).toBe('horizontal');
+    expect(session.snapshot().currentSlide).toBe('b');
+    expect(strip().querySelector('[data-current]')!.getAttribute('data-slide-thumb')).toBe('b');
+    editorWidth = 1100;
+    layout();
+    expect(strip().dataset.direction).toBe('vertical');
+  });
+
+  it('remeasures the card reservation while a preview narrows into a sheet', async () => {
+    cardWidth = 288;
+    const { session, container } = withHistory();
+    act(() => session.toggleRail('history'));
+    fireEvent.click(await screen.findByRole('button', { name: /^Version Draft 1 by/ }));
+    await waitFor(() => expect(container.querySelector('[data-history-stage]')).not.toBeNull());
+    const width = () => Number.parseFloat(container.querySelector<HTMLElement>('[data-history-stage] .deck-slide-frame')!.style.width);
+    layout(WIDE);
+    expect(width()).toBeCloseTo(848);
+    layout({ w: 700, h: 800 });
+    expect(width()).toBeCloseTo(652);
+  });
 
   it('history Fit preserves its last usable size while hidden and refits when shown again', async () => {
     const { session, container } = withHistory();

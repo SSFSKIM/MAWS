@@ -19,6 +19,7 @@ import type { PanelHostProps } from '../panel/host-slot';
 import type { PanelTool, PanelToolInit } from '../panel/tool';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import { useShellView } from '../app/shell-view';
 
 export const A = 'app-a' as AppSessionId;
 export const B = 'app-b' as AppSessionId;
@@ -143,6 +144,7 @@ export function spyLayout() {
 }
 
 export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   resetPanelHost();
   resetEditorHosts(); // P3-G
   onChangeCalls.splice(0);
@@ -154,6 +156,8 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
     panelBySession: new Map(),
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
+    panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} },
+    knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: opts.hydrated ?? true,
   });

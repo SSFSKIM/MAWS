@@ -32,7 +32,7 @@
   /* W2 (B2, C1): Codex's 22px corner, shared by the user bubble and the composer box; the box's faint shadow */
   --radius-2xl: 22px;
   --shadow-composer: 0 0 0 1px #0000000a, 0 2px 8px 0 #0000000a, 0 4px 80px 8px #00000006;
-  --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
+  --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 240px; --panel-w: 380px;
   /* W5: the floating Overview's lift off the main area */
   --shadow-float: 0 0 0 1px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.10), 0 24px 64px rgba(0,0,0,0.08);
   /* P2-F L148: the comment card in the browser's strip, which clips at its 8 px margin: every layer reaches at most 8 px */

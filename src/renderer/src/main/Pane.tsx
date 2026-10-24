@@ -23,6 +23,8 @@ import { useLayout } from '../stores/layout';
 import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
+import { createPortal } from 'react-dom';
+import { useChromeTabs } from './chrome-tabs';
 
 type PaneIndex = 0 | 1;
 const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
@@ -34,6 +36,7 @@ const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
 // from its end), so nothing in it reflows at no width: a transcript re-measured at 0 px scrolled to other rows, and the
 // carry its float records named a row the reader never saw.
 export function Pane({ index, split, column, collapsed = false }: { index: PaneIndex; split: boolean; column: number; collapsed?: boolean }) {
+  const chrome = useChromeTabs((s) => s.host);
   const pane = useLayout((s) => currentSet(s.main).panes[index]);
   const hydrated = useLayout((s) => s.hydrated);
   const cover = useCoverState('main'); // P4-B3 (Z5): a panel record dragged here appends to this pane
@@ -69,9 +72,13 @@ export function Pane({ index, split, column, collapsed = false }: { index: PaneI
       onFocusCapture={focus}
       className="contents"
     >
-      <div data-pane-strip className="min-w-0" style={{ gridRow: 1, gridColumn: column, ...(collapsed ? HIDDEN : null) }}>
+      {chrome ? createPortal(
+        <div data-pane-strip data-chrome-pane={index} className="min-w-0 flex-1" style={collapsed ? { display: 'none' } : undefined}>
+          <TabStrip pane={index} split={split} idPrefix={idPrefix} />
+        </div>, chrome
+      ) : <div data-pane-strip className="min-w-0" style={{ gridRow: 1, gridColumn: column, ...(collapsed ? HIDDEN : null) }}>
         <TabStrip pane={index} split={split} idPrefix={idPrefix} />
-      </div>
+      </div>}
       <div
         ref={body}
         role="tabpanel"

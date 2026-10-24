@@ -293,7 +293,7 @@ export const EMPTY_TAB_SET: TabSet = { panes: [{ tabs: [], activeTabId: '' }], f
 export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelPinned: PanelTabRef[] } = {
   regions: {
     version: 4,
-    sidebar: { width: 300, collapsed: false, sort: 'priority', expandedProjects: [] },
+    sidebar: { width: 240, collapsed: false, sort: 'priority', expandedProjects: [] },
     panel: { width: 380, collapsed: false, maximized: false, floating: false },
     overview: null,
     floatingCard: {},
@@ -333,10 +333,21 @@ export const PanelParamsSchema = z.strictObject({ version: z.literal(1), params:
 export const PanelActiveNoSessionSchema = z.strictObject({ version: z.literal(1), activeTabId: z.string().nullable() });   // key `panelTools.activeNoSession`
 // P4-B3 end
 
+// UX2-L: the two visible tools per session (or '@none'), icon-row preferences, and the last session shown per project.
+// Refs, tool params and keep-across-session tab pins remain in their existing keys. Missing scopes derive the old
+// activeTabId; an explicitly empty stack instead shows the summary. Live refs and sessions are checked at derivation.
+export const PanelSurfacesSchema = z.strictObject({
+  version: z.literal(1),
+  stacks: z.record(z.string(), z.array(z.string()).max(2)),
+  pinnedTools: z.array(z.string()),
+  contexts: z.record(z.string(), AppSessionIdSchema),
+});
+export type PanelSurfaces = z.infer<typeof PanelSurfacesSchema>;
+
 export const LayoutKeySchema = z.union([
   z.literal('regions'), z.literal('main.tabs'), z.literal('panel.pinned'), z.string().regex(/^panel\.[^.]+$/), z.literal('window.main'),
   // P4-B3 start
-  z.literal('panelTools.params'), z.literal('panelTools.activeNoSession'),
+  z.literal('panelTools.params'), z.literal('panelTools.activeNoSession'), z.literal('panelTools.surfaces'),
   // P4-B3 end
   // C8a start
   z.literal('summary.sections'),

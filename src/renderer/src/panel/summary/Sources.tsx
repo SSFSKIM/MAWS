@@ -19,7 +19,7 @@ export function useSessionActivity(appSessionId: AppSessionId): TurnActivity[] |
   return useTranscriptStore((s) => (s.entries[appSessionId] ? s.activity(appSessionId) : null));
 }
 
-export function Sources({ appSessionId, directory }: { appSessionId: AppSessionId; directory: string }) {
+export function Sources({ appSessionId, directory, embedded = false }: { appSessionId: AppSessionId; directory: string; embedded?: boolean }) {
   const phase = useTranscriptStore((s) => s.entries[appSessionId]?.phase);
   const activity = useSessionActivity(appSessionId);
   const sources = useMemo(() => (activity ? sourcesOf(activity) : null), [activity]);
@@ -33,8 +33,8 @@ export function Sources({ appSessionId, directory }: { appSessionId: AppSessionI
           : sources?.length
             ? null
             : SUMMARY_COPY.noSources;
-  return (
-    <Section id="sources">
+  const body = (
+    <>
       {note ? (
         <p className="text-ui-sm text-fg-muted">{note}</p>
       ) : (
@@ -46,8 +46,9 @@ export function Sources({ appSessionId, directory }: { appSessionId: AppSessionI
           ))}
         </ul>
       )}
-    </Section>
+    </>
   );
+  return embedded ? <div aria-label="Sources" className="flex flex-col gap-1 border-t border-border pt-2"><h4 className="text-ui-sm font-medium text-fg-muted">Sources</h4>{body}</div> : <Section id="sources">{body}</Section>;
 }
 
 const keyOf = (source: Source) => (source.kind === 'file' ? `file:${source.path}` : source.kind === 'web' ? `web:${source.url}` : `mcp:${source.server}/${source.tool}`);

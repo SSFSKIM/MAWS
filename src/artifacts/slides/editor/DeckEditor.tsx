@@ -16,7 +16,7 @@
 // regions (a11y.ts), keeping the selection, so a middle element's selection reaches the inspector by keyboard.
 // P4-A2 G2.3 (X35; G-R3 to G-R5 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn
 // as it streams, from the tab's provisional layers: on the shown slide beneath the human's states, and in the filmstrip.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import { DECK_LIMITS } from '../deck';
@@ -129,6 +129,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const viewport = useRef<HTMLDivElement>(null);
   const observed = useRef<{ node: HTMLDivElement; observer: ResizeObserver } | null>(null);
   const [room, setRoom] = useState<{ w: number; h: number } | null>(null);
+  const readRoom = useCallback((next: { w: number; h: number }) => setRoom((now) => now?.w === next.w && now.h === next.h ? now : next), []);
   useLayoutEffect(() => {
     const node = viewport.current;
     if (observed.current?.node === node) return;
@@ -151,7 +152,24 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     },
     [],
   );
-  const fit = room ? Math.max(0.05, Math.min((room.w - STAGE_GUTTER) / SLIDE_W, (room.h - STAGE_GUTTER) / SLIDE_H)) : 0.25;
+  // The tools float in one stack, not independent columns. Measure that stack rather than adding each card's width;
+  // Fit and the stage's centering share the exact space it leaves. In a small stage the stack is a sheet instead.
+  const cards = useRef<HTMLDivElement>(null);
+  const [cardWidth, setCardWidth] = useState(0);
+  useLayoutEffect(() => {
+    const node = cards.current;
+    if (!node) {
+      setCardWidth(0);
+      return;
+    }
+    const read = () => setCardWidth(node.clientWidth);
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(node);
+    return () => observer.disconnect();
+  });
+  const cardReserve = room && cardWidth > 0 && room.w - cardWidth - 16 >= 520 ? cardWidth + 16 : 0;
+  const fit = room ? Math.max(0.05, Math.min((room.w - cardReserve - STAGE_GUTTER) / SLIDE_W, (room.h - STAGE_GUTTER) / SLIDE_H)) : 0.25;
   const scale = state.zoom === 'fit' ? fit : state.zoom;
 
   // the first slide drawn: once per showing
@@ -232,17 +250,17 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     }
   };
   const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
-  const [narrow, setNarrow] = useState(false);
+  const [below, setBelow] = useState(compact);
   useLayoutEffect(() => {
     const node = root.current;
     if (!node) return;
-    const read = () => { if (node.clientWidth > 0) setNarrow(node.clientWidth < 720); };
+    const read = () => { if (node.clientWidth > 0) setBelow(node.clientWidth < 1100); };
     read();
     const observer = new ResizeObserver(read);
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
-  const thumbnailWidth = narrow ? 80 : compact ? 120 : SLIDE_W / 8;
+  const thumbnailWidth = below ? 112 : 96;
 
   useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
@@ -253,7 +271,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     const timer = setTimeout(() => setNotice(''), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice]);
-  const [inspectorOpen, setInspectorOpen] = useState(!compact);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const editable = !readOnly && slide !== null && slide.held === null;
   const insert = useCallback(
     (kind: NewKind) => {
@@ -299,6 +317,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               assetUrl={assetUrl}
               faces={liveFaces.aliases}
               width={thumbnailWidth}
+              horizontal={below}
               readOnly={readOnly}
               onDrawn={onThumbnailsDrawn}
               provisional={written}
@@ -350,9 +369,6 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
             </CommentFrame>
             {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}
           </div>
-          {state.rail === 'theme' && scope(<ThemePanel session={session} system={system} theme={theme} overrides={view.overrides} faces={view.faces} readOnly={readOnly} />)}
-          {state.rail === 'check' && <CheckPanel session={session} system={system} />}
-          {state.rail === 'comments' && <CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} />}
     </>
   );
   const editor = (
@@ -384,19 +400,29 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               onToggleInspector={() => setInspectorOpen((open) => !open)}
             />
             <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
+            {history && <button type="button" className="deck-button" aria-label="Version history" aria-pressed={historyOpen} onClick={() => session.toggleRail('history')}>History</button>}
             <CommentButtons api={commentsApi} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
             <span role="status" className="deck-notice" data-deck-notice>
               {notice}
             </span>
           </Toolbar>
       )}
-      <div className="deck-editor-body">
-        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assets={previewAssets} faces={versionFaces!} zoom={state.zoom} thumbnailWidth={thumbnailWidth} onDrawn={previewDrawn} /> : live}
-        {historyRail}
-        {!preview &&
-          inspectorOpen &&
-          slide &&
-          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} overlayRail />)}
+      <div className="deck-editor-body" data-filmstrip={below ? 'horizontal' : 'vertical'} style={{ '--deck-card-reserve': `${cardReserve}px` } as CSSProperties}>
+        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assets={previewAssets} faces={versionFaces!} zoom={state.zoom} thumbnailWidth={thumbnailWidth} horizontal={below} cardReserve={cardReserve} onRoom={readRoom} onDrawn={previewDrawn} /> : live}
+        {(historyRail || (!preview && (state.rail === 'theme' || state.rail === 'check' || state.rail === 'comments' || (inspectorOpen && slide)))) && (
+          <div ref={cards} className="deck-tool-cards">
+            {!preview && inspectorOpen && slide && (
+              <div className="deck-tool-card">
+                <div className="deck-tool-card-header"><span>Inspector</span><button type="button" className="deck-button" aria-label="Close inspector" onClick={() => setInspectorOpen(false)}>×</button></div>
+                {scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} overlayRail />)}
+              </div>
+            )}
+            {historyRail && <div className="deck-tool-card">{historyRail}</div>}
+            {!preview && state.rail === 'theme' && <div className="deck-tool-card">{scope(<ThemePanel session={session} system={system} theme={theme} overrides={view.overrides} faces={view.faces} readOnly={readOnly} />)}</div>}
+            {!preview && state.rail === 'check' && <div className="deck-tool-card"><CheckPanel session={session} system={system} /></div>}
+            {!preview && state.rail === 'comments' && <div className="deck-tool-card"><CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} /></div>}
+          </div>
+        )}
       </div>
     </div>
   );

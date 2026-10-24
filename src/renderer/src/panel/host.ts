@@ -17,6 +17,7 @@ import { activeTab, foldEnded, sessionOfTab } from '../stores/layout-model'; // 
 import { useSessions } from '../stores/sessions';
 import { askEditorHostClose, clearEditorHost } from './editor-host'; // P3-G
 import type { PanelHostProps } from './host-slot';
+import { surfaceSession } from './surface-model';
 import type { PanelTool, PanelToolInit } from './tool';
 
 type AnyTool = PanelTool<unknown, unknown>;
@@ -279,7 +280,7 @@ function activateIn(target: AppSessionId | null, tabId: string): void {
     reveal();
     return;
   }
-  if (shownSession() !== target) layout().openSession(target);
+  if (surfaceSession(layout()) !== target) layout().openSession(target);
   writeRefs(target, (refs) => refs, tabId);
   requestFocus(tabId);
   reveal();
@@ -335,7 +336,7 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   // The tab is written before its session is shown, so a synchronous reaction to that switch which adds the same
   // single-instance tool finds this tab rather than making a second one.
   writeRefs(target, (refs) => [...refs, ref], activate ? tabId : undefined);
-  if (activate && target !== null && shownSession() !== target) layout().openSession(target);
+  if (activate && target !== null && surfaceSession(layout()) !== target) layout().openSession(target);
   if (activate && (target !== null || shownSession() === null)) requestFocus(tabId);
   if (activate) reveal();
   return tabId;

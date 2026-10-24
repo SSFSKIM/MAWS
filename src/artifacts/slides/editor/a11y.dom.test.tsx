@@ -278,6 +278,8 @@ describe('P4-B2 (D14, tracker row 253): F6 and ⇧F6 cycle the editor’s region
     const doc = deck(SLIDE);
     const session = new DeckSession(doc, 0);
     const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} {...props} />);
+    // UX2 keeps tools closed by default; this fixture exercises the ring with the inspector explicitly open.
+    act(() => container.querySelector<HTMLButtonElement>('.deck-toolbar [aria-label="Inspector"]')!.click());
     const stage = container.querySelector<HTMLElement>('[data-stage-surface]')!;
     const node = (id: string) => stage.querySelector<HTMLElement>(`[data-eid="${id}"]`)!;
     const box = (id: string) => node(id).querySelector<HTMLElement>('.deck-textbox');

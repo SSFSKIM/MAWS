@@ -19,11 +19,14 @@ import { moveFocusedArtifactToPanel, moveShownRecordToTab } from '../shell/trans
 import { panelInMain } from './regions';
 import { setSessionUnread, visibleSessionStep } from '../keymap/session-navigation';
 import { registerSessionAction } from './session-actions';
+import { focusRegion, focusSidebar, stepMainTab } from '../keymap/shell-navigation';
+import { toggleKeyboardShortcuts } from '../keymap/KeyboardShortcuts';
+import { toggleSidebar } from './shell-view';
 
 export function registerShellActions(client: MawsBridge = ipc): () => void {
   const layout = () => useLayout.getState();
   const offs = [
-    registerAction('sidebar.toggle', () => layout().setSidebar({ collapsed: !layout().regions.sidebar.collapsed })),
+    registerAction('sidebar.toggle', toggleSidebar),
     // Hiding a maximized panel also un-maximizes it; maximizing a hidden one shows it.
     registerAction('panel.toggle', () =>
       layout().setPanel(layout().regions.panel.collapsed ? { collapsed: false } : { collapsed: true, maximized: false }),
@@ -71,6 +74,11 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     }),
     registerAction('tab.next', () => layout().cycleTab(1)),
     registerAction('tab.previous', () => layout().cycleTab(-1)),
+    registerAction('tab.stripNext', () => stepMainTab(1)),
+    registerAction('tab.stripPrevious', () => stepMainTab(-1)),
+    registerAction('region.focusNext', () => focusRegion(1)),
+    registerAction('region.focusPrevious', () => focusRegion(-1)),
+    registerAction('sidebar.focus', focusSidebar),
     registerAction('pane.split', () => layout().splitWithActive()),
     // DOM focus moves too, so a pane-scoped chord (bound to the element that holds focus) follows the pane. P4-B3 (its
     // Decision Log 7): a pane that floats is its card's, which opens if it is a pill, its composer taking the keyboard.
@@ -85,6 +93,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),
     registerAction('artifacts.open', openArtifacts), // P3-G (§D5): a singleton, so a second open activates it
     registerAction('palette.open', togglePalette),
+    registerAction('shortcuts.open', toggleKeyboardShortcuts),
 
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),
     registerSessionAction('openInNewTab', (appSessionId) => layout().openSession(appSessionId, { how: 'tab' })),

@@ -66,7 +66,7 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
     title: 'MAWS',
     width: 1440,
     height: 900,
-    minWidth: 960,
+    minWidth: 600,
     minHeight: 600,
     show: false,
     backgroundColor: THEME_BACKGROUND[theme],

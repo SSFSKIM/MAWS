@@ -15,6 +15,7 @@ import {
   PanelParamsSchema,
   PanelPinnedSchema,
   PanelSessionStateSchema,
+  PanelSurfacesSchema,
   StoredMainSchema,
   StoredRegionsSchema,
   type FloatingCardSize,
@@ -22,6 +23,7 @@ import {
   type LayoutMain,
   type LayoutRegions,
   type PanelSessionState,
+  type PanelSurfaces,
   type PanelTabRef,
   type TabRef,
   type TabSetKey,
@@ -29,6 +31,7 @@ import {
 } from '@shared/ipc/schema/layout';
 import type * as z from 'zod';
 import * as model from './layout-model';
+import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope } from '../panel/surface-model';
 
 type Pane = 0 | 1;
 
@@ -44,6 +47,9 @@ export interface LayoutState {
   // P4-B3 (its Decision Log 22; X5 as amended): what each panel tool persisted of a tab, by panel tab id
   // (`panelTools.params`), handed back as the restored instance's `init.params`.
   panelParams: Record<string, unknown>;
+  panelSurfaces: PanelSurfaces;
+  // Hydration's live record/intent resolver; derivation ignores stale contexts without deleting saved preferences.
+  knownSession(appSessionId: AppSessionId): boolean;
   hydrated: boolean;
   // The tab being dragged (P4-B3, X38; its Decision Log 16): a main tab, or a panel tab showing an artifact's record.
   // Transient; the drop targets decide acceptance from it (`shell/transfer.ts`).
@@ -105,6 +111,9 @@ export interface LayoutState {
   // The panel host's `onChange` (PanelHostProps): pinned refs go to `panel.pinned` (D-10), the rest to the session's own
   // key; with no session only the pins are kept, and the selection goes to `panelActiveNoSession`.
   setPanelTabs(appSessionId: AppSessionId | null, next: PanelSessionState): void;
+  // Visible tools only; hiding a surface does not close its refs or clear its params. The last slot is active.
+  setSurfaceStack(appSessionId: AppSessionId | null, ids: string[]): void;
+  toggleSurfacePin(toolId: string): void; // the icon-row preference, separate from keep-across-session tab pins
   effectivePanelTabs(appSessionId: AppSessionId | null): PanelTabRef[]; // panelPinned first, then the session's own
   // A session's panel refs whichever session or the Overview is on screen (C8's eleventh ask: C10's Attach adds a
   // Terminal tab to session A from a sidebar row while B is shown). Read as the host reads them (the pins first) and
@@ -237,7 +246,15 @@ export function createLayoutStore() {
     // the first `layout.get`) apply at once and are kept, then replayed over the hydrated tabs, so hydration never
     // wipes what the user just opened. After hydration a change simply applies.
     // P4-B3x: every change of the tabs or the regions lands through `commit`, so the fold rule holds at every state.
-    const commit = (nextMain: LayoutMain, nextRegions: LayoutRegions) => set(reconcileFold(get().main, { main: nextMain, regions: nextRegions }));
+    const commit = (nextMain: LayoutMain, nextRegions: LayoutRegions) => {
+      const next = reconcileFold(get().main, { main: nextMain, regions: nextRegions });
+      set({ ...next, panelSurfaces: rememberSurfaceContext(get(), next.main) });
+    };
+    const earlySurfaces: ((state: PanelSurfaces) => PanelSurfaces)[] = [];
+    const surfaces = (change: (state: PanelSurfaces) => PanelSurfaces) => {
+      if (!get().hydrated) earlySurfaces.push(change);
+      return change(get().panelSurfaces);
+    };
     const early: ((m: LayoutMain) => LayoutMain)[] = [];
     const main = (next: (m: LayoutMain) => LayoutMain) => {
       if (!get().hydrated) early.push(next);
@@ -264,13 +281,15 @@ export function createLayoutStore() {
       panelBySession: new Map(),
       panelActiveNoSession: null,
       panelParams: {},
+      panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} },
+      knownSession: () => true,
       hydrated: false,
       dragging: null,
       overviewOpen: false,
       projectOf: NO_PROJECT_OF,
 
       async hydrate(client, known, opts = {}) {
-        if (opts.projectOf) set({ projectOf: opts.projectOf });
+        set({ knownSession: known, ...(opts.projectOf ? { projectOf: opts.projectOf } : {}) });
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
         const readAs = new Map<LayoutKey, unknown>(); // each key read as a valid value, as layout.json holds it
         const read = async <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => {
@@ -299,12 +318,13 @@ export function createLayoutStore() {
               return match && key !== 'panel.pinned' ? [match[1] as AppSessionId] : [];
             })
           : [];
-        const [persistedRegions, persistedMain, panelPinned, storedParams, storedNoSession, ...panels] = await Promise.all([
+        const [persistedRegions, persistedMain, panelPinned, storedParams, storedNoSession, storedSurfaces, ...panels] = await Promise.all([
           read('regions', StoredRegionsSchema, LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
           read('main.tabs', StoredMainSchema, LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped; W12: version 1 is filed by project
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
           readHeld('panelTools.params', PanelParamsSchema, { version: 1, params: {} }),
           readHeld('panelTools.activeNoSession', PanelActiveNoSessionSchema, { version: 1, activeTabId: null }),
+          readHeld('panelTools.surfaces', PanelSurfacesSchema, { version: 1, stacks: {}, pinnedTools: [], contexts: {} }),
           ...panelIds.map((id) => read(`panel.${id}`, PanelSessionStateSchema.nullable(), null)),
         ]);
         opts.settle?.();
@@ -326,7 +346,14 @@ export function createLayoutStore() {
           return next;
         }, persistedRegions);
         const restored = opened ? model.unfold(stored) : stored;
-        const repairedMain = replayed.reduce((m, change) => change(m), model.refile(model.repairMain(restored, known), setOfTab));
+        const repaired = model.refile(model.repairMain(restored, known), setOfTab);
+        let panelSurfaces = rememberSurfaceContext({ panelSurfaces: storedSurfaces, knownSession: known }, repaired);
+        const repairedMain = replayed.reduce((m, change) => {
+          const next = change(m);
+          panelSurfaces = rememberSurfaceContext({ panelSurfaces, knownSession: known }, next);
+          return next;
+        }, repaired);
+        panelSurfaces = earlySurfaces.splice(0).reduce((state, change) => change(state), panelSurfaces);
         // P4-B3x: a fold restored with its float stands; one whose float the reader dropped opens the panel it folded,
         // and one stored beside an open panel is dropped (both written back below).
         const { main: hydratedMain, regions } = reconcileFold(restored, { main: repairedMain, regions: replayedRegions });
@@ -334,7 +361,7 @@ export function createLayoutStore() {
         // no-session selection is read back if it still names a pin.
         const live = livePanelTabIds(panelPinned, panelBySession);
         const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
-        set({ regions, main: hydratedMain, ...pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId), panelBySession, panelParams, hydrated: true });
+        set({ regions, main: hydratedMain, ...pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId), panelBySession, panelParams, panelSurfaces, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
         // and persistence takes the hydrated state as its baseline, so they are written here too. Everything after this
@@ -350,7 +377,8 @@ export function createLayoutStore() {
         const unfolded = model.foldOf(stored) !== null && model.foldOf(hydratedMain) === null;
         if (persistedMain.version === 1 || rewritten || unfolded || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
         if (regions !== persistedRegions) unsaved.add('regions');
-        const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
+        if (!sameJson(panelSurfaces, storedSurfaces)) unsaved.add('panelTools.surfaces');
+        const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': panelSurfaces };
         for (const key of unsaved) {
           if (!(key in values)) continue;
           void client.invoke('layout.set', { key, value: values[key] }).then((result) => {
@@ -493,14 +521,40 @@ export function createLayoutStore() {
         }
       },
       setPanelTabs(appSessionId, next) {
+        const refsBefore = get().effectivePanelTabs(appSessionId);
+        const activeBefore = appSessionId === null ? get().panelActiveNoSession : (get().panelBySession.get(appSessionId)?.activeTabId ?? null);
         const pinned = next.tabs.filter((t) => t.pinned);
-        if (appSessionId === null) {
-          set(pins(pinned, next.activeTabId));
-          return;
-        }
         const panelBySession = new Map(get().panelBySession);
-        panelBySession.set(appSessionId, { tabs: next.tabs.filter((t) => !t.pinned), activeTabId: next.activeTabId });
-        set({ ...pins(pinned), panelBySession });
+        if (appSessionId !== null) panelBySession.set(appSessionId, { tabs: next.tabs.filter((t) => !t.pinned), activeTabId: next.activeTabId });
+        const selection = pins(pinned, appSessionId === null ? next.activeTabId : undefined);
+        const active = appSessionId === null ? selection.panelActiveNoSession : next.activeTabId;
+        const refs = surfaceRefs({ panelPinned: selection.panelPinned, panelBySession }, appSessionId);
+        const scope = surfaceScope(appSessionId);
+        const panelSurfaces = surfaces((state) => {
+          const before = normalizeSurfaceStack(state.stacks[scope] ?? (activeBefore === null ? [] : [activeBefore]), refsBefore);
+          const ids = stackAfterSelection(before.map((id) => refsBefore.find((tab) => tab.id === id)!), refs, active);
+          if (sameJson(state.stacks[scope] ?? before, ids)) return state;
+          return { ...state, stacks: { ...state.stacks, [scope]: ids } };
+        });
+        set({ ...selection, ...(appSessionId === null ? {} : { panelBySession }), panelSurfaces });
+      },
+      setSurfaceStack(appSessionId, requested) {
+        const ids = normalizeSurfaceStack(requested, get().effectivePanelTabs(appSessionId));
+        const activeTabId = ids.at(-1) ?? null;
+        const panelBySession = new Map(get().panelBySession);
+        if (appSessionId !== null) {
+          const own = panelBySession.get(appSessionId) ?? { tabs: [], activeTabId: null };
+          panelBySession.set(appSessionId, { ...own, activeTabId });
+        }
+        const scope = surfaceScope(appSessionId);
+        const panelSurfaces = surfaces((state) => sameJson(state.stacks[scope], ids) ? state : { ...state, stacks: { ...state.stacks, [scope]: ids } });
+        set({ ...(appSessionId === null ? { panelActiveNoSession: activeTabId } : { panelBySession }), panelSurfaces });
+      },
+      toggleSurfacePin(toolId) {
+        set({ panelSurfaces: surfaces((state) => ({
+          ...state,
+          pinnedTools: state.pinnedTools.includes(toolId) ? state.pinnedTools.filter((id) => id !== toolId) : [...state.pinnedTools, toolId],
+        })) });
       },
       effectivePanelTabs(appSessionId) {
         const own = appSessionId === null ? [] : (get().panelBySession.get(appSessionId)?.tabs ?? []);
@@ -540,6 +594,7 @@ function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
     ['panel.pinned', state.panelPinned],
     ['panelTools.params', state.panelParams], // P4-B3
     ['panelTools.activeNoSession', state.panelActiveNoSession], // P4-B3
+    ['panelTools.surfaces', state.panelSurfaces], // UX2-L
   ]);
   for (const [id, panel] of state.panelBySession) keys.set(`panel.${id}`, panel);
   return keys;

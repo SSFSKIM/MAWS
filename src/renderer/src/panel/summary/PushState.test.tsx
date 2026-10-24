@@ -2,6 +2,7 @@
 // control, and a second row says the PR's state from `scm.status` and `scm.pr.state` (shared with the tool's header by
 // query key), with Install, Sign in and a manual refresh; the PR state is polled only while there is something to ask.
 import { QueryClientProvider } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +12,7 @@ import type { ScmGhState, ScmPrState, ScmPrStateInput, ScmStatus } from '@shared
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
-import { A, probeTool, resetPanelStores, TestHost } from '../../test-support/panel';
+import { A, probeTool, resetPanelStores } from '../../test-support/panel';
 import { useGit } from '../../stores/git';
 import { connectScmRunEnds } from '../../tools/scm/store';
 import { panelHost, registerPanelTool } from '../host';
@@ -59,8 +60,13 @@ const prLine = () => within(push()).queryByTestId('pr-line');
 // The line answers after main's two reads, however many turns that takes under load.
 const lineReads = (text: string) => waitFor(() => expect(prLine()?.textContent).toBe(text));
 
+function PushFixture() {
+  useEffect(() => useGit.getState().watch(DIR), []);
+  return <QueryClientProvider client={queryClient}><PushState directory={DIR} appSessionId={A} /></QueryClientProvider>;
+}
+
 async function mount() {
-  const view = render(<TestHost />);
+  const view = render(<PushFixture />);
   for (let i = 0; i < 4; i++) await settle();
   return view;
 }

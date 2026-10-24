@@ -5,6 +5,7 @@ import type { SessionDigest } from '@shared/ipc/schema';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { projectReveal } from '../sidebar/reveal';
 import { useAttention } from '../stores/attention';
+import { useShellView } from '../app/shell-view';
 import { NO_PROJECT_OF, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
@@ -41,6 +42,7 @@ export function fillStores(scenario: Scenario, opts: { loaded?: boolean } = {}):
 }
 
 export function resetShellStores(): void {
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
   useSessions.setState({ indexing: null });
@@ -51,6 +53,8 @@ export function resetShellStores(): void {
     panelBySession: new Map(),
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
+    panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} },
+    knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: true,
     overviewOpen: false,

@@ -8,25 +8,24 @@ import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
-import { createSession, runAction, useSessionCreatorRegistered, useUnstartedTitle } from '../keymap/actions-runtime';
+import { createSession, runAction, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { revealProject } from '../sidebar/reveal';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { useSessions } from '../stores/sessions';
-import { FolderIcon, Icon, IconButton, PanelIcon, SidebarIcon } from './IconButton';
-import { sidebarWidth, useWindowWidth } from './regions';
+import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
+import { useShellGeometry, useShellView } from './shell-view';
+import { mountChromeTabs } from '../main/chrome-tabs';
+import { SurfaceRow } from '../panel/SurfaceRow';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
-import { useSlot } from './slots';
 import { displayTitle } from '../sessions/title';
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
-import { useArtifactTitle } from '../library/store';
 // P3-L end
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
-import { useBrowserTitle } from '../tools/browser/store';
 // E4a end
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -67,31 +66,23 @@ export function toolbarTitle(
 
 export function Toolbar() {
   const sidebar = useLayout((s) => s.regions.sidebar);
-  const panelCollapsed = useLayout((s) => s.regions.panel.collapsed);
-  const windowWidth = useWindowWidth();
-  const width = useLayout((s) => sidebarWidth(s.regions, windowWidth));
+  const geometry = useShellGeometry();
+  const overlay = useShellView((s) => s.sidebarOverlay);
   const tab = useLayout((s) => activeTab(s.main));
   const records = useSessions((s) => s.records);
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const waiting = useAttention((s) => selectNeedsYou(s, { records, recordsVersion }).filter((row) => row.tier === 1).length);
   const overviewOpen = useLayout((s) => s.overviewOpen);
-  const End = useSlot('topBarEnd');
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
-  const unstarted = useUnstartedTitle(appSessionId ?? ('' as AppSessionId));
-  const browserTitle = useBrowserTitle(tab?.kind === 'browser' ? tab.appSessionId : null, tab?.kind === 'browser' ? tab.browserTabId : null); // E4a
-  const artifactTitle = useArtifactTitle(tab?.kind === 'artifact' ? tab.artifactId : null); // P3-L
-  const titled = toolbarTitle(tab, records, browserTitle, artifactTitle);
-  // An unstarted session is titled like its tab.
-  const { title, branch } = appSessionId && !records.has(appSessionId) ? { title: unstarted.title, branch: null } : titled;
 
   return (
-    <header data-toolbar className="col-span-full row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg-raised select-none [-webkit-app-region:drag]">
+    <header data-toolbar className="col-span-2 row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]">
       <div
         className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
-        style={sidebar.collapsed ? undefined : { width }}
+        style={{ width: geometry.sidebar || 148 }}
       >
         <div className="flex items-center gap-1">
-          <IconButton label="Toggle sidebar" action="sidebar.toggle" pressed={!sidebar.collapsed} onClick={() => runAction('sidebar.toggle')}>
+          <IconButton label="Toggle sidebar" action="sidebar.toggle" pressed={geometry.sidebarAside ? overlay : !sidebar.collapsed} onClick={() => runAction('sidebar.toggle')}>
             <SidebarIcon />
           </IconButton>
           <IconButton
@@ -110,23 +101,11 @@ export function Toolbar() {
           </IconButton>
         </div>
       </div>
-      <div className="flex min-w-0 items-center gap-3 pl-5">
-        <ProjectChip />
-        <span className="truncate font-medium text-fg">{title}</span>
-        {branch && (
-          <span className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-ui-sm text-fg-muted">⎇ {branch}</span>
-        )}
-      </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1 px-3">
-        <div data-toolbar-end className="flex items-center [-webkit-app-region:no-drag]">
-          {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-          <End />
-        </div>
-        <SessionMenu appSessionId={appSessionId} />
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <IconButton label="Toggle right panel" action="panel.toggle" pressed={!panelCollapsed} onClick={() => runAction('panel.toggle')}>
-          <PanelIcon />
-        </IconButton>
+      <div className="min-w-0 shrink-[2] max-[1100px]:hidden"><ProjectChip /></div>
+      <div ref={mountChromeTabs} data-chrome-tabs className="flex min-w-0 flex-1 items-stretch" />
+      <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
+        {appSessionId && <SessionMenu appSessionId={appSessionId} />}
+        <SurfaceRow />
       </div>
     </header>
   );

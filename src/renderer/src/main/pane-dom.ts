@@ -6,6 +6,8 @@ export const paneDomId = (index: 0 | 1) => `pane-${index}`;
 // empty pane's Overview, so focus stays inside the pane rather than falling to the page.
 export function focusPaneElement(index: 0 | 1): void {
   const pane = document.getElementById(paneDomId(index));
-  const target = pane?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? pane?.querySelector<HTMLElement>('[role="tabpanel"] button:not(:disabled)');
+  const target = pane?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+    ?? document.querySelector<HTMLElement>(`[data-chrome-pane="${index}"] [role="tab"][aria-selected="true"]`)
+    ?? pane?.querySelector<HTMLElement>('[role="tabpanel"] button:not(:disabled)');
   target?.focus();
 }

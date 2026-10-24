@@ -29,6 +29,11 @@ export const ACTIONS = {
   'tab.select':           { title: 'Select tab 1–9',              chord: 'Cmd+1',        sink: 'menu', menu: 'view', scope: 'app' },   // the menu expands this to nine items Cmd+1 … Cmd+9 with arg 1..9
   'tab.next':             { title: 'Next tab',                    chord: 'Ctrl+Tab',     sink: 'renderer', menu: 'view', scope: 'pane' },
   'tab.previous':         { title: 'Previous tab',                chord: 'Ctrl+Shift+Tab', sink: 'renderer', menu: 'view', scope: 'pane' },
+  'tab.stripNext':        { title: 'Next tab in strip',           chord: 'Cmd+Alt+]',    sink: 'menu', menu: 'go', scope: 'app' },
+  'tab.stripPrevious':    { title: 'Previous tab in strip',       chord: 'Cmd+Alt+[',    sink: 'menu', menu: 'go', scope: 'app' },
+  'region.focusNext':     { title: 'Focus next region',           chord: 'F6',           sink: 'menu', menu: 'go', scope: 'app' },
+  'region.focusPrevious': { title: 'Focus previous region',       chord: 'Shift+F6',     sink: 'menu', menu: 'go', scope: 'app' },
+  'sidebar.focus':        { title: 'Focus sidebar',               chord: null,           sink: 'menu', menu: 'go', scope: 'app' },
   'pane.split':           { title: 'Split / move to other pane',  chord: 'Cmd+\\',       sink: 'menu', menu: 'view', scope: 'app' },
   'pane.focusOther':      { title: 'Focus other pane',            chord: 'Cmd+Shift+\\', sink: 'menu', menu: 'view', scope: 'app' },
   'sidebar.toggle':       { title: 'Toggle sidebar',              chord: 'Cmd+B',        sink: 'menu', menu: 'view', scope: 'app' },
@@ -53,6 +58,7 @@ export const ACTIONS = {
   'session.next':        { title: 'Next session', chord: 'Cmd+Shift+]', sink: 'menu', menu: 'go', scope: 'app' },
   'session.markUnread':  { title: 'Mark session unread', chord: 'Cmd+Alt+U', sink: 'menu', menu: 'go', scope: 'app' },
   'attention.next':       { title: 'Next Needs-you',              chord: 'Cmd+Shift+J',  sink: 'menu', menu: 'go',   scope: 'app' },
+  'shortcuts.open':       { title: 'Keyboard shortcuts',          chord: 'Cmd+/',        sink: 'menu', menu: 'help', scope: 'app' },
   'diagnostics.open':     { title: 'Diagnostics',                 chord: null,           sink: 'menu', menu: 'help', scope: 'app' },
   'request.accept':       { title: 'Approve / answer the docked request', chord: 'Enter', sink: 'renderer', menu: null, scope: 'pane' },     // C7's card subscribes through useKeyChord
   'request.decline':      { title: 'Decline the docked request', chord: 'Escape',       sink: 'renderer', menu: null, scope: 'pane' },

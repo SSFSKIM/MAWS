@@ -23,9 +23,10 @@ interface TabStripProps {
   activeTabId: string | null;
   onChange: PanelHostProps['onChange'];
   bodyId: string;
+  toolId?: string;
 }
 
-export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId }: TabStripProps) {
+export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, toolId }: TabStripProps) {
   const select = (id: string) => {
     if (id !== activeTabId) onChange({ tabs, activeTabId: id });
     requestFocus(id);
@@ -42,15 +43,15 @@ export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId }: 
 
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1">
-      <IconButton label={COPY.home} pressed={activeTabId === null} onClick={() => activeTabId !== null && onChange({ tabs, activeTabId: null })}>
+      {!toolId && <IconButton label={COPY.home} pressed={activeTabId === null} onClick={() => activeTabId !== null && onChange({ tabs, activeTabId: null })}>
         <HomeIcon />
-      </IconButton>
-      <div role="tablist" aria-label="Panel tools" onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+      </IconButton>}
+      <div role="tablist" aria-label={toolId ? `${toolId} tabs` : 'Panel tools'} onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
         {tabs.map((tab) => (
           <Tab key={tab.id} tab={tab} selected={tab.id === activeTabId} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => select(tab.id)} />
         ))}
       </div>
-      <AddMenu appSessionId={appSessionId} tabs={tabs} />
+      {toolId ? <IconButton label={`New ${toolId} tab`} disabled={!appSessionId} onClick={() => appSessionId && panelHost.addTool(toolId, { appSessionId })}><PlusIcon /></IconButton> : <AddMenu appSessionId={appSessionId} tabs={tabs} />}
     </div>
   );
 }

@@ -521,24 +521,28 @@
   border-left: 1px solid var(--border);
   background: var(--bg);
 }
-/* P3-F1 (rail-layout.ts): from a 720 px body up the rail sits beside the page, at most 40 % of the body, the page never
-   under 420 px; below, a drawer over the page's right side from the page's top (under the toolbar and find), the page's
-   layout untouched beneath it and above it a comment card (the card host's z-index 10) and the toolbar's menus. */
-.doc-editor-body[data-rail-layout='beside'] > .doc-rail {
-  max-width: 40%;
-}
-.doc-editor-body[data-rail-layout='beside'] > .doc-tab-editor {
-  min-width: calc(var(--space) * 105);
-}
-.doc-editor-body[data-rail-layout='drawer'] > .doc-rail {
+/* UX2: History and All comments float under the document's own toolbar, not in a dedicated full-height column.
+   A wide page shifts only by the card's width and gutters (at most 40%, preserving the 420 px page floor at 720 px).
+   A narrow body keeps its whole page width beneath the card. With no card open there is no reserved space. */
+.doc-editor-body > .doc-rail {
   position: absolute;
-  top: var(--doc-drawer-top, 0);
-  right: 0;
-  bottom: 0;
+  top: calc(var(--doc-drawer-top, 0px) + var(--space) * 2);
+  right: calc(var(--space) * 2);
   z-index: 5;
-  width: calc(var(--space) * 80);
-  max-width: 100%;
+  width: calc(var(--space) * 76);
+  max-width: calc(100% - var(--space) * 4);
+  max-height: calc(100% - var(--doc-drawer-top, 0px) - var(--space) * 4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
   box-shadow: var(--shadow-float);
+  overflow: hidden;
+}
+.doc-editor-body[data-rail-layout='beside'] > .doc-rail {
+  max-width: calc(40% - var(--space) * 4);
+}
+.doc-editor-body[data-rail-layout='beside'] > .doc-tab-editor .doc-page-frame {
+  margin-right: min(calc(var(--space) * 80), 40%);
 }
 .doc-rail-header {
   display: flex;

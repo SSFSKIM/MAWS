@@ -26,9 +26,11 @@ const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title
 const offs: (() => void)[] = [];
 
 const main = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
-const strips = () => within(main()).getAllByRole('tablist');
+// The panes still own their tab state, but their strips now portal into the single chrome row.
+const chrome = () => document.querySelector<HTMLElement>('[data-chrome-tabs]')!;
+const strips = () => within(chrome()).getAllByRole('tablist');
 const tabNames = (strip = strips()[0]) => within(strip).queryAllByRole('tab').map((t) => t.getAttribute('aria-label'));
-const tab = (name: string) => within(main()).getByRole('tab', { name });
+const tab = (name: string) => within(chrome()).getByRole('tab', { name });
 const selected = (strip = strips()[0]) => within(strip).getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
 // A session's row, in its project expanded in place (W11).
 const sidebarRow = (title: string) => {
@@ -480,7 +482,7 @@ describe('the split’s float: the divider', () => {
   const move = (x: number) => act(() => void fireEvent.pointerMove(divider(), { pointerId: 1, clientX: x }));
   const up = (x: number) => act(() => void fireEvent.pointerUp(divider(), { pointerId: 1, clientX: x }));
   // The session's tab and its content, hidden or not.
-  const sessionTab = () => main().querySelector(`[data-tab-id="session:${idOf('Charter + research')}"]`);
+  const sessionTab = () => chrome().querySelector(`[data-tab-id="session:${idOf('Charter + research')}"]`);
   const sessionBody = () => main().querySelector('[data-pane="0"] [role="tabpanel"]')?.firstElementChild;
 
   // S on the left (the session), A on the right (Diagnostics), at the ratio 0.5: the divider at 750 px.
@@ -512,7 +514,7 @@ describe('the split’s float: the divider', () => {
     expect(columns()).toBe('320px 1px minmax(0, 1fr)'); // the dead zone holds S at S_min
     move(159);
     expect(columns()).toBe('0px 1px minmax(0, 1fr)'); // armed: A spans the region
-    expect(within(main()).queryByRole('tab', { name: SESSION })).toBeNull(); // S's column hidden...
+    expect(within(chrome()).queryByRole('tab', { name: SESSION })).toBeNull(); // S's column hidden...
     expect(sessionTab()).toBe(tabS); // ...and still mounted, so a disarm is lossless
     expect(sessionBody()).toBe(bodyS);
     move(161);
@@ -545,7 +547,7 @@ describe('the split’s float: the divider', () => {
     expect(columns()).toBe('1180px 1px minmax(0, 1fr)'); // S held at 320 on the right
     move(1341);
     expect(columns()).toBe('minmax(0, 1fr) 1px 0px'); // armed: A spans, S's column at 0 on the right
-    expect(within(main()).queryByRole('tab', { name: SESSION })).toBeNull();
+    expect(within(chrome()).queryByRole('tab', { name: SESSION })).toBeNull();
     expect(sessionTab()).toBe(tabS);
     move(1339);
     expect(columns()).toBe('1180px 1px minmax(0, 1fr)'); // disarmed
