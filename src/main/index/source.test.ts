@@ -16,6 +16,7 @@ import { registerFs } from '../../engine-host/fs/register';
 import { registerEngineIpc } from '../../engine-host/ipc';
 import type { FsService } from '../../engine-host/fs/service';
 import { Index } from './index';
+import { Db } from './db';
 import { locate, locatesWithoutGit } from './projects'; // P4 W2-B
 import { DISCOVERY_BATCH, IndexSessionSource, type ReadModelWriter, type SourceHost } from './source';
 import { SessionReadModel, type ReadModelWriter as ModelWriter } from '../sessions/read-model'; // C12
@@ -145,6 +146,160 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
   const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
   const applied = () => new Promise((resolve) => setImmediate(resolve)); // E11: discoveries apply at the end of the burst's turn
   const withHolders = (holders: { sessionId: SessionId; holder: Holder }[]) => ({ ...FS_STATE_EMPTY, holders: holders.map((h) => ({ ...h, appSessionId: null })) });
+
+  it('indexes every continuation page and retries a timed-out read before marking the stamp current', async () => {
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    const dispatch = fake.host.dispatch;
+    let attempts = 0;
+    fake.host.dispatch = async (owner, name, input) => {
+      if (name === 'fs.sessionText') {
+        attempts += 1;
+        if (attempts === 1) return { ok: false, error: ipcError('timeout', 'request timed out') };
+        const { cursor } = input as { cursor?: string };
+        return { ok: true, value: { text: cursor ? 'boundary needle at the tail' : 'cross-', cursor: cursor ? null : 'page-2', size: transcript.size, mtimeMs: transcript.mtimeMs } } as CommandResult<typeof name>;
+      }
+      return dispatch(owner, name, input);
+    };
+    begin(fake.host);
+    fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+    await vi.waitFor(() => expect(index.sessionSearch.search('cross-boundary')).toHaveLength(1));
+    const record = index.sessions.getByEngineId(transcript.sessionId)!;
+    expect(index.sessionSearch.current(record.appId, transcript.sessionId, transcript.size, transcript.mtimeMs)).toBe(true);
+    expect(attempts).toBe(3);
+    expect(index.sessionSearch.indexing()).toBe(false);
+  });
+
+  it('does not loop when both indexing and persisting its terminal failure cannot write to SQLite', async () => {
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    fake.answers.set('fs.sessionText', () => ({ text: 'Unreadable index destination', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs }));
+    const run = Db.prototype.run;
+    const write = vi.spyOn(Db.prototype, 'run').mockImplementation(function (this: Db, sql, ...params) {
+      if (sql.includes('INTO session_text_state')) throw new Error('disk full');
+      return run.call(this, sql, ...params);
+    });
+    try {
+      begin(fake.host);
+      fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+      await vi.waitFor(() => expect(index.sessionSearch.incomplete()).toBe(true), { timeout: 3000 });
+      expect(index.sessionSearch.indexing()).toBe(false);
+      fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+      await settle();
+      expect(fake.names().filter((name) => name === 'fs.sessionText')).toHaveLength(3);
+    } finally { write.mockRestore(); }
+  });
+
+  it('keeps a job until its text-index write succeeds', async () => {
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    fake.answers.set('fs.sessionText', () => ({ text: 'Tail after write recovery', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs }));
+    const replace = vi.spyOn(index.sessionSearch, 'replace').mockImplementationOnce(() => { throw new Error('temporary write failure'); });
+    try {
+      begin(fake.host);
+      fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+      await vi.waitFor(() => expect(index.sessionSearch.search('write recovery')).toHaveLength(1));
+      expect(replace).toHaveBeenCalledTimes(2);
+      expect(index.sessionSearch.indexing()).toBe(false);
+    } finally { replace.mockRestore(); }
+  });
+
+  it('discards an in-flight old stamp and indexes a replacement discovery instead', async () => {
+    const transcript = summary();
+    const changed = { ...transcript, size: transcript.size + 1, mtimeMs: transcript.mtimeMs + 1 };
+    const fake = scriptedHost('starting');
+    let resolve!: (page: unknown) => void;
+    let reads = 0;
+    const dispatch = fake.host.dispatch;
+    fake.host.dispatch = async (owner, name, input) => {
+      if (name !== 'fs.sessionText') return dispatch(owner, name, input);
+      reads += 1;
+      if (reads === 1) return await new Promise((done) => { resolve = done; }) as CommandResult<typeof name>;
+      return { ok: true, value: { text: 'Newer conversation', cursor: null, size: changed.size, mtimeMs: changed.mtimeMs } } as CommandResult<typeof name>;
+    };
+    begin(fake.host);
+    fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+    await applied();
+    fake.fire('fs.sessionChanged', { summary: changed, appSessionId: null });
+    await applied();
+    resolve({ ok: true, value: { text: 'Obsolete conversation', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs } });
+    await vi.waitFor(() => expect(index.sessionSearch.search('Newer conversation')).toHaveLength(1));
+    expect(index.sessionSearch.search('Obsolete')).toEqual([]);
+    expect(reads).toBe(2);
+    expect(index.sessionSearch.indexing()).toBe(false);
+  });
+
+  it('restarts indexing after host replacement without waiting for or applying an old in-flight response', async () => {
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    const dispatch = fake.host.dispatch;
+    let reads = 0;
+    let resolve!: (value: unknown) => void;
+    fake.host.dispatch = async (owner, name, input) => {
+      if (name !== 'fs.sessionText') return dispatch(owner, name, input);
+      reads += 1;
+      if (reads === 1) return await new Promise((done) => { resolve = done; }) as CommandResult<typeof name>;
+      return { ok: true, value: { text: 'Fresh host conversation', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs } } as CommandResult<typeof name>;
+    };
+    begin(fake.host);
+    fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+    await applied();
+    try {
+      fake.setState('crashed');
+      fake.setState('ready');
+      fake.stream();
+      await settle();
+      fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+      await vi.waitFor(() => expect(index.sessionSearch.search('Fresh host')).toHaveLength(1));
+    } finally {
+      resolve({ ok: true, value: { text: 'Obsolete host conversation', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs } });
+      await settle();
+    }
+    expect(index.sessionSearch.search('Obsolete host')).toEqual([]);
+    expect(index.sessionSearch.indexing()).toBe(false);
+  });
+
+  it('ends persistent failures honestly, does not retry unchanged discoveries forever, and recovers after change or restart', async () => {
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    const dispatch = fake.host.dispatch;
+    let reads = 0;
+    let failing = true;
+    fake.host.dispatch = async (owner, name, input) => {
+      if (name === 'fs.sessionText') {
+        reads += 1;
+        return failing ? { ok: false, error: ipcError('timeout', 'request timed out') } : { ok: true, value: { text: 'Recovered tail', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs } } as CommandResult<typeof name>;
+      }
+      return dispatch(owner, name, input);
+    };
+    begin(fake.host);
+    fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+    await applied();
+    await vi.waitFor(() => expect(index.sessionSearch.indexing()).toBe(false), { timeout: 3000 });
+    expect(index.sessionSearch.incomplete()).toBe(true);
+    expect(reads).toBe(3);
+    fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+    await applied();
+    expect(reads).toBe(3);
+
+    failing = false;
+    fake.stream();
+    await settle();
+    fake.fire('fs.sessionChanged', { summary: transcript, appSessionId: null });
+    await vi.waitFor(() => expect(index.sessionSearch.search('Recovered tail')).toHaveLength(1));
+    expect(index.sessionSearch.incomplete()).toBe(false);
+
+    failing = true;
+    transcript.size += 1;
+    fake.fire('fs.sessionChanged', { summary: { ...transcript }, appSessionId: null });
+    await vi.waitFor(() => expect(index.sessionSearch.incomplete()).toBe(true), { timeout: 3000 });
+    failing = false;
+    transcript.size += 1;
+    fake.fire('fs.sessionChanged', { summary: { ...transcript }, appSessionId: null });
+    await vi.waitFor(() => expect(index.sessionSearch.incomplete()).toBe(false));
+    expect(index.sessionSearch.indexing()).toBe(false);
+    expect(reads).toBe(8);
+  });
 
   it('starts by pushing every project and record, then scans with what the index knows and folds the holder snapshot', async () => {
     const tree = tempDir('maws-source-');

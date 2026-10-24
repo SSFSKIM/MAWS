@@ -174,6 +174,21 @@ it('Escape returns focus to the element focused before each palette opening', as
   }
 });
 
+it('shows terminal incomplete indexing without polling forever or hiding available results', async () => {
+  vi.useFakeTimers();
+  const id = idOf('Quota reset recovery');
+  const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { hits: [{ appSessionId: id, snippet: 'Available conversation text' }], indexing: false, incomplete: true } } as never);
+  try {
+    render(<CommandPalette />);
+    act(() => openConversationSearch('needle'));
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    expect(screen.getByRole('alert').textContent).toContain('Some conversations could not be indexed');
+    expect(screen.getByText('Available conversation text')).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(invoke).toHaveBeenCalledTimes(1);
+  } finally { invoke.mockRestore(); vi.useRealTimers(); }
+});
+
 it('opens conversation matches from the sidebar query with a snippet, without mixing in commands', async () => {
   const id = idOf('Quota reset recovery');
   const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { hits: [{ appSessionId: id, snippet: 'Remember bg-finished in the prompt' }], indexing: false } } as never);

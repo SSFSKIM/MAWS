@@ -236,9 +236,12 @@ CREATE VIRTUAL TABLE library_text USING fts5(artifact_id UNINDEXED, title, body,
   // P3-L end
   { version: 11, sql: 'ALTER TABLE library_artifacts ADD COLUMN built_in INTEGER NOT NULL DEFAULT 0; ALTER TABLE library_artifacts ADD COLUMN seed_only INTEGER NOT NULL DEFAULT 0;' },
   { version: 12, sql: `
-CREATE TABLE session_text_state(app_id TEXT PRIMARY KEY REFERENCES sessions(app_id) ON DELETE CASCADE, session_id TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL);
+CREATE TABLE session_text_state(app_id TEXT PRIMARY KEY REFERENCES sessions(app_id) ON DELETE CASCADE, session_id TEXT NOT NULL,
+  size INTEGER NOT NULL, mtime_ms REAL NOT NULL, status TEXT NOT NULL CHECK (status IN ('indexing','ready','error')), tail TEXT NOT NULL DEFAULT '');
+CREATE TABLE session_text_chunks(id INTEGER PRIMARY KEY, app_id TEXT NOT NULL REFERENCES session_text_state(app_id) ON DELETE CASCADE);
+CREATE INDEX session_text_chunks_app ON session_text_chunks(app_id);
 CREATE VIRTUAL TABLE session_text USING fts5(body, tokenize = 'trigram');
-CREATE TRIGGER session_text_delete AFTER DELETE ON session_text_state BEGIN DELETE FROM session_text WHERE rowid = old.rowid; END;
+CREATE TRIGGER session_text_delete AFTER DELETE ON session_text_chunks BEGIN DELETE FROM session_text WHERE rowid = old.id; END;
 ` },
 ];
 

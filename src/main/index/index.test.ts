@@ -48,7 +48,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       tables: [
         'attention_items', 'browser_activity', 'browser_bookmarks', 'browser_history', 'drafts',
         'library_artifacts', 'library_links', 'library_spaces', 'library_text', 'library_text_config', 'library_text_content', 'library_text_data', 'library_text_docsize', 'library_text_idx', // P3-L
-        'owner_channel_marks', 'owner_channel_sessions', 'projects', 'replay_fixtures', 'session_text', 'session_text_config', 'session_text_content', 'session_text_data', 'session_text_docsize', 'session_text_idx', 'session_text_state', 'sessions', 'side_threads', 'sqlite_sequence',
+        'owner_channel_marks', 'owner_channel_sessions', 'projects', 'replay_fixtures', 'session_text', 'session_text_chunks', 'session_text_config', 'session_text_content', 'session_text_data', 'session_text_docsize', 'session_text_idx', 'session_text_state', 'sessions', 'side_threads', 'sqlite_sequence',
       ],
       mode: 'wal',
     });
@@ -159,7 +159,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const sideColumns = (db.prepare('PRAGMA table_info(side_threads)').all() as { name: string }[]).map((c) => c.name);
       expect(sideColumns).toEqual(['child_app_id', 'parent_app_id', 'opened_at', 'summarised_at', 'text', 'is_error', 'turns', 'last_turn_event_id']);
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((i) => i.name);
-      expect(indexes).toEqual(['browser_activity_session', 'browser_bookmarks_tree', 'browser_bookmarks_url', 'browser_history_recent', 'library_artifacts_updated', 'library_links_session', 'owner_channel_marks_session', 'sessions_project', 'sessions_root', 'side_threads_parent']); // E4a: v5 applies after v4; cua board #93: v6 after it; cua board #90: v7; P2-C: v8; P3-L: v10
+      expect(indexes).toEqual(['browser_activity_session', 'browser_bookmarks_tree', 'browser_bookmarks_url', 'browser_history_recent', 'library_artifacts_updated', 'library_links_session', 'owner_channel_marks_session', 'session_text_chunks_app', 'sessions_project', 'sessions_root', 'side_threads_parent']); // E4a: v5 applies after v4; cua board #93: v6 after it; cua board #90: v7; P2-C: v8; P3-L: v10
       const sizes = db.prepare('SELECT app_id, transcript_size, transcript_mtime_ms, lineage, lineage_source FROM sessions ORDER BY app_id').all();
       expect(sizes).toEqual([
         { app_id: 'no-transcript', transcript_size: null, transcript_mtime_ms: null, lineage: null, lineage_source: null },

@@ -93,7 +93,7 @@ function Palette() {
   const query = usePalette((s) => s.query);
   const scope = usePalette((s) => s.scope);
   const setQuery = (query: string) => usePalette.setState({ query });
-  const [content, setContent] = useState<{ query: string; hits: CommandOutput<'session.search'>['hits']; indexing?: boolean; error?: string } | null>(null);
+  const [content, setContent] = useState<{ query: string; hits: CommandOutput<'session.search'>['hits']; indexing?: boolean; incomplete?: boolean; error?: string } | null>(null);
   useEffect(() => {
     if (scope !== 'sessions') return;
     let cancelled = false;
@@ -154,6 +154,7 @@ function Palette() {
         </button>)}
       </div>
       {scope === 'sessions' && content?.query === query && content.indexing && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Indexing conversations… Results will update.</p>}
+      {scope === 'sessions' && content?.query === query && content.incomplete && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Some conversations could not be indexed. Results may be incomplete. Indexing will retry after a restart or when those conversations change.</p>}
       {searching && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Searching conversations…</p>}
       {scope === 'sessions' && content?.query === query && content.error && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{content.error}</p>}
       {(scope === 'sessions' ? sessions.length >= RESULT_LIMIT : entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT) && (

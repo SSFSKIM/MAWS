@@ -97,7 +97,7 @@ export type FsReadSpillOutput = z.infer<typeof FsReadSpillOutputSchema>;
 export const FOLLOW_STATES = ['backfilling', 'following', 'reloading', 'stopped', 'error'] as const;
 
 export const commands = {
-  'fs.sessionText': { input: z.strictObject({ sessionId: SessionIdSchema }), output: z.strictObject({ text: z.string(), size: z.number(), mtimeMs: z.number() }), owner: 'engine-host' },
+  'fs.sessionText': { input: z.strictObject({ sessionId: SessionIdSchema, cursor: z.string().optional() }), output: z.strictObject({ text: z.string().max(128 * 1024), cursor: z.string().nullable(), size: z.number(), mtimeMs: z.number() }), owner: 'engine-host' },
   'fs.state': { input: z.void(), output: FsStateSchema, owner: 'engine-host' },
   'fs.scan': { input: z.strictObject({ known: z.array(FsScanKnownSchema).optional() }), output: FsScanResultSchema, owner: 'engine-host' },
   // main → host, after the index allocates or binds an app id
