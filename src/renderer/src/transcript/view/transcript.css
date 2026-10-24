@@ -192,6 +192,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 @media (prefers-reduced-motion: reduce) {
   .transcript-shimmer { animation: none; background-image: none; }
 }
+/* The thinking mark (ui/thinking-mark) sits between the chevron and the live label, centred on the text. */
+.thinking-mark { flex: none; display: block; }
 
 /* Work divider */
 .transcript-divider { display: flex; align-items: center; gap: 7px; padding: 2px 0 14px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
