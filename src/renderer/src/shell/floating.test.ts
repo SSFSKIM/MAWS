@@ -431,9 +431,14 @@ describe('the split’s card', () => {
     expect(closed()).toBe(false);
   });
 
-  it('Expand on the pane beside a session floats it; on a floating split it docks; otherwise it says why', () => {
+  it('Expand folds the conversation to its composer; Restore split docks it; otherwise it says why', () => {
     runAction('main.expandArtifactPane'); // Diagnostics is focused, the session beside it
     expect(set()).toMatchObject({ floating: { sessionTabId: S.id }, splitRatio: 0.4, focusedPane: 0 });
+    expect(closed(), 'Expand releases the full conversation column').toBe(true);
+    expect(marked(), 'the compressed composer receives the keyboard').toEqual([A]);
+    openCard();
+    expect(closed(), 'the title reopens the full conversation without restoring the split').toBe(false);
+    expect(set().floating?.sessionTabId).toBe(S.id);
     useLayout.getState().focusPane(1);
     runAction('main.expandArtifactPane'); // Restore split
     expect(set().floating).toBeUndefined();
