@@ -54,6 +54,35 @@ describe('l2-transcript-15: stopping closes the turn at the engine evidence', ()
     expect(state.current).toBe(turnId.ofMessage(uuid('u2')));
   });
 
+  it('does not give a newer running turn’s unnamed result to an older marker-stopped turn', () => {
+    const b = builder();
+    b.turn('u1');
+    b.emit('user.message', { messageUuid: uuid('marker'), content: '[Request interrupted by user]', isReplay: false, isSynthetic: false, origin: 'interrupt-marker', bash: null });
+    b.turn('u2');
+    b.text('m2', 0, 'New answer');
+    b.end([]);
+    const state = reduce(b.events);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ closedBy: 'stopped', ended: null });
+    expect(state.turns.get(turnId.ofMessage(uuid('u2')))).toMatchObject({ state: 'closed', ended: { terminalReason: 'completed' } });
+  });
+
+  it('retains the real engine-initiated interrupt result without user UUIDs after its marker closed the turn', () => {
+    const events = journalToEvents(loadJournal('pass3', 'p2-c3-subagent-ask'));
+    const marker = events.findIndex((event) => event.kind === 'user.message' && event.origin === 'interrupt-marker');
+    const result = events.find((event) => event.kind === 'turn.ended' && event.terminalReason === 'aborted_streaming');
+    expect(result).toMatchObject({ userMessageUuids: [], origin: 'task-notification' });
+    let state = reduce(events.slice(0, marker + 1));
+    expect(state.current).toBeNull();
+    const id = state.order.at(-1)!;
+    expect(state.turns.get(id)).toMatchObject({ closedBy: 'stopped', endedAt: '2026-10-14T08:54:40.526Z', ended: null });
+    state = applyEvents(state, events.slice(marker + 1));
+    expect(state.turns.get(id)!.ended).toBe(result);
+    expect(rowsOf(state).filter((row) => row.kind === 'divider').at(-1)).toMatchObject({
+      state: 'stopped', endedAt: '2026-10-14T08:54:40.528Z',
+      summary: { costUsd: 0.005708365, durationMs: 2509, terminalReason: 'aborted_streaming', usage: { cacheCreationInputTokens: 0, cacheReadInputTokens: 0, inputTokens: 0, outputTokens: 0, thinkingTokens: 0 } },
+    });
+  });
+
   it('closes on the real interrupt-text marker before its result, then retains the real result accounting', () => {
     // pass3/interrupt-text: seq 97 is the marker; seq 98 is the aborted_streaming result.
     const journal = loadJournal('pass3', 'interrupt-text');

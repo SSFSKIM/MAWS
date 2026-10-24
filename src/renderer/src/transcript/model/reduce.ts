@@ -506,7 +506,13 @@ function apply(batch: Batch, event: SessionEvent): void {
       // The interrupt marker can close the turn before its result arrives. Keep that result (and its accounting)
       // on the turn it names, even if another prompt has started meanwhile.
       const named = event.userMessageUuids.map(turnOf).find((turn) => turn?.state === 'open' || (turn?.closedBy === 'stopped' && turn.ended === null));
-      const turn = named ? batch.touch(named.id) : batch.current();
+      // Engine-initiated results have no user UUIDs (pass3/p2-c3-subagent-ask seq 214). With no current turn,
+      // the latest marker-stopped turn still awaits that result; do not discard its accounting as a loose event.
+      const interrupted = state.current === null && event.userMessageUuids.length === 0 ? state.order.findLast((id) => {
+        const candidate = state.turns.get(id)!;
+        return candidate.closedBy === 'stopped' && candidate.ended === null && wasInterrupted(candidate);
+      }) : undefined;
+      const turn = named ? batch.touch(named.id) : interrupted !== undefined ? batch.touch(interrupted) : batch.current();
       if (!turn) return batch.loose(event, false);
       batch.close(turn, event);
       return;
