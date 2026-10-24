@@ -71,7 +71,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await expect(mark).toBeVisible();
     await expect(mark).toHaveAttribute('title', new RegExp(`^Released at ${CLOCK} to stay under the 2 GB memory budget · Send resumes it$`));
     await expect(row.getByRole('img', { name: 'Idle' })).toBeVisible(); // the idle glyph: no failed or exited glyph
-    await expect(row.getByLabel('Unread')).toHaveCount(0);
+    await expect(row.getByRole('img', { name: 'Unread', exact: true })).toHaveCount(0); // not the hover control “Mark unread”
     // W5: the Overview floats over the main area from the toolbar's button rather than showing as the first tab.
     const overview = main.getByRole('dialog', { name: 'Overview' });
     const overviewButton = page.getByRole('banner').getByRole('button', { name: /^Overview/ });

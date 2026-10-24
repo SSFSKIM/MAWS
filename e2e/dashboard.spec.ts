@@ -300,12 +300,17 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await page.mouse.move(last.x, last.y);
     await expect(scatter.locator('.dash-tip')).toHaveText(last.tip);
     const counts = figures(main).nth(3);
-    await counts.scrollIntoViewIfNeeded();
-    const hatched = await counts.locator('svg').evaluate((svg) => {
-      const hatch = Array.from(svg.querySelectorAll('path[pointer-events="none"]')).find((p) => p.previousElementSibling?.hasAttribute('data-tip'))!;
+    const hatch = counts.locator('svg path[data-tip] + path[pointer-events="none"]').first();
+    // The figure keeps its 480px legibility floor: a narrow main column must scroll to the same hatched bar.
+    await hatch.scrollIntoViewIfNeeded();
+    const hatched = await hatch.evaluate((hatch) => {
       const box = hatch.getBoundingClientRect();
-      return { x: box.left + box.width / 2, y: box.top + box.height / 2, tip: hatch.previousElementSibling!.getAttribute('data-tip')! };
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      const hit = hatch.ownerDocument.elementFromPoint(x, y)?.closest('[data-tip]');
+      return { x, y, tip: hatch.previousElementSibling!.getAttribute('data-tip')!, hitTip: hit?.getAttribute('data-tip') ?? null };
     });
+    expect(hatched.hitTip, 'the visible hatching lets the real pointer reach its bar underneath').toBe(hatched.tip);
     await page.mouse.move(hatched.x, hatched.y);
     await expect(counts.locator('.dash-tip')).toHaveText(hatched.tip);
     await counts.screenshot({ path: `${PROOF}/hatched-hover.png` });

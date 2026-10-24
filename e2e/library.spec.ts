@@ -62,13 +62,31 @@ const AGENT = 'app-e2e-library-agent';
 let launch: MawsLaunch | null = null;
 let scratch: string | null = null;
 const cleanups: (() => Promise<void>)[] = []; // M5b: a session case's
+let libraryListTrace = false;
 
-test.afterEach(async () => {
-  for (const cleanup of cleanups.splice(0)) await cleanup();
-  await launch?.cleanup();
-  launch = null;
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
-  scratch = null;
+test.afterEach(async ({}, testInfo) => {
+  try {
+    if (libraryListTrace && launch) {
+      try {
+        if (testInfo.status !== testInfo.expectedStatus) {
+          const path = testInfo.outputPath('library-menu-failure.png');
+          await launch.page.screenshot({ path });
+          await testInfo.attach('Library menu failure', { path, contentType: 'image/png' });
+        }
+      } finally {
+        libraryListTrace = false;
+        const path = testInfo.outputPath('library-menu-trace.zip');
+        await launch.page.context().tracing.stop({ path });
+        await testInfo.attach('Library menu trace', { path, contentType: 'application/zip' });
+      }
+    }
+  } finally {
+    for (const cleanup of cleanups.splice(0)) await cleanup();
+    await launch?.cleanup();
+    launch = null;
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+    scratch = null;
+  }
 });
 
 test('the library lists, finds, pins, files into a Space, renames and deletes, and is right after the host restarts', async () => {
@@ -78,6 +96,8 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   writeFileSync(filePath, 'month,amount\nOctober,1200\n');
   launch = await launchMaws();
   const { page } = launch;
+  await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
+  libraryListTrace = true;
   await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
 
   // what the owner and an agent made
