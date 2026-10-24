@@ -13,7 +13,7 @@
 // never stand in for the list, and A's session states (its observed facts, availability and Refresh) reach `/plugins`
 // only through the loaded line and the detail's "Loaded in this session".
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
@@ -73,10 +73,26 @@ export interface PluginsLibraryProps {
 // details and confirmations, so an old request cannot silently become a change in a different project.
 export function PluginsLibrary({ cwd, appSessionId }: PluginsLibraryProps) {
   const ready = useSessions((s) => appSessionId !== null && s.engine.get(appSessionId)?.process === 'ready');
-  return appSessionId !== null && ready
-    ? <SessionLibrary key={`${cwd}:${appSessionId}`} cwd={cwd} appSessionId={appSessionId} presentation={{ variant: 'embedded' }} />
-    : <LibraryBody key={cwd} cwd={cwd} session={null} presentation={{ variant: 'embedded' }} />;
+  return <EmbeddedLibrary key={cwd} cwd={cwd} appSessionId={ready ? appSessionId : null} />;
 }
+
+function EmbeddedLibrary({ cwd, appSessionId }: PluginsLibraryProps) {
+  const [session, setSession] = useState<PluginSession | null>(null);
+  return (
+    <>
+      {appSessionId !== null && <ReadySession key={appSessionId} appSessionId={appSessionId} onChange={setSession} />}
+      <LibraryBody cwd={cwd} session={session?.appSessionId === appSessionId ? session : null} presentation={{ variant: 'embedded' }} />
+    </>
+  );
+}
+
+// Only the runtime reader follows the attachment. Memo keeps publishing its facts from rerendering the reader itself;
+// reload hooks return new callbacks on each render. The cwd-based body, operations and sheets remain mounted beside it.
+const ReadySession = memo(function ReadySession({ appSessionId, onChange }: { appSessionId: AppSessionId; onChange(session: PluginSession): void }) {
+  const session = usePluginSession(appSessionId, false);
+  useLayoutEffect(() => onChange(session), [onChange, session]);
+  return null;
+});
 
 export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   // the CLI's cwd: the launch's directory (which the host compares for project and local scope), else the record's
@@ -86,12 +102,16 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
 
 // The session modal alone keeps dormant-session Refresh. The embedded library exposes ready-process reloads only.
 function SessionLibrary({ cwd, appSessionId, presentation }: { cwd: string | null; appSessionId: AppSessionId; presentation: LibraryPresentation }) {
+  const session = usePluginSession(appSessionId, presentation.variant === 'modal');
+  return <LibraryBody cwd={cwd} session={session} presentation={presentation} />;
+}
+
+function usePluginSession(appSessionId: AppSessionId, allowAcquire: boolean): PluginSession {
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   const reloads = useReloads(appSessionId);
   const loaded = useLoadedPlugins(appSessionId);
   const availability = useAvailability(appSessionId);
-  const session: PluginSession = { appSessionId, loaded, availability, reloads: ready ? reloads : null, allowAcquire: presentation.variant === 'modal' };
-  return <LibraryBody cwd={cwd} session={session} presentation={presentation} />;
+  return { appSessionId, loaded, availability, reloads: ready ? reloads : null, allowAcquire };
 }
 
 function LibraryBody({ cwd, session, presentation }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation }) {

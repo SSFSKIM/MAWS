@@ -278,6 +278,78 @@ describe('plugins library: embedded and offline', () => {
     off();
   });
 
+  it('keeps a cwd operation, Stop and its follow-up confirmation through exit and a new attachment', async () => {
+    const nextId = 'app-9a1d4262' as AppSessionId;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const content = (appSessionId: AppSessionId | null) => <QueryClientProvider client={client}><PluginsLibrary cwd={cwd} appSessionId={appSessionId} /></QueryClientProvider>;
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    const view = render(content(ID));
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    menu('e8-probe@e8-scratch', 'Update');
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' })).toBeTruthy());
+
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) }));
+    expect(screen.getByText(/unavailable without a running session/)).toBeTruthy();
+    expect(within(row('e8-probe@e8-scratch')).getByRole('status').textContent).toBe('Working…');
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'update', phase: 'output', line: 'Updating the plugin…' })));
+    expect(within(row('e8-probe@e8-scratch')).getByRole('status').textContent).toBe('Updating the plugin…');
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(invoked('plugins.cancel')).toEqual([{ opId: 'pop-1' }]));
+    view.rerender(content(null));
+    act(() => useSessions.setState({ engine: new Map([[nextId, backend.status(nextId)]]) }));
+    view.rerender(content(nextId));
+    expect(loadedLine()).toBeTruthy();
+    expect(within(row('e8-probe@e8-scratch')).getByRole('status').textContent).toBe('Updating the plugin…');
+
+    const shownCommand = { sha256: SHA, command: 'npx fetch-helper', kind: 'command-source' };
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'update', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'This plugin runs a command its marketplace declares', failureCode: 'command_source_refused', shownCommand } } })));
+    await waitFor(() => expect(sheet()).toBeTruthy());
+    await resolved();
+    expect(within(sheet()).getByRole('heading', { name: 'Run the command e8-probe@e8-scratch declares?' })).toBeTruthy();
+    expect(row('e8-probe@e8-scratch').querySelector('[role="status"]')!.textContent).toBe('This plugin runs a command its marketplace declares · command_source_refused');
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Run it' }));
+    await waitFor(() => expect(invoked('plugins.update')).toEqual([
+      { cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user' },
+      { cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user', acceptCommand: SHA },
+    ]));
+    expect(sessionCalls()).toEqual([]);
+  });
+
+  it('keeps Browse detail and a pending sheet at its chosen scope when the ready attachment changes', async () => {
+    const nextId = 'app-9a1d4262' as AppSessionId;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const content = (appSessionId: AppSessionId | null) => <QueryClientProvider client={client}><PluginsLibrary cwd={cwd} appSessionId={appSessionId} /></QueryClientProvider>;
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    const view = render(content(ID));
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    await toBrowse();
+    fireEvent.click(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'View E8 other' }));
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-browse-detail]')!).getByRole('button', { name: 'Install' }));
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
+
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) }));
+    expect(sheet()).toBeTruthy();
+    expect(within(sheet()).getByText('No running session to reload')).toBeTruthy();
+    expect(within(sheet()).getByRole('radio', { name: 'Project' })).toHaveProperty('checked', true);
+    view.rerender(content(null));
+    act(() => useSessions.setState({ engine: new Map([[nextId, backend.status(nextId)]]) }));
+    view.rerender(content(nextId));
+    expect(document.querySelector('[data-browse-detail]')?.getAttribute('data-browse-detail')).toBe('e8-other@e8-scratch');
+    expect(within(sheet()).getByRole('radio', { name: 'Project' })).toHaveProperty('checked', true);
+    expect(within(sheet()).getByText('Reloads plugins in 1 running session')).toBeTruthy();
+    expect(invoked('plugins.install')).toEqual([]);
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-other@e8-scratch', scope: 'project' }]));
+    expect(document.querySelector('[data-browse-detail]')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Browse' }));
+    expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
+    expect(invoked('plugins.available')).toEqual([{ cwd }]);
+    expect(sessionCalls()).toEqual([]);
+  });
+
   it('changing project dismisses an old confirmation instead of retargeting its write to the new cwd', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const content = (directory: string) => <QueryClientProvider client={client}><PluginsLibrary cwd={directory} appSessionId={null} /></QueryClientProvider>;
