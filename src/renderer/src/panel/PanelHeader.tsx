@@ -76,7 +76,8 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   });
 
   if (toolbarHost) return createPortal(
-    <div ref={row} data-editor-toolbar className="flex min-w-0 shrink-0 items-center gap-1">
+    <div ref={row} data-editor-toolbar className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
+      {scope?.surface === 'panel' && registration && <span data-header-title title={registration.title} className="max-w-full min-w-0 truncate text-ui text-fg">{registration.title}</span>}
       {registration?.saved && <span data-header-saved title={SAVED_COPY[registration.saved]} className="truncate px-1 text-ui-sm text-fg-muted">{registration.saved === 'saved' ? 'Saved' : SAVED_COPY[registration.saved]}</span>}
       {shown.map((action) => <ActionButton key={action.id} action={action} text />)}
       {(overflow.length > 0 || folded.length > 0) && <MoreMenu actions={overflow} exports={folded} label={toolbarHost.menuLabel} text />}

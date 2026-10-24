@@ -79,6 +79,7 @@ describe('the panel header', () => {
       { id: 'check', label: 'Check against the design system', onSelect: () => calls.push('check') },
     ], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('pdf') }] }} controls={<button onClick={() => calls.push('expand')}>Expand pane</button>} />);
     expect(document.querySelector('[data-editor-header]')).toBeNull();
+    expect(within(target).getByText('Deck', { exact: true })).toBeTruthy(); // the panel has no main tab naming its record
     expect(within(target).getByText('Saved').getAttribute('title')).toBe('All changes saved');
     await user.click(within(target).getByRole('button', { name: 'Present' }));
     await user.click(within(target).getByRole('button', { name: 'Expand pane' }));
@@ -92,6 +93,16 @@ describe('the panel header', () => {
     expect(document.activeElement).toBe(within(target).getByRole('button', { name: 'Deck actions' }));
     act(() => expect(focusEditorHostAction(inlineScope, 'present')).toBe(true));
     expect(document.activeElement).toBe(within(target).getByRole('button', { name: 'Present' }));
+  });
+
+  it('does not repeat a main tab’s record title in its hosted controls', () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    offs.push(() => target.remove());
+    render(<EditorHeader title="Presentation" scope={{ surface: 'main', tabId: 'main-deck' }} registration={{ title: 'Q3 review', saved: 'saved', toolbarHost: { element: target, menuLabel: 'Deck actions' } }} />);
+    expect(within(target).queryByText('Q3 review', { exact: true })).toBeNull();
+    expect(within(target).getByText('Saved')).toBeTruthy();
+    expect(document.querySelector('[data-editor-header]')).toBeNull();
   });
 
   it('reserves no header or column for the resting summary (D1 floating cards)', () => {

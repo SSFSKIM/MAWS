@@ -235,7 +235,6 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
 
   const [regions] = useState(() => new RegionRing(DECK_REGIONS)); // P4-B2 (D14)
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (regionKey(event, regions, session, bindsKey)) return; // P4-B2 (D14): F6 and ⇧F6
     const mod = event.metaKey || event.ctrlKey;
     if (!mod || readOnly || preview) return; // M8: no undo in history (the live deck is not shown)
     const target = event.target as HTMLElement;
@@ -263,6 +262,23 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     return () => observer.disconnect();
   }, []);
   const thumbnailWidth = below ? 112 : 96;
+
+  // Host controls may be React portals from outside the editor's React tree. Their DOM ancestry still owns this ring.
+  useEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const focus = (event: FocusEvent) => regions.note(node, event.target);
+    const key = (event: KeyboardEvent) => {
+      // Document bubbling follows React's delegated handlers, so nested controls can consume the key first.
+      if (event.target instanceof Node && node.contains(event.target)) regionKey(event, regions, session, bindsKey, node);
+    };
+    node.addEventListener('focusin', focus);
+    node.ownerDocument.addEventListener('keydown', key);
+    return () => {
+      node.removeEventListener('focusin', focus);
+      node.ownerDocument.removeEventListener('keydown', key);
+    };
+  }, [regions, session, bindsKey]);
 
   useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
@@ -375,7 +391,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   );
   const toolbarHost = onToolbarHost && <div ref={onToolbarHost} className="deck-toolbar-host" />;
   const editor = (
-    <div ref={root /* P4-B2 K6 */} className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown} onFocus={(event) => regions.note(event.currentTarget, event.target)}>
+    <div ref={root /* P4-B2 K6 */} className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
       {faces && <style data-deck-faces>{faces}</style>}
       {!preview &&
         historySnapshot?.banner && (

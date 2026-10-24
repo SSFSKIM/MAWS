@@ -114,16 +114,16 @@ export class RegionRing {
 }
 
 /**
- * An editor root's F6 (⇧F6 back), from its `onKeyDown`: true when the key was F6 and is the editor's to take. It steps
+ * An editor root's F6 (⇧F6 back), from React or a native bubble listener with an explicit root: true when the key is the editor's. It steps
  * aside while an input method composes, for a key something earlier took, and for one the owner's keymap binds
  * (`bindsKey`, the shell's). An edit ends first, as a press outside the stage ends it; the armed box then unmounts as
  * the focus leaves (T23: SEL), and arms again when the stage is focused again.
  */
-export function regionKey(event: ReactKeyboardEvent<HTMLElement>, ring: RegionRing, session: DeckSession, bindsKey?: (event: KeyboardEvent) => boolean): boolean {
+export function regionKey(event: ReactKeyboardEvent<HTMLElement> | KeyboardEvent, ring: RegionRing, session: DeckSession, bindsKey?: (event: KeyboardEvent) => boolean, root = event.currentTarget): boolean {
   if (event.key !== 'F6' || event.metaKey || event.ctrlKey || event.altKey) return false;
-  const native = event.nativeEvent;
+  const native = 'nativeEvent' in event ? event.nativeEvent : event;
   if (event.defaultPrevented || native.isComposing || native.keyCode === 229 || session.snapshot().composing || bindsKey?.(native)) return false;
   if (session.snapshot().editingText !== null) session.editText(null);
-  if (ring.step(event.currentTarget, event.shiftKey)) event.preventDefault();
+  if (root instanceof HTMLElement && ring.step(root, event.shiftKey)) event.preventDefault();
   return true;
 }

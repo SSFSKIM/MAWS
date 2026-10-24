@@ -405,6 +405,16 @@ test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole cont
   await resizePanel(page, 280);
   const toolbar = inPanel.getByRole('toolbar', { name: 'Deck' });
   await expect(toolbar.getByRole('button', { name: 'Text style', exact: true })).toBeVisible();
+  const identity = toolbar.locator('[data-header-title]');
+  await expect(identity).toHaveText('Q3 review');
+  for (const label of ['Present', 'Deck actions', 'Float conversation over surface', 'Expand surface', 'Close surface']) {
+    await expect(toolbar.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  const titleBox = (await identity.boundingBox())!;
+  const panelBox = (await panel.boundingBox())!;
+  expect(titleBox.width).toBeGreaterThan(0);
+  expect(titleBox.x).toBeGreaterThanOrEqual(panelBox.x);
+  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width);
 
   await test.info().attach('deck-panel-280', { body: await panel.screenshot(), contentType: 'image/png' });
   expect(await squeezedControls(toolbar, { within: panel }), 'nothing selected').toEqual([]);
@@ -415,6 +425,16 @@ test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole cont
   await expect(inPanel.locator('[data-overlay] [data-selected="title"]')).toHaveCount(1);
   await test.info().attach('deck-panel-280-selected', { body: await panel.screenshot(), contentType: 'image/png' });
   expect(await squeezedControls(toolbar, { within: panel }), 'a heading selected').toEqual([]);
+
+  // Leave F6 to the portable editor for this isolated profile instead of the shell's default region shortcuts.
+  await ok(page, 'settings.set', { keymap: { 'region.focusNext': null, 'region.focusPrevious': null } });
+  const hostAction = toolbar.getByRole('button', { name: 'Present', exact: true });
+  await hostAction.focus();
+  await expect(hostAction).toBeFocused();
+  await page.keyboard.press('F6');
+  await expect(inPanel.locator('.deck-filmstrip [data-current] .deck-thumb-button')).toBeFocused();
+  await page.keyboard.press('Shift+F6');
+  await expect(hostAction).toBeFocused();
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

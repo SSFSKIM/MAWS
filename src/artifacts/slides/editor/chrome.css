@@ -141,13 +141,14 @@
   background: var(--bg-raised);
 }
 /* each item at its own width; the notice ellipsizes and the spacer takes what is left */
-.deck-toolbar > :not(.deck-notice):not(.deck-toolbar-spacer):not(.deck-element-bar),
+.deck-toolbar > :not(.deck-notice):not(.deck-toolbar-spacer):not(.deck-element-bar):not(.deck-toolbar-host),
 .deck-element-bar > * {
   flex-shrink: 0;
 }
-/* the element bar is a group of controls, not one: it may be narrower than all of them in a row (its own controls never
-   shrink, they wrap within it), else its one-row width overflows a narrow editor */
-.deck-toolbar > .deck-element-bar {
+/* Element and host bars are groups, not single controls: their controls keep their own width and wrap inside the
+   available toolbar width, including in a 280 px panel. */
+.deck-toolbar > .deck-element-bar,
+.deck-toolbar > .deck-toolbar-host {
   flex-shrink: 1;
   min-width: 0;
   max-width: 100%;

@@ -145,6 +145,17 @@ describe('P3-F F3: the deck family’s toolbars wrap by whole controls', () => {
       for (const control of zoom.children) expect(getComputedStyle(control).flexShrink).toBe('0');
     });
 
+    it(`the host slot can narrow within the toolbar instead of preserving its controls’ combined width, sheets in the order ${order.join(', ')}`, () => {
+      sheets(order);
+      const { container } = render(<DeckEditor session={new DeckSession(deckDoc(), 0)} assetUrl={() => null} system={null} readOnly={false} onToolbarHost={noop} />);
+      const host = container.querySelector<HTMLElement>('.deck-toolbar-host')!;
+      host.append(document.createElement('button'));
+      const css = getComputedStyle(host);
+      expect(css.flexShrink).toBe('1');
+      expect(css.minWidth).toBe('0');
+      expect(css.maxWidth).toBe('100%');
+    });
+
     // P3-F F3 reviews 2 and 4: a wrapping row places each item at its flex basis, so a notice at its text's width ("A deck
     // holds at most 100 slides: delete one to add another.") would take a row of its own whenever it shows, the zoom with
     // it, and the stage would jump: its basis is zero. Beside the spacer (grow 1) it takes nearly all the row's free
