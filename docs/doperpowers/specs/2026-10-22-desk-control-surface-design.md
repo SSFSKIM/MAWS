@@ -120,12 +120,15 @@ allows today.
   remain test evidence only. `read.catalog` has no UI consumer and no live timing
   samples; comparative A33 and the full two-Mac acceptance remain open.
 - [ ] M2 — native panels from reads: side question, context and usage, model and effort,
-  MCP, compact with instructions, status, permissions and hooks.
+  MCP, compact with instructions, status, permissions and hooks. Paused (2026-10-24;
+  Decision Log, convergence with MAWS).
 - [ ] M3 — requests and modes: rule suggestions with a scope, plan approval into a mode,
-  "allow and switch", the mode chip.
-- [ ] M4 — agents, fork, following an id change (three reviewed increments).
+  "allow and switch", the mode chip. Paused (2026-10-24; Decision Log, convergence
+  with MAWS).
+- [ ] M4 — agents, fork, following an id change (three reviewed increments). Paused
+  (2026-10-24; Decision Log, convergence with MAWS).
 - [ ] M5 — composer parity: attachments, `@` files, history (`!` shell not in this run:
-  F3).
+  F3). Paused (2026-10-24; Decision Log, convergence with MAWS).
 - [-] M6 — the attach key driver for `--bg` seats: out of this run (F2, the owner's
   choice, 2026-10-22; Decision Log, entry 6).
 - [ ] The latency table on #52 against the baseline, and the acceptance walk on both
@@ -2781,6 +2784,35 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
 
 - 2026-10-24: Record #129's deployment and the owner's attended phone re-walk in
   Progress and Outcomes; no change to the unwalked M1 branches or comparative A33.
+
+- Decision: Convergence with MAWS. M2–M5 pause for the remote-session architecture;
+  their existing mod-based plan is not the next work to execute. The owner expects the
+  desk and the MAWS desktop app to become one kind of application — “MAWS on web”
+  and the MAWS app, one GUI workspace for every Claude Code session across projects
+  and machines. MAWS already has a mature agent workspace design; showing sessions
+  across machines in it is not very different, so the owner expects some
+  reconciliation, not much. The desk's org and IAM structure persist: IAM answers
+  who owns a session, and one workspace belongs to one org, covering the projects
+  of its enrolled machines. The sharing choice imagined when a person opens a
+  session is to share it with the org, keep it private, or set a sharing boundary.
+  Full remote control is meant to come through a protocol akin to Claude Code
+  Desktop's SSH mode, planned but not built here. Since Desktop already does it,
+  the owner expects bringing MAWS's native experience to remote sessions not to be
+  too hard. The remaining panels — context and usage, model and effort, MCP,
+  permissions and more — will likely come through an architectural change rather
+  than the working but limited mods API: probably a helper daemon exposing the
+  SDK's control surface for full native-level control, not a settled architecture.
+  Rationale: MAWS's UX is moving quickly; the owner will wait for that work to
+  finish, and the remote-session architecture is not settled. It is not yet time
+  for the session-source seam design note the orchestrator proposed before M2;
+  that note waits for the architecture too. Rejected: building M2's panels now on
+  the mods/bridge surface as desk-only components. M2–M5's existing design and
+  acceptance remain the record to reconcile when that architecture settles, not
+  authority to continue the current implementation plan.
+  Note for that future design, not a decision: a private session's content should
+  be withheld at the machine, in what its daemon publishes to the hub, not merely
+  hidden in the UI, so the sharing choice is enforced where data leaves the machine.
+  Date/Author: 2026-10-24, the owner's direction, recorded by the desk orchestrator.
 
 ## Outcomes & Retrospective
 
