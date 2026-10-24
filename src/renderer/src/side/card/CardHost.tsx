@@ -25,7 +25,7 @@
 // in flow in the stack's entry the margin placed (`layout="margin"`), as the docked strip is in its column: the card at
 // the entry's width (`marginCard`), its height capped by the page's scroll box (`.ds-doc`), never pinned, nothing
 // located. The document host also opts into X36's draft rule (`keepDraftOnEscape`, `discardOnBlurEmpty`, `onDraft`).
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
@@ -38,7 +38,7 @@ export interface CardFrame {
   scale: number;
   offset: { x: number; y: number };
   key: string; // changes when the frame is replaced (the viewer's `frame` string)
-  locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: one function per mounted frame
+  locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: a fresh function on mount and each page load
   showVersion?(at: ArtifactOpenAt, location?: ArtifactLocation): void; // the host viewer's: a version asked for from a card thread's row (P3-L M6b fix wave 2); P4-B4: or by a link's place (its version id)
   // P3-B start (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a document's own card controls, drawn in the
   // card's header before Close (its Resolve or Reopen), and a send of the card's composer as it sets out; the call it
@@ -169,16 +169,15 @@ function Caret({ x }: { x: number }) {
 
 // The card's element as the frame last located it, else the card's own rect (the pick's; none for a re-dock). Asked
 // when the card shows, when the frame is replaced or its locate arrives (a viewer whose frame mounts after the card was
-// claimed), and when the host's box resizes; a null answer keeps what was. `locate` is one function per frame. A card
-// with no rect to stand at (a re-dock nothing has located yet) asks once more after a null (P3-F L198): its first ask
-// can race the page it re-docks into.
+// claimed), on the frame's load (a fresh `locate` handle), and when the host's box resizes. A null can be a lost or
+// timed-out bridge ask, not just a missing element: ask once more even if this card has a rect from the previous frame.
+// Two nulls keep what was, without an unbounded retry for an element that really is gone.
 function useLocated(card: OpenCard | null, frame: CardFrame, box: { width: number; height: number }, layout: Layout /* P4-B1 */): CardRect | null {
   const [located, setLocated] = useState<{ serial: number; rect: CardRect } | null>(null);
   const serial = card?.serial ?? null;
   const selector = card?.anchor.locator ?? null;
   const { key, locate } = frame;
   const { width, height } = box;
-  const unplaced = useEffectEvent((at: number) => card?.serial === at && card.rect === null && located?.serial !== at);
   useEffect(() => {
     if (serial === null || selector === null || layout !== 'anchored' /* P4-B1: docked or margin */ || locate === undefined) return;
     let latest = true;
@@ -186,7 +185,7 @@ function useLocated(card: OpenCard | null, frame: CardFrame, box: { width: numbe
       void locate(selector).then((rect) => {
         if (!latest) return;
         if (rect !== null) setLocated({ serial, rect });
-        else if (again && unplaced(serial)) ask(false);
+        else if (again) ask(false);
       });
     ask(true);
     return () => {

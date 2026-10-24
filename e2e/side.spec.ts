@@ -16,6 +16,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { anchoredMessage } from '../src/shared/anchor/message';
 import { ScratchRepo } from '../test/support/scratch-repo';
+import { collectBestEffortEvidence } from './support/best-effort-evidence';
 import { StoreFixture } from '../test/support/store-fixture';
 import { menu, otherThemeColours } from './support/code-product';
 import { clickRevealed } from './support/hover';
@@ -920,6 +921,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(redocked).toBeVisible();
     await expect(redocked.getByRole('textbox', { name: 'Reply' })).toBeEnabled();
 
+    await captureArtifactPins(c, viewer, redocked, hero);
     // a Reload mounts a new frame: the card stays and is pinned in it again
     await headerAction(page, panelRegion(page), 'Reload');
     await expect(viewer.frameLocator('[data-artifact-frame="html"]').locator('#hero')).toHaveText('Sales overview');
@@ -940,6 +942,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const c = await begin((cwd, dir) => [pageParentJournal(cwd).write(dir, 'parent'), updateJournal(cwd, {}).write(dir, 'thread')]);
     const { page, maws, parent, repo } = c;
     const { card, record } = await commentOnHeading(c, await parentPage(page, parent));
+    const viewer = panelRegion(page).locator('[data-artifact-viewer]');
+    const hero = viewer.frameLocator('[data-artifact-frame="html"]').locator('#hero');
+    await captureArtifactPins(c, viewer, card, hero);
     updateJournal(repo.root, { status: 'published', id: 'dash', deliverableId: record.id, version: 2, title: 'Dashboard', changed: ['index.html'], ownerAppSessionId: parent }).write(c.journals, 'thread');
     await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
     await card.getByRole('button', { name: 'Send' }).click();
@@ -990,8 +995,6 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // the parent's viewer, on the latest, moves to v2; the card stays open in thread phase, pinned under the heading in the
     // new frame, and the thread's reply arrives in it
-    const viewer = panelRegion(page).locator('[data-artifact-viewer]');
-    const hero = viewer.frameLocator('[data-artifact-frame="html"]').locator('#hero');
     await expect(viewer).toHaveAttribute('data-version', '2', { timeout: 20_000 });
     await expect(hero).toHaveText(HERO_V2);
     await expect(card).toHaveAttribute('data-card-phase', 'thread');
@@ -1126,6 +1129,42 @@ async function shootCard(maws: MawsLaunch, target: Locator, name: string): Promi
   }
   await menu(maws, 'theme.light');
   await expect(maws.page.locator('html')).toHaveAttribute('data-theme', 'light');
+}
+
+// The custom Electron launches have no fixture-managed tracing. Keep frame replacement evidence for both Reload and
+// version switches; capture is bounded/best-effort because it runs before the app and scratch disposals in afterEach.
+async function captureArtifactPins({ maws, page }: Case, viewer: Locator, card: Locator, heading: Locator): Promise<void> {
+  const info = test.info();
+  await maws.app.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
+  cleanups.push(() => collectBestEffortEvidence({
+    'artifact-pin-trace': async () => {
+      const path = info.outputPath('artifact-pin-trace.zip');
+      await maws.app.context().tracing.stop({ path });
+      await info.attach('artifact-pin-trace', { path, contentType: 'application/zip' });
+    },
+    'artifact-pin-geometry': async () => {
+      await info.attach('artifact-pin-geometry', {
+        body: JSON.stringify({
+          heading: await heading.boundingBox({ timeout: 1_000 }),
+          card: await card.boundingBox({ timeout: 1_000 }),
+          host: await viewer.locator('[data-card-host]').boundingBox({ timeout: 1_000 }),
+          frame: await viewer.locator('[data-artifact-frame="html"]').boundingBox({ timeout: 1_000 }),
+          cardStyle: await card.getAttribute('style', { timeout: 1_000 }),
+        }, null, 2),
+        contentType: 'application/json',
+      });
+    },
+    'artifact-pin-screenshot': async () => {
+      await info.attach('artifact-pin-screenshot', { body: await page.screenshot({ timeout: 5_000 }), contentType: 'image/png' });
+    },
+  }, 5_000));
+  await viewer.evaluate((viewer) => {
+    window.addEventListener('message', (event) => {
+      if (event.data?.type !== 'maws:located') return;
+      const currentFrame = event.source === viewer.querySelector<HTMLIFrameElement>('[data-artifact-frame="html"]')?.contentWindow;
+      console.log('artifact-pin-located', JSON.stringify({ currentFrame, message: event.data }));
+    });
+  });
 }
 
 // The card 4 px under the element's bottom edge, at its left (D4's below placement).
