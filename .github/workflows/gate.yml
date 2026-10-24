@@ -138,12 +138,14 @@ env:
   # Wave 2 (V4, CI-opt): transcript, panel, c7, code, scm, library, document and settings were 3/3 green in guest runs
   # 40095523463, 40099706584 and 40107391110, matching host references 40095523499 and 40077708930. tools matched the
   # host's two stale failures in all three guest runs, its other 11 cases green; UX2 fixed those on master (f645666ee),
-  # and tools now passes on the host. side is held: the post-Reload pinned-card predicate failed in guest 40112861862
-  # and host control 40118458114; it rejoins once the host is green again. design and presentations stay held.
+  # and tools now passes on the host. side had been held: the post-Reload pinned-card predicate failed in guest 40112861862
+  # and host control 40118458114. design and presentations stay held.
   # Wave 2b (V4, CI-opt): dashboard was 3/3 green on maws-vm-golden-20261024a in guest runs 40114501885,
   # 40120234172 and 40121336786 (5.4, 5.2 and 4.6 min, against the host's 4.2 min).
+  # Wave 2c (V4, CI-opt wave 2d): side was 3/3 green in guest runs 40123319856, 40124224867 and 40127753336 at master
+  # 8757bfb90, after the re-pin fix (PR #139, merge 0acb77912), with no post-Reload pin failure (2.3, 2.9 and 3.1 min).
   MAC_VM_E2E: >-
-    document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard
+    document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side
 
 defaults:
   run:
