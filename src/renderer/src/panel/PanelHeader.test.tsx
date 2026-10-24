@@ -22,6 +22,7 @@ import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';
 import type { PanelToolContext } from './tool';
+import { EditorHeader } from './PanelHeader';
 
 const offs: (() => void)[] = [];
 beforeEach(() => {
@@ -64,6 +65,35 @@ const add = (toolId: string) => {
 };
 
 describe('the panel header', () => {
+  it('moves saved state, primary action, grouped actions and host controls into an editor toolbar without a second header row', async () => {
+    const user = userEvent.setup();
+    const target = document.createElement('div');
+    target.setAttribute('role', 'toolbar');
+    document.body.append(target);
+    offs.push(() => target.remove());
+    const calls: string[] = [];
+    const inlineScope = { surface: 'panel', tabId: 'inline-deck' } as const;
+    render(<EditorHeader title="Deck" scope={inlineScope} registration={{ title: 'Deck', saved: 'saved', toolbarHost: { element: target, menuLabel: 'Deck actions' }, actions: [
+      { id: 'present', label: 'Present', onSelect: () => calls.push('present') },
+      { id: 'theme', label: 'Theme', pressed: false, onSelect: () => calls.push('theme') },
+      { id: 'check', label: 'Check against the design system', onSelect: () => calls.push('check') },
+    ], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('pdf') }] }} controls={<button onClick={() => calls.push('expand')}>Expand pane</button>} />);
+    expect(document.querySelector('[data-editor-header]')).toBeNull();
+    expect(within(target).getByText('Saved').getAttribute('title')).toBe('All changes saved');
+    await user.click(within(target).getByRole('button', { name: 'Present' }));
+    await user.click(within(target).getByRole('button', { name: 'Expand pane' }));
+    expect(within(target).queryByRole('button', { name: 'Theme' })).toBeNull();
+    await user.click(within(target).getByRole('button', { name: 'Deck actions' }));
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Theme' }));
+    await user.click(within(target).getByRole('button', { name: 'Deck actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'PDF' }));
+    expect(calls).toEqual(['present', 'expand', 'theme', 'pdf']);
+    act(() => expect(focusEditorHostAction(inlineScope, 'theme')).toBe(true));
+    expect(document.activeElement).toBe(within(target).getByRole('button', { name: 'Deck actions' }));
+    act(() => expect(focusEditorHostAction(inlineScope, 'present')).toBe(true));
+    expect(document.activeElement).toBe(within(target).getByRole('button', { name: 'Present' }));
+  });
+
   it('reserves no header or column for the resting summary (D1 floating cards)', () => {
     mount();
     expect(header()).toBeNull();

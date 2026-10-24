@@ -551,7 +551,7 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
     const stage = container.querySelector('[data-stage-surface]') as HTMLElement;
     stage.focus();
-    return { session, stage, notes: screen.getByRole('textbox', { name: 'Speaker notes' }), user: userEvent.setup() };
+    return { session, stage, notes: screen.getByRole('button', { name: 'Speaker notes', exact: true }), user: userEvent.setup() };
   }
 
   // P4-B2 (D1, D15 A3): a text element selected is ARMED, its box holding the focus; any other, its own node
@@ -575,6 +575,17 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     await user.tab({ shift: true });
     expect(document.activeElement).not.toBe(stage);
     expect(stage.compareDocumentPosition(document.activeElement!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('lets the keyboard open folded notes and reach the notes field without trapping focus on the stage', async () => {
+    const { stage, notes, user } = mount(deck(`<section id="s" style="background:#ffffff"></section>`));
+    await user.tab();
+    expect(document.activeElement).toBe(notes);
+    await user.keyboard('{Enter}');
+    expect(notes.getAttribute('aria-expanded')).toBe('true');
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Speaker notes' }));
+    expect(document.activeElement).not.toBe(stage);
   });
 
   it('an empty slide captures neither Tab nor Shift+Tab', async () => {

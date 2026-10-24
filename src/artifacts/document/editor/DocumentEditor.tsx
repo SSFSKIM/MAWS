@@ -44,7 +44,7 @@ import { isBindingTransaction, type Carry, type Doc } from '../../yjs'; // P3-E:
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
-import { listTabs, tabBody, tabOfBlock } from '../tabs'; // P4-B4: listTabs, tabOfBlock
+import { addTab, listTabs, tabBody, tabOfBlock, TAB_LIMIT_REFUSAL } from '../tabs'; // P4-B4: listTabs, tabOfBlock
 import { discardThread, getThread, reopen, reply, resolve } from '../threads'; // P4-B1: isBlockAnchor moved to comments/locate.ts
 import type { ExtraChange } from '../history'; // P3-E
 import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges, type CommentsOptions /* P3-E */ } from './comments/plugins';
@@ -71,7 +71,8 @@ import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E
 import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
 import type { MentionSource } from './MentionPicker';
-import { Toolbar } from './Toolbar';
+import { Toolbar, type SectionControls } from './Toolbar';
+import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { Suggestions, type SuggestionHost } from './Suggestions';
 import { useReadOnly } from './read-only';
 import { useRailLayout } from './rail-layout'; // P3-F1
@@ -197,6 +198,30 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const commentsView = props.commentsView ?? 'expand';
   const [marginTier, setMarginTier] = useState<MarginTier['kind']>('off');
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
+  const shownEditor = useRef<Editor | null>(null);
+  const focusAfterBind = useRef(false);
+  const bindEditor = useCallback((editor: Editor | null) => {
+    shownEditor.current = editor;
+    props.onEditor?.(editor);
+    if (editor && focusAfterBind.current) {
+      focusAfterBind.current = false;
+      editor.view.focus();
+    }
+  }, [props.onEditor]);
+  const selectSection = (id: string, focusPage = false) => {
+    if (focusPage && id === active?.id && shownEditor.current) shownEditor.current.view.focus();
+    else if (focusPage) focusAfterBind.current = true;
+    setSelected(id);
+  };
+  const newSection: SectionControls = {
+    disabled: readOnly || tabs.length >= DOCUMENT_LIMITS.tabs,
+    reason: tabs.length >= DOCUMENT_LIMITS.tabs ? TAB_LIMIT_REFUSAL : undefined,
+    add: () => {
+      const current = listTabs(doc);
+      if (props.handle.state().readOnly || current.length >= DOCUMENT_LIMITS.tabs) return;
+      setSelected(addTab(doc, { title: `Tab ${current.length + 1}`, ...(active ? { after: active.id } : {}) }));
+    },
+  };
   const { host } = props;
   const author = useMemo<CommentAuthor>(() => ({ actor: host.identity().actor, now: () => Date.now() }), [host]);
   // P4-B1 (X36's draft rule: a hidden card keeps its draft, one draft per thread): the threads' reply drafts, the
@@ -336,7 +361,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   };
   return (
     <div className="doc-editor" data-document-editor="">
-      {!preview && <Tabs doc={doc} tabs={tabs} active={active?.id ?? null} readOnly={readOnly} onSelect={setSelected} />}
+      {!preview && tabs.length > 1 && <Tabs doc={doc} tabs={tabs} active={active?.id ?? null} readOnly={readOnly} onSelect={selectSection} />}
       {snapshot?.banner && (
         <div className="doc-banner" role="status" aria-label="Restored">
           <span>{snapshot.banner}</span>
@@ -356,7 +381,9 @@ export function DocumentEditor(props: DocumentEditorProps) {
             <TabEditor
               {...props}
               key={active.id}
+              onEditor={bindEditor}
               tabId={active.id}
+              newSection={newSection}
               tabTitle={tabs.length === 1 ? '' : active.title} // P4-B1 (tracker L275): one tab names no tab in a comment's label
               author={author}
               rail={rail}
@@ -422,6 +449,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
 interface TabEditorProps extends DocumentEditorProps {
   tabId: string;
   tabTitle: string;
+  newSection: SectionControls;
   author: CommentAuthor;
   rail: Rail;
   openRail(rail: Rail): void;
@@ -452,7 +480,7 @@ interface TabEditorProps extends DocumentEditorProps {
   previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, provisional, readOnly, showing, onShown, revealing, onRevealed /* P4-B4 */, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, provisional, readOnly, showing, onShown, revealing, onRevealed /* P4-B4 */, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -655,6 +683,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           comments={{ comment: comments ? () => commentRef.current() : null, railOpen: rail === 'comments', openCount, toggleRail: () => openRail(rail === 'comments' ? null : 'comments'), ...(onCommentsViewChange && { view: { value: commentsView ?? 'expand', set: onCommentsViewChange } }) /* P4-B1 */ }}
           history={historyController ? { open: rail === 'history', toggle: toggleHistory } : undefined}
           mentions={mentions}
+          newSection={newSection}
         />
       )}
       {findOpen && <FindBar ref={findField} editor={shown} onClose={() => setFindOpen(false)} />}

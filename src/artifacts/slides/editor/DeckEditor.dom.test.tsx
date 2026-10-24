@@ -42,6 +42,37 @@ function mount(doc = deck(), readOnly = false) {
 const thumbs = () => screen.getAllByRole('button', { name: /^Slide \d+(, hidden|, held)*$/ });
 
 describe('the deck editor', () => {
+  it('starts notes folded with saved content indicated, preserves the choice on remount, and follows remote notes while folded', () => {
+    const { session, doc, unmount } = mount();
+    const disclosure = () => screen.getByRole('button', { name: 'Speaker notes', exact: true });
+    expect(disclosure().getAttribute('aria-expanded')).toBe('false');
+    expect(disclosure().textContent).toContain('Notes a');
+    expect(screen.queryByRole('textbox', { name: 'Speaker notes' })).toBeNull();
+    fireEvent.click(disclosure());
+    expect(screen.getByRole('textbox', { name: 'Speaker notes' })).toBeTruthy();
+    fireEvent.click(disclosure());
+    act(() => setNotes(doc, 'a', 'Opening notes from another writer', 'remote'));
+    expect(disclosure().textContent).toContain('Opening notes from another writer');
+    unmount();
+    const reopened = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(disclosure().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(disclosure());
+    expect((screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement).value).toBe('Opening notes from another writer');
+    reopened.unmount();
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(disclosure().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('keeps an unsaved notes draft visible even when the tab’s notes choice is folded', () => {
+    const doc = deck();
+    const session = new DeckSession(doc);
+    session.keepNotesDraft('a', { from: 'Notes a', text: 'Retained notes while read-only' });
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly />);
+    expect(screen.getByRole('button', { name: 'Speaker notes', exact: true }).getAttribute('aria-expanded')).toBe('true');
+    expect((screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement).value).toBe('Retained notes while read-only');
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+
   it('keeps the inspector closed until its own toolbar action is used, then closes it from the card', () => {
     mount();
     expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
@@ -114,7 +145,7 @@ describe('the deck editor', () => {
 
   it('the notes: typed into the model, a remote change into the field, the current slide’s only', () => {
     const { doc } = mount();
-    const field = screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+    const field = notesField();
     expect(field.value).toBe('Notes a');
     field.value = 'Notes a, then more';
     fireEvent.input(field);
@@ -126,7 +157,7 @@ describe('the deck editor', () => {
   it('read-only: no gestures offered, the notes not editable', () => {
     mount(deck(), true);
     expect(screen.queryByRole('button', { name: 'New slide' })).toBeNull();
-    expect((screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(notesField().readOnly).toBe(true);
   });
 
   it('reports the first showing drawn once every thumbnail has laid out', async () => {
@@ -142,7 +173,11 @@ describe('the deck editor', () => {
 
 // ---- fix wave 1 ----------------------------------------------------------------------------------------------------
 
-const notesField = () => screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+const notesField = () => {
+  const disclosure = screen.getByRole('button', { name: 'Speaker notes', exact: true });
+  if (disclosure.getAttribute('aria-expanded') === 'false') fireEvent.click(disclosure);
+  return screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+};
 
 describe('the notes under a composition and the dialect’s limits (findings 1 and 4)', () => {
   it('a composition ends carried onto a remote insertion at the edge of the owner’s deletion, nothing of either lost', () => {
@@ -356,15 +391,20 @@ describe('what the editor shows, for the header’s Export (L233)', () => {
       markViewed: async () => {},
     };
     const session = new DeckSession(doc);
-    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
+    const toolbarHosts: Array<HTMLDivElement | null> = [];
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} onToolbarHost={(element) => { toolbarHosts.push(element); }} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Speaker notes', exact: true }));
     act(() => session.toggleRail('history'));
     const row = (label: string) => screen.findByRole('button', { name: new RegExp(`^Version ${label} by`) });
     fireEvent.click(await row('Draft 2'));
     await waitFor(() => expect(session.snapshot().shown).toEqual({ versionId: 2 }));
+    expect(toolbarHosts.at(-1)?.closest('.deck-history-bar')).toBeTruthy();
     fireEvent.click(await row('Draft 1'), { shiftKey: true });
     await waitFor(() => expect(session.snapshot().shown).toBe('compare'));
     act(() => session.toggleRail('history'));
     await waitFor(() => expect(session.snapshot().shown).toBeNull());
+    expect(toolbarHosts.at(-1)?.closest('[aria-label="Deck"]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Speaker notes', exact: true }).getAttribute('aria-expanded')).toBe('true');
   });
 });
 

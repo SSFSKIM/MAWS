@@ -104,19 +104,16 @@ async function openFromLibrary(page: Page, title: string, artifactId: string): P
   return tab;
 }
 
-/** Document History lives in its toolbar/card; non-card actions remain in the title header and its overflow. */
-async function headerAction(page: Page, label: string): Promise<void> {
+/** History keeps its document toolbar/card controls; Theme lives under Deck actions. */
+async function deckAction(page: Page, label: 'Version history' | 'Theme'): Promise<void> {
+  const editor = page.locator('[data-region="main"] [data-deck-editor]');
   if (label === 'Version history') {
-    const editor = page.locator('[data-region="main"] [data-deck-editor]');
     const close = editor.getByRole('button', { name: 'Close version history', exact: true });
     if (await close.isVisible()) return close.click();
     return editor.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: label, exact: true }).click();
   }
-  const header = page.locator('[data-region="main"] [data-editor-header]');
-  const button = header.getByRole('button', { name: label, exact: true });
-  if (await button.isVisible()) return button.click();
-  await header.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
+  await editor.locator('.deck-toolbar [data-editor-toolbar]').getByRole('button', { name: 'Deck actions', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: label, exact: true }).click();
 }
 
 const bundled = (key: string) => JSON.parse(readFileSync(join(REPO_ROOT, `src/artifacts/types/design_system/defaults/${key}/tokens.tokens.json`), 'utf8')) as { color: Record<string, { $root: { $value: { hex: string } } }> };
@@ -170,7 +167,7 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
 
   await test.step('the document toolbar’s Version history opens its floating card and Fit uses the width it leaves', async () => {
     const stageBefore = await tab.locator('[data-stage-slide]').boundingBox();
-    await headerAction(page, 'Version history');
+    await deckAction(page, 'Version history');
     const rail = tab.getByRole('complementary', { name: 'Version history' });
     await expect(rail).toBeVisible();
     await expect.poll(async () => (await tab.locator('[data-stage-slide]').boundingBox())!.width, { message: 'Fit gives the open card real width' }).toBeLessThan(stageBefore!.width);
@@ -270,7 +267,7 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   });
 
   await test.step('Show editors on the selected element names who edited it', async () => {
-    await headerAction(page, 'Version history'); // the rail closed: under 720 px of editor it is a sheet over the stage
+    await deckAction(page, 'Version history'); // the rail closed: under 720 px of editor it is a sheet over the stage
     await expect(tab.locator('[data-deck-rail="history"]')).toHaveCount(0);
     const live = tab.locator('[data-stage-slide] [data-eid="title"]');
     await live.click();
@@ -283,7 +280,7 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   });
 
   await test.step('Restore brings the slides and the deck’s properties back as a new restore version, with the banner', async () => {
-    await headerAction(page, 'Version history');
+    await deckAction(page, 'Version history');
     await rail.getByRole('button', { name: /^Version Draft by You/ }).click();
     await bar.getByRole('button', { name: 'Restore this version' }).click();
     await tab.getByRole('alertdialog', { name: 'Restore this version?' }).getByRole('button', { name: 'Restore' }).click();
@@ -308,7 +305,7 @@ test('WR #46: an open history card receives committed human and automatic agent 
   const id = artifact.id;
   await seam(page, 'seed', id, DRAFT);
   const tab = await openFromLibrary(page, 'Live history', id);
-  await headerAction(page, 'Version history');
+  await deckAction(page, 'Version history');
   const rail = tab.getByRole('complementary', { name: 'Version history' });
   await expect(rail).toBeVisible();
   const listed = async () => (await ok<{ versions: { id: number }[] }>(page, 'artifacts.versions', { artifactId: id })).versions;
@@ -433,10 +430,10 @@ test('a live editor and a version’s preview of one deck in one window each dra
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
 
   // fix wave 3: the Theme's Body face set to the uploaded family, so text reading the body token asks for it too
-  await headerAction(page, 'Theme');
+  await deckAction(page, 'Theme');
   await inMain.locator('[data-deck-rail="theme"]').getByRole('combobox', { name: 'Body face', exact: true }).selectOption({ label: 'Face Lab' });
   await expect.poll(async () => JSON.parse((await seam(page, 'files', id))['project/deck.json']!).dsOverrides?.['--ds-font-body'] ?? '').toContain('Face Lab');
-  await headerAction(page, 'Theme');
+  await deckAction(page, 'Theme');
   await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Serif face' });
 
   // the serif face's width, live; then the deck re-mapped to the monospace face: both live surfaces follow
@@ -450,7 +447,7 @@ test('a live editor and a version’s preview of one deck in one window each dra
   const mono = await settledWidth(inPanel);
 
   // the main tab previews the version while the panel stays live: each draws its own upload for 'Face Lab'
-  await headerAction(page, 'Version history');
+  await deckAction(page, 'Version history');
   await inMain.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Serif face by You/ }).click();
   await expect(inMain.getByRole('toolbar', { name: 'Version preview' })).toBeVisible();
   const preview = await settledWidth(inMain.locator('[data-history-stage]'));
@@ -497,7 +494,7 @@ test('the preview of a 3-month-old version of S7a’s heavy deck draws within 1,
   expect((await seam(page, 'order', id)).length).toBeGreaterThan(50);
 
   const tab = await openFromLibrary(page, 'Heavy deck', id);
-  await headerAction(page, 'Version history');
+  await deckAction(page, 'Version history');
   const rail = tab.getByRole('complementary', { name: 'Version history' });
   const bar = tab.getByRole('toolbar', { name: 'Version preview' });
   const times: number[] = [];

@@ -14,9 +14,10 @@
 // (another slide and back, a version shown and left, a tab switch) shows it again with its refusal, carried onto the
 // notes as they are now.
 //
+// The tab remembers its disclosure choice. Saved notes have a collapsed preview; an unsaved draft stays visible.
 // WR #39: retained text autosaves once its rebased value fits, including on return to the field.
 // Read-only keeps the draft intact until editing becomes available; over-limit text remains refused.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import * as Y from '../../yjs/slides';
 import { mapCaret, rebaseText } from '../caret';
 import { setNotes } from '../model';
@@ -31,6 +32,9 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
   // the length of the text the field holds unwritten, refused or kept since (L203: the session's kept text, at mount)
   const [unwritten, setUnwritten] = useState<number | null>(() => session.unwrittenNotes(slideId)?.length ?? null);
   const doc = session.doc;
+  const notesOpen = useSyncExternalStore(session.subscribe, () => session.snapshot().notesOpen);
+  const [preview, setPreview] = useState(() => session.unwrittenNotes(slideId) ?? Y.readNotes(doc, slideId));
+  const bodyId = useId();
 
   // L203: the field's unwritten text is the tab's (its session), typed over the notes the field shows it from
   const keep = (text: string | null) => {
@@ -39,6 +43,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
   };
 
   const write = (value: string) => {
+    setPreview(value);
     if (readOnly) return;
     if (value.length > SLIDE_LIMITS.notes) return keep(value);
     keep(null);
@@ -52,6 +57,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
     const notes = Y.readNotes(doc, slideId);
     const kept = session.unwrittenNotes(slideId); // L203
     el.value = kept ?? notes;
+    setPreview(el.value);
     shownFrom.current = notes;
     setUnwritten(kept === null ? null : kept.length);
     composingFrom.current = null;
@@ -64,6 +70,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
       // text the model refused stays the owner's, carried onto the change
       const shown = before === shownFrom.current ? next : rebaseText(shownFrom.current, before, next);
       shownFrom.current = next;
+      setPreview(shown);
       if (session.notesDraft(slideId)) {
         keep(shown);
         if (shown.length <= SLIDE_LIMITS.notes) write(shown);
@@ -78,40 +85,48 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
   }, [doc, slideId, token, session, readOnly]);
 
   const refused = unwritten !== null && unwritten > SLIDE_LIMITS.notes;
+  const expanded = notesOpen || unwritten !== null;
+  const snippet = preview.trim().replace(/\s+/g, ' ');
   return (
     <div className="deck-notes">
-      <textarea
-        ref={field}
-        className="deck-notes-field"
-        aria-label={C.notes}
-        aria-invalid={refused || undefined}
-        placeholder={C.notesPlaceholder}
-        readOnly={readOnly}
-        spellCheck
-        onInput={(event) => {
-          if (composingFrom.current === null) write(event.currentTarget.value);
-        }}
-        onCompositionStart={() => (composingFrom.current = Y.readNotes(doc, slideId))}
-        onCompositionEnd={(event) => {
-          const el = event.currentTarget;
-          const base = composingFrom.current ?? el.value;
-          composingFrom.current = null;
-          const current = Y.readNotes(doc, slideId);
-          const merged = current === base ? el.value : rebaseText(base, el.value, current);
-          if (merged !== el.value) {
-            const caret = mapCaret(el.value, merged, el.selectionStart);
-            el.value = merged;
-            el.setSelectionRange(caret, caret);
-          }
-          shownFrom.current = current;
-          write(merged);
-        }}
-      />
-      {unwritten !== null && (
-        <p role="alert" className="deck-notes-refused">
-          {refused ? C.notesTooLong(unwritten, SLIDE_LIMITS.notes) : C.notesNotSaved}
-        </p>
-      )}
+      <button type="button" data-notes-disclosure aria-label={C.notes} aria-expanded={expanded} aria-controls={bodyId} onClick={() => session.setNotesOpen(!expanded)} className="deck-notes-disclosure">
+        <span aria-hidden>{expanded ? '▾' : '▸'}</span><span>{C.notes}</span>
+        {!expanded && snippet && <span className="deck-notes-preview" title={preview}>{snippet}</span>}
+      </button>
+      <div id={bodyId} hidden={!expanded}>
+        <textarea
+          ref={field}
+          className="deck-notes-field"
+          aria-label={C.notes}
+          aria-invalid={refused || undefined}
+          placeholder={C.notesPlaceholder}
+          readOnly={readOnly}
+          spellCheck
+          onInput={(event) => {
+            if (composingFrom.current === null) write(event.currentTarget.value);
+          }}
+          onCompositionStart={() => (composingFrom.current = Y.readNotes(doc, slideId))}
+          onCompositionEnd={(event) => {
+            const el = event.currentTarget;
+            const base = composingFrom.current ?? el.value;
+            composingFrom.current = null;
+            const current = Y.readNotes(doc, slideId);
+            const merged = current === base ? el.value : rebaseText(base, el.value, current);
+            if (merged !== el.value) {
+              const caret = mapCaret(el.value, merged, el.selectionStart);
+              el.value = merged;
+              el.setSelectionRange(caret, caret);
+            }
+            shownFrom.current = current;
+            write(merged);
+          }}
+        />
+        {unwritten !== null && (
+          <p role="alert" className="deck-notes-refused">
+            {refused ? C.notesTooLong(unwritten, SLIDE_LIMITS.notes) : C.notesNotSaved}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

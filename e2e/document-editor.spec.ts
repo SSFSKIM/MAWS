@@ -6,6 +6,7 @@
 // comment's card anchored to its mark, Resolve and Reopen; and (M5) version history: a preview, a copy, a restore. `pnpm
 // e2e:document` builds the harness and runs this file; under a plain build the cases skip. One launch for the file; the
 // page's document is reset before each case.
+import { addDocumentSection } from './support/document-sections';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type CDPSession, type Locator, type Page } from '@playwright/test';
@@ -195,7 +196,7 @@ test.describe('the document editor', () => {
 
   test('a tab is added in one replica, switched to, and seen by the other', async () => {
     const { page } = maws;
-    await replica(page, 'a').getByRole('button', { name: 'Add tab' }).click();
+    await addDocumentSection(replica(page, 'a'));
     await expect(replica(page, 'a').getByRole('tab', { selected: true })).toHaveText('Tab 2');
     await expect(content(page, 'a')).toHaveText('');
     await content(page, 'a').click();
@@ -213,7 +214,7 @@ test.describe('the document editor', () => {
     await expect(replica(page, 'a').getByRole('tab', { selected: true })).toHaveText('Notes');
     await expect(replica(page, 'b').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
     // and its ×: an empty tab goes without asking, the selection moving on
-    await replica(page, 'a').getByRole('button', { name: 'Add tab' }).click();
+    await addDocumentSection(replica(page, 'a'));
     await expect(replica(page, 'a').getByRole('tab', { selected: true })).toHaveText('Tab 3');
     await replica(page, 'a').getByRole('tab', { name: 'Tab 3' }).getByRole('button', { name: 'Delete Tab 3' }).click();
     await expect(page.getByRole('alertdialog')).toHaveCount(0);

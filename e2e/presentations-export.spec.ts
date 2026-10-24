@@ -12,7 +12,7 @@
 //   works in a window of its own;
 // - For Claude: a zip whose slides use no `var()` and which the loader reads back with no slide held;
 // - PNG: the cover slide at 1920×1080, or at the width asked.
-// The editor's Export menu (the X32 header in a main tab) saves each where the owner chooses (the e2e's folder).
+// The export entries under Deck actions save each where the owner chooses (the e2e's folder).
 // The LibreOffice render-and-compare (parent §4.8) runs where `soffice` is present, else it is skipped with its reason:
 // the corpus as one deck exported to PPTX (`named`), converted by LibreOffice to PDF, both that and the app's own PDF
 // rasterized by `pdftoppm` at 480×270, compared per slide (mean absolute difference per channel ≤ 0.08) and per text
@@ -570,7 +570,7 @@ test('the 100-slide deck exports to PPTX, named and as pictures, and to PDF with
   console.log(`[100-slide export] ${times.join(', ')} at load ${loadavg()[0]!.toFixed(1)}`);
 });
 
-test('the editor’s Export menu saves each format where the owner chooses', async () => {
+test('the export entries under Deck actions save each format where the owner chooses', async () => {
   test.setTimeout(240_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-deck-export-'));
   const saved = join(scratch, 'saved');
@@ -583,9 +583,9 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
   await page.locator('[data-library]').getByRole('article', { name: 'Quarterly', exact: true }).click();
   const tab = page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
   await expect(tab.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  const header = page.locator('[data-region="main"] [data-editor-header]');
+  const toolbar = tab.locator('.deck-toolbar [data-editor-toolbar]');
   const pick = async (label: string) => {
-    await header.getByRole('button', { name: 'Export', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Deck actions', exact: true }).click();
     if (['Fonts by name', 'Basic fonts (default)', 'Slides as pictures'].includes(label)) await page.getByRole('menuitem', { name: 'PowerPoint', exact: true }).click();
     await page.getByRole('menuitem', { name: label, exact: true }).click();
   };
@@ -594,10 +594,8 @@ test('the editor’s Export menu saves each format where the owner chooses', asy
     expect.poll(() => (existsSync(savedFile(name)) ? check(readFileSync(savedFile(name))) : false), { timeout: 60_000, message: `${name} saved` }).toBe(true);
   const isZip = (bytes: Buffer) => bytes.subarray(0, 2).toString('latin1') === 'PK';
 
-  await expect(async () => {
-    await header.getByRole('button', { name: 'Export', exact: true }).click();
-    await expect(page.getByRole('menuitem')).toHaveText(['PowerPoint›', 'PDF', 'HTML (one page)', 'For Claude (zip)', 'PNG (all slides)']);
-  }).toPass({ timeout: 15_000 });
+  await toolbar.getByRole('button', { name: 'Deck actions', exact: true }).click();
+  await expect(page.getByRole('menu').getByRole('group').getByRole('menuitem')).toHaveText(['PowerPoint›', 'PDF', 'HTML (one page)', 'For Claude (zip)', 'PNG (all slides)']);
   await page.keyboard.press('Escape');
 
   await pick('Fonts by name');
@@ -691,15 +689,10 @@ test('a named Google Fonts face with no network: Lora fetched once and drawn off
   expect(inEditor.loaded).toBe(true);
   expect(Math.abs(inEditor.drawn - inEditor.fallback)).toBeGreaterThan(2);
 
-  // Theme ▸ Faces: each face with its state, Roboto Slab refused by name
-  const header = page.locator('[data-region="main"] [data-editor-header]');
-  const headerAction = async (label: string) => {
-    const button = header.getByRole('button', { name: label, exact: true });
-    if (await button.isVisible()) return button.click();
-    await header.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
-  };
-  await headerAction('Theme');
+  // Deck actions ▸ Theme ▸ Faces: each face with its state, Roboto Slab refused by name
+  const toolbar = tab.locator('.deck-toolbar [data-editor-toolbar]');
+  await toolbar.getByRole('button', { name: 'Deck actions', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Theme', exact: true }).click();
   const theme = tab.locator('[data-deck-rail="theme"]');
   await expect(theme.locator('[data-face="lora"]')).toHaveAttribute('data-face-state', 'saved');
   await expect(theme.locator('[data-face="lora"]')).toContainText('Lora');
@@ -707,7 +700,7 @@ test('a named Google Fonts face with no network: Lora fetched once and drawn off
   await expect(theme.locator('[data-face="roboto-slab"]')).toContainText(SLAB_REFUSAL);
 
   // the presenter: the audience window declares the face under its own name, loaded from the deck's assets
-  await headerAction('Present');
+  await toolbar.getByRole('button', { name: 'Present', exact: true }).click();
   const audiencePage = () => app.windows().find((w) => w.url().includes('present=1') && w.url().includes('role=audience'));
   await expect.poll(() => audiencePage() !== undefined, { timeout: 15_000, message: 'the audience window opened' }).toBe(true);
   const audience = audiencePage()!;

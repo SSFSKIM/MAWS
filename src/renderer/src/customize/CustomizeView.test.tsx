@@ -5,7 +5,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { project, status } from '../../../../test/support/builders';
+import { project, record, status } from '../../../../test/support/builders';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
@@ -42,7 +42,97 @@ afterEach(() => {
   useCustomizeProject.setState({ projectId: undefined });
   delete (window as { maws?: MawsBridge }).maws;
 });
-const mount = (section: 'skills' | 'mcp') => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section={section} /></QueryClientProvider>);
+const mount = (section: 'plugins' | 'skills' | 'mcp') => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section={section} /></QueryClientProvider>);
+
+it('keeps the plugin session picker with its library controls and reloads the selected session without resetting disk choices', async () => {
+  const first = { ...status('live-a'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
+  const second = { ...status('live-b'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
+  useSessions.setState({
+    engine: new Map([[first.appSessionId, first], [second.appSessionId, second]]),
+    records: new Map([[first.appSessionId, record(first.appSessionId, { title: { text: 'Review notes', source: 'user' } })], [second.appSessionId, record(second.appSessionId, { title: { text: 'Prepare release', source: 'user' } })]]),
+  });
+  backend.script('plugins.list', () => ({ plugins: [] }));
+  backend.script('marketplaces.list', () => ({ marketplaces: [] }));
+  backend.script('plugins.available', () => ({ plugins: [] }));
+  backend.script('mods.list', () => []);
+  backend.script('session.reloadSkills', () => ({ opId: 'chrome-skills' }));
+  mount('plugins');
+
+  const pageHead = screen.getByRole('heading', { name: 'Customize' }).closest('header')!;
+  expect(within(pageHead).getByRole('tablist', { name: 'Customize sections' })).toBeTruthy();
+  expect(within(pageHead).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', P);
+  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Plugins' })).toBeNull();
+  const picker = screen.getByRole('combobox', { name: 'Live session' });
+  const libraryHead = picker.closest('header')!;
+  expect(within(libraryHead).getByRole('radio', { name: 'My items' })).toBeTruthy();
+  expect(within(libraryHead).getByRole('searchbox', { name: 'Search plugins' })).toBeTruthy();
+  for (const name of ['Show', 'Sort by', 'Add']) expect(within(libraryHead).getByRole('button', { name })).toBeTruthy();
+  expect(screen.getByText('Loaded now')).toBeTruthy();
+
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'notes' } });
+  fireEvent.change(picker, { target: { value: second.appSessionId } });
+  expect(picker).toHaveProperty('value', second.appSessionId);
+  expect(screen.getByRole('searchbox', { name: 'Search plugins' })).toHaveProperty('value', 'notes');
+  fireEvent.click(screen.getByRole('button', { name: 'Reload skills' }));
+  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'session.reloadSkills').map((call) => call.input)).toEqual([{ appSessionId: second.appSessionId }]));
+  expect(screen.getByText('Working…').getAttribute('role')).toBe('status');
+  act(() => backend.emitOperation({ appSessionId: second.appSessionId, opId: 'chrome-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'review' }, { name: 'release' }] } } }));
+  expect((await screen.findByText('Reloaded · 2 skills')).getAttribute('role')).toBe('status');
+  expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
+
+  fireEvent.click(within(libraryHead).getByRole('radio', { name: 'Browse' }));
+  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'plugins.available').map((call) => call.input)).toEqual([{ cwd: '/one' }]));
+  expect(within(libraryHead).getByRole('combobox', { name: 'Live session' })).toBe(picker);
+  expect(within(libraryHead).getByRole('button', { name: 'Filter' })).toBeTruthy();
+  expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
+});
+
+it('keeps the Skills scopes visible through search and detail without treating the attachment as disk inventory', async () => {
+  const live = { ...status('live-skills-scope'), cwd: '/one' };
+  useSessions.setState({ engine: new Map([[live.appSessionId, live]]) });
+  mount('skills');
+  await screen.findByRole('button', { name: 'View review' });
+  const pageHead = screen.getByRole('heading', { name: 'Customize' }).closest('header')!;
+  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  const picker = screen.getByRole('combobox', { name: 'Live session' });
+  const toolbar = picker.closest('[data-customize-toolbar]') as HTMLElement;
+  expect(within(toolbar).getByRole('searchbox', { name: 'Search skills' })).toBeTruthy();
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search skills' }), { target: { value: 'absent' } });
+  expect(screen.queryByRole('button', { name: 'View review' })).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search skills' }), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'View review' }));
+  expect(screen.getByRole('combobox', { name: 'Live session' })).toBe(picker);
+  expect(screen.getByRole('combobox', { name: 'Project' })).toHaveProperty('value', P);
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Skills' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: Q } });
+  await screen.findByRole('button', { name: 'View translate' });
+  expect(screen.queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  expect(backend.calls.filter((call) => call.command.startsWith('session.'))).toEqual([]);
+});
+
+it('keeps the MCP session picker beside live connectors and switches only the live read', async () => {
+  const first = { ...status('mcp-a'), cwd: '/one' };
+  const second = { ...status('mcp-b'), cwd: '/one' };
+  useSessions.setState({ engine: new Map([[first.appSessionId, first], [second.appSessionId, second]]) });
+  backend.script('session.mcpStatus', (input) => ({ mcpServers: [{ name: (input as { appSessionId: string }).appSessionId, status: 'connected', tools: [{ name: 'read' }] }] }));
+  mount('mcp');
+  const live = await screen.findByRole('region', { name: 'Live connectors' });
+  await within(live).findByText(first.appSessionId);
+  const picker = within(live).getByRole('combobox', { name: 'Live session' });
+  const pageHead = screen.getByRole('heading', { name: 'Customize' }).closest('header')!;
+  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  const inventoryReads = backend.calls.filter((call) => call.command === 'customization.inventory').length;
+  picker.focus();
+  fireEvent.change(picker, { target: { value: second.appSessionId } });
+  await within(screen.getByRole('region', { name: 'Live connectors' })).findByText(second.appSessionId);
+  expect(screen.getByRole('combobox', { name: 'Live session' })).toBe(picker);
+  expect(document.activeElement).toBe(picker);
+  expect(screen.getByText('notion')).toBeTruthy();
+  expect(backend.calls.filter((call) => call.command === 'session.mcpStatus').map((call) => call.input)).toEqual([{ appSessionId: first.appSessionId }, { appSessionId: second.appSessionId }]);
+  expect(backend.calls.filter((call) => call.command === 'customization.inventory')).toHaveLength(inventoryReads);
+  expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
+});
 
 it('reads the focused project without a session and switches the disk inventory with the project picker', async () => {
   mount('skills');
