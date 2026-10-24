@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { shellGeometry } from './shell-geometry';
+import { shellGeometryOf } from './shell-view';
+import { useLayout } from '../stores/layout';
+import { A, mainShowing, ref, resetPanelStores } from '../test-support/panel';
 
 const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 240 } };
 describe('the optional surface geometry', () => {
@@ -15,6 +18,24 @@ describe('the optional surface geometry', () => {
     const narrow = shellGeometry(regions, 1280, true, false);
     expect(wide.panel).toBeGreaterThan(narrow.panel);
     expect(1280 - wide.sidebar - wide.panel).toBeGreaterThanOrEqual(360);
+  });
+  it('opens an artifact surface at the narrow automatic width while reading tools alone earn wide defaults', () => {
+    resetPanelStores();
+    useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: 'artifacts:aaaaaaaa' }]]) });
+    const state = useLayout.getState();
+    expect(shellGeometryOf(state, 1440).panel).toBe(420);
+    for (const tool of ['review', 'files', 'browser']) {
+      const id = `${tool}:aaaaaaaa`;
+      expect(shellGeometryOf({ ...state, panelBySession: new Map([[A, { tabs: [ref(id)], activeTabId: id }]]) }, 1440).panel).toBe(720);
+    }
+  });
+  it('honors a resized narrow surface up to the main floor and restores its remembered width when room returns', () => {
+    const resized = { ...regions, panel: { ...regions.panel, width: 640 } };
+    expect(shellGeometry(resized, 1440, true, false).panel).toBe(640);
+    expect(shellGeometry(resized, 900, true, false).panel).toBe(540);
+    expect(shellGeometry(resized, 1440, true, false).panel).toBe(640);
+    expect(resized.panel.width).toBe(640);
+    expect(shellGeometry(regions, 1440, true, false).panel).toBe(420);
   });
   it('temporarily yields the sidebar at 900, restoring the same width when the surface closes', () => {
     expect(shellGeometry(regions, 900, true, true)).toMatchObject({ sidebar: 0, sidebarAside: true, sheet: false });

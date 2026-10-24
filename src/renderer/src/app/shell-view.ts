@@ -5,7 +5,7 @@ import { shellGeometry } from './shell-geometry';
 import { useWindowWidth } from './regions';
 
 export const useShellView = create<{ sidebarOverlay: boolean; cardsOverlay: boolean }>(() => ({ sidebarOverlay: false, cardsOverlay: false }));
-export const WIDE_SURFACES = new Set(['review', 'files', 'browser', 'artifacts']);
+export const WIDE_SURFACES = new Set(['review', 'files', 'browser']);
 export function shellGeometryOf(state: LayoutState, width: number) {
   const tabs = surfaceTabs(state, surfaceSession(state));
   return shellGeometry(state.regions, width, tabs.length > 0, tabs.some((tab) => WIDE_SURFACES.has(tab.toolId)));

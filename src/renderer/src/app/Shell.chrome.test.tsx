@@ -94,7 +94,7 @@ describe('the chrome yields to the tab strip', () => {
   it('keeps a folded saved surface’s context actions reachable from the keyboard', async () => {
     const user = userEvent.setup();
     offs.push(registerPanelTool(probeTool('artifacts', { multiInstance: false }).tool));
-    setWidth(900);
+    setWidth(700);
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: 'artifacts:aaaaaaaa' }]]) });
     renderShell();
     expect(within(chrome()).queryByRole('button', { name: 'artifacts' })).toBeNull();

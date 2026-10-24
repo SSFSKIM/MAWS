@@ -744,9 +744,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
   // panel's three widths and maximized, over the derived fixture's first child.
   test('child transcript renders inside the region at 280, 380, 640 and maximized', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    // C5's clamp keeps the main column at 480 px and lets the panel yield first, so with the page's 300 px sidebar a
-    // window under 1420 px (this Mac's e2e window is 1280) renders 640 as less; with the sidebar collapsed every width
-    // renders as set in any window of at least 1120 px, and the case asserts the rendered width rather than assume it.
+    // With the sidebar collapsed this window leaves room for every explicit width plus main's 360px floor.
+    // The 380px legacy sentinel instead selects the narrow content-sized default.
     await panel.call('collapseSidebar', true);
     const verdict: Record<string, unknown>[] = [];
     let open: string | null = null;
@@ -761,7 +760,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         else await panel.call('setWidth', width);
         await expect.poll(async () => (await panel.metrics()).rows, 'the child’s history').toBeGreaterThan(0);
         if (width === 'maximized') await expect.poll(async () => (await panel.metrics()).regionWidth, 'maximized: wider than the widest side width').toBeGreaterThan(640);
-        else await expect.poll(async () => (await panel.metrics()).regionWidth, 'UX2: the 380px sentinel adopts a content-sized default; narrow tools cap at 420px').toBe(width === 280 ? 280 : 420);
+        else await expect.poll(async () => (await panel.metrics()).regionWidth, 'UX2: automatic narrow defaults cap at 420px; explicit user widths are honored').toBe(width === 380 ? 420 : width);
 
         let last: PanelChildMetrics | null = null;
         for (const [i, count] of PANEL_CHILD_TAIL.batches.entries()) {
