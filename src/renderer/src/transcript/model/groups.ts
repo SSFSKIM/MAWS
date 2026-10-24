@@ -3,7 +3,7 @@
 // of one turn, in event order, folded into group rows, standalone cell rows and the rows between them. derive.ts
 // walks a turn's events into these items and hands them here.
 import type { ToolUseId } from '@shared/graph/ids';
-import { mergeReads, MERGEABLE_READS, thinkingCell, type ToolRecord } from './cells';
+import { thinkingCell, type ToolRecord } from './cells';
 import { activeGroupLabel, groupSummary, hostOf, type GroupPhraseInput } from './copy';
 import { rowId } from './keys';
 import type { TranscriptUi, TurnState } from './reduce';
@@ -71,13 +71,9 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
         continue;
       }
       if (!open) open = [];
-      const last = open.at(-1);
       if (!hasTool) cell.classification = { ...cell.classification, startsGroup: true };
       hasTool = true;
-      if (last && MERGEABLE_READS.has(last.toolName) && MERGEABLE_READS.has(cell.toolName) && last.status !== 'running') {
-        const merged = mergeReads(last, cell); // a new id (`cell:reads:…`), so its expansion is read under that id
-        open[open.length - 1] = { ...merged, expanded: ui?.expandedCells.has(merged.id) ?? false };
-      } else open.push(cell);
+      open.push(cell); // each call keeps its own input/output disclosure and stable tool-use identity
       continue;
     }
     if (item.kind === 'thinking') {

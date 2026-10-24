@@ -4,7 +4,7 @@
 import { truncationOf } from '../../model/cells';
 import { DETAIL, shellFooter } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
-import { useActions, useTranscriptContext } from '../context';
+import { useActions, useDisclosure, useTranscriptContext } from '../context';
 import { copyText } from '../rows/parts';
 import { spilledOr, SpillLoader } from './Spill';
 import { Truncated } from './Truncated';
@@ -15,6 +15,8 @@ const durationOf = (cell: Cell) => (cell.endedAt === null ? 0 : Date.parse(cell.
 
 export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
   const actions = useActions();
+  const [fullCommand, toggleCommand] = useDisclosure(`command:${cell.id}`);
+  const longCommand = detail.command.split('\n').length > 8 || detail.command.length > 800;
   // The call's own cwd when its input names one (the engine's Bash input does not), else the session's directory,
   // labelled as such: a `cd` inside an earlier command may have moved the shell since.
   const { sessionDirectory } = useTranscriptContext();
@@ -26,12 +28,12 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
   return (
     <div className="transcript-shell">
       <div className="transcript-shell-heading">
-        <code>$ {detail.command}</code>
+        <code className="transcript-shell-command" data-bounded={longCommand && !fullCommand ? '' : undefined}>$ {detail.command}</code>
         <button type="button" onClick={() => copyText(detail.command)}>
           {DETAIL.copyCommand}
         </button>
       </div>
-      {detail.description && <div className="transcript-shell-meta">{detail.description}</div>}
+      {longCommand && <button type="button" aria-expanded={fullCommand} onClick={toggleCommand}>{fullCommand ? 'Show less command' : 'Show more command'}</button>}
       {where && (
         <div className="transcript-shell-meta">
           {where.label} <span className="transcript-mono">{where.path}</span>

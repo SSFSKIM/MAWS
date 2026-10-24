@@ -612,6 +612,11 @@ function apply(batch: Batch, event: SessionEvent): void {
       batch.push(turn, event);
       return;
     }
+    case 'tool.summary': {
+      const last = event.toolUseIds.at(-1);
+      if (!pushRouted(last ? index.toolUses.get(last) : undefined)) batch.loose(event, false);
+      return;
+    }
     case 'tool.result':
     case 'tool.safeguard':
     case 'tool.progress': {

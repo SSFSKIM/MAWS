@@ -33,41 +33,30 @@ describe('group row', () => {
     return b.events;
   }
 
-  it('shows its summary and category icon, and opens into a bounded, keyboard-reachable scroller of cell disclosures', async () => {
+  it('shows both call rows directly, with their input and output folded', async () => {
     const store = await storeWith(twoCommands());
     useTranscriptStore.getState().toggleTurn(store.key, useTranscriptStore.getState().entries[store.key].state.order[0]);
     const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
-    const header = screen.getByRole('button', { expanded: false });
-    expect(header.textContent).toBe('Ran 2 commands');
-    expect(view.container.querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('commands');
+    expect(screen.getAllByRole('button', { name: 'Ran Bash', expanded: false })).toHaveLength(2);
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
-    fireEvent.click(header);
-    view.rerenderRow(rowOf(store.rows(), 'group'));
-    const scroller = view.container.querySelector<HTMLElement>('[data-group-cells]')!;
-    expect(scroller.tabIndex).toBe(0);
-    expect(scroller.getAttribute('aria-label')).toBeTruthy();
-    const lines = [...scroller.querySelectorAll('[data-cell-id] > button')];
-    expect(lines.map((line) => line.getAttribute('aria-expanded'))).toEqual(['false', 'false']);
+    expect(view.container.textContent).not.toContain('pnpm test');
+    expect(view.container.querySelector('.transcript-group-header')).toBeNull();
   });
 
   describe('while the turn works', () => {
     beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-09-28T10:00:05.000Z'), toFake: ['Date', 'setInterval', 'clearInterval'] }));
     afterEach(() => vi.useRealTimers());
 
-    it('its header is the live label of the running call, ticking, and it never unwraps', async () => {
-      const b = builder();
-      b.turn('u1');
-      b.toolUse('t1', 'Bash', { command: 'sleep 30' });
+    it('keeps the running call visible with its description and status', async () => {
+      const b = builder(); b.turn('u1');
+      b.toolUse('t1', 'Bash', { command: 'sleep 30', description: 'Wait for the server' });
       const store = await storeWith(b.events);
       const group = rowOf(store.rows(), 'group');
       expect(group.state).toBe('active');
-      renderRow(group, { storeKey: store.key });
-      const header = screen.getByRole('button', { expanded: false });
-      expect(header.querySelector('code')?.textContent).toBe('sleep 30');
-      const read = () => Number(/for (\d+)s/.exec(header.textContent!)?.[1]);
-      const before = read();
-      act(() => vi.advanceTimersByTime(3000));
-      expect(read()).toBe(before + 3);
+      const view = renderRow(group, { storeKey: store.key });
+      expect(screen.getByRole('button', { name: 'Wait for the server', expanded: false })).toBeTruthy();
+      expect(view.container.querySelector('[data-cell-id]')?.getAttribute('data-status')).toBe('running');
+      expect(view.container.textContent).not.toContain('sleep 30');
     });
   });
 });
@@ -83,7 +72,7 @@ describe('standalone cell row', () => {
     expect(ofKind(store.rows(), 'group')).toHaveLength(0);
     const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
     expect(view.container.querySelector('[data-cell-count]')).toBeNull();
-    expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toMatch(/^Ran git status --short in/);
+    expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toBe('Ran Bash');
   });
 
   it('pass1/permission-roundtrip: the denied call is a standalone, focusable cell row, never inside a group', async () => {

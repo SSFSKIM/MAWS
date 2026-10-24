@@ -31,6 +31,7 @@ import {
   type SystemFrame,
   type SystemInitFrame,
   type ToolProgressFrame,
+  type ToolUseSummaryFrame,
   type UserFrame,
   type UserInputFrame,
 } from '@shared/wire/frames';
@@ -222,7 +223,11 @@ export class Normalizer {
       case 'control_cancel_request':
         mapInboundCancel(this.state.inbound, (frame as ControlCancelRequestFrame).request_id as RequestId, out);
         return;
-      case 'tool_use_summary':
+      case 'tool_use_summary': {
+        const f = frame as ToolUseSummaryFrame;
+        if (f.preceding_tool_use_ids.length > 0) out.emit({ kind: 'tool.summary', toolUseIds: f.preceding_tool_use_ids as ToolUseId[], summary: f.summary }, attribution);
+        return;
+      }
       case 'prompt_suggestion':
       case 'rate_limit_event':
       case 'auth_status':

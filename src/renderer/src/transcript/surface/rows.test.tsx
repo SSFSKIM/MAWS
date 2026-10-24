@@ -95,7 +95,7 @@ describe('mounted transcript surface integration', () => {
     expect(rowOf(stored, 'cell')).toMatchObject({ detail: { command: 'pwd' } });
   });
 
-  it('lets each hooked member of a merged read disclose its own native detail', async () => {
+  it('lets each hooked read disclose its own native detail', async () => {
     fake = fakeClient({ 'session.ui.render': (request: CommandInput<'session.ui.render'>) => answer(request.props) }); holder.client = fake.client;
     const b = builder(); b.turn('u'); b.toolUse('r1', 'Read', { file_path: '/a' }); b.result('r1', 'first file'); b.toolUse('r2', 'Read', { file_path: '/b' }); b.result('r2', 'second file'); b.toolUse('g', 'Grep', { pattern: 'find' });
     const store = await mounted(b); act(() => useTranscriptStore.getState().expandAll(store.key));
@@ -105,6 +105,7 @@ describe('mounted transcript surface integration', () => {
     const second = view.container.querySelector('[data-cell-id="cell:r2"] button')!;
     expect(first).not.toBeNull(); expect(second).not.toBeNull();
     fireEvent.click(first);
+    view.rerenderRow(rowOf(store.rows(), 'group'));
     await waitFor(() => expect(first.getAttribute('aria-expanded')).toBe('true'));
     expect(second.getAttribute('aria-expanded')).toBe('false');
   });

@@ -575,6 +575,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null, messageTools
         if (rec) rec.safeguard = event.verdict;
         break;
       }
+      case 'tool.summary': {
+        // A batch summary belongs to its final named call, even when emitted after the final assistant answer.
+        const last = event.toolUseIds.at(-1);
+        const rec = last ? toolRecord(last) : undefined;
+        if (rec && event.summary.trim()) rec.summary = event.summary.trim();
+        break;
+      }
       case 'tool.progress': {
         const rec = toolRecord(event.toolUseId);
         if (rec) rec.elapsedSeconds = Math.max(rec.elapsedSeconds, event.elapsedSeconds);
