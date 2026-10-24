@@ -104,10 +104,17 @@ const toastId = (attentionId: AttentionId) => `attention:${attentionId}`;
 type ToastedItems = Map<AttentionId, { appSessionId: AppSessionId; held: boolean }>;
 
 function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery }: EventPayload<'attention.notified'>): void {
-  if (delivery !== 'fallback') return;
+  if (delivery === 'os') return;
+  if (attentionId === null) {
+    const record = useSessions.getState().records.get(appSessionId);
+    const digest = useSessions.getState().digests.get(appSessionId);
+    useNotices.getState().toast({ level: 'info', text: `${record ? displayTitle(record) : 'A session'} finished${digest?.lastAssistantLine ? ` · ${digest.lastAssistantLine}` : ''}`,
+      actions: [{ label: 'Open', run: () => useLayout.getState().openSession(appSessionId) }], dismissible: true });
+    return;
+  }
   const id = appSessionId as AppSessionId;
   const item = itemOf(id, attentionId as AttentionId);
-  if (requestOnScreen(id, item)) return;
+  if (delivery === 'fallback' && requestOnScreen(id, item)) return;
   if (item && !isOpen(item)) return; // settled before its notice arrived
   const record = useSessions.getState().records.get(id);
   const title = record ? displayTitle(record) : 'A session';

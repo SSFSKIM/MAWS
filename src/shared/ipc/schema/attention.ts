@@ -29,13 +29,14 @@ export const C3_ATTENTION_EVENTS = Object.keys(c3Events) as (keyof typeof c3Even
 export const AttentionNavigateSchema = z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema.nullable(), source: z.enum(['notification', 'menu']) });
 export type AttentionNavigate = z.infer<typeof AttentionNavigateSchema>;
 const c5Commands = {
+  'attention.viewing': { input: z.strictObject({ appSessionId: AppSessionIdSchema.nullable() }), output: z.void(), owner: 'main' },
   // Snapshot in C1's pattern: the navigation main queued while no page could hear it, cleared on read. The renderer
   // subscribes to `attention.navigate` first, then calls this once; the call also tells main this page is listening.
   'attention.pendingNavigate': { input: z.void(), output: z.strictObject({ navigate: AttentionNavigateSchema.nullable() }), owner: 'main' },
 } as const satisfies Record<`attention.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c5Events = {
   // A notification was posted (or would have been: `fallback`, the unsigned-binary case); also what the smoke observes.
-  'attention.notified': z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema, delivery: z.enum(['os', 'fallback']), at: z.string() }),
+  'attention.notified': z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema.nullable(), delivery: z.enum(['os', 'fallback', 'in-app']), at: z.string() }),
   'attention.navigate': AttentionNavigateSchema,
 } as const satisfies Record<`attention.${string}`, z.ZodType>;
 // C5 end

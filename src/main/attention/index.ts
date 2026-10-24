@@ -4,7 +4,7 @@
 // to a page that is listening or keeps it for `attention.pendingNavigate`; any page load or window close makes the page
 // un-announced again.
 import { app, type App, type BrowserWindow } from 'electron';
-import type { AttentionId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
@@ -14,6 +14,15 @@ import { createNavigationRelay } from './navigation';
 import { startNotifier } from './notifier';
 
 export function startAttention(model: SessionReadModel, deps: { restoredIds: ReadonlySet<AttentionId>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
+  const viewing = new Map<number, AppSessionId | null>();
+  registerMainHandler('attention.viewing', ({ appSessionId }, { sender }) => {
+    if (!viewing.has(sender.id)) {
+      sender.on('did-start-loading', () => viewing.delete(sender.id));
+      sender.once('destroyed', () => viewing.delete(sender.id));
+    }
+    viewing.set(sender.id, appSessionId as AppSessionId | null);
+  });
+  const isViewing = (id: AppSessionId) => appWindows().some((win) => win.isFocused() && viewing.get(win.webContents.id) === id);
   const relay = createNavigationRelay(emit);
   registerMainHandler('attention.pendingNavigate', () => ({ navigate: relay.take() }));
   followAppPages(app, relay.pageGone);
@@ -26,7 +35,7 @@ export function startAttention(model: SessionReadModel, deps: { restoredIds: Rea
     win.focus();
   };
   // Listen immediately, including during store retries; only restored arrivals are silent.
-  return startNotifier(model, { restoredIds: deps.restoredIds, isFocused, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
+  return startNotifier(model, { restoredIds: deps.restoredIds, isFocused, isViewing, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
 }
 
 // E2 start (E2 execution document, Design §7, Decision Log 21): only an app window's page load or close makes the page

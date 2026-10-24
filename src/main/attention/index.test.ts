@@ -15,6 +15,7 @@ vi.mock('electron', () => ({
     static isSupported() { return true; }
     on() { return this; }
     show() { electron.shown(); }
+    close() {}
   },
 }));
 vi.mock('../ipc/router', () => ({ registerMainHandler: vi.fn() }));
