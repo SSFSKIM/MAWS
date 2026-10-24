@@ -48,7 +48,7 @@ export async function closeSurface(page: Page, name: string): Promise<void> {
 
 export async function hideSurfaces(page: Page): Promise<void> {
   // Hide the visible surfaces, retaining their tool instances. The isolated #panel page has its own real control, not the
-  // product's native application menu; both routes invoke the same registered shell action.
+  // product's surface controls: its visibility toggle directly collapses the harness region.
   const panel = page.locator('[data-region="panel"]:not([inert])');
   if (!await panel.count() && !await sessionCards(page).isVisible()) return;
   const harness = page.locator('[data-panel-harness]');

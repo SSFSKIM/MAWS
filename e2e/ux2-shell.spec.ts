@@ -459,7 +459,7 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
       if (!saved) return false;
       return saved.sets[saved.current]?.panes.some((pane) => pane.tabs.some((tab) => tab.id === `session:${scratch.appSessionId}`)) ?? false;
     }, { message: 'the scratch session reached the persisted current tab set before restoring file tabs' }).toBe(true);
-    await restoreWithTab(p, names.map((name) => ({ id: `file:${scratch.path(name)}`, kind: 'file', appSessionId: scratch.appSessionId, path: scratch.path(name), pinned: true })));
+    await restoreWithTab(p, names.map((name): import('../src/shared/ipc/schema/layout').TabRef => ({ id: `file:${scratch.path(name)}`, kind: 'file', appSessionId: scratch.appSessionId, path: scratch.path(name), line: null, pinned: true })));
     const name = names.at(-1)!;
     const tab = page.locator('[data-chrome-tabs]').getByRole('tab', { name, exact: true });
     await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
