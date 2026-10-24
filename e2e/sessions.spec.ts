@@ -644,6 +644,28 @@ test.describe('sessions', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
+  for (const entry of ['title bar', 'tab strip', 'project plus', 'sidebar New chat', 'keyboard'] as const) {
+    test(`new chat takes typing from ${entry}, without Space opening more tabs`, async () => {
+      const { page, maws, trustedRepos } = await begin({ fixtures: [] });
+      const project = await addProject(page, trustedRepos[0].root);
+      await plus(page, project.name);
+      await expect(editor(page)).toBeFocused();
+      const tabs = page.locator('[data-region="main"] [role="tab"]');
+      const before = await tabs.count();
+      if (entry === 'title bar') await page.getByRole('banner').getByRole('button', { name: `New chat in ${project.name}` }).click();
+      else if (entry === 'tab strip') await page.locator('[data-region="main"]').getByRole('button', { name: 'New chat', exact: true }).click();
+      else if (entry === 'project plus') await newChatIn(page, project.name);
+      else if (entry === 'sidebar New chat') await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
+      else await page.keyboard.press('Meta+n');
+      await expect(tabs).toHaveCount(before + 1);
+      await expect(editor(page)).toBeFocused();
+      await page.keyboard.type('A prompt with several spaces');
+      await expect(editor(page)).toHaveText('A prompt with several spaces');
+      await expect(tabs).toHaveCount(before + 1);
+      expect(maws.consoleErrors()).toEqual([]);
+    });
+  }
+
   test('Overview New chat on an empty board closes the panel and hands typing to the new composer', async () => {
     const { page, maws } = await begin({ fixtures: [] });
     await page.getByRole('button', { name: 'Overview', exact: true }).click();
