@@ -9,7 +9,8 @@
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
-import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
+import { FolderIcon, GearIcon, IconButton, SearchIcon, SortIcon } from '../app/IconButton';
+import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
@@ -42,8 +43,13 @@ export function Sidebar() {
     <div className="flex min-h-0 flex-1 flex-col text-fg" aria-busy={!loaded}>
       <div className="px-2.5 pt-2.5">
         <div data-sidebar-wordmark className="flex h-(--row-h) items-center px-[9px] text-ui-sm font-semibold tracking-[0.08em] text-fg-muted">MAWS</div>
-        <NewChatRow />
-        <ArtifactsRow />
+        <nav aria-label="App destinations">
+          <DestinationRow kind="search" />
+          <NewChatRow />
+          <DestinationRow kind="projects" />
+          <ArtifactsRow />
+          <DestinationRow kind="customize" />
+        </nav>
       </div>
       {loaded ? <SidebarBody /> : <SidebarSkeleton />}
       <Footer />
@@ -342,6 +348,20 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
 // New chat (M2): directly under the sidebar wordmark, above the search and tree, as Codex's first nav row sits above its
 // projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
 // starts in the project whose tab set the strip shows (`focusedProject`), else in none ("Choose a project").
+function DestinationRow({ kind }: { kind: 'search' | 'projects' | 'customize' }) {
+  const current = useLayout((s) => activeTab(s.main)?.kind === kind);
+  const label = { search: 'Search', projects: 'Projects', customize: 'Customize' }[kind];
+  const open = () => { if (kind === 'search') openConversationSearch(''); else if (kind === 'projects') openProjects(); else openCustomize(); };
+  return <button type="button" aria-current={current ? 'page' : undefined} onClick={open}
+    className={`flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 ${current ? 'bg-bg-active' : ''}`}>
+    {kind === 'search' ? <SearchIcon className="size-[13px]" /> : kind === 'projects' ? <FolderIcon className="size-[13px]" /> : <CustomizeIcon />}
+    <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+  </button>;
+}
+const CustomizeIcon = () => <svg viewBox="0 0 16 16" aria-hidden className="size-[13px] shrink-0 fill-none stroke-current [stroke-linecap:round] [stroke-width:1.5]">
+  <path d="M2 4h3m4 0h5M2 12h7m4 0h1" /><circle cx="7" cy="4" r="2" /><circle cx="11" cy="12" r="2" />
+</svg>;
+
 function NewChatRow() {
   const canCreate = useSessionCreatorRegistered();
   const chord = useChordHint('session.new');

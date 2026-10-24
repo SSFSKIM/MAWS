@@ -19,6 +19,7 @@ export interface SkillRow {
   plugin: string | null; // the plugin's display name: the row's badge
   description: string;
   source: string; // the engine's source word; '' from the catalogue
+  path?: string; // disk inventory: distinguishes same-named skills at different scopes
 }
 export interface SkillGroup {
   group: SourceGroup | null; // null: one list (the catalogue's, or a sort that flattens)

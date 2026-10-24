@@ -27,6 +27,7 @@ export interface LoadedLineProps {
   availability: Availability | null;
   loaded: SessionPlugins;
   reloads: Reloads | null; // on a ready process
+  allowAcquire?: boolean; // false in Customize: reload a ready attachment, never offer a dormant gesture
   onShowLoaded(): void;
   now?: number;
 }
@@ -59,7 +60,7 @@ export function RefreshGesture({ appSessionId, availability, refresh, ready }: {
   return <DormantGesture appSessionId={appSessionId} label={L.refresh} onGesture={refresh.run} busy={refresh.pending} starting={refresh.pending} words={words} />;
 }
 
-export function LoadedLine({ appSessionId, availability, loaded, reloads, onShowLoaded, now: fixed }: LoadedLineProps) {
+export function LoadedLine({ appSessionId, availability, loaded, reloads, allowAcquire = true, onShowLoaded, now: fixed }: LoadedLineProps) {
   const clock = useNow();
   const now = fixed ?? clock;
   const refresh = useRefresh(loaded.refresh);
@@ -89,7 +90,9 @@ export function LoadedLine({ appSessionId, availability, loaded, reloads, onShow
         </span>
       )}
       <span className="ml-auto flex min-w-0 flex-wrap items-center gap-2 [&>[data-dormant-gesture]]:mb-0">
-        <RefreshGesture appSessionId={appSessionId} availability={availability} refresh={refresh} ready={reloads && <ReloadControls reloads={reloads} />} />
+        {allowAcquire
+          ? <RefreshGesture appSessionId={appSessionId} availability={availability} refresh={refresh} ready={reloads && <ReloadControls reloads={reloads} />} />
+          : reloads && <ReloadControls reloads={reloads} />}
       </span>
       {reloadLine !== null && (
         <span role={reload.failed ? 'alert' : 'status'} data-loaded-reload={reload.failed ? 'failed' : ''} className={`basis-full [overflow-wrap:anywhere] ${reload.failed ? 'text-danger' : ''}`}>

@@ -19,14 +19,11 @@ import { FRAME } from './copy';
 import { DormantGesture } from './DormantGesture';
 import type { ReadState } from './read';
 
-export interface WidgetFrameProps {
-  appSessionId: AppSessionId;
+interface WidgetFrameBase {
   title: string;
-  command: string; // the palette name, shown as `/name`
-  state: ReadState;
+  command: string; // the palette name, shown as `/name` in a modal
   error: string | null; // in place of the body when state is 'error'; above the kept body when 'ready' (a later read failed); unavailable: why
   readAt?: number | null; // P2-A: when the body's answer was read; a dormant frame shows that body, dated, only when given
-  close(): void;
   children?: ReactNode;
   // P2-B start (2026-10-09): X19 (the P2-B execution document §5.2). `library`: the frame fills the dialog's fixed box,
   // its head carries `heading` after the title (My items | Browse) and `toolbar` before the `/name` (Search, Filter, Sort,
@@ -37,6 +34,12 @@ export interface WidgetFrameProps {
   toolbar?: ReactNode;
   // P2-B end
 }
+
+// Embedded libraries belong to their page: no modal dismissal, session acquisition, or composer focus.
+export type WidgetFrameProps = WidgetFrameBase & (
+  | { variant?: 'modal'; appSessionId: AppSessionId; state: ReadState; close(): void }
+  | { variant: 'embedded'; appSessionId?: never; state: 'loading' | 'error' | 'ready'; close?: never }
+);
 
 // P2-B start (2026-10-09)
 const isTextField = (el: Element | null): boolean => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable);
@@ -72,13 +75,15 @@ function dormantBody(appSessionId: AppSessionId, state: 'dormant' | 'starting' |
 }
 // P2-A end
 
-export function WidgetFrame({ appSessionId, title, command, state, error, readAt, close, children, size = 'utility', heading, toolbar }: WidgetFrameProps) {
+export function WidgetFrame(props: WidgetFrameProps) {
+  const { title, command, state, error, readAt, children, size = 'utility', heading, toolbar } = props;
+  const embedded = props.variant === 'embedded';
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!root.current?.contains(document.activeElement)) root.current?.focus();
-  }, []);
+    if (!embedded && !root.current?.contains(document.activeElement)) root.current?.focus();
+  }, [embedded]);
   let body: ReactNode;
-  if (state === 'dormant' || state === 'starting' || state === 'unavailable') body = dormantBody(appSessionId, state, error, readAt, children);
+  if (props.variant !== 'embedded' && (state === 'dormant' || state === 'starting' || state === 'unavailable')) body = dormantBody(props.appSessionId, state, error, readAt, children);
   else if (state === 'loading') body = <p className="m-0 text-fg-muted">{FRAME.reading}</p>;
   else if (state === 'error')
     body = (
@@ -104,7 +109,8 @@ export function WidgetFrame({ appSessionId, title, command, state, error, readAt
       tabIndex={-1}
       data-widget={command}
       data-widget-size={size} // P2-B (2026-10-09)
-      className={`flex min-w-0 flex-col text-ui outline-none ${size === 'library' ? 'min-h-0 flex-1' : ''}`}
+      data-widget-variant={embedded ? 'embedded' : 'modal'}
+      className={`flex min-w-0 flex-col text-ui outline-none ${size === 'library' ? 'min-h-0 flex-1' : ''} ${embedded ? 'w-full' : ''}`}
       onKeyDown={(event) => {
         // P2-B start (2026-10-09): `/` focuses the search field; an Escape a field or an inner layer already handled
         // (a non-empty search cleared, E8 D-16's sheet), or one bubbling through React from a layer portalled outside
@@ -112,24 +118,28 @@ export function WidgetFrame({ appSessionId, title, command, state, error, readAt
         if (focusSearch(event)) return;
         if (event.key === 'Escape' && (event.defaultPrevented || !event.currentTarget.contains(event.target as Node))) return;
         // P2-B end
-        if (event.key !== 'Escape') return;
+        if (event.key !== 'Escape' || props.variant === 'embedded') return;
         event.preventDefault();
         event.stopPropagation();
-        close();
-        useComposerStore.getState().focusTargets.get(appSessionId)?.focusEditor();
+        props.close();
+        useComposerStore.getState().focusTargets.get(props.appSessionId)?.focusEditor();
       }}
     >
       {/* P2-B start (2026-10-09): the library's head: title and heading at the left, the toolbar at the right */}
-      <header className={size === 'library' ? 'flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2' : 'flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2'}>
+      <header className={size === 'library' ? `flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2 ${embedded ? 'flex-wrap' : ''}` : 'flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2'}>
         <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>
         {size === 'library' && heading}
         <span className={size === 'library' ? 'ml-auto flex min-w-0 items-center gap-2' : 'flex items-baseline gap-2'}>
           {size === 'library' && toolbar}
           {/* P2-B end */}
-          <code className="font-mono text-ui-sm text-fg-muted">/{command}</code>
-          <button type="button" aria-label={FRAME.close(title)} onClick={close} className="rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
-            ×
-          </button>
+          {props.variant !== 'embedded' && (
+            <>
+              <code className="font-mono text-ui-sm text-fg-muted">/{command}</code>
+              <button type="button" aria-label={FRAME.close(title)} onClick={props.close} className="rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+                ×
+              </button>
+            </>
+          )}
         </span>
       </header>
       {/* P2-B (2026-10-09): the library's body takes the remaining height; its panes scroll, and A's dormant line, drawn

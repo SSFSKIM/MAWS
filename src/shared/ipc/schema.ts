@@ -57,6 +57,8 @@ import * as presentations from './schema/presentations'; // P3-C M6
 import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
 import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
+import * as customization from './schema/customization'; // UX2-K
+export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer } from './schema/customization';
 
 export {
   HostPingSchema,
@@ -153,6 +155,7 @@ export const commands = {
   ...presentations.commands, // P3-C M6
   ...connectors.commands, // P3-H H3b
   ...delivery.commands, // P4-B5
+  ...customization.commands, // UX2-K
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -198,6 +201,7 @@ export const events = {
   ...presentations.events, // P3-C M6
   ...connectors.events, // P3-H H3b
   ...delivery.events, // P4-B5
+  ...customization.events, // UX2-K
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

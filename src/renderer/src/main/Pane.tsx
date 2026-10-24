@@ -23,6 +23,8 @@ import { useLayout } from '../stores/layout';
 import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
+import { ProjectsView } from '../projects/ProjectsView';
+import { CustomizeView } from '../customize/CustomizeView';
 
 type PaneIndex = 0 | 1;
 const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
@@ -155,6 +157,10 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       );
     case 'settings':
       return <SettingsTab section={tab.section} />;
+    case 'projects':
+      return <ProjectsView />;
+    case 'customize':
+      return <CustomizeView section={tab.section} />;
     case 'artifacts': // P3-G (§D5)
       return <ArtifactsTab />;
     case 'artifact': // P3-L: one artifact in its kind's editor

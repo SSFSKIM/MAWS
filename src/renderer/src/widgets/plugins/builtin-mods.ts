@@ -22,7 +22,7 @@ export interface BuiltInModsState {
   setOverride(id: ModId, value: LaneOverride): Promise<void>; // this session's
 }
 
-export function useBuiltInMods(appSessionId: AppSessionId, client: MawsBridge = ipc): BuiltInModsState {
+export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBridge = ipc): BuiltInModsState {
   const [read, setRead] = useState<ModRowsRead>({ state: 'loading' });
   const [asked, setAsked] = useState(0); // bumped to read again
   const [failure, setFailure] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export function useBuiltInMods(appSessionId: AppSessionId, client: MawsBridge = 
 
   useEffect(() => {
     let live = true;
-    void client.invoke('mods.list', { appSessionId }).then((result) => {
+    void client.invoke('mods.list', appSessionId === null ? {} : { appSessionId }).then((result) => {
       if (!live) return;
       setRead(result.ok ? { state: 'ready', rows: result.value } : { state: 'unavailable', reason: result.error.message });
     });
@@ -59,6 +59,7 @@ export function useBuiltInMods(appSessionId: AppSessionId, client: MawsBridge = 
   );
   const setOverride = useCallback(
     async (id: ModId, value: LaneOverride) => {
+      if (appSessionId === null) return;
       setFailure(null);
       const result = await client.invoke('mods.setSessionOverride', { appSessionId, id, value });
       if (!result.ok) setFailure(result.error.message);

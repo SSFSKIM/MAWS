@@ -82,9 +82,9 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
         </span>
         {row.description !== '' && <span className="truncate text-ui-sm text-fg-muted">{row.description}</span>}
       </div>
-      <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(row.name)}>
+      {onUse && <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(row.name)}>
         {S.useInChat}
-      </button>
+      </button>}
     </li>
   );
 }
@@ -96,6 +96,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
     { label: S.invoke, value: <code className="font-mono text-ui-sm">/{row.name}</code> },
     ...(row.plugin !== null ? [{ label: S.plugin, value: row.plugin }] : []),
     ...(row.source !== '' ? [{ label: S.source, value: row.source }] : []),
+    ...(row.path ? [{ label: 'File', value: row.path }] : []),
   ];
   return (
     <div ref={root} tabIndex={-1} data-skill-detail={row.name} onKeyDown={backOnChord(onBack)} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3 outline-none">
@@ -105,9 +106,9 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>
-        <button type="button" className={PRIMARY} onClick={() => onUse(row.name)}>
+        {onUse && <button type="button" className={PRIMARY} onClick={() => onUse(row.name)}>
           {S.useInChat}
-        </button>
+        </button>}
       </div>
       {row.description !== '' && <p className="m-0 max-w-[640px] text-ui whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">{row.description}</p>}
       <dl className="m-0 grid max-w-[640px] grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-ui-sm">
@@ -124,7 +125,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
 
 // The list pane and, in place of it, a row's detail. The list stays mounted beneath the detail so Back returns to it as
 // it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop).
-export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse(name: string): void; onDetail(open: boolean): void }) {
+export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void }) {
   const [selected, setSelected] = useState<SkillRow | null>(null);
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ name: string; scrollTop: number } | null>(null);
@@ -169,7 +170,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: read
         {group !== null && <GroupHeading label={L.group[group]} count={rows.length} />}
         <ul aria-label={group === null ? S.list : undefined} className="m-0 list-none p-0">
           {rows.map((row) => (
-            <SkillItem key={row.name} row={row} onOpen={open} onUse={onUse} />
+            <SkillItem key={row.path ?? row.name} row={row} onOpen={open} onUse={onUse} />
           ))}
         </ul>
       </section>

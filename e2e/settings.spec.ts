@@ -5,7 +5,8 @@
 // relaunch over the same profile. The monospace-font case needs the harness's `#probe` page (`pnpm e2e:settings` builds
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -466,4 +467,54 @@ test('settings: a Nerd Font in appearance.monoFont draws private-use prompt glyp
   } finally {
     await maws.cleanup();
   }
+});
+
+// UX2-K: the app-level libraries with no session. Real disk inventory and the existing plugin CLI boundary; screenshots
+// are attachments from the Mac gate, not the owner's running app. Narrow captures exercise these pages' own reflow.
+test('Customize and Projects are reachable without a chat, at desktop and narrow widths', async ({}, testInfo) => {
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-ux2k-')));
+  const directory = join(userData, 'harbor-quarterly-review');
+  mkdirSync(join(directory, '.claude', 'skills', 'review-quarterly'), { recursive: true });
+  writeFileSync(join(directory, '.claude', 'skills', 'review-quarterly', 'SKILL.md'), '---\nname: review-quarterly\ndescription: Review the quarterly narrative against the financial source documents.\n---\n# Quarterly review\n');
+  writeFileSync(join(directory, '.mcp.json'), JSON.stringify({ mcpServers: { documents: { type: 'http', url: 'https://example.invalid/mcp?token=must-not-reach-renderer' } } }));
+  const plugins = [{ name: 'editorial-tools', version: '1.0.0', description: 'Review and refine the quarterly narrative.' }];
+  const market = scratchMarketplace(join(userData, 'marketplace'), { name: 'harbor-tools', plugins });
+  const cli = writePluginCliStub(userData, { marketplaces: [{ name: 'harbor-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'editorial-tools@harbor-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
+  try {
+    const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin }, prepare: ({ claudeConfigDir }) => {
+      mkdirSync(join(claudeConfigDir, 'skills', 'proofread'), { recursive: true });
+      writeFileSync(join(claudeConfigDir, 'skills', 'proofread', 'SKILL.md'), '---\nname: proofread\ndescription: Check wording, consistency and citations.\n---\n# Proofread\n');
+      writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ mcpServers: { notion: { type: 'http', url: 'https://example.invalid/notion' } } }));
+    } });
+    try {
+      const { page, app } = maws;
+      const added = await page.evaluate(async (directory) => window.maws.invoke('session.projects.add', { directory }), directory);
+      expect(added.ok).toBe(true);
+      await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Customize', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
+      await expect(page.locator('[data-plugins-section="my-items"]')).toBeVisible();
+      const shot = async (name: string) => { const path = testInfo.outputPath(`${name}.png`); await page.screenshot({ path }); await testInfo.attach(name, { path, contentType: 'image/png' }); };
+      for (const [width, height] of [[1280, 820], [1512, 982], [600, 760]] as const) {
+        await app.evaluate(({ BrowserWindow }, [width, height]) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(600, 600); win.setContentSize(width, height); }, [width, height]);
+        await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, [width, height]);
+        await page.getByRole('tab', { name: 'Plugins', exact: true }).click();
+        await expect(page.locator('[data-plugins-section="my-items"]')).toBeVisible();
+        await shot(`ux2k-plugins-${width}x${height}`);
+        await page.getByRole('tab', { name: 'Skills', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'View review-quarterly' })).toBeVisible();
+        await shot(`ux2k-skills-${width}x${height}`);
+        await page.getByRole('tab', { name: 'MCP servers', exact: true }).click();
+        await expect(page.getByText('documents', { exact: true })).toBeVisible();
+        await expect(page.getByText(/Connection state and tools are unavailable/)).toBeVisible();
+        await expect(page.locator('body')).not.toContainText('must-not-reach-renderer');
+        await shot(`ux2k-mcp-${width}x${height}`);
+        await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Projects', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
+        await shot(`ux2k-projects-${width}x${height}`);
+        await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Customize', exact: true }).click();
+        await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
+      }
+      expect(await page.evaluate(async () => { const snapshot = await window.maws.invoke('session.list', {}); return snapshot.ok ? snapshot.value.sessions.length : -1; })).toBe(0);
+    } finally { await maws.cleanup(); }
+  } finally { rmSync(userData, { recursive: true, force: true }); }
 });

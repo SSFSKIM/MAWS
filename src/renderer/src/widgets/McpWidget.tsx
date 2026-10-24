@@ -162,8 +162,24 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh }: { server
   );
 }
 
-export function McpBody({ view, actions }: { view: { servers: McpServerView[] }; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh'] } }) {
+export function McpBody({ view, actions, compact = false }: { view: { servers: McpServerView[] }; compact?: boolean; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh'] } }) {
   if (view.servers.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>;
+  if (compact) return <ul aria-label={MCP.list} className="m-0 list-none p-0">
+    {view.servers.map((server) => <li key={`${server.name}:${server.scope}:${server.source}`} className="border-b border-border px-2 py-2 last:border-b-0">
+      <details>
+        <summary className="cursor-default rounded-sm text-ui outline-accent focus-visible:outline-2">
+          <span className="font-medium [overflow-wrap:anywhere]">{server.name}</span>
+          <span className="ml-2 text-ui-sm text-fg-muted">{server.status}{server.tools.length > 0 ? ` · ${MCP.tools(server.tools.length)}` : ''}{server.scope ? ` · ${server.scope}` : ''}</span>
+        </summary>
+        <div className="flex flex-col gap-1 pt-2 text-ui-sm text-fg-muted [overflow-wrap:anywhere]">
+          {server.transport && <span>{server.transport}</span>}
+          {server.source && <span>{server.source}</span>}
+          {server.error && <span className="text-danger">{server.error}</span>}
+          {server.tools.length > 0 && <span className="font-mono">{server.tools.join(', ')}</span>}
+        </div>
+      </details>
+    </li>)}
+  </ul>;
   return (
     <Rows label={MCP.list}>
       {view.servers.map((s) => (
