@@ -150,8 +150,10 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
   test('an inline edit discloses its diff and opens the changed file', async ({ maws }) => {
     const h = await Harness.open(maws);
     await h.panel('loadTranscript', 'A', 'transcript/edit-and-receipt');
-    await h.transcript('A').expandAll();
     const transcript = h.page.locator('[data-code-harness-transcript]');
+    // The visible transcript has its own harness:<n> disclosure state, distinct from Review's source A.
+    const divider = transcript.locator('[data-kind="divider"] button[aria-expanded]').first();
+    if (await divider.getAttribute('aria-expanded') === 'false') await divider.click();
     await expect(transcript.locator('.transcript-receipt')).toHaveCount(0);
     const cell = transcript.locator('.transcript-cell').filter({ has: h.page.getByRole('button', { name: /^Edited.*app.ts.*\+1.*−1/ }) });
     await cell.locator('.transcript-cell-line').click();
