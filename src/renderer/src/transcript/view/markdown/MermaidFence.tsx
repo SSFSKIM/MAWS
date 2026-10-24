@@ -27,6 +27,7 @@ export function MermaidFence({ code: source, isIncomplete, meta: marked }: Custo
   const diagram = complete && mermaid !== null;
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const outcome = useOutcome(root, diagram ? source : null);
+  useInlineDiagram(root);
   const withDiagrams = useMemo(() => (mermaid ? { code, mermaid } : CODE_ONLY), [mermaid]);
   return (
     <div className="transcript-mermaid" data-drawn={outcome === 'drawn' ? '' : undefined}>
@@ -45,6 +46,24 @@ export function MermaidFence({ code: source, isIncomplete, meta: marked }: Custo
       {outcome === 'failed' && <p className="transcript-mermaid-failed">{DIAGRAM.failed}</p>}
     </div>
   );
+}
+
+// Streamdown 2.6's panZoom flag hides controls but does not disable its wheel/pointer listeners, and also hides
+// fullscreen controls. Keep those controls enabled for its body portal; shield only the inline diagram before the
+// library's native listeners run. Never preventDefault: the wheel still scrolls the transcript. Toolbar clicks pass.
+function useInlineDiagram(root: HTMLElement | null) {
+  useEffect(() => {
+    if (!root) return;
+    const stopInlineGesture = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest('[data-streamdown="mermaid"]')) event.stopPropagation();
+    };
+    root.addEventListener('wheel', stopInlineGesture, { capture: true, passive: true });
+    root.addEventListener('pointerdown', stopInlineGesture, true);
+    return () => {
+      root.removeEventListener('wheel', stopInlineGesture, true);
+      root.removeEventListener('pointerdown', stopInlineGesture, true);
+    };
+  }, [root]);
 }
 
 // Streamdown's error box for a diagram mermaid rejected, replaced by a marker the hidden diagram's observer reads: the
