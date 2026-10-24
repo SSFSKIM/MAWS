@@ -205,7 +205,10 @@ export function DocumentEditor(props: DocumentEditorProps) {
     props.onEditor?.(editor);
     if (editor && focusAfterBind.current) {
       focusAfterBind.current = false;
-      editor.view.focus();
+      // The collaboration binding initializes after this callback. Focus only once the current page is ready.
+      requestAnimationFrame(() => {
+        if (shownEditor.current === editor && !editor.isDestroyed) editor.view.focus();
+      });
     }
   }, [props.onEditor]);
   const selectSection = (id: string, focusPage = false) => {

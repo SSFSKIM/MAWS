@@ -272,7 +272,14 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
       readOnlyHistory,
       yUndoPlugin(placeholder),
       attachUndo,
-      ...(awareness ? [yCursorPlugin(awareness, cursors ?? {})] : []),
+      ...(awareness ? [yCursorPlugin(awareness, {
+        ...cursors,
+        resolveLocalCursorState: (ctx) => {
+          // Tiptap destroys a switched-out view later; it must not clear the surviving view's shared cursor meanwhile.
+          if (!ctx.view.dom.isConnected) return ctx.prevState;
+          return ctx.view.hasFocus() ? ctx.nextState : ctx.isOwnState ? null : ctx.prevState;
+        },
+      })] : []),
       ...(hold ? [compositionHold(hold)] : []),
       caretFollowsId(),
     ];

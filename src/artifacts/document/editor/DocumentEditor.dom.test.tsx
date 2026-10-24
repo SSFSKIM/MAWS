@@ -405,9 +405,23 @@ describe('tabs', () => {
     await until(() => listTabs(handle.doc).length === 2 && editor().getText() === '', 'the new section to bind');
     expect(screen.getByRole('tablist', { name: 'Tabs' })).toBeTruthy();
     expect(screen.getByRole('tab', { selected: true }).textContent).toContain('Tab 2');
-    act(() => fireEvent.click(screen.getByLabelText('Delete Tab 2')));
-    await until(() => listTabs(handle.doc).length === 1 && editor().getText() === 'First section text', 'the original section');
-    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
+    const focusedText: string[] = [];
+    const focused = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && event.target.matches('.ProseMirror[data-editor="live"]')) focusedText.push(event.target.textContent ?? '');
+    };
+    document.addEventListener('focusin', focused);
+    try {
+      act(() => fireEvent.click(screen.getByLabelText('Delete Tab 2')));
+      await until(() => listTabs(handle.doc).length === 1 && editor().getText() === 'First section text' && editor().view.hasFocus(), 'the original section to bind and take focus');
+      expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
+      expect(focusedText, 'the remaining page is ready when it receives focus').toEqual(['First section text']);
+      act(() => void editor().commands.setTextSelection(endOf(editor(), 'p1')));
+      type(editor(), '!');
+      expect(editor().getText()).toBe('First section text!');
+      expect(ynodeToPmnode(tabBody(handle.doc, TAB)!, schemaFor()).textContent).toBe('First section text!');
+    } finally {
+      document.removeEventListener('focusin', focused);
+    }
   });
 
   it('are added, renamed, reordered and switched, each with its own body', async () => {
