@@ -204,7 +204,19 @@ describe('the measurement corrections (E2 M6 review; parent Decision Log 42)', (
     const markerB = `region,costs\nBusan,${(clock % 100_000) + 1}\n`;
     await write('A', markerA);
     writeFileSync(join(((await seam.run({ cmd: 'cwd', session: 'B' })) as { cwd: string }).cwd, 'costs.csv'), markerB);
-    // the two sessions' writes to the one dashboard, in flight together
+    // Starting both calls together does not guarantee their startup timers subscribe in the same turn. Hold the
+    // real writes until both calls reach this boundary, so their announcement subscriptions overlap.
+    let releaseWrites!: () => void;
+    const bothWriting = new Promise<void>((resolve) => {
+      releaseWrites = resolve;
+    });
+    let writes = 0;
+    const writeWithAssets = world.store.writeWithAssets.bind(world.store);
+    vi.spyOn(world.store, 'writeWithAssets').mockImplementation(async (...args) => {
+      if (++writes === 2) releaseWrites();
+      await bothWriting;
+      return writeWithAssets(...args);
+    });
     const before = subscriptions;
     const [a, b] = (
       await Promise.all([
