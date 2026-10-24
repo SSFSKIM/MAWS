@@ -208,13 +208,13 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     const transcript = summary();
     const changed = { ...transcript, size: transcript.size + 1, mtimeMs: transcript.mtimeMs + 1 };
     const fake = scriptedHost('starting');
-    let resolve!: (page: unknown) => void;
+    let resolve!: (page: CommandResult<'fs.sessionText'>) => void;
     let reads = 0;
     const dispatch = fake.host.dispatch;
     fake.host.dispatch = async (owner, name, input) => {
       if (name !== 'fs.sessionText') return dispatch(owner, name, input);
       reads += 1;
-      if (reads === 1) return await new Promise((done) => { resolve = done; }) as CommandResult<typeof name>;
+      if (reads === 1) return await new Promise<CommandResult<'fs.sessionText'>>((done) => { resolve = done; }) as CommandResult<typeof name>;
       return { ok: true, value: { text: 'Newer conversation', cursor: null, size: changed.size, mtimeMs: changed.mtimeMs } } as CommandResult<typeof name>;
     };
     begin(fake.host);
@@ -234,11 +234,11 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     const fake = scriptedHost('starting');
     const dispatch = fake.host.dispatch;
     let reads = 0;
-    let resolve!: (value: unknown) => void;
+    let resolve!: (value: CommandResult<'fs.sessionText'>) => void;
     fake.host.dispatch = async (owner, name, input) => {
       if (name !== 'fs.sessionText') return dispatch(owner, name, input);
       reads += 1;
-      if (reads === 1) return await new Promise((done) => { resolve = done; }) as CommandResult<typeof name>;
+      if (reads === 1) return await new Promise<CommandResult<'fs.sessionText'>>((done) => { resolve = done; }) as CommandResult<typeof name>;
       return { ok: true, value: { text: 'Fresh host conversation', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs } } as CommandResult<typeof name>;
     };
     begin(fake.host);
