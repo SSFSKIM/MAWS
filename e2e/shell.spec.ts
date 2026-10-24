@@ -399,7 +399,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await page.keyboard.press('Home');
     await expect(needsYou.nth(0)).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(sidebar.getByRole('button', { name: 'Sort sessions' })).toBeFocused();
+    await expect(sidebar.getByRole('button', { name: 'Filter projects' })).toBeFocused();
     await sidebar.getByRole('searchbox').focus();
     await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
