@@ -103,17 +103,18 @@ allows today.
 - [x] (2026-10-22 22:03Z) First walk fixes deployed: doperpowers #355 (`099a44c9`,
   sminos 1.8.1) and MAWS #127 (`1cea5bc35`), adding Skills membership, guarded
   chunk-load recovery, corrected upgrade/stale guidance and the G1 test-helper fix.
-  The live catalog carried `skills`; the deployed Skills UI re-check remains owed.
+  The live catalog carried `skills`; the deployed Skills UI re-check is below.
 - [x] (2026-10-22 23:55Z) Phone wake resnapshot and unseen-receipt recovery deployed
   in MAWS #128 (`4c12e4a1b`), including the missing-outcome line. Committed-head
   Linux and macOS gates passed; browser fixtures are not the owner's phone re-walk.
-- [ ] Owner's phone re-walk on the deployed build: fully reopen the app, recheck
-  Skills, queue `/color orange` during a long turn, lock through its end, then
-  unlock and check current content and the row-confirmed Ran receipt. The owner
-  deferred this until available (2026-10-23 00:34Z); it is not done.
-- [ ] MAWS #129 is in flight, awaiting its Mac gate: free scroll while streaming
-  makes follow yield to the reader's scrolling input, with an explicit return to
-  the bottom. It is not deployed; physical iPhone momentum remains to be walked.
+- [x] (2026-10-23 06:36Z) MAWS #129 (`5a4b93b4c`) deployed: free scroll while
+  streaming, after final-head Linux and seven-group Mac gates passed. The
+  reader-input policy is in the Decision Log; build and gate evidence in Outcomes.
+- [x] (2026-10-24 10:26–10:45Z) Owner's attended physical-phone re-walk on that
+  build, MacBook seat `m1-busy`: Skills populated, streaming free scroll worked,
+  queued `/color orange` ran after the turn with its row-confirmed Ran receipt;
+  unlock preserved the reader's place and showed the completed reply at once.
+  Outcomes records the scope; this does not close M1's other branches.
 - [ ] M1's unwalked branches: A9's replaced-module effect, A11's same-command
   collision, A14's cached-catalog downgrade and A1's historical no-status fixture
   remain test evidence only. `read.catalog` has no UI consumer and no live timing
@@ -2168,7 +2169,11 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   browser receipt ownership, and shared transcript follow behavior.
   Evidence: the owner's attended `m1-busy` walk, 20:36–20:49Z; orange ran at
   20:44:55Z. MAWS #128's Chromium/WebKit fixtures pass after the wake/receipt fixes;
-  physical phone revalidation is still owed, and scroll is separated into #129.
+  the physical re-walk on #129's deployed build is recorded in Outcomes.
+- Observation: The re-walk's seat declined the 2,000-sentence hand-typed fixture:
+  it stopped at 92 to ask for a script. A long plain story supplied the streaming
+  turn instead; the requested count was not the completed fixture.
+  Evidence: the owner's attended `m1-busy` re-walk, 2026-10-24 10:26–10:45Z.
 - Observation: A fresh snapshot aggregates the reply so far, but the real plane's
   post-snapshot live backlog can still grow and drain one event at a time. It is
   not enough to dismiss a slow burst as a fake producer's artifact, nor does that
@@ -2757,6 +2762,26 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Date/Author: 2026-10-23, the orchestrator's M1 record update, from the working
   log, walk artifacts and verified PR merge records.
 
+- Decision: Streaming follow releases only on witnessed reader input: upward
+  wheel/touch intent at once; scroll-capable keys captured globally and a scrollbar
+  pointer's release arm a 250 ms movement witness. Keyboard/scrollbar release needs
+  upward list movement away from the measured end, including before a smaller DOM
+  sizer commits. Browser clamps, row replacement and shrink cannot detach a
+  follower by themselves. Returning to the end or Jump to latest resumes following;
+  explicit app-owned row navigation still opts out.
+  Rationale: four review rounds on MAWS #129 moved the near-end heuristic to this
+  policy, through measured-end changes, unwitnessed detachment, native key/scrollbar
+  ordering and witnessed end clamps. Rejected: inferring reader intent from offset
+  or a near-end band, which confuses browser geometry changes with reading and can
+  pin small upward gestures back to the bottom. The accepted cost is that native
+  find-in-page, focus or selection autoscroll alone does not pause following. The
+  bounded stale-end re-entry corner remains in `docs/tech-debt-tracker.md`, retained
+  to preserve WebKit's queued return-to-bottom fix.
+  Date/Author: 2026-10-23, the free-scroll executor and orchestrator, MAWS #129.
+
+- 2026-10-24: Record #129's deployment and the owner's attended phone re-walk in
+  Progress and Outcomes; no change to the unwalked M1 branches or comparative A33.
+
 ## Outcomes & Retrospective
 
 **M0 (2026-10-22).** Built in both repositories as two parallel tasks against the
@@ -2872,7 +2897,7 @@ orchestrator's working log, 20:36–20:49Z.
 | A11 | Desk red then blue each read back their own line. With the owner typing yellow between desk commands at 20:37:03Z, yellow stayed unattributed and both desk lines remained row-confirmed. |
 | A12 | A skill command and `/goal` started turns and showed Started a turn; the goal-clear hint named Interrupt rather than promising a queued clear would stop the running goal. |
 | A13 | Desk Interrupt left `/color` usable. After the owner's terminal Esc, desk green was refused with *stopped at the terminal: commands resume after input is typed there*; terminal purple cleared the condition and desk green ran at 20:40:19Z. |
-| Sleeping phone | Failed on the original M1 build: stale streaming content after unlock, orange still queued after its end, receipt lost on reopen, and no free scroll while streaming. Wake/receipts are deployed in #128; the physical re-walk is open. Scroll remains in-flight #129. |
+| Sleeping phone | Failed on the original M1 build: stale streaming content after unlock, orange still queued after its end, receipt lost on reopen, and no free scroll while streaming. Wake/receipts shipped in #128, scroll in #129; the physical re-walk is below. |
 
 **A33 samples from that walk**, milliseconds, on the original M1 deployment before
 the fixes (MacBook load observed at 18–55). The first five paths each have at
@@ -2901,11 +2926,11 @@ not live passes. A1's pre-`read.status` producer likewise had no live fixture.
 The comparative RC column stays deferred on MAWS #52; the separate second latency
 window was skipped while the owner's screen was locked, yielding no samples.
 
-**Fixes landed; phone revalidation still owed (2026-10-23).** Skills membership
+**Fixes landed (2026-10-22–23; phone revalidation below).** Skills membership
 now crosses the child and plane allowlists as well as the mod/web types, and an
 unavailable usage summary leaves the command catalog intact. The live 1.8.1
 catalog was checked after deployment and carried `skills`; the screen was locked,
-so the deployed Skills UI was not re-walked. #127 also recovers failed lazy chunks
+so the deployed Skills UI was not re-walked then. #127 also recovers failed lazy chunks
 with a build-scoped one-reload guard, fixes both capability wordings and hardens
 G1's live-row scroll helper without changing production scrolling. Pre-fix tabs
 still need one manual reload to acquire that recovery code.
@@ -2924,12 +2949,26 @@ effect. The implementation contracts and their tradeoffs are in the existing
 wake/receipt Decision Log entries; fix evidence is under `/tmp/dsk-scripts/m1fix/`
 and in the linked PRs.
 
-The owner has not re-walked the deployed fix: at 00:34Z they deferred until
-available. Progress keeps that check open, alongside the in-flight free-scroll
-PR and the unwalked acceptance branches. Residue is tracked in the backlog:
-doperpowers board #127, complete task/worktree proof before desk `/exit` can be
-re-enabled (deferred P3), and #128, post-snapshot live backlog measurement and
-bounding (P2 ready-for-architect). M2–M5 and comparative A33 remain ahead.
+[MAWS #129](https://github.com/SSFSKIM/MAWS/pull/129) merged as `5a4b93b4c` on
+2026-10-23 and deployed at 06:36Z as `hub@5a4b93b4 web@master.5a4b93b4`. Its final
+head `4644f3e30` passed Linux static/unit/probes/desk-web (39893304199) and the
+seven-group Mac set (39909560332): unit:darwin, e2e:default, transcript, panel,
+composer, agents and desk-web-hub.
+
+**Owner's physical-phone re-walk (2026-10-24 10:26–10:45Z, attended).** On that
+build, MacBook seat `m1-busy`, the command list's Skills group was populated and
+free scroll worked while the reply streamed. `/color orange`, sent during the
+turn, waited and ran after the turn ended; its line read the row-confirmed *Ran*
+result. The phone was locked through the turn's end. On unlock the page kept the
+reader's place and showed the completed reply at once, with no slow catch-up.
+These are the owner's observed results, not a measured latency distribution or
+a full M1 sign-off. The previously unwalked acceptance branches remain open.
+
+Residue stays in the backlog: doperpowers board #127, complete task/worktree proof
+before desk `/exit` can be re-enabled (deferred P3), and #128, post-snapshot live
+backlog measurement and bounding (P2 ready-for-architect). The wake path caught up
+instantly in this walk; that does not close #128's measurement/bounding work.
+M2–M5 and comparative A33 remain ahead.
 
 The lesson of this walk is that an outcome reaching the hub is not yet an outcome
 the person can read: a sleeping browser needs both a current transcript and its
