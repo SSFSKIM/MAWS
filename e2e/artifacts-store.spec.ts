@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import type { HostStatus } from '@shared/ipc/schema/host';
 import { documents, seamReady } from './support/documents';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { quietWait } from './support/quiet';
@@ -38,9 +39,14 @@ async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
 }
 
 async function hostReady(page: Page): Promise<{ pid: number }> {
-  let state: { state: string; pid: number | null } = { state: 'starting', pid: null };
-  await expect.poll(async () => (state = await ok(page, 'engine.hostState')).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
-  return { pid: state.pid! };
+  let pid: number | null = null;
+  // Process spawn is not event readiness: main receives this supervisor snapshot only after X13's ready handoff.
+  await expect.poll(async () => {
+    const status = await ok<HostStatus>(page, 'host.status');
+    pid = status.state === 'ready' ? status.supervisor?.pid ?? null : null;
+    return pid;
+  }, { timeout: 20_000, message: 'the engine host event stream is ready' }).not.toBeNull();
+  return { pid: pid! };
 }
 
 // A second app window through main's seam, with its page.
