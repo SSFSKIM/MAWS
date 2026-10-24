@@ -1314,9 +1314,18 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(divider).toHaveAttribute('aria-expanded', 'false');
     await expect(divider).toContainText('1 tool call');
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
-    // Level 2: the divider expanded shows the tool row
+    // Level 2 exposes the l2-transcript-01 summary row; the command remains on demand inside its detail.
     await divider.click();
-    await expect(pane.getByText('git status --short', { exact: false }).first()).toBeVisible();
+    const tool = pane.locator('[data-cell-id="cell:toolu_01P2cM5Bash01"]');
+    const detailToggle = tool.getByRole('button', { name: 'Check the tree', exact: true });
+    await expect(detailToggle).toBeVisible();
+    await expect(detailToggle).toHaveAttribute('aria-expanded', 'false');
+    const command = tool.locator('.transcript-shell-command');
+    await expect(command).not.toBeVisible();
+    await detailToggle.click();
+    await expect(detailToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(command).toBeVisible();
+    await expect(command).toHaveText('$ git status --short');
     await captureReportShot(page, 'report-level2');
     await fold.click();
     await expect(record).toHaveAttribute('aria-expanded', 'false');
