@@ -124,13 +124,12 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   // One group of turn 120 with at least two cells, and two of its cell details.
   const groupRowId = await page.evaluate((id) => {
     const groups = Array.from(document.querySelectorAll(`[data-kind="group"][data-turn-id="${id}"]`));
-    const group = groups.find((element) => Number(element.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')) >= 2);
+    const group = groups.find((element) => element.querySelectorAll('.transcript-tool-block [data-cell-id]').length >= 2);
     return group?.closest('[data-row-id]')?.getAttribute('data-row-id') ?? null;
   }, turnId);
   expect(groupRowId, `turn ${TURN} shows a group of at least two cells`).not.toBeNull();
   const group = page.locator(rowSelector(groupRowId!));
-  await group.getByRole('button', { expanded: false }).first().click();
-  const cellButtons = group.locator('[data-cell-id] > button');
+  const cellButtons = group.locator('.transcript-tool-block [data-cell-id] > button');
   await cellButtons.nth(0).click();
   await cellButtons.nth(1).click();
   await expect(group.locator('[data-cell-id][data-expanded]')).toHaveCount(2);
@@ -385,10 +384,10 @@ test('collapsing a divider keeps its position', async ({ harness }) => {
   expect(harness.consoleErrors()).toEqual([]);
 });
 
-// W8 (T3): a group opens and closes as Codex's disclosures do, its height running through the values between closed and
+// W8 (T3): a call detail opens and closes as Codex's disclosures do, its height running through the values between closed and
 // open (300 ms opening, 150 ms closing) rather than jumping, the row below following it frame by frame and flush with it
-// at the end, and its cells unmounted once it has closed.
-test('a group’s height moves through its disclosure rather than jumping, and the row below follows it', async ({ harness }) => {
+// at the end, and its detail unmounted once it has closed.
+test('a tool detail moves through its disclosure rather than jumping, and the row below follows it', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
@@ -397,11 +396,11 @@ test('a group’s height moves through its disclosure rather than jumping, and t
   const turnId = await openTurn(page);
   const groupRowId = await page.evaluate((id) => {
     const groups = Array.from(document.querySelectorAll(`[data-kind="group"][data-turn-id="${id}"]`));
-    const group = groups.find((element) => Number(element.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')) >= 2);
+    const group = groups.find((element) => element.querySelectorAll('.transcript-tool-block [data-cell-id]').length >= 2);
     return group?.closest('[data-row-id]')?.getAttribute('data-row-id') ?? null;
   }, turnId);
   expect(groupRowId, `turn ${TURN} shows a group of at least two cells`).not.toBeNull();
-  // Clicks the group's header and samples, every frame for 600 ms, the row's height and the next row's top.
+  // Clicks a visible call's summary and samples, every frame for 600 ms, the row's height and the next row's top.
   const sample = () =>
     page.evaluate(async (id) => {
       const row = document.querySelector<HTMLElement>(`[data-row-id="${id}"]`)!;
@@ -410,14 +409,14 @@ test('a group’s height moves through its disclosure rather than jumping, and t
       const heights: number[] = [];
       const gaps: number[] = [];
       const started = performance.now();
-      row.querySelector<HTMLElement>('button[aria-expanded]')!.click();
+      row.querySelector<HTMLElement>('.transcript-tool-block .transcript-cell-line')!.click();
       while (performance.now() - started < 600) {
         await new Promise((resolve) => requestAnimationFrame(resolve));
         const box = row.getBoundingClientRect();
         heights.push(box.height);
         gaps.push(next().getBoundingClientRect().top - box.bottom);
       }
-      return { before, heights, gaps, cells: row.querySelectorAll('[data-group-cells]').length };
+      return { before, heights, gaps, cells: row.querySelectorAll('.transcript-tool-block .transcript-cell-detail').length };
     }, groupRowId!);
   const between = (values: number[], a: number, b: number) => values.filter((value) => value > Math.min(a, b) + 1 && value < Math.max(a, b) - 1);
 
@@ -1075,16 +1074,14 @@ for (const { site, component, outcome } of r3DomCases) {
         await expect(pane.getByText('R3 command', { exact: true })).not.toBeVisible();
       } else if (component === 'ToolUse') {
         const group = pane.locator('[data-kind="group"]').first();
-        await expect(group.locator('button[aria-expanded]').first()).toBeVisible();
-        await group.locator('button[aria-expanded]').first().click();
         await expect(group.locator('[data-surface-row="ToolUse"]')).toHaveCount(1);
         await expect(group.locator('.transcript-cell-line')).not.toBeVisible();
         await expect(group.locator('[data-cell-count]')).toHaveAttribute('data-cell-count', '1');
       } else if (component === 'ToolGroup') {
         const group = pane.locator('[data-kind="group"]').first();
         await expect(group.getByText('R3 slot', { exact: true })).toBeVisible();
-        await expect(group.locator('button[aria-expanded]').first()).toHaveAttribute('aria-expanded', 'true');
-        await expect(group.locator('.transcript-cell-line')).toContainText('printf R3');
+        await expect(group.locator('.transcript-cell-line')).toBeVisible();
+        await expect(group.locator('.transcript-cell-line')).toContainText('Bash');
       } else if (component === 'ToolResult') {
         // X3 renders a completed one-tool run as a standalone cell, so opening it mounts ToolResult.
         const cell = pane.locator('[data-kind="cell"] .transcript-cell');
@@ -1187,20 +1184,23 @@ test('R3 owner to-human draws every span as Markdown, folds the working record, 
 });
 
 
-test('R4 detached owner recording draws labelled bodies and inert choices without an engine surface', async () => {
+test('detached owner recording keeps one authored Markdown flow without cards or injected choices', async () => {
   await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-to-human'), async ({ page, pane, id }) => {
-    const report = pane.locator('[data-owner-report]');
+    const report = pane.locator('[data-kind="assistant_text"]').filter({ hasText: 'First span.' });
     await expect(report).toBeVisible();
-    await expect(report.locator('.owner-report-label')).toHaveText(['to human', 'essential', 'need input']);
-    await expect(report.locator('.owner-report-body > .transcript-prose')).toHaveText(['First span.', 'Second span.', 'Which path?']);
+    await expect(report.locator('.transcript-prose')).toHaveCount(1);
+    await expect(report).toContainText('Private working notes.');
+    await expect(report).toContainText('First span.');
+    await expect(report).toContainText('Second span.');
+    await expect(report).toContainText('Which path?');
+    await expect(report).toContainText('One');
+    await expect(report).toContainText('Two');
+    await expect(report).toContainText('More working notes.');
     await expect(report.locator('[data-streamdown="strong"]')).toHaveText('span');
-    await expect(report.getByRole('listitem')).toHaveText(['OneRecommended', 'Two']);
-    await expect(report.getByRole('button')).toHaveCount(0);
-    await expect(report.getByText('Resume this session to answer.')).toBeVisible();
-    const question = await report.getByText('Which path?', { exact: true }).boundingBox();
-    const choices = await report.getByRole('list').boundingBox();
-    expect(question!.y + question!.height).toBeLessThanOrEqual(choices!.y);
-    await expect(pane.getByText('Private working notes.', { exact: true })).not.toBeVisible();
+    await expect(report.locator('[data-owner-card], [data-owner-report], button')).toHaveCount(0);
+    await expect(report).not.toContainText('<to-human>');
+    await expect(report).not.toContainText('<choice');
+    await expect(report).not.toContainText('Resume this session to answer.');
     await expect(pane.getByText('Private follow-up record.', { exact: true })).not.toBeVisible();
     // This indexed session was never started: there is no engine host session, not a detached ready process.
     expect(await invoke(page, 'session.status', { appSessionId: id as never })).toEqual({
@@ -1217,12 +1217,12 @@ test('R4 detached owner recording draws labelled bodies and inert choices withou
     const divider = pane.locator('.transcript-divider button[aria-expanded]').first();
     await expect(divider).toHaveAttribute('aria-expanded', 'false');
     await divider.click();
-    await expect(report.getByText('Private working notes.', { exact: true })).toBeVisible();
-    await expect(report.getByText('More working notes.', { exact: true })).toBeVisible();
+    await expect(report).toContainText('Private working notes.');
+    await expect(report).toContainText('More working notes.');
     await expect(pane.getByText('Private follow-up record.', { exact: true })).toBeVisible();
     await divider.click();
     await expect(report.getByText('First span.', { exact: false })).toBeVisible();
-    await expect(report.getByText('Private working notes.', { exact: true })).not.toBeVisible();
+    await expect(report).toContainText('Private working notes.');
   }, (base) => {
     const t = transcriptSeed(base); t.user('owner-user', 'Show the report');
     t.text('owner-multi', ownerMarkedText); t.text('owner-record', 'Private follow-up record.');
@@ -1255,14 +1255,8 @@ test('M1 marked commentary is visible at full contrast before and after folding 
 });
 
 
-// P2-C M5 (2026-10-09; the P2-C document, Design §7 and §8, acceptance G3 and G5's presentation): with the owner
-// channel's lane on (the default), a replayed turn whose reply carries the four marks nested as U2 S13 recorded them,
-// after one Bash call and one unmarked sentence (test/fixtures/engine/p2c-report-marks.jsonl), reads as the report:
-// the prompt, one "Working record" row, the cards. The record opens to the ordinary divider, the divider to the tool
-// row, "Fold to report" closes it; an unmarked turn draws as the full transcript; the header's toggle shows the full
-// transcript with the marks still as cards. With room for the margin, a long insight after a short message keeps its
-// height in its row: it ends above the next insight and the next transcript row. No engine runs.
-test('M5 the report view folds a marked turn into its working record and draws the four marks as cards', async () => {
+// The owner lane still folds whole work rows; text inside an authored message is never cardified or moved to a margin.
+test('the report folds work while marked text retains its authored flow and geometry', async () => {
   test.setTimeout(120_000);
   const fixture = 'test/fixtures/engine/p2c-report-marks.jsonl';
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c-report-')));
@@ -1296,27 +1290,20 @@ test('M5 the report view folds a marked turn into its working record and draws t
     await expect(toggle.getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
     await expect(toggle.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'false');
 
-    // Level 0: the prompt, one working record that counts what it holds, the cards in the reply's order
+    // Level 0: whole work rows fold, but a marked text block keeps all of its authored words (UX1 l2-transcript-03).
     const record = pane.getByRole('button', { name: /^Working record/ });
     await expect(record).toHaveText('Working record · 1 tool call · 1 message');
     await expect(record).toHaveAttribute('aria-expanded', 'false');
-    const report = pane.locator('[data-owner-report]').filter({ hasText: "I haven't opened any files" });
-    await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
-    await expect(report.locator('[data-owner-card="to-human"]')).toContainText("I haven't opened any files");
-    await expect(report.locator('[data-owner-card="essential"]')).toContainText('The README above is unverified.');
-    const question = report.locator('[data-owner-card="need-input"]');
-    await expect(question).toContainText('Which tone should the README use?');
-    await expect(question.getByRole('group', { name: 'Choices' }).getByRole('button')).toHaveText([/^Concise reference style.*Recommended$/, /^Friendly guide style/]);
-    await expect(question.getByRole('button', { name: 'Reply' })).toBeEnabled(); // M6: main knows the mark, so the card answers
-    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
-    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0); // the unmarked turn has no work: no divider either
-    // the insight beside the message when the pane leaves a 240 px margin, else under it in reading order
-    const placement = await report.locator('.owner-insights').evaluate((el) => {
-      const scroller = el.closest('[data-transcript-scroller]') as HTMLElement;
-      const column = el.closest('.thread-column') as HTMLElement;
-      return { placement: el.getAttribute('data-placement'), room: (scroller.clientWidth - column.offsetWidth) / 2 };
-    });
-    expect(placement.placement).toBe(placement.room >= 256 ? 'margin' : 'inline');
+    const report = pane.locator('[data-kind="assistant_text"]').filter({ hasText: "I haven't opened any files" });
+    await expect(report.locator('.transcript-prose')).toHaveCount(1);
+    await expect(report).toContainText("I haven't opened any files");
+    await expect(report).toContainText('The README above is unverified.');
+    await expect(report).toContainText('Which tone should the README use?');
+    await expect(report).toContainText('Concise reference style');
+    await expect(report).toContainText('Friendly guide style');
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
+    await expect(report.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible(); // UX1: part of this same authored block
+    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
     await captureReportShot(page, 'report-level0');
 
     // Level 1: the turn as the full transcript draws it folded, the record above it
@@ -1327,53 +1314,48 @@ test('M5 the report view folds a marked turn into its working record and draws t
     await expect(divider).toHaveAttribute('aria-expanded', 'false');
     await expect(divider).toContainText('1 tool call');
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
-    // Level 2: the divider expanded shows the tool row
+    // Level 2 exposes the l2-transcript-01 summary row; the command remains on demand inside its detail.
     await divider.click();
-    await expect(pane.getByText('git status --short', { exact: false }).first()).toBeVisible();
+    const tool = pane.locator('[data-cell-id="cell:toolu_01P2cM5Bash01"]');
+    const detailToggle = tool.getByRole('button', { name: 'Check the tree', exact: true });
+    await expect(detailToggle).toBeVisible();
+    await expect(detailToggle).toHaveAttribute('aria-expanded', 'false');
+    const command = tool.locator('.transcript-shell-command');
+    await expect(command).not.toBeVisible();
+    await detailToggle.click();
+    await expect(detailToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(command).toBeVisible();
+    await expect(command).toHaveText('$ git status --short');
     await captureReportShot(page, 'report-level2');
     await fold.click();
     await expect(record).toHaveAttribute('aria-expanded', 'false');
-    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
+    await expect(report.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible(); // UX1: part of this same authored block
 
-    // The full transcript: no record, every word, the marks still as cards
+    // The full transcript: no record, every word, still no cards
     await toggle.getByRole('button', { name: 'Transcript' }).click();
     await expect(pane.getByRole('button', { name: /^Working record/ })).toHaveCount(0);
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
-    await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
+    await expect(report.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
     await toggle.getByRole('button', { name: 'Report' }).click();
     await expect(pane.getByRole('button', { name: /^Working record/ })).toBeVisible();
 
-    // The margin keeps an insight's height (the M5 fix wave): widen the window and narrow the column until the pane
-    // leaves the margin's room, then a long insight after a short message ends above the next message's insight, inside
-    // its own transcript row, and the next row starts below that row.
+    // A long insight remains in the same document flow, including when the column narrows.
     await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 1000));
-    const notes = pane.locator('[data-owner-report]').filter({ hasText: 'Keep the README short.' });
+    const notes = pane.locator('[data-kind="assistant_text"]').filter({ hasText: 'Keep the README short.' });
     await notes.scrollIntoViewIfNeeded();
     await notes.evaluate((el) => {
       const scroller = el.closest('[data-transcript-scroller]') as HTMLElement;
       document.documentElement.style.setProperty('--measure', `${Math.max(240, scroller.clientWidth - 2 * 272)}px`);
     });
-    await expect.poll(() => notes.locator('.owner-insights').evaluateAll((els) => els.map((el) => el.getAttribute('data-placement')))).toEqual(['margin', 'margin']);
+    await expect(notes.locator('.transcript-prose')).toHaveCount(1);
+    await expect(notes.locator('.transcript-prose p')).toHaveCount(8);
+    await expect(notes.locator('.owner-insights, aside')).toHaveCount(0);
     await expect.poll(() => notes.evaluate((el) => {
-      const box = (node: Element | null | undefined) => node?.getBoundingClientRect() ?? null;
-      const [tall, short] = Array.from(el.querySelectorAll('.owner-insights'), (node) => node.getBoundingClientRect());
-      const first = el.querySelector('.owner-report-item');
-      const message = box(first?.querySelector('[data-owner-card="to-human"]'));
-      const column = box(el.closest('.thread-column'));
-      const row = el.closest('[data-index]')!;
-      const next = box(row.parentElement?.querySelector(`[data-index="${Number(row.getAttribute('data-index')) + 1}"]`));
-      const own = row.getBoundingClientRect();
-      const wrong: string[] = [];
-      if (!message || message.height >= tall.height) wrong.push(`the message (${message?.height}) is not shorter than its insight (${tall.height})`);
-      if (column && tall.left < column.right) wrong.push(`the insight (left ${tall.left}) is not in the margin (column right ${column.right})`);
-      if (first && first.getBoundingClientRect().bottom < tall.bottom - 0.5) wrong.push(`the item (bottom ${first.getBoundingClientRect().bottom}) does not hold its insight (bottom ${tall.bottom})`);
-      if (short.top < tall.bottom) wrong.push(`the next insight (top ${short.top}) overlaps the long one (bottom ${tall.bottom})`);
-      const lowest = Math.max(tall.bottom, short.bottom);
-      if (own.bottom < lowest - 0.5) wrong.push(`the row (bottom ${own.bottom}) does not hold its insights (bottom ${lowest})`);
-      if (!next || next.top < own.bottom - 0.5) wrong.push(`the next row (top ${next?.top}) starts above this row's end (${own.bottom})`);
-      return wrong;
-    })).toEqual([]);
-    await captureReportShot(page, 'report-margin');
+      const paragraphs = Array.from(el.querySelectorAll('.transcript-prose p')).map((node) => node.getBoundingClientRect());
+      const own = el.closest('[data-index]')!.getBoundingClientRect();
+      return paragraphs.every((box, index) => box.bottom <= own.bottom + 0.5 && (index === 0 || box.top >= paragraphs[index - 1].bottom - 0.5));
+    })).toBe(true);
+    await captureReportShot(page, 'report-authored-flow');
     await page.evaluate(() => document.documentElement.style.removeProperty('--measure'));
     expect(maws.consoleErrors()).toEqual([]);
   } finally {

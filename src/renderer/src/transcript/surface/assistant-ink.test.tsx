@@ -42,7 +42,7 @@ it('keeps the first expanded commentary drawing mounted when ink promotes it to 
 });
 
 it.each([false, true])('probes folded assistant text, preserves ink in order at full contrast, and restores T2 on inkless/unhooked (%s) or detach', async (hooked) => {
-  const b = builder(); b.turn('u'); b.text('first', 0, '<to-human>Update</to-human>');
+  const b = builder(); b.turn('u'); b.text('first', 0, 'Update');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
   const store = await storeWith(b.events); const id = store.key as AppSessionId;
@@ -51,15 +51,15 @@ it.each([false, true])('probes folded assistant text, preserves ink in order at 
   const off = connectEngineSurface(fake.client);
   render(<Transcript storeKey={store.key} />);
   const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
-  expect(asks.filter((a) => a.component === 'AssistantMessage').map((a) => a.props.text)).toEqual(['<to-human>Update</to-human>', 'Answer']);
+  expect(asks.filter((a) => a.component === 'AssistantMessage').map((a) => a.props.text)).toEqual(['Update', 'Answer']);
   expect(asks.some((a) => a.component === 'ToolUse')).toBe(false);
   // User, folded commentary probe, answer: respond to all outstanding sites in their request order.
   for (const ask of asks) await act(() => fake.reply('session.ui.render', {
     hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
     tree: ask.component === 'AssistantMessage' ? { type: 'Box', children: [{ type: 'Text', children: ['label'] }, { type: 'engine', ref: 0 }] } : { type: 'engine', ref: 0 },
   }));
-  expect(store.rows().filter((r) => r.kind === 'assistant_text').map((r) => r.markdown)).toEqual(['<to-human>Update</to-human>', 'Answer']);
-  expect(screen.getByText('<to-human>Update</to-human>').closest('.transcript-commentary')).toBeNull();
+  expect(store.rows().filter((r) => r.kind === 'assistant_text').map((r) => r.markdown)).toEqual(['Update', 'Answer']);
+  expect(screen.getByText('Update').closest('.transcript-commentary')).toBeNull();
   expect((fake.invoked('session.ui.render') as { component: string }[]).filter((a) => a.component === 'AssistantMessage')).toHaveLength(2);
   act(() => invalidateSession(id));
   while (fake.pending('session.ui.render')) await act(() => fake.reply('session.ui.render', { hooked, rewritten: false, props: {}, tree: { type: 'Box' } }));
@@ -174,7 +174,7 @@ it.each([false, true])('does not derive large folded history during live token b
   expect(derivations).toBe(0);
 });
 
-it.each(['session', 'child'] as const)('R4 presents detached marked commentary outside the fold (%s), keeping plain text inside', async (variant) => {
+it.each(['session', 'child'] as const)('R4 presents detached marked commentary outside the fold (%s), preserving surrounding text in the same flow', async (variant) => {
   const b = builder(); b.turn('u'); b.text('first', 0, 'Working notes.\n<to-human>Report.</to-human>');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
@@ -183,21 +183,20 @@ it.each(['session', 'child'] as const)('R4 presents detached marked commentary o
   const view = render(<Transcript storeKey={store.key} variant={variant} />);
   expect(screen.getByText('Report.').closest('.transcript-answer')).not.toBeNull();
   expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown.includes('Report.'))).toMatchObject({ forHuman: true });
-  expect(screen.queryByText('Working notes.')).toBeNull();
+  expect(screen.getByText('Working notes.')).toBeTruthy();
   act(() => useTranscriptStore.getState().expandAll(store.key));
-  expect(screen.getByText('Working notes.').closest('.transcript-commentary')).not.toBeNull();
-  expect(view.container.querySelectorAll('[data-owner-report]')).toHaveLength(1);
+  expect(screen.getByText('Working notes.').closest('.transcript-answer')).not.toBeNull();
+  expect(view.container.querySelectorAll('.owner-message-ink')).toHaveLength(1);
   expect(fake.invoked('session.ui.render')).toHaveLength(0);
 });
 
-it('R4 keeps the working record reachable when a mixed answer has no turn divider', async () => {
+it('keeps a mixed answer intact without inventing a within-message fold', async () => {
   const b = builder(); b.turn('u'); b.text('only', 0, 'Private notes.\n<to-human>Report.</to-human>'); b.end(['u']);
   const store = await storeWith(b.events); useSessions.setState({ engine: new Map() });
   render(<Transcript storeKey={store.key} />);
   expect(screen.getByText('Report.')).toBeTruthy();
-  expect(screen.queryByText('Private notes.')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Working record' }));
-  expect(screen.getByText('Private notes.').closest('.transcript-commentary')).not.toBeNull();
+  expect(screen.getByText('Private notes.').closest('.transcript-answer')).not.toBeNull();
+  expect(screen.queryByRole('button', { name: 'Working record' })).toBeNull();
 });
 
 it('R4 keeps detached ordinary commentary folded and ordinary answers native', async () => {
@@ -246,7 +245,8 @@ it.each([false, true])('R4 retains local promotion through resume with its divid
     act(() => invalidateSession(id));
     while (fake.pending('session.ui.render')) await act(() => fake.reply('session.ui.render', { hooked, rewritten: false, props: {}, tree: { type: 'engine', ref: 0 } }));
     expect(screen.queryByText('Mod report')).toBeNull();
-    expect(store.rows().filter((r) => r.kind === 'assistant_text')).toHaveLength(1);
+    expect(store.rows().filter((r) => r.kind === 'assistant_text')).toHaveLength(2);
+    expect(screen.getByText('Local report.')).toBeTruthy();
   } finally { off(); }
 });
 
@@ -303,7 +303,7 @@ it('R4 yields exclusively to an attached surface, including native fallback, and
     tree: ask.props.text?.includes('Local report.') ? { type: 'Text', children: ['Mod report'] } : { type: 'engine', ref: 0 },
   }));
   expect(screen.getByText('Mod report')).toBeTruthy();
-  expect(screen.queryByText('Local report.')).toBeNull();
+  expect(screen.getByText('Local report.').closest('[aria-hidden="true"]')).not.toBeNull();
   act(() => invalidateSession(id));
   while (fake.pending('session.ui.render')) await act(() => fake.reply('session.ui.render', { hooked: false, rewritten: false, props: {}, tree: { type: 'engine', ref: 0 } }));
   expect(view.container.querySelector('[data-owner-report]')).toBeNull();

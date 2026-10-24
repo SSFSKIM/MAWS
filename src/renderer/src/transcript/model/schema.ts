@@ -48,7 +48,7 @@ const SubagentRefSchema = z.strictObject({
 
 const cellShape = {
   id: z.string(), toolUseId: nullable(z.string()), toolName: z.string(), category, classification: ToolClassificationSchema,
-  status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
+  status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), summary: z.string().optional(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
   detail: CellDetailSchema, expanded: z.boolean(), agent: nullable(SubagentRefSchema),
 };
 export const CellSchema = z.strictObject(cellShape);

@@ -80,7 +80,7 @@ export const EVENT_KINDS = [
   // user input (replayed, bash-tagged, synthetic)
   'user.message',
   // tools (safeguard verdicts arrive separately and are folded onto the result)
-  'tool.use', 'tool.safeguard', 'tool.result', 'tool.progress',
+  'tool.use', 'tool.safeguard', 'tool.result', 'tool.progress', 'tool.summary',
   // hooks: settings and plugin hooks emit lifecycle; host callback hooks are requests to us
   'hook.started', 'hook.finished', 'hook.callback_requested', 'hook.callback_resolved',
   // requests to the human (all arrive as can_use_tool or dedicated control requests)
@@ -190,6 +190,7 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     spillPath: nullableString(), denial: DenialKindSchema.nullable(), safeguard: SafeguardVerdictSchema, messageUuid: MessageUuidSchema.nullable(),
   }),
   event('tool.progress', { toolUseId: ToolUseIdSchema, toolName: z.string(), elapsedSeconds: z.number(), taskId: TaskIdSchema.nullable(), heartbeat: z.boolean() }),
+  event('tool.summary', { toolUseIds: z.array(ToolUseIdSchema), summary: z.string() }),
   event('hook.started', { hookId: z.string(), hookName: z.string(), hookEvent: z.string() }),
   event('hook.finished', {
     hookId: z.string(), hookName: z.string(), hookEvent: z.string(), outcome: z.enum(['success', 'error', 'cancelled']),

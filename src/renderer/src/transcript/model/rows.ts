@@ -218,7 +218,8 @@ export interface Cell {
   category: ToolCategory;
   classification: ToolClassification;
   status: 'running' | 'done' | 'error' | 'denied' | 'stopped';
-  label: string; // the one line the collapsed cell shows (copy.ts)
+  label: string; // diagnostic/copy label (copy.ts)
+  summary?: string; // optional engine summary; never replaces a denial diagnostic
   paths: string[]; // file chips; a merged read cell lists every path
   startedAt: string;
   endedAt: string | null;

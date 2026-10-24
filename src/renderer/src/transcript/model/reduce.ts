@@ -503,8 +503,16 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'turn.ended': {
       if (event.isEchoReceipt) return batch.loose(event, false);
       const turnOf = (uuid: MessageUuid) => state.turns.get(turnIdOf.ofMessage(uuid)) ?? (index.messages.has(uuid) ? state.turns.get(index.messages.get(uuid)!) : undefined);
-      const named = event.userMessageUuids.map(turnOf).find((turn) => turn?.state === 'open');
-      const turn = named ? batch.touch(named.id) : batch.current();
+      // The interrupt marker can close the turn before its result arrives. Keep that result (and its accounting)
+      // on the turn it names, even if another prompt has started meanwhile.
+      const named = event.userMessageUuids.map(turnOf).find((turn) => turn?.state === 'open' || (turn?.closedBy === 'stopped' && turn.ended === null));
+      // Engine-initiated results have no user UUIDs (pass3/p2-c3-subagent-ask seq 214). With no current turn,
+      // the latest marker-stopped turn still awaits that result; do not discard its accounting as a loose event.
+      const interrupted = state.current === null && event.userMessageUuids.length === 0 ? state.order.findLast((id) => {
+        const candidate = state.turns.get(id)!;
+        return candidate.closedBy === 'stopped' && candidate.ended === null && wasInterrupted(candidate);
+      }) : undefined;
+      const turn = named ? batch.touch(named.id) : interrupted !== undefined ? batch.touch(interrupted) : batch.current();
       if (!turn) return batch.loose(event, false);
       batch.close(turn, event);
       return;
@@ -537,8 +545,16 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (!pushRouted(null)) batch.loose(event); // a bash or local_command row; never a turn
         return;
       }
-      if (event.isSynthetic || isInterruptionMarker(event.origin, event.content)) {
-        if (!event.isSynthetic && batch.foldMarkerBack(event)) return;
+      if (isInterruptionMarker(event.origin, event.content) && !event.isSynthetic) {
+        if (batch.foldMarkerBack(event)) return;
+        const turn = batch.current();
+        if (turn) {
+          batch.push(turn, event, false); // retained evidence, never a prompt bubble
+          batch.closeUnended(turn, 'stopped', event.at);
+        }
+        return;
+      }
+      if (event.isSynthetic) {
         pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }
@@ -594,6 +610,11 @@ function apply(batch: Batch, event: SessionEvent): void {
       const turn = batch.currentOrOpen(event);
       index.toolUses.set(event.toolUseId, turn.id);
       batch.push(turn, event);
+      return;
+    }
+    case 'tool.summary': {
+      const last = event.toolUseIds.at(-1);
+      if (!pushRouted(last ? index.toolUses.get(last) : undefined)) batch.loose(event, false);
       return;
     }
     case 'tool.result':

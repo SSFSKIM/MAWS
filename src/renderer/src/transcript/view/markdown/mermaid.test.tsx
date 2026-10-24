@@ -2,7 +2,7 @@
 // once its closing fence is present, live block or not (residue *Mermaid*). The plugin module is mocked: mermaid itself
 // cannot lay out in happy-dom, and what is under test is which fences reach it. Every case starts from a fresh module
 // graph, so the load-once state never leaks between cases.
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rendered: string[] = [];
@@ -63,6 +63,25 @@ const CLOSED = 'Plan:\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nNext';
 const OPEN = 'Plan:\n\n```mermaid\nflowchart LR\n  C --> D';
 
 describe('mermaid fences', () => {
+  it('lets the transcript scroll over an inline diagram and reserves wheel zoom for fullscreen', async () => {
+    const Markdown = await freshMarkdown();
+    const { container } = render(<Markdown markdown={CLOSED} live={false} />);
+    await waitFor(() => expect(diagrams(container)).toBe(1));
+    const inline = container.querySelector('[data-streamdown="mermaid"] [role="img"]')!;
+    const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 });
+    fireEvent(inline, wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(inline.closest('[role="application"]')?.getAttribute('style')).toContain('scale(1)');
+    fireEvent.click(screen.getByRole('button', { name: /view fullscreen/i }));
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog.querySelector('[role="img"]')).not.toBeNull());
+    const fullscreen = dialog.querySelector('[role="img"]')!;
+    const zoom = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 });
+    fireEvent(fullscreen, zoom);
+    expect(zoom.defaultPrevented).toBe(true);
+    expect(fullscreen.closest('[role="application"]')?.getAttribute('style')).toContain('scale(1.1)');
+  }, 15000);
+
   it('shows an unterminated fence as code and loads nothing while no fence has closed', async () => {
     const Markdown = await freshMarkdown();
     const { container } = render(<Markdown markdown={OPEN} live />);

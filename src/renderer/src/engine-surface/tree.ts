@@ -15,8 +15,8 @@ export type StyleProps = Record<string, string | number | boolean>;
 export type SurfaceNode =
   | string
   | { type: 'fragment'; children: SurfaceNode[] }
-  | { type: 'Box' | 'Text' | 'div' | 'span' | 'b'; props: StyleProps; children: SurfaceNode[] }
-  | { type: 'Button'; props: { key: string; label: string; hotkey?: string; plain?: boolean; dimColor?: boolean; variant?: 'primary' | 'secondary'; role?: 'dismiss'; autoFocus?: boolean }; press: Press }
+  | { type: 'Box' | 'Text' | 'div' | 'span' | 'b'; props: StyleProps; children: SurfaceNode[]; hover?: StyleProps }
+  | { type: 'Button'; props: { key: string; label: string; hotkey?: string; plain?: boolean; dimColor?: boolean; variant?: 'primary' | 'secondary'; role?: 'dismiss'; autoFocus?: boolean }; press: Press; children?: SurfaceNode[]; hover?: StyleProps }
   | { type: 'Input'; props: { key: string; label?: string; placeholder?: string; value?: string; submitLabel?: string; autoFocus?: boolean }; press: Press }
   | { type: 'Select'; props: { key: string; label?: string; options: { value: string; label?: string }[]; value?: string; autoFocus?: boolean }; press: Press }
   | { type: 'Link'; props: { href: string; label?: string }; children: SurfaceNode[] }
@@ -41,11 +41,14 @@ const webHref = (href: string) => {
   return protocol === 'https:' || protocol === 'http:';
 };
 
+const styles = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
+const hover = styles.optional().catch(undefined);
 const SCHEMAS = {
-  styled: z.looseObject({ type: z.enum(STYLED), props: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional() }),
+  styled: z.looseObject({ type: z.enum(STYLED), props: styles.optional(), hover }),
   engine: z.looseObject({ type: z.literal('engine'), ref: z.number().int() }),
   Button: z.looseObject({
     type: z.literal('Button'),
+    hover,
     props: z.looseObject({ key: str, label: str, hotkey: opt, action: opt, plain: flag, dimColor: flag, autoFocus: flag, variant: z.enum(['primary', 'secondary']).optional().catch(undefined), role: z.enum(['dismiss']).optional().catch(undefined) }),
     press,
   }),
@@ -68,6 +71,9 @@ const SCHEMAS = {
   Client: z.looseObject({ type: z.literal('Client'), props: z.looseObject({ key: str.min(1).max(256), module: str.min(1).max(256) }), client: z.looseObject({ plugin: str.min(1).max(256) }) }),
 };
 
+// The engine's Button body admits only strings and Text (2.1.309 cli.pretty.js:106824-106846).
+const buttonText = (node: SurfaceNode): boolean => typeof node === 'string' || (node.type === 'Text' && node.children.every(buttonText));
+
 const fragment = (children: SurfaceNode[]): SurfaceNode => ({ type: 'fragment', children });
 
 // Desktop's bounds on a drawn tree (c95e4d2cf:395-397).
@@ -88,7 +94,7 @@ function node(raw: unknown, depth: number, budget: Budget, above: Set<object>): 
   if (typeof raw === 'number') return String(raw);
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw) || above.has(raw)) return fragment([]);
   const record = raw as Record<string, unknown>;
-  budget.chars += JSON.stringify(record.props ?? {}).length;
+  budget.chars += JSON.stringify(record.props ?? {}).length + (record.hover ? JSON.stringify(record.hover).length : 0);
   if (budget.chars >= LIMITS.chars) return null;
   const nested = new Set(above).add(raw);
   const kids = (): SurfaceNode[] | null => {
@@ -106,7 +112,7 @@ function node(raw: unknown, depth: number, budget: Budget, above: Set<object>): 
   const type = record.type;
   if (typeof type === 'string' && (STYLED as readonly string[]).includes(type)) {
     const parsed = SCHEMAS.styled.safeParse(record);
-    return parsed.success ? { type: parsed.data.type, props: parsed.data.props ?? {}, children } : fragment(children);
+    return parsed.success ? { type: parsed.data.type, props: parsed.data.props ?? {}, children, ...defined({ hover: parsed.data.hover }) } : fragment(children);
   }
   switch (type) {
     case 'engine': {
@@ -121,7 +127,7 @@ function node(raw: unknown, depth: number, budget: Budget, above: Set<object>): 
       const parsed = SCHEMAS.Button.safeParse(record);
       if (!parsed.success) return fragment(children);
       const { key, label, hotkey, plain, dimColor, variant, role, autoFocus } = parsed.data.props;
-      return { type: 'Button', props: { key, label, ...defined({ hotkey, plain, dimColor, variant, role, autoFocus }) }, press: parsed.data.press };
+      return { type: 'Button', props: { key, label, ...defined({ hotkey, plain, dimColor, variant, role, autoFocus }) }, press: parsed.data.press, ...(children.length ? { children: children.filter(buttonText) } : {}), ...defined({ hover: parsed.data.hover }) };
     }
     case 'Input': {
       const parsed = SCHEMAS.Input.safeParse(record);
@@ -208,7 +214,7 @@ export function textOf(tree: SurfaceNode | null): string {
 export function firstEngineNode(tree: SurfaceNode | null): Extract<SurfaceNode, { type: 'engine' }> | null {
   if (tree === null || typeof tree === 'string') return null;
   if (tree.type === 'engine') return tree;
-  if ('children' in tree && tree.type !== 'Link') {
+  if ('children' in tree && tree.type !== 'Link' && tree.type !== 'Button') {
     for (const child of tree.children) {
       const node = firstEngineNode(child);
       if (node !== null) return node;

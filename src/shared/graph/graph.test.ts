@@ -81,7 +81,7 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(69); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact; E4c: maws.browser.action; P2-C: queue.transition
+      expect(EVENT_KINDS).toHaveLength(70); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact; E4c: maws.browser.action; P2-C: queue.transition; l2-transcript-01: tool.summary
       expect(EVENT_KINDS.at(-4)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
       expect(EVENT_KINDS.at(-3)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
       expect(EVENT_KINDS.at(-2)).toBe('maws.browser.action'); // E4c: after E2's, in ledger order
@@ -133,6 +133,7 @@ describe('graph schemas accept and reject', () => {
         'tool.safeguard': { toolUseId: 't', verdict: 'not_flagged', lane: 'server' },
         'tool.result': { toolUseId: 't', content: [{ type: 'text', text: 'x' }], isError: false, structured: null, spillPath: null, denial: 'user-rejected', safeguard: 'not_flagged', messageUuid: null },
         'tool.progress': { toolUseId: 't', toolName: 'Task', elapsedSeconds: 3, taskId: 'task', heartbeat: false },
+        'tool.summary': { toolUseIds: ['t'], summary: 'Checked project state' },
         'hook.started': { hookId: 'h', hookName: 'n', hookEvent: 'PreToolUse' },
         'hook.finished': { hookId: 'h', hookName: 'n', hookEvent: 'PreToolUse', outcome: 'success', exitCode: 0, stdout: '', stderr: '' },
         'hook.callback_requested': { requestId: 'r', callbackId: 'cb', hookEvent: 'PreToolUse', toolUseId: 't', input: {} },

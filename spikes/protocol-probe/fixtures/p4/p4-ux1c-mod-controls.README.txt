@@ -1,0 +1,27 @@
+p4-ux1c-mod-controls.jsonl
+
+Captured with the unmodified installed Claude Code 2.1.309 binary on 2026-10-24 UTC.
+MAWS's TESTED_ENGINE_VERSION remains 2.1.296; this capture does not update that marker.
+
+Reproduce from the repository worktree:
+  /tmp/maws-review/with-slot.sh node spikes/protocol-probe/scenarios/p4/mod-controls.mjs
+
+The scenario creates a temporary CLAUDE_CONFIG_DIR, project and minimal scratch plugin.
+It sends initialize, ui_attach, ui_render, three ui_press requests and ui_detach only.
+It sends no user prompt, makes no inference request, and points the inference endpoint at
+closed localhost port 9 with a dummy token. It removes its scratch directories on exit.
+No owner's plugin installation, settings, engine binary or application data is modified.
+
+The raw control response preserves authored Button children and top-level hover fields,
+keyed Box props and hover, a single Markdown body, and the semantic color name "claude".
+All three ui_press responses succeeded. The model_call_check records zero prompts/results;
+the engine exited with code 0. The renderer's mod-controls.test.tsx consumes the captured tree.
+
+The minimal plugin uses the control shape from doperpowers PR #363, head d17d9b73785f4e55091ca30d80afe9901fa216f4.
+This is not a capture of the complete to-human plugin, nor a real-app visual acceptance.
+Engine implementation references in /Users/new/claude-code-bundle/2.1.309/cli.pretty.js:
+  106790-106955: Button children validation and top-level hover serialization
+  134132-134201: hover context and nearest keyed Box
+  134883-134897: Button children and hover overrides
+  135267-135301: renderer dispatch and keyed Box identity
+  889886: the engine theme's Claude orange (MAWS maps the role to --accent)

@@ -158,7 +158,7 @@ function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEven
   const prompt = humanQueuedPrompt(record);
   if (prompt === null) return;
   const { messageUuid, content } = prompt;
-  events.push({ ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: null, bash: null });
+  events.push({ ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
 
@@ -240,6 +240,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   // W1 (A5): the summary `/compact` writes after its boundary (`isCompactSummary`, w1-compact.jsonl line 29) is the
   // engine's context for the model, which the live stream sends as a synthetic frame: no bubble and no turn, like meta.
   const isMeta = record.isMeta === true || record.isCompactSummary === true;
+  const humanOrigin = (record.origin as { kind?: unknown } | undefined)?.kind === 'human' ? 'human' : null;
   const marker = isInterruptMarker(record);
   const local = isLocalCommandOutput(record);
   const turn = (origin: string | null): void => {
@@ -268,7 +269,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
       if (sourceUuid !== null) ctx.notificationSources.add(sourceUuid);
       if (notification.toolUseId !== null) ctx.notificationTools.add(notification.toolUseId);
     }
-    const origin = notification === null ? null : 'task-notification'; // X1's engine-initiated origin
+    const origin = notification === null ? humanOrigin : 'task-notification'; // preserve typed provenance; notifications are engine-initiated
     const bash = parseBash(content);
     turn(origin);
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin, bash });
@@ -299,8 +300,8 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   const results = blocks.filter((block) => block.type === 'tool_result');
   const others = blocks.filter((block) => block.type !== 'tool_result');
   if (others.length > 0) {
-    turn(null);
-    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: marker ? 'interrupt-marker' : null, bash: null });
+    turn(humanOrigin);
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: marker ? 'interrupt-marker' : humanOrigin, bash: null });
   }
   const structured = record.toolUseResult ?? null;
   const persisted = (structured as { persistedOutputPath?: unknown } | null)?.persistedOutputPath;
@@ -587,7 +588,7 @@ export function startsTurn(record: TranscriptRecord): boolean {
 // them are text (the array form is the common one on disk). C3's normaliser tags it `origin: 'interrupt-marker'` on the
 // wire; the backfill does the same, and it opens no turn.
 function isInterruptMarker(record: TranscriptRecord): boolean {
-  if (record.type !== 'user') return false;
+  if (record.type !== 'user' || (record.origin as { kind?: unknown } | undefined)?.kind === 'human') return false;
   const content = messageContent(record);
   let text: string | null = null;
   if (typeof content === 'string') text = content;

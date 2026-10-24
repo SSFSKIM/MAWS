@@ -158,7 +158,7 @@ describe('group state machine', () => {
     expect(find(list, 'divider')).toMatchObject({ state: 'working' });
   });
 
-  it('consecutive reads merge into one read cell with every path', () => {
+  it('consecutive reads keep their own cells and paths', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Read', { file_path: '/p/a.ts' });
@@ -171,13 +171,13 @@ describe('group state machine', () => {
     b.result('t4', '1\tz');
     b.end(['u1']);
     const g = group(rows(b.events));
-    expect(g.cells.map((c) => c.id)).toEqual(['cell:reads:t1', 'cell:t3', 'cell:t4']);
-    expect(g.cells[0]).toMatchObject({ label: 'Read 2 files', paths: ['/p/a.ts', '/p/b.ts'] });
-    expect(g.cells[0].detail).toMatchObject({ kind: 'read', files: [{ path: '/p/a.ts', range: null }, { path: '/p/b.ts', range: [10, 29] }] });
+    expect(g.cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2', 'cell:t3', 'cell:t4']);
+    expect(g.cells[0]).toMatchObject({ label: 'Read /p/a.ts', paths: ['/p/a.ts'] });
+    expect(g.cells[1].detail).toMatchObject({ kind: 'read', files: [{ path: '/p/b.ts', range: [10, 29] }] });
     expect(g.summary).toBe('Read 3 files, searched for `x`');
   });
 
-  it('a merged read cell expands under its own id', () => {
+  it('a read cell expands without opening its neighboring read', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Read', { file_path: '/p/a.ts' });
@@ -186,9 +186,10 @@ describe('group state machine', () => {
     b.result('t2', '1\ty');
     b.end(['u1']);
     const state = reduce(b.events);
-    const ui = { ...state.ui, expandedTurns: new Set(state.order), expandedCells: new Set([cellId.reads(tool('t1'))]), version: state.ui.version + 1 };
-    const cell = rowsOf({ ...state, ui }).find((row) => row.kind === 'cell');
-    expect(cell).toMatchObject({ id: 'cell:reads:t1', expanded: true });
+    const ui = { ...state.ui, expandedTurns: new Set(state.order), expandedCells: new Set([cellId.tool(tool('t1'))]), version: state.ui.version + 1 };
+    const cells = group(rowsOf({ ...state, ui })).cells;
+    expect(cells[0]).toMatchObject({ id: 'cell:t1', expanded: true });
+    expect(cells[1]).toMatchObject({ id: 'cell:t2', expanded: false });
   });
 
   it('an image result is a standalone image cell', () => {

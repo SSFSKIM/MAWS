@@ -23,6 +23,7 @@ interface SurfaceContextValue {
   nativeNode: Extract<SurfaceNode, { type: 'engine' | 'Client' }> | null;
   engine: ReactNode; // MAWS's own drawing of the site, for an `engine` node
 }
+const RowHover = createContext(false);
 const SurfaceContext = createContext<SurfaceContextValue | null>(null);
 const useSurface = (): SurfaceContextValue => {
   const value = useContext(SurfaceContext);
@@ -70,7 +71,9 @@ function Children({ nodes, inline }: { nodes: SurfaceNode[]; inline: boolean }) 
 // text typed or the option picked in it, when siblings move around it or another element takes its place (the root
 // included); anything else, or a duplicate among siblings, its position.
 const identityOf = (node: SurfaceNode): string | null =>
-  typeof node !== 'string' && (node.type === 'Button' || node.type === 'Input' || node.type === 'Select' || (node.type === 'Markdown' && node.press)) && node.props.key !== undefined
+  typeof node !== 'string' && node.type === 'Box' && (typeof node.props.key === 'string' || typeof node.props.key === 'number')
+    ? `box:${node.props.key}`
+    : typeof node !== 'string' && (node.type === 'Button' || node.type === 'Input' || node.type === 'Select' || (node.type === 'Markdown' && node.press)) && node.props.key !== undefined
     ? `el:${node.press!.plugin}:${node.props.key}`
     : null;
 
@@ -88,19 +91,11 @@ function Node({ node, inline = false }: { node: SurfaceNode; inline?: boolean })
       return <Children nodes={node.children} inline={inline} />;
     case 'Box':
     case 'div':
-      return (
-        <div data-surface="box" style={boxStyle(node.props)}>
-          <Children nodes={node.children} inline={false} />
-        </div>
-      );
+      return <BoxNode node={node} />;
     case 'Text':
     case 'span':
     case 'b':
-      return (
-        <span data-surface="text" style={textStyle(node.type === 'b' ? { ...node.props, bold: true } : node.props)}>
-          <Children nodes={node.children} inline />
-        </span>
-      );
+      return <TextNode node={node} />;
     case 'Button':
       return <ButtonNode node={node} />;
     case 'Input':
@@ -121,12 +116,31 @@ function Node({ node, inline = false }: { node: SurfaceNode; inline?: boolean })
   }
 }
 
+// Engine 2.1.309 cli.pretty.js:134182-134201,135295-135301: the nearest keyed Box owns its hover context.
+function BoxNode({ node }: { node: Extract<SurfaceNode, { type: 'Box' | 'Text' | 'div' | 'span' | 'b' }> }) {
+  const inherited = useContext(RowHover);
+  const [hovered, setHovered] = useState(false);
+  const keyed = node.type === 'Box' && (typeof node.props.key === 'string' || typeof node.props.key === 'number');
+  const hot = keyed ? hovered : inherited;
+  return <RowHover.Provider value={hot}>
+    <div data-surface="box" style={boxStyle(hot && node.hover ? { ...node.props, ...node.hover } : node.props)} onMouseEnter={keyed ? () => setHovered(true) : undefined} onMouseLeave={keyed ? () => setHovered(false) : undefined}>
+      <Children nodes={node.children} inline={false} />
+    </div>
+  </RowHover.Provider>;
+}
+
+function TextNode({ node }: { node: Extract<SurfaceNode, { type: 'Box' | 'Text' | 'div' | 'span' | 'b' }> }) {
+  const hot = useContext(RowHover);
+  const props = { ...node.props, ...(node.type === 'b' ? { bold: true } : {}), ...(hot ? node.hover : {}) };
+  return <span data-surface="text" style={textStyle(props)}><Children nodes={node.children} inline /></span>;
+}
+
 // There is exactly one native placement: the first engine node, or, with no engine node, the first Client.
 // A Client is a fallback, not a second native slot (one persistent row host cannot mount in two places).
 function firstClientNode(tree: SurfaceNode): Extract<SurfaceNode, { type: 'Client' }> | null {
   if (typeof tree === 'string') return null;
   if (tree.type === 'Client') return tree;
-  if ('children' in tree) {
+  if ('children' in tree && tree.type !== 'Button') {
     for (const child of tree.children) {
       const client = firstClientNode(child);
       if (client !== null) return client;
@@ -142,6 +156,7 @@ function NativeNode({ node }: { node: Extract<SurfaceNode, { type: 'engine' | 'C
 
 function ButtonNode({ node }: { node: Extract<SurfaceNode, { type: 'Button' }> }) {
   const { site } = useSurface();
+  const hot = useContext(RowHover);
   const { key, label, variant, role, plain, dimColor, hotkey } = node.props;
   const onClick = () => sendPress(site, node.press, key);
   if (role === 'dismiss') {
@@ -152,10 +167,13 @@ function ButtonNode({ node }: { node: Extract<SurfaceNode, { type: 'Button' }> }
     );
   }
   const className = plain ? PLAIN : variant === 'primary' ? PRIMARY : BUTTON;
+  // Hover overrides the button's own inversion/dimming, not only its parent (engine 2.1.309:134883-134897).
+  const override = hot && node.hover ? textStyle({ dimColor: dimColor === true, ...node.hover }) : null;
+  const style = override ? { ...override, color: override.color ?? 'var(--fg)', backgroundColor: override.backgroundColor ?? 'transparent' } : undefined;
   return (
-    <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-hotkey={hotkey} onClick={onClick} className={`${className}${dimColor ? ' text-fg-muted hover:text-fg' : ''}`}>
+    <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-hotkey={hotkey} aria-label={node.children?.length ? label : undefined} onClick={onClick} style={style} className={`${className}${dimColor ? ' text-fg-muted hover:text-fg' : ''}`}>
       {plain && hotkey ? <span className="text-accent">{hotkey}:&nbsp;</span> : null}
-      {label}
+      {node.children?.length ? <Children nodes={node.children} inline /> : label}
     </button>
   );
 }

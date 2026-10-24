@@ -49,7 +49,8 @@ const assistantAsks = (fake: ReturnType<typeof fakeClient>) => (fake.invoked('se
 it('forced local: an attached session’s marked answer draws MAWS’s presenter, asking the surface nothing for it', async () => {
   const { store, fake } = await attachedSession('<to-human>Heading enlarged.</to-human>');
   const view = render(<Transcript storeKey={store.key} presentation="local" />);
-  expect(view.container.querySelectorAll('[data-owner-report]')).toHaveLength(1);
+  expect(view.container.querySelectorAll('.owner-message-ink')).toHaveLength(1);
+  expect(view.container.querySelector('[data-owner-report]')).toBeNull();
   expect(screen.getByText('Heading enlarged.')).toBeTruthy();
   expect(view.container.textContent).not.toContain('<to-human>');
   expect(assistantAsks(fake)).toHaveLength(0);
@@ -65,7 +66,7 @@ it('without the option, the same attached session draws its assistant text throu
 it('forced local: a need-input question has no “Resume this session to answer.” line (the card’s Reply is under it)', async () => {
   const { store } = await attachedSession('<need-input>Which size?\n<choice recommended>Larger</choice>\n<choice>Same</choice></need-input>');
   render(<Transcript storeKey={store.key} presentation="local" />);
-  expect(screen.getByText('Which size?')).toBeTruthy();
+  expect(screen.getByText(/Which size\?/)).toBeTruthy();
   expect(screen.queryByText('Resume this session to answer.')).toBeNull();
 });
 

@@ -263,7 +263,7 @@ describe('turn boundaries', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'sleep 60' });
-    b.emit('user.message', { messageUuid: uuid('int'), content: '[Request interrupted by user]', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('user.message', { messageUuid: uuid('int'), content: '[Request interrupted by user]', isReplay: false, isSynthetic: false, origin: 'interrupt-marker', bash: null });
     exit(b, 'crash');
     expect(reduce(b.events).turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ closedBy: 'stopped', closedCause: null });
   });

@@ -38,6 +38,15 @@ const assistant = (uuid: string, parentUuid: string, content: unknown[]) => ({ t
 const progress = (uuid: string, parentUuid: string) => ({ type: 'progress', uuid, parentUuid, data: { type: 'hook_progress' } });
 
 describe('recentTurnsOf', () => {
+  it.each([false, true])('l2-transcript-15: retains the full prompt preview with legacy or explicit human provenance (explicit: %s)', (explicit) => {
+    const prompt = { ...user('p1', null, 'Explain the stopped turn'), ...(explicit && { origin: { kind: 'human' } }) };
+    const answer = recentTurnsOf(records(prompt, assistant('a1', 'p1', [{ type: 'text', text: 'The turn was stopped.' }])), 5, false);
+    expect(answer).toEqual({
+      turns: [{ prompt: { text: 'Explain the stopped turn', at: '2026-10-09T11:00:00.000Z' }, answer: { text: 'The turn was stopped.', at: '2026-10-09T11:00:01.000Z' }, toolCalls: 0 }],
+      earlier: false, source: 'transcript',
+    });
+  });
+
   it('reads a prompt as the human wrote it: a linked read sent with it is not its words (P4-A3)', () => {
     const id = '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806';
     const read = JSON.stringify({ status: 'read', artifactId: id, kind: 'document', title: 'Plan', revision: 3, markdown: 'x ^p1\n' }, null, 2);

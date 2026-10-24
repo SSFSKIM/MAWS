@@ -9,7 +9,7 @@
 // Busy is C3's predicate as the renderer can read it: a turn is open, or an entry is `submitting` or `released` (C3
 // opens the turn at the engine's `started`, so between a write and its start the entry is what makes the session busy).
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { QueueEntry } from '@shared/engine/session-state-store';
+import type { QueueEntry, QueuePauseReason } from '@shared/engine/session-state-store';
 import type { Availability } from '@shared/ipc/schema/session'; // P2-A
 import { CHOOSE_PROJECT_FIRST } from '@shared/sessions/intent';
 
@@ -18,7 +18,7 @@ export type SubmitState = 'send' | 'stop' | 'resume';
 export interface SubmitInput {
   status: EngineSessionStatus | null;
   intent: { starting: boolean; messageHeld: boolean; phase?: string | null; noProject?: boolean } | null; // non-null while the session is unstarted (C10's hook answers); phase: C10's running setup phase in words; noProject: a New chat with no project chosen yet
-  queue: { entries: readonly QueueEntry[]; paused: boolean };
+  queue: { entries: readonly QueueEntry[]; paused: boolean; pauseReason?: QueuePauseReason | null };
   empty: boolean;
   mode: 'send' | 'bash' | 'memory';
   // P2-A: the session's availability (null without a record, an unstarted intent being C10's) and, while a terminal or
@@ -96,8 +96,8 @@ export function submitState(i: SubmitInput): SubmitDecision {
   if (mode === 'bash') return decide('send', 'Run', !empty, null, busy ? RUNS_NOW : null);
   if (mode === 'memory') return decide('send', 'Save to memory', !empty);
   if (busy) return empty ? decide('stop', 'Stop', true) : decide('send', 'Send', true, null, SENDS_AT_NEXT_STEP, true);
-  // Idle with messages waiting in MAWS's queue (paused, or about to be released): Send puts the new one behind them.
-  if (queue.paused) return empty ? decide('resume', 'Resume', queue.entries.length > 0) : decide('send', 'Send', true, null, JOINS_PAUSED_QUEUE);
+  // Stop holds the older queued text, not a fresh instruction. Other pauses keep new text behind the held entries.
+  if (queue.paused) return empty ? decide('resume', 'Resume', queue.entries.length > 0) : decide('send', 'Send', true, null, queue.pauseReason === 'interrupt' ? SENDS_NOW : JOINS_PAUSED_QUEUE);
   if (queue.entries.length > 0) return decide('send', 'Send', !empty, null, SENDS_AFTER_QUEUED);
   return decide('send', 'Send', !empty);
 }

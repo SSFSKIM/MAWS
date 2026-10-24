@@ -508,7 +508,7 @@ describe('a Mark read that failed says so', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }));
     await settle();
     const [notice] = useNotices.getState().notices;
-    expect(notice).toMatchObject({ kind: 'toast', text: 'Must-reads not marked read: the index is unavailable', actions: [{ label: 'Retry' }] });
+    expect(notice).toMatchObject({ kind: 'toast', text: 'Items not marked read: the index is unavailable', actions: [{ label: 'Retry' }] });
     await act(async () => notice!.actions[0]!.run());
     await settle();
     expect(fake.invoked('ownerChannel.markRead')).toEqual([{ appSessionId: APP, markIds: 'all' }, { appSessionId: APP, markIds: 'all' }]);

@@ -16,6 +16,7 @@ import type { Cell, CellDetail, ChangedFile, Hunk, Spill, ToolCategory, Truncati
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 
 export interface ToolRecord {
+  summary?: string; // optional engine-generated label, keyed by preceding tool-use ids
   use: Event<'tool.use'>;
   result: Event<'tool.result'> | null;
   safeguard: SafeguardVerdict;
@@ -299,7 +300,7 @@ export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, di
   const paths = detail.kind === 'read' ? detail.files.map((file) => file.path) : detail.kind === 'edit' ? [detail.filePath] : [];
   return {
     id: cellId.tool(use.toolUseId), toolUseId: use.toolUseId, toolName: use.toolName, category, classification, status,
-    label: labelOf(rec, detail, status, category, labelClassification, turn), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
+    label: labelOf(rec, detail, status, category, labelClassification, turn), ...(rec.summary ? { summary: rec.summary } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
   };
 }
 

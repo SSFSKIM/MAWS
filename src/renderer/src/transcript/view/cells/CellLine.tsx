@@ -14,6 +14,14 @@ import { CellDetailView } from './CellDetail';
 const EDIT_COUNTS = / \+(\d+) −(\d+)$/;
 
 function Label({ cell }: { cell: Cell }) {
+  if (cell.summary && !cell.classification.denial) return <>{cell.summary.split(/\r?\n/, 1)[0]}</>;
+  // Bash's description is the agent-authored summary, not a command to reformat. Keep diagnostic denial labels.
+  if (cell.detail.kind === 'shell' && !cell.classification.denial) {
+    const description = cell.detail.description?.trim().split(/\r?\n/, 1)[0];
+    const verb = { running: 'Running', done: 'Ran', error: 'Failed', stopped: 'Stopped', denied: 'Denied' }[cell.status];
+    return <>{description || `${verb} ${cell.toolName}`}</>;
+  }
+  if (cell.toolName === 'Skill') return <>Ran /{cell.label.replace(/^Loaded (.*) skill$/, '$1').replace(/^\//, '')}</>;
   if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingLabel startedAt={cell.startedAt} />; // W8
   const counts = cell.detail.kind === 'edit' ? EDIT_COUNTS.exec(cell.label) : null;
   if (!counts) return <CodeText text={cell.label} />;

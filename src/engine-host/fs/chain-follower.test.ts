@@ -720,7 +720,8 @@ describe('a holder-less transcript whose last turn never ended', () => {
     const MARKER = '68646e1f-b5ba-4d72-bdae-3fd5f7f3ec46' as SessionId;
     const { out } = await follow(joined(linesOf(join(TRANSCRIPT_FIXTURE_DIR, 'interrupt-marker.jsonl'))), MARKER, 0);
     expect(out.of('turn.started')).toHaveLength(1);
-    expect(out.of('user.message').map((e) => e.origin)).toEqual([null, 'interrupt-marker']);
+    // l2-transcript-15: the recorded prompt's explicit human origin survives backfill; the engine marker stays distinct.
+    expect(out.of('user.message').map((e) => e.origin)).toEqual(['human', 'interrupt-marker']);
     expect(out.of('process.exited').map((e) => e.id)).toEqual([`session:${MARKER}:exited`]);
   });
 

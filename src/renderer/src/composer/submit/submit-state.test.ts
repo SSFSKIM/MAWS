@@ -104,6 +104,14 @@ describe('submitState covers Send, Stop, Resume and the unstarted rows (W10: one
     expect(row({ empty: true })).toEqual(['send', 'Send', false, null, false]);
   });
 
+  it('l2-transcript-15: an idle fresh Send after Stop says it sends now, without offering to resume older held text', () => {
+    for (const entries of [[], [entry('queued')]]) {
+      const queue = { entries, paused: true, pauseReason: 'interrupt' as const };
+      expect(submitState(input({ queue }))).toMatchObject({ primary: 'send', label: 'Send', enabled: true, steer: false, detail: 'Sends this now' });
+      expect(submitState(input({ queue, empty: true }))).toMatchObject({ primary: 'resume', enabled: entries.length > 0 });
+    }
+  });
+
   it('decides only Send, Stop and Resume (W10: no hold, no queue primary, no menu, no Stop beside it)', () => {
     const cases: Partial<SubmitInput>[] = [{}, { empty: true }, { status: turning }, { status: turning, empty: true }, { queue: { entries: [entry('queued')], paused: true } }, { queue: { entries: [entry('queued')], paused: true }, empty: true }, { mode: 'bash', status: turning }];
     for (const c of cases) {

@@ -154,7 +154,7 @@ describe('live thinking label', () => {
     expect(shimmer()).toBeNull();
   });
 
-  it('an active group with nothing running reads Thinking under the shimmer', async () => {
+  it('an active group without internal activity keeps its completed call visible, without a thinking header', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'ls' });
@@ -162,8 +162,11 @@ describe('live thinking label', () => {
     const store = await storeWith(b.events);
     const group = rowOf(store.rows(), 'group');
     expect(group.state).toBe('active');
-    renderRow(group, { storeKey: store.key, effort: 'high' });
-    expect(shimmer().textContent).toBe('Thinking');
+    expect(rowOf(store.rows(), 'divider').state).toBe('working');
+    const { container } = renderRow(group, { storeKey: store.key, effort: 'high' });
+    expect(screen.getByRole('button', { name: 'Ran Bash', expanded: false })).toBeTruthy();
+    expect(container.querySelector('.transcript-group-header')).toBeNull();
+    expect(shimmer()).toBeNull();
   });
 });
 
@@ -181,7 +184,7 @@ describe('local command row', () => {
 });
 
 describe('group and cell disclosure', () => {
-  it('a group discloses its cells and a cell its detail, through the store', async () => {
+  it('shows individual calls without a group fold and discloses only the chosen cell through the store', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 0);
@@ -192,12 +195,16 @@ describe('group and cell disclosure', () => {
     const group = rowOf(store.rows(), 'group');
     const view = renderRow(group, { storeKey: store.key });
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
-    fireEvent.click(screen.getByRole('button', { expanded: false }));
-    view.rerenderRow(rowOf(store.rows(), 'group'));
+    expect(view.container.querySelector('.transcript-group-header')).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Ran Bash', expanded: false })).toHaveLength(2);
     const cells = view.container.querySelectorAll('[data-cell-id]');
-    expect(cells).toHaveLength(2);
+    expect(Array.from(cells, (cell) => cell.getAttribute('data-cell-id'))).toEqual(['cell:t1', 'cell:t2']);
+    expect(view.container.textContent).not.toContain('a.txt');
+    expect(view.container.textContent).not.toContain('/x');
     fireEvent.click(cells[0].querySelector('button')!);
     view.rerenderRow(rowOf(store.rows(), 'group'));
-    expect(view.container.querySelector('[data-cell-id][data-expanded]')?.textContent).toContain('a.txt');
+    expect(view.container.querySelector('[data-cell-id="cell:t1"][data-expanded]')?.textContent).toContain('a.txt');
+    expect(view.container.querySelector('[data-cell-id="cell:t2"][data-expanded]')).toBeNull();
+    expect(view.container.textContent).not.toContain('/x');
   });
 });
