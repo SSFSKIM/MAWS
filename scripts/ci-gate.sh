@@ -64,6 +64,8 @@
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:` (none for `all`, the plan's
 # default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
+# A successful local plan adds `Pool-Demand:`, ci-kit's advisory attempt-1 pre-launch hint: the exact multiset of pool
+# jobs, or `none` when no job uses the pool. If it fails, no hint is written and the push still proceeds.
 # The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
 # The pool takes class 1a and the POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the
 # repository, so the script runs from any directory.
@@ -216,6 +218,17 @@ trailers="Nonce: $(date +%s)-$$"
 if [[ -n $affected ]]; then
   trailers+=$'\n'"Selection: affected"$'\n'"Affected-Count: ${#affected_lines[@]}"
   if ((${#affected_lines[@]} > 0 && ${#affected_lines[@]} <= AFFECTED_BOUND)); then for line in "${affected_lines[@]}"; do trailers+=$'\n'"Affected: $line"; done; fi
+fi
+# ci-kit's attempt-1 pre-launch hint: this plan's exact pool jobs, not the shape of a historical run. Advisory only:
+# an unreadable variable, tree or plan omits the hint and leaves the launcher its history fallback. Read the variables
+# now, and the package scripts and workflow env at the sha we push (never the caller's possibly dirty checkout).
+if gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") &&
+   gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") &&
+   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" \
+     node "$(dirname "$0")/ci-gate-pool-demand.mjs" --git-dir "$git_dir" --sha "$sha"); then
+  trailers+=$'\n'"Pool-Demand: $pool_demand"
+else
+  echo 'ci-gate: warning: could not plan pool demand; pushing without the advisory Pool-Demand trailer'
 fi
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short${affected:+ affected}" -m "$trailers") || exit 1
 
