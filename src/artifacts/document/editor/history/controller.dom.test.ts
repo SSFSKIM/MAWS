@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ArtifactVersion } from '@shared/artifacts/version';
 import { attributedRuns, renderDiff } from '../../history';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
@@ -100,6 +101,34 @@ describe('a change count that fails', () => {
     await controller.recount(); // the pill's own retry
     expect(controller.getSnapshot().pill).toMatchObject({ count: 1, failed: null });
     expect(controller.getSnapshot().error).toBeNull();
+  });
+});
+
+describe('a restore overlapping a versions notification', () => {
+  it('keeps the restored label when an older response replaces the list before the banner is set', async () => {
+    const { history, handle, host } = await deletedTab();
+    let versionsChanged!: () => void;
+    const api: HistoryApi = Object.assign(Object.create(history) as HistoryApi, {
+      onVersions: (listener: () => void) => { versionsChanged = listener; return () => {}; },
+    });
+    const controller = attach(handle, api);
+    await until(() => controller.getSnapshot().pill?.count === 1, 'the first look');
+    const before = await history.versions();
+    const reads: Array<(versions: ArtifactVersion[]) => void> = [];
+    api.versions = () => new Promise((resolve) => { reads.push(resolve); });
+
+    versionsChanged();
+    // A live restore sends its document update before the notice, so the notice is not initial-sync catch-up.
+    host.write((doc) => { addTab(doc, { id: 'removed', title: 'Removed tab', body: body('p2', 'The agent deletes this whole tab') }); });
+    const restored = history.version('restore', { kind: 'human' }, { label: 'Restored from Draft' });
+    const versions = await history.versions();
+    host.announceRestored(restored.id);
+    await until(() => reads.length === 2, 'the restore read');
+    // Both refresh continuations run before restored() resumes: the older list wins the snapshot.
+    reads[1]!(versions);
+    reads[0]!(before);
+    await until(() => controller.getSnapshot().banner !== null, 'the restore banner');
+    expect(controller.getSnapshot().banner).toBe('Restored from Draft');
   });
 });
 

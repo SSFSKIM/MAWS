@@ -156,15 +156,17 @@ export class DeckHistoryController {
   }
 
   /** Reads the list again (a previewed version's heading with it), and counts the new changes again if counting them failed. */
-  async refresh(): Promise<void> {
+  async refresh(): Promise<ArtifactVersion[] | undefined> {
     const read = ++this.versionRead;
+    let versions: ArtifactVersion[] | undefined;
     try {
-      const versions = await this.api.versions();
+      versions = await this.api.versions();
       if (read === this.versionRead) this.set({ versions, ...this.headingFrom(versions) });
     } catch (error) {
       if (read === this.versionRead) this.set({ error: message(error) });
     }
     if (this.snapshot.pill?.failed != null) await this.recount();
+    return versions;
   }
 
   async recount(): Promise<void> {
@@ -429,8 +431,9 @@ export class DeckHistoryController {
 
   private async restored(versionId: number): Promise<void> {
     if (this.snapshot.preview || this.snapshot.loading) this.close();
-    await this.refresh();
-    const version = this.snapshot.versions?.find((v) => v.id === versionId);
+    // Use this read even when a concurrent refresh owns (or has replaced) the snapshot.
+    const versions = (await this.refresh()) ?? this.snapshot.versions;
+    const version = versions?.find((v) => v.id === versionId);
     this.set({ banner: version?.label ?? 'Restored from an earlier version' });
   }
 
