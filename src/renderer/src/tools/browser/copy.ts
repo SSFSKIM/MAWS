@@ -72,7 +72,7 @@ export const BROWSER_COPY = {
     zoomOut: 'Zoom out',
     resetZoom: 'Reset zoom',
     openInTab: 'Open in tab',
-    showInPanel: 'Show in panel',
+    showInPanel: 'Show in side surface',
     copyUrl: 'Copy URL',
     inspect: 'Inspect',
     closeTab: 'Close tab',

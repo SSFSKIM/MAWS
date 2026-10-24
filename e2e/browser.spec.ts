@@ -163,7 +163,7 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
       await overflow(s, panel, 'Open in tab');
       await expectOnPane(s, a, paneIn(main), 'main');
       await expect(paneIn(panel).locator('[data-browser-page="elsewhere"]')).toBeVisible();
-      await overflow(s, main, 'Show in panel');
+      await overflow(s, main, 'Show in side surface');
       await expectOnPane(s, a, paneIn(panel), 'panel');
       await expect(paneIn(main).locator('[data-browser-page="elsewhere"]')).toBeVisible();
     }

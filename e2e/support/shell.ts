@@ -120,7 +120,7 @@ export async function openArtifactReplicaInPanel(page: Page, artifactId: string)
 // The old Artifacts launcher is the project Library card now. Record editors still move into a surface through X38.
 export async function moveMainArtifactToPanel(page: Page, artifactId: string): Promise<Locator> {
   await mainTabById(page, `artifact:${artifactId}`).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Show in panel', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Move to side surface', exact: true }).click();
   const record = surface(page, 'artifacts').locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record).toBeVisible();
   return record;

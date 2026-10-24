@@ -210,7 +210,7 @@ function TabMenuItem({ children, onSelect, disabled = false, reason }: { childre
 // P3-F wave S (F16, the owner's obs 7): an artifact tab moves into the panel, the mirror of the panel record's Move to
 // tab. P4-B3 (X38; its Decision Log 20, 21): through the transfer's one move, which a drag onto the panel takes too, and
 // disabled with the reason that drag is refused for (the panel shown once the tab is gone has none, M5).
-export const SHOW_IN_PANEL_COPY = { label: 'Show in panel', noPanel: TRANSFER_COPY.noPanel };
+export const SHOW_IN_PANEL_COPY = { label: TRANSFER_COPY.moveToPanel, noPanel: TRANSFER_COPY.noPanel };
 
 function ShowInPanelItem({ tab }: { tab: Extract<TabRef, { kind: 'artifact' }> }) {
   const refusal = useTransferRefusal({ to: 'panel', mainTabId: tab.id });
