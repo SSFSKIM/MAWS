@@ -237,13 +237,10 @@ test.describe('fractional browser geometry', () => {
     await scroller.evaluate((el) => { el.scrollTop -= 200; });
     const jump = view.getByRole('button', { name: 'Jump to latest' });
     await expect(jump).toBeVisible();
-    // Let the browser clamp to its real maximum; do not manufacture an integer offset from scrollHeight-clientHeight.
-    const gap = await scroller.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-      return el.scrollHeight - el.clientHeight - el.scrollTop;
-    });
-    expect(Math.abs(gap)).toBeLessThanOrEqual(1);
+    // Clamp once to the real maximum; let the scroll/measurement handlers resume following before reading the end.
+    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
     await expect(jump).toHaveCount(0);
+    await expect.poll(async () => Math.abs(await bottomGap(scroller)), 'the resumed transcript settles at its end').toBeLessThanOrEqual(1);
     appendBlock();
     await expect(view.locator('[data-row-id^="desk-stream:"]')).toHaveCount(2);
     const at = await scroller.evaluate((el) => el.scrollTop);
