@@ -75,6 +75,11 @@ export class IndexSessionSource implements SessionSource {
   private discoveries: TranscriptSummary[] = []; // E11: fs.sessionChanged summaries not yet applied
   private draining = false; // E11: a warm-up for the queue is out
   private stopped = false; // E11: a drain that resumes after the stop applies nothing
+  // l1-sessions-13: whether a scan has answered since the engine host's latest transition (a scan's discoveries all
+  // precede its answer), the generation that transition started, and who waits to hear of the next answered scan
+  private scanned = false;
+  private generation = 0;
+  private readonly scanListeners = new Set<() => void>();
 
   constructor(
     private readonly index: Index,
@@ -131,6 +136,8 @@ export class IndexSessionSource implements SessionSource {
       }),
       // E10: the reset at every transition, `ready` included; a kept session's burst status re-marks it self after it
       this.host.onState('engine-host', () => {
+        this.generation += 1; // l1-sessions-13: what the store holds is unknown again until the next scan answers
+        this.scanned = false;
         this.applyBefore([...this.holders.keys()]); // E11: what the host sent before it went (P4 W2-B: a record made later would miss the holder forgotten here)
         this.live.clear(); // a host that went away took its processes with it
         this.holders.clear();
@@ -158,6 +165,7 @@ export class IndexSessionSource implements SessionSource {
     return () => {
       stopped = true;
       this.stopped = true;
+      this.scanned = false;
       this.discoveries = []; // W-B review M3: the next launch's fs.scan reports them again
       for (const off of this.offs) off();
       this.offs = [];
@@ -168,6 +176,22 @@ export class IndexSessionSource implements SessionSource {
       this.unfollows = [];
       this.writer = null;
     };
+  }
+
+  // l1-sessions-13: whether the index holds what the store said of a session as of a scan answered since the engine
+  // host's latest transition: false before that scan's answer (or when it failed, or the source is inert or stopped),
+  // and while a summary of the session's transcript (`engineSessionId`; null asks only about the scan) still waits in
+  // the queue. A decision that reads a session's last activity (the inactivity archive) waits for this, since the index
+  // otherwise still holds what an earlier run saw.
+  discoveryCurrent(engineSessionId: SessionId | null): boolean {
+    if (!this.scanned || this.stopped) return false;
+    return engineSessionId === null || !this.discoveries.some((s) => s.sessionId === engineSessionId);
+  }
+
+  // Called after each scan that answers (every host start's sync), once its discoveries are queued.
+  onScanned(listener: () => void): () => void {
+    this.scanListeners.add(listener);
+    return () => void this.scanListeners.delete(listener);
   }
 
   // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.
@@ -317,8 +341,13 @@ export class IndexSessionSource implements SessionSource {
       const bindings = this.index.sessions.bindings();
       const bare = bindings.filter((b) => b.size === null || b.mtimeMs === null).map(({ sessionId, appSessionId }) => ({ sessionId, appSessionId }));
       const known = bindings.flatMap(({ sessionId, appSessionId, size, mtimeMs }) => (size === null || mtimeMs === null ? [] : [{ sessionId, appSessionId, size, mtimeMs }]));
+      const generation = this.generation;
       if (bare.length > 0) await this.command('fs.bind', { bindings: bare });
-      await this.command('fs.scan', { known });
+      const scan = await this.command('fs.scan', { known });
+      if (scan !== null && generation === this.generation && !this.stopped) {
+        this.scanned = true;
+        for (const listener of [...this.scanListeners]) listener();
+      }
       const state = await this.command('fs.state', undefined);
       if (state !== null) this.foldHolders(state.holders);
     });

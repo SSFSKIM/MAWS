@@ -117,6 +117,36 @@ describe('shell event subscription', () => {
     expect(tabIds(stores)).toEqual(['session:a']);
   });
 
+  // l1-sessions-13 review: the project command and the inactivity sweep archive in main, past the renderer's own archive
+  // that drops the tabs; the change event closes them instead, by the store's revision rule.
+  it.each([0, 16])('closes the tabs of a session main archived, and only on news of the owner’s archive (batch %i ms)', async (batchMs) => {
+    const { fake, stores } = setup(batchMs);
+    await answerSnapshots(fake); // session.list at revision 1
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    const archived = { ...record('a'), archived: true };
+    fake.event('session.changed', { record: archived, cause: 'facts', revision: 2 }); // its transcript went from disk
+    await vi.waitFor(() => expect(stores.sessions.getState().records.get(A)?.archived).toBe(true));
+    expect(tabIds(stores)).toEqual(['session:a']);
+    fake.event('session.changed', { record: record('a'), cause: 'facts', revision: 3 }); // and came back
+    fake.event('session.changed', { record: archived, cause: 'update', revision: 2 }); // stale: the store knows newer
+    await new Promise((resolve) => setTimeout(resolve, batchMs + 5));
+    expect(stores.sessions.getState().records.get(A)?.archived).toBe(false);
+    expect(tabIds(stores)).toEqual(['session:a']);
+    fake.event('session.changed', { record: archived, cause: 'update', revision: 4 });
+    await vi.waitFor(() => expect(tabIds(stores)).toEqual([]));
+    expect(stores.sessions.getState().records.get(A)?.archived).toBe(true); // the record stays, archived
+  });
+
+  it('an archive heard before the layout hydrates closes the persisted tab once it does', async () => {
+    const { fake, stores } = setup();
+    await fake.reply('session.list', { sessions: [record('a')], revision: 1 });
+    fake.event('session.changed', { record: { ...record('a'), archived: true }, cause: 'update', revision: 2 });
+    await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
+    await fake.reply('session.digests', { digests: [digest('a')] });
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    expect(tabIds(stores)).toEqual([]);
+  });
+
   describe('tab retention (C10’s seventh ask)', () => {
     const retentions: (() => void)[] = [];
     afterEach(() => retentions.splice(0).forEach((off) => off()));

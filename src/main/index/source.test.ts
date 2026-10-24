@@ -19,6 +19,7 @@ import { Index } from './index';
 import { locate, locatesWithoutGit } from './projects'; // P4 W2-B
 import { DISCOVERY_BATCH, IndexSessionSource, type ReadModelWriter, type SourceHost } from './source';
 import { SessionReadModel, type ReadModelWriter as ModelWriter } from '../sessions/read-model'; // C12
+import { DiscoveryPendingError, InactiveArchive } from '../sessions/inactive-archive'; // l1-sessions-13
 
 type Listener = (payload: unknown) => void;
 
@@ -846,6 +847,82 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     });
   });
   // C12 end
+
+  // l1-sessions-13: the inactivity archive reads a session's last activity from the index, which before this run's scan
+  // (and the warm-up its discoveries wait for) still holds what an earlier run saw of the store.
+  describe('discovery freshness for the inactivity archive', () => {
+    const NOW = Date.parse('2026-10-24T00:00:00.000Z');
+    const archiverOver = (current: IndexSessionSource) => new InactiveArchive({
+      index, status: () => null, waiting: () => false, git: async () => '', now: () => NOW,
+      discovered: (engineSessionId) => current.discoveryCurrent(engineSessionId),
+      archive: async (id, eligible) => ((await eligible()) ? (index.sessions.update(id, { archived: true }), { archived: true as const }) : { status: 'skipped_ineligible' as const }),
+    });
+
+    it('a cached old session the CLI used while the app was closed is not archived before its scan’s summary applies, nor after', async () => {
+      const cached = summary({ lastRecordAt: '2026-09-01T00:00:00.000Z' });
+      const record = index.sessions.upsertFromSummary(cached).record;
+      const fake = scriptedHost('starting');
+      fake.answers.set('fs.scan', () => {
+        fake.fire('fs.sessionChanged', { appSessionId: record.appId, summary: { ...cached, size: cached.size + 1, mtimeMs: cached.mtimeMs + 1, lastRecordAt: '2026-10-23T12:00:00.000Z' } });
+        return SCAN_RESULT;
+      });
+      // the holder fold after the scan would apply the queue's warm prefix (this directory is cached since the record's
+      // making); held, so the queued summary is seen waiting as a cold directory's waits for its warm-up
+      const dispatch = fake.host.dispatch as ReturnType<typeof vi.fn>;
+      const answer = dispatch.getMockImplementation() as SourceHost['dispatch'];
+      dispatch.mockImplementation((...args: Parameters<SourceHost['dispatch']>) => (args[1] === 'fs.state' ? new Promise(() => {}) : answer(...args)));
+      const warmUps: (() => void)[] = [];
+      source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5, warmLinkedWorktrees: () => new Promise<void>((release) => void warmUps.push(release)) });
+      const scanned = vi.fn();
+      source.onScanned(scanned);
+      stop = source.start(recordingWriter().writer);
+      const archiver = archiverOver(source);
+
+      expect(source.discoveryCurrent(null)).toBe(false);
+      await expect(archiver.run(7, null)).rejects.toBeInstanceOf(DiscoveryPendingError);
+      fake.setState('ready');
+      fake.stream();
+      await settle();
+      expect(scanned).toHaveBeenCalledTimes(1);
+      expect(source.discoveryCurrent(null)).toBe(true);
+      expect(source.discoveryCurrent(cached.sessionId)).toBe(false); // its summary waits for the warm-up
+      expect(await archiver.run(7, null)).toEqual({ archived: 0, skipped: 1 });
+      expect(index.sessions.get(record.appId)?.archived).toBe(false);
+
+      warmUps.forEach((release) => release());
+      await settle();
+      expect(source.discoveryCurrent(cached.sessionId)).toBe(true);
+      expect(index.sessions.summaryOf(record.appId)?.lastRecordAt).toBe('2026-10-23T12:00:00.000Z');
+      expect(await archiver.run(7, null)).toEqual({ archived: 0, skipped: 1 });
+      expect(index.sessions.get(record.appId)?.archived).toBe(false);
+
+      fake.setState('crashed'); // the next host's scan has to answer again
+      expect(source.discoveryCurrent(null)).toBe(false);
+      await expect(archiver.run(7, null)).rejects.toBeInstanceOf(DiscoveryPendingError);
+    });
+
+    it('a scan that fails leaves the index not current, and a stopped source is never current', async () => {
+      const fake = scriptedHost('starting');
+      const dispatch = fake.host.dispatch as ReturnType<typeof vi.fn>;
+      const answer = dispatch.getMockImplementation() as SourceHost['dispatch'];
+      dispatch.mockImplementation(async (...args: Parameters<SourceHost['dispatch']>) =>
+        args[1] === 'fs.scan' ? { ok: false, error: ipcError('host_unavailable', 'engine-host is crashed') } : answer(...args));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const current = begin(fake.host);
+      fake.setState('ready');
+      fake.stream();
+      await settle();
+      expect(dispatch).toHaveBeenCalledWith('engine-host', 'fs.scan', expect.anything());
+      expect(current.discoveryCurrent(null)).toBe(false);
+      dispatch.mockImplementation(answer);
+      fake.stream();
+      await settle();
+      expect(current.discoveryCurrent(null)).toBe(true);
+      stop!();
+      stop = null;
+      expect(current.discoveryCurrent(null)).toBe(false);
+    });
+  });
 
   it('stop unsubscribes from the host and the index', async () => {
     const fake = scriptedHost();

@@ -1,5 +1,6 @@
 import type { ProjectId } from '@shared/graph/ids';
 import { InactiveArchive, scheduleInactiveArchive } from './sessions/inactive-archive';
+import { openSessionTabs } from './layout/open-session-tabs';
 import { isActionable as archiveActionable, isOpen as archiveOpen } from '@shared/attention/kinds';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
@@ -445,6 +446,8 @@ void startWithProfileLock(app, () => {
     index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
     waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
     archive: (id, eligible, stillEligible) => sessionService.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
+    discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
+    open: openSessionTabs(layout), // the sweep keeps what the owner keeps in a tab
     activity: (id) => {
       const digest = sessions.model.digest(id);
       const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
@@ -452,7 +455,7 @@ void startWithProfileLock(app, () => {
     },
   });
   registerMainHandler('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
-  shutdown.add('inactive archive', scheduleInactiveArchive(inactiveArchive, () => settings.state().settings.sessions.archiveInactiveDays, (changed) => settings.onChange(changed)));
+  shutdown.add('inactive archive', scheduleInactiveArchive(inactiveArchive, () => settings.state().settings.sessions.archiveInactiveDays, (changed) => settings.onChange(changed), (scanned) => indexSource.onScanned(scanned)));
   registerObservedFacts(hosts.dispatch); // P2-A (X17): the engine host's observed facts, beside session.digests
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
