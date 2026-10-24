@@ -170,12 +170,13 @@ for (const input of ['wheel', 'touch-like'] as const) {
 }
 
 for (const toolCount of [2, 16]) {
-  test(`@layout upward input in ${toolCount === 2 ? 'a fitting' : 'an overflowing'} tool group belongs to the group, not transcript follow`, async ({ page, hub, browserName }) => {
+  test(`@layout upward input in ${toolCount === 2 ? 'a fitting' : 'an overflowing'} internal-activity group belongs to the group, not transcript follow`, async ({ page, hub, browserName }) => {
     const { view, scroller, replay } = await openStream(page, hub);
     if (timer) clearInterval(timer);
     timer = null;
     replay.depth.apply({ at: 0, k: 'step-end', body: { turnId: 'scroll-turn', agentId: null, step: 0 } });
-    const calls = Array.from({ length: toolCount }, (_, i) => ({ type: 'tool_use', id: `toolu_scroll_${i}`, name: 'Read', input: { file_path: `/tmp/scroll-file-${i}.ts` } }));
+    // UX1-C tool summaries no longer have a nested group fold; internal activity retains the bounded scroller.
+    const calls = Array.from({ length: toolCount }, (_, i) => ({ type: 'tool_use', id: `toolu_scroll_${i}`, name: 'TaskGet', input: { taskId: `scroll-task-${i}` } }));
     const row = {
       uuid: 'scroll-group-calls', parentUuid: 'scroll-prompt', isSidechain: false, timestamp: '2026-10-22T10:01:00.000Z', sessionId: replay.session,
       type: 'assistant', message: { id: 'msg_scroll_group', role: 'assistant', type: 'message', model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'Earlier investigation.\n\n'.repeat(40) }, ...calls], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } },

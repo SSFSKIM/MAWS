@@ -6,6 +6,7 @@
 // The layout cases (tagged @layout) also run in WebKit on the Linux lane (playwright.config.ts); the service worker's
 // cases need Chromium's DevTools protocol to deliver a push, so they run there alone. Installing to an iPhone's home
 // screen, Access, the passkey, and a real push service are the owner's walk (the plan's M4).
+import { revealEarlier } from './transcript-history';
 import { loadRecording, SESSION_VIEW, type Recording } from 'desk-hub/fake-machine';
 import { inputSha256, seal, verifyRpc, importOrgKey, type JsonObject, type PushNotice, type Raised } from 'desk-hub/protocol';
 import type { BrowserContext, Locator, Page } from '@playwright/test';
@@ -314,7 +315,7 @@ const toBottom = (view: Locator) => scroller(view).evaluate((el) => el.scrollTo(
 test("@layout a session's channel on the phone is its session view: its working record unfolds in place, each tool call one line that opens on a tap, long inputs truncated, and at 390 and 320 nothing wider than the screen", async ({ page, hub }) => {
   const { fm, view } = await openReplay(page, hub, withLongInputs(loadRecording(SESSION_VIEW)));
   fm.step(endOf(fm.recording)); // every row in, the session idle and still running
-  const answer = view.locator('[data-owner-card="to-human"]').filter({ hasText: LONG_ANSWER });
+  const answer = view.locator('.owner-message-ink').filter({ hasText: LONG_ANSWER });
   await expect(answer).toBeVisible();
   await expect(page.getByRole('group', { name: 'Session view' })).toBeVisible(); // Report · Transcript, as on a desktop
   await expect(page.getByRole('complementary', { name: 'Session depth' })).toHaveCount(0);
@@ -336,6 +337,7 @@ test("@layout a session's channel on the phone is its session view: its working 
   const subagents = view.locator(`[data-turn-id="${launchTurn}"] .transcript-subagent`);
   await expect(subagents).toHaveCount(1);
   await expect(subagents.locator('button')).toHaveCount(0);
+  await revealEarlier(view, launchDivider); // expansion can recycle the divider outside the mounted window
   await launchDivider.click();
 
   // The added turn: its prompt, one closed record, its message.
@@ -343,32 +345,32 @@ test("@layout a session's channel on the phone is its session view: its working 
   const turn = 'turn:10a91e55-0000-4000-8000-000000000001';
   const record = view.locator(`[data-row-id="owner-record:${turn}"]`);
   await expect(record).toContainText('Working record · 3 tool calls');
-  await expect(view).not.toContainText('Ran pnpm');
+  await expect(view).not.toContainText('Run the phone layout cases in WebKit');
   await fitsTheWidth(page);
 
   // Unfolded in place: the turn as the transcript draws it, as on a desktop — its work behind MAWS's "Worked for"
-  // divider, its calls under one group line, and each call a line of its own.
+  // divider, with each tool summary directly visible and its detail one tap away.
   await record.getByRole('button').click();
   await expect(record).toContainText('Fold to report');
   const divider = view.locator(`[data-row-id="divider:${turn}"]`);
   await divider.getByRole('button', { name: /Worked for/ }).click();
-  const group = view.locator(`[data-turn-id="${turn}"] .transcript-group-header`);
-  await group.click();
-  await expect(group).toHaveAttribute('aria-expanded', 'true');
+  // UX1-C exposes tool summaries directly; there is no second group disclosure.
+  await expect(view.locator(`[data-turn-id="${turn}"] .transcript-tool-block`)).toBeVisible();
+  await expect(view.locator(`[data-turn-id="${turn}"] .transcript-group-header`)).toHaveCount(0);
   const lines = view.locator(`[data-turn-id="${turn}"] .transcript-cell-line`);
   await expect(lines).toHaveCount(3);
-  const bash = lines.filter({ hasText: 'Ran pnpm --filter desk-web' });
+  const bash = lines.filter({ hasText: 'Run the phone layout cases in WebKit' });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await bash.scrollIntoViewIfNeeded();
     await expect(bash).toBeVisible();
-    // The group and each call are one line, inside the screen; the long command, path and pattern end in an ellipsis
+    // Each summary is one line inside the screen; the long description, path and pattern end in an ellipsis
     // rather than widening it.
-    for (const line of [group, ...(await lines.all())]) {
+    for (const line of await lines.all()) {
       const box = (await line.boundingBox())!;
       expect(box.height).toBeLessThan(40);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
-      const label = line.locator('.transcript-cell-label, .transcript-group-label');
+      const label = line.locator('.transcript-cell-label');
       expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis')).toBe(true);
     }
     await fitsTheWidth(page);
@@ -389,7 +391,7 @@ test("@layout a session's channel on the phone is its session view: its working 
   // Folded again to the report.
   await record.getByRole('button', { name: 'Fold to report' }).click();
   await expect(record).toContainText('Working record · 3 tool calls');
-  await expect(view).not.toContainText('Ran pnpm');
+  await expect(view).not.toContainText('Run the phone layout cases in WebKit');
 });
 
 test('@layout the running turn streams on the phone: the answer draws as it is written, its folded record working', async ({ page, hub }) => {
@@ -405,8 +407,17 @@ test('@layout the running turn streams on the phone: the answer draws as it is w
     fm.step(1);
     await page.waitForTimeout(20);
   }
+  // An open mark already folds the working turn, but its unfinished text remains literal and without ink.
+  await expect(streaming.last()).toContainText('<message>You chose blue');
+  await expect(streaming.last().locator('.owner-message-ink')).toHaveCount(0);
+  await expect(view.locator('[data-row-id^="owner-record:"] .transcript-working-dots')).toHaveCount(1);
+  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
+  const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
+  if (answerBlock.k !== 'block-row') throw new Error('no block-row');
+  const lastText = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === answerBlock.body.turnId && s.step === answerBlock.body.step && s.chunk.index === answerBlock.body.index && s.chunk.kind === 'text');
+  fm.step(lastText + 1 - fm.played);
   await toBottom(view);
-  await expect(streaming.last().locator('[data-owner-card="to-human"]')).toContainText('You chose blue');
+  await expect(streaming.last().locator('.owner-message-ink')).toContainText('You chose blue');
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // its row is not written yet
   await expect(view.locator('[data-row-id^="owner-record:"] .transcript-working-dots')).toHaveCount(1);
   for (const width of [390, 320]) {
@@ -450,7 +461,8 @@ test("@layout with the session's machine offline the phone draws the log's chann
   delete draft.ts;
   delete draft.seq;
   await hub.append(PROJECT, draft as never);
-  await expect(view.locator('[data-owner-card="to-human"]').filter({ hasText: 'You chose blue' })).toBeVisible();
+  await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: 'You chose blue' }));
+  await expect(view.locator('.owner-message-ink').filter({ hasText: 'You chose blue' })).toBeVisible();
   hub.dropMachine(PROJECT, MACHINE);
   await expect(page.getByTestId('machine-offline')).toContainText('fake is offline');
   await expect(center(page).getByTestId('session-view')).toHaveCount(0);

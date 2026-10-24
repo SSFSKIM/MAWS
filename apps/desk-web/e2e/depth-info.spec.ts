@@ -109,7 +109,7 @@ test('session info: where it runs, its model, and context and cost from usage â€
   await expect(info('cost')).toHaveText('$0.0053');
 });
 
-test("a <message> draws as the report's message card while it streams and once settled; a hand-back's turn reads Continued", async ({ page, hub }) => {
+test("a streaming message stays authored text until closed, then receives unboxed ink; a hand-back's turn reads Continued", async ({ page, hub }) => {
   const { player } = await openDepth(page, hub);
   const view = page.getByTestId('session-view');
   player.advanceTo((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text' && String(item.body.chunk.text).startsWith('<message>'));
@@ -119,16 +119,22 @@ test("a <message> draws as the report's message card while it streams and once s
     player.advance(1);
     await page.waitForTimeout(20);
   }
-  const live = stream.last().locator('[data-owner-card="to-human"]');
-  await expect(live).toContainText('Both subagents rep');
-  await expect(stream.last()).not.toContainText('<message>');
+  // UX1-C preserves unfinished output tags literally instead of repairing them into a card.
+  await expect(stream.last()).toContainText('<message>\nBoth subagents rep');
+  await expect(stream.last().locator('.owner-message-ink')).toHaveCount(0);
 
   player.advance(player.script.length);
   await expect(stream).toHaveCount(0);
-  const settled = view.locator('[data-owner-card="to-human"]');
-  await expect(settled).toHaveCount(1);
-  await expect(settled).toContainText('Both subagents reported back.');
-  await expect(settled.locator('.owner-card-label')).toHaveText('Message');
+  const settled = view.locator('[data-kind="assistant_text"]').filter({ hasText: 'Both subagents reported back.' });
+  await expect(settled).toHaveCount(1); // one answer row, not one ink span per Markdown leaf
+  await expect(settled).toContainText('Both subagents reported back. The kettle is on the second shelf, and the last word in words.txt is "gamma".');
+  await expect(settled.locator('p .owner-message-ink').filter({ hasText: 'Both subagents reported back.' })).toHaveCount(1);
+  await expect(settled.locator('li')).toHaveText([
+    'notes.md: the kettle is on the second shelf.',
+    'words.txt: the file lists alpha, beta, gamma, then an empty trailing line, so the last word is "gamma".',
+  ]);
+  await expect(settled.locator('[data-streamdown="strong"] .owner-message-ink')).toHaveText(['notes.md:', 'words.txt:']);
+  await expect(view.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
   expect(await view.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
   await expect(view).not.toContainText('Peer session worked');
   await expect(view).toContainText('Continued for');

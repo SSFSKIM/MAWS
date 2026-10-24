@@ -6,6 +6,7 @@
 // word), each row in view before is the same element after (no remount, no reload), and the older rows the reader paged
 // in before stay drawn without being asked for again; then the answer streams to its end, drawn once, and a reload draws
 // the same rows. A disruption that outlasts the quiet window is said (`depth.spec.ts`, under a fast-forwarded clock).
+import { revealEarlier } from './transcript-history';
 import type { Locator, Page } from '@playwright/test';
 import type { Step } from 'desk-hub/fake-machine';
 import { FakeMachineReplay } from './fake-machine';
@@ -221,6 +222,7 @@ for (const [disruption, disrupt] of [
     await expect.poll(() => occurrences(view, ANSWER)).toBe(1);
     const settled = await allRowIds(view);
     await page.reload();
+    await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
     await expect(view).toContainText(ANSWER);
     expect(await occurrences(view, ANSWER)).toBe(1);
     await expect.poll(() => allRowIds(view), { timeout: 15_000 }).toEqual(settled);
