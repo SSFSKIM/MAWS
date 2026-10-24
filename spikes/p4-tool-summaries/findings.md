@@ -22,7 +22,9 @@ Code labels rows locally, from the tool calls themselves. There is no summarizer
 - **Agent and Task:** the row is the agent's `input.description`, with running and done labels (`c52b02f3f-BejopSz8.js:4672-4704`).
 - **Group headers** ("Edited 2 files, created 1 file, ran 1 command" and its +/− totals) are deterministic localized categories (`c24951e9f-JzS5EfmT.js:535-648`). Grouping and Write classification are at :939-1013, and the totals at `c96d752d0-CWv_7-n9.js:104224-104237`.
 - **Code turns the engine's summaries off:** it launches the engine with `CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: "false"` (`main-process/index.chunk-jPKPzV-P.js:316009`).
-- **Cowork turns them on**, behind a gate (`main-process/index.chunk-Dl8NPgw7.js:20511`). The shared renderer can show such summaries (`ccba96ec3-BOycIJQ9.js:644-657, 938-952`) and can use thinking summaries for group status (`c05b96c7f-MPVkefMW.js:10307-10372`).
+- **Code's converter ignores them anyway:** its timeline converter (`hb` in `web/app/v1/c06cf64bb-CdJdJuVd.js`, from :10146) skips non-user, non-assistant frames at :11362-11364. Its only `tool_use_summary` reference, at :10025, excludes the frame from a look-back. Code's renderer `c96d752d0-CWv_7-n9.js` has no summary path.
+- **Cowork turns them on**, behind gate 66187241 (`main-process/index.chunk-Dl8NPgw7.js:20511`). Its module (`cb1e253a0-DgeDleLc.js:635-659`, with summary state at :7283, :7336 and :7399) uses the converter `ccba96ec3-BOycIJQ9.js`. That converter indexes each summary by the batch's last tool id (:644-657) and inserts it as a block beside that tool use (:938-952). Cowork can also use thinking summaries for group status (`c05b96c7f-MPVkefMW.js:10307-10372`).
+- **So the owner's screenshot rows cost nothing:** they are the model's own Bash descriptions, Skill names and Read basenames. Engine batch summaries would be a MAWS addition that Code does not have.
 
 ## 2. The engine's `tool_use_summary`
 
@@ -97,7 +99,7 @@ The model's own commentary stays in its place in time, between Read and Edit.
 ## Recommendation
 
 1. **Free and factual first.** Label rows from the Bash, Agent and Task descriptions, Skill names, the tool verb with its target, and MCP identity. Group headers are counted locally. Edit and Write rows show their counts and expand to an inline diff. None of this costs a model call.
-2. **Engine batch summaries, as an option.** They become a caption for a group whose rows lack descriptions, keyed to the whole id set. They are never a replacement for the rows. Each costs one small helper call per batch and arrives one response late.
+2. **Engine batch summaries, as an option beyond Code.** They become a caption for a group whose rows lack descriptions, keyed to the whole id set. They are never a replacement for the rows. Each costs one small helper call per batch and arrives one response late.
 3. **Thinking line.** It streams the visible progress or summary text, bounded and with disclosure. Showing reasoning summaries rather than progress notes means sending `thinking_display: "summarized"`, which adds no billed tokens. First fix MAWS's `display` field so that the request takes effect.
 4. **Remove the files-changed card** as the owner asked. Keep the checkpoint rewind behind a deliberate action if the owner wants it.
 
