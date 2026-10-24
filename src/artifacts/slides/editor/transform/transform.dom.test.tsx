@@ -193,7 +193,7 @@ describe('the always-available Arrange menu', () => {
     const user = userEvent.setup();
     const choose = async (name: string) => {
       await user.click(screen.getByRole('button', { name: 'Arrange' }));
-      await user.click(screen.getByRole('menuitem', { name, exact: true }));
+      await user.click(screen.getByRole('menuitem', { name }));
     };
     return { ...utils, ...ctx, doc: ctx.session.doc, user, choose, readOnly: () => utils.rerender(<ElementBar {...props} readOnly />) };
   }
@@ -243,8 +243,8 @@ describe('the always-available Arrange menu', () => {
     const { doc, session, user, choose, readOnly } = mount(gestureContext(deck(), { title: [128, 128, 1664, 80], body: [128, 240, 1664, 45] }));
     act(() => session.select(['body']));
     await user.click(screen.getByRole('button', { name: 'Arrange' }));
-    expect(screen.getByRole('menuitem', { name: 'Detach', exact: true }).hasAttribute('data-disabled')).toBe(false);
-    expect(screen.getByRole('menuitem', { name: 'Bring to front', exact: true }).hasAttribute('data-disabled')).toBe(true);
+    expect(screen.getByRole('menuitem', { name: 'Detach' }).hasAttribute('data-disabled')).toBe(false);
+    expect(screen.getByRole('menuitem', { name: 'Bring to front' }).hasAttribute('data-disabled')).toBe(true);
     await user.keyboard('{Escape}');
     await choose('Detach');
     expect(styleOf(doc, 'body')).toMatchObject({ position: 'absolute', top: '240px' });
@@ -252,7 +252,7 @@ describe('the always-available Arrange menu', () => {
     const before = slideFile(doc, 's');
     await user.click(screen.getByRole('button', { name: 'Arrange' }));
     expect(screen.getAllByRole('menuitem').every((item) => item.hasAttribute('data-disabled'))).toBe(true);
-    await user.click(screen.getByRole('menuitem', { name: 'Delete', exact: true }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
     expect(slideFile(doc, 's')).toBe(before);
   });
 });
@@ -302,13 +302,13 @@ describe('the stage’s keys and clipboard', () => {
     expect(order()).toEqual(['a', 'title', 'body', 'b']);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Arrange' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Bring to front', exact: true }));
+    await user.click(screen.getByRole('menuitem', { name: 'Bring to front' }));
     expect(order()).toEqual(['title', 'body', 'b', 'a']);
     await user.click(screen.getByRole('button', { name: 'Arrange' }));
-    expect(screen.getByRole('menuitem', { name: 'Detach', exact: true }).hasAttribute('data-disabled')).toBe(true);
+    expect(screen.getByRole('menuitem', { name: 'Detach' }).hasAttribute('data-disabled')).toBe(true);
     act(() => session.select(['body']));
-    expect(screen.getByRole('menuitem', { name: 'Detach', exact: true }).hasAttribute('data-disabled')).toBe(false);
-    expect(screen.getByRole('menuitem', { name: 'Bring to front', exact: true }).hasAttribute('data-disabled')).toBe(true);
+    expect(screen.getByRole('menuitem', { name: 'Detach' }).hasAttribute('data-disabled')).toBe(false);
+    expect(screen.getByRole('menuitem', { name: 'Bring to front' }).hasAttribute('data-disabled')).toBe(true);
   });
 
   it('copies the selection as the dialect and pastes it beside itself', async () => {

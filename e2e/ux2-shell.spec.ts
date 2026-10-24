@@ -275,7 +275,7 @@ async function deckToolbarPlacement(deck: Locator): Promise<void> {
   await expect(toolbar.getByRole('button', { name: 'Arrange', exact: true })).toBeVisible();
   await expect.poll(() => toolbar.evaluate((bar) => {
     const row = bar.getBoundingClientRect();
-    const controls = [...bar.querySelectorAll('button, select')].map((control) => control.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
+    const controls = Array.from(bar.querySelectorAll('button, select')).map((control) => control.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
     const height = Math.max(...controls.map((rect) => rect.height));
     return {
       oneRow: Math.max(...controls.map((rect) => rect.bottom)) - Math.min(...controls.map((rect) => rect.top)) <= height + 1,

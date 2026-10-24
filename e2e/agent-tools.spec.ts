@@ -438,10 +438,22 @@ test.describe('the #panel harness: the agent tools', () => {
     expect((await h.tabs()).filter((tab) => tab.toolId === 'log'), 'neither Log in the strip').toEqual([]);
     await expect.poll(async () => (await h.layoutOf('A'))?.tabs.filter((tab) => tab.toolId === 'log') ?? [], 'nor in layout.json').toEqual([]);
 
-    const fresh = await h.panel('addTool', 'log', { params: { path: null, title: 'Log' } });
+    // Log is intentionally absent from the launcher: a fresh output target creates it, and opening that output
+    // again must reveal the same transient instance rather than manufacture a generic Log surface.
+    await h.load('A', 'events/agents-stop-shell', { releaseTo: AGENTS_STOP_SHELL_TAIL.first });
+    await h.agents('fakeFs', { spills: { [AGENTS_STOP_SHELL_TAIL.outputFile]: 'fresh shell output\n' } });
+    await h.open('background');
+    await expect.poll(async () => (await h.background())?.shells[0]?.output).toBe('enabled');
+    await h.agents('output', AGENTS_STOP_SHELL_TAIL.taskId);
+    const freshLogs = (await h.tabs()).filter((tab) => tab.toolId === 'log');
+    expect(freshLogs).toHaveLength(1);
+    const fresh = freshLogs[0].id;
+    expect(logIds).not.toContain(fresh);
+    await expect.poll(async () => (await h.log())?.path).toBe(AGENTS_STOP_SHELL_TAIL.outputFile);
     await showSessionCards(h.page);
-    await openSurface(h.page, 'Log');
-    await surface(h.page, 'log').locator(`[data-tab-id="${fresh}"]`).getByRole('tab').click();
+    await h.open('background');
+    await h.agents('output', AGENTS_STOP_SHELL_TAIL.taskId);
+    await expect(surface(h.page, 'log').locator(`[data-tab-id="${fresh}"]`).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
     await h.panel('switchSession', 'B');
     await h.panel('switchSession', 'A');
     expect((await h.tabs()).map((tab) => tab.id)).toContain(fresh);
