@@ -7,7 +7,8 @@
 // close, and the store folds the turn when they have. R1: while the turn works, the most recent status line a plugin
 // pinned (the engine's `ui_status`) reads under the divider, muted and on one line, the label itself untouched. R2: a
 // plugin hooking the Spinner site replaces the working label's text (engine-surface/spinner.ts), nothing else.
-import { Popover } from 'radix-ui';
+import { Dialog, Popover } from 'radix-ui';
+import { rowId } from '../../model/keys';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
 import { dividerCopy, turnSummaryCopy } from '../../model/copy';
@@ -149,8 +150,47 @@ const tokensOf = (usage: DividerRowData['summary']['usage']) =>
   usage === null ? null : usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
 
 function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: number }) {
+  const { storeKey, rewind } = useTranscriptContext();
+  const [files, setFiles] = useState<string[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const receipt = rowId.receipt(row.turnId!);
+  const restoreState = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.receipts.get(receipt)?.state ?? 'applied');
+  const working = useTranscriptStore((state) => [...(state.entries[storeKey]?.state.turns.values() ?? [])].some((turn) => turn.state === 'open'));
+  const busy = checking || restoreState === 'undoing';
+  const preview = async () => {
+    if (!rewind || busy || working) return;
+    setChecking(true); setError(null);
+    try {
+      const answer = await rewind.canUndo(row.turnId!);
+      if (!answer.ok) setError(answer.reason ?? 'Files cannot be restored.');
+      else if (!answer.files?.length) setError(answer.files ? 'No files need restoring.' : 'The engine did not provide a file list.');
+      else { setFiles(answer.files); setMenuOpen(false); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setChecking(false); }
+  };
+  const restore = async () => {
+    if (!rewind || !files || busy || working) return;
+    const update = useTranscriptStore.getState().setReceipt;
+    update(storeKey, receipt, { state: 'undoing' }); setError(null);
+    try {
+      const answer = await rewind.canUndo(row.turnId!);
+      if (!answer.ok || !answer.files) throw new Error(answer.reason ?? 'The engine did not provide a file list.');
+      if (answer.files.length !== files.length || answer.files.some((file) => !files.includes(file))) {
+        update(storeKey, receipt, { state: 'applied' });
+        setFiles(answer.files); setError('The files to restore changed. Review the list and confirm again.'); return;
+      }
+      await rewind.undo(row.turnId!);
+      update(storeKey, receipt, { state: 'undone' }); setFiles(null);
+    } catch (cause) {
+      update(storeKey, receipt, { state: 'applied' });
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
   return (
-    <Popover.Root>
+    <>
+    <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
       <Popover.Trigger className="transcript-divider-summary" aria-label="Turn summary">
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <circle cx="3" cy="6" r="1" fill="currentColor" />
@@ -161,9 +201,30 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
       <Popover.Portal>
         <Popover.Content className="transcript-popover" side="bottom" align="start" sideOffset={6}>
           <SummaryText row={row} durationMs={durationMs} />
+          {rewind && (row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" disabled={working || busy || restoreState === 'undone'} onClick={() => void preview()}>
+            {restoreState === 'undone' ? 'Files restored' : checking ? 'Checking files…' : 'Restore files to before this turn'}
+          </button>}
+          {error && <p role="alert">{error}</p>}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+    <Dialog.Root open={files !== null} onOpenChange={(open) => { if (!open && !busy) { setFiles(null); setError(null); } }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-bg/60" />
+        <Dialog.Content className="transcript-restore-dialog" onOpenAutoFocus={(event) => { event.preventDefault(); document.getElementById(`${storeKey}-${receipt}-cancel`)?.focus(); }}>
+          <Dialog.Title>Restore files to before this turn?</Dialog.Title>
+          <Dialog.Description>This restores the following files, including changes made in later turns. Conversation history stays unchanged. There is no reapply.</Dialog.Description>
+          <ul>{files?.map((file) => <li key={file}>{file}</li>)}</ul>
+          {error && <p role="alert">{error}</p>}
+          {working && <p role="status">Wait for the active turn to finish before restoring.</p>}
+          <div className="transcript-restore-actions">
+            <Dialog.Close id={`${storeKey}-${receipt}-cancel`} className="transcript-button" disabled={busy}>Cancel</Dialog.Close>
+            <button type="button" className="transcript-button" disabled={busy || working} onClick={() => void restore()}>{busy ? 'Restoring…' : 'Restore files'}</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+    </>
   );
 }
 

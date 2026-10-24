@@ -143,7 +143,7 @@ describe('group state machine', () => {
     const g = group(list);
     expect(g.cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2']);
     expect(g.cells[0].classification.hidden).toBe(true);
-    expect(g.summary).toBe('Ran `a`');
+    expect(g.summary).toBe('Ran 1 command');
   });
 
   it('an active group never unwraps and labels what is running', () => {
@@ -172,7 +172,7 @@ describe('group state machine', () => {
     b.end(['u1']);
     const g = group(rows(b.events));
     expect(g.cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2', 'cell:t3', 'cell:t4']);
-    expect(g.cells[0]).toMatchObject({ label: 'Read /p/a.ts', paths: ['/p/a.ts'] });
+    expect(g.cells[0]).toMatchObject({ label: 'Read a.ts', paths: ['/p/a.ts'] });
     expect(g.cells[1].detail).toMatchObject({ kind: 'read', files: [{ path: '/p/b.ts', range: [10, 29] }] });
     expect(g.summary).toBe('Read 3 files, searched for `x`');
   });
@@ -312,7 +312,7 @@ describe.each(['mcp__doperpowers__AskUserQuestion', 'mcp__sminos__AskUserQuestio
   });
 });
 
-describe('receipt counts', () => {
+describe('completed divider changed-file counts', () => {
   it('aggregates files cells, counting + and - lines of the structured patch', () => {
     const b = builder();
     b.turn('u1');
@@ -326,23 +326,23 @@ describe('receipt counts', () => {
     b.text('m9', 0, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text', 'receipt']);
-    const receipt = find(list, 'receipt');
-    expect(receipt).toMatchObject({ id: rowId.receipt(turnId.ofMessage(uuid('u1'))), added: 5, removed: 3, state: 'applied' });
-    expect(receipt.files).toEqual([
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
+    const divider = find(list, 'divider');
+    expect(divider).toMatchObject({ id: rowId.divider(turnId.ofMessage(uuid('u1'))), state: 'completed' });
+    expect(divider.files).toEqual([
       { path: '/p/a.ts', change: 'update', added: 2, removed: 1, cellId: 'cell:t1' },
       { path: '/p/new.ts', change: 'create', added: 2, removed: 0, cellId: 'cell:t2' },
       { path: '/p/b.ts', change: 'update', added: 1, removed: 2, cellId: 'cell:t3' },
     ]);
     const g = group(list);
-    expect(g.summary).toBe('Edited 3 files');
+    expect(g.summary).toBe('Edited 2 files, created 1 file');
     expect(g.cells[0]).toMatchObject({ label: 'Edited /p/a.ts +2 −1' });
     expect(g.cells[0].detail).toMatchObject({ kind: 'edit', hunks: [hunk], added: 2, removed: 1 });
-    expect(g.cells[1]).toMatchObject({ label: 'Created /p/new.ts' });
+    expect(g.cells[1]).toMatchObject({ label: 'Created /p/new.ts +2 −0' });
   });
 });
 
-describe('receipts name each file once', () => {
+describe('completed dividers name each changed file once', () => {
   it('two edits of one file are one entry with their counts summed; a create stays a create', () => {
     const b = builder();
     b.turn('u1');
@@ -353,17 +353,16 @@ describe('receipts name each file once', () => {
     b.toolUse('t3', 'Edit', { file_path: '/p/new.ts', old_string: 'two', new_string: 'two\nthree' });
     b.result('t3', 'ok');
     b.end(['u1']);
-    const receipt = find(rows(b.events), 'receipt');
-    expect(receipt.files).toEqual([
+    const divider = find(rows(b.events), 'divider');
+    expect(divider.files).toEqual([
       { path: '/p/new.ts', change: 'create', added: 4, removed: 1, cellId: 'cell:t1' },
       { path: '/p/a.ts', change: 'update', added: 1, removed: 1, cellId: 'cell:t2' },
     ]);
-    expect(receipt).toMatchObject({ added: 5, removed: 2 });
   });
 });
 
-describe('receipts aggregate successful edits only', () => {
-  it('a failed edit cell contributes no receipt entry', () => {
+describe('divider changed files aggregate successful edits only', () => {
+  it('a failed edit cell contributes no changed-file entry', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Edit', { file_path: '/p/a.ts', old_string: 'x', new_string: 'y' });
@@ -373,7 +372,7 @@ describe('receipts aggregate successful edits only', () => {
     b.toolUse('t2', 'Edit', { file_path: '/p/b.ts', old_string: 'x', new_string: 'y' });
     b.result('t2', 'ok');
     const list = rows(b.events);
-    expect(find(list, 'receipt').files.map((f) => f.path)).toEqual(['/p/b.ts']);
+    expect(find(list, 'divider').files?.map((f) => f.path)).toEqual(['/p/b.ts']);
   });
 });
 

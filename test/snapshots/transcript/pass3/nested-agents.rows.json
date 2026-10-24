@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": "2026-09-29T15:35:35.103Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:d157117c-0a34-49ab-bbf5-24815f33a51d",
     "kind": "divider",

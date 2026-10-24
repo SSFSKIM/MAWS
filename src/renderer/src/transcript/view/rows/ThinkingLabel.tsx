@@ -7,6 +7,8 @@ import type { CSSProperties, ReactNode } from 'react';
 import { liveThinkingLabel, thinkingWarmth } from '../../model/copy';
 import { useTranscriptContext } from '../context';
 import { useWorkingMs } from './parts';
+import { liveBlockBuffer, useTranscriptStore } from '../../../stores/transcript';
+import type { Cell, TurnId } from '../../model/rows';
 
 // Text under the shimmer, in its own colour turned `warmth` of the way to the warning colour.
 export function Shimmer({ children, warmth = 0 }: { children: ReactNode; warmth?: number }) {
@@ -18,8 +20,15 @@ export function Shimmer({ children, warmth = 0 }: { children: ReactNode; warmth?
   );
 }
 
-export function LiveThinkingLabel({ startedAt }: { startedAt: string }) {
+export function LiveThinkingLabel({ startedAt, text = '' }: { startedAt: string; text?: string }) {
   const { storeKey, effort } = useTranscriptContext();
   const elapsedMs = useWorkingMs(storeKey, startedAt);
-  return <Shimmer warmth={thinkingWarmth(elapsedMs)}>{liveThinkingLabel(elapsedMs, effort ?? null)}</Shimmer>;
+  const latest = text.trim().split(/\r?\n/).filter((line) => line.trim()).at(-1);
+  return <span className="transcript-thinking-summary"><Shimmer warmth={thinkingWarmth(elapsedMs)}>{latest || liveThinkingLabel(elapsedMs, effort ?? null)}</Shimmer></span>;
+}
+
+export function LiveThinkingCellLabel({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
+  const { storeKey } = useTranscriptContext();
+  const buffer = useTranscriptStore((state) => turnId && cell.id.startsWith('cell:think:') ? liveBlockBuffer(state.entries[storeKey], turnId, cell.id.slice('cell:think:'.length)) : null);
+  return <LiveThinkingLabel startedAt={cell.startedAt} text={buffer ?? (cell.detail.kind === 'thinking' ? cell.detail.text : '')} />;
 }

@@ -25,7 +25,7 @@ import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { PermissionBroker } from './broker';
 import { appInitialize } from '@shared/engine/initialize';
-import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf, setPermissionMode } from './controls';
+import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf, setMaxThinkingTokens, setPermissionMode } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { ENGINE_COMPAT_NOTICE_KEY, EngineCompatWatch } from './engine-compat'; // W13
 import { HostHookRegistry } from './host-hooks';
@@ -717,6 +717,12 @@ export class EngineSession {
     // C10 end
     await this.surface.attach(client, init.capabilities); // R2: as the desktop surface, when the engine speaks ui_surface_v1
 
+    // Visibility only: null preserves the engine's thinking budget (2.1.309 probe).
+    try {
+      await setMaxThinkingTokens(client, { max_thinking_tokens: null, thinking_display: 'summarized' });
+    } catch (error) {
+      this.notice('thinking:display_failed', `Reasoning summaries could not be enabled: ${messageOf(error)}`);
+    }
     await this.verifyGateway();
     await this.fallBackFromAuto(client, init); // W3
     if ((this.spec.resume !== null || this.inheritedGrants /* C10 */) && this.grants.allow.length > 0 && this.processState === 'initializing') {

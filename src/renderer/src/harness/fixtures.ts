@@ -11,6 +11,7 @@ import { journalToEvents } from '../transcript/dev/journal';
 const pass1 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });
 const pass2 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/pass2/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });
 const pass3 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/pass3/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });
+const summaries = import.meta.glob<string>('../../../../spikes/protocol-probe/fixtures/p4/p4-tool-summaries-*.jsonl', { query: '?raw', import: 'default' });
 const transcript = import.meta.glob<string>('../../../../test/fixtures/transcript/*.jsonl', { query: '?raw', import: 'default' });
 const events = import.meta.glob<string>('../../../../test/fixtures/transcript/events/*.events.jsonl', { query: '?raw', import: 'default' });
 
@@ -55,6 +56,7 @@ const LOADERS = new Map<string, Loader>([
   ...journals('pass2', pass2),
   ...journals('pass3', pass3),
   ...journals('transcript', transcript),
+  ...journals('p4', summaries),
   ...eventFixtures,
 ]);
 

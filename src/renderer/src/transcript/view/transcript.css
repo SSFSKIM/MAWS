@@ -577,3 +577,12 @@ button.transcript-chip[data-chip="anchor"]:hover { background: var(--bg-hover); 
 .transcript-browser-action-note { margin: 0 0 2px 23px; overflow-wrap: anywhere; }
 .transcript-browser-action > .transcript-output { margin: 4px 0 2px 23px; }
 /* E4c end */
+
+/* Code-mode transcript: factual summaries occupy one quiet line; details earn space only when opened. */
+.transcript-group-summary { padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-thinking .transcript-disclosure { max-width: 100%; }
+.transcript-thinking-summary { display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.transcript-restore-dialog { position: fixed; top: 18%; left: 50%; transform: translateX(-50%); z-index: 50; width: min(480px, 90vw); padding: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-overlay); color: var(--fg); font-size: var(--text-ui); }
+.transcript-restore-dialog ul { max-height: 30vh; overflow: auto; overflow-wrap: anywhere; padding-left: 20px; font-family: var(--font-mono); }
+.transcript-restore-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.transcript-restore-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

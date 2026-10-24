@@ -1449,3 +1449,30 @@ for (const { fixture, headers } of sittingReplays) test(`M3 owner sitting preser
     })).toBe(3);
   });
 });
+
+// The owner's Code-mode comparison: the existing real-world mixed-tool fixture at the review viewport.
+test('Code-mode transcript rows keep labels, counts and inline diffs without a files-changed card', async ({ harness }, testInfo) => {
+  const { page } = harness;
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await harnessReady(page);
+  await loadAll(page, 'transcript/edit-and-receipt');
+  await page.locator('[data-kind="divider"] button[aria-expanded]').first().click();
+  await expect(page.locator('[data-kind="receipt"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Read app.ts', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ran the unit tests', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('transcript-rows-1280x820.png'), animations: 'disabled' });
+  await testInfo.attach('Transcript tool rows', { path: testInfo.outputPath('transcript-rows-1280x820.png'), contentType: 'image/png' });
+  const edit = page.getByRole('button', { name: /^Edited.*app.ts.*\+2.*−1/ });
+  await edit.click();
+  await expect(page.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('transcript-inline-diff-1280x820.png'), animations: 'disabled' });
+  await testInfo.attach('Inline edit diff', { path: testInfo.outputPath('transcript-inline-diff-1280x820.png'), contentType: 'image/png' });
+  await loadAll(page, 'p4/p4-tool-summaries-thinking-edits');
+  const divider = page.locator('[data-kind="divider"] button[aria-expanded]').first();
+  if (await divider.getAttribute('aria-expanded') === 'false') await divider.click();
+  const create = page.getByRole('button', { name: /^Created.*notes.txt.*\+1.*−0/ });
+  await create.click();
+  await expect(page.locator('.transcript-diff-line[data-diff="add"]')).toContainText('Ready for review.');
+  await page.screenshot({ path: testInfo.outputPath('transcript-create-diff-1280x820.png'), animations: 'disabled' });
+  await testInfo.attach('Recorded create diff', { path: testInfo.outputPath('transcript-create-diff-1280x820.png'), contentType: 'image/png' });
+});

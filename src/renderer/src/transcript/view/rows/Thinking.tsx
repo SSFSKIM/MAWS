@@ -15,7 +15,7 @@ export function ThinkingRow({ row }: { row: Extract<Row, { kind: 'thinking' }> }
   const buffer = useTranscriptStore((state) => liveBuffer(state.entries[storeKey], row));
   const [open, toggle] = useDisclosure(row.id);
   const text = buffer ?? row.text;
-  const label = row.live ? <LiveThinkingLabel startedAt={row.at} /> : thinkingLabel(false, row.durationMs);
+  const label = row.live ? <LiveThinkingLabel startedAt={row.at} text={text} /> : thinkingLabel(false, row.durationMs);
   if (text.trim() === '') {
     return (
       <div className="transcript-thinking">

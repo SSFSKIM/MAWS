@@ -11,7 +11,7 @@ const rows = (events: SessionEvent[]) => rowsOf(withAllExpanded(applyEvents(crea
 afterEach(() => configureTime(null));
 
 describe('serializeRows', () => {
-  it('renders a turn as markdown: the prompt, the divider line, the work as a list, the answer verbatim, the receipt', () => {
+  it('renders a turn as markdown: the prompt, the divider line, the work as a list and the answer verbatim, without a receipt', () => {
     configureTime({ now: '2026-09-28T15:00:00.000Z', timeZone: 'UTC' });
     const b = builder();
     b.turn('u1', 'Fix the tests');
@@ -32,10 +32,9 @@ describe('serializeRows', () => {
       '**You**',
       'Fix the tests',
       '*Worked for 2m 14s · 4 tool calls · 1 denied*',
-      ['- Edited a.ts, read a.ts, ran `pnpm test`', '  - Thought', '    > Look first.', '  - Read /p/a.ts', '  - Ran `pnpm test` in 0s', '    ```', '    $ pnpm test', '    1 passed', '    ```', '  - Edited /p/a.ts +1 −1'].join('\n'),
+      ['- Edited 1 file, read 1 file, ran 1 command', '  - Thought', '    > Look first.', '  - Read a.ts', '  - Ran `pnpm test` in 0s', '    ```', '    $ pnpm test', '    1 passed', '    ```', '  - Edited /p/a.ts +1 −1'].join('\n'),
       '- Denied: `rm -rf x` · Denied by rule',
       'Done: **one** edit.\n\n```ts\nconst y = 1;\n```',
-      '**1 file changed · +1 −1**\n- /p/a.ts (+1 −1)',
     ].join('\n\n'));
   });
 

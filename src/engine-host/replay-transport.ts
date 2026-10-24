@@ -109,8 +109,10 @@ function surfaceKey(request: Frame): string {
 
 // A control that mutates nothing, so answering it unrecorded cannot change what the fixture replays next: a read, and
 // E1 M5: a `rewind_files` dry run (the transcript's file-change receipt asks one as it draws, `canUndo`).
-function isReplayRead(request: { subtype: string; dry_run?: unknown }): boolean {
-  return requestClassOf(request.subtype) === 'read' || (request.subtype === 'rewind_files' && request.dry_run === true);
+function isReplayRead(request: { subtype: string; dry_run?: unknown; max_thinking_tokens?: unknown; thinking_display?: unknown }): boolean {
+  // Startup visibility selection cannot change a recording's already-fixed thinking text. Never accept a budget mutation here.
+  return requestClassOf(request.subtype) === 'read' || (request.subtype === 'rewind_files' && request.dry_run === true)
+    || (request.subtype === 'set_max_thinking_tokens' && request.max_thinking_tokens === null && request.thinking_display === 'summarized');
 }
 
 const noop = (): void => undefined;

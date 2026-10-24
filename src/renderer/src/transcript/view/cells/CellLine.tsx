@@ -5,24 +5,24 @@
 import type { ReactNode } from 'react';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
+import { descriptionLabel } from '../../model/copy';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
-import { LiveThinkingLabel } from '../rows/ThinkingLabel';
+import { LiveThinkingCellLabel } from '../rows/ThinkingLabel';
 import { CellDetailView } from './CellDetail';
 
 const EDIT_COUNTS = / \+(\d+) −(\d+)$/;
 
-function Label({ cell }: { cell: Cell }) {
-  if (cell.summary && !cell.classification.denial) return <>{cell.summary.split(/\r?\n/, 1)[0]}</>;
+function Label({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
   // Bash's description is the agent-authored summary, not a command to reformat. Keep diagnostic denial labels.
   if (cell.detail.kind === 'shell' && !cell.classification.denial) {
     const description = cell.detail.description?.trim().split(/\r?\n/, 1)[0];
     const verb = { running: 'Running', done: 'Ran', error: 'Failed', stopped: 'Stopped', denied: 'Denied' }[cell.status];
-    return <>{description || `${verb} ${cell.toolName}`}</>;
+    return <>{description ? descriptionLabel(description, cell.status) : `${verb} ${cell.toolName}`}</>;
   }
   if (cell.toolName === 'Skill') return <>Ran /{cell.label.replace(/^Loaded (.*) skill$/, '$1').replace(/^\//, '')}</>;
-  if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingLabel startedAt={cell.startedAt} />; // W8
+  if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingCellLabel cell={cell} turnId={turnId} />; // W8
   const counts = cell.detail.kind === 'edit' ? EDIT_COUNTS.exec(cell.label) : null;
   if (!counts) return <CodeText text={cell.label} />;
   return (
@@ -45,7 +45,7 @@ export function CellLine({ cell, turnId, focusable = false, renderDetail, onTogg
     >
       <button type="button" className="transcript-cell-line" aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
         <span className="transcript-cell-label">
-          <Label cell={cell} />
+          <Label cell={cell} turnId={turnId} />
         </span>
         <Chevron />
       </button>

@@ -23,7 +23,7 @@ import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
-import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
+import { isEngineOrigin, originOf, runningTurn, type ReceiptUndo } from './reduce';
 import { closedByUnseenExit } from './reduce'; // DC9
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { previewHidesBody } from './rows'; // E7
@@ -575,13 +575,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null, messageTools
         if (rec) rec.safeguard = event.verdict;
         break;
       }
-      case 'tool.summary': {
-        // A batch summary belongs to its final named call, even when emitted after the final assistant answer.
-        const last = event.toolUseIds.at(-1);
-        const rec = last ? toolRecord(last) : undefined;
-        if (rec && event.summary.trim()) rec.summary = event.summary.trim();
-        break;
-      }
+      case 'tool.summary': break; // Code-mode rows retain their own facts, never a paid batch caption.
       case 'tool.progress': {
         const rec = toolRecord(event.toolUseId);
         if (rec) rec.elapsedSeconds = Math.max(rec.elapsedSeconds, event.elapsedSeconds);
@@ -856,7 +850,6 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null, messageTools
   const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
-  const files = changedFiles(cells, turn);
   const summary = summaryOf(turn, cells, subagents, model);
   const denials = summary.denials;
   const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError ? 'failed' : turn.ended ? 'completed' : 'stopped';
@@ -871,16 +864,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null, messageTools
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
     rows.push({
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && turn.closedCause !== null && { cause: turn.closedCause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
-      toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary,
+      toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
     });
   }
   rows.push(...(expanded ? allRows : allRows.filter(isPersistentRow))); // with no divider there is no work: every row is persistent
-  if (files.length > 0) {
-    rows.push({
-      id: rowId.receipt(turn.id), turnId: turn.id, at: context.lastAt, kind: 'receipt', files, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0),
-      ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
-    });
-  }
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 

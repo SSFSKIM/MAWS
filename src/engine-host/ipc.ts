@@ -508,7 +508,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     bounded(async () => {
       const { session, client } = ready(appSessionId);
       session.markUsed(); // C12
-      await controls.setMaxThinkingTokens(client, { max_thinking_tokens: maxThinkingTokens, display });
+      await controls.setMaxThinkingTokens(client, { max_thinking_tokens: maxThinkingTokens, thinking_display: display });
     }),
   );
   handle('session.applyFlagSettings', async ({ appSessionId, settings }) =>

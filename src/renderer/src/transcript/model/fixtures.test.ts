@@ -93,7 +93,7 @@ describe('synthetic journals', () => {
     expect(kinds.indexOf('boundary', kinds.indexOf('boundary') + 1)).toBeLessThan(kinds.lastIndexOf('user'));
   });
 
-  it('transcript/mockup-turn: Worked for {t} · 12 tool calls · 1 denied, the denied cell outside its group, three files in the receipt', () => {
+  it('transcript/mockup-turn: Worked for {t} · 12 tool calls · 1 denied, the denied cell outside its group, three files on the divider', () => {
     const rows = rowsFor(journal('mockup-turn'));
     const divider = ofKind(rows, 'divider')[0];
     expect(divider).toMatchObject({ state: 'completed', origin: 'human', toolCalls: 12, denied: 1, autoDenied: 0, firstDeniedCell: 'cell:toolu_synth_mock_7' });
@@ -102,12 +102,13 @@ describe('synthetic journals', () => {
     expect(denied).toMatchObject({ status: 'denied', label: 'Denied: `rm -rf node_modules/.vite` · Permission denied by rule: Bash(rm -rf:*) is denied in this project.' });
     expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual(['Read 2 files, searched for `setWidth`, searched for `src/layout/*.css`', 'Edited 2 files', 'Ran 4 commands']);
     expect(ofKind(rows, 'assistant_text').map((t) => t.phase)).toEqual(['commentary', 'commentary', 'answer']);
-    const receipt = ofKind(rows, 'receipt')[0];
-    expect(receipt.files.map((f) => f.path.split('/').at(-1))).toEqual(['useSidebarDrag.ts', 'store.ts', 'sidebar.css']);
-    expect(receipt).toMatchObject({ added: 4, removed: 2 });
+    const files = divider.files!;
+    expect(files.map((f) => f.path.split('/').at(-1))).toEqual(['useSidebarDrag.ts', 'store.ts', 'sidebar.css']);
+    expect(files.map(({ added, removed }) => [added, removed])).toEqual([[2, 1], [1, 1], [1, 0]]);
+    expect(rows.map((row) => row.kind)).not.toContain('receipt');
   });
 
-  it('transcript/edit-and-receipt: edit cells with hunks and the receipt with three files', () => {
+  it('transcript/edit-and-receipt: edit cells with hunks and the completed divider with three files', () => {
     const rows = rowsFor(journal('edit-and-receipt'));
     const cells = cellsOf(rows);
     const edits = cells.filter((c) => c.detail.kind === 'edit');
@@ -116,8 +117,10 @@ describe('synthetic journals', () => {
     const shell = cells.find((c) => c.detail.kind === 'shell')!;
     expect(shell.detail).toMatchObject({ kind: 'shell', command: 'pnpm test', exitCode: 0 });
     expect(shell.label).toMatch(/^Ran `pnpm test` in \d+s$/);
-    expect(ofKind(rows, 'receipt')[0]).toMatchObject({ added: 7, removed: 4 });
-    expect(ofKind(rows, 'receipt')[0].files).toHaveLength(3);
+    const divider = ofKind(rows, 'divider')[0];
+    expect(divider.state).toBe('completed');
+    expect(divider.files).toMatchObject([{ added: 1, removed: 1 }, { added: 3, removed: 3 }, { added: 3, removed: 0 }]);
+    expect(rows.map((row) => row.kind)).not.toContain('receipt');
     expect(ofKind(rows, 'assistant_text').at(-1)?.markdown).toContain('```ts');
   });
 
@@ -142,7 +145,7 @@ describe('synthetic journals', () => {
     const paths = ['derive', 'reduce', 'rows', 'keys', 'copy', 'time'].map((name) => `/tmp/maws-synth-exploration-and-web/src/model/${name}.ts`);
     expect(reads).toHaveLength(6);
     reads.forEach((read, index) => expect(read).toMatchObject({
-      id: `cell:toolu_synth_x_read${index + 1}`, toolUseId: `toolu_synth_x_read${index + 1}`, paths: [paths[index]], label: `Read ${paths[index]}`,
+      id: `cell:toolu_synth_x_read${index + 1}`, toolUseId: `toolu_synth_x_read${index + 1}`, paths: [paths[index]], label: `Read ${paths[index].split('/').at(-1)}`,
       detail: { kind: 'read', files: [{ path: paths[index], range: index === 1 ? [10, 49] : null }] },
     }));
     expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual([

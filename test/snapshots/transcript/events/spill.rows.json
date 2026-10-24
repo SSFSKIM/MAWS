@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": "2026-09-28T12:00:04.100Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:u-spill-1",
     "kind": "divider",

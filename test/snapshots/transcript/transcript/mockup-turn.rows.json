@@ -26,6 +26,29 @@
     "denied": 1,
     "endedAt": "2026-09-28T11:20:04.105Z",
     "expanded": true,
+    "files": [
+      {
+        "added": 2,
+        "cellId": "cell:toolu_synth_mock_5",
+        "change": "update",
+        "path": "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts",
+        "removed": 1
+      },
+      {
+        "added": 1,
+        "cellId": "cell:toolu_synth_mock_6",
+        "change": "update",
+        "path": "/tmp/maws-synth-mockup-turn/src/layout/store.ts",
+        "removed": 1
+      },
+      {
+        "added": 1,
+        "cellId": "cell:toolu_synth_mock_8",
+        "change": "update",
+        "path": "/tmp/maws-synth-mockup-turn/src/layout/sidebar.css",
+        "removed": 0
+      }
+    ],
     "firstDeniedCell": "cell:toolu_synth_mock_7",
     "id": "divider:turn:u-mockup-turn-002",
     "kind": "divider",
@@ -132,7 +155,7 @@
         "endedAt": "2026-09-28T11:20:00.333Z",
         "expanded": true,
         "id": "cell:toolu_synth_mock_1",
-        "label": "Read /tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts",
+        "label": "Read useSidebarDrag.ts",
         "paths": [
           "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts"
         ],
@@ -168,7 +191,7 @@
         "endedAt": "2026-09-28T11:20:00.619Z",
         "expanded": true,
         "id": "cell:toolu_synth_mock_2",
-        "label": "Read /tmp/maws-synth-mockup-turn/src/layout/store.ts",
+        "label": "Read store.ts",
         "paths": [
           "/tmp/maws-synth-mockup-turn/src/layout/store.ts"
         ],
@@ -637,40 +660,6 @@
     "messageUuid": "a-mockup-turn-179",
     "model": "claude-opus-5-5",
     "phase": "answer",
-    "turnId": "turn:u-mockup-turn-002"
-  },
-  {
-    "added": 4,
-    "at": "2026-09-28T11:20:04.105Z",
-    "canReapply": false,
-    "canUndo": false,
-    "files": [
-      {
-        "added": 2,
-        "cellId": "cell:toolu_synth_mock_5",
-        "change": "update",
-        "path": "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts",
-        "removed": 1
-      },
-      {
-        "added": 1,
-        "cellId": "cell:toolu_synth_mock_6",
-        "change": "update",
-        "path": "/tmp/maws-synth-mockup-turn/src/layout/store.ts",
-        "removed": 1
-      },
-      {
-        "added": 1,
-        "cellId": "cell:toolu_synth_mock_8",
-        "change": "update",
-        "path": "/tmp/maws-synth-mockup-turn/src/layout/sidebar.css",
-        "removed": 0
-      }
-    ],
-    "id": "receipt:turn:u-mockup-turn-002",
-    "kind": "receipt",
-    "removed": 2,
-    "state": "applied",
     "turnId": "turn:u-mockup-turn-002"
   },
   {
