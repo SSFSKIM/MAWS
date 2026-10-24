@@ -52,9 +52,9 @@ describe('settings tab writes one field per row', () => {
   it('has the eight sections, the index and its footer', () => {
     renderView();
     const index = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Browser', 'Artifacts']); // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
+    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts']); // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
     expect(index.textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
-    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Browser', 'Artifacts']) expect(screen.getByRole('region', { name })).toBeTruthy();
+    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts']) expect(screen.getByRole('region', { name })).toBeTruthy();
   });
 
   it('Engine: the binary, the config home, and the subagent model as one field', async () => {
@@ -149,6 +149,16 @@ describe('settings tab writes one field per row', () => {
     fireEvent.blur(font);
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ appearance: { monoFont: null } }));
     expect(within(row('Monospace font')).getByText('Name a Nerd Font to draw prompt glyphs in the terminal')).toBeTruthy();
+  });
+
+  it('Sessions: automatic archiving is opt-in and saves the chosen interval', async () => {
+    renderView();
+    const select = screen.getByRole('combobox', { name: 'Archive sessions inactive for' });
+    expect((select as HTMLSelectElement).value).toBe('never');
+    await userEvent.selectOptions(select, '14');
+    expect(settings().sessions.archiveInactiveDays).toBe(14);
+    await userEvent.selectOptions(select, 'never');
+    expect(settings().sessions.archiveInactiveDays).toBeNull();
   });
 
   it('Notifications: enabled, one kind at a time, sound and no retired near-limit control; held peer messages never notify', async () => {

@@ -1,3 +1,6 @@
+import type { ProjectId } from '@shared/graph/ids';
+import { InactiveArchive, scheduleInactiveArchive } from './sessions/inactive-archive';
+import { isActionable as archiveActionable, isOpen as archiveOpen } from '@shared/attention/kinds';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
@@ -438,6 +441,18 @@ void startWithProfileLock(app, () => {
     acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
   });
   registerSessionServiceHandlers(sessionService);
+  const inactiveArchive = new InactiveArchive({
+    index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
+    waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
+    archive: (id, eligible, stillEligible) => sessionService.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
+    activity: (id) => {
+      const digest = sessions.model.digest(id);
+      const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
+      return times.length ? Math.max(...times) : null;
+    },
+  });
+  registerMainHandler('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
+  shutdown.add('inactive archive', scheduleInactiveArchive(inactiveArchive, () => settings.state().settings.sessions.archiveInactiveDays, (changed) => settings.onChange(changed)));
   registerObservedFacts(hosts.dispatch); // P2-A (X17): the engine host's observed facts, beside session.digests
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end

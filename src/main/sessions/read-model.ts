@@ -112,6 +112,10 @@ export class SessionReadModel {
     return [...this.digestsById.values()];
   }
 
+  digest(appSessionId: AppSessionId): SessionDigest | null {
+    return this.digestsById.get(appSessionId) ?? null;
+  }
+
   engineStatus(appSessionId: AppSessionId): EngineSessionStatus | null {
     return this.statuses.get(appSessionId) ?? null;
   }

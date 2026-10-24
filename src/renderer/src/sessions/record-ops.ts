@@ -41,6 +41,7 @@ export async function archiveSession(appSessionId: AppSessionId, opts: { onlyIfI
     dropTabs(appSessionId);
     return { archived: true };
   }
+  if (outcome.status === 'skipped_ineligible') return { skipped: 'Session is no longer eligible for archive' };
   if (outcome.status === 'skipped_live') return { skipped: holderWords(outcome.holder) };
   return { error: `Held by ${holderWords(outcome.holder)}; archive it where it runs` };
 }

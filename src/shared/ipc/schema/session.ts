@@ -393,6 +393,7 @@ export const ArchiveOutcomeSchema = z.union([
   z.strictObject({ archived: z.literal(true) }),
   z.strictObject({ status: z.literal('held'), holder: SessionHolderSchema }),
   z.strictObject({ status: z.literal('skipped_live'), holder: SessionHolderSchema }),
+  z.strictObject({ status: z.literal('skipped_ineligible') }),
 ]);
 export type ArchiveOutcome = z.infer<typeof ArchiveOutcomeSchema>;
 
@@ -473,6 +474,7 @@ const c10Commands = {
     output: StartOutcomeSchema,
     owner: 'main',
   },
+  'session.archiveOlder': { input: z.strictObject({ projectId: ProjectIdSchema.nullable(), days: z.union([z.literal(7), z.literal(14), z.literal(30)]) }), output: z.strictObject({ archived: z.number().int(), skipped: z.number().int() }), owner: 'main' },
   'session.archive': { input: z.strictObject({ appSessionId: AppSessionIdSchema, onlyIfIdle: z.boolean().optional() }), output: ArchiveOutcomeSchema, owner: 'main' },
   // W7 (D-12 as amended 2026-10-01): "Take over here": ends the holder the owner confirmed (`claude stop` for a `--bg`
   // job, SIGTERM to an interactive holder's verified pid) and waits for the registry to clear; on `released` the

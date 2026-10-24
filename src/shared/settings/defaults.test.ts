@@ -87,6 +87,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(SETTINGS_DEFAULTS_V17).toEqual({
       version: 17, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17
       theme: 'light',
+      sessions: { archiveInactiveDays: null },
       keymap: {},
       notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
       engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8 */, launchProfile: { plugins: { off: [] }, outputStyle: 'user', hooks: 'user' } /* P4-A2: the user scope */ }, // W13: no pin

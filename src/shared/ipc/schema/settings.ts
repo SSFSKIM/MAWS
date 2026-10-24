@@ -132,6 +132,8 @@ export const ArtifactsSettingsSchema = z.strictObject({
 export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
 // P3-D end
 
+export const SessionSettingsSchema = z.strictObject({ archiveInactiveDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).nullable() });
+
 export const SettingsSchema = z.strictObject({
   version: z.literal(17), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers); P4-A2: version 17 (engine.launchProfile)
   theme: ThemeSettingSchema,
@@ -151,6 +153,7 @@ export const SettingsSchema = z.strictObject({
   browser: BrowserSettingsSchema, // E4a
   mods: ModsSettingsSchema, // P2-C (2026-10-09)
   artifacts: ArtifactsSettingsSchema, // P3-D (2026-10-13)
+  sessions: SessionSettingsSchema.default({ archiveInactiveDays: null }), // UX1; integration makes the combined v18 migration
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -175,6 +178,7 @@ export const SettingsPatchSchema = z.strictObject({
   // P3-D start (2026-10-13): field by field; the Spaces' record is replaced whole, so a Space's default is removed by
   // leaving it out
   artifacts: ArtifactsSettingsSchema.partial().optional(),
+  sessions: SessionSettingsSchema.partial().optional(),
   // P3-D end
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;

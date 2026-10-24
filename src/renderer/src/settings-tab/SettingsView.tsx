@@ -5,6 +5,7 @@
 // ~/.claude.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { TabRef } from '@shared/ipc/schema/layout';
+import { SessionsSection } from './SessionsSection';
 import { AppearanceSection } from './AppearanceSection';
 import { INDEX, KEYBOARD, SECTIONS } from './copy';
 import { EngineSection } from './EngineSection';
@@ -17,7 +18,7 @@ import { BrowserSection } from './BrowserSection'; // E4a
 import { ArtifactsSection } from './ArtifactsSection'; // P3-D
 
 export type SettingsSection = NonNullable<Extract<TabRef, { kind: 'settings' }>['section']>;
-const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications', 'browser', 'artifacts']; // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
+const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications', 'sessions', 'browser', 'artifacts']; // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
 const HINTS: Partial<Record<SettingsSection, string>> = { keyboard: KEYBOARD.hint }; // W9 (H4): no charter labels in the UI
 const headingId = (section: SettingsSection) => `settings-${section}`;
 
@@ -104,6 +105,7 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
               <Section id="notifications">
                 <NotificationsSection settings={settings} />
               </Section>
+              <Section id="sessions"><SessionsSection settings={settings} /></Section>
               {/* E4a */}
               <Section id="browser">
                 <BrowserSection settings={settings} />
