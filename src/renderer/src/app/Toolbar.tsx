@@ -56,6 +56,10 @@ export function toolbarTitle(
       return { title: 'Diagnostics', branch: null };
     case 'settings':
       return { title: 'Settings', branch: null };
+    case 'projects':
+      return { title: 'Projects', branch: null };
+    case 'customize':
+      return { title: 'Customize', branch: null };
     case 'artifacts': // P3-G
       return { title: 'Artifacts', branch: null };
     case 'artifact': // P3-L
