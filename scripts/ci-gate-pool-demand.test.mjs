@@ -120,7 +120,7 @@ test('the CLI reads scripts and env lists at the pushed sha, ignoring dirty file
   const changedScripts = JSON.parse(packageJson);
   changedScripts.scripts['e2e:document-app'] = 'scripts/e2e-build.sh harness && playwright test';
   put('package.json', JSON.stringify(changedScripts));
-  put('.github/workflows/gate.yml', workflow.replace(/^ {2}MAC_VM_E2E: .*$/m, '  MAC_VM_E2E: document-app widgets'));
+  put('.github/workflows/gate.yml', workflow.replace(/^ {2}MAC_VM_E2E: (?:>-\n(?: {4}.*\n)+|.*\n)/m, '  MAC_VM_E2E: document-app widgets\n'));
   git('add', '.');
   git('commit', '--quiet', '-m', 'target has one build variant');
   const target = git('rev-parse', 'HEAD');
