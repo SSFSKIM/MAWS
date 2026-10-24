@@ -143,10 +143,10 @@ describe('Needs you across projects', () => {
   it('shows every waiting session in wait order, with project, title and reason, unaffected by search or hidden projects', async () => {
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.name === 'MAWS' })) });
     render(<Sidebar />);
-    expect(buttons().map((b) => b.textContent)).toEqual([
-      'MAWSFix sidebar dragApproval needed',
-      'MAWSSidebar interaction passQuestion',
-      'codex_somersaultQuota reset recoveryPlan review',
+    expect(buttons().map((b) => b.getAttribute('aria-label'))).toEqual([
+      'MAWS · Fix sidebar drag · Approval needed',
+      'MAWS · Sidebar interaction pass · Question',
+      'codex_somersault · Quota reset recovery · Plan review',
     ]);
     expect(screen.queryByRole('button', { name: /Needs you/ })).toBeNull();
     expect(row('codex_somersault').getAttribute('aria-expanded')).toBe('false');
@@ -240,9 +240,9 @@ describe('Needs you across projects', () => {
     render(<Sidebar />);
     const id = idOf('Fix sidebar drag');
     act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'interrupted', '2026-10-03T10:00:00Z')] }));
-    expect(buttons().at(-1)?.textContent).toBe('MAWSFix sidebar dragInterrupted');
+    expect(buttons().at(-1)?.getAttribute('aria-label')).toBe('MAWS · Fix sidebar drag · Interrupted');
     act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'error', '2026-09-01T10:00:00Z')] }));
-    expect(buttons()[0].textContent).toBe('MAWSFix sidebar dragError');
+    expect(buttons()[0].getAttribute('aria-label')).toBe('MAWS · Fix sidebar drag · Error');
     act(() => useSessions.getState().applyChanged({ record: { ...useSessions.getState().records.get(id)!, archived: true }, cause: 'update', revision: useSessions.getState().revision + 1 }));
     expect(buttons()).toHaveLength(2);
     act(() => {
@@ -398,7 +398,7 @@ describe('an expanded project', () => {
     expand('proj-maws', 'proj-codex-somersault', 'proj-claude-usage-menubar', 'other');
     render(<Sidebar />);
     expect(screen.getAllByLabelText('Unread').map((dot) => dot.closest('[data-kind="session"]')!.getAttribute('aria-label')).sort()).toEqual(['Fix sidebar drag', 'Quota reset recovery', 'Terminal workflow notes']);
-    const glyph = (title: string) => within(row(title)).getAllByRole('img')[0].getAttribute('aria-label'); // the glyph leads the row
+    const glyph = (title: string) => within(row(title)).getAllByRole('img').at(-1)!.getAttribute('aria-label'); // status sits beside the age
     expect(glyph('Quota reset recovery')).toBe('Plan review');
     expect(glyph('Trace stream reconnects')).toBe('Done');
     expect(glyph('Somersault terminal run')).toBe('Live in terminal');
@@ -411,7 +411,7 @@ describe('an expanded project', () => {
     render(<Sidebar />);
     const charter = row('Charter + research');
     expect(within(charter).queryByText('Running bun test')).toBeNull();
-    expect(charter.textContent).toBe(`●Charter + research${REL.now}`);
+    expect(charter.textContent).toBe(`Charter + research●${REL.now}`);
     expect(within(row('Workstation north star')).getByRole('img', { name: 'Pinned' })).toBeTruthy();
     expect(within(charter).queryByRole('img', { name: 'Pinned' })).toBeNull();
     expect(within(row('Fix sidebar drag')).getByRole('img', { name: 'Unread' })).toBeTruthy();
@@ -434,8 +434,8 @@ describe('an expanded project', () => {
     render(<Sidebar />);
     expect(sessionRows(row('MAWS'))).toHaveLength(4);
     expect(within(row('MAWS')).getAllByRole('group')).toHaveLength(1); // the project's own: no Main or worktree groups
-    expect(within(row('Fix sidebar drag')).getByTestId('row-branch').textContent).toBe('⎇ worktree-accept-one');
-    expect(within(row('Charter + research')).queryByTestId('row-branch')).toBeNull(); // W9 (H2): no branch recorded, none guessed
+    expect(within(row('Fix sidebar drag')).getByTestId('row-branch').textContent).toBe('⎇');
+    expect(within(row('Charter + research')).getByTestId('row-branch').textContent).toBe('⎇'); // A worktree is marked even when its branch is unknown
     expect(within(row('Sidebar interaction pass')).queryByTestId('row-branch')).toBeNull();
     expect(fake.invoked('git.worktree.list')).toEqual([]);
   });
@@ -462,19 +462,18 @@ describe('an expanded project', () => {
     expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true, true]);
   });
 
-  it('a session row’s hover actions pin, and archive stays disabled until C10', async () => {
+  it('the hover overflow offers the same actions without opening the session', async () => {
     const user = userEvent.setup();
-    const pin = vi.fn();
-    offs.push(registerSessionAction('pin', pin));
+    const rename = vi.fn();
+    offs.push(registerSessionAction('rename', rename));
     expand('proj-maws');
     render(<Sidebar />);
-    const charter = row('Charter + research');
-    await user.click(within(charter).getByRole('button', { name: 'Pin Charter + research' }));
-    expect(pin).toHaveBeenCalledWith(idOf('Charter + research'));
-    expect(activeTab(useLayout.getState().main)).toBeNull(); // the action does not open the row
-    const archive = within(charter).getByRole('button', { name: 'Archive Charter + research' }) as HTMLButtonElement;
-    expect(archive.disabled).toBe(true);
-    expect(archive.title).toBe('Not available here');
+    await user.click(within(row('Charter + research')).getByRole('button', { name: 'Actions for Charter + research' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Archive' }).hasAttribute('data-disabled')).toBe(true);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Rename…' }));
+    expect(rename).toHaveBeenCalledWith(idOf('Charter + research'));
+    expect(activeTab(useLayout.getState().main)).toBeNull();
   });
 
   it('a session row carries its id for a drag to a tab strip', () => {

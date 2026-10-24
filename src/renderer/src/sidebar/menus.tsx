@@ -2,7 +2,7 @@
 // items follow the row under the pointer (or the focused row, for the keyboard's context-menu key). Actions another
 // child answers render disabled until its handler registers. A foreign-live session offers only the opens (D-12); I2:
 // Open replaces the focused pane's session, Open in new tab keeps it.
-import { ContextMenu } from 'radix-ui';
+import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -28,11 +28,12 @@ export function menuTargetOf(element: Element | null): MenuTarget | null {
 const ITEM =
   'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
-function Item({ enabled, onSelect, children }: { enabled: boolean; onSelect(): void; children: ReactNode }) {
+function Item({ enabled, onSelect, children, dropdown = false }: { dropdown?: boolean; enabled: boolean; onSelect(): void; children: ReactNode }) {
+  const Component = dropdown ? DropdownMenu.Item : ContextMenu.Item;
   return (
-    <ContextMenu.Item disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : 'Not available here'} className={ITEM}>
+    <Component disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : 'Not available here'} className={ITEM}>
       {children}
-    </ContextMenu.Item>
+    </Component>
   );
 }
 
@@ -52,17 +53,17 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
   );
 }
 
-function SessionItems({ appSessionId }: { appSessionId: AppSessionId }) {
+function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   if (!record) return null;
-  return sessionActionsFor(record).map((id) => <SessionItem key={id} id={id} record={record} />);
+  return sessionActionsFor(record).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />);
 }
 
-function SessionItem({ id, record }: { id: SessionActionId; record: SessionRecord }) {
+function SessionItem({ id, record, dropdown }: { id: SessionActionId; record: SessionRecord; dropdown?: boolean }) {
   const enabled = useSessionActionEnabled(id);
   const label = id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id];
   return (
-    <Item enabled={enabled} onSelect={() => runSessionAction(id, record.appId)}>
+    <Item dropdown={dropdown} enabled={enabled} onSelect={() => runSessionAction(id, record.appId)}>
       {label}
     </Item>
   );
@@ -114,4 +115,20 @@ async function markAllRead(records: SessionRecord[]): Promise<void> {
       if (!result.ok) console.error('[sidebar] session.update (mark read) failed', result.error);
     }),
   );
+}
+
+// The same action list as the context menu, without sacrificing title width at rest.
+export function SessionOverflow({ appSessionId, title }: { appSessionId: AppSessionId; title: string }) {
+  return <DropdownMenu.Root modal={false}>
+    <DropdownMenu.Trigger asChild>
+      <button type="button" tabIndex={-1} aria-label={`Actions for ${title}`} onClick={(e) => e.stopPropagation()}
+        className="hidden size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent group-hover/session:inline-flex group-focus-within/session:inline-flex hover:bg-bg-active focus-visible:outline-2 data-[state=open]:inline-flex">
+        <svg viewBox="0 0 16 16" aria-hidden className="size-[13px] fill-current"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg>
+      </button>
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={4} onClick={(e) => e.stopPropagation()}
+      className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+      <SessionItems appSessionId={appSessionId} dropdown />
+    </DropdownMenu.Content></DropdownMenu.Portal>
+  </DropdownMenu.Root>;
 }

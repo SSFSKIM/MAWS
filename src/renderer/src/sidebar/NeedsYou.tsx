@@ -77,11 +77,11 @@ export function NeedsYou({ rows, selected, onEmptyFocus }: { rows: NeedsYouRow[]
                   onKeyDown={(event) => onKeyDown(event, index)}
                   onClick={(event) => open(event.metaKey ? { how: 'tab' } : {})}
                   onAuxClick={(event) => event.button === 1 && open({ how: 'tab' })}
-                  className={`flex w-full cursor-default flex-col rounded-sm px-[9px] py-1.5 text-left outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected === row.appSessionId ? 'bg-bg-active' : ''}`}
+                  className={`flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm px-[9px] text-left outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected === row.appSessionId ? 'bg-bg-active' : ''}`}
                 >
-                  <span className="w-full truncate text-ui-sm text-fg-muted">{project}</span>
-                  <span className="w-full truncate text-ui text-fg">{title}</span>
-                  <span className="w-full truncate text-ui-sm text-fg-muted">{reason}</span>
+                  <span aria-hidden className="shrink-0 text-warning">◐</span>
+                  <span className="min-w-0 flex-1 truncate text-ui text-fg">{title}</span>
+                  <span className="max-w-[30%] truncate text-ui-sm text-fg-muted">{project}</span>
                 </button>
               </SessionHoverCard>
             </li>
