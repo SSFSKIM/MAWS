@@ -1066,12 +1066,13 @@ describe('the activation table and the keys', () => {
   it('the Add comment button sits at the selection head’s line while text is selected and the editor focused (C1)', async () => {
     const m = await mount(content());
     act(() => m.editor().view.dom.focus());
-    expect(screen.queryByRole('button', { name: 'Add comment' })).toBeNull();
+    expect(within(margin()!).queryByRole('button', { name: 'Add comment' })).toBeNull();
     vi.spyOn(m.editor().view, 'coordsAtPos').mockReturnValue({ top: 250, bottom: 270, left: 100, right: 100 });
     act(() => void select(m.editor(), 'track the budget'));
-    const add = screen.getByRole('button', { name: 'Add comment' });
+    const add = within(margin()!).getByRole('button', { name: 'Add comment' });
     expect(topOf(add)).toBe(250 - scene.columnTop);
     fireEvent.click(add);
+    expect(document.activeElement).toBe(m.editor().view.dom);
     expect(m.opened).toHaveLength(1);
     expect(m.opened[0]!.quote).toBe('track the budget');
   });
