@@ -7,7 +7,7 @@ import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
 import { activeTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
-import { gitScopeFiles, parseRef, receiptOf, turnScopeFiles, type ReviewFile, type ReviewScope } from '../../tools/code/review/review-model';
+import { gitScopeFiles, parseRef, dividerOf, turnScopeFiles, type ReviewFile, type ReviewScope } from '../../tools/code/review/review-model';
 import { diffOf, fileDiffOf, turnKeyOf, useReview, type DiffTarget } from '../../tools/code/review/review-store';
 import type { ReviewState } from '../../tools/code/review/ReviewTool';
 import { useViewer } from '../../tools/code/viewer/viewer-store';
@@ -88,7 +88,7 @@ function filesOf(target: ReviewTarget, scope: ReviewScope): { files: ReviewFile[
     const key = turnKeyOf(entries, target.appSessionId, target.turnId);
     if (key === null) return null;
     const activity = useTranscriptStore.getState().activity(key).find((a) => a.turnId === target.turnId) ?? null;
-    return { files: turnScopeFiles(receiptOf(entries[key].rows, target.turnId)?.files ?? [], activity), diff: null };
+    return { files: turnScopeFiles(dividerOf(entries[key].rows, target.turnId)?.files ?? [], activity), diff: null };
   }
   const status = useGit.getState().entries.get(target.directory)?.status ?? null;
   if (!status) return null;
@@ -227,13 +227,8 @@ export const codeProbes: CodeHarnessApi = {
     const tab = activeTab(useLayout.getState().main);
     if (tab?.kind === 'file') useViewer.getState().toggleSource(tab.id);
   },
-  async clickReceiptReview(path) {
-    const selector = path ? `.transcript-receipt-file[data-path="${CSS.escape(path)}"]` : '.transcript-receipt-review';
-    const button = await until(() => document.querySelector<HTMLElement>(`[data-code-harness-transcript] ${selector}`), path ? `receipt row ${path}` : 'Review changes');
-    button.click();
-  },
   transcriptKey,
   storeKeys: () => Object.keys(useTranscriptStore.getState().entries),
-  receiptTurns: (key) => (useTranscriptStore.getState().entries[key]?.rows ?? []).flatMap((row) => (row.kind === 'receipt' && row.turnId ? [row.turnId] : [])),
+  changedTurns: (key) => (useTranscriptStore.getState().entries[key]?.rows ?? []).flatMap((row) => (row.kind === 'divider' && row.files?.length && row.turnId ? [row.turnId] : [])),
   openTab: (target) => useLayout.getState().openTab(target),
 };

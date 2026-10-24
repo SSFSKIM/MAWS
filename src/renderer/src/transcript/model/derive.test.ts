@@ -372,7 +372,7 @@ describe('divider changed files aggregate successful edits only', () => {
     b.toolUse('t2', 'Edit', { file_path: '/p/b.ts', old_string: 'x', new_string: 'y' });
     b.result('t2', 'ok');
     const list = rows(b.events);
-    expect(find(list, 'divider').files?.map((f) => f.path)).toEqual(['/p/b.ts']);
+    expect(list.filter((row) => row.kind === 'divider').map((divider) => divider.files?.map((file) => file.path))).toEqual([[], ['/p/b.ts']]);
   });
 });
 

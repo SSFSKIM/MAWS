@@ -111,7 +111,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
       sdkMcpServers: ['maws'], // E1
     });
     expect(journal.rows[3]!.frame).toEqual({ event: 'initialize', current_permission_mode: 'auto', session_state: 'idle', hooks_applied: null, workspace_trust_recorded: null });
-    expect(journal.rows[6]!.frame).toEqual({ event: 'status_check', baseUrl: RELAY_URL, autoModeServer: 'enabled', verified: 'routed' });
+    expect(journal.rows[8]!.frame).toEqual({ event: 'status_check', baseUrl: RELAY_URL, autoModeServer: 'enabled', verified: 'routed' });
     const status = EngineSessionStatusSchema.parse(session.status());
     expect(status).toMatchObject({
       process: 'ready', engineSessionId: '33333333-3333-4333-8333-333333333333', pid: 4242, permissionMode: { requested: 'auto', effective: 'auto', refusal: null },

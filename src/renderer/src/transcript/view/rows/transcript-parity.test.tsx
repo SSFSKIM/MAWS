@@ -53,7 +53,7 @@ it('restores only after a dry run and a confirmation naming the engine’s files
   await screen.findByRole('dialog');
   expect(screen.getByRole('dialog').textContent).toContain('/p/later-turn');
   expect(rewind.undo).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Restore files', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Restore files' }));
   await vi.waitFor(() => expect(rewind.undo).toHaveBeenCalledOnce());
 });
 

@@ -553,15 +553,15 @@ test('an answered question reads as one compact receipt that stays in view when 
 // W8 (T1): a streaming thinking block's label in the CLI's words (tier, effort, time) and colour (the warning colour
 // from 20 s), under Codex's shimmer, static under reduced motion. With MAWS_W8_SHOTS=1 it also writes the screenshots
 // the wave hands back (docs/doperpowers/plans/shots/w8-thinking-*.png), in both themes.
-test('a streaming thinking block reads the CLI’s tier, effort and time under the shimmer, warm from 20 s', async ({ harness }) => {
+test('a streaming reasoning summary stays under the shimmer, warm from 20 s', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.setEffort('xhigh'));
   const cases = [
-    { fixture: 'events/thinking-live', shot: 'deep', text: /^Deep in thought with xhigh effort · (5\ds|1m \d\ds)$/, warm: true }, // 50 s in at load
-    { fixture: 'events/thinking-live-group', shot: 'still', text: /^(Still thinking|Thinking more) with xhigh effort · [12]\ds$/, warm: false }, // 12 s in
+    { fixture: 'events/thinking-live', shot: 'deep', text: 'Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.', warm: true }, // 50 s in at load
+    { fixture: 'events/thinking-live-group', shot: 'still', text: 'It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.', warm: false }, // 12 s in
   ];
   for (const { fixture, shot, text, warm } of cases) {
     await loadAll(page, fixture);
@@ -1462,7 +1462,7 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await expect(page.getByRole('button', { name: 'Ran the unit tests', exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('transcript-rows-1280x820.png'), animations: 'disabled' });
   await testInfo.attach('Transcript tool rows', { path: testInfo.outputPath('transcript-rows-1280x820.png'), contentType: 'image/png' });
-  const edit = page.getByRole('button', { name: /^Edited.*app.ts.*\+2.*−1/ });
+  const edit = page.getByRole('button', { name: /^Edited.*app.ts.*\+1.*−1/ });
   await edit.click();
   await expect(page.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('transcript-inline-diff-1280x820.png'), animations: 'disabled' });

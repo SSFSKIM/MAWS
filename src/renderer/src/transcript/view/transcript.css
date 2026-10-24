@@ -277,6 +277,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell { flex: none; scroll-margin: 20px; outline: none; }
 .transcript-cell-line { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 26px; color: var(--fg-muted); font-size: var(--text-ui-sm); text-align: left; }
 .transcript-cell-line:hover { color: var(--fg); }
+.transcript-cell-line > .transcript-counts { flex: none; }
 .transcript-cell-line > .transcript-chevron { margin-left: auto; opacity: 0; }
 .transcript-cell-line:hover > .transcript-chevron, .transcript-cell-line:focus-visible > .transcript-chevron, .transcript-cell-line[aria-expanded="true"] > .transcript-chevron { opacity: 1; }
 .transcript-cell-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

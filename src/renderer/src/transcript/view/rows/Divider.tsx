@@ -150,7 +150,7 @@ const tokensOf = (usage: DividerRowData['summary']['usage']) =>
   usage === null ? null : usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
 
 function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: number }) {
-  const { storeKey, rewind } = useTranscriptContext();
+  const { storeKey, rewind, actions } = useTranscriptContext();
   const [files, setFiles] = useState<string[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,6 +201,7 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
       <Popover.Portal>
         <Popover.Content className="transcript-popover" side="bottom" align="start" sideOffset={6}>
           <SummaryText row={row} durationMs={durationMs} />
+          {(row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" onClick={() => { actions.reviewChanges(row.turnId!); setMenuOpen(false); }}>Review changes</button>}
           {rewind && (row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" disabled={working || busy || restoreState === 'undone'} onClick={() => void preview()}>
             {restoreState === 'undone' ? 'Files restored' : checking ? 'Checking files…' : 'Restore files to before this turn'}
           </button>}

@@ -50,9 +50,8 @@ export interface CodeHarnessApi {
   selectEntry(path: string): void;
   viewer(): CodeHarnessViewer | null; // the focused pane's file tab
   toggleSource(): void;
-  clickReceiptReview(path?: string): Promise<void>; // the loaded receipt's "Review changes", or one of its file rows
   transcriptKey(): string | null; // the store key the left column's Transcript renders over: the loaded HarnessSession's `harness:<n>`
   storeKeys(): string[]; // the transcript store's entry keys
-  receiptTurns(key: string): string[]; // the turn ids of the receipt rows in `entries[key].rows`
+  changedTurns(key: string): string[]; // turn ids with changed files in divider metadata
   openTab(target: TabTarget): void; // C5's openTab, for a diff or file tab in the left column
 }

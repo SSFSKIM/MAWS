@@ -94,35 +94,32 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
   test.use({ mawsEnv: HARNESS_ENV });
   test.beforeAll(() => mkdirSync(DIR_A, { recursive: true }));
 
-  test("Review changes from the receipt opens Last turn on the turn's files", async ({ maws }) => {
+  test("Review Last turn shows the turn's files without a receipt card", async ({ maws }) => {
     const h = await Harness.open(maws);
     await h.panel('loadTranscript', 'A', 'transcript/edit-and-receipt');
-    const receipt = h.page.locator('[data-code-harness-transcript] .transcript-receipt');
-    await expect(receipt).toBeVisible();
-    // The receipt's own counts, file by file (C6's row: the path as recorded in `data-path`, then `+A −R`).
-    const receiptFiles = await receipt.locator('.transcript-receipt-file').evaluateAll((rows) =>
-      rows.map((row) => {
-        const counts = /\+(\d+) −(\d+)/.exec(row.querySelector('.transcript-counts')?.textContent ?? '');
-        return { path: (row as HTMLElement).dataset.path!, added: Number(counts?.[1]), removed: Number(counts?.[2]) };
-      }),
-    );
-    expect(receiptFiles).toHaveLength(3);
-
-    await h.code('clickReceiptReview');
+    await expect(h.page.locator('[data-code-harness-transcript] .transcript-receipt')).toHaveCount(0);
+    const root = '/tmp/maws-synth-edit-and-receipt/src';
+    const turnFiles = [
+      { path: `${root}/app.ts`, added: 1, removed: 1 },
+      { path: `${root}/store.ts`, added: 3, removed: 3 },
+      { path: `${root}/util/rows.ts`, added: 3, removed: 0 },
+    ];
+    await h.page.locator('[data-code-harness-transcript]').getByRole('button', { name: 'Turn summary' }).click();
+    await h.page.getByRole('button', { name: 'Review changes', exact: true }).click();
     await expect(h.region.locator('[data-chip="turn"]')).toHaveAttribute('aria-pressed', 'true');
     await expect(h.region.locator('[data-chip="turn"]')).toHaveText('Last turn');
     await expect.poll(async () => (await h.review('panel'))?.files.length).toBe(3);
     const collapsed = (await h.review('panel'))!;
     expect(collapsed.scope).toBe('turn');
-    expect(collapsed.files.map(({ path, added, removed }) => ({ path, added, removed }))).toEqual(receiptFiles);
-    const sum = receiptFiles.reduce((a, f) => ({ added: a.added + f.added, removed: a.removed + f.removed }), { added: 0, removed: 0 });
+    expect(collapsed.files.map(({ path, added, removed }) => ({ path, added, removed }))).toEqual(turnFiles);
+    const sum = turnFiles.reduce((a, f) => ({ added: a.added + f.added, removed: a.removed + f.removed }), { added: 0, removed: 0 });
     expect(collapsed.header).toBe(`3 files changed · +${sum.added} −${sum.removed} · Last turn`);
     expect(collapsed.hunks?.length, 'the selected file has hunks').toBeGreaterThan(0);
 
     // Every file's hunks, the turn collapsed (a closed turn's default), then expanded: identical.
     const everyFile = async () => {
       const out: Record<string, string[] | null> = {};
-      for (const file of receiptFiles) {
+      for (const file of turnFiles) {
         await h.code('selectFile', file.path, 'panel');
         await expect.poll(async () => (await h.review('panel'))?.selected).toBe(file.path);
         out[file.path] = (await h.review('panel'))!.hunks;
@@ -142,55 +139,26 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     const keys = await h.code('storeKeys');
     expect(keys).toEqual(expect.arrayContaining(['A', key!]));
     expect(keys.filter((k) => k.startsWith('source:'))).toEqual([]);
-    expect(await h.code('receiptTurns', 'A')).toContain(collapsed.turnId);
-    expect(await h.code('receiptTurns', key!)).toEqual(await h.code('receiptTurns', 'A'));
+    expect(await h.code('changedTurns', 'A')).toContain(collapsed.turnId);
+    expect(await h.code('changedTurns', key!)).toEqual(await h.code('changedTurns', 'A'));
 
-    // A file row of the receipt opens Review with that file selected.
-    await h.code('clickReceiptReview', receiptFiles[1].path);
-    await expect.poll(async () => (await h.review('panel'))?.selected).toBe(receiptFiles[1].path);
+    await h.code('selectFile', turnFiles[1].path, 'panel');
+    await expect.poll(async () => (await h.review('panel'))?.selected).toBe(turnFiles[1].path);
     h.expectQuietConsole();
   });
 
-  // W4 (B5): Review from the receipt opens a hidden right panel; a file row reads its path relative to the session's
-  // directory, shows the turn's hunks for that file above it after 800 ms of hover (the turn folded),
-  // and a click on the popover opens Review at that file; ⌘-click opens the file itself.
-  test('the receipt opens a hidden panel, shows a file’s hunks on hover, and ⌘-click opens the file', async ({ maws }) => {
+  test('an inline edit discloses its diff and opens the changed file', async ({ maws }) => {
     const h = await Harness.open(maws);
     await h.panel('loadTranscript', 'A', 'transcript/edit-and-receipt');
-    const receipt = h.page.locator('[data-code-harness-transcript] .transcript-receipt');
-    await expect(receipt).toBeVisible();
-    const root = '/tmp/maws-synth-edit-and-receipt'; // the fixture's cwd
-    expect(await receipt.locator('.transcript-receipt-path').allTextContents()).toEqual(['src/app.ts', 'src/store.ts', 'src/util/rows.ts']);
-    const inert = () => h.region.evaluate((region) => region.hasAttribute('inert'));
-
-    await hideSurfaces(h.page);
-    expect(await inert(), 'the panel is hidden').toBe(true);
-    await h.code('clickReceiptReview');
-    await expect.poll(inert, { message: 'Review changes opens the hidden panel' }).toBe(false);
-    await expect.poll(async () => (await h.review('panel'))?.scope).toBe('turn');
-
-    await hideSurfaces(h.page);
-    const row = receipt.locator(`.transcript-receipt-file[data-path="${root}/src/app.ts"]`);
-    const hover = h.page.locator(`[data-receipt-hover="${root}/src/app.ts"]`);
-    await row.hover();
-    const hovered = Date.now();
-    await expect(hover).toBeVisible();
-    expect(Date.now() - hovered, 'not before 800 ms').toBeGreaterThanOrEqual(700);
-    const [rowBox, hoverBox] = [(await row.boundingBox())!, (await hover.boundingBox())!];
-    expect(hoverBox.y + hoverBox.height, 'above the row').toBeLessThanOrEqual(rowBox.y + 1);
-    expect(hoverBox.height, 'at most 420 px tall').toBeLessThanOrEqual(420);
-    expect(Math.round(hoverBox.width), 'the row’s width less 64 px').toBe(Math.round(rowBox.width) - 64);
-    await expect(hover.locator('.transcript-receipt-hover-header')).toContainText('src/app.ts');
-    await expect(hover.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible(); // the turn's edit of app.ts (its Read adds none)
-    await expect(hover.locator('.transcript-diff-line[data-diff="del"]').first()).toBeVisible();
-    await hover.click();
-    await expect.poll(inert).toBe(false);
-    await expect.poll(async () => (await h.review('panel'))?.selected).toBe(`${root}/src/app.ts`);
-    await h.page.mouse.move(0, 0);
-    await expect(hover).toHaveCount(0);
-
-    await row.click({ modifiers: ['Meta'] });
-    await expect(h.page.locator(`[data-file-viewer][data-path="${root}/src/app.ts"]`)).toBeVisible();
+    await h.transcript('A').expandAll();
+    const transcript = h.page.locator('[data-code-harness-transcript]');
+    await expect(transcript.locator('.transcript-receipt')).toHaveCount(0);
+    const cell = transcript.locator('.transcript-cell').filter({ has: h.page.getByRole('button', { name: /^Edited.*app.ts.*\+1.*−1/ }) });
+    await cell.locator('.transcript-cell-line').click();
+    await expect(cell.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible();
+    await expect(cell.locator('.transcript-diff-line[data-diff="del"]').first()).toBeVisible();
+    await cell.getByRole('button', { name: 'app.ts', exact: true }).click();
+    await expect(h.page.locator('[data-file-viewer][data-path="/tmp/maws-synth-edit-and-receipt/src/app.ts"]')).toBeVisible();
     h.expectQuietConsole();
   });
 
@@ -314,9 +282,9 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
             },
           ],
           [
-            "Last turn over the receipt's hunks",
+            "Last turn over the tool rows’ hunks",
             async () => {
-              await h.code('clickReceiptReview');
+              await h.region.locator('[data-chip="turn"]').click();
               await expect.poll(async () => (await h.review('panel'))?.scope).toBe('turn');
               await expect(h.region.locator('[data-review-body] tr[data-state="diff"]').first()).toBeVisible();
             },

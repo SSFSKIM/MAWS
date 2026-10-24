@@ -23,17 +23,14 @@ function Label({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
   }
   if (cell.toolName === 'Skill') return <>Ran /{cell.label.replace(/^Loaded (.*) skill$/, '$1').replace(/^\//, '')}</>;
   if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingCellLabel cell={cell} turnId={turnId} />; // W8
-  const counts = cell.detail.kind === 'edit' ? EDIT_COUNTS.exec(cell.label) : null;
+  const counts = cell.detail.kind === 'edit' && !cell.classification.denial ? EDIT_COUNTS.exec(cell.label) : null;
   if (!counts) return <CodeText text={cell.label} />;
-  return (
-    <>
-      <CodeText text={cell.label.slice(0, counts.index)} /> <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />
-    </>
-  );
+  return <CodeText text={cell.label.slice(0, counts.index)} />;
 }
 
 export function CellLine({ cell, turnId, focusable = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
   const { storeKey } = useTranscriptContext();
+  const counts = cell.detail.kind === 'edit' && !cell.classification.denial ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
       className="transcript-cell"
@@ -47,6 +44,7 @@ export function CellLine({ cell, turnId, focusable = false, renderDetail, onTogg
         <span className="transcript-cell-label">
           <Label cell={cell} turnId={turnId} />
         </span>
+        {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}
         <Chevron />
       </button>
       <DisclosureBody open={cell.expanded}>
