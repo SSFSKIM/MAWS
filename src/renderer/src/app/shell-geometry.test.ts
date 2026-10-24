@@ -3,6 +3,7 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { shellGeometry } from './shell-geometry';
 import { shellGeometryOf } from './shell-view';
 import { useLayout } from '../stores/layout';
+import { openTab } from '../stores/layout-model';
 import { A, mainShowing, ref, resetPanelStores } from '../test-support/panel';
 
 const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 240 } };
@@ -34,6 +35,21 @@ describe('the optional surface geometry', () => {
     for (const tool of ['review', 'files', 'browser']) {
       const id = `${tool}:aaaaaaaa`;
       expect(shellGeometryOf({ ...state, panelBySession: new Map([[A, { tabs: [ref(id)], activeTabId: id }]]) }, 1440).panel).toBe(720);
+    }
+  });
+  it('keeps Projects and Customize on the same optional narrow/wide surface rules as other tabs', () => {
+    for (const target of [{ kind: 'projects' }, { kind: 'customize', section: 'plugins' }] as const) {
+      resetPanelStores();
+      const main = openTab(mainShowing(A), target);
+      useLayout.setState({ main });
+      const state = useLayout.getState();
+      expect(shellGeometryOf(state, 1280)).toMatchObject({ sidebar: 240, panel: 0 });
+      for (const [tool, width] of [['terminal', 420], ['browser', 624]] as const) {
+        const id = `${tool}:aaaaaaaa`;
+        const withSurface = { ...state, panelBySession: new Map([[A, { tabs: [ref(id)], activeTabId: id }]]) };
+        expect(shellGeometryOf(withSurface, 1280).panel).toBe(width);
+        expect(shellGeometryOf(withSurface, 900)).toMatchObject({ sidebar: 0, sidebarAside: true });
+      }
     }
   });
   it('honors a resized narrow surface up to the main floor and restores its remembered width when room returns', () => {

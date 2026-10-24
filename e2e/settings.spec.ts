@@ -5,10 +5,9 @@
 // relaunch over the same profile. The monospace-font case needs the harness's `#probe` page (`pnpm e2e:settings` builds
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
-import { mainTab } from './support/shell';
+import { mainTab, openAppDestination } from './support/shell';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
-import { LAYOUT_DEFAULTS } from '../src/shared/ipc/schema/layout';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -487,7 +486,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
   const cli = writePluginCliStub(userData, { marketplaces: [{ name: 'harbor-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'editorial-tools@harbor-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
   try {
     const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin }, prepare: ({ claudeConfigDir }) => {
-      writeFileSync(join(userData, 'layout.json'), JSON.stringify({ regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 240 }, panel: { ...LAYOUT_DEFAULTS.regions.panel, collapsed: true } } }));
+      // UX2-L defaults to a 240px sidebar and no surface: do not hide a reserved panel by fixture.
       mkdirSync(join(claudeConfigDir, 'skills', 'proofread'), { recursive: true });
       writeFileSync(join(claudeConfigDir, 'skills', 'proofread', 'SKILL.md'), '---\nname: proofread\ndescription: Check wording, consistency and citations.\n---\n# Proofread\n');
       writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ mcpServers: { notion: { type: 'http', url: 'https://example.invalid/notion' } } }));
@@ -496,10 +495,18 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
       const { page, app } = maws;
       const added = await page.evaluate(async (directory) => window.maws.invoke('session.projects.add', { directory }), directory);
       expect(added.ok).toBe(true);
-      await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Customize', exact: true }).click();
+      await openAppDestination(page, 'Customize');
       await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
       await expect(page.locator('[data-plugins-section="my-items"]')).toBeVisible();
-      const shot = async (name: string) => { const path = testInfo.outputPath(`${name}.png`); await page.screenshot({ path }); await testInfo.attach(name, { path, contentType: 'image/png' }); };
+      const shot = async (name: string) => {
+        const main = page.locator('[data-region="main"]');
+        await expect(page.locator('[data-region="panel"]')).toHaveJSProperty('inert', true);
+        await expect.poll(async () => { const box = (await main.boundingBox())!; return Math.round(box.x + box.width); }).toBe(await page.evaluate(() => innerWidth));
+        expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth), 'destinations do not overflow the main area').toBe(0);
+        const path = testInfo.outputPath(`${name}.png`);
+        await page.screenshot({ path });
+        await testInfo.attach(name, { path, contentType: 'image/png' });
+      };
       for (const [width, height] of [[1280, 820], [1512, 982], [900, 760], [600, 760]] as const) {
         await app.evaluate(({ BrowserWindow }, [width, height]) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(600, 600); win.setContentSize(width, height); }, [width, height]);
         await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, [width, height]);
@@ -514,10 +521,19 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await expect(page.getByText(/Connection state and tools are unavailable/)).toBeVisible();
         await expect(page.locator('body')).not.toContainText('must-not-reach-renderer');
         await shot(`ux2k-mcp-${width}x${height}`);
-        await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Projects', exact: true }).click();
+        await openAppDestination(page, 'Projects');
         await expect(page.getByRole('heading', { name: 'Projects', exact: true, level: 1 })).toBeVisible();
         await shot(`ux2k-projects-${width}x${height}`);
-        await page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Customize', exact: true }).click();
+        // K's singletons use L's portaled chrome and ordinary strip/pane chords.
+        await expect(mainTab(page, /Projects/)).toHaveCount(1);
+        await expect(mainTab(page, /Customize/)).toHaveCount(1);
+        await menu(app, 'tab.stripPrevious');
+        await expect(mainTab(page, /Customize/)).toHaveAttribute('aria-selected', 'true');
+        await menu(app, 'tab.stripNext');
+        await expect(mainTab(page, /Projects/)).toHaveAttribute('aria-selected', 'true');
+        await mainTab(page, /Projects/).focus();
+        await page.keyboard.press('Control+Tab');
+        await expect(mainTab(page, /Customize/)).toHaveAttribute('aria-selected', 'true');
         await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
       }
       expect(await page.evaluate(async () => { const snapshot = await window.maws.invoke('session.list', {}); return snapshot.ok ? snapshot.value.sessions.length : -1; })).toBe(0);

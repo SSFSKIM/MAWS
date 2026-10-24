@@ -16,6 +16,7 @@ import { activateForScene, traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { mainTabs, surfaceRow as shellSurfaceRow, usagePill } from './support/shell';
 
 const SHELL_ENV = {
   MAWS_HARNESS: '0',
@@ -333,8 +334,8 @@ async function assertToolbarPlacement(page: Page): Promise<void> {
   const toolbar = page.getByRole('banner');
   const overview = toolbar.getByRole('button', { name: /^Overview/ });
   const sidebar = toolbar.getByRole('button', { name: 'Toggle sidebar' });
-  const usage = page.locator('[data-region="sidebar"] footer [data-usage-pill]');
-  const surfaceRow = toolbar.locator('[data-surface-row]');
+  const usage = usagePill(page);
+  const surfaceRow = shellSurfaceRow(page);
   const wordmark = page.locator('[data-sidebar-wordmark]');
   const newChat = page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true });
   const search = page.locator('[data-region="sidebar"]').getByRole('searchbox');
@@ -363,7 +364,7 @@ async function assertToolbarPlacement(page: Page): Promise<void> {
   await expect(usage).toContainText(/Usage|%/);
   await expect(toolbar.locator('[data-usage-pill]')).toHaveCount(0);
   const [bar, toggle, board, surface, strip] = await Promise.all([
-    toolbar, sidebar, overview, surfaceRow, toolbar.locator('[data-chrome-tabs] [data-pane-strip]').first(),
+    toolbar, sidebar, overview, surfaceRow, mainTabs(page).locator('[data-pane-strip]').first(),
   ].map((el) => el.boundingBox()));
   expect(board!.x).toBe(toggle!.x + toggle!.width + 4);
   expect(strip!.y).toBeGreaterThanOrEqual(bar!.y);

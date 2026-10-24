@@ -14,6 +14,14 @@ export const sessionCards = (page: Page): Locator => page.getByRole('complementa
 export const sidebarFooter = (page: Page): Locator => page.locator('[data-region="sidebar"] footer');
 export const usagePill = (page: Page): Locator => sidebarFooter(page).locator('[data-usage-pill]');
 
+// Destinations remain reachable when the narrow layout puts the sidebar in an overlay.
+export async function openAppDestination(page: Page, name: 'Projects' | 'Artifacts' | 'Customize'): Promise<void> {
+  const entry = page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name, exact: true });
+  if (await page.locator('[data-region="sidebar"]').evaluate((element) => element.inert)) await menu(applicationOf(page), 'sidebar.toggle');
+  await entry.click();
+  await expect(mainTab(page, new RegExp(name))).toHaveAttribute('aria-selected', 'true');
+}
+
 const namedSurface = (page: Page, name: string) => page.locator(`[data-region="panel"]:not([inert]) [data-surface][aria-label=${JSON.stringify(name)}]`);
 
 async function chooseSurface(page: Page, name: string): Promise<void> {
