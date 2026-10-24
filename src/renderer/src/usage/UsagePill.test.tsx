@@ -96,7 +96,7 @@ describe('the usage pill', () => {
   it("reads the routing account's most binding percent in its severity's colour", () => {
     useUsage.setState({ snapshot: fixture });
     render(<UsagePill />);
-    expect(pill().textContent).toBe('82'); // 3@'s Fable week, above its 5h 53 % and weekly 63 %
+    expect(pill().textContent).toBe('Fable 82%'); // 3@'s Fable week, above its 5h 53 % and weekly 63 %
     expect(pill().getAttribute('data-severity')).toBe('warning');
     expect(pill().querySelector('[data-dot]')!.className).toContain('bg-warning');
     expect(pill().getAttribute('aria-label')).toBe('Usage · Fable 82% · 3@example.test');
@@ -105,13 +105,13 @@ describe('the usage pill', () => {
   it('is a muted dash without ClaudeUsage data, and before the first read', () => {
     useUsage.setState({ snapshot: { ...fixture, available: false, accounts: [] } });
     const { unmount } = render(<UsagePill />);
-    expect(pill().textContent).toBe('--');
+    expect(pill().textContent).toBe('Usage —');
     expect(pill().querySelector('[data-dot]')!.className).toContain('bg-fg-muted');
     expect(pill().getAttribute('aria-label')).toBe('Usage · ClaudeUsage has no data');
     unmount();
     useUsage.setState({ snapshot: null });
     render(<UsagePill />);
-    expect(pill().textContent).toBe('--');
+    expect(pill().textContent).toBe('Usage —');
   });
 });
 

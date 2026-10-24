@@ -59,6 +59,28 @@ function edit(op: EditOp): void {
   else target[op]();
 }
 
+// Only explicit shell focus/navigation commands transfer native keyboard ownership. A browser WebContentsView is a
+// sibling native surface: HTMLElement.focus in the renderer cannot take the keyboard from it. Resolve its actual host
+// (the view manager attaches it directly to contentView), focus that page, then send only that page its DOM action.
+const SHELL_FOCUS_ACTIONS: ReadonlySet<ActionId> = new Set([
+  'region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther',
+]);
+
+function dispatchAction(id: ActionId, arg: number | null, emit: Emit): void {
+  const payload = { action: id, arg };
+  if (!SHELL_FOCUS_ACTIONS.has(id)) {
+    void emit('layout.action', payload);
+    return;
+  }
+  const windows = appWindows();
+  const focused = webContents.getFocusedWebContents();
+  const host = focused ? windows.find((win) => win.webContents === focused
+    || win.contentView.children.some((view) => 'webContents' in view && view.webContents === focused)) : windows[0];
+  if (!host) return;
+  host.webContents.focus();
+  emitTo(host.webContents, 'layout.action', payload);
+}
+
 export function menuTemplate(
   actions: ActionTable,
   overrides: KeymapOverrides,
@@ -71,7 +93,7 @@ export function menuTemplate(
     label,
     ...(accelerator ? { accelerator } : {}),
     enabled: enabled.has(id),
-    click: () => void emit('layout.action', { action: id, arg }),
+    click: () => dispatchAction(id, arg, emit),
     ...extra,
   });
 

@@ -82,6 +82,13 @@ export function SurfaceRow() {
         <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={6} className={MENU}>
           {overflow.map((tool) => <DropdownMenu.Item key={tool.id} disabled={!session} className={ITEM} onSelect={() => toggleSurface(tool.id)}><tool.icon className="size-4 text-fg-muted" />{tool.title}</DropdownMenu.Item>)}
           {held.filter((tab) => tab.toolId === 'artifacts' && !ids.includes(tab.toolId)).map((tab: PanelTabRef) => <DropdownMenu.Item key={tab.id} className={ITEM} onSelect={() => toggleSurface(tab.toolId)}>Open saved artifact</DropdownMenu.Item>)}
+          {held.filter((tab) => !tools.has(tab.toolId)).map((tab) => <DropdownMenu.Sub key={tab.id}>
+            <DropdownMenu.SubTrigger className={ITEM}>{tab.toolId} (unavailable)</DropdownMenu.SubTrigger>
+            <DropdownMenu.Portal><DropdownMenu.SubContent className={MENU}>
+              <DropdownMenu.Item className={ITEM} onSelect={() => toggleSurface(tab.toolId)}>Show saved surface</DropdownMenu.Item>
+              <DropdownMenu.Item className={ITEM} onSelect={() => void panelHost.closeTab(tab.id)}>Close saved tab</DropdownMenu.Item>
+            </DropdownMenu.SubContent></DropdownMenu.Portal>
+          </DropdownMenu.Sub>)}
           {panes.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
           {panes.map((pane) => <DropdownMenu.Item key={pane.id} className={ITEM} onSelect={() => session && openPaneTab(session, pane.id)}>{pane.title || pane.id}<span className="ml-auto text-fg-muted">{pane.plugin}</span></DropdownMenu.Item>)}
           {overflow.length === 0 && panes.length === 0 && <DropdownMenu.Item disabled className={ITEM}>No other surfaces</DropdownMenu.Item>}

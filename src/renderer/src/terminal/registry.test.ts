@@ -6,6 +6,7 @@ import type { CommandName, EventName, EventPayload, HostState, MawsBridge, PtyAt
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectKeys } from '../keymap/dispatcher';
 import { bindChord } from '../keymap/useKeyChord';
+import { useSettings } from '../stores/settings';
 import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry, type Adopting } from './registry';
@@ -712,6 +713,21 @@ describe('terminal registry lifecycle', () => {
 });
 
 describe('terminal key filter', () => {
+  it('reads effective application bindings on each key, without sending them to xterm or dispatching them twice', async () => {
+    const previous = useSettings.getState().state;
+    try {
+      useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V18, resolvedTheme: 'light' } });
+      const registry = makeRegistry();
+      const { renderer } = await openRunning(registry);
+      expect(renderer.key('keydown', { key: 'F6', code: 'F6' })).toBe(false);
+      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, keymap: { 'region.focusNext': 'F8' } }, resolvedTheme: 'light' } });
+      expect(renderer.key('keydown', { key: 'F8', code: 'F8' })).toBe(false);
+      expect(renderer.key('keyup', { key: 'F8', code: 'F8' })).toBe(false);
+      expect(renderer.key('keydown', { key: 'F6', code: 'F6' })).toBe(true);
+      expect(runAction).not.toHaveBeenCalled(); // the application menu alone owns these bindings
+    } finally { useSettings.setState({ state: previous }); }
+  });
+
   it('installs the filter: ⌃Tab keydown runs tab.next once and stays with the app, ordinary keys go to the pty', async () => {
     const registry = makeRegistry();
     const { renderer } = await openRunning(registry);

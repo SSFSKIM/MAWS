@@ -137,6 +137,7 @@ describe('everything else stays native, through layout.nativeEdit', () => {
   it('an inspector field inside the editor: the field’s own undo, the deck untouched', () => {
     const { session, left } = mountDeck();
     act(() => session.select(['a']));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspector' }));
     focus(screen.getByRole('textbox', { name: 'Width' }));
     page.menu('undo');
     page.menu('redo');

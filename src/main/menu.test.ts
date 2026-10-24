@@ -7,6 +7,7 @@ import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 interface Contents {
   id: number;
   selectAll(): void;
+  focus(): void;
   // P4-B2 K6: the native commands the Edit menu's Undo and Redo run, and the one page's event they send
   undo(): void;
   redo(): void;
@@ -15,7 +16,7 @@ interface Contents {
 }
 const electron = vi.hoisted(() => ({
   setApplicationMenu: vi.fn(),
-  windows: [] as { webContents: Contents }[],
+  windows: [] as { webContents: Contents; contentView?: { children: { webContents?: Contents }[] } }[],
   focused: null as Contents | null,
   handlers: new Map<string, (input: unknown, context: { sender: unknown }) => unknown>(), // P4-B2 K6: main's handlers
 }));
@@ -127,7 +128,7 @@ describe('application menu', () => {
 // (electron.d.ts, MenuItemConstructorOptions.role), so the item is the app's own.
 describe('Edit ▸ Select All', () => {
   const selectAll = (send = vi.fn()) => (top(menuTemplate(ACTIONS, {}, ALL, send), 'Edit')!.submenu as Item[]).find((item) => item.label === 'Select All')!;
-  const contents = (id: number): Contents => ({ id, selectAll: vi.fn(), undo: vi.fn(), redo: vi.fn(), send: vi.fn(), isDestroyed: () => false });
+  const contents = (id: number): Contents => ({ id, selectAll: vi.fn(), focus: vi.fn(), undo: vi.fn(), redo: vi.fn(), send: vi.fn(), isDestroyed: () => false });
   afterEach(() => {
     electron.windows = [];
     electron.focused = null;
@@ -178,7 +179,7 @@ describe('Edit ▸ Select All', () => {
 describe('Edit ▸ Undo and Redo', () => {
   const editItem = (id: string, send = vi.fn()) => items(menuTemplate(ACTIONS, {}, ALL, send)).find((item) => item.id === id)!;
   const click = (id: string, send = vi.fn()) => (editItem(id, send).click as () => void)();
-  const contents = (id: number): Contents => ({ id, selectAll: vi.fn(), undo: vi.fn(), redo: vi.fn(), send: vi.fn(), isDestroyed: () => false });
+  const contents = (id: number): Contents => ({ id, selectAll: vi.fn(), focus: vi.fn(), undo: vi.fn(), redo: vi.fn(), send: vi.fn(), isDestroyed: () => false });
   const sent = (target: Contents) => vi.mocked(target.send).mock.calls;
   const calls = (...fns: (() => void)[]) => fns.map((fn) => vi.mocked(fn).mock.calls.length);
   afterEach(() => {
@@ -245,6 +246,58 @@ describe('Edit ▸ Undo and Redo', () => {
     nativeEdit({ op: 'undo' }, { sender: page });
     nativeEdit({ op: 'redo' }, { sender: page });
     expect(calls(page.undo, page.redo)).toEqual([1, 1]);
+  });
+});
+
+describe('shell focus actions from native browser views', () => {
+  const contents = (id: number): Contents => ({ id, selectAll: vi.fn(), focus: vi.fn(), undo: vi.fn(), redo: vi.fn(), send: vi.fn(), isDestroyed: () => false });
+  afterEach(() => {
+    electron.windows = [];
+    electron.focused = null;
+  });
+
+  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther'])(
+    '%s focuses the browser view’s actual shell host before delivering the action to that page alone', (id) => {
+      const otherPage = contents(1);
+      const hostPage = contents(2);
+      const browserPage = contents(3);
+      electron.windows = [
+        { webContents: otherPage, contentView: { children: [] } },
+        { webContents: hostPage, contentView: { children: [{}, { webContents: browserPage }] } },
+      ];
+      electron.focused = browserPage;
+      const send = vi.fn();
+      (byId(menuTemplate(ACTIONS, {}, ALL, send), id)!.click as () => void)();
+      expect(hostPage.focus).toHaveBeenCalledOnce();
+      expect(hostPage.send).toHaveBeenCalledWith(eventChannel('layout.action'), { action: id, arg: null });
+      expect(vi.mocked(hostPage.focus).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(hostPage.send).mock.invocationCallOrder[0]);
+      expect(otherPage.focus).not.toHaveBeenCalled();
+      expect(otherPage.send).not.toHaveBeenCalled();
+      expect(browserPage.focus).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled(); // no broadcast to other windows
+    },
+  );
+
+  it('does not pull native focus away for unrelated menu actions', () => {
+    const hostPage = contents(1);
+    const browserPage = contents(2);
+    electron.windows = [{ webContents: hostPage, contentView: { children: [{ webContents: browserPage }] } }];
+    electron.focused = browserPage;
+    const send = vi.fn();
+    (byId(menuTemplate(ACTIONS, {}, ALL, send), 'theme.light')!.click as () => void)();
+    expect(hostPage.focus).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith('layout.action', { action: 'theme.light', arg: null });
+  });
+
+  it('does not send a focus action to an arbitrary app window when other native contents hold focus', () => {
+    const page = contents(1);
+    electron.windows = [{ webContents: page, contentView: { children: [] } }];
+    electron.focused = contents(2); // DevTools or a window outside the app registry
+    const send = vi.fn();
+    (byId(menuTemplate(ACTIONS, {}, ALL, send), 'region.focusNext')!.click as () => void)();
+    expect(page.focus).not.toHaveBeenCalled();
+    expect(page.send).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

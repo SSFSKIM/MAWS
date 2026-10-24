@@ -64,17 +64,19 @@ const add = (toolId: string) => {
 };
 
 describe('the panel header', () => {
-  it('reads "Session overview" on the summary and keeps the region’s controls', () => {
+  it('reserves no header or column for the resting summary (D1 floating cards)', () => {
     mount();
-    expect(title().textContent).toBe('Session overview');
-    expect(buttons()).toEqual(['Float session over panel', 'Maximize right panel', 'Hide right panel']);
+    expect(header()).toBeNull();
+    expect(document.querySelector('[data-region="panel"]')?.hasAttribute('inert')).toBe(true);
   });
 
   // P3-F wave S (F6, candidate 58): the card draws the session in front; with none, Float is disabled and names why
   it('with no session in front, Float is disabled and reads its reason; Maximize and Hide stay', () => {
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    offs.push(registerPanelTool(probeTool('files').tool));
+    panelHost.addTool('files', { appSessionId: null, pin: true });
     mount();
-    expect(buttons()).toEqual([FLOAT_COPY.noSession, 'Maximize right panel', 'Hide right panel']);
+    expect(buttons()).toEqual([FLOAT_COPY.noSession, 'Maximize right panel', 'Close surface']);
     expect((within(header()).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(header()).getByRole('button', { name: 'Maximize right panel' }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -133,7 +135,7 @@ describe('the panel header', () => {
     expect(header().textContent).toContain('Docs/Planning/Q3 brief');
     expect(header().textContent).toContain('Saving…');
     // The count stands for the `comments` action, which is not repeated among the actions.
-    expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export', 'Float session over panel', 'Maximize right panel', 'Hide right panel']);
+    expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export', 'Float session over panel', 'Maximize right panel', 'Close surface']);
     await user.click(within(header()).getByRole('button', { name: '3 open comments' }));
     await user.click(within(header()).getByRole('button', { name: 'Version history' }));
     await user.click(within(header()).getByRole('button', { name: 'Export' }));
@@ -230,12 +232,12 @@ describe('the panel header', () => {
     mount();
     const id = add('t');
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1, { pressed: true }), action(2), action(3)] }));
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Float session over panel', 'Maximize right panel', 'Hide right panel']);
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Float session over panel', 'Maximize right panel', 'Close surface']);
     expect(within(header()).getByRole('button', { name: 'Action 1' }).getAttribute('aria-pressed')).toBe('true');
 
     resetEditorHosts();
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [1, 2, 3, 4, 5].map((n) => action(n, n === 5 ? { disabled: true } : {})) }));
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'More actions', 'Float session over panel', 'Maximize right panel', 'Hide right panel']);
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'More actions', 'Float session over panel', 'Maximize right panel', 'Close surface']);
     await user.click(within(header()).getByRole('button', { name: 'More actions' }));
     const items = within(await screen.findByRole('menu')).getAllByRole('menuitem');
     expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled')])).toEqual([
@@ -261,7 +263,7 @@ describe('the panel header', () => {
     mount();
     const id = add('t');
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1), action(2), action(3), action(4), action(5, { pinned: true, label: 'Send to…' })] }));
-    const controls = ['Float session over panel', 'Maximize right panel', 'Hide right panel'];
+    const controls = ['Float session over panel', 'Maximize right panel', 'Close surface'];
     expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Send to…', 'More actions', ...controls]);
     await user.click(within(header()).getByRole('button', { name: 'More actions' }));
     expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Action 4']);
@@ -323,7 +325,7 @@ describe('the panel header', () => {
         { title: 'Q3 brief', saved: 'saved', actions: [action(1), action(2), action(3)], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('export:pdf') }] },
       ),
     );
-    const controls = ['Float session over panel', 'Maximize right panel', 'Hide right panel'];
+    const controls = ['Float session over panel', 'Maximize right panel', 'Close surface'];
 
     width = 280; // the panel's narrowest
     resize(header(), { width: 264, height: 40 });
@@ -363,11 +365,12 @@ describe('the panel header', () => {
     offs.push(registerPanelTool(probeTool('plain', { title: 'Plain' }).tool));
     mount();
     add('page');
-    expect(buttons()).toEqual(['Mark up', 'Float session over panel', 'Maximize right panel', 'Hide right panel']);
+    expect(buttons()).toEqual(['Mark up', 'Float session over panel', 'Maximize right panel', 'Close surface']);
     await userEvent.click(within(header()).getByRole('button', { name: 'Mark up' }));
     expect(begin).toHaveBeenCalledTimes(1);
-    add('plain');
-    expect(buttons()).toEqual(['Float session over panel', 'Maximize right panel', 'Hide right panel']);
+    const plain = add('plain');
+    act(() => useLayout.getState().setSurfaceStack(A, [plain]));
+    expect(buttons()).toEqual(['Float session over panel', 'Maximize right panel', 'Close surface']);
   });
 
   it('closing an inactive editor tab asks its guard: switched away, the registration still vetoes', async () => {
@@ -377,13 +380,14 @@ describe('the panel header', () => {
     offs.push(registerPanelTool(probeTool('other').tool));
     mount();
     const editor = add('editor');
-    add('other'); // the editor's body unmounts
+    const other = add('other');
+    act(() => useLayout.getState().setSurfaceStack(A, [other])); // hiding a surface keeps its editor instance
     expect(screen.queryByText('editor body')).toBeNull();
     let closed: boolean | undefined;
     await act(async () => void (closed = await panelHost.closeTab(editor)));
     expect(closed, 'the inactive tab’s guard vetoes').toBe(false);
     expect(probe.beforeClose, 'the veto stops before the tool is asked').toEqual([]);
-    expect(screen.getByRole('tab', { name: 'Editor' }), 'the tab stays').toBeTruthy();
+    expect(useLayout.getState().effectivePanelTabs(A).some((tab) => tab.id === editor), 'the hidden editor ref stays').toBe(true);
     allow = true;
     await act(async () => void (closed = await panelHost.closeTab(editor)));
     expect(closed).toBe(true);

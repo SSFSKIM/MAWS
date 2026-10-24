@@ -110,7 +110,7 @@ describe('panel host registry and instances', () => {
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' }]]) });
     render(<TestHost />);
     expect(screen.getByRole('tabpanel').textContent).toBe('terminal is not available');
-    expect(screen.getByRole('tab', { selected: true }).textContent).toContain('terminal');
+    expect(document.querySelector('[data-header-title]')?.textContent).toContain('terminal');
     await act(async () => void expect(await panelHost.closeTab('terminal:aaaaaaaa')).toBe(true));
     expect(panelOf(A)).toEqual({ tabs: [], activeTabId: null });
   });
@@ -337,7 +337,7 @@ describe('panel host transitions', () => {
     expect(panelOf(A)!.activeTabId).toBe(x);
     await act(() => panelHost.closeTab(x));
     expect(panelOf(A)!.activeTabId).toBeNull();
-    expect(screen.getByRole('tabpanel').textContent).toContain('Tools stay with this session.');
+    expect(screen.queryByRole('tabpanel')).toBeNull(); // the last surface yields; summary cards belong to main (D1/D3)
   });
 
   it('a single-instance addTool re-targets the tab in the target’s list or the pins, never one in another session’s list', () => {

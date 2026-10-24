@@ -15,6 +15,22 @@ describe('terminal key filter', () => {
     expect(terminalKeyFilter(key(init))).toBe('app');
   });
 
+  it('yields region keys to the app, including effective function-key overrides', () => {
+    expect(terminalKeyFilter(key({ key: 'F6', code: 'F6' }))).toBe('app');
+    expect(terminalKeyFilter(key({ key: 'F6', code: 'F6', shiftKey: true }))).toBe('app');
+    const overrides = { 'region.focusNext': 'F8', 'region.focusPrevious': null } as const;
+    expect(terminalKeyFilter(key({ key: 'F8', code: 'F8' }), overrides)).toBe('app');
+    expect(terminalKeyFilter(key({ key: 'F6', code: 'F6' }), overrides)).toBe('pty');
+    expect(terminalKeyFilter(key({ key: 'F6', code: 'F6', shiftKey: true }), overrides)).toBe('pty');
+  });
+
+  it('yields rebound application navigation, but leaves unbound and editor-scoped keys in the terminal', () => {
+    expect(terminalKeyFilter(key({ key: 'F9', code: 'F9' }), { 'tab.stripNext': 'F9' })).toBe('app');
+    expect(terminalKeyFilter(key({ key: 'F9', code: 'F9' }), { 'tab.stripNext': null })).toBe('pty');
+    expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', shiftKey: true }))).toBe('pty');
+    expect(terminalKeyFilter(key({ key: 'c', code: 'KeyC', metaKey: true }), { 'sidebar.focus': 'Cmd+C' })).toBe('pty');
+  });
+
   it('keeps the tab cycle: ⌃Tab is tab.next and ⌃⇧Tab is tab.previous', () => {
     expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', ctrlKey: true }))).toBe('tab.next');
     expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true }))).toBe('tab.previous');

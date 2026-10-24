@@ -519,7 +519,7 @@ describe('the split’s float: the divider', () => {
     expect(sessionBody()).toBe(bodyS);
     move(161);
     expect(columns()).toBe('320px 1px minmax(0, 1fr)'); // disarmed, held at 320
-    expect(within(main()).getByRole('tab', { name: SESSION })).toBe(tabS);
+    expect(within(chrome()).getByRole('tab', { name: SESSION })).toBe(tabS);
     expect(sessionBody()).toBe(bodyS);
     expect(useLayout.getState().main).toBe(before); // nothing reached main.tabs, so nothing is persisted
     move(150);
@@ -601,7 +601,7 @@ describe('the split’s float: the divider', () => {
     resize(region(), { width: W, height: 800 });
     const body = (pane: 0 | 1) => main().querySelector(`[data-pane="${pane}"] [role="tabpanel"]`)?.firstElementChild;
     const bodyRight = body(1)!;
-    const tabRight = within(main()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' });
+    const tabRight = within(chrome()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' });
     down(750);
     move(100);
     expect(columns()).toBe('0px 1px minmax(0, 1fr)'); // the left session is squeezed: it arms
@@ -610,7 +610,7 @@ describe('the split’s float: the divider', () => {
     expect(set().floating).toEqual({ sessionTabId: `session:${idOf('Charter + research')}` });
     expect(sessionTab()).toBeNull();
     expect(body(1)).toBe(bodyRight); // the right session's pane kept its slot
-    expect(within(main()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' })).toBe(tabRight);
+    expect(within(chrome()).getByRole('tab', { name: 'Fix sidebar drag · MAWS' })).toBe(tabRight);
   });
 
   it('a release that is not armed persists the ratio; A clamps at its floor and never collapses', () => {
@@ -718,7 +718,7 @@ describe('unstarted sessions', () => {
   it('createSession opens a "New chat" tab under the project with no glyph, the composer frame and no transcript; the sidebar does not list it', async () => {
     render(<Shell />);
     await act(() => createSession(MAWS));
-    const t = tab('New chat · MAWS');
+    const t = tab('New chat');
     expect(t.getAttribute('aria-selected')).toBe('true');
     expect(within(t).queryByRole('img')).toBeNull();
     const panel = within(main()).getByRole('tabpanel');
@@ -742,7 +742,7 @@ describe('unstarted sessions', () => {
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
     await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New chat' }));
     expect(asked).toEqual([null, 'proj-codex-somersault']);
-    expect(selected()).toBe('New chat · codex_somersault');
+    expect(selected()).toBe('New chat');
   });
 
   it('a record arriving for the id turns the tab into the session’s ordinary tab', async () => {
@@ -762,7 +762,7 @@ describe('unstarted sessions', () => {
     offs.push(registerUnstartedTitle((id) => (id === NEW ? { title: 'Set up a session', project: 'MAWS', projectId: MAWS } : null)));
     render(<Shell />);
     await act(() => createSession(MAWS));
-    expect(tab('Set up a session · MAWS')).toBeTruthy();
+    expect(tab('Set up a session')).toBeTruthy();
   });
 
   it('closes at once with no guard, and drops the unstarted entry without a reopen entry', async () => {
@@ -782,7 +782,7 @@ describe('unstarted sessions', () => {
     await act(() => createSession(MAWS));
     await act(async () => runAction('tab.close'));
     expect(guard).toHaveBeenCalledWith(expect.objectContaining({ kind: 'session', appSessionId: NEW }));
-    expect(tabNames()).toEqual(['New chat · MAWS']);
+    expect(tabNames()).toEqual(['New chat']);
     expect(screen.queryByRole('alertdialog')).toBeNull(); // the guard asks, not the shell
     answer = true;
     await act(async () => runAction('tab.close'));
@@ -799,11 +799,11 @@ describe('unstarted sessions', () => {
     render(<Shell />);
     await act(() => createSession(MAWS));
     await user.click(sidebarRow('Charter + research'));
-    expect(tabNames()).toEqual(['New chat · MAWS', 'Charter + research · MAWS']); // shown at once, the draft beside it
+    expect(tabNames()).toEqual(['New chat', 'Charter + research · MAWS']); // shown at once, the draft beside it
     expect(selected()).toBe('Charter + research · MAWS');
     expect(guard).toHaveBeenCalledWith(expect.objectContaining({ kind: 'session', appSessionId: NEW }));
     await act(async () => {});
-    expect(tabNames()).toEqual(['New chat · MAWS', 'Charter + research · MAWS']); // declined: the draft stays
+    expect(tabNames()).toEqual(['New chat', 'Charter + research · MAWS']); // declined: the draft stays
     act(() => useLayout.getState().activateTab(`session:${NEW}`));
     answer = true;
     await user.click(sidebarRow('Fix sidebar drag'));
@@ -880,7 +880,6 @@ describe('⌃Tab follows DOM focus', () => {
       useLayout.getState().openSession(idOf('Sidebar interaction pass'), { how: 'tab' }); // into the focused pane, the new right one
     });
   }
-  const pane = (label: string) => within(main()).getByRole('region', { name: label });
 
   beforeEach(() => {
     offs.push(connectKeys());
@@ -892,7 +891,7 @@ describe('⌃Tab follows DOM focus', () => {
     splitOpen();
     act(() => useLayout.getState().focusPane(0));
     const before0 = activeOf(0);
-    act(() => within(pane('Right pane')).getByRole('tab', { name: 'Sidebar interaction pass · MAWS' }).focus());
+    act(() => within(strips()[1]).getByRole('tab', { name: 'Sidebar interaction pass · MAWS' }).focus());
     await user.keyboard('{Control>}{Tab}{/Control}');
     expect(activeOf(1)).toBe(`session:${idOf('Quota reset recovery')}`);
     expect(activeOf(0)).toBe(before0);
@@ -958,19 +957,19 @@ describe('tab sets per project', () => {
       useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
       useLayout.getState().openSession(idOf('Fix sidebar drag'), { how: 'tab' });
     });
-    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
+    expect(tabNames()).toEqual(['Charter + research', 'Fix sidebar drag']);
     expect(label()?.textContent).toBe('MAWS');
     await user.click(sidebarRow('Quota reset recovery'));
-    expect(tabNames()).toEqual(['Quota reset recovery · codex_somersault']);
+    expect(tabNames()).toEqual(['Quota reset recovery']);
     expect(label()?.textContent).toBe('codex_somersault');
     await act(async () => runAction('tab.select', 2));
-    expect(selected()).toBe('Quota reset recovery · codex_somersault'); // MAWS's tabs are not counted
+    expect(selected()).toBe('Quota reset recovery'); // MAWS's tabs are not counted
     await user.click(projectRow('MAWS'));
-    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
-    expect(selected()).toBe('Fix sidebar drag · MAWS');
+    expect(tabNames()).toEqual(['Charter + research', 'Fix sidebar drag']);
+    expect(selected()).toBe('Fix sidebar drag');
     await act(async () => runAction('tab.select', 1));
-    expect(selected()).toBe('Charter + research · MAWS');
-    expect(main().querySelector('[data-strip-project]')).toBeNull(); // the strip names no project
+    expect(selected()).toBe('Charter + research');
+    expect(chrome().querySelector('[data-strip-project]')).toBeNull(); // the strip names no project
     // the chip's context menu reveals its project in the sidebar
     act(() => useLayout.getState().setSidebar({ expandedProjects: [] }));
     fireEvent.contextMenu(label()!);
@@ -994,12 +993,12 @@ describe('tab sets per project', () => {
     render(<Shell />);
     act(() => useLayout.getState().openSession(idOf('Charter + research')));
     act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Settings']);
+    expect(tabNames()).toEqual(['Charter + research', 'Settings']);
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
     act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(tabNames()).toEqual(['Quota reset recovery · codex_somersault', 'Settings']);
+    expect(tabNames()).toEqual(['Quota reset recovery', 'Settings']);
     act(() => useLayout.getState().setCurrentProject('proj-maws' as ProjectId));
-    expect(tabNames()).toEqual(['Charter + research · MAWS']);
+    expect(tabNames()).toEqual(['Charter + research']);
   });
 });
 

@@ -29,9 +29,9 @@ function Regions() {
     <section id="region-sidebar"><button>Sidebar destination</button></section>
     <section id="region-main">
       {set.panes.map((pane, index) => <section id={`pane-${index}`} data-pane={index} key={index} onFocusCapture={() => useLayout.getState().focusPane(index as 0 | 1)}>
-        <div role="tablist" aria-label={`Tabs ${index}`}>
+        <div data-pane-strip><div role="tablist" aria-label={`Tabs ${index}`}>
           {pane.tabs.map((tab) => <button role="tab" data-tab-id={tab.id} aria-selected={tab.id === pane.activeTabId} tabIndex={tab.id === pane.activeTabId ? 0 : -1} key={tab.id}>{tab.id}</button>)}
-        </div>
+        </div></div>
         <div role="tabpanel"><textarea aria-label={`Pane ${index} content`} /></div>
       </section>)}
     </section>
@@ -58,7 +58,7 @@ function pressMenu(init: KeyboardEventInit, overrides: KeymapOverrides = {}) {
   return id;
 }
 
-const active = () => currentSet(useLayout.getState().main).panes[currentSet(useLayout.getState().main).focusedPane].activeTabId;
+const active = () => currentSet(useLayout.getState().main).panes[currentSet(useLayout.getState().main).focusedPane]?.activeTabId ?? null;
 
 function ChromeRegions() {
   const set = useLayout((s) => currentSet(s.main));
@@ -109,6 +109,19 @@ it('keeps portaled chrome strips in the focus ring and Ctrl+Tab reaches their ow
   } finally { offKeys(); }
 });
 
+it('uses only the shell strip as a region stop when a legacy pane contains nested tool tabs', () => {
+  render(<>
+    <section id="region-sidebar"><button>Sidebar destination</button></section>
+    <section id="region-main"><section id="pane-0" data-pane="0">
+      <div role="tabpanel"><div role="tablist"><button role="tab" aria-selected="true">Tool tab</button></div></div>
+      <div data-pane-strip><div role="tablist"><button role="tab" aria-selected="true">Shell tab</button></div></div>
+    </section></section>
+  </>);
+  screen.getByRole('button', { name: 'Sidebar destination' }).focus();
+  pressMenu({ key: 'F6', code: 'F6' });
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Shell tab' }));
+});
+
 describe('strip-order navigation', () => {
   it('steps through mixed tab kinds in strip order, wraps, and returns focus to the selected tab', () => {
     openTabs();
@@ -144,7 +157,7 @@ describe('strip-order navigation', () => {
   it('steps the pane owning DOM focus instead of moving a different pane', () => {
     openTabs();
     useLayout.getState().splitWithActive();
-    useLayout.getState().openTab({ kind: 'settings', section: 0 });
+    useLayout.getState().openTab({ kind: 'settings', section: 'keyboard' });
     render(<Regions />);
     screen.getByLabelText('Pane 1 content').focus();
     // A store focus is not a substitute for the keyboard's actual owner.
@@ -153,7 +166,7 @@ describe('strip-order navigation', () => {
     const set = currentSet(useLayout.getState().main);
     expect(set.focusedPane).toBe(1);
     expect(set.panes[0].activeTabId).toBe('diagnostics');
-    expect(set.panes[1].activeTabId).toBe('session:chat-a');
+    expect(set.panes[1]?.activeTabId).toBe('session:chat-a');
   });
 });
 

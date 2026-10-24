@@ -60,6 +60,7 @@ const hostRow = (over: Partial<ArtifactRow> = {}): ArtifactRow => {
 let main: ReturnType<typeof installFakeMain>;
 const offs: (() => void)[] = [];
 const mainRegion = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
+const chromeTabs = () => document.querySelector<HTMLElement>('[data-chrome-tabs]')!;
 const headerTitle = () => mainRegion().querySelector('[data-editor-header] [data-header-title]')?.textContent ?? null;
 const LIBRARY_GONE = 'This artifact was deleted, or it is not in the library.';
 const tabOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === `artifact:${A}`);
@@ -116,7 +117,7 @@ describe('an artifact in a main tab', () => {
     expect(editor.createState).toHaveBeenCalledTimes(1);
     expect(editor.createState).toHaveBeenCalledWith({ artifactId: A, kind: 'document', surface: 'main' });
     expect(headerTitle()).toBe('Editing 1');
-    expect(within(mainRegion()).getByRole('tab', { name: 'Launch notes' }), 'the row’s title labels the tab').toBeTruthy();
+    expect(within(chromeTabs()).getByRole('tab', { name: 'Launch notes' }), 'the row’s title labels the tab').toBeTruthy();
     expect(document.querySelector('[data-toolbar]')!.textContent).toContain('Launch notes');
     await waitFor(() => expect(main.callsOf('artifacts.markViewed')).toEqual([{ artifactId: A }]));
 
@@ -237,7 +238,7 @@ describe('an artifact in a main tab', () => {
     expect(screen.queryByText(LIBRARY_GONE)).toBeNull();
     current = row({ title: 'Untitled document' });
     await changed();
-    expect(within(mainRegion()).getByRole('tab', { name: 'Untitled document' })).toBeTruthy();
+    expect(within(chromeTabs()).getByRole('tab', { name: 'Untitled document' })).toBeTruthy();
     expect(screen.getByText(/main editor for/)).toBeTruthy();
     expect(editor.createState, 'one showing: the hold is the same').toHaveBeenCalledTimes(1);
     expect(editor.dispose).not.toHaveBeenCalled();

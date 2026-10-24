@@ -34,6 +34,8 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
   it('refuses a chord already effective for another action, and accepts it once that action is unbound', () => {
     expect(captureChord(key('KeyK', 'k', { metaKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'Already bound to Command palette · unbind it first' });
     expect(captureChord(key('KeyK', 'k', { metaKey: true }), 'attention.next', { 'palette.open': null })).toEqual({ kind: 'chord', chord: 'Cmd+K' });
+    expect(captureChord(key('F6', 'F6'), 'attention.next', {})).toEqual({ kind: 'refused', message: 'Already bound to Focus next region · unbind it first' });
+    expect(captureChord(key('F6', 'F6'), 'attention.next', { 'region.focusNext': null })).toEqual({ kind: 'chord', chord: 'F6' });
     // an override takes the chord with it: palette.open moved to Cmd+P frees Cmd+K and takes Cmd+P
     expect(captureChord(key('KeyP', 'p', { metaKey: true }), 'attention.next', { 'palette.open': 'Cmd+P' })).toMatchObject({ kind: 'refused', message: 'Already bound to Command palette · unbind it first' });
   });
@@ -49,7 +51,7 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
   it('refuses a menu shortcut without ⌘, ⌃ or ⌥; a renderer action may take a bare key', () => {
     expect(captureChord(key('KeyU', 'u'), 'attention.next', {})).toEqual({ kind: 'refused', message: 'A menu shortcut needs ⌘, ⌃ or ⌥' });
     expect(captureChord(key('KeyU', 'U', { shiftKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'A menu shortcut needs ⌘, ⌃ or ⌥' });
-    expect(captureChord(key('F6', 'F6'), 'attention.next', {})).toEqual({ kind: 'chord', chord: 'F6' });
+    expect(captureChord(key('F7', 'F7'), 'attention.next', {})).toEqual({ kind: 'chord', chord: 'F7' });
     expect(captureChord(key('KeyY', 'y'), 'request.accept', {})).toEqual({ kind: 'chord', chord: 'Y' });
   });
 
@@ -100,7 +102,7 @@ it('refuses printable app-wide renderer shortcuts, including Shift-only, without
   expect(captureChord(key('KeyS', 's'), 'composer.stop', {})).toMatchObject({ kind: 'refused' });
   expect(captureChord(key('KeyS', 'S', { shiftKey: true }), 'composer.stop', {})).toMatchObject({ kind: 'refused' });
   expect(captureChord(key('Space', ' '), 'composer.stop', {})).toMatchObject({ kind: 'refused' });
-  expect(captureChord(key('F6', 'F6'), 'composer.stop', {})).toEqual({ kind: 'chord', chord: 'F6' });
+  expect(captureChord(key('F7', 'F7'), 'composer.stop', {})).toEqual({ kind: 'chord', chord: 'F7' });
   expect(captureChord(key('KeyY', 'y'), 'request.accept', {})).toEqual({ kind: 'chord', chord: 'Y' });
 });
 

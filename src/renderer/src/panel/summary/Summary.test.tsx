@@ -75,7 +75,7 @@ describe('floating session cards', () => {
   });
 
   it('combines checkout, changes, push and real navigation in Environment', async () => {
-    const addTool = vi.spyOn(panelHost, 'addTool').mockImplementation(() => {});
+    const addTool = vi.spyOn(panelHost, 'addTool').mockReturnValue('summary-test-tool');
     offs.push(registerPanelTool(probeTool('review', { title: 'Review' }).tool));
     offs.push(registerPanelTool(probeTool('source-control', { title: 'Source control' }).tool));
     mount();

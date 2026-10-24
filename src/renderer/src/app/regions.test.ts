@@ -18,10 +18,10 @@ const regions = (panel: Partial<LayoutRegions['panel']>, sidebar: Partial<Layout
 
 describe('regions while floating', () => {
   it('gives the floating panel the main column’s place, as maximized does', () => {
-    expect(gridColumns(regions({ floating: true }), 1440)).toBe('300px 0px minmax(0, 1fr)');
+    expect(gridColumns(regions({ floating: true }), 1440)).toBe('240px 0px minmax(0, 1fr)');
     expect(gridColumns(regions({ floating: true }), 1440)).toBe(gridColumns(regions({ maximized: true }), 1440));
     expect(gridColumns(regions({ floating: true }, { collapsed: true }), 1440)).toBe('0px 0px minmax(0, 1fr)');
-    expect(gridColumns(regions({}), 1440)).toBe('300px minmax(0, 1fr) 380px');
+    expect(gridColumns(regions({}), 1440)).toBe('240px minmax(0, 1fr) 380px');
   });
 
   it('sizes the sidebar against main’s floor alone and keeps the panel’s width for docking', () => {
@@ -47,7 +47,7 @@ describe('a float with no card session', () => {
     await useLayout.getState().hydrate(client, () => true);
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     expect(panelInMain(useLayout.getState().regions)).toBe(false);
-    expect(gridColumns(useLayout.getState().regions, 1440)).toBe('300px minmax(0, 1fr) 380px');
+    expect(gridColumns(useLayout.getState().regions, 1440)).toBe('240px minmax(0, 1fr) 380px');
   });
 });
 
@@ -66,6 +66,6 @@ describe('a split float', () => {
     expect(currentSet(useLayout.getState().main).floating).toEqual({ sessionTabId: SESSION.id });
     expect(useLayout.getState().regions).toBe(before);
     expect(panelInMain(useLayout.getState().regions)).toBe(false);
-    expect(gridColumns(useLayout.getState().regions, 1440)).toBe('300px minmax(0, 1fr) 380px');
+    expect(gridColumns(useLayout.getState().regions, 1440)).toBe('240px minmax(0, 1fr) 380px');
   });
 });

@@ -10,6 +10,7 @@ import type { EventPayload, HostState, IpcError, MawsBridge, PtyExit, PtyId, Pty
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
 import { runAction } from '../keymap/actions-runtime';
+import { useSettings } from '../stores/settings';
 import {
   ACK_COALESCE_BYTES,
   ACK_COALESCE_MS,
@@ -406,7 +407,7 @@ export class TerminalRegistry {
     renderer.onTitle((title) => this.update(entry, { title: title || null }));
     renderer.onAccelerationChange((acceleration) => this.update(entry, { acceleration }));
     renderer.setKeyFilter((ev) => {
-      const verdict = terminalKeyFilter(ev);
+      const verdict = terminalKeyFilter(ev, useSettings.getState().state?.settings.keymap ?? {});
       if (verdict === 'pty') return true;
       if (verdict !== 'app' && ev.type === 'keydown') this.deps.runAction(verdict);
       return false;

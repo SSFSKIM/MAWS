@@ -9,7 +9,7 @@
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
-import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
+import { GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { useChordHint } from '../app/IconButton'; // C11
 import { useSlot } from '../app/slots';
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';

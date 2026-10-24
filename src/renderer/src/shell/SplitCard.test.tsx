@@ -16,6 +16,7 @@ import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
 import { runAction } from '../keymap/actions-runtime';
 import { resetEditorHosts, useEditorHost, useEditorHostScope } from '../panel/editor-host';
+import { PanelHeader } from '../panel/PanelHeader';
 import { useAttention } from '../stores/attention';
 import { registerFocusTarget, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
@@ -261,7 +262,7 @@ describe('the split’s floating card in the Shell', () => {
     shell();
     dragTo(150);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
-    const elsewhere = within(mainRegion().querySelector<HTMLElement>('[data-pane="1"]')!).getByRole('tab');
+    const elsewhere = within(document.querySelector<HTMLElement>('[data-chrome-pane="1"]')!).getByRole('tab');
     act(() => elsewhere.focus());
     expect(document.activeElement).toBe(elsewhere);
     focused.splice(0);
@@ -369,6 +370,9 @@ describe('the split’s floating card in the Shell', () => {
   // One card at a time (its Decision Log 8): the panel's Float with the split's card up names and does a dock
   it('the panel header’s Float reads “Dock session” while the split’s card is up and docks it', async () => {
     const user = userEvent.setup();
+    const tab = { id: 'probe:1', toolId: 'probe', pinned: false };
+    useLayout.getState().setPanelTabs(A, { tabs: [tab], activeTabId: tab.id });
+    registerSlot('panelHost', (props) => <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />);
     shell();
     dragTo(150);
     const panelHeader = document.querySelector<HTMLElement>('[data-region="panel"] [data-editor-header]')!;

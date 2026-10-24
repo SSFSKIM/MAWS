@@ -30,6 +30,7 @@
     "e2e:transcript": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/transcript.spec.ts",
     "e2e:terminal": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/terminal.spec.ts",
     "e2e:panel": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/panel.spec.ts",
+    "e2e:layout": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 MAWS_E2E_FOREGROUND=0 playwright test e2e/ux2-shell.spec.ts e2e/shell.spec.ts",
     "e2e:requests": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/requests.spec.ts",
     "e2e:composer": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/composer.spec.ts",
     "e2e:c7": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/requests.spec.ts e2e/composer.spec.ts",

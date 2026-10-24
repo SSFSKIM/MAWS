@@ -113,6 +113,27 @@ describe('command palette', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it.each([
+    ['Focus sidebar', 'Sidebar destination'],
+    ['Focus next region', 'Panel destination'],
+    ['Focus previous region', 'Sidebar destination'],
+  ])('runs %s after the palette releases its modal focus', async (title, destination) => {
+    const user = userEvent.setup();
+    render(<>
+      <section id="region-sidebar"><button>Sidebar destination</button></section>
+      <section id="region-main"><button>Main destination</button></section>
+      <section id="region-panel"><button>Panel destination</button></section>
+      <CommandPalette />
+    </>);
+    screen.getByRole('button', { name: 'Main destination' }).focus();
+    act(() => runAction('palette.open'));
+    await user.keyboard(title);
+    expect(document.activeElement).toBe(within(dialog()).getByRole('combobox'));
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: destination })));
+  });
+
   it('a project reveals it in the sidebar: shown, its row expanded', async () => {
     useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] });
     const user = await openAndType(nine.projects[1].name.slice(0, 7));

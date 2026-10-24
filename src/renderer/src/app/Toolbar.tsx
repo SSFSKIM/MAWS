@@ -101,7 +101,7 @@ export function Toolbar() {
           </IconButton>
         </div>
       </div>
-      <div className="min-w-0 shrink-[2] max-[1100px]:hidden"><ProjectChip /></div>
+      <div className="max-w-24 min-w-0 shrink max-[1100px]:hidden"><ProjectChip /></div>
       <div ref={mountChromeTabs} data-chrome-tabs className="flex min-w-0 flex-1 items-stretch" />
       <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
         {appSessionId && <SessionMenu appSessionId={appSessionId} />}
