@@ -47,13 +47,16 @@ export async function closeSurface(page: Page, name: string): Promise<void> {
 }
 
 export async function hideSurfaces(page: Page): Promise<void> {
-  // Collapse, rather than close the retained tools. The isolated #panel page has its own real control, not the
+  // Hide the visible surfaces, retaining their tool instances. The isolated #panel page has its own real control, not the
   // product's native application menu; both routes invoke the same registered shell action.
   const panel = page.locator('[data-region="panel"]:not([inert])');
   if (!await panel.count() && !await sessionCards(page).isVisible()) return;
   const harness = page.locator('[data-panel-harness]');
   if (await harness.count()) await harness.getByRole('button', { name: 'Hide panel', exact: true }).click();
-  else await menu(applicationOf(page), 'panel.toggle');
+  else {
+    for (const name of await panel.locator('[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')!))) await closeSurface(page, name);
+    if (await sessionCards(page).isVisible()) await menu(applicationOf(page), 'panel.toggle');
+  }
   await expect(panel).toHaveCount(0);
   await expect(sessionCards(page)).toBeHidden();
 }

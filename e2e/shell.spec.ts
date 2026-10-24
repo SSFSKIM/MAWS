@@ -795,7 +795,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const panelWidth = Number(await panelResizer.getAttribute('aria-valuenow'));
     await dragBy(page, panelResizer, panelWidth - 320);
     await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
-    await menu(app, 'panel.toggle');
+    await menu(app, 'panel.toggle'); // replace Files with session cards
+    await menu(app, 'panel.toggle'); // hide the cards
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
 

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, pinSurfaceForSessions, surface } from './support/shell';
+import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, closeSurface, pinSurfaceForSessions, surface } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -452,12 +452,12 @@ for (const width of [1280, 1512]) test(`the document margin’s tier at ${width}
   readings.a = alone;
 
   // (d) the panel closed
-  await menu('panel.toggle');
+  await closeSurface(page, 'Artifacts');
   await expect.poll(async () => (await widths()).panel).toBeLessThanOrEqual(0);
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
   const closed = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(d) settled');
   readings.d = closed;
-  await menu('panel.toggle');
+  await openSurface(page, 'Artifacts');
   await expect.poll(async () => (await widths()).panel).toBeGreaterThan(0);
 
   // (b) beside a session in main, then Expand pane (the session floats into the main area's card and the right panel
