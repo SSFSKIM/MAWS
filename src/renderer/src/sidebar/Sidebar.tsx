@@ -104,8 +104,8 @@ function SidebarBody() {
         const open = searching || expanded.has(entry.key);
         if (!open) return { entry, open, sessions: [], more: 0 };
         const all = nestLineage(projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches })); // E3: the caps count trees
-        const count = shownCount(all.length, more.has(entry.key));
-        return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: Math.min(all.length, SESSIONS_CAP) - count };
+        const count = searching ? all.length : shownCount(all.length, more.has(entry.key));
+        return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: searching ? 0 : Math.min(all.length, SESSIONS_CAP) - count };
       }),
     [listed, searching, expanded, digests, rows, sidebar.sort, matches, more],
   );
@@ -253,7 +253,7 @@ function SidebarBody() {
                 {shown.map((group, i) => (
                   <Fragment key={group.entry.key}>
                     {i === moreAt && moreProjects}
-                    <ProjectRow entry={group.entry} open={group.open} sessions={group.sessions} more={group.more} onToggle={toggleProject} onShowMore={showMore} />
+                    <ProjectRow entry={group.entry} open={group.open} sessions={group.sessions} more={group.more} matchCount={searching ? group.sessions.length : undefined} onToggle={toggleProject} onShowMore={showMore} />
                   </Fragment>
                 ))}
                 {moreAt === shown.length && moreProjects}

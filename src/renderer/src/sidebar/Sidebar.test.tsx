@@ -514,6 +514,16 @@ describe('an expanded project', () => {
     expect(screen.getByText('No projects match')).toBeTruthy();
   });
 
+  it('search reaches every matching session beyond the browsing cap and reports the count', async () => {
+    fillStores(scenarioFile('many-sessions'));
+    render(<Sidebar />);
+    await userEvent.type(screen.getByRole('searchbox'), 'MAWS');
+    const expected = [...useSessions.getState().records.values()].filter((r) => r.projectId === 'proj-maws' && !r.archived);
+    expect(expected.length).toBeGreaterThan(8);
+    expect(sessionRows(row('MAWS'))).toHaveLength(expected.length);
+    expect(within(row('MAWS')).getByLabelText(`${expected.length} matching sessions`)).toBeTruthy();
+  });
+
   it('shows five sessions, then "Show more" reveals up to eight, never more', async () => {
     fillStores(scenarioFile('many-sessions'));
     expand('proj-maws');

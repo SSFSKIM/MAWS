@@ -26,12 +26,13 @@ export interface ProjectRowProps {
   entry: ProjectEntry;
   open: boolean;
   sessions: SessionTreeRow[]; // the rows shown while open (ordered, capped by trees, E3's nested under their parent); empty while closed
+  matchCount?: number;
   more: number; // how many more "Show more" reveals; 0: no Show more row
   onToggle(key: ProjectKey): void;
   onShowMore(key: ProjectKey): void;
 }
 
-export function ProjectRow({ entry, open, sessions, more, onToggle, onShowMore }: ProjectRowProps) {
+export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, onShowMore }: ProjectRowProps) {
   const { key, project, name, rollup } = entry;
   const tree = useTree();
   const nodeId = projectNodeId(key);
@@ -51,6 +52,7 @@ export function ProjectRow({ entry, open, sessions, more, onToggle, onShowMore }
     >
       {open ? <FolderOpenIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} /> : <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />}
       <span className={`min-w-0 flex-1 truncate text-ui ${project ? 'text-fg' : 'text-fg-muted'}`}>{name}</span>
+      {matchCount !== undefined && <span aria-label={`${matchCount} matching sessions`} className="text-ui-sm text-fg-muted tabular-nums">{matchCount}</span>}
       {!open && (rollup.waiting > 0 || rollup.working > 0) && (
         <span className="flex shrink-0 items-center gap-[7px] group-hover/line:hidden group-focus-visible/project:hidden">
           {rollup.waiting > 0 && (
