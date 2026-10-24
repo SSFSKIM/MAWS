@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 import { workflowEnv } from './ci-gate-alerts.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
