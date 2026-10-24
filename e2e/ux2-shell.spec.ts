@@ -221,7 +221,7 @@ test('UX2: at 900 the sidebar yields; at 600 a surface is a dismissible sheet', 
 
   await size(maws, 600, 820);
   await expect(sidebar(page)).toHaveJSProperty('inert', true);
-  await expect(main(page)).toHaveJSProperty('inert', false);
+  await expect(main(page)).toHaveJSProperty('inert', true); // the sheet owns input; covered content must not take focus
   const sheet = await box(panel(page));
   const under = await box(main(page));
   expect(under.width, 'a sheet overlays rather than reserving a side column').toBe(600);
@@ -298,6 +298,19 @@ test('UX2: real Library document and deck editors use main without an empty pane
     await noReservedPanel(page);
     await singleChromeRow(page);
     await shot(maws, info, 'deck-main');
+    const toolbar = deckTab.getByRole('toolbar', { name: 'Deck', exact: true });
+    await toolbar.getByRole('button', { name: 'Inspector', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Version history', exact: true }).click();
+    await expect(deckTab.locator('.deck-tool-card')).toHaveCount(2);
+    // Fit uses the measured width left by the floating stack, not the full stage underneath it (l7-shell-02).
+    await expect.poll(async () => {
+      const slide = await box(deckTab.locator('[data-stage-slide]').first());
+      const cards = await box(deckTab.locator('.deck-tool-cards'));
+      return slide.x + slide.width <= cards.x + 1;
+    }, { message: 'the fitted slide stays visible beside its document tools' }).toBe(true);
+    await shot(maws, info, 'deck-tools');
+    await toolbar.getByRole('button', { name: 'Version history', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Inspector', exact: true }).click();
   }
   expect(maws.consoleErrors()).toEqual([]);
 });
