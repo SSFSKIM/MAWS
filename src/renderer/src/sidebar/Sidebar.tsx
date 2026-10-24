@@ -90,6 +90,11 @@ function SidebarBody() {
   const [focusWithin, setFocusWithin] = useState(false);
   const pointerOwner = useRef<Node | null>(null);
   const focusOwner = useRef<Node | null>(null);
+  const ownPointer = (target: EventTarget, fallback: HTMLElement) => {
+    // Row and portal shells survive incidental icon/text replacement; their actual removal still ends ownership.
+    pointerOwner.current = (target as Element).closest('[role="treeitem"], [data-needs-you], [role="dialog"], [role="menu"]') ?? fallback;
+    setPointerWithin(true);
+  };
   const releaseRemoved = useCallback((removed: Node) => {
     if (pointerOwner.current && removed.contains(pointerOwner.current)) {
       pointerOwner.current = null;
@@ -280,8 +285,8 @@ function SidebarBody() {
     <TreeContext.Provider value={tree}>
       <SidebarInteractionContext.Provider value={releaseRemoved}>
       <div className="flex min-h-0 flex-1 flex-col"
-        onPointerEnter={(event) => { pointerOwner.current = event.target as Node; setPointerWithin(true); }}
-        onPointerOverCapture={(event) => { pointerOwner.current = event.target as Node; setPointerWithin(true); }}
+        onPointerEnter={(event) => ownPointer(event.target, event.currentTarget)}
+        onPointerOverCapture={(event) => ownPointer(event.target, event.currentTarget)}
         onPointerLeave={() => { pointerOwner.current = null; setPointerWithin(false); }}
         onFocusCapture={(event) => { focusOwner.current = event.target; setFocusWithin(true); }}
         onBlurCapture={(event) => {

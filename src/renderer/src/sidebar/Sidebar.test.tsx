@@ -141,6 +141,25 @@ describe('sidebar action stability', () => {
     await waitFor(() => expect(projectRows()).toEqual(['beta', 'alpha']));
   });
 
+  it.each(['expand', 'collapse'] as const)('holds the project under the pointer while its folder icon changes on %s', (action) => {
+    start();
+    if (action === 'expand') expand();
+    const outside = screen.getByRole('button', { name: 'Outside' });
+    act(() => outside.focus());
+    const project = row('alpha');
+    const line = project.querySelector<HTMLElement>('[data-project-line]')!;
+    const icon = line.querySelector('svg path')!;
+    fireEvent.pointerOver(icon);
+    working(elsewhere.appId);
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+    fireEvent.click(icon);
+    expect(project.getAttribute('aria-expanded')).toBe(action === 'expand' ? 'true' : 'false');
+    expect(document.activeElement).toBe(outside);
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+    fireEvent.pointerLeave(line);
+    expect(projectRows()).toEqual(['beta', 'alpha']);
+  });
+
   it.each(['portal', 'trigger'] as const)('ends only removed pointer ownership when a hover card closes (pointer on %s)', async (pointer) => {
     start();
     const user = userEvent.setup();
