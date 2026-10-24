@@ -203,6 +203,7 @@ describe('the always-available Arrange menu', () => {
     await user.click(screen.getByRole('button', { name: 'Arrange' }));
     const items = screen.getAllByRole('menuitem');
     expect(items.map((item) => item.getAttribute('aria-label'))).toEqual(['Bring to front', 'Bring forward', 'Send backward', 'Send to back', 'Group', 'Ungroup', 'Detach', 'Duplicate', 'Delete']);
+    expect(items.map((item) => item.querySelector('.deck-menu-shortcut')?.textContent ?? null)).toEqual([null, '⌘]', '⌘[', null, '⌘G', '⇧⌘G', null, '⌘D', '⌫']);
     expect(items.every((item) => item.hasAttribute('data-disabled'))).toBe(true);
     await user.keyboard('{Escape}');
     act(() => session.select(['a']));

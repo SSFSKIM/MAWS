@@ -1,6 +1,7 @@
 // The shared deck/design element tools: Insert, text-style controls supplied by the editor, one stable Arrange menu,
 // and Inspector. Arrange uses the stage keys' own selection commands (transform/commands.ts), with one undo gesture
-// per action. Shortcut hints are the existing bindings in transform/Overlay.tsx; Detach has no key binding.
+// per action. Hints reflect working stage bindings: native tab-strip chords take precedence over the legacy
+// front/back handlers' ⌥⌘ brackets, so those actions advertise no shortcut. Detach has no key binding.
 import { DropdownMenu } from 'radix-ui';
 import { useSyncExternalStore, type ReactNode } from 'react';
 import type { SlideCanvas } from '../canvas';
@@ -47,10 +48,10 @@ export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content className="deck-menu" aria-label={C.arrange} align="start" sideOffset={4}>
-            {item(C.bringToFront, cmds?.canZ ?? false, () => cmds?.z('front'), '⌥⌘]')}
+            {item(C.bringToFront, cmds?.canZ ?? false, () => cmds?.z('front'))}
             {item(C.bringForward, cmds?.canZ ?? false, () => cmds?.z('forward'), '⌘]')}
             {item(C.sendBackward, cmds?.canZ ?? false, () => cmds?.z('backward'), '⌘[')}
-            {item(C.sendToBack, cmds?.canZ ?? false, () => cmds?.z('back'), '⌥⌘[')}
+            {item(C.sendToBack, cmds?.canZ ?? false, () => cmds?.z('back'))}
             <DropdownMenu.Separator className="deck-menu-separator" />
             {item(C.group, cmds?.canGroup ?? false, () => notice(cmds?.group() ?? null), '⌘G')}
             {item(C.ungroup, cmds?.canUngroup ?? false, () => notice(cmds?.ungroup() ?? null), '⇧⌘G')}
