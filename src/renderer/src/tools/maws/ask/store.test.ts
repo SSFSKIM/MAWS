@@ -522,6 +522,26 @@ it('keeps an explicitly opened Questions surface after its cancellation notice i
   off();
 });
 
+it.each([false, true])('a collapsed explicit Questions stack re-revealed by a new ask relinquishes its space unless explicitly reopened (reopened=%s)', async (reopened) => {
+  useSessions.setState({ records: new Map([[A, record(A)]]) });
+  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
+  const fake = fakeClient();
+  const off = connectAsks(fake.client);
+  const history: AskRowData = { askId: 'history', toolUseId: 'history' as ToolUseId, title: 'Earlier setup', context: null, blocking: true, questions: QUESTIONS, state: 'answered', answers: [], error: null, cancelReason: null };
+  mawsTranscriptActionsOver(fake.client).openAsk(A, history);
+  const retained = surfaceTabs(useLayout.getState(), A).map((tab) => tab.id);
+  useLayout.getState().setPanel({ collapsed: true }); // narrow-sheet Escape keeps the saved stack
+  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toEqual(retained);
+  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+  expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
+  if (reopened) mawsTranscriptActionsOver(fake.client).openAsk(A, history);
+  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
+  await Promise.resolve();
+  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual(reopened ? [ASK_SHEET_TOOL_ID] : []);
+  off();
+});
+
 it('does not dismiss Questions explicitly opened to inspect an answer', () => {
   useSessions.setState({ records: new Map([[A, record(A)]]) });
   registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);

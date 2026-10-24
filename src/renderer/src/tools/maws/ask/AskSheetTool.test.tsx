@@ -5,6 +5,7 @@
 // capsule reopens read-only with nothing to submit, with no read at all; a cancelled ask says the session ended.
 // P2-C3: a choice's previews in a pane that follows the focused option; a note beside any answer, shown read-only too.
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { PendingAsk } from '@shared/maws/ask';
@@ -16,6 +17,7 @@ import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
 import type { AskSheetParams } from '../actions';
 import { askSheetTool } from './AskSheetTool';
+import { HoverAsk } from './HoverAsk';
 import { applyAskEvents, askSheet, resetAskSheets } from './store';
 
 const holder: { client: FakeClient['client'] | null } = { client: null };
@@ -139,6 +141,37 @@ describe('the sections', () => {
     await within(section('q4')).findByText('/work/app-a/assets');
     fireEvent.click(within(section('q4')).getByRole('button', { name: 'Remove /work/app-a/assets' }));
     expect(within(section('q4')).queryByText('/work/app-a/assets')).toBeNull();
+  });
+});
+
+describe('editing the same ask in the hover and the sheet', () => {
+  it.each([
+    ['hover', 'q1', 'radio'], ['sheet', 'q1', 'radio'],
+    ['hover', 'q2', 'checkbox'], ['sheet', 'q2', 'checkbox'],
+  ] as const)('keeps Other focus in the initiating %s surface for %s, while sharing its draft', async (origin, questionId, role) => {
+    const state = askSheetTool.createState({ appSessionId: A, session: record(A), instanceId: 'ask-sheet:shared', params: { askId: ASK.askId } });
+    const Sheet = askSheetTool.render;
+    render(<>
+      <div data-testid="hover"><HoverAsk appSessionId={A} askId={ASK.askId} /></div>
+      <div data-testid="sheet"><Sheet state={state} ctx={ctx()} /></div>
+    </>);
+    await fake.reply('maws.asks.list', { asks: [ASK] });
+    const local = screen.getByTestId(origin).querySelector<HTMLElement>(`[data-question-id="${questionId}"]`)!;
+    const peer = screen.getByTestId(origin === 'hover' ? 'sheet' : 'hover').querySelector<HTMLElement>(`[data-question-id="${questionId}"]`)!;
+    const user = userEvent.setup();
+    const chooseOther = async () => {
+      await user.click(within(local).getByRole(role, { name: 'Other…' }));
+      expect(document.activeElement).toBe(within(local).getByRole('textbox'));
+      expect(within(peer).getByRole(role, { name: 'Other…' }).getAttribute('aria-checked')).toBe('true');
+    };
+    await chooseOther();
+    await user.type(within(local).getByRole('textbox'), 'A custom answer');
+    expect((within(peer).getByRole('textbox') as HTMLInputElement).value).toBe('A custom answer');
+    // Toggling the shared choice from the peer must not leave a stale focus claim on either surface.
+    if (role === 'radio') await user.click(within(peer).getByRole('radio', { name: 'Blue' }));
+    else await user.click(within(peer).getByRole('checkbox', { name: 'Other…' }));
+    await chooseOther();
+    expect((within(peer).getByRole('textbox') as HTMLInputElement).value).toBe('');
   });
 });
 

@@ -8,7 +8,7 @@
 // the first with a preview. The Other row focuses nothing new. The pane's height never follows its content, so moving
 // between previews does not move the rows beneath.
 import { Checkbox, RadioGroup } from 'radix-ui';
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { AskQuestion } from '@shared/maws/tools';
 import { Markdown } from '../../../../transcript';
 import { SHEET } from '../copy';
@@ -48,14 +48,20 @@ export function OptionText({ label, description }: { label: string; description?
 }
 
 function OtherInput({ question, value, onChange, disabled }: { question: string; value: string; onChange(value: string): void; disabled: boolean }) {
+  const input = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    // Shared drafts can mount this field in several surfaces. Only the choice whose control holds focus initiated it.
+    const field = input.current;
+    if (!disabled && field?.parentElement?.contains(document.activeElement)) field.focus();
+  }, [disabled]);
   return (
     <input
+      ref={input}
       type="text"
       aria-label={SHEET.otherLabel(question)}
       placeholder={SHEET.otherPlaceholder}
       value={value}
       disabled={disabled}
-      autoFocus={!disabled && value === ''}
       onChange={(event) => onChange(event.target.value)}
       className="w-full rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2"
     />

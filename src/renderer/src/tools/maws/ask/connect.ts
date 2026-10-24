@@ -27,7 +27,8 @@ import { applyAskEvents, askSheet, reloadAsks } from './store';
 // target not on screen).
 function openSheet(appSessionId: AppSessionId, askId: string): void {
   if (!usePanelHost.getState().tools.has(ASK_SHEET_TOOL_ID)) return;
-  const visible = surfaceTabs(useLayout.getState(), appSessionId);
+  const layout = useLayout.getState();
+  const visible = layout.regions.panel.collapsed ? [] : surfaceTabs(layout, appSessionId);
   if (!visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID) && !automatic.has(appSessionId)) {
     automatic.set(appSessionId, askSheet(appSessionId).subscribe((state, before) => {
       // Submit and Dismiss change the store without an engine batch. Check after any whole batch has finished too.
