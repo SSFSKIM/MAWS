@@ -14,6 +14,6 @@ it.each([{ count: 1, kind: 'essential' }, { count: 2, kind: 'essential' }, { cou
   useTranscriptStore.setState({ entries: { [APP]: { state: { ui: { ownerLane: true } } } } as never });
   const markRead = vi.fn();
   render(<ReportBar appSessionId={APP} markAllRead={markRead} />);
-  fireEvent.click(screen.getByRole('button', { name: count === 1 ? 'Mark read' : 'Mark all read', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: count === 1 ? 'Mark read' : 'Mark all read' }));
   expect(markRead).toHaveBeenCalledOnce();
 });

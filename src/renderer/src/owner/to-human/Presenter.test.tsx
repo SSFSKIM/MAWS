@@ -61,6 +61,22 @@ it('message-tool content has the same unboxed ink and authored Markdown', () => 
   expect(view.container.querySelector('[data-owner-card], [data-owner-report]')).toBeNull();
 });
 
+it.each([false, true])('keeps entity and backslash-escaped tag examples literal beside real marks (live=%s)', (live) => {
+  const view = render(draw('Use &lt;message&gt;entity&lt;/message&gt; and \\<message>escaped\\</message> literally.\n<message>Real **message**.</message>\nThen &#60;message&#62;numeric&#60;/message&#62;.\n\n<message>Done.</message>\n\nUse &lt;message&gt;example&lt;/message&gt; literally.', live));
+  expect([...view.container.querySelectorAll('p')].map((node) => node.textContent)).toEqual([
+    'Use <message>entity</message> and <message>escaped</message> literally.\nReal message.\nThen <message>numeric</message>.',
+    'Done.',
+    'Use <message>example</message> literally.',
+  ]);
+  expect([...view.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent).join('')).toBe('Real message.Done.');
+});
+
+it('does not promote escaped-tag-only commentary as owner ink', () => {
+  for (const text of ['Use &lt;message&gt;example&lt;/message&gt; literally.', 'Use \\<message>example\\</message> literally.', '&#60;essential&#62;example&#60;/essential&#62;']) {
+    expect(assistantPresentation(text)).toBeNull();
+  }
+});
+
 it('legacy questions keep their written options without adding controls or recommendation labels', () => {
   const view = render(draw('<need-input>Which?\n<choice recommended>One</choice>\n<choice>Two</choice></need-input>'));
   expect(view.container.textContent).toBe('Which?\nOne\nTwo');

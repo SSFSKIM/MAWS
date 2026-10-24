@@ -17,17 +17,19 @@ const PLUGINS = { code, math, renderers: [{ language: 'mermaid', component: Merm
 export interface MarkdownProps {
   markdown: string;
   live: boolean;
-  decorate?: Plugin<[], Root>; // trusted presentation after the HTML/URL gates, over one complete document
+  decorate?: { source: Plugin; decorate: Plugin<[], Root> }; // source recognition, then trusted decoration after the HTML/URL gates
 }
 
 const wholeDocument = (text: string) => [text];
 
 export function Markdown({ markdown: text, live, decorate }: MarkdownProps) {
   const markdown = useMemo(() => (live ? holdBackTable(text) : text), [text, live]);
-  const rehypePlugins = useMemo(() => decorate ? [...STREAMDOWN_OPTIONS.rehypePlugins, decorate] : STREAMDOWN_OPTIONS.rehypePlugins, [decorate]);
+  const remarkPlugins = useMemo(() => decorate ? [decorate.source, ...STREAMDOWN_OPTIONS.remarkPlugins] : STREAMDOWN_OPTIONS.remarkPlugins, [decorate]);
+  const rehypePlugins = useMemo(() => decorate ? [...STREAMDOWN_OPTIONS.rehypePlugins, decorate.decorate] : STREAMDOWN_OPTIONS.rehypePlugins, [decorate]);
   return (
     <Streamdown
       {...STREAMDOWN_OPTIONS}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       parseMarkdownIntoBlocksFn={decorate ? wholeDocument : undefined}
       mode={live ? 'streaming' : 'static'}

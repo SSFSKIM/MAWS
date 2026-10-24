@@ -1,5 +1,5 @@
 // Recorded no-inference engine 2.1.309 shapes: fixtures/p4/p4-ux1c-mod-controls.jsonl.
-// The scratch plugin reproduces doperpowers PR #363 at d17d9b7, control()/spanRows().
+// The scratch plugin reproduces doperpowers PR 363 at d17d9b7, control()/spanRows().
 // Engine 2.1.309 cli.pretty.js:106790-106955, 134132-134201, 134883-134897, 135267-135301.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';

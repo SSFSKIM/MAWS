@@ -1290,7 +1290,7 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(toggle.getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
     await expect(toggle.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'false');
 
-    // Level 0: the prompt, one working record that counts what it holds, the cards in the reply's order
+    // Level 0: whole work rows fold, but a marked text block keeps all of its authored words (UX1 l2-transcript-03).
     const record = pane.getByRole('button', { name: /^Working record/ });
     await expect(record).toHaveText('Working record · 1 tool call · 1 message');
     await expect(record).toHaveAttribute('aria-expanded', 'false');
@@ -1302,7 +1302,7 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(report).toContainText('Concise reference style');
     await expect(report).toContainText('Friendly guide style');
     await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
-    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
+    await expect(report.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible(); // UX1: part of this same authored block
     await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
     await captureReportShot(page, 'report-level0');
 
@@ -1320,7 +1320,7 @@ test('the report folds work while marked text retains its authored flow and geom
     await captureReportShot(page, 'report-level2');
     await fold.click();
     await expect(record).toHaveAttribute('aria-expanded', 'false');
-    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
+    await expect(report.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible(); // UX1: part of this same authored block
 
     // The full transcript: no record, every word, still no cards
     await toggle.getByRole('button', { name: 'Transcript' }).click();
@@ -1342,7 +1342,7 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(notes.locator('.transcript-prose p')).toHaveCount(8);
     await expect(notes.locator('.owner-insights, aside')).toHaveCount(0);
     await expect.poll(() => notes.evaluate((el) => {
-      const paragraphs = [...el.querySelectorAll('.transcript-prose p')].map((node) => node.getBoundingClientRect());
+      const paragraphs = Array.from(el.querySelectorAll('.transcript-prose p')).map((node) => node.getBoundingClientRect());
       const own = el.closest('[data-index]')!.getBoundingClientRect();
       return paragraphs.every((box, index) => box.bottom <= own.bottom + 0.5 && (index === 0 || box.top >= paragraphs[index - 1].bottom - 0.5));
     })).toBe(true);

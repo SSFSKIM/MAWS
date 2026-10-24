@@ -94,7 +94,7 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
       },
       () =>
         page.evaluate(() => {
-          const card = [...document.querySelectorAll('[data-kind="assistant_text"]')].find((node) => node.textContent?.includes('The migration drops the legacy_users table.'));
+          const card = Array.from(document.querySelectorAll('[data-kind="assistant_text"]')).find((node) => node.textContent?.includes('The migration drops the legacy_users table.'));
           const row = card?.closest('[id]');
           return { card: card != null, row: row ? `${row.tagName.toLowerCase()}#${row.id} tabindex=${row.getAttribute('tabindex')}` : null, rowConnected: row?.isConnected ?? null, cardInView: card ? card.getBoundingClientRect().top : null };
         }),
