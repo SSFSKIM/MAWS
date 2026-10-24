@@ -16,6 +16,14 @@ async function size(maws: MawsLaunch, width: number, height: number): Promise<vo
   await expect.poll(() => maws.page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
 }
 
+async function advance(maws: MawsLaunch, at: number): Promise<void> {
+  await maws.app.evaluate((_electron, at) => {
+    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
+    if (!scenario) throw new Error('Missing manual scenario clock');
+    scenario.advanceTo(at);
+  }, at);
+}
+
 async function attachSidebarStates(maws: MawsLaunch, info: TestInfo, state: 'rows' | 'search'): Promise<void> {
   const { page } = maws;
   for (const { width, height } of SIZES) {
@@ -91,11 +99,7 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     await expect(contextMenu).toBeVisible();
     const menuBox = await contextMenu.boundingBox();
     await page.mouse.move(menuBox!.x + menuBox!.width - 4, menuBox!.y + 8);
-    await maws.app.evaluate(() => {
-      const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
-      if (!scenario) throw new Error('Missing manual scenario clock');
-      scenario.advanceTo(1000);
-    });
+    await advance(maws, 1000);
     const projects = sidebarOf(page).locator('[data-kind="project"]');
     await expect(projects.first()).toHaveAttribute('aria-label', 'chosen');
     await page.keyboard.press('Escape');
@@ -121,6 +125,72 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
     await expect(palette.getByRole('combobox')).toHaveValue('test');
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Chromium removes hovered/focused elements without necessarily emitting pointerleave or blur.
+// Exercise those native lifecycle edges, not synthetic replacement events that would hide a stuck hold.
+test('UX1: ordering resumes after Escape removes a hovered portal and after the focused row disappears', async ({ mawsEnv }) => {
+  const root = mkdtempSync(join(tmpdir(), 'maws-sidebar-lifecycle-'));
+  const alphaDirectory = join(root, 'alpha');
+  const betaDirectory = join(root, 'beta');
+  mkdirSync(alphaDirectory);
+  mkdirSync(betaDirectory);
+  const alpha = project('alpha', 0, { directory: alphaDirectory });
+  const beta = project('beta', 1, { directory: betaDirectory });
+  const first = record('first', { projectId: alpha.id, directory: alphaDirectory, updatedAt: '2026-10-24T10:00:00Z' });
+  const second = record('second', { projectId: alpha.id, directory: alphaDirectory, updatedAt: '2026-10-24T09:00:00Z' });
+  const elsewhere = record('elsewhere', { projectId: beta.id, directory: betaDirectory, updatedAt: '2026-10-24T08:00:00Z' });
+  const future = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+  const fixture = join(root, 'scenario.json');
+  writeFileSync(fixture, JSON.stringify(ScenarioFileSchema.parse({
+    version: 1, projects: [alpha, beta], sessions: [first, second, elsewhere], digests: [], engine: [], attention: [],
+    timeline: [
+      { at: 1000, op: 'session', record: { ...elsewhere, title: { text: 'Elsewhere after hover', source: 'user' }, updatedAt: future(1) } },
+      { at: 2000, op: 'session', record: { ...first, title: { text: 'First after pointer', source: 'user' }, updatedAt: future(2) } },
+      { at: 3000, op: 'removeSession', appSessionId: first.appId },
+      { at: 4000, op: 'session', record: { ...second, title: { text: 'Second after removal', source: 'user' }, updatedAt: future(3) } },
+    ],
+  })));
+  const maws = await launchMaws({ env: { ...mawsEnv, MAWS_HARNESS: '0', MAWS_E2E_FOREGROUND: '0', MAWS_SESSION_SOURCE: `stub:${fixture}`, MAWS_SCENARIO_CLOCK: 'manual' } });
+  try {
+    const { page } = maws;
+    await size(maws, 1280, 820);
+    await openProject(page, 'beta');
+    await openProject(page, 'alpha');
+    const sidebar = sidebarOf(page);
+    const projects = sidebar.locator('[data-kind="project"]');
+    await page.locator('[data-region="main"]').getByRole('button', { name: /Overview/ }).focus();
+    await sidebar.getByRole('treeitem', { name: 'first', exact: true }).hover();
+    const card = page.getByRole('dialog', { name: 'first', exact: true });
+    await expect(card).toBeVisible();
+    await card.hover();
+    await advance(maws, 1000);
+    await expect(sidebar.getByRole('treeitem', { name: 'Elsewhere after hover', exact: true })).toBeVisible();
+    await expect(projects.first()).toHaveAttribute('aria-label', 'alpha');
+    await page.keyboard.press('Escape');
+    await expect(card).toHaveCount(0);
+    await expect(projects.first()).toHaveAttribute('aria-label', 'beta');
+
+    await page.mouse.move(1100, 700);
+    await advance(maws, 2000);
+    const focused = sidebar.getByRole('treeitem', { name: 'First after pointer', exact: true });
+    await expect(focused).toBeVisible();
+    await expect(projects.first()).toHaveAttribute('aria-label', 'alpha');
+    await focused.focus();
+    await expect(focused).toBeFocused();
+    await advance(maws, 3000);
+    await expect(focused).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await expect(projects.first()).toHaveAttribute('aria-label', 'beta');
+
+    await advance(maws, 4000);
+    await expect(sidebar.getByRole('treeitem', { name: 'Second after removal', exact: true })).toBeVisible();
+    await expect(projects.first()).toHaveAttribute('aria-label', 'alpha');
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();

@@ -8,7 +8,7 @@
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
-import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
@@ -31,6 +31,7 @@ import { ResumeChooserHost } from '../resume/host'; // P2-D
 import { registerProjectRevealer } from './reveal';
 import { AddProject } from './AddProject';
 import { Search } from './Search';
+import { SidebarInteractionContext } from './interaction';
 import { openConversationSearch, openPalette } from '../palette/CommandPalette';
 import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
@@ -87,10 +88,29 @@ function SidebarBody() {
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [pointerWithin, setPointerWithin] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
+  const pointerOwner = useRef<Node | null>(null);
+  const focusOwner = useRef<Node | null>(null);
+  const releaseRemoved = useCallback((removed: Node) => {
+    if (pointerOwner.current && removed.contains(pointerOwner.current)) {
+      pointerOwner.current = null;
+      setPointerWithin(false);
+    }
+    if (focusOwner.current && removed.contains(focusOwner.current)) {
+      focusOwner.current = null;
+      setFocusWithin(false);
+    }
+  }, []);
+  useLayoutEffect(() => {
+    // Removing a row can omit leave/blur and move focus to BODY without focusin. Reconcile after this
+    // sidebar's commit; surviving targets and focus transfers performed by children keep their ownership.
+    for (const owner of [pointerOwner.current, focusOwner.current]) {
+      if (owner && !owner.isConnected) releaseRemoved(owner);
+    }
+  });
   useEffect(() => {
-    // Removing a focused portal need not emit blur. Clear at document capture first; this subtree's React
-    // focus capture then renews the hold for its own controls, including those rendered through portals.
-    const clearFocus = () => setFocusWithin(false);
+    // Clear at document capture first; this subtree's React capture renews ownership for its own controls,
+    // including portals. A focus elsewhere also clears stale ownership left by a removed portal.
+    const clearFocus = () => { focusOwner.current = null; setFocusWithin(false); };
     document.addEventListener('focusin', clearFocus, true);
     return () => document.removeEventListener('focusin', clearFocus, true);
   }, []);
@@ -258,10 +278,15 @@ function SidebarBody() {
 
   return (
     <TreeContext.Provider value={tree}>
+      <SidebarInteractionContext.Provider value={releaseRemoved}>
       <div className="flex min-h-0 flex-1 flex-col"
-        onPointerEnter={() => setPointerWithin(true)} onPointerLeave={() => setPointerWithin(false)}
-        onFocusCapture={() => setFocusWithin(true)}
-        onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusWithin(false); }}>
+        onPointerEnter={(event) => { pointerOwner.current = event.target as Node; setPointerWithin(true); }}
+        onPointerOverCapture={(event) => { pointerOwner.current = event.target as Node; setPointerWithin(true); }}
+        onPointerLeave={() => { pointerOwner.current = null; setPointerWithin(false); }}
+        onFocusCapture={(event) => { focusOwner.current = event.target; setFocusWithin(true); }}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) { focusOwner.current = null; setFocusWithin(false); }
+        }}>
         <SidebarDestinations>
           <div ref={search}>
             <Search value={query} onChange={setQuery} label="Search projects and sessions" onSearch={openPalette} chord={searchChord} onLeave={() => {
@@ -331,6 +356,7 @@ function SidebarBody() {
         </ContextMenu.Root>
         <ResumeChooserHost />
       </div>
+      </SidebarInteractionContext.Provider>
     </TreeContext.Provider>
   );
 }

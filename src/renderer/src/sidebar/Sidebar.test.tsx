@@ -141,6 +141,47 @@ describe('sidebar action stability', () => {
     await waitFor(() => expect(projectRows()).toEqual(['beta', 'alpha']));
   });
 
+  it.each(['portal', 'trigger'] as const)('ends only removed pointer ownership when a hover card closes (pointer on %s)', async (pointer) => {
+    start();
+    const user = userEvent.setup();
+    act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+    await user.hover(row('first'));
+    const card = await screen.findByRole('dialog', { name: 'first' });
+    if (pointer === 'portal') await user.hover(card);
+    working(elsewhere.appId);
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Outside' }));
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'first' })).toBeNull());
+    if (pointer === 'trigger') {
+      expect(projectRows()).toEqual(['alpha', 'beta']); // the remaining row still owns the pointer
+      await user.unhover(row('first'));
+    }
+    await waitFor(() => expect(projectRows()).toEqual(['beta', 'alpha']));
+  });
+
+  it('releases a pointer-only rank hold when the hovered session is removed without leave', () => {
+    start();
+    fireEvent.pointerEnter(row('first'));
+    working(elsewhere.appId);
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+    act(() => useSessions.getState().applyRemoved({ appSessionId: first.appId, revision: useSessions.getState().revision + 1 }));
+    expect(projectRows()).toEqual(['beta', 'alpha']);
+  });
+
+  it('releases the keyboard rank hold when a focused session is removed without a focus transfer', () => {
+    start();
+    act(() => row('first').focus());
+    working(elsewhere.appId);
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+    act(() => useSessions.getState().applyRemoved({ appSessionId: first.appId, revision: useSessions.getState().revision + 1 }));
+    expect(document.activeElement).toBe(document.body);
+    expect(projectRows()).toEqual(['beta', 'alpha']);
+    // Later live data does not need another focus/blur event to resume ordering.
+    act(() => useSessions.getState().applyDigest(digest(second.appId, { phase: 'working', turnStartedAt: '2026-10-24T14:00:00Z', revision: 2 })));
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+  });
+
   it('lets an explicit sort change take effect while keyboard focus remains in the sidebar', async () => {
     start();
     act(() => useSessions.getState().applyDigest(digest(second.appId, { phase: 'working', turnStartedAt: '2026-10-24T07:00:00Z' })));
